@@ -1,6 +1,6 @@
 {
   "repo": "todo-kafka-service",
-  "verify_command": "make verify-integration",
+  "verify_command": "make test",
   "preflight_profile": "brownfield",
   "comments": [
     {
