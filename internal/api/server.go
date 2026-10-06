@@ -3383,8 +3383,12 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 // computeCostSummary's own doc comment for why this is passed through
 // rather than each request's cost summary re-scanning dataDir/runs.
 func (s *Server) requestSummaryViewFor(req *request.Request, waitingOn string, runsByRequest map[string][]*run.Run) requestSummaryView {
+	// The board needs no edit history, and each edit carries its diff: only
+	// GET /requests/{id} sends them.
+	listed := *req
+	listed.Edits = nil
 	view := requestSummaryView{
-		Request:     req,
+		Request:     &listed,
 		Title:       request.Title(s.dataDir, req.ID),
 		CostSummary: s.computeCostSummary(req, runsByRequest),
 		ActiveJob:   request.LoadActiveJob(s.dataDir, req.ID),
@@ -4132,6 +4136,10 @@ func decodeRequestContentBody(w http.ResponseWriter, r *http.Request) (updateReq
 		writeError(w, http.StatusBadRequest, "request body must contain one JSON object")
 		return updateRequestContentBody{}, false
 	}
+	if len(body.By) > request.MaxEditByLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("by is longer than %d bytes", request.MaxEditByLen))
+		return updateRequestContentBody{}, false
+	}
 	return body, true
 }
 
@@ -4147,8 +4155,13 @@ func (s *Server) saveOperatorEdit(loaded *request.Request, by, path, content str
 	if by == "" {
 		by = requestAPIPrincipal
 	}
-	rel, err := filepath.Rel(request.Dir(s.dataDir, loaded.ID), path)
-	if err != nil || !filepath.IsLocal(rel) {
+	// Both made absolute first: a relative -data-dir beside a ticket path
+	// recorded absolute is still the same directory.
+	dir, dirErr := filepath.Abs(request.Dir(s.dataDir, loaded.ID))
+	abs, absErr := filepath.Abs(path)
+	rel, err := filepath.Rel(dir, abs)
+	if dirErr != nil || absErr != nil || err != nil || !filepath.IsLocal(rel) {
+		log.Printf("request %s: edit of %q by %q is not recorded: the file is outside the request's directory", loaded.ID, path, by)
 		return writeFileAtomic(path, content)
 	}
 	return request.RecordEdit(s.dataDir, loaded, by, filepath.ToSlash(rel), content, time.Now())

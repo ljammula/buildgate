@@ -1099,6 +1099,87 @@ func TestUpdateRequestSpecHandlerRecordsTheEdit(t *testing.T) {
 	}
 }
 
+// TestUpdateRequestTicketHandlerRecordsTheEdit: the ticket route records
+// its edit under the ticket's request-relative path, by the server's own
+// principal when the client names no operator.
+func TestUpdateRequestTicketHandlerRecordsTheEdit(t *testing.T) {
+	dataDir := t.TempDir()
+	seedPlanReviewRequestWithTicket(t, dataDir, "req-1")
+	body, err := json.Marshal(updateRequestContentBody{Content: validTicketMD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/tickets/1", "test-token", string(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Edits) != 1 || loaded.Edits[0].Path != "tickets/001.spec.md" || loaded.Edits[0].By != "api" || loaded.Edits[0].FromState != request.StatePlanReview {
+		t.Errorf("Edits = %+v, want one edit of tickets/001.spec.md by api in plan_review", loaded.Edits)
+	}
+}
+
+// TestUpdateRequestSpecHandlerRefusesAnOverlongOperatorName: "by" is the
+// client's claim and is stored, so it is bounded; nothing is written.
+func TestUpdateRequestSpecHandlerRefusesAnOverlongOperatorName(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	before, err := os.ReadFile(request.SpecPath(dataDir, "req-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(updateRequestContentBody{Content: validSpecMD, By: strings.Repeat("k", 201)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/spec", "test-token", string(body)))
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	after, err := os.ReadFile(request.SpecPath(dataDir, "req-1"))
+	if err != nil || string(after) != string(before) {
+		t.Errorf("spec.md changed on a refused save")
+	}
+}
+
+// TestListRequestsOmitsEditHistory: an edit's diff is on GET
+// /requests/{id}, never on the board's list.
+func TestListRequestsOmitsEditHistory(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := request.RecordEdit(dataDir, loaded, "kanna", "spec.md", validSpecMD, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(dataDir, WithReadToken("test-token"))
+	get := func(path string) string {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, requestActionFor(t, http.MethodGet, path, "test-token", ""))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, recorder.Code, recorder.Body.String())
+		}
+		return recorder.Body.String()
+	}
+
+	if list := get("/requests"); strings.Contains(list, `"edits"`) {
+		t.Errorf("GET /requests carries edits: %s", list)
+	}
+	if detail := get("/requests/req-1"); !strings.Contains(detail, `"edits"`) {
+		t.Errorf("GET /requests/req-1 carries no edits: %s", detail)
+	}
+}
+
 func TestUpdateRequestSpecHandlerWrongStateConflict(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StatePlanReview, false)

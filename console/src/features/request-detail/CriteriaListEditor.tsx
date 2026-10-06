@@ -10,6 +10,7 @@ import {
 } from "@/domain/structuredEdit";
 import { Button } from "@/ui/Button";
 import { Input, Textarea } from "@/ui/Input";
+import { trimSpace } from "@/domain/specSkeleton";
 
 import { useFieldDraft } from "./useFieldDraft";
 
@@ -45,7 +46,7 @@ function CriterionRow({
   // An emptied first line is no longer a criterion to the server, so it is
   // held in the field and not written until there is text again.
   const draft = useFieldDraft(body, (next) => {
-    if ((next.split("\n")[0] ?? "").trim() !== "") onBody(next);
+    if (trimSpace(next.split("\n")[0] ?? "") !== "") onBody(next);
   });
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;

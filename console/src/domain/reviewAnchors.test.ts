@@ -143,3 +143,26 @@ test("a revision's rejection is the one with its instant and operator", () => {
     rejectionForRevision([first, second], { by: "bob", at: "2026-09-10T09:00:00Z" }),
   ).toBeNull();
 });
+
+test("a criterion that kept its text under another number is matched by its text", () => {
+  const then = "# Spec\n\n## Acceptance criteria\n\n1. Drop me.\n2. Vague thing.\n3. Third.\n";
+  const now = "# Spec\n\n## Acceptance criteria\n\n1. Vague thing.\n2. Third.\n";
+  const rejection = {
+    by: "jane",
+    at: "2026-09-10T09:00:00Z",
+    reason: "r",
+    fromState: "spec_review",
+    forStage: null,
+    note: "",
+    anchors: [
+      anchor("spec.md", "## Acceptance criteria", 2),
+      anchor("spec.md", "## Acceptance criteria", 1),
+    ],
+  };
+  const changes = anchoredChanges(rejection, { "spec.md": then }, () => now);
+  expect(changes.map((c) => [c.before, c.after, c.movedTo])).toEqual([
+    ["2. Vague thing.", "1. Vague thing.", 1],
+    // Its text is nowhere in the list now: compared by number, and not called moved.
+    ["1. Drop me.", "1. Vague thing.", null],
+  ]);
+});

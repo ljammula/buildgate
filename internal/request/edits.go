@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // RevisionKindEdit marks a Revision that SnapshotEdit took: the text an
@@ -45,6 +46,14 @@ const (
 	// long files costs a bounded allocation under the request lock.
 	maxEditDiffCells = 4_000_000
 	editDiffContext  = 2
+	// maxSectionEditsBytes bounds the edits quoted in one rejection's
+	// feedback section. The driver keeps the newest feedback within its own
+	// cap and cuts at a section heading: a section whose edits outgrew that
+	// cap would lose its heading and the operator's reason, which come first.
+	maxSectionEditsBytes = 4 * 1024
+	// MaxEditByLen bounds the operator name an edit is recorded under: it is
+	// the client's own claim, stored on the request and in the revision.
+	MaxEditByLen = 200
 )
 
 // SnapshotEdit copies relPath as it is on disk now (the text an edit is
@@ -122,7 +131,47 @@ func RecordEdit(dataDir string, r *Request, by, relPath, after string, now time.
 		Diff:          diff,
 		DiffTruncated: truncated,
 	})
-	return r.Save(dataDir)
+	if err := r.Save(dataDir); err != nil {
+		// The record could not be saved: put the replaced text back, so a
+		// save the caller is told failed has not changed the file, and a
+		// retry meets the text and the hash it started from.
+		r.Edits = r.Edits[:len(r.Edits)-1]
+		if werr := os.WriteFile(tmp, before, 0o600); werr == nil {
+			werr = os.Rename(tmp, path)
+			if werr == nil {
+				return err
+			}
+		}
+		return fmt.Errorf("%w (and %s could not be restored: it holds the edited text)", err, relPath)
+	}
+	return nil
+}
+
+// feedbackSectionHeadings are the strings the driver cuts the feedback file
+// at (stageFeedback's own headings). Quoted text must never contain one: the
+// cut would start a section in the middle of a diff line.
+var feedbackSectionHeadings = strings.NewReplacer(
+	"## Spec rejected ", "## Spec (rejected) ",
+	"## Oracle rejected ", "## Oracle (rejected) ",
+	"## Plan rejected ", "## Plan (rejected) ",
+)
+
+// quotedLine makes one line of edited text safe to quote on one line of a
+// drafter's feedback: every control character and Unicode line separator but
+// a tab becomes a space (a bare CR or U+2028 inside a line would otherwise
+// start a line of its own for some readers), and a section heading of the
+// feedback file is rewritten.
+func quotedLine(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(text, ""))
+	return feedbackSectionHeadings.Replace(text)
 }
 
 // editDiff renders before -> after as changed lines with editDiffContext
@@ -155,14 +204,14 @@ func editDiff(before, after string) (string, bool) {
 			out.WriteString("...\n")
 			gap = false
 		}
-		line := string(op.kind) + " " + strings.TrimSuffix(op.text, "\r") + "\n"
+		line := string(op.kind) + " " + quotedLine(strings.TrimSuffix(op.text, "\r")) + "\n"
 		if out.Len()+len(line) > maxEditDiffBytes {
 			out.WriteString("(more changes not listed)\n")
-			return strings.ToValidUTF8(out.String(), ""), true
+			return out.String(), true
 		}
 		out.WriteString(line)
 	}
-	return strings.ToValidUTF8(out.String(), ""), false
+	return out.String(), false
 }
 
 type lineOp struct {
@@ -208,18 +257,46 @@ func lineOps(a, b []string) []lineOp {
 }
 
 // editsBefore renders, for the feedback section of the stage rejection made
-// at `at`, every edit of that stage made after `after` (the stage's previous
-// rejection; zero for the first) and not after `at`: the operator's own
-// changes to the draft being rejected, which the redraft must keep.
+// at `at`, the edits of that stage made after `after` (the stage's previous
+// rejection or the send-back that reset the stage; zero for the first) and
+// not after `at`: the operator's own changes to the draft being rejected,
+// which the redraft must keep. The newest are kept within
+// maxSectionEditsBytes, oldest first, with a line saying earlier ones were
+// left out.
 func editsBefore(r *Request, stage State, after, at time.Time) string {
-	var b strings.Builder
-	for _, e := range r.Edits {
+	var quoted []string
+	size := 0
+	omitted := false
+	for i := len(r.Edits) - 1; i >= 0; i-- {
+		e := r.Edits[i]
 		when, err := time.Parse(time.RFC3339Nano, e.At)
 		if err != nil || e.FromState != stage || !when.After(after) || when.After(at) {
 			continue
 		}
-		fmt.Fprintf(&b, "Before rejecting, %s edited %s by hand. Keep these changes in the redraft unless the note above says otherwise (\"-\" lines were removed, \"+\" lines were added):\n\n%s\n",
-			sanitizeFeedbackBy(e.By), e.Path, e.Diff)
+		text := quotedEdit(e)
+		if size+len(text) > maxSectionEditsBytes {
+			omitted = true
+			break
+		}
+		size += len(text)
+		quoted = append(quoted, text)
+	}
+	var b strings.Builder
+	if omitted {
+		b.WriteString("(Earlier hand edits of this draft are not listed.)\n\n")
+	}
+	for i := len(quoted) - 1; i >= 0; i-- {
+		b.WriteString(quoted[i])
 	}
 	return b.String()
+}
+
+// quotedEdit is one edit as a drafter reads it. An edit whose lines are not
+// all listed says so, and asks only for what is listed to be kept.
+func quotedEdit(e Edit) string {
+	who, path := sanitizeFeedbackBy(e.By), oneLine(e.Path)
+	if e.DiffTruncated {
+		return fmt.Sprintf("Before rejecting, %s edited %s by hand. Not every changed line is listed; keep the listed changes in the redraft unless the note above says otherwise (\"-\" lines were removed, \"+\" lines were added):\n\n%s\n", who, path, e.Diff)
+	}
+	return fmt.Sprintf("Before rejecting, %s edited %s by hand. Keep these changes in the redraft unless the note above says otherwise (\"-\" lines were removed, \"+\" lines were added):\n\n%s\n", who, path, e.Diff)
 }

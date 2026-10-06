@@ -130,6 +130,18 @@ export interface AnchoredChange {
   readonly before: string | null;
   /** The same place in the current text; null when it is gone. */
   readonly after: string | null;
+  /**
+   * For a numbered criterion whose rejected text is in the current list
+   * under another number: that number, and `after` is that criterion.
+   * Criteria are matched by number otherwise, so a list that lost an item
+   * above this one shows its neighbour: the screen says which it compares.
+   */
+  readonly movedTo: number | null;
+}
+
+/** A criterion's text without its "N. " prefix. */
+function bare(criterion: string): string {
+  return criterion.replace(/^[0-9]+[.)][\t\n\f\r ]+/, "");
 }
 
 /**
@@ -146,12 +158,24 @@ export function anchoredChanges(
   return rejection.anchors.map((anchor) => {
     const then = Object.hasOwn(rejected, anchor.path) ? (rejected[anchor.path] ?? "") : null;
     const now = current(anchor.path);
-    return {
-      anchor,
-      place: anchorPlace(anchor),
-      before: then === null ? null : anchorExcerpt(then, anchor),
-      after: now === "" ? null : anchorExcerpt(now, anchor),
-    };
+    const before = then === null ? null : anchorExcerpt(then, anchor);
+    const after = now === "" ? null : anchorExcerpt(now, anchor);
+    const numbered =
+      anchor.item > 0 && anchor.path === "spec.md" && anchor.section === ACCEPTANCE_CRITERIA;
+    if (numbered && before !== null && (after === null || bare(after) !== bare(before))) {
+      const criteria = specAcceptanceCriteria(now);
+      const at = criteria.findIndex((criterion) => bare(criterion) === bare(before));
+      if (at !== -1) {
+        return {
+          anchor,
+          place: anchorPlace(anchor),
+          before,
+          after: criteria[at] ?? null,
+          movedTo: at + 1,
+        };
+      }
+    }
+    return { anchor, place: anchorPlace(anchor), before, after, movedTo: null };
   });
 }
 
