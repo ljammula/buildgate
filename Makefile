@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -170,6 +170,23 @@ live-smoke-results:
 # is scoped to bar's own summariser/verdict logic.
 live-smoke-test:
 	python3 -m unittest discover -s scripts/tests -p 'test_live_smoke_recording.py' -v
+
+# live-round: one real PR-review corrective round on a real pull request
+# (scripts/live_round.py's doc comment): submit a fixture's spec and plan,
+# comment on its pull request as LIVE_ROUND_REVIEWER, and pass only if every
+# comment is answered by a pushed commit within max_review_rounds. It opens a
+# pull request on LIVE_ROUND_REPO's origin, so it is never part of verify.
+live-round:
+	python3 scripts/live_round.py
+
+# live-round-results: the recorded runs and the share of reviewer comments
+# resolved within the cap.
+live-round-results:
+	python3 scripts/live_round.py --results
+
+# live-round-test: offline unit tests for live_round.py's own logic.
+live-round-test:
+	python3 -m unittest scripts/tests/test_live_round.py -v
 
 # with-spinner-test: offline test for scripts/with-spinner.sh, the wrapper
 # `make install` runs its long builds through (exit-status passthrough, the
