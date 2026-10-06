@@ -20,8 +20,9 @@ only — it does not restate that content.
 ## Current state
 
 - Latest release tag `m6`; `main` may be ahead of it. The status table and
-  known limits are in README's "Status" and "Known limits" sections — update
-  them in the same PR as a change that alters either.
+  known limits are in [`STATUS.md`](STATUS.md), summarised in README's
+  "Status" and "Known limits" sections — update both in the same PR as a
+  change that alters either.
 - A request runs three model **roles** (`planning`, `execution`, `review`),
   each bound in the session config to a route, a model and a coding-agent
   **harness** (`pi` default, `pifork`, `codex`, `copilot`). One execution
@@ -119,9 +120,17 @@ Test gotchas that have broken `main` before:
   `waitForServeHealthy`), never a couple of seconds: under eight shards a
   start is slow. Tests are dealt to shards on each run from the measured
   seconds in `scripts/factoryd-test-timings.txt`; a new test needs no entry,
-  and `TEST_SHARDS_RECORD=1 make test` re-measures. On a memory-tight machine,
+  and `TEST_SHARDS_RECORD=1 make test` re-measures. The run fails if a test is
+  in zero or two shards. On a memory-tight machine,
   `TEST_SHARDS_SEQUENTIAL=1 make verify` runs the shards one after another
   (slower, peak memory of one race binary).
+- `make verify-live` fails loudly without Docker and needs Temporal at
+  `TEMPORAL_ADDRESS` (default `localhost:7233`) or the `temporal` CLI. On
+  colima it roots scratch dirs under `~/buildgate` so the VM can see them.
+- `make proving-ground` runs the fixtures in
+  `scripts/proving-ground/fixtures.json`, each pinned to a `base_ref`, one at
+  a time. `PROVING_GROUND_TEMPORAL=<addr>` also runs each through Temporal as
+  a separate `path: temporal` row.
 - The `internal/claims` guards scan **tracked** files (`git ls-files`):
   `git add` a new file before running them. `TestNoPrivateNotesReferences`
   also rejects finding labels such as a capital letter plus a number unless
