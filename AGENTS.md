@@ -189,6 +189,18 @@ Rules for a new boundary:
 - A dependency is passed in (a parameter or a struct field), never reached through a package variable.
 - A fake is a small hand-written struct in a `_test.go` file; no mock framework.
 
+`make verify` checks these design rules (`internal/claims`):
+
+| Rule | Test | When it fails |
+|---|---|---|
+| A Go function has at most 25 decision points | `TestFunctionComplexityStaysWithinLimit` | Split the function. One already over the limit is listed in `internal/claims/testdata/complexity_baseline.txt` and may shrink, never grow |
+| No mock framework | `TestNoMockFrameworkIsImported` | Write a fake struct |
+| Only listed packages import `os/exec` | `TestOnlyListedPackagesRunProcesses` | Run the process through an interface the caller declares, then add the package to `processRunningPackages` |
+
+After splitting or moving a listed function, regenerate the baseline with
+`CLAIMS_UPDATE_COMPLEXITY_BASELINE=1 go test ./internal/claims -run TestFunctionComplexityStaysWithinLimit`.
+Its diff may only remove lines, lower numbers, or rename a moved function.
+
 The tests of `internal/hostcontrol` and `internal/requestdriver` still live in `cmd/factoryd` and call them through exported names.
 
 Operator docs describe the current state only: no history, no "used to",
