@@ -103,3 +103,48 @@ func TestNextActionForPRReviewNamesAFailedCorrectiveRound(t *testing.T) {
 		t.Errorf("a conformity round only: NextAction() = %q", got)
 	}
 }
+
+// TestNextActionForPRReviewNamesAReadyToMergePullRequest: once a poll has
+// checked a pull request against the ready-to-merge bar, the next step says
+// to merge it, or names what the bar still lacks.
+func TestNextActionForPRReviewNamesAReadyToMergePullRequest(t *testing.T) {
+	pr := func(state string, readiness *MergeReadiness) Ticket {
+		return Ticket{Index: 1, PRURL: "https://example.test/pull/1", PRState: state, MergeReadiness: readiness}
+	}
+	notReady := &MergeReadiness{Blockers: []string{"its checks are pending or failing", "1 review thread(s) are open"}}
+	for _, c := range []struct {
+		name    string
+		ticket  Ticket
+		want    []string
+		wantNot []string
+	}{
+		{"ready and passing the bar", pr("ready", &MergeReadiness{Ready: true}),
+			[]string{"merge https://example.test/pull/1: ready to merge", "checks pass", "no review thread is open", "code review of the whole diff is clean", "the factory never merges"},
+			[]string{"review https://"}},
+		{"approved and passing the bar", pr("approved", &MergeReadiness{Ready: true}),
+			[]string{"merge https://example.test/pull/1: ready to merge"}, []string{"it is approved"}},
+		{"approved on GitHub but below the bar", pr("approved", notReady),
+			[]string{"https://example.test/pull/1 is not ready to merge: its checks are pending or failing; 1 review thread(s) are open"},
+			[]string{"merge https://"}},
+		{"a draft is described as a draft", pr("draft", &MergeReadiness{Blockers: []string{"it is still a draft"}}),
+			[]string{"is still a draft: the factory marks it ready"}, []string{"not ready to merge"}},
+		{"not yet checked", pr("ready", nil),
+			[]string{"review https://example.test/pull/1"}, []string{"ready to merge"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
+			r.State, r.Tickets = StatePRReview, []Ticket{c.ticket}
+			got := r.NextAction()
+			for _, want := range c.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("next action lacks %q:\n%s", want, got)
+				}
+			}
+			for _, wantNot := range c.wantNot {
+				if strings.Contains(got, wantNot) {
+					t.Errorf("next action has %q:\n%s", wantNot, got)
+				}
+			}
+		})
+	}
+}

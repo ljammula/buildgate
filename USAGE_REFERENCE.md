@@ -216,8 +216,16 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   every ticket has merged. Closed without merging: request halts, naming
   the PR. The factory never merges.
 
+Every poll that finds no new thread also checks the pull request against
+the ready-to-merge bar ([STATUS.md § Ready to merge](STATUS.md#ready-to-merge))
+and records the result as the ticket's `merge_readiness` (`ready`,
+`checked_at`, `head_sha`, `blockers`). Nothing the factory does depends on
+it. It is cleared while a corrective round runs and once the pull request
+has merged.
+
 `factoryd status` appends each `pr_review` request's per-ticket PR state
-(`tickets: 1:approved 2:open`). The request's next step, in the console's
+(`tickets: 1:approved 2:open`; `1:ready,ready-to-merge` once the bar is
+met). The request's next step, in the console's
 "Next" line and in `GET /requests`' `next_action`, says what each open pull
 request waits on:
 
@@ -227,6 +235,8 @@ request waits on:
 | `approved` | Merge it; the factory never merges |
 | `stacked` | Merge the earlier ticket's pull request first |
 | `draft` | Nothing yet: the factory marks it ready once checks pass and no thread is open |
+| `ready` or `approved`, bar met | Merge it: ready to merge; the factory never merges |
+| `ready` or `approved`, bar not met | That it is not ready to merge, and each thing it lacks |
 | `ready`, last corrective round not accepted | That the round pushed nothing and why; the open thread starts another round on the next poll, up to `max_review_rounds` |
 
 The request page lists each ticket's corrective rounds (the one under way, then each that ended, with its outcome, cause and run); `GET /requests/{id}` names a round under way as the ticket's `active_round_run_id`.

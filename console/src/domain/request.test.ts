@@ -372,6 +372,11 @@ test("request-every-field decodes with every optional field populated", () => {
       // not a review round.
       reviewRounds: [],
       activeRoundRunId: "",
+      mergeReadiness: {
+        ready: true,
+        checkedAt: "2026-09-10T09:00:00Z",
+        blockers: ["every-field blockers"],
+      },
     },
   ]);
   expect(r.costSummary?.currency).toBe("usd");
@@ -576,7 +581,11 @@ test("a ticket's PR-review rounds are decoded; conformity rounds are left out", 
     },
   ]);
   expect(r.tickets[0]?.activeRoundRunId).toBe("req-1-001-review3-x");
-  expect(r.tickets[1]).toMatchObject({ reviewRounds: [], activeRoundRunId: "" });
+  expect(r.tickets[1]).toMatchObject({
+    reviewRounds: [],
+    activeRoundRunId: "",
+    mergeReadiness: null,
+  });
 });
 
 test("a request's in-place edits decode, and an edit is handed over by the next rejection of its stage", () => {
