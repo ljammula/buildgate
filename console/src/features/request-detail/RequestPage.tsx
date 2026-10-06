@@ -6,6 +6,7 @@ import { PageBody } from "@/ui/PageLayout";
 
 import { AuditSection } from "./AuditSection";
 import { ContentSections } from "./ContentSections";
+import { CriteriaCoverage } from "./CriteriaCoverage";
 import { NextActionBanner } from "./NextActionBanner";
 import { OracleSkipWarning } from "./OracleSkipWarning";
 import { Panel } from "./Panel";
@@ -36,8 +37,8 @@ export interface RequestPageProps {
 
 /**
  * A loaded request: header, the "Next" line, then a main column (the state's
- * own section, the oracle-skip warning, the revision compare, the spec or
- * plan files, the tickets) beside a side column of facts (request facts, the
+ * own section, the oracle-skip warning, the revision compare, plan review's
+ * criteria coverage, the spec or plan files, the tickets) beside a side column of facts (request facts, the
  * pipeline, the audit trail). Once tickets build, they lead the main column.
  */
 export function RequestPage({
@@ -91,6 +92,7 @@ export function RequestPage({
             <OracleSkipWarning request={request} />
             {leads ? tickets : null}
             {comparable ? <RevisionCompare request={request} /> : null}
+            {request.state === "plan_review" ? <CriteriaCoverage request={request} /> : null}
             <ContentSections
               request={request}
               files={edit.files}
