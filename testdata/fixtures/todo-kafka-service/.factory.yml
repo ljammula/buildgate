@@ -1,0 +1,7 @@
+verify_command: "make verify-integration"
+preflight_profile: brownfield
+# lint_command: "golangci-lint run ./..."
+# security_command: "govulncheck ./..."
+# unit_test_command: "go test ./..."
+# integration_test_command: "go test -tags=integration ./..."
+# reference_oracle_command: "" # e.g. a script diffing candidate output against an independent oracle -- must NOT be agent-authored or editable via the ticket's Allowed-Files

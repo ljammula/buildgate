@@ -1,0 +1,27 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRT_kwDOAbc789",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {"login": "github-actions"},
+                    "body": "lint found an issue",
+                    "path": "internal/forge/reviewstate.go",
+                    "line": 5,
+                    "createdAt": "2026-09-10T08:00:00Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

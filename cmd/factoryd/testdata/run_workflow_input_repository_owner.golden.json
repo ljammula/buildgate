@@ -1,0 +1,155 @@
+{
+  "allowed_files": [
+    "content.txt"
+  ],
+  "base_sha": "<BASE_SHA>",
+  "build_app_interpreter": "/bin/sh",
+  "build_app_script": "<TESTDATA>/fake_build_app.sh",
+  "build_max_attempts": 3,
+  "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
+  "code_review_policy": "advisory",
+  "compose_services_allowed_registries": [
+    "registry.example.invalid"
+  ],
+  "compose_services_cpus": "1.5",
+  "compose_services_enabled": true,
+  "compose_services_max_services": 3,
+  "compose_services_memory": "3g",
+  "compose_services_ready_timeout": 150000000000,
+  "compose_services_require_digest": true,
+  "conformity_policy": "advisory",
+  "data_dir": "<DATA_DIR>",
+  "fast_check_command": "echo fast",
+  "full_suite_command": "echo full",
+  "gate_commands": {
+    "integration_tests": "echo integration",
+    "lint": "echo lint",
+    "reference_oracle": "sh verify/check.sh",
+    "security_audit": "echo security",
+    "unit_tests": "echo unit"
+  },
+  "harness": "pi",
+  "isolate_workspace": true,
+  "isolated_parent_dir": "<DATA_DIR>/workspaces",
+  "isolated_repo_dir": "<WORKSPACE>",
+  "log_dir": "<DATA_DIR>/runs/<RUN_ID>",
+  "max_rounds": 7,
+  "no_commit_oracles": true,
+  "project": "<PROJECT>",
+  "reference_oracle_dir": "<INPUTS>/oracle",
+  "reference_oracle_in_loop_retry": true,
+  "reference_oracle_mount_path": "verify",
+  "registry_proxy_policy": {
+    "cache_bytes": 1073741824,
+    "image": "registry-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "max_concurrent_upstream": 16,
+    "max_object_bytes": 268435456,
+    "routes": [
+      {
+        "prefix": "/npm/",
+        "upstream": "https://registry.npmjs.org"
+      },
+      {
+        "allowed_hosts": [
+          "files.pythonhosted.org-\u003e/pypi-files/"
+        ],
+        "prefix": "/pypi/",
+        "upstream": "https://pypi.org/simple"
+      },
+      {
+        "prefix": "/pypi-files/",
+        "upstream": "https://files.pythonhosted.org"
+      },
+      {
+        "prefix": "/gomodproxy/sumdb/sum.golang.org/",
+        "upstream": "https://sum.golang.org"
+      },
+      {
+        "allowed_hosts": [
+          "storage.googleapis.com"
+        ],
+        "prefix": "/gomodproxy/",
+        "upstream": "https://proxy.golang.org"
+      }
+    ],
+    "upstream_timeout": 60000000000
+  },
+  "relay_policy": {
+    "allow_plaintext_upstream": false,
+    "allow_unauthenticated_upstream": false,
+    "allowed_path_prefix": "",
+    "auth_mode": "static",
+    "billing": "metered",
+    "cache_write_micro_usd_per_mtok": 0,
+    "cached_input_micro_usd_per_mtok": 0,
+    "cost_budget_micro_usd": 5000000,
+    "cost_budget_window": 3600000000000,
+    "cost_ceiling_micro_usd": 25000000,
+    "input_micro_usd_per_mtok": 0,
+    "max_request_bytes": 1048576,
+    "output_micro_usd_per_mtok": 0,
+    "requests_per_minute": 60,
+    "route": "golden-route",
+    "token_budget": 1000000,
+    "token_budget_window": 3600000000000,
+    "token_ceiling": 5000000,
+    "upstream": "https://golden.example.invalid",
+    "upstream_auth_header": "",
+    "usage_format": "openai",
+    "worker_model_api": "openai-completions",
+    "worker_model_extra_json": "{\"reasoning\":true}",
+    "worker_model_id": "builder-model-id"
+  },
+  "release_protected_paths": [
+    "deploy/",
+    ".github/"
+  ],
+  "repository_owner_id": "<OWNER_ID>",
+  "request_ticket": true,
+  "required_changed_files": [
+    "content.txt"
+  ],
+  "review_harness": "pi",
+  "review_relay_policy": {
+    "allow_plaintext_upstream": false,
+    "allow_unauthenticated_upstream": false,
+    "allowed_path_prefix": "",
+    "auth_mode": "static",
+    "billing": "metered",
+    "cache_write_micro_usd_per_mtok": 0,
+    "cached_input_micro_usd_per_mtok": 0,
+    "cost_budget_micro_usd": 5000000,
+    "cost_budget_window": 3600000000000,
+    "cost_ceiling_micro_usd": 25000000,
+    "input_micro_usd_per_mtok": 0,
+    "max_request_bytes": 1048576,
+    "output_micro_usd_per_mtok": 0,
+    "requests_per_minute": 60,
+    "route": "review-route",
+    "token_budget": 1000000,
+    "token_budget_window": 3600000000000,
+    "token_ceiling": 5000000,
+    "upstream": "https://review.example.invalid",
+    "upstream_auth_header": "",
+    "usage_format": "openai-responses",
+    "worker_model_api": "openai-responses",
+    "worker_model_extra_json": "{\"reasoning\":true}",
+    "worker_model_id": "reviewer-model-id"
+  },
+  "review_thinking": "high",
+  "run_id": "<RUN_ID>",
+  "sandbox_docker": "<TESTDATA>/fake_docker.sh",
+  "sandbox_image": "example.test/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sandbox_user": "1234:5678",
+  "spec_acceptance_criteria": "<INPUTS>/criteria.md",
+  "spec_path": "<DATA_DIR>/runs/<RUN_ID>/spec.snapshot.md",
+  "task_queue": "factoryd-repo-<OWNER_ID>-run-<RUN_ID>",
+  "tests_required_opt_out": "integration fixture doesn't exercise tests_added",
+  "thinking": "medium",
+  "ticket": "001-golden",
+  "ticket_path": "<INPUTS>/spec.md",
+  "timeout_minutes": 11,
+  "verify_command": "true",
+  "verify_max_attempts": 4,
+  "workspace_path": "<WORKSPACE>"
+}

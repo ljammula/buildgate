@@ -1,0 +1,9 @@
+{
+  "name": "console-walk",
+  "private": true,
+  "description": "Operator walkthrough of the embedded factoryd console; see run.sh",
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.59.1"
+  }
+}

@@ -1,0 +1,288 @@
+name: CI
+
+# pull_request deliberately not a trigger here: an iterative PR (several
+# review-driven pushes to the same branch before merge, e.g. addressing
+# review feedback in rounds) previously re-ran this full job -- Temporal
+# dev server included -- on every single push, burning Actions minutes
+# for runs whose result is superseded within minutes by the next push.
+# main still verifies automatically post-merge as a safety net; run this
+# manually against a PR branch (Actions tab -> CI -> Run workflow) when
+# its result is actually needed before merging.
+#
+# Self-hosted runner: push/schedule triggers below are
+# wired but stay no-ops on GitHub-hosted runners -- both jobs' own `if:`
+# gates them on the `SELF_HOSTED_RUNNER` repository variable, which defaults
+# unset (falsy), so today's effective behavior (manual-only, ubuntu-latest)
+# is unchanged. See doc/self-hosted-runner.md for the one-time registration
+# steps and exactly what flipping that variable turns on.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly, well outside any normal working hours -- see
+    # doc/self-hosted-runner.md. No-op (see the jobs' own `if:` gates) until
+    # SELF_HOSTED_RUNNER=true.
+    - cron: "17 9 * * *"
+
+jobs:
+  verify:
+    # ubuntu-latest by default (today's behavior, unchanged); once the
+    # operator sets the repository variable SELF_HOSTED_RUNNER=true (see
+    # doc/self-hosted-runner.md), this retargets at the registered
+    # self-hosted Mac Studio runner instead.
+    runs-on: ${{ vars.SELF_HOSTED_RUNNER == 'true' && fromJSON('["self-hosted", "macOS"]') || 'ubuntu-latest' }}
+    # A manual run (workflow_dispatch) always runs, on ubuntu-latest, exactly
+    # as before this change. The push/schedule triggers added above are
+    # otherwise no-ops (Actions minutes are the constraint on GitHub-hosted
+    # runners -- see the historical comment this replaced) until the
+    # operator opts in.
+    if: github.event_name == 'workflow_dispatch' || vars.SELF_HOSTED_RUNNER == 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # go.sum exists (Temporal landed as a real dependency) — the
+          # prior "stdlib only, no go.sum" comment/cache:false pair here
+          # was stale (see CLAIMS.md's Remaining gaps). Let setup-go cache
+          # module downloads normally, keyed on go.sum.
+          cache: true
+
+      # S6 (CLAIMS.md Remaining gaps, closed here): every live Temporal
+      # test in this repo (RunWorkflow/RepositoryOwnerWorkflow exclusivity,
+      # daemon execution, stop-line, reclaim, heartbeat-kill,
+      # full_suite_verify's Temporal path) skips itself via t.Skipf when
+      # TEMPORAL_ADDRESS (default localhost:7233) is unreachable — true on
+      # every CI run until now, since nothing here ever started a server.
+      # Green CI never meant those guarantees held; it meant they were
+      # never checked. `temporal server start-dev` is the same lightweight,
+      # single-binary dev server used for local development (README/plan's
+      # own "one local Go daemon" shape) — sqlite-backed, no Postgres
+      # needed for test purposes.
+      - name: Install Temporal CLI
+        # Downloads a specific, immutable GitHub release asset and
+        # verifies its checksum before extracting anything -- no `curl |
+        # sh`. Found via review (local `codex review`, round 2 on this
+        # change): piping temporal.download/cli.sh to a shell still
+        # executes a script fetched from a mutable URL on every run even
+        # when a --version argument is passed to it, so a compromise of
+        # that endpoint (or its delivery path) could run arbitrary
+        # commands in a workflow triggered by any push or PR. GitHub
+        # release assets for a tagged version don't change after
+        # publication, and the checksum step below fails closed if this
+        # asset ever did.
+        run: |
+          curl -sSfL -o /tmp/temporal_cli.tar.gz "https://github.com/temporalio/cli/releases/download/v1.8.2/temporal_cli_1.8.2_linux_amd64.tar.gz"
+          echo "d8421bda989e6514b4bdb4d63a9012a8a05a806892e881a5aad8510496349a94  /tmp/temporal_cli.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.temporalio/bin"
+          tar -xzf /tmp/temporal_cli.tar.gz -C "$HOME/.temporalio/bin" temporal
+          chmod +x "$HOME/.temporalio/bin/temporal"
+
+      - name: Start Temporal dev server
+        run: |
+          echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
+          TEMPORAL="$HOME/.temporalio/bin/temporal"
+          # nohup + disown: a backgrounded process can otherwise receive
+          # SIGHUP when this step's own shell exits, killing the server
+          # before the later `make verify` step ever reaches it — each
+          # step here is its own shell invocation within the same job.
+          nohup "$TEMPORAL" server start-dev --headless --port 7233 --log-level warn > /tmp/temporal-dev.log 2>&1 &
+          disown
+          for i in $(seq 1 30); do
+            "$TEMPORAL" operator cluster health --address localhost:7233 >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "Temporal dev server did not become healthy within 30s" >&2
+          cat /tmp/temporal-dev.log >&2
+          exit 1
+
+      - name: make verify
+        run: |
+          set -o pipefail
+          make verify 2>&1 | tee /tmp/make-verify.log
+          # Found via review (GitHub Codex App, PR #34): if the Temporal
+          # dev server dies after the one-time health check above but
+          # before make verify reaches the live tests -- fmt-check, vet,
+          # and compilation run first -- every live Temporal test
+          # silently SKIPs via its own t.Skipf fallback (meant for local
+          # dev convenience: no server running, don't fail) instead of
+          # failing, recreating exactly the false-green state this whole
+          # change exists to close, undetected by make verify's own exit
+          # code. "Temporal (Service|server) at <addr> is unreachable:" is
+          # the literal, contiguous phrase both t.Skipf call sites emit
+          # (cmd/factoryd/integration_test.go, internal/workflow/
+          # temporal_live_test.go) -- grep the captured output for it and
+          # fail explicitly if found, rather than trust an exit code a
+          # silent skip never affects.
+          #
+          # A second real finding, from a local `codex review` pass on
+          # the fix above itself (confirmed live, not just read): this
+          # grep did nothing without -v below. `go test` (no -v) only
+          # ever prints "ok  <pkg>  <time>" for a package where every
+          # test passed OR skipped -- it silently drops every "--- SKIP:"
+          # line and its skip-reason text, precisely the line this grep
+          # needs. Verified directly: the exact same unreachable-Temporal
+          # skip prints nothing beyond "ok ..." without -v, and includes
+          # it with -v.
+          #
+          # A third real finding, from live-testing the fix above against
+          # a real mid-run server kill (not just a synthetic log): a bare
+          # "is unreachable:" substring match is NOT unique to these two
+          # skip sites -- cmd/factoryd's own runtime error message ("...
+          # is unreachable: ...; builds run only on Temporal", logged by
+          # TestIntegrationIsolatedTemporalUnreachableHaltsInsteadOfFallingBack
+          # and TestIntegrationIsolateWorkspaceRequiresReachableTemporalServer,
+          # both of which deliberately probe an unreachable address as
+          # their own real, passing test case) also contains that
+          # substring, just with unrelated prose in between -- and would
+          # have failed CI on two entirely healthy, correct test runs.
+          # The two real skip messages are "Temporal Service at %s is
+          # unreachable:"/"Temporal server at %s is unreachable:" with no
+          # text in between; anchoring the regex to that exact contiguous
+          # phrase excludes the false positive while still matching the
+          # real skip (confirmed against both cases live).
+          if grep -qE "Temporal (Service|server) at \S+ is unreachable:" /tmp/make-verify.log; then
+            echo "one or more live Temporal tests skipped (the dev server became unreachable mid-run) -- failing explicitly, see the log above" >&2
+            exit 1
+          fi
+        env:
+          TEMPORAL_ADDRESS: localhost:7233
+          # Found via a local `codex review` pass: `actions/setup-go`'s
+          # cache: true above (enabled the same commit) persists GOCACHE
+          # across separate workflow runs keyed on go.sum, and `go test`'s
+          # own result cache is not keyed on environment variables a test
+          # reads (like TEMPORAL_ADDRESS above) — only on unchanged source
+          # and build inputs. Without this, a later run with unchanged Go
+          # sources could silently replay an old cached PASS/SKIP result
+          # for every live Temporal test instead of actually contacting
+          # the server this job just started, defeating the point of this
+          # whole change while still reporting green. -v is required for
+          # the reason explained above (skip-reason text is otherwise
+          # dropped even on a fresh, uncached run); confirmed compatible
+          # with go vet (also invoked by make verify) via `go vet -v`
+          # locally. Neither -count=1 nor -v is added to the Makefile's
+          # own `test` target -- local development keeps Go's normal
+          # caching and quieter output for fast iteration.
+          GOFLAGS: -count=1 -v
+
+      # Visibility only -- never fails the job (if: always(), and the run
+      # itself has no failing exit path). Added 2026-09-16 alongside the
+      # cold-build fix to cmd/factoryd's own TestMain (see that file's
+      # runTests): the step above already runs with GOFLAGS=-v for the
+      # false-green guard's own sake, so /tmp/make-verify.log already
+      # carries a "--- PASS/FAIL: Test (Ns)" line for every top-level test
+      # and subtest -- this just surfaces the slowest ones instead of
+      # letting them sit unread past GitHub's own log rendering limits.
+      # Before this, the ~300s cmd/factoryd spends actually running tests
+      # (as opposed to the ~85s it used to spend rebuilding from a cold
+      # cache every invocation, fixed separately) had no per-test
+      # breakdown available at all from a CI run -- this is the cheapest
+      # way to get one without re-running anything.
+      - name: Slowest tests (visibility only)
+        if: always()
+        run: |
+          if [ -f /tmp/make-verify.log ]; then
+            grep -E '^(    )?--- (PASS|FAIL): ' /tmp/make-verify.log \
+              | sed -E 's/^ *--- (PASS|FAIL): ([^ ]+) \(([0-9.]+)s\)/\3 \1 \2/' \
+              | sort -rn \
+              | head -25 \
+              | awk '{printf "%8.2fs  %-4s  %s\n", $1, $2, $3}'
+          fi
+
+      # internal/sandbox/docker_test.go's TestRunLiveDocker gates itself on
+      # DOCKER_SANDBOX_LIVE=1, so without the steps below CI would only
+      # exercise that file's own hand-written fake `docker` shell script. A
+      # locally built image normally has no RepoDigests at all (only a
+      # registry push/pull populates that), and this runner's Docker does
+      # not accept name@sha256:<local-image-id> as a runnable reference
+      # either, so the images are pushed through a local registry to get a
+      # real, engine-independent digest.
+      - name: Local Docker registry for the live sandbox tests
+        run: |
+          docker run -d --restart=always -p 5000:5000 --name local-registry registry:2
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5000/v2/ >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "local Docker registry did not become healthy within 30s" >&2
+          exit 1
+
+      # Every image factoryd launches is built from source, never
+      # published or pulled from a registry (see AGENTS.md) -- so the
+      # sandbox worker image is built and
+      # pushed through the local registry above to get a real,
+      # engine-independent digest, and DOCKER_SANDBOX_IMAGE points the
+      # live sandbox tests below at it instead of their own generic
+      # python:3.13-slim-bookworm fallback -- so this job actually
+      # exercises internal/sandbox/Dockerfile with a real Docker engine.
+      - name: Build and push the sandbox worker image for the live sandbox tests
+        run: |
+          set -o pipefail
+          docker build -f internal/sandbox/Dockerfile -t localhost:5000/buildgate-worker:live .
+          push_output="$(docker push localhost:5000/buildgate-worker:live)"
+          echo "$push_output"
+          digest="$(printf '%s\n' "$push_output" | grep -oE 'sha256:[0-9a-f]+' | tail -1)"
+          if [ -z "$digest" ]; then
+            echo "could not read a digest from docker push output" >&2
+            exit 1
+          fi
+          echo "DOCKER_SANDBOX_IMAGE=localhost:5000/buildgate-worker@$digest" >> "$GITHUB_ENV"
+
+      - name: Live Docker sandbox tests
+        run: |
+          set -o pipefail
+          DOCKER_SANDBOX_LIVE=1 go test -race -count=1 -v ./internal/sandbox/... -run TestRunLiveDocker 2>&1 | tee /tmp/live-sandbox.log
+          # Every image factoryd launches is built from source (see
+          # AGENTS.md) -- there is no published default to test resolving.
+          # This still proves the sandbox worker image builds cleanly from
+          # this repo's own Dockerfile, and that a target project needing a
+          # dependency the worker image doesn't already bake needs a
+          # project-specific image (internal/sandbox/Dockerfile.project)
+          # instead (found via a real GitHub Codex App review of PR #51).
+          # Proves both directions against a real engine: a dependency
+          # absent from this repo's own go.sum fails inside the plain base
+          # image with no network, and succeeds once Dockerfile.project
+          # bakes it in. Also runs the security regression test for a real
+          # leak an earlier version of Dockerfile.project had (COPY .
+          # against the target project's own root baked its whole tree --
+          # .git, .env, any credential -- into an image layer): builds from
+          # a fixture with a fake secret and confirms it never appears in
+          # the saved image's own layer data.
+          DOCKER_SANDBOX_LIVE=1 go test -race -count=1 -v ./internal/sandbox/... -run 'TestDockerfileProjectBakesMissingDependency|TestDockerfileProjectDoesNotLeakProjectSecrets' 2>&1 | tee /tmp/live-project-image.log
+          DOCKER_SANDBOX_LIVE=1 go test -race -count=1 -v ./cmd/factoryd/... -run TestLiveDockerBuildPhaseMountsTheOracleSnapshot 2>&1 | tee /tmp/live-oracle-snapshot.log
+          # Same false-green risk as the make-verify step above: a silent
+          # t.Skip (Docker unreachable, an image pull failing) must fail
+          # this job explicitly rather than report a vacuous pass.
+          if grep -qE "^--- SKIP" /tmp/live-sandbox.log /tmp/live-project-image.log /tmp/live-oracle-snapshot.log; then
+            echo "a live Docker test skipped instead of running -- failing explicitly, see the log above" >&2
+            exit 1
+          fi
+
+  # Nightly live-Docker + Temporal-live backbone (`make verify-live`,
+  # scripts/verify-live.sh) on the self-hosted runner only -- never
+  # meaningful on GitHub-hosted ubuntu (no persistent Docker/Temporal state,
+  # and no reason to pay Actions minutes for a live run there). Runs only
+  # once the operator has set SELF_HOSTED_RUNNER=true (see
+  # doc/self-hosted-runner.md), and only on the nightly schedule or a manual
+  # dispatch -- never on every push, since a live run takes minutes rather
+  # than the `verify` job's seconds. Deliberately calls the Makefile target
+  # rather than duplicating the `verify` job's own per-test steps above: one
+  # place defines what "live" coverage means, exercised identically here and
+  # on a developer's own machine (`make verify-live`).
+  verify-live:
+    if: vars.SELF_HOSTED_RUNNER == 'true' && github.event_name != 'push'
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: make verify-live
+        run: make verify-live

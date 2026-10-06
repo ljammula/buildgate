@@ -1,0 +1,35 @@
+[
+  {
+    "label": "math-ops-multiply",
+    "description": "math_ops: add multiply_numbers (the same fixture live-smoke.sh uses; reused here as a fast, high-confidence expect=accept baseline)",
+    "repo": "testdata/fixtures/math_ops",
+    "spec": "data/tickets/math-ops-multiply.spec.md",
+    "expect": "accept",
+    "base_ref": "HEAD"
+  },
+  {
+    "label": "json-merge-patch-rfc7396",
+    "description": "json-merge-patch-rfc7396: RFC 7396 JSON Merge Patch in Go, single-file merge.go",
+    "repo": "testdata/fixtures/json-merge-patch-rfc7396",
+    "spec": "data/tickets/json-merge-patch-rfc7396.spec.md",
+    "expect": "accept",
+    "base_ref": "HEAD"
+  },
+  {
+    "label": "math-ops-oracle-unsatisfiable",
+    "description": "math_ops: same multiply ticket, gated by an intentionally unsatisfiable reference oracle (3*4==13) -- the deliberate should-quarantine fixture for reference_oracle. Reuses data/oracles/math-ops-multiply-unsatisfiable, the same fixture scripts/live-smoke.sh's live-smoke-mathops-oracle-reject case uses.",
+    "repo": "testdata/fixtures/math_ops",
+    "spec": "data/tickets/math-ops-multiply.spec.md",
+    "expect": "quarantine:reference_oracle",
+    "oracle_dir": "data/oracles/math-ops-multiply-unsatisfiable",
+    "base_ref": "HEAD"
+  },
+  {
+    "label": "math-ops-scope-violation",
+    "description": "math_ops: authored for this corpus, 2026-09-24 -- the deliberate should-quarantine fixture for diff_scope. Goal requires adding divide_numbers to add.py, but Allowed-Files declares only tests/test_scope_violation.py, excluding add.py entirely. Expect diff_scope rather than required_files_changed: the ticket's Verify-Command asserts real behavior (divide_numbers(10,2)==5.0) that can only be satisfied by editing add.py, so a build that actually passes verification is the one most likely to occur, and that build necessarily touches a file outside Allowed-Files -- diff_scope is the gate positioned to catch exactly that. (A build that instead honors Allowed-Files and leaves add.py untouched would fail canonical_verify and/or required_files_changed instead; either way the run quarantines, which is what makes this fixture usable even if the actual failing gate varies by build.) Either gate is correct: diff_scope when the agent edits the forbidden add.py, canonical_verify when it declines to (observed on the Temporal path, 2026-09-24).",
+    "repo": "testdata/fixtures/math_ops",
+    "spec": "data/tickets/math-ops-scope-violation.spec.md",
+    "expect": "quarantine:diff_scope|canonical_verify",
+    "base_ref": "HEAD"
+  }
+]

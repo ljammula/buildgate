@@ -1,0 +1,9 @@
+{
+  "isDraft": true,
+  "state": "OPEN",
+  "mergedAt": null,
+  "reviewDecision": "",
+  "statusCheckRollup": [],
+  "headRefOid": "cafef00d",
+  "baseRefName": "factoryd/run-1"
+}

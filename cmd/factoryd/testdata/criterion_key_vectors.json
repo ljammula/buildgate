@@ -1,0 +1,122 @@
+[
+ {
+  "a": "5. Zero amounts are ignored.",
+  "b": "Zero amounts are ignored",
+  "match": true
+ },
+ {
+  "a": "5) Zero amounts.",
+  "b": "5. Zero amounts",
+  "match": true
+ },
+ {
+  "a": "  7.   x  ; ",
+  "b": "x",
+  "match": true
+ },
+ {
+  "a": "12 rows returned.",
+  "b": "rows returned.",
+  "match": false
+ },
+ {
+  "a": "12 rows returned.",
+  "b": "12 rows returned",
+  "match": true
+ },
+ {
+  "a": "5 x",
+  "b": "x",
+  "match": false
+ },
+ {
+  "a": "\uff15. x",
+  "b": "x",
+  "match": false
+ },
+ {
+  "a": "x\u0001y",
+  "b": "xy",
+  "match": false
+ },
+ {
+  "a": "a  b",
+  "b": "a b",
+  "match": false
+ },
+ {
+  "a": "A b",
+  "b": "a b",
+  "match": false
+ },
+ {
+  "a": "5. Zero amounts are",
+  "b": "5. Zero amounts are ignored.",
+  "match": false
+ },
+ {
+  "a": "5. Zero amounts are ignored. Also more.",
+  "b": "5. Zero amounts are ignored.",
+  "match": false
+ },
+ {
+  "a": "ok!",
+  "b": "ok.",
+  "match": false
+ },
+ {
+  "a": "ok",
+  "b": "ok\u00a0",
+  "match": false
+ },
+ {
+  "a": "",
+  "b": "x",
+  "match": false
+ },
+ {
+  "a": "1.2.3 is supported",
+  "b": "2.3 is supported",
+  "match": false
+ },
+ {
+  "a": "1.2.3 is supported.",
+  "b": "1.2.3 is supported",
+  "match": true
+ },
+ {
+  "a": "2.0 release notes",
+  "b": "release notes",
+  "match": false
+ },
+ {
+  "a": "3) Do it",
+  "b": "Do it",
+  "match": true
+ },
+ {
+  "a": "3)Do it",
+  "b": "Do it",
+  "match": false
+ },
+ {
+  "a": "1.5x speed",
+  "b": "5x speed",
+  "match": false
+ },
+ {
+  "a": "2. `MerchantKey(\"  KROGER #1234 \")` returns `\"kroger\"`.",
+  "b": "2. `MerchantKey(\"  KROGER #1234 \")` returns \"kroger\".",
+  "match": true
+ },
+ {
+  "a": "1. `x` is set",
+  "b": "1. x is set",
+  "match": true
+ },
+ {
+  "a": "1. `x` is set",
+  "b": "1. y is set",
+  "match": false
+ }
+]

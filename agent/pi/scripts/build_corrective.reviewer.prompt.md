@@ -1,0 +1,3 @@
+Independent reviewer findings:
+
+{detail}

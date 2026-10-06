@@ -1,0 +1,25 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "CURSOR_PAGE_1"
+          },
+          "nodes": [
+            {
+              "id": "PRT_page1",
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {"author": {"login": "alice"}, "body": "already addressed", "path": "a.go", "line": 1, "createdAt": "2026-09-10T12:00:00Z"}
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

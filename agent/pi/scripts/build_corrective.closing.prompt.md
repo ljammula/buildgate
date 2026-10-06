@@ -1,0 +1,1 @@
+Inspect these concrete signals, make the smallest fix needed, and rerun the failing check (narrowed to what failed where you can) before finishing; the harness reruns the full command after your turn.

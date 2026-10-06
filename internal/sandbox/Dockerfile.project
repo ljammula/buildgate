@@ -1,0 +1,100 @@
+# Builds a project-specific sandbox image on top of a base worker image
+# (BASE_IMAGE -- the locally built worker `make sandbox-image` prints, or
+# another project image; every image factoryd launches is built from
+# source, never published, see AGENTS.md), baking in a TARGET project's own
+# Go module cache, npm package cache, and/or pip packages. Fixes a real
+# GitHub Codex App review finding on PR #51: the plain worker image
+# bakes only this repo's own go.sum, and a sandboxed build_app.py run has
+# no package-registry network at all (only the optional model relay --
+# see internal/sandbox/relay.go, which is model-endpoint-only), so a
+# target project needing any dependency the canonical image doesn't
+# already have baked cannot build inside it, even though the same project
+# built fine on the host before Docker containment was default-on. This
+# Dockerfile's own build step runs on the HOST, which does have normal
+# network access, so that is where the dependency resolution has to
+# happen instead -- factoryd itself never gets a package-registry route,
+# by design (see internal/sandbox/relay.go's own scope).
+#
+# Build context MUST be a clean staging directory containing only the
+# manifest files below -- NEVER the target project's own root. A real
+# project checkout can contain `.git`, `.env`, credentials, or anything
+# else gitignored, and this file's own `COPY .` would commit all of it to
+# an immutable image layer if pointed at that root; a later layer removing
+# the copy does not remove those bytes from the image's history, and
+# `make project-sandbox-image` pushes the result to a registry (found via
+# a real GitHub Codex App review of PR #51 -- an earlier version of this
+# file did exactly that). `make project-sandbox-image PROJECT_DIR=<path>`
+# stages the manifests into a throwaway directory and builds from that:
+#   stage=$(mktemp -d)
+#   cp <target-project-root>/go.mod <target-project-root>/go.sum "$stage/"    # if present
+#   cp <target-project-root>/package.json <target-project-root>/package-lock.json "$stage/"  # if present
+#   cp <target-project-root>/requirements.txt "$stage/"  # if present
+#   docker build -f <this repo>/internal/sandbox/Dockerfile.project \
+#     --build-arg BASE_IMAGE=<canonical or another project image> \
+#     -t <project>-worker:local "$stage"
+# `make project-sandbox-image PROJECT_DIR=<path>` does exactly this and
+# prints a locally-addressable digest-pinned reference to pass as
+# -sandbox-image -- see that target's own comment for why a plain local
+# tag can't be used directly. Prefer it over invoking `docker build`
+# yourself.
+#
+# Supports Go (go.mod/go.sum), npm (package.json/package-lock.json), and
+# pip (requirements.txt) today. Found live, 2026-09-08: a real Python
+# project (a notes app repo) whose own Makefile requires mypy for `make verify`'s
+# lint step had no way to get it into a sandboxed run at all before this --
+# the canonical base image only ever bakes what this repo's own toolchain
+# needs (go/node/pi), never a target project's Python dev dependencies, so
+# every such project silently failed lint inside the sandbox regardless of
+# how it passed on the host. Unlike the Go/npm blocks below, this one
+# installs into site-packages directly rather than only priming an offline
+# cache: pip has no equivalent of "resolve now, install later from the
+# resolved set" that plain `go build`/`npm install` already get for free
+# from GOMODCACHE/npm's own cache, and a target project's own Python
+# tooling (mypy included) must already be importable inside the sandbox --
+# there is no separate offline "install step" build_app.py could run later
+# the way there is for Go/npm. Add another `if [ -f ... ]; then ...; fi`
+# block below for a different manifest (poetry.lock, Cargo.lock, ...) the
+# same way.
+#
+# npm gets its own baked cache path here, deliberately not the base
+# image's own $HOME/.npm: internal/sandbox/docker.go mounts an EMPTY
+# tmpfs over /home/worker on every launch (see its own doc comment there),
+# so anything baked under $HOME in any image is wiped before the worker
+# ever runs. GOMODCACHE needs no such override -- the base Dockerfile
+# already bakes it outside $HOME, at /usr/local/gomodcache, for exactly
+# this reason, and this file inherits that setting unchanged.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+
+ENV npm_config_cache=/usr/local/npm-cache
+
+# Safe only because the build context is the staged manifests-only
+# directory described above, never the target project's own root.
+COPY . /tmp/project-src/
+RUN --mount=type=secret,id=build-ca,required=false \
+    set -e; \
+    if [ -f /run/secrets/build-ca ]; then \
+        export SSL_CERT_FILE=/run/secrets/build-ca \
+            NODE_EXTRA_CA_CERTS=/run/secrets/build-ca \
+            PIP_CERT=/run/secrets/build-ca; \
+    fi; \
+    mkdir -p /usr/local/npm-cache; \
+    cd /tmp/project-src; \
+    if [ -f go.mod ]; then \
+        echo "baking Go module cache from go.mod"; \
+        go mod download; \
+    fi; \
+    if [ -f package-lock.json ]; then \
+        echo "baking npm cache from package-lock.json"; \
+        npm ci --ignore-scripts; \
+    fi; \
+    if [ -f requirements.txt ]; then \
+        echo "installing pip packages from requirements.txt"; \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi; \
+    cd /; \
+    rm -rf /tmp/project-src; \
+    chmod -R a+rX /usr/local/npm-cache /usr/local/gomodcache
+
+USER 65532:65532

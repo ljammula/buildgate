@@ -1,0 +1,12 @@
+[
+  {
+    "label": "filtertodos",
+    "description": "todo-service: FilterTodos (the 2026-09-21 R2 fixture; its first drafted oracle needed two fixes at oracle_review)",
+    "repo": "testdata/fixtures/todo-kafka-service",
+    "request": "req-filtertodos.md",
+    "verify": "go vet ./... && go test ./...",
+    "full_suite": "",
+    "mutants": "mutants-filtertodos.py",
+    "impl": "filter.go"
+  }
+]

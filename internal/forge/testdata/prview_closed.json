@@ -1,0 +1,9 @@
+{
+  "isDraft": false,
+  "state": "CLOSED",
+  "mergedAt": null,
+  "reviewDecision": "",
+  "statusCheckRollup": [
+    {"conclusion": "SUCCESS"}
+  ]
+}

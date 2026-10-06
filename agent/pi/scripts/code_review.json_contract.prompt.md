@@ -1,0 +1,1 @@
+Respond with ONLY a JSON object of the form {"findings": [{"severity": "high"|"medium"|"low", "file": "<path>", "line": <int>, "summary": "<what is wrong>", "failure_scenario": "<inputs/state that trigger it and the wrong result>"}]} -- or {"findings": []} when there are none. No prose outside the JSON.

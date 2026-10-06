@@ -1,0 +1,25 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": ""
+          },
+          "nodes": [
+            {
+              "id": "PRT_page2",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {"author": {"login": "bob"}, "body": "still needs work", "path": "b.go", "line": 2, "createdAt": "2026-09-10T13:00:00Z"}
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

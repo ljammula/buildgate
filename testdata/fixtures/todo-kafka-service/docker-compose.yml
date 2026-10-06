@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD: todo
+      POSTGRES_DB: todo
+    ports:
+      - "5433:5432"
+    volumes:
+      - todo-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todo -d todo"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # Single-node KRaft broker (no ZooKeeper) -- the official Apache Kafka
+  # image, not a third-party build, matching this repo's other services'
+  # own preference for upstream-published images. POST /todos publishes
+  # to this broker; cmd/consumer reads from it and writes into postgres.
+  kafka:
+    image: apache/kafka:3.8.0
+    hostname: kafka
+    ports:
+      - "9094:9092"
+    x-bg-service-port: 19092
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:19092,CONTROLLER://kafka:19093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:19093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # The image defaults to -Xmx1G -Xms1G, which needs a ~1.2g container
+      # limit. 256m is the smallest heap that starts (192m and 128m fail
+      # with java.lang.OutOfMemoryError while starting the LogManager);
+      # it peaks at ~450 MiB over repeated test runs, inside a 512m limit
+      # (heap at ~50% of the container; 384m got OOM-killed).
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms256m"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  # Cache and idempotency store for the API: POST /todos Idempotency-Key
+  # records, and the cached GET /todos/durable list that cmd/consumer
+  # invalidates after each write. No volume -- nothing here is the source
+  # of truth, so a restart only costs a cold cache.
+  redis:
+    image: redis:7.4
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  todo-pgdata:

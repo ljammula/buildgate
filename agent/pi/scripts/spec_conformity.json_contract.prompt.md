@@ -1,0 +1,1 @@
+Respond with ONLY a JSON object of the form {"criteria": [{"criterion": "<criterion text, verbatim>", "verdict": "clean"|"flagged", "detail": "<why, if flagged>"}]} -- exactly one entry per criterion above, in the same order, using each criterion's exact text. No prose outside the JSON.

@@ -1,0 +1,92 @@
+package main
+
+import (
+	"buildgate/internal/requestdriver"
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+// prReplyComments is Flutter + Go app PR #331's review thread as GitHub listed it
+// (2026-09-28): the factory replied to 4122296002, and GitHub filed that
+// reply (4122411995) under the thread root 4121343639 while gh exited 1.
+var prReplyComments = []requestdriver.ReviewComment{
+	{ID: 4121343639, Body: "`from` and `to` are concatenated unescaped"},
+	{ID: 4121463880, InReplyToID: 4121343639, Body: "Addressed in 3e4c78f."},
+	{ID: 4122296002, InReplyToID: 4121343639, Body: "The PR head is still c90bbaf"},
+	{ID: 4122411995, InReplyToID: 4121343639, Body: "Addressed in 1610b47."},
+	{ID: 5000000001, Body: "another thread"},
+}
+
+func TestReplyLandedMatchesThreadRootAndBody(t *testing.T) {
+	cases := []struct {
+		name      string
+		commentID int64
+		body      string
+		want      bool
+	}{
+		{"reply_to_a_reply_filed_under_the_root", 4122296002, "Addressed in 1610b47.", true},
+		{"reply_to_the_root_itself", 4121343639, "Addressed in 1610b47.", true},
+		{"different_body", 4122296002, "Addressed in deadbee.", false},
+		{"same_body_other_thread", 5000000001, "Addressed in 1610b47.", false},
+		{"unknown_comment", 42, "Addressed in 1610b47.", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := requestdriver.ReplyLanded(prReplyComments, tc.commentID, tc.body); got != tc.want {
+				t.Fatalf("replyLanded(%d, %q) = %v, want %v", tc.commentID, tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPostReviewReplyConfirmsAfterGhError(t *testing.T) {
+	dp := newTestDeps(t)
+	origReply, origList := fakeForgeOf(dp).replyToReviewCommentFn, fakeForgeOf(dp).listReviewCommentsFn
+	t.Cleanup(func() {
+		fakeForgeOf(dp).replyToReviewCommentFn, fakeForgeOf(dp).listReviewCommentsFn = origReply, origList
+	})
+	const prURL = "https://github.com/example/example-app/pull/331"
+	ghErr := errors.New("exit status 1: unexpected end of JSON input")
+
+	cases := []struct {
+		name    string
+		replyOK bool
+		list    []requestdriver.ReviewComment
+		listErr error
+		body    string
+		wantErr string
+	}{
+		{name: "gh_ok", replyOK: true, body: "Addressed in 1610b47."},
+		{name: "gh_error_but_reply_posted", list: prReplyComments, body: "Addressed in 1610b47."},
+		{name: "gh_error_reply_missing", list: prReplyComments, body: "Addressed in deadbee.", wantErr: "unexpected end of JSON input"},
+		{name: "gh_error_and_list_fails", listErr: errors.New("rate limited"), body: "Addressed in 1610b47.", wantErr: "checking whether it posted anyway: rate limited"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			listed := false
+			fakeForgeOf(dp).replyToReviewCommentFn = func(context.Context, string, int64, string) error {
+				if tc.replyOK {
+					return nil
+				}
+				return ghErr
+			}
+			fakeForgeOf(dp).listReviewCommentsFn = func(context.Context, string) ([]requestdriver.ReviewComment, error) {
+				listed = true
+				return tc.list, tc.listErr
+			}
+			err := requestdriver.PostReviewReply(dp, context.Background(), prURL, 4122296002, tc.body)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("postReviewReply: %v, want nil", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("postReviewReply error = %v, want it to contain %q", err, tc.wantErr)
+			}
+			if tc.replyOK && listed {
+				t.Fatal("listed comments after a successful reply")
+			}
+		})
+	}
+}

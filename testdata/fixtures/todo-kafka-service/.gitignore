@@ -1,0 +1,19 @@
+workspace/
+
+# go build output: `go build` and `go build ./cmd/consumer` from the repo root
+/todo-service
+/consumer
+*.test
+
+# go test -coverprofile / -cpuprofile output
+*.out
+*.prof
+
+# local secrets and overrides
+.env
+.env.*
+
+# editor and OS files
+.DS_Store
+.idea/
+.vscode/

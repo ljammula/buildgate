@@ -1,0 +1,10 @@
+[
+  {
+    "criterion": "1. multiply_numbers(3, 4) == 12 and multiply_numbers(-2, 5) == -10, verified by a real test.",
+    "oracle_file": "test_oracle_multiply.py",
+    "rationale": "Deliberately wrong (asserts 3*4 == 13): a negative fixture no correct build can satisfy, proving the reference_oracle gate really gates.",
+    "criterion_index": 1,
+    "target_path": "tests/test_oracle_multiply.py",
+    "supersedes": []
+  }
+]

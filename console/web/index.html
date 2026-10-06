@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Read-only operator console for factoryd runs.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Factory Console">
+  <link rel="apple-touch-icon" href="icons/Icon-maskable-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Factory Console</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!--
+    The "needs you" favicon badge. Draws a small
+    red count badge onto a copy of the static favicon above and swaps the
+    <link rel=icon> href to it; window.__factoryFavicon.setBadge is called
+    from Dart via lib/tab_title_web.dart's own small dart:js_interop shim.
+    Kept as plain JS here rather than reimplemented in Dart: canvas/Image
+    drawing is native browser work with no cross-platform Dart
+    counterpart worth adding for one small badge.
+  -->
+  <script>
+    window.__factoryFavicon = (function () {
+      var baseHref = 'favicon.png';
+      var baseLink = document.querySelector("link[rel~='icon']");
+      return {
+        setBadge: function (count) {
+          if (!baseLink) return;
+          if (!count || count <= 0) {
+            baseLink.href = baseHref;
+            return;
+          }
+          var img = new Image();
+          img.onload = function () {
+            var size = 32;
+            var canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            var ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0, size, size);
+            var label = count > 99 ? '99+' : String(count);
+            var radius = 10;
+            var cx = size - radius - 1;
+            var cy = radius + 1;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+            ctx.fillStyle = '#c62828';
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, cx, cy + 1);
+            baseLink.href = canvas.toDataURL('image/png');
+          };
+          img.src = baseHref;
+        },
+      };
+    })();
+  </script>
+</head>
+<body>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

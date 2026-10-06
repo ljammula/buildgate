@@ -1,0 +1,59 @@
+# OpenShell 0.1.2 gateway configuration (Docker compute driver, mTLS for
+# clients, JWT for sandboxes), rendered by factoryd into the gateway's compose
+# stack. The only field is the meter's gRPC endpoint.
+[openshell]
+version = 2
+
+[openshell.gateway]
+bind_address        = "127.0.0.1:8080"
+health_bind_address = "127.0.0.1:8081"
+log_level           = "info"
+compute_driver      = "docker"
+disable_tls         = false
+guest_tls_ca        = "/var/lib/openshell/tls/ca.crt"
+guest_tls_cert      = "/var/lib/openshell/tls/client/tls.crt"
+guest_tls_key       = "/var/lib/openshell/tls/client/tls.key"
+
+[openshell.gateway.tls]
+cert_path      = "/var/lib/openshell/tls/server/tls.crt"
+key_path       = "/var/lib/openshell/tls/server/tls.key"
+client_ca_path = "/var/lib/openshell/tls/ca.crt"
+
+[openshell.gateway.gateway_jwt]
+signing_key_path = "/var/lib/openshell/tls/jwt/signing.pem"
+public_key_path  = "/var/lib/openshell/tls/jwt/public.pem"
+kid_path         = "/var/lib/openshell/tls/jwt/kid"
+gateway_id       = "openshell"
+
+[openshell.gateway.auth]
+allow_unauthenticated_users = false
+
+[openshell.gateway.mtls_auth]
+enabled = true
+
+[openshell.drivers.docker]
+default_image         = "nvcr.io/nvidia/base/ubuntu:24.04"
+sandbox_runtime_image = "ghcr.io/nvidia/openshell/sandbox@sha256:bf4797b6c511f2d8ba02955dbba4bf76c1f0dd6d83531420c5408d5f1fb9d72f"
+supervisor_image      = "ghcr.io/nvidia/openshell/supervisor@sha256:d7b5264bb6bc56f4796e6fa3617b8e4a8d785be0b7293542efd8cc250b0fb67a"
+image_pull_policy     = "if_not_present"
+sandbox_label         = "openshell"
+# The supervisor is host-networked and reaches the gateway on the VM's loopback.
+grpc_endpoint         = "https://127.0.0.1:8080"
+app_armor_profile     = "RuntimeDefault"
+# Bind mounts carry the worktree into a sandbox; OpenShell requires its
+# resource admission off for them.
+allow_driver_config   = true
+enable_bind_mounts    = true
+# One process limit for every sandbox (the gateway's own default is 2048);
+# the Docker driver takes none per sandbox.
+sandbox_pids_limit    = 1024
+
+[openshell.drivers.docker.resource_admission]
+enabled = false
+
+[[openshell.supervisor.middleware]]
+name                     = "factoryd-meter"
+grpc_endpoint            = "{{.MeterEndpoint}}"
+max_payload_bytes        = 4194304
+timeout                  = "2s"
+allow_insecure_transport = true

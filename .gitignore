@@ -1,0 +1,41 @@
+/factoryd
+.claude/
+data/runs/
+data/workspaces/
+data/isolation-markers/
+data/project-checks/
+data/*.out
+data/events.db
+data/events.db-wal
+data/events.db-shm
+data/daemon-heartbeat-*.json
+data/temporal-checkpoints/
+/dist/
+data/projects/
+data/queue/
+data/requests/
+data/scratch/
+__pycache__/
+*.py[cod]
+internal/workflow/runs/
+# The real Flutter Web console build (make console-build) -- committing it
+# would put megabytes of generated JS in git, and every rebuild (even of
+# unchanged sources) rewrites index.html, so tracking it directly dirtied
+# `make install` on any machine with Flutter on PATH. .gitkeep stays
+# tracked purely so `//go:embed all:dist` in internal/consoleweb has
+# something to embed in a checkout that has never run `make console-build`
+# -- see internal/consoleweb/consoleweb.go, which serves its placeholder
+# page from a Go string constant instead, independent of this directory.
+/internal/consoleweb/dist/*
+!/internal/consoleweb/dist/.gitkeep
+
+# scripts/console-walk installs playwright locally (run.sh).
+/scripts/console-walk/node_modules/
+/scripts/console-walk/package-lock.json
+
+# graphify knowledge-graph output (generated, machine-local; regenerate with graphify)
+graphify-out/
+
+# Private terms the claims guard checks tracked files against (see TestNoPrivateTerms).
+/.private-terms
+/cmd/factoryd/factoryd

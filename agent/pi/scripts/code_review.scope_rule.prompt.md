@@ -1,0 +1,1 @@
+Report only concrete correctness, security, data-loss, or concurrency defects -- each finding must describe a concrete failure scenario: the input or state that triggers it and the wrong result it produces. Do NOT report style, formatting, naming, lint, or missing-comment issues -- those are not this review's concern and must never appear as a finding.

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "generated": "2026-01-01T00:00:00+00:00",
+  "usage": {
+    "input": 200,
+    "output": 80,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "totalTokens": 280
+  },
+  "agent_exit_code": 0,
+  "duration_s": 45.2,
+  "agents_md_used": true,
+  "thinking": "high"
+}

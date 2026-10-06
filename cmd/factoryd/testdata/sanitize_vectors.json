@@ -1,0 +1,56 @@
+[
+ {
+  "in": "ok \u001b[31mred\u001b[0m \u0007bell \u202eevil\u200b",
+  "absent": [
+   "\u001b",
+   "\u0007",
+   "\u202e",
+   "\u200b",
+   "[31m"
+  ],
+  "present": [
+   "ok red",
+   "bell",
+   "evil"
+  ]
+ },
+ {
+  "in": "Authorization: Bearer abc.def-123\nnext",
+  "absent": [
+   "abc.def-123"
+  ],
+  "present": [
+   "Authorization:",
+   "[redacted]",
+   "next"
+  ]
+ },
+ {
+  "in": "header Bearer tok_XYZ.1",
+  "absent": [
+   "tok_XYZ"
+  ],
+  "present": [
+   "Bearer [redacted]"
+  ]
+ },
+ {
+  "in": "api_key=hunter2 and OPENAI_API_KEY: sk-abcdef123456789",
+  "absent": [
+   "hunter2",
+   "sk-abcdef"
+  ],
+  "present": [
+   "api_key=[redacted]"
+  ]
+ },
+ {
+  "in": "keep\ttab\nand\r\nlines",
+  "absent": [],
+  "present": [
+   "keep\ttab",
+   "\n",
+   "\r"
+  ]
+ }
+]

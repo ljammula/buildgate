@@ -1,0 +1,1 @@
+Pure formatting or lint drift (gofmt, whitespace, import order, style) is NOT a spec-conformity finding: the build loop formats changed Go files itself. Never flag or fail a criterion over formatting alone.

@@ -1,0 +1,28 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRT_kwDOAbc999",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {"login": "alice"},
+                    "body": "please rename this variable",
+                    "path": "internal/forge/reviewstate.go",
+                    "line": 10,
+                    "createdAt": "2026-09-10T12:00:00Z",
+                    "databaseId": 123456789
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

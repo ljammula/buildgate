@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "generated": "2026-01-01T00:00:00+00:00",
+  "usage": {
+    "input": 200,
+    "output": 80,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "totalTokens": 280
+  },
+  "agent_exit_code": 0,
+  "duration_s": 90.0,
+  "agents_md_used": true,
+  "thinking": "max",
+  "criteria_count": 3,
+  "oracle_count": 2,
+  "status": "drafted",
+  "dropped_count": 0,
+  "feedback_truncated": false,
+  "failure_reason": null,
+  "failures": [
+    {
+      "criterion_index": 3,
+      "reason": "model produced no usable oracle"
+    }
+  ],
+  "salvaged_count": 1
+}

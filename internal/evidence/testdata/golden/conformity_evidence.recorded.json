@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "generated": "2026-09-27T16:23:30.637307+00:00",
+  "conformity_policy": "required",
+  "thinking": "max",
+  "succeeded": true,
+  "stopped_reason": "spec conformity review cleared every criterion",
+  "review_verdicts": [
+    {
+      "criterion": "1. `backend/internal/domain/checklist.go` exposes `type ChecklistProgress struct { Done, Total, Percent int }` with the three exported integer fields `Done`, `Total`, and `Percent`.",
+      "verdict": "clean",
+      "detail": ""
+    },
+    {
+      "criterion": "2. `Checklist.Progress()` in `backend/internal/domain/checklist.go` returns a `ChecklistProgress` whose `Total` equals `len(c.Items)` and whose `Done` equals the number of items in `c.Items` with `Done == true`.",
+      "verdict": "clean",
+      "detail": ""
+    },
+    {
+      "criterion": "3. `Checklist.Progress()` in `backend/internal/domain/checklist.go` returns `Percent == 0` when `Total == 0`, without dividing by zero; the no-item result is `{Done: 0, Total: 0, Percent: 0}` as represented in `backend/internal/domain/checklist_test.go`.",
+      "verdict": "clean",
+      "detail": ""
+    },
+    {
+      "criterion": "4. For every non-empty checklist, `Checklist.Progress()` in `backend/internal/domain/checklist.go` computes `Percent` as `Done*100/Total` with integer division rounded down; a checklist with 3 items and exactly 1 done returns `{Done: 1, Total: 3, Percent: 33}` as represented in `backend/internal/domain/checklist_test.go`.",
+      "verdict": "clean",
+      "detail": ""
+    },
+    {
+      "criterion": "5. A checklist with 2 items both marked done returns `{Done: 2, Total: 2, Percent: 100}` from `Checklist.Progress()` in `backend/internal/domain/checklist.go`, as represented in `backend/internal/domain/checklist_test.go`.",
+      "verdict": "clean",
+      "detail": ""
+    },
+    {
+      "criterion": "6. `Checklist.Progress()` in `backend/internal/domain/checklist.go` is additive and read-only: it does not mutate the checklist or its items, and existing checklist domain behavior remains unchanged apart from the new progress contract.",
+      "verdict": "clean",
+      "detail": ""
+    }
+  ]
+}

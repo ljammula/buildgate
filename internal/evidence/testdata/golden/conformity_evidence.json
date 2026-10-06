@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "generated": "2026-01-01T00:00:00+00:00",
+  "conformity_policy": "required",
+  "thinking": "max",
+  "succeeded": false,
+  "stopped_reason": "spec conformity review flagged 1 of 2 criteria",
+  "error": "",
+  "review_verdicts": [
+    {
+      "criterion": "1. Returns 200 on success.",
+      "verdict": "clean",
+      "detail": ""
+    },
+    {
+      "criterion": "2. Handles empty payload.",
+      "verdict": "flagged",
+      "detail": "crashes on nil"
+    }
+  ]
+}

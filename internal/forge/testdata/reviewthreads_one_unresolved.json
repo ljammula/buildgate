@@ -1,0 +1,27 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRT_kwDOAbc123",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {"login": "alice"},
+                    "body": "please handle this edge case",
+                    "path": "internal/forge/reviewstate.go",
+                    "line": 42,
+                    "createdAt": "2026-09-10T12:00:00Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

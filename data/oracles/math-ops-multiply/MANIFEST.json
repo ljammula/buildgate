@@ -1,0 +1,10 @@
+[
+  {
+    "criterion": "1. multiply_numbers(3, 4) == 12 and multiply_numbers(-2, 5) == -10, verified by a real test.",
+    "oracle_file": "test_oracle_multiply.py",
+    "rationale": "Derivable value: integer arithmetic stated directly in the ticket.",
+    "criterion_index": 1,
+    "target_path": "tests/test_oracle_multiply.py",
+    "supersedes": []
+  }
+]

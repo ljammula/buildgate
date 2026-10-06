@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "generated": "2026-01-01T00:00:00+00:00",
+  "review_policy": "required",
+  "thinking": null,
+  "available": true,
+  "succeeded": false,
+  "stopped_reason": "code review found 1 blocking high-severity finding(s)",
+  "error": "",
+  "findings": [
+    {
+      "severity": "high",
+      "file": "internal/foo/bar.go",
+      "line": 42,
+      "summary": "Nil pointer dereference on empty input.",
+      "failure_scenario": "Calling Bar(nil) panics instead of returning an error."
+    }
+  ]
+}

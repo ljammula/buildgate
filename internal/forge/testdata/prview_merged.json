@@ -1,0 +1,9 @@
+{
+  "isDraft": false,
+  "state": "MERGED",
+  "mergedAt": "2026-09-10T18:30:00Z",
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [
+    {"conclusion": "SUCCESS"}
+  ]
+}

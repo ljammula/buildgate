@@ -1,0 +1,71 @@
+# The OpenShell gateway stack factoryd starts for sandboxed builds: buildgate's
+# own meter (token and cost admission for model calls) and the pinned NVIDIA
+# OpenShell 0.1.2 gateway. `factoryd` writes this file to its config directory,
+# supplies the FACTORYD_* variables below, and runs it under the project name
+# `buildgate-openshell`. Both services listen on the Docker VM's loopback only.
+name: buildgate-openshell
+
+services:
+  meter:
+    image: ${FACTORYD_METER_IMAGE:?}
+    restart: "no"
+    read_only: true
+    user: "65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    command:
+      - -listen
+      - 0.0.0.0:50051
+      - -ledger-root
+      - ${FACTORYD_METER_LEDGER_DIR:?}
+    ports:
+      - "127.0.0.1:50051:50051"
+    volumes:
+      - type: bind
+        source: ${FACTORYD_METER_LEDGER_DIR:?}
+        target: ${FACTORYD_METER_LEDGER_DIR:?}
+
+  gateway:
+    image: ghcr.io/nvidia/openshell/gateway@sha256:2fe4dad9118e14ab80a8258b545ea6e6cd74c3469e24ad4e6610f964d98913a2
+    restart: "no"
+    # Host-networked and bound to loopback: the gateway and every sandbox's
+    # supervisor (host-networked too) reach the meter at 127.0.0.1:50051, and
+    # no container on a Docker network can reach the gateway or the meter.
+    network_mode: host
+    command:
+      - --bind-address
+      - 127.0.0.1
+      - --port
+      - "8080"
+    user: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: /var/lib/openshell
+        target: /var/lib/openshell
+        bind:
+          create_host_path: true
+      # The gateway checks that a sandbox bind source exists at the same path:
+      # launch directories under the data root, and the .git of the
+      # repository a worktree belongs to, wherever under the home directory.
+      - type: bind
+        source: ${FACTORYD_HOME_DIR:?}
+        target: ${FACTORYD_HOME_DIR:?}
+        read_only: true
+    environment:
+      OPENSHELL_GATEWAY_CONFIG: /etc/openshell/gateway.toml
+      OPENSHELL_DB_URL: "sqlite:/var/lib/openshell/gateway.db?mode=rwc"
+      XDG_DATA_HOME: /var/lib/openshell
+      HOME: /var/lib/openshell
+    configs:
+      - source: gateway_toml
+        target: /etc/openshell/gateway.toml
+
+# Inline, because the host's factoryd config directory is not visible inside the
+# Colima VM: a host-path bind of the file would mount empty.
+configs:
+  gateway_toml:
+    content: ${FACTORYD_GATEWAY_TOML:?}

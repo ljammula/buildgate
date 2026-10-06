@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "generated": "2026-01-01T00:00:00+00:00",
+  "review_policy": "advisory",
+  "conformity_policy": "required",
+  "provider": "factoryd-relay",
+  "model": "gpt-5.6-luna",
+  "agents_md_used": true,
+  "agents_md_git_blob": "f55d748f1f4a5821f806fe1809936f827ea088e8",
+  "review_verdicts": [],
+  "succeeded": true,
+  "stopped_reason": "canonical verification passed; advisory review (unavailable: no-review-verdict)",
+  "rounds": [
+    {
+      "index": 1,
+      "agent": "pi",
+      "agent_returncode": 0,
+      "agent_timed_out": false,
+      "usage": {
+        "input": 26852,
+        "output": 2835,
+        "cacheRead": 49664,
+        "cacheWrite": 0,
+        "reasoning": 933,
+        "totalTokens": 79351
+      },
+      "reviewer_outcome": "unavailable",
+      "reviewer_detail": "no-review-verdict",
+      "verify_passed": true,
+      "verify_timed_out": false,
+      "duration_s": 210.255867137108,
+      "fast_check_ran": false,
+      "fast_check_passed": null,
+      "oracle_command": null,
+      "oracle_passed": null,
+      "oracle_output_tail": ""
+    }
+  ]
+}

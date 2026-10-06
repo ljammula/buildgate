@@ -1,0 +1,10 @@
+data/
+graphify-out/
+# tests: excluded so the graph maps architecture; CLAIMS.md already maps claims to tests
+*_test.go
+*_test.dart
+*_test.py
+test_*.py
+conftest.py
+tests/
+console/test/
