@@ -25,6 +25,3 @@ export const defaultInitialBackoffMs = 1_000;
 
 /** The longest wait between two reconnect attempts. */
 export const defaultMaxBackoffMs = 30_000;
-
-/** How long a "Copied" confirmation stays on a copy button. */
-export const copiedFeedbackMs = 2_000;

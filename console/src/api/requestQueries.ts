@@ -109,7 +109,7 @@ function cacheRequest(client: QueryClient, request: RequestSummary, isDetail: bo
  * and the run list's titles share (one cache entry). A fetched list never
  * replaces a newer record already in the cache.
  */
-export function requestListOptions(http: Http) {
+function requestListOptions(http: Http) {
   return queryOptions({
     queryKey: queryKeys.requests.list(),
     queryFn: ({ signal }) => listRequests(http, signal),
@@ -118,7 +118,7 @@ export function requestListOptions(http: Http) {
 }
 
 /** One request's full detail record (`GET /requests/{id}`). */
-export function requestDetailOptions(http: Http, id: string) {
+function requestDetailOptions(http: Http, id: string) {
   return queryOptions({
     queryKey: queryKeys.requests.detail(id),
     queryFn: ({ signal }) => getRequest(http, id, signal),
@@ -268,7 +268,7 @@ const noTicketFiles: OracleListing = {
 };
 
 /** One ticket's oracle listing, with a 404 read as "no files". */
-export function ticketOracleListingOptions(http: Http, id: string, ticket: number) {
+function ticketOracleListingOptions(http: Http, id: string, ticket: number) {
   return queryOptions({
     queryKey: queryKeys.requests.ticketOracle(id, ticket),
     queryFn: async ({ signal }): Promise<OracleListing> => {
@@ -308,7 +308,7 @@ export interface OracleFileRef {
  * One oracle file's content at its listed hash. Never refetched on its own
  * (the hash in the key is the version) and never retried: an error is shown.
  */
-export function oracleFileOptions(http: Http, id: string, file: OracleFileRef) {
+function oracleFileOptions(http: Http, id: string, file: OracleFileRef) {
   const { name, sha256, ticket } = file;
   return queryOptions({
     queryKey:

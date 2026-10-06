@@ -18,7 +18,7 @@ export interface WorkspaceHint {
   readonly verifyCommandSource: string;
 }
 
-export function decodeWorkspaceHint(o: JsonObject, at: string): WorkspaceHint {
+function decodeWorkspaceHint(o: JsonObject, at: string): WorkspaceHint {
   return {
     workspace: optString(o, "workspace", at),
     hasFactoryYml: optBoolean(o, "has_factory_yml", at),
@@ -71,7 +71,7 @@ export interface DaemonStatus {
   readonly heartbeatUpdatedAt: string;
 }
 
-export function decodeDaemonStatus(o: JsonObject, at: string): DaemonStatus {
+function decodeDaemonStatus(o: JsonObject, at: string): DaemonStatus {
   return {
     repository: optString(o, "repository", at),
     state: optString(o, "state", at),

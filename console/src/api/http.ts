@@ -68,7 +68,7 @@ function tokenFor(config: HttpConfig, kind: TokenKind): string | null {
   }
 }
 
-export function authHeaders(config: HttpConfig, kind: TokenKind): Record<string, string> {
+function authHeaders(config: HttpConfig, kind: TokenKind): Record<string, string> {
   const token = tokenFor(config, kind);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }

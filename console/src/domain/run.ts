@@ -55,7 +55,7 @@ export interface Attempt {
   readonly relayReasoningEffortAnomaly: boolean;
 }
 
-export function decodeAttempt(o: JsonObject, at: string): Attempt {
+function decodeAttempt(o: JsonObject, at: string): Attempt {
   return {
     kind: optString(o, "kind", at),
     command: stringList(o, "command", at),
@@ -117,7 +117,7 @@ export interface ComposeService {
   readonly digest: string;
 }
 
-export function decodeComposeService(o: JsonObject, at: string): ComposeService {
+function decodeComposeService(o: JsonObject, at: string): ComposeService {
   return {
     name: optString(o, "name", at),
     alias: optString(o, "alias", at),
@@ -161,7 +161,7 @@ export interface GateResult {
   readonly logSha256: string;
 }
 
-export function decodeGateResult(o: JsonObject, at: string): GateResult {
+function decodeGateResult(o: JsonObject, at: string): GateResult {
   return {
     check: reqString(o, "check", at),
     command: stringList(o, "command", at),
@@ -178,7 +178,7 @@ export interface DiffStat {
   readonly deletions: number;
 }
 
-export function decodeDiffStat(o: JsonObject, at: string): DiffStat {
+function decodeDiffStat(o: JsonObject, at: string): DiffStat {
   return {
     filesChanged: reqNumber(o, "files_changed", at),
     insertions: reqNumber(o, "insertions", at),
@@ -195,7 +195,7 @@ export interface RunNotification {
   readonly sentAt: string;
 }
 
-export function decodeRunNotification(o: JsonObject, at: string): RunNotification {
+function decodeRunNotification(o: JsonObject, at: string): RunNotification {
   return {
     runId: reqString(o, "run_id", at),
     ticket: reqString(o, "ticket", at),
@@ -213,7 +213,7 @@ export interface Override {
   readonly newState: string;
 }
 
-export function decodeOverride(o: JsonObject, at: string): Override {
+function decodeOverride(o: JsonObject, at: string): Override {
   return {
     by: reqString(o, "by", at),
     reason: reqString(o, "reason", at),
@@ -285,7 +285,7 @@ export interface AgentEvidence {
   readonly rounds: readonly AgentEvidenceRound[];
 }
 
-export function decodeAgentEvidence(o: JsonObject, at: string): AgentEvidence {
+function decodeAgentEvidence(o: JsonObject, at: string): AgentEvidence {
   return { rounds: objectList(o, "rounds", at, decodeAgentEvidenceRound) };
 }
 

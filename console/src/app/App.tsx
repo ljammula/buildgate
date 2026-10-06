@@ -41,7 +41,7 @@ function newQueryClient(): QueryClient {
 }
 
 /** The route table: one line per screen, every path from routes/paths. */
-export function AppRoutes() {
+function AppRoutes() {
   return (
     <Routes>
       <Route path={routePatterns.board} element={<BoardScreen />} />

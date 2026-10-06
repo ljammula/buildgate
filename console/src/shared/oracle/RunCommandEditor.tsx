@@ -12,7 +12,7 @@ import { Textarea } from "@/ui/Input";
  * text field: they show as U+FFFD here, and the saved file will differ from
  * what was displayed.
  */
-export function editableRunCommandText(shown: string): string {
+function editableRunCommandText(shown: string): string {
   return Array.from(shown, (ch) => {
     const cp = ch.codePointAt(0) ?? 0;
     return cp >= 0xd800 && cp <= 0xdfff ? "�" : ch;

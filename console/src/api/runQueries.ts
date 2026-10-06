@@ -48,7 +48,7 @@ export function useRuns(refetchIntervalMs?: number): UseQueryResult<Run[]> {
 }
 
 /** Whichever record of one run is newer; a tie goes to the incoming one. */
-export function newerRun(cached: Run | undefined, incoming: Run): Run {
+function newerRun(cached: Run | undefined, incoming: Run): Run {
   return cached && compareTimestamps(cached.updatedAt, incoming.updatedAt) > 0 ? cached : incoming;
 }
 
@@ -178,14 +178,14 @@ export function useProjects(): UseQueryResult<ProjectSummary[]> {
   });
 }
 
-export function projectStatsOptions(http: Http, project: string) {
+function projectStatsOptions(http: Http, project: string) {
   return queryOptions({
     queryKey: queryKeys.projects.stats(project),
     queryFn: ({ signal }) => getProjectStats(http, project, signal),
   });
 }
 
-export function projectReleaseOptions(http: Http, project: string) {
+function projectReleaseOptions(http: Http, project: string) {
   return queryOptions({
     queryKey: queryKeys.projects.release(project),
     queryFn: ({ signal }) => getProjectRelease(http, project, signal),

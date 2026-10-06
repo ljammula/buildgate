@@ -33,7 +33,7 @@ export interface ActiveJob {
   readonly startedAt: string;
 }
 
-export function decodeActiveJob(o: JsonObject, at: string): ActiveJob {
+function decodeActiveJob(o: JsonObject, at: string): ActiveJob {
   return {
     stage: optString(o, "stage", at),
     role: optString(o, "role", at),
@@ -112,7 +112,7 @@ export interface SpecEvidence {
   readonly usage: Usage | null;
 }
 
-export function decodeSpecEvidence(o: JsonObject, at: string): SpecEvidence {
+function decodeSpecEvidence(o: JsonObject, at: string): SpecEvidence {
   return { usage: optObject(o, "usage", at, decodeUsage) };
 }
 
@@ -121,7 +121,7 @@ export interface PlanEvidence {
   readonly usage: Usage | null;
 }
 
-export function decodePlanEvidence(o: JsonObject, at: string): PlanEvidence {
+function decodePlanEvidence(o: JsonObject, at: string): PlanEvidence {
   return { usage: optObject(o, "usage", at, decodeUsage) };
 }
 
@@ -164,7 +164,7 @@ export interface RejectionAnchor {
   readonly note: string;
 }
 
-export function decodeRejectionAnchor(o: JsonObject, at: string): RejectionAnchor {
+function decodeRejectionAnchor(o: JsonObject, at: string): RejectionAnchor {
   return {
     path: reqString(o, "path", at),
     section: optString(o, "section", at),
@@ -173,7 +173,7 @@ export function decodeRejectionAnchor(o: JsonObject, at: string): RejectionAncho
   };
 }
 
-export function decodeRejection(o: JsonObject, at: string): Rejection {
+function decodeRejection(o: JsonObject, at: string): Rejection {
   return {
     by: reqString(o, "by", at),
     at: reqString(o, "at", at),
@@ -209,7 +209,7 @@ export interface RevisionSummary {
   readonly files: readonly string[];
 }
 
-export function decodeRevisionSummary(o: JsonObject, at: string): RevisionSummary {
+function decodeRevisionSummary(o: JsonObject, at: string): RevisionSummary {
   return {
     index: reqNumber(o, "index", at),
     at: reqString(o, "at", at),
@@ -262,7 +262,7 @@ export interface RequestTransition {
   readonly reason: string;
 }
 
-export function decodeRequestTransition(o: JsonObject, at: string): RequestTransition {
+function decodeRequestTransition(o: JsonObject, at: string): RequestTransition {
   return {
     from: reqString(o, "from", at),
     to: reqString(o, "to", at),
@@ -287,7 +287,7 @@ export interface OracleDraftCriterion {
   readonly reason: string;
 }
 
-export function decodeOracleDraftCriterion(o: JsonObject, at: string): OracleDraftCriterion {
+function decodeOracleDraftCriterion(o: JsonObject, at: string): OracleDraftCriterion {
   const number = optNumber(o, "number", at);
   return {
     number: number === null ? 0 : Math.trunc(number),
@@ -308,7 +308,7 @@ export interface ResumeInfo {
   readonly refused: readonly string[];
 }
 
-export function decodeResumeInfo(o: JsonObject, at: string): ResumeInfo {
+function decodeResumeInfo(o: JsonObject, at: string): ResumeInfo {
   return {
     fromState: optString(o, "from_state", at),
     lostRunId: optString(o, "lost_run_id", at),

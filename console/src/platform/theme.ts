@@ -12,7 +12,7 @@ const listeners = new Set<() => void>();
  * `data-theme`; "system" removes it so the stylesheet follows the operating
  * system's preference.
  */
-export function applyThemeMode(mode: ThemeMode): void {
+function applyThemeMode(mode: ThemeMode): void {
   const root = document.documentElement;
   if (mode === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", mode);

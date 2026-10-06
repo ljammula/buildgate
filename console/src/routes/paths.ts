@@ -34,11 +34,11 @@ function deepLink(
   return { filters: emptyFilters, triage: false, deepLink: kind, deepLinkId: id };
 }
 
-export function boardRoute(filters: RequestBoardFilters = emptyFilters): RequestBoardRouteConfig {
+function boardRoute(filters: RequestBoardFilters = emptyFilters): RequestBoardRouteConfig {
   return { filters, triage: false, deepLink: "none", deepLinkId: null };
 }
 
-export function triageRoute(): RequestBoardRouteConfig {
+function triageRoute(): RequestBoardRouteConfig {
   return { filters: emptyFilters, triage: true, deepLink: "none", deepLinkId: null };
 }
 
