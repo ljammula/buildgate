@@ -1,5 +1,6 @@
 import { useUpdateRequestTicket } from "@/api/requestQueries";
 import type { RequestSummary, RequestTicket } from "@/domain/request";
+import { specAcceptanceCriteria } from "@/domain/specSkeleton";
 
 import { FileContentSection } from "./FileContentSection";
 import type { EditorBinding } from "./useEditSession";
@@ -44,6 +45,7 @@ export function TicketPlanSection({
       }}
       onFetchCurrent={onFetchCurrent}
       structure="ticket"
+      specCriteria={specAcceptanceCriteria(request.spec)}
       {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
     />

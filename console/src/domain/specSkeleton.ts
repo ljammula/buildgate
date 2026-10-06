@@ -43,21 +43,24 @@ const GO_SPACE =
   "\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
 const GO_TRIM = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, "g");
 
-function trimSpace(s: string): string {
+/** Go's `strings.TrimSpace`. */
+export function trimSpace(s: string): string {
   return s.replace(GO_TRIM, "");
 }
 
-function isIndented(raw: string): boolean {
+/** Whether a raw line starts with a space or a tab: what makes a line a continuation, not a new item. */
+export function isIndented(raw: string): boolean {
   return raw.startsWith(" ") || raw.startsWith("\t");
 }
 
 // Go's regexp `\s`, `\S` and `\d` are ASCII-only; JavaScript's are not.
-const CRITERION_ITEM = /^[0-9]+[.)][\t\n\f\r ]+[^\t\n\f\r ]/;
+/** A trimmed line that opens a numbered criterion (`specCriterionItemRE`). */
+export const CRITERION_ITEM = /^[0-9]+[.)][\t\n\f\r ]+[^\t\n\f\r ]/;
 const COVERED_ITEM = /^(?:[-*][\t\n\f\r ]*)?([0-9]+)[\t\n\f\r ]*$/;
 const GO_MAX_INT = 9223372036854775807n;
 
 /** Line indexes of `headings` found in order, each searched after the one before; -1 where not found. */
-function headingPositions(lines: readonly string[], headings: readonly string[]): number[] {
+export function headingPositions(lines: readonly string[], headings: readonly string[]): number[] {
   const positions: number[] = [];
   let searchFrom = 0;
   for (const heading of headings) {
@@ -229,19 +232,28 @@ function closesFence(trimmed: string, ch: string, minLength: number): boolean {
  * line outside a fenced code block (`TicketStructureBrownfield`'s header
  * check; its section checks are the server's alone).
  */
-export function missingTicketHeaderKeys(content: string): string[] {
-  const found = new Set<string>();
+/** Calls `visit` with each unindented line outside a fenced code block, and its index. */
+export function forEachTopLevelLine(
+  lines: readonly string[],
+  visit: (trimmed: string, index: number) => void,
+): void {
   let fence: { readonly ch: string; readonly length: number } | null = null;
-  for (const line of content.split("\n")) {
+  lines.forEach((line, index) => {
     const trimmed = trimSpace(line);
     if (fence !== null) {
       if (closesFence(trimmed, fence.ch, fence.length)) fence = null;
-      continue;
+      return;
     }
     fence = fenceMarker(trimmed);
-    if (fence !== null || isIndented(line)) continue;
+    if (fence === null && !isIndented(line)) visit(trimmed, index);
+  });
+}
+
+export function missingTicketHeaderKeys(content: string): string[] {
+  const found = new Set<string>();
+  forEachTopLevelLine(content.split("\n"), (trimmed) => {
     for (const key of requiredTicketHeaderKeys) if (trimmed.startsWith(key)) found.add(key);
-  }
+  });
   return requiredTicketHeaderKeys.filter((key) => !found.has(key));
 }
 

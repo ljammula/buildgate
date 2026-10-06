@@ -475,6 +475,8 @@ step("request-edit-refused", async () => {
   await page.getByText(/Could not save: .*missing required heading/).waitFor();
   check((await editor.inputValue()) === "just one line\n", "the refused text was lost");
   await main().getByRole("button", { name: "Cancel", exact: true }).click();
+  // Unsaved text is never dropped without asking.
+  await confirmDialog("Discard changes");
   await page.getByText("Acceptance criteria (2)").waitFor();
 });
 
@@ -482,6 +484,24 @@ step("request-edit-spec", async () => {
   await visit("/requests/req-spec-review");
   await main().getByRole("button", { name: "Edit", exact: true }).click();
   await main().getByRole("textbox", { name: "Edit spec.md" }).fill(validSpec);
+  // The criteria list writes the same text box: a criterion added and taken
+  // out again through it leaves exactly the text that was typed.
+  const criteria = main().getByRole("region", { name: "Acceptance criteria" });
+  await criteria.getByRole("textbox", { name: "New criterion" }).fill("A key is logged.");
+  await criteria.getByRole("button", { name: "Add", exact: true }).click();
+  await criteria.getByRole("textbox", { name: "Criterion 4" }).waitFor();
+  check(
+    (await main().getByRole("textbox", { name: "Edit spec.md" }).inputValue()).includes(
+      "3. A key expires after 24 hours.\n4. A key is logged.\n",
+    ),
+    "the added criterion is not in the text that Save sends",
+  );
+  await main().getByRole("region", { name: "Your changes" }).waitFor();
+  await criteria.getByRole("button", { name: "Remove criterion 4" }).click();
+  check(
+    (await main().getByRole("textbox", { name: "Edit spec.md" }).inputValue()) === validSpec,
+    "adding and removing a criterion did not give the text back byte for byte",
+  );
   // A text the checklist calls complete is one the server then accepts.
   await main()
     .getByRole("region", { name: "Structure checklist" })
@@ -492,6 +512,8 @@ step("request-edit-spec", async () => {
     "Approve stayed enabled with unsaved edits",
   );
   await main().getByRole("button", { name: "Save", exact: true }).click();
+  // The open editor's own list carries the same count: wait for it to close.
+  await main().getByRole("textbox", { name: "Edit spec.md" }).waitFor({ state: "detached" });
   await page.getByText("Acceptance criteria (3)").waitFor();
   check(
     (await request("req-spec-review")).spec === validSpec,

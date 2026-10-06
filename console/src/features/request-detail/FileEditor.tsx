@@ -10,7 +10,9 @@ import { Textarea } from "@/ui/Input";
 import { describeError } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 
+import { CriteriaListEditor } from "./CriteriaListEditor";
 import { StructureChecklist, type StructureKind } from "./StructureChecklist";
+import { TicketFieldsEditor } from "./TicketFieldsEditor";
 import type { EditorBinding } from "./useEditSession";
 
 export interface FileEditorProps {
@@ -28,6 +30,8 @@ export interface FileEditorProps {
   readonly session?: EditorBinding;
   /** Shows the live structure checklist for this kind of file beside the text. */
   readonly structure?: StructureKind;
+  /** For a ticket: the spec's numbered criteria, offered as what the ticket may cover. */
+  readonly specCriteria?: readonly string[];
 }
 
 /**
@@ -40,7 +44,11 @@ export interface FileEditorProps {
  * reported hash (an informed overwrite of what they just saw). Any other
  * failure (a 422's validation message) shows verbatim and keeps the edit.
  * With `structure`, a checklist of what that 422 would name follows the text
- * as it is typed; it never blocks Save.
+ * as it is typed; it never blocks Save. The fields above the text (a spec's
+ * criteria list, a ticket's header lines and covered criteria) are other
+ * ways to write the same text: they change `text` and nothing else, so the
+ * save, its base hash and the server's validation are those of a hand edit,
+ * and the line diff under the text shows everything that will be sent.
  * Keyboard: the text is focused on open, Cmd/Ctrl+S saves, Esc cancels (asking
  * first when there is unsaved text). A newer record arriving never discards
  * the text: see `session`.
@@ -53,6 +61,7 @@ export function FileEditor({
   onClose,
   session,
   structure,
+  specCriteria,
 }: FileEditorProps) {
   const [opened] = useState(initialContent);
   const [text, setText] = useState(initialContent);
@@ -147,6 +156,23 @@ export function FileEditor({
           </div>
         </div>
       )}
+      {structure === undefined ? null : (
+        <div className="border-border flex flex-col gap-2 rounded-md border p-3">
+          {structure === "spec" ? (
+            <CriteriaListEditor text={text} onChange={setText} disabled={blockedReason !== null} />
+          ) : (
+            <TicketFieldsEditor
+              text={text}
+              onChange={setText}
+              specCriteria={specCriteria ?? []}
+              disabled={blockedReason !== null}
+            />
+          )}
+          <p className="text-fg-subtle text-xs">
+            These fields rewrite the text below, which is exactly what Save sends.
+          </p>
+        </div>
+      )}
       <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
         <Textarea
           ref={field}
@@ -165,6 +191,18 @@ export function FileEditor({
           <StructureChecklist kind={structure} text={text} className="lg:w-72 lg:shrink-0" />
         )}
       </div>
+      {structure === undefined || !dirty ? null : (
+        <section
+          aria-label="Your changes"
+          data-testid="edit-changes"
+          className="flex flex-col gap-1"
+        >
+          <h4 className="text-fg-muted text-xs font-semibold">Your changes</h4>
+          <div className="max-h-60 overflow-auto">
+            <TextDiffView before={opened} after={text} beforeLabel="opened" afterLabel="to save" />
+          </div>
+        </section>
+      )}
       {blockedReason === null ? null : (
         <p data-testid="edit-blocked" className="text-fg-muted text-sm">
           {blockedReason}
