@@ -5,7 +5,15 @@ import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Section } from "@/ui/PageLayout";
 import { KillSwitchChip } from "@/ui/StatusChip";
-import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFrame,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
 
 import { ProjectFieldList } from "./ProjectFieldList";
@@ -36,30 +44,32 @@ function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
             Never engaged. This project has no recorded transitions.
           </p>
         ) : (
-          <Table>
-            <TableHead>
-              <TableRow className="hover:bg-transparent">
-                <TableHeaderCell>Transition</TableHeaderCell>
-                <TableHeaderCell>By</TableHeaderCell>
-                <TableHeaderCell>At</TableHeaderCell>
-                <TableHeaderCell>Reason</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {killSwitch.history.map((transition) => (
-                <TableRow key={`${transition.at}-${transition.by}`}>
-                  <TableCell className="font-medium">
-                    {transition.engaged ? "Engaged" : "Disengaged"}
-                  </TableCell>
-                  <TableCell>{transition.by}</TableCell>
-                  <TableCell className="text-xs">
-                    <LocalTimeText value={transition.at} />
-                  </TableCell>
-                  <TableCell>{transition.reason}</TableCell>
+          <TableFrame>
+            <Table>
+              <TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHeaderCell>Transition</TableHeaderCell>
+                  <TableHeaderCell>By</TableHeaderCell>
+                  <TableHeaderCell>At</TableHeaderCell>
+                  <TableHeaderCell>Reason</TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {killSwitch.history.map((transition) => (
+                  <TableRow key={`${transition.at}-${transition.by}`}>
+                    <TableCell className="font-medium">
+                      {transition.engaged ? "Engaged" : "Disengaged"}
+                    </TableCell>
+                    <TableCell>{transition.by}</TableCell>
+                    <TableCell className="text-xs tabular-nums">
+                      <LocalTimeText value={transition.at} />
+                    </TableCell>
+                    <TableCell>{transition.reason}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableFrame>
         )}
       </Section>
     </>

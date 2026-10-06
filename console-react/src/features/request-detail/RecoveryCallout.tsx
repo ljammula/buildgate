@@ -52,41 +52,42 @@ export function RecoveryCallout({
       data-testid="recovery-callout"
       tone={plan.awaitingPullRequest ? "neutral" : "danger"}
       title={plan.headline}
-      className="flex flex-col gap-3"
     >
-      <p className="break-words whitespace-pre-wrap">{plan.explanation}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        {plan.sendBackIsPrimary ? sendBack : null}
-        <Button variant="primary" disabled={disabled} onClick={onRetry}>
-          <RotateCcw aria-hidden="true" />
-          {plan.retryLabel}
-        </Button>
-        <Button disabled={disabled} onClick={onCancel}>
-          <Ban aria-hidden="true" />
-          Cancel request
-        </Button>
-        {plan.sendBackIsPrimary ? null : sendBack}
-      </div>
-      <CopyableCommand command={plan.cliEquivalent} />
-      {plan.overrideTicket === null ? null : (
-        <div className="flex flex-col items-start gap-2">
-          <p>
-            Correcting the ticket&apos;s own run record (accepted vs. halted) is a separate,
-            optional action -- it does not affect whether Retry above will work.
-          </p>
-          <Button asChild>
-            <Link
-              to={runOverridePath(
-                plan.overrideTicket.runId,
-                `Request ${request.id} ticket ${plan.overrideTicket.index} quarantined`,
-              )}
-            >
-              <ShieldCheck aria-hidden="true" />
-              Review the ticket&apos;s run override
-            </Link>
+      <div className="flex flex-col gap-3">
+        <p className="break-words whitespace-pre-wrap">{plan.explanation}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {plan.sendBackIsPrimary ? sendBack : null}
+          <Button variant="primary" disabled={disabled} onClick={onRetry}>
+            <RotateCcw aria-hidden="true" />
+            {plan.retryLabel}
           </Button>
+          <Button disabled={disabled} onClick={onCancel}>
+            <Ban aria-hidden="true" />
+            Cancel request
+          </Button>
+          {plan.sendBackIsPrimary ? null : sendBack}
         </div>
-      )}
+        <CopyableCommand command={plan.cliEquivalent} />
+        {plan.overrideTicket === null ? null : (
+          <div className="flex flex-col items-start gap-2">
+            <p>
+              Correcting the ticket&apos;s own run record (accepted vs. halted) is a separate,
+              optional action -- it does not affect whether Retry above will work.
+            </p>
+            <Button asChild>
+              <Link
+                to={runOverridePath(
+                  plan.overrideTicket.runId,
+                  `Request ${request.id} ticket ${plan.overrideTicket.index} quarantined`,
+                )}
+              >
+                <ShieldCheck aria-hidden="true" />
+                Review the ticket&apos;s run override
+              </Link>
+            </Button>
+          </div>
+        )}
+      </div>
     </Callout>
   );
 }

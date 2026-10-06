@@ -87,13 +87,13 @@ export function Field({ label, hint, error, children, className }: FieldProps) {
     ...(error ? { "aria-invalid": true } : {}),
   });
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      <label htmlFor={controlId} className="text-xs font-medium text-fg-muted">
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <label htmlFor={controlId} className="text-xs font-medium text-fg">
         {label}
       </label>
       {control}
       {hint ? (
-        <p id={hintId} className="text-xs text-fg-subtle">
+        <p id={hintId} className="text-xs text-fg-muted">
           {hint}
         </p>
       ) : null}

@@ -21,8 +21,10 @@ export interface FieldProps {
 export function Field({ label, children, mono = false }: FieldProps) {
   return (
     <>
-      <dt className="text-fg-muted">{label}</dt>
-      <dd className={cn("min-w-0 break-words text-fg", mono && "font-mono text-xs")}>{children}</dd>
+      <dt className="text-xs leading-5 text-fg-muted">{label}</dt>
+      <dd className={cn("min-w-0 break-words text-fg", mono && "font-mono text-xs break-all")}>
+        {children}
+      </dd>
     </>
   );
 }

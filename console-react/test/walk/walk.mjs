@@ -31,7 +31,10 @@ const only = flags.filter((flag, i) => flags[i - 1] === "--only");
 const shots = path.join(walkDir, "shots");
 fs.mkdirSync(shots, { recursive: true });
 
-const browser = await chromium.launch({ channel: "chrome", headless: !headed });
+// Playwright's own Chromium by default (a pinned browser, the same on every
+// machine); WALK_BROWSER_CHANNEL=chrome uses an installed Google Chrome.
+const channel = process.env.WALK_BROWSER_CHANNEL;
+const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: !headed });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await context.newPage();
 page.setDefaultTimeout(8000);

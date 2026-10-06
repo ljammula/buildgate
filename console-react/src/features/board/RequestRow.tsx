@@ -50,10 +50,10 @@ export function RequestRow({ request, now }: RequestRowProps) {
       data-testid={`request-${request.id}`}
       className={cn(
         "relative align-top focus-within:bg-surface-hover",
-        needsYou && "bg-tone-warning-soft/40",
+        needsYou && "bg-tone-warning-soft/30 shadow-[inset_2px_0_0_var(--color-tone-warning)]",
       )}
     >
-      <TableCell className="w-px whitespace-nowrap">
+      <TableCell>
         <div className="flex flex-col items-start gap-1">
           <RequestStageChip
             state={request.state}
@@ -64,7 +64,7 @@ export function RequestRow({ request, now }: RequestRowProps) {
           <WaitingBadge request={request} now={now} />
         </div>
       </TableCell>
-      <TableCell className="max-w-md min-w-48">
+      <TableCell>
         <Link
           to={requestPath(request.id)}
           title={request.title !== "" ? request.title : request.id}
@@ -74,7 +74,9 @@ export function RequestRow({ request, now }: RequestRowProps) {
         </Link>
         <span className="text-fg-subtle font-mono text-xs">{request.id}</span>
       </TableCell>
-      <TableCell className="text-fg-muted whitespace-nowrap">{request.project}</TableCell>
+      <TableCell className="text-fg-muted truncate" title={request.project}>
+        {request.project}
+      </TableCell>
       <TableCell>
         <div className="flex flex-col items-start gap-1">
           {progressLines.map((line) => (
@@ -102,7 +104,7 @@ export function RequestRow({ request, now }: RequestRowProps) {
           ) : null}
         </div>
       </TableCell>
-      <TableCell className="text-fg-muted font-mono text-xs whitespace-nowrap">
+      <TableCell className="text-fg-muted font-mono text-xs break-words">
         {/* The server's cost_summary (model id and tokens, no dollar figure)
             when the list provided one, else the older token-total proxy. */}
         {cost !== null ? (
@@ -113,7 +115,7 @@ export function RequestRow({ request, now }: RequestRowProps) {
           </span>
         )}
       </TableCell>
-      <TableCell className="text-fg-muted text-xs whitespace-nowrap">
+      <TableCell className="text-fg-muted text-xs whitespace-nowrap tabular-nums">
         <LocalTimeText value={request.updatedAt} />
       </TableCell>
     </TableRow>

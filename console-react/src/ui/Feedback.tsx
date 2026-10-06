@@ -1,4 +1,12 @@
-import { Loader2 } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  Info,
+  Inbox,
+  Loader2,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import type { HTMLAttributes, ReactNode } from "react";
 
 import type { StatusTone } from "@/domain/status";
@@ -32,17 +40,25 @@ export interface EmptyStateProps {
   readonly title: string;
   readonly children?: ReactNode;
   readonly action?: ReactNode;
+  readonly icon?: LucideIcon;
   readonly className?: string;
 }
 
-export function EmptyState({ title, children, action, className }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  children,
+  action,
+  icon: Icon = Inbox,
+  className,
+}: EmptyStateProps) {
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center",
+        "flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-6 py-10 text-center",
         className,
       )}
     >
+      <Icon aria-hidden="true" className="mb-1 size-6 text-fg-subtle" />
       <p className="text-sm font-medium text-fg">{title}</p>
       {children ? <div className="max-w-md text-sm text-fg-muted">{children}</div> : null}
       {action ? <div className="mt-2">{action}</div> : null}
@@ -55,16 +71,36 @@ export interface CalloutProps extends Omit<HTMLAttributes<HTMLDivElement>, "titl
   readonly title?: ReactNode;
 }
 
+const calloutIcons: Readonly<Record<StatusTone, LucideIcon>> = {
+  warning: TriangleAlert,
+  danger: CircleAlert,
+  success: CircleCheck,
+  info: Info,
+  neutral: Info,
+  neutralOnDark: Info,
+  muted: Info,
+};
+
 export function Callout({ tone, title, children, className, ...props }: CalloutProps) {
   const classes = toneClasses[tone];
+  const Icon = calloutIcons[tone];
   return (
     <div
       role={tone === "danger" ? "alert" : "status"}
-      className={cn("rounded-md border px-3 py-2 text-sm", classes.soft, classes.border, className)}
+      className={cn(
+        "flex gap-2.5 rounded-md border px-3 py-2 text-sm",
+        title ? "items-start" : "items-center",
+        classes.soft,
+        classes.border,
+        className,
+      )}
       {...props}
     >
-      {title ? <p className={cn("font-medium", classes.text)}>{title}</p> : null}
-      <div className="text-fg">{children}</div>
+      <Icon aria-hidden="true" className={cn("size-4 shrink-0", title && "mt-0.5", classes.text)} />
+      <div className="min-w-0 flex-1">
+        {title ? <p className={cn("font-medium", classes.text)}>{title}</p> : null}
+        <div className="text-fg">{children}</div>
+      </div>
     </div>
   );
 }

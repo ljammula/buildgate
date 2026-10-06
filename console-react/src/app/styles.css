@@ -68,13 +68,13 @@
   --bg: oklch(0.155 0.008 260);
   --surface: oklch(0.19 0.009 260);
   --surface-raised: oklch(0.225 0.01 260);
-  --surface-sunken: oklch(0.13 0.008 260);
+  --surface-sunken: oklch(0.135 0.008 260);
   --surface-hover: oklch(0.25 0.012 260);
   --border: oklch(0.29 0.012 260);
   --border-strong: oklch(0.38 0.014 260);
   --fg: oklch(0.95 0.005 260);
   --fg-muted: oklch(0.74 0.012 260);
-  --fg-subtle: oklch(0.58 0.014 260);
+  --fg-subtle: oklch(0.62 0.014 260);
   --accent: oklch(0.7 0.15 255);
   --accent-hover: oklch(0.76 0.14 255);
   --accent-fg: oklch(0.16 0.02 255);
@@ -82,7 +82,7 @@
   --ring: oklch(0.7 0.15 255 / 0.6);
 
   --tone-warning: oklch(0.83 0.15 80);
-  --tone-warning-soft: oklch(0.83 0.15 80 / 0.12);
+  --tone-warning-soft: oklch(0.83 0.15 80 / 0.1);
   --tone-warning-border: oklch(0.83 0.15 80 / 0.35);
   --tone-info: oklch(0.76 0.12 240);
   --tone-info-soft: oklch(0.76 0.12 240 / 0.12);
@@ -91,7 +91,7 @@
   --tone-success-soft: oklch(0.78 0.16 150 / 0.12);
   --tone-success-border: oklch(0.78 0.16 150 / 0.35);
   --tone-danger: oklch(0.72 0.18 25);
-  --tone-danger-soft: oklch(0.72 0.18 25 / 0.13);
+  --tone-danger-soft: oklch(0.72 0.18 25 / 0.1);
   --tone-danger-border: oklch(0.72 0.18 25 / 0.4);
   --tone-neutral: oklch(0.74 0.012 260);
   --tone-neutral-soft: oklch(0.74 0.012 260 / 0.1);
@@ -106,16 +106,16 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: oklch(0.975 0.003 260);
+  --bg: oklch(0.962 0.004 260);
   --surface: oklch(1 0 0);
   --surface-raised: oklch(1 0 0);
-  --surface-sunken: oklch(0.955 0.004 260);
+  --surface-sunken: oklch(0.94 0.005 260);
   --surface-hover: oklch(0.94 0.006 260);
-  --border: oklch(0.9 0.006 260);
-  --border-strong: oklch(0.8 0.01 260);
+  --border: oklch(0.87 0.007 260);
+  --border-strong: oklch(0.76 0.01 260);
   --fg: oklch(0.22 0.012 260);
   --fg-muted: oklch(0.44 0.014 260);
-  --fg-subtle: oklch(0.58 0.012 260);
+  --fg-subtle: oklch(0.52 0.013 260);
   --accent: oklch(0.52 0.19 258);
   --accent-hover: oklch(0.46 0.19 258);
   --accent-fg: oklch(0.99 0 0);
@@ -149,16 +149,16 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-    --bg: oklch(0.975 0.003 260);
+    --bg: oklch(0.962 0.004 260);
     --surface: oklch(1 0 0);
     --surface-raised: oklch(1 0 0);
-    --surface-sunken: oklch(0.955 0.004 260);
+    --surface-sunken: oklch(0.94 0.005 260);
     --surface-hover: oklch(0.94 0.006 260);
-    --border: oklch(0.9 0.006 260);
-    --border-strong: oklch(0.8 0.01 260);
+    --border: oklch(0.87 0.007 260);
+    --border-strong: oklch(0.76 0.01 260);
     --fg: oklch(0.22 0.012 260);
     --fg-muted: oklch(0.44 0.014 260);
-    --fg-subtle: oklch(0.58 0.012 260);
+    --fg-subtle: oklch(0.52 0.013 260);
     --accent: oklch(0.52 0.19 258);
     --accent-hover: oklch(0.46 0.19 258);
     --accent-fg: oklch(0.99 0 0);

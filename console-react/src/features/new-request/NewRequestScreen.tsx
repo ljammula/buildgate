@@ -44,89 +44,95 @@ export function NewRequestScreen() {
         description="A request drives spec drafting, planning, and building end to end -- the same thing `factoryd submit` starts from a terminal."
       />
       <PageBody>
-        <Card className="max-w-3xl p-4">
+        <Card className="max-w-2xl">
           <form
             noValidate
-            className="flex flex-col gap-4"
+            className="flex flex-col"
             onSubmit={(event) => {
               event.preventDefault();
               form.submit();
             }}
           >
-            <h2 className="text-base font-semibold text-fg">Start a request</h2>
-            {workspaces.isPending ? <Spinner label="Loading workspaces" /> : null}
-            {workspaces.isError ? <ErrorCallout error={workspaces.error} /> : null}
-            {hints.length > 0 ? (
-              <Field label="Known workspace">
-                <Select
-                  value={selected}
+            <div className="border-b border-border px-4 py-3">
+              <h2 className="text-base font-semibold text-fg">Start a request</h2>
+            </div>
+            <div className="flex flex-col gap-4 border-b border-border p-4">
+              {workspaces.isPending ? <Spinner label="Loading workspaces" /> : null}
+              {workspaces.isError ? <ErrorCallout error={workspaces.error} /> : null}
+              {hints.length > 0 ? (
+                <Field label="Known workspace">
+                  <Select
+                    value={selected}
+                    onChange={(event) => {
+                      setSelected(event.target.value);
+                      if (event.target.value !== "") set({ workspace: event.target.value });
+                    }}
+                  >
+                    <option value="">Pick one, or type a path below</option>
+                    {hints.map((hint) => (
+                      <option key={hint.workspace} value={hint.workspace}>
+                        {hint.workspace}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              ) : null}
+              <Field
+                label="Workspace path"
+                error={errors.workspace}
+                hint={
+                  currentHint?.hasFactoryYml ? (
+                    <span>
+                      {currentHint.resolvedVerifyCommand !== ""
+                        ? `Verify command from ${currentHint.verifyCommandSource}: ${currentHint.resolvedVerifyCommand}`
+                        : "This workspace has a .factory.yml, but no verify_command set."}
+                    </span>
+                  ) : undefined
+                }
+              >
+                <Input
+                  className="font-mono"
+                  placeholder="A git repository root on the factoryd host"
+                  value={values.workspace}
                   onChange={(event) => {
-                    setSelected(event.target.value);
-                    if (event.target.value !== "") set({ workspace: event.target.value });
+                    set({ workspace: event.target.value });
                   }}
-                >
-                  <option value="">Pick one, or type a path below</option>
-                  {hints.map((hint) => (
-                    <option key={hint.workspace} value={hint.workspace}>
-                      {hint.workspace}
-                    </option>
-                  ))}
-                </Select>
+                />
               </Field>
-            ) : null}
-            <Field
-              label="Workspace path"
-              error={errors.workspace}
-              hint={
-                currentHint?.hasFactoryYml ? (
-                  <span>
-                    {currentHint.resolvedVerifyCommand !== ""
-                      ? `Verify command from ${currentHint.verifyCommandSource}: ${currentHint.resolvedVerifyCommand}`
-                      : "This workspace has a .factory.yml, but no verify_command set."}
-                  </span>
-                ) : undefined
-              }
-            >
-              <Input
-                className="font-mono"
-                placeholder="A git repository root on the factoryd host"
-                value={values.workspace}
-                onChange={(event) => {
-                  set({ workspace: event.target.value });
-                }}
-              />
-            </Field>
-            <Field label="Request" error={errors.text}>
-              <Textarea
-                rows={8}
-                placeholder="What should the factory build?"
-                value={values.text}
-                onChange={(event) => {
-                  set({ text: event.target.value });
-                }}
-              />
-            </Field>
-            <div className="flex items-start gap-2">
-              <Checkbox
-                id={draftId}
-                aria-describedby={`${draftId}-desc`}
-                className="mt-0.5"
-                checked={values.draftOracles}
-                onChange={(event) => {
-                  set({ draftOracles: event.target.checked });
-                }}
-              />
-              <div className="flex flex-col">
-                <label htmlFor={draftId} className="text-sm font-medium text-fg">
-                  Draft oracles
-                </label>
-                <p id={`${draftId}-desc`} className="text-xs text-fg-subtle">
-                  Adds an oracle-review stage between spec approval and planning, to
-                  approve/hand-write/skip acceptance-test oracles before any ticket is planned.
-                </p>
+            </div>
+            <div className="flex flex-col gap-4 border-b border-border p-4">
+              <Field label="Request" error={errors.text}>
+                <Textarea
+                  rows={8}
+                  placeholder="What should the factory build?"
+                  value={values.text}
+                  onChange={(event) => {
+                    set({ text: event.target.value });
+                  }}
+                />
+              </Field>
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id={draftId}
+                  aria-describedby={`${draftId}-desc`}
+                  className="mt-0.5"
+                  checked={values.draftOracles}
+                  onChange={(event) => {
+                    set({ draftOracles: event.target.checked });
+                  }}
+                />
+                <div className="flex flex-col">
+                  <label htmlFor={draftId} className="text-sm font-medium text-fg">
+                    Draft oracles
+                  </label>
+                  <p id={`${draftId}-desc`} className="text-xs text-fg-subtle">
+                    Adds an oracle-review stage between spec approval and planning, to
+                    approve/hand-write/skip acceptance-test oracles before any ticket is planned.
+                  </p>
+                </div>
               </div>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-3">
               <Button
                 variant="ghost"
                 size="sm"
@@ -177,26 +183,28 @@ export function NewRequestScreen() {
                 </>
               ) : null}
             </div>
-            {!canWrite ? (
-              <Callout tone="danger">
-                This console cannot write to the server from here -- no override token is configured
-                and the server did not enable an unauthenticated console write.
-              </Callout>
-            ) : null}
-            {form.error ? <ErrorCallout error={form.error} /> : null}
-            <Button
-              type="submit"
-              variant="primary"
-              className="self-start"
-              disabled={form.submitting || !canWrite}
-            >
-              {form.submitting ? (
-                <Loader2 className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Send aria-hidden="true" />
-              )}
-              {form.submitting ? "Submitting…" : "Submit request"}
-            </Button>
+            <div className="flex flex-col gap-3 bg-surface-sunken/50 p-4">
+              {!canWrite ? (
+                <Callout tone="danger">
+                  This console cannot write to the server from here -- no override token is
+                  configured and the server did not enable an unauthenticated console write.
+                </Callout>
+              ) : null}
+              {form.error ? <ErrorCallout error={form.error} /> : null}
+              <Button
+                type="submit"
+                variant="primary"
+                className="self-start"
+                disabled={form.submitting || !canWrite}
+              >
+                {form.submitting ? (
+                  <Loader2 className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Send aria-hidden="true" />
+                )}
+                {form.submitting ? "Submitting…" : "Submit request"}
+              </Button>
+            </div>
           </form>
         </Card>
       </PageBody>

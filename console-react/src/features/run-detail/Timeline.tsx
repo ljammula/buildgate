@@ -31,7 +31,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
       {error !== null ? <ErrorCallout error={error} /> : null}
       <div
         data-testid="timeline-status-strip"
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border pb-3 text-sm text-fg-muted"
       >
         <span className="text-base font-semibold text-fg">{strip.label}</span>
         {strip.round !== null ? <span>{strip.round}</span> : null}
@@ -42,7 +42,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
         <StallChip run={run} />
         <StatusChipForToken token={run.state} />
       </div>
-      <ol aria-label="Timeline stages">
+      <ol aria-label="Timeline stages" className="divide-y divide-border/60">
         {rows.map((row) => (
           <TimelineRowItem key={row.rowKey} row={row} />
         ))}

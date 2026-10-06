@@ -25,8 +25,8 @@ export function OverrideSection({ runId }: { runId: string }) {
   const [open, setOpen] = useState(false);
   const initialReason = parseRunOverrideReason(useLocation().search);
   return (
-    <Section title="Operator override">
-      <Fields>
+    <Section title="Operator override" card>
+      <Fields className="grid-cols-[6.5rem_minmax(0,1fr)]">
         <Field label="Action">Move this quarantined run to an accepted or halted state.</Field>
         {override.error ? (
           <Field label="Error">

@@ -5,6 +5,7 @@ import type { Run } from "@/domain/run";
 import type { RequestSummary } from "@/domain/request";
 import { runPath } from "@/routes/paths";
 import { TableCell, TableRow } from "@/ui/Table";
+import { ShortPath } from "@/ui/ShortPath";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { ElapsedText, LocalTimeText, StallChip } from "@/ui/Time";
 
@@ -25,8 +26,12 @@ export function RunRow({ run, request }: RunRowProps) {
   const terminal = runIsTerminalForDisplay(run);
   return (
     <TableRow>
-      <TableCell className="max-w-72">
-        <Link to={runPath(run.id)} className="font-medium text-accent hover:underline">
+      <TableCell>
+        <Link
+          to={runPath(run.id)}
+          className="block truncate font-medium text-accent hover:underline"
+          title={request === null ? run.ticket : request.title}
+        >
           {request === null ? run.ticket : request.title}
         </Link>
         {request === null ? null : <div className="text-xs text-fg-muted">Ticket {run.ticket}</div>}
@@ -35,8 +40,10 @@ export function RunRow({ run, request }: RunRowProps) {
       <TableCell>
         <StatusChipForToken token={run.state} />
       </TableCell>
-      <TableCell className="font-mono text-xs break-all">{run.projectPath}</TableCell>
-      <TableCell className="font-mono text-xs">
+      <TableCell>
+        <ShortPath path={run.projectPath} />
+      </TableCell>
+      <TableCell className="font-mono text-xs tabular-nums">
         <ElapsedText since={run.createdAt} until={terminal ? run.updatedAt : null} />
       </TableCell>
       <TableCell className="text-xs text-fg-muted">
@@ -48,10 +55,12 @@ export function RunRow({ run, request }: RunRowProps) {
           </span>
         )}
       </TableCell>
-      <TableCell className="text-xs">
+      <TableCell className="text-xs whitespace-nowrap tabular-nums">
         <LocalTimeText value={run.createdAt} />
       </TableCell>
-      <TableCell className="font-mono text-xs">{run.id}</TableCell>
+      <TableCell className="truncate font-mono text-xs" title={run.id}>
+        {run.id}
+      </TableCell>
     </TableRow>
   );
 }

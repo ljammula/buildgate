@@ -11,10 +11,12 @@ import { cn } from "@/ui/cn";
  */
 export function TimelineRowItem({ row }: { row: TimelineRow }) {
   return (
-    <li data-testid={`timeline-row-${row.rowKey}`} className="flex flex-col gap-0.5 py-1">
+    <li data-testid={`timeline-row-${row.rowKey}`} className="flex flex-col gap-0.5 py-1.5">
       <div className="flex items-center gap-2 text-sm">
         <StageGlyph glyph={row.glyph} />
-        <span className="text-fg">{row.label}</span>
+        <span className={cn(row.glyph === "pending" ? "text-fg-subtle" : "font-medium text-fg")}>
+          {row.label}
+        </span>
         {row.durationText !== null ? (
           <span className="text-xs text-fg-muted tabular-nums">{row.durationText}</span>
         ) : null}

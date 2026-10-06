@@ -26,6 +26,14 @@ export function ReviewSection({
   anyEditorOpen,
 }: ReviewSectionProps) {
   const { canWrite } = useApi();
+  const hasContent =
+    !canWrite ||
+    !detailLoaded ||
+    request.state === "oracle_review" ||
+    awaitsTicketOracle(request) ||
+    anyEditorOpen;
+  // A card with nothing in it (a spec review the operator can already act on) is noise.
+  if (!hasContent) return null;
   return (
     <Panel title="Review">
       {!canWrite ? (

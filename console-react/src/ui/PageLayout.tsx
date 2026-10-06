@@ -19,7 +19,7 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   return (
-    <header className={cn("flex flex-col gap-2 border-b border-border px-6 py-5", className)}>
+    <header className={cn("flex flex-col gap-2 border-b border-border px-6 py-4", className)}>
       {breadcrumbs ? <div className="text-xs text-fg-muted">{breadcrumbs}</div> : null}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -40,14 +40,22 @@ export interface SectionProps {
   readonly title: string;
   readonly actions?: ReactNode;
   readonly children: ReactNode;
+  /** Draw the section as a bordered card, for a column of short facts. */
+  readonly card?: boolean;
   readonly className?: string;
 }
 
-export function Section({ title, actions, children, className }: SectionProps) {
+export function Section({ title, actions, children, card = false, className }: SectionProps) {
   return (
-    <section className={cn("flex flex-col gap-3", className)}>
+    <section
+      className={cn(
+        "flex flex-col gap-3",
+        card && "rounded-lg border border-border bg-surface p-4",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-fg">{title}</h2>
+        <h2 className={cn("font-semibold text-fg", card ? "text-sm" : "text-base")}>{title}</h2>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </div>
       {children}

@@ -5,7 +5,10 @@
 #
 #   console-react/test/walk/run.sh [walk.mjs arguments]
 #
-# It needs Go, Node and Google Chrome. It starts nothing but its own
+# It needs Go, Node and Playwright's Chromium (`npx playwright install
+# chromium`), or WALK_BROWSER_CHANNEL=chrome for an installed Google Chrome.
+# WALK_SCRIPT picks what drives the browser: walk.mjs (default) or shots.mjs,
+# which only photographs every screen in both themes. It starts nothing but its own
 # `factoryd serve` on WALK_PORT (default 18090) with FACTORYD_AUTOSTART=0, and
 # stops it on exit. Everything it writes is under WALK_DIR (default
 # ~/buildgate/console-react-walk): the data directory, the workspace, the
@@ -32,22 +35,34 @@ echo "walk: building the console bundle"
 
 dist="$root/internal/consoleweb/dist"
 saved="$walk_dir/dist.saved"
-rm -rf "$saved"
-cp -R "$dist" "$saved"
-restore() {
-  rm -rf "$dist"
-  cp -R "$saved" "$dist"
-  rm -rf "$saved"
+# The embedded bundle is one directory for the whole checkout: only one
+# build may swap it at a time (the walk, the screenshots and the parity run
+# can be started side by side).
+lock="${TMPDIR:-/tmp}/buildgate-consoleweb-dist.lock"
+until mkdir "$lock" 2>/dev/null; do sleep 1; done
+restore_dist() {
+  if [ -d "$saved" ]; then
+    rm -rf "$dist"
+    cp -R "$saved" "$dist"
+    rm -rf "$saved"
+  fi
+  rmdir "$lock" 2>/dev/null || true
+}
+cleanup() {
+  restore_dist
   if [ -n "${server_pid:-}" ]; then kill "$server_pid" 2>/dev/null || true; fi
 }
-trap restore EXIT
+trap cleanup EXIT
 
+rm -rf "$saved"
+cp -R "$dist" "$saved"
 rm -rf "$dist"
 mkdir -p "$dist"
 cp -R "$root/console-react/dist/." "$dist/"
 touch "$dist/.gitkeep"
 echo "walk: building factoryd with the React console embedded"
 (cd "$root" && go build -o "$walk_dir/factoryd" ./cmd/factoryd)
+restore_dist
 
 echo "walk: seeding $walk_dir/data"
 (cd "$root" && FACTORYD_CONTRACT_FIXTURE_DIR="$walk_dir/data" \
@@ -77,4 +92,4 @@ done
 token="$(grep -o '#t=[A-Za-z0-9_-]*' "$walk_dir/serve.log" | head -1 | cut -c4-)"
 
 cd "$root/console-react"
-node test/walk/walk.mjs "http://127.0.0.1:$port" "$token" "$walk_dir" "$@"
+node "test/walk/${WALK_SCRIPT:-walk.mjs}" "http://127.0.0.1:$port" "$token" "$walk_dir" "$@"

@@ -13,7 +13,7 @@ import { Panel } from "./Panel";
 function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
     <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-sm">
-      <dt className="text-fg-muted">{label}</dt>
+      <dt className="text-xs leading-5 text-fg-muted">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   );
@@ -33,7 +33,7 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
       <dl className="flex flex-col gap-1.5">
         <Fact label="Project">{request.project}</Fact>
         <Fact label="Workspace">
-          <span className="font-mono text-xs">{request.workspace}</span>
+          <span className="font-mono text-xs break-all">{request.workspace}</span>
         </Fact>
         <Fact label="Submitted">
           <LocalTimeText value={request.submittedAt} />

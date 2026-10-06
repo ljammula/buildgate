@@ -7,6 +7,7 @@ import {
   Moon,
   Plus,
   ServerCog,
+  ShieldCheck,
   Sun,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
@@ -79,27 +80,34 @@ export interface AppShellProps {
 }
 
 /**
- * The frame around every screen: the navigation rail, and the bar that holds
- * what is true on every page (whether this console may write, the theme).
+ * The frame around every screen: one sidebar holding the primary action, the
+ * navigation, and what is true on every page (whether this console may
+ * write, the theme).
  */
 export function AppShell({ children }: AppShellProps) {
   const { canWrite } = useApi();
   return (
-    <div className="grid min-h-screen grid-cols-[13rem_1fr] max-md:grid-cols-1">
-      <aside className="sticky top-0 flex h-screen flex-col border-r border-border bg-surface max-md:static max-md:h-auto">
+    <div className="grid min-h-screen grid-cols-[14rem_minmax(0,1fr)] max-md:grid-cols-1">
+      <aside className="sticky top-0 flex h-screen flex-col gap-3 border-r border-border bg-surface p-3 max-md:static max-md:h-auto">
         <Link
           to={boardPath()}
-          className="flex h-12 items-center gap-2 border-b border-border px-4 font-semibold tracking-tight"
+          className="flex h-8 items-center gap-2.5 rounded-md px-1.5 font-semibold tracking-tight text-fg"
         >
           <span
             aria-hidden
-            className="grid size-5 place-items-center rounded-sm bg-accent text-[11px] font-bold text-accent-fg"
+            className="grid size-6 place-items-center rounded-md bg-accent text-accent-fg"
           >
-            B
+            <ShieldCheck className="size-4" />
           </span>
           Buildgate
         </Link>
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 p-2 max-md:flex-row">
+        <Button asChild variant="primary" className="w-full">
+          <Link to={newRequestPath()}>
+            <Plus aria-hidden />
+            New request
+          </Link>
+        </Button>
+        <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 max-md:flex-row">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -107,41 +115,48 @@ export function AppShell({ children }: AppShellProps) {
               end={end ?? false}
               className={({ isActive }) =>
                 cn(
-                  "flex h-8 items-center gap-2 rounded-md px-2.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg",
-                  isActive && "bg-accent-soft font-medium text-fg",
+                  "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg",
+                  isActive && "bg-surface-hover font-medium text-fg",
                 )
               }
             >
-              <Icon aria-hidden className="size-4" />
-              {label}
+              {({ isActive }) => (
+                <>
+                  <Icon
+                    aria-hidden
+                    className={cn("size-4", isActive ? "text-accent" : "text-fg-subtle")}
+                  />
+                  {label}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
-        <div className="flex items-center justify-between gap-2 border-t border-border p-2">
+        <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
           <span
-            className={cn("px-1.5 text-xs", canWrite ? "text-fg-subtle" : "text-tone-warning")}
+            className={cn(
+              "flex items-center gap-1.5 px-1.5 text-xs",
+              canWrite ? "text-fg-subtle" : "text-tone-warning",
+            )}
             title={
               canWrite
                 ? "This console can approve, reject and start work."
                 : "This server accepts no writes from this console. Open the link printed by `factoryd serve`, or use the CLI."
             }
           >
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 rounded-full",
+                canWrite ? "bg-tone-success" : "bg-tone-warning",
+              )}
+            />
             {canWrite ? "Read and write" : "Read-only"}
           </span>
           <ThemeToggle />
         </div>
       </aside>
-      <div className="flex min-w-0 flex-col">
-        <div className="flex h-12 items-center justify-end gap-2 border-b border-border bg-surface px-6">
-          <Button asChild variant="primary" size="sm">
-            <Link to={newRequestPath()}>
-              <Plus aria-hidden />
-              New request
-            </Link>
-          </Button>
-        </div>
-        <main className="min-w-0 flex-1">{children}</main>
-      </div>
+      <main className="min-w-0">{children}</main>
     </div>
   );
 }

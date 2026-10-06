@@ -21,12 +21,12 @@ export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
   const [commandOpen, setCommandOpen] = useState(false);
   const modelLine = attemptModelLine(attempt);
   return (
-    <Card>
-      <CardBody className="flex flex-col gap-1 p-3 text-sm">
+    <Card className="bg-surface-sunken">
+      <CardBody className="flex flex-col gap-0.5 p-3 text-xs text-fg-muted">
         <h3 className="text-sm font-semibold text-fg">
           {attempt.kind === "" ? "Attempt" : `Attempt · ${attempt.kind}`}
         </h3>
-        <p>{attemptExitText(attempt)}</p>
+        <p className="text-fg">{attemptExitText(attempt)}</p>
         <p>Started: {formatLocalTimestamp(attempt.startedAt)}</p>
         <p>Finished: {formatLocalTimestamp(attempt.finishedAt)}</p>
         {modelLine !== null ? <p>{modelLine}</p> : null}

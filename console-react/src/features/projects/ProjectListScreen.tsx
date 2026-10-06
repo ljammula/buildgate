@@ -7,7 +7,15 @@ import { Button } from "@/ui/Button";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
-import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFrame,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
 
 /**
@@ -41,50 +49,55 @@ export function ProjectListScreen() {
         ) : projects.data.length === 0 ? (
           <EmptyState title="No projects yet. Start a custom run to create the first one." />
         ) : (
-          <Table>
-            <TableHead>
-              <TableRow className="hover:bg-transparent">
-                <TableHeaderCell>Project</TableHeaderCell>
-                <TableHeaderCell>Kill-switch id</TableHeaderCell>
-                <TableHeaderCell>Runs</TableHeaderCell>
-                <TableHeaderCell>Last run</TableHeaderCell>
-                <TableHeaderCell>
-                  <span className="sr-only">Start a run</span>
-                </TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {projects.data.map((project) => {
-                const quickFill = new URLSearchParams({
-                  workspace: project.workspacePath,
-                  spec: project.specPath,
-                  repository: project.repository,
-                });
-                return (
-                  <TableRow key={project.projectPath}>
-                    <TableCell className="font-mono text-xs">
-                      <Link
-                        to={`${newRunPath()}?${quickFill.toString()}`}
-                        className="text-accent hover:underline"
-                      >
-                        {project.projectPath}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{project.project}</TableCell>
-                    <TableCell>
-                      {project.runCount} run{project.runCount === 1 ? "" : "s"}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      <LocalTimeText value={project.lastRunAt} />
-                    </TableCell>
-                    <TableCell className="text-right text-fg-muted">
-                      <Play aria-hidden="true" className="inline size-4" />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <TableFrame>
+            <Table className="table-fixed">
+              <TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHeaderCell>Project</TableHeaderCell>
+                  <TableHeaderCell className="w-56">Kill-switch id</TableHeaderCell>
+                  <TableHeaderCell className="w-24">Runs</TableHeaderCell>
+                  <TableHeaderCell className="w-44">Last run</TableHeaderCell>
+                  <TableHeaderCell className="w-12">
+                    <span className="sr-only">Start a run</span>
+                  </TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {projects.data.map((project) => {
+                  const quickFill = new URLSearchParams({
+                    workspace: project.workspacePath,
+                    spec: project.specPath,
+                    repository: project.repository,
+                  });
+                  return (
+                    <TableRow key={project.projectPath}>
+                      <TableCell className="font-mono text-xs">
+                        <Link
+                          title={project.projectPath}
+                          to={`${newRunPath()}?${quickFill.toString()}`}
+                          className="block truncate text-accent hover:underline"
+                        >
+                          {project.projectPath}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="truncate font-mono text-xs" title={project.project}>
+                        {project.project}
+                      </TableCell>
+                      <TableCell>
+                        {project.runCount} run{project.runCount === 1 ? "" : "s"}
+                      </TableCell>
+                      <TableCell className="text-xs whitespace-nowrap tabular-nums">
+                        <LocalTimeText value={project.lastRunAt} />
+                      </TableCell>
+                      <TableCell className="text-right text-fg-muted">
+                        <Play aria-hidden="true" className="inline size-4" />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableFrame>
         )}
       </PageBody>
     </>

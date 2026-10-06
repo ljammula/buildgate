@@ -12,7 +12,62 @@ npm run check          # typecheck, lint, format check, tests: the bar for every
 npm run test -- src/domain/status.test.ts   # one file
 npm run dev            # dev server; set VITE_API_BASE_URL to a running factoryd
 npm run build          # static bundle in dist/
+test/walk/run.sh       # the live walk: a real factoryd, a real browser, every screen and action
 ```
+
+| From the repository root   | What it does                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `make console-react-test`  | `npm ci && npm run check`                                                                                                              |
+| `make console-react-build` | Builds the bundle and embeds it in place of the Flutter one (`internal/consoleweb/dist`); the next `go build ./cmd/factoryd` serves it |
+
+## Checks, and what each one is for
+
+| Check                    | Run                                                                            | Catches                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Unit and component tests | `npm run test`                                                                 | Logic and rendering, in isolation, against a fake server (`src/test/render.tsx`)                          |
+| Contract fixtures        | `go test ./internal/api -run TestConsoleContractFixtures`, then `npm run test` | A Go response shape the decoders cannot read                                                              |
+| Golden vectors           | The Go, Dart and Vitest suites                                                 | The server and the console disagreeing on a content hash or a token count                                 |
+| Lint boundaries          | `npm run lint`                                                                 | A layer importing what it may not; HTML from untrusted text; `fetch` or `localStorage` in the wrong layer |
+| Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 36 steps, each write checked against the server's own record    |
+| Request parity           | `test/parity/run.sh`                                                           | The React console sending a different request than the Flutter console for the same action                |
+| Test port map            | `node scripts/port-map.mjs`                                                    | A Flutter test with no React counterpart and no stated reason                                             |
+
+`npx playwright install chromium` once before the walk or the parity run; `WALK_BROWSER_CHANNEL=chrome` uses an installed Google Chrome instead.
+
+## Add a screen
+
+1. Path: add its pattern to `routePatterns` and a builder function in `src/routes/paths.ts`, with a test. A path that is also an API read (`/projects`, `/runs/{id}/diff`) would be answered with JSON on a reload: put the screen under `/app/` or in a query string, or add the path to `consoleDeepLinkPatterns` in `internal/api/server.go`.
+2. Folder: `src/features/<name>/` with `<Name>Screen.tsx` (thin: hooks and components), its components (one per file), and tests beside them.
+3. Route: one `<Route>` line in `src/app/App.tsx`; a navigation entry in `src/shared/shell/AppShell.tsx` if it is a top-level screen.
+4. Data: use the hooks in `src/api/*Queries.ts`. A screen never calls `fetch` or builds a query key.
+5. Tests: `renderApp(<NameScreen />, { server: [...], path, pattern })`. Assert by role and name, and assert what was sent with `server.sent("POST /...")`.
+6. Walk: a `step(...)` in `test/walk/walk.mjs` that opens the screen and performs each of its actions.
+
+## Add an API route
+
+| Step                         | Where                                                                                                                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Go handler and its route | `internal/api/server.go` (and the operator docs the repository's `AGENTS.md` names)                                                                                                                               |
+| A fixture of its response    | One line in `contractRoutes()` in `internal/api/contract_fixtures_test.go`, then `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/api -run TestConsoleContractFixtures`. The test fails until every GET route has one |
+| The type and decoder         | `src/domain/<resource>.ts`: `interface X` and `decodeX(o, at)`, with a test that decodes the fixture                                                                                                              |
+| The call                     | `src/api/<resource>.ts`: `getX(http, ..., signal)` naming the token kind its handler checks (`read`, `start` or `override`), with a test of the exact request it sends                                            |
+| The hook                     | `src/api/<resource>Queries.ts`: a query (key from `queryKeys`) or a mutation that caches the answer and invalidates what it changed                                                                               |
+
+## Differences from the Flutter console
+
+Behaviour is the Flutter console's unless a row below says otherwise.
+
+| Area                          | Flutter                                                                 | React                                                                                                                                                 | Why                                                                                                |
+| ----------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Look and layout               | Material                                                                | A dense, dark-first design; navigation in a sidebar                                                                                                   | Redesigned for its users, engineers. Button, link and heading names are unchanged                  |
+| Text                          | Canvas: selection, find-in-page and middle-click were rebuilt by hand   | The browser's own                                                                                                                                     | Real DOM                                                                                           |
+| Run diff and release decision | Pages pushed with no URL                                                | Tabs of the run page at `?view=diff` and `?view=release`                                                                                              | A reload or a shared link lands on the same view                                                   |
+| Projects list, New run        | Pages pushed with no URL                                                | `/app/projects`, `/app/runs/new`                                                                                                                      | Same                                                                                               |
+| Markdown links                | Label and target as plain text                                          | An `http(s)` link is clickable (`rel="noopener noreferrer nofollow"`, new tab), its target always shown beside the label; any other scheme stays text | The Flutter console had no way to open a link; the visible target is what stops a misleading label |
+| A refused write               | "Request failed (N)" with the reason behind Details                     | The server's reason shown directly                                                                                                                    | The reason is the next step (found on the live walk)                                               |
+| Approving                     | Hashes computed from the record passed when the sheet opened            | Same, made explicit: the dialog fixes the record it was opened with                                                                                   | A redraft arriving while the dialog is open is refused by the server, not approved unread          |
+| Daemon status                 | Read `name`, `alive`, `last_heartbeat_at`, which the server never sends | Reads the server's `repository`, `state`, `pid`, `started_at`, `heartbeat_updated_at`                                                                 | A defect in the Flutter decoder                                                                    |
+| Board "Disconnected"          | After 3 failed reconnects                                               | Same                                                                                                                                                  | —                                                                                                  |
 
 ## Module layout
 

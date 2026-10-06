@@ -22,8 +22,10 @@ export function Panel({ title, actions, children, className, testId }: PanelProp
       className={cn("min-w-0", className)}
       {...(testId === undefined ? {} : { "data-testid": testId })}
     >
-      <CardHeader>
-        <CardTitle id={titleId}>{title}</CardTitle>
+      <CardHeader className="py-2.5">
+        <CardTitle id={titleId} className="text-sm">
+          {title}
+        </CardTitle>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </CardHeader>
       <CardBody className="flex flex-col gap-3">{children}</CardBody>

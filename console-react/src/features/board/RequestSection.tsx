@@ -1,7 +1,7 @@
 import { sectionLabels, type RequestBoardSection } from "@/domain/boardFilters";
 import type { RequestSummary } from "@/domain/request";
 import { Section } from "@/ui/PageLayout";
-import { Table, TableBody, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
+import { Table, TableBody, TableFrame, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
 
 import { RequestRow } from "./RequestRow";
 
@@ -16,16 +16,16 @@ export function RequestSection({ section, requests, now }: RequestSectionProps) 
   const label = sectionLabels[section];
   return (
     <Section title={`${label} (${requests.length})`}>
-      <div className="border-border overflow-x-auto rounded-lg border">
-        <Table aria-label={label}>
+      <TableFrame>
+        <Table aria-label={label} className="min-w-[56rem] table-fixed">
           <TableHead>
             <TableRow className="hover:bg-transparent">
-              <TableHeaderCell>Status</TableHeaderCell>
+              <TableHeaderCell className="w-56">Status</TableHeaderCell>
               <TableHeaderCell>Request</TableHeaderCell>
-              <TableHeaderCell>Project</TableHeaderCell>
-              <TableHeaderCell>Progress</TableHeaderCell>
-              <TableHeaderCell>Usage</TableHeaderCell>
-              <TableHeaderCell>Updated</TableHeaderCell>
+              <TableHeaderCell className="w-24">Project</TableHeaderCell>
+              <TableHeaderCell className="w-60">Progress</TableHeaderCell>
+              <TableHeaderCell className="w-48">Usage</TableHeaderCell>
+              <TableHeaderCell className="w-44">Updated</TableHeaderCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -34,7 +34,7 @@ export function RequestSection({ section, requests, now }: RequestSectionProps) 
             ))}
           </TableBody>
         </Table>
-      </div>
+      </TableFrame>
     </Section>
   );
 }

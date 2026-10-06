@@ -24,8 +24,8 @@ export function RunSummarySection({ run, streamError, temporalUiUrl }: RunSummar
       ? `${temporalUiUrl}/namespaces/default/workflows/${encodeURIComponent(run.temporalWorkflowId)}`
       : null;
   return (
-    <Section title="Run">
-      <Fields>
+    <Section title="Run" card>
+      <Fields className="grid-cols-[6.5rem_minmax(0,1fr)]">
         <Field label="State">
           <StatusChipForToken token={run.state} />
         </Field>

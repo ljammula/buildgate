@@ -6,7 +6,7 @@ import { Button } from "@/ui/Button";
 import { Callout, EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout, describeError } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
-import { Table, TableBody, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
+import { Table, TableBody, TableFrame, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
 
 import { ProjectLookupDialog } from "./ProjectLookupDialog";
 import { RunRow } from "./RunRow";
@@ -93,30 +93,32 @@ export function RunListScreen() {
             {runs.data.length === 0 ? (
               <EmptyState title="No runs found." />
             ) : (
-              <Table>
-                <TableHead>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHeaderCell>Run</TableHeaderCell>
-                    <TableHeaderCell>State</TableHeaderCell>
-                    <TableHeaderCell>Project</TableHeaderCell>
-                    <TableHeaderCell>Elapsed</TableHeaderCell>
-                    <TableHeaderCell>Activity</TableHeaderCell>
-                    <TableHeaderCell>Created</TableHeaderCell>
-                    <TableHeaderCell>Run ID</TableHeaderCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {runs.data.map((run) => (
-                    <RunRow
-                      key={run.id}
-                      run={run}
-                      request={
-                        run.requestId === "" ? null : (requestsById.get(run.requestId) ?? null)
-                      }
-                    />
-                  ))}
-                </TableBody>
-              </Table>
+              <TableFrame>
+                <Table className="min-w-[60rem] table-fixed">
+                  <TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHeaderCell className="w-[22%]">Run</TableHeaderCell>
+                      <TableHeaderCell className="w-32">State</TableHeaderCell>
+                      <TableHeaderCell className="w-64">Project</TableHeaderCell>
+                      <TableHeaderCell className="w-24">Elapsed</TableHeaderCell>
+                      <TableHeaderCell className="w-48">Activity</TableHeaderCell>
+                      <TableHeaderCell className="w-44">Created</TableHeaderCell>
+                      <TableHeaderCell className="w-44">Run ID</TableHeaderCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {runs.data.map((run) => (
+                      <RunRow
+                        key={run.id}
+                        run={run}
+                        request={
+                          run.requestId === "" ? null : (requestsById.get(run.requestId) ?? null)
+                        }
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableFrame>
             )}
           </>
         )}

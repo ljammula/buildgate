@@ -26,64 +26,63 @@ export function ResumeCallout({ request, acting, onResume, onCancel }: ResumeCal
   const plan = resumePlan(request);
   const disabled = acting || !canWrite;
   return (
-    <Callout
-      data-testid="resume-callout"
-      tone="warning"
-      title={plan.headline}
-      className="flex flex-col gap-3"
-    >
-      {plan.prompt === "" ? null : <p className="break-words whitespace-pre-wrap">{plan.prompt}</p>}
-      {plan.refused.length === 0 ? null : (
-        <div>
-          <p className="font-semibold">Resume is not possible:</p>
-          <ul>
-            {plan.refused.map((reason, i) => (
-              <li key={i} className="break-words">{`- ${reason}`}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        {plan.isBuild ? (
-          <>
-            {plan.refused.length === 0 ? (
+    <Callout data-testid="resume-callout" tone="warning" title={plan.headline}>
+      <div className="flex flex-col gap-3">
+        {plan.prompt === "" ? null : (
+          <p className="break-words whitespace-pre-wrap">{plan.prompt}</p>
+        )}
+        {plan.refused.length === 0 ? null : (
+          <div>
+            <p className="font-semibold">Resume is not possible:</p>
+            <ul>
+              {plan.refused.map((reason, i) => (
+                <li key={i} className="break-words">{`- ${reason}`}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {plan.isBuild ? (
+            <>
+              {plan.refused.length === 0 ? (
+                <Button
+                  variant="primary"
+                  disabled={disabled}
+                  onClick={() => {
+                    onResume("round");
+                  }}
+                >
+                  <Play aria-hidden="true" />
+                  Resume
+                </Button>
+              ) : null}
               <Button
-                variant="primary"
                 disabled={disabled}
                 onClick={() => {
-                  onResume("round");
+                  onResume("scratch");
                 }}
               >
-                <Play aria-hidden="true" />
-                Resume
+                <RotateCcw aria-hidden="true" />
+                Rebuild from scratch
               </Button>
-            ) : null}
+            </>
+          ) : (
             <Button
+              variant="primary"
               disabled={disabled}
               onClick={() => {
-                onResume("scratch");
+                onResume("round");
               }}
             >
               <RotateCcw aria-hidden="true" />
-              Rebuild from scratch
+              Rerun step
             </Button>
-          </>
-        ) : (
-          <Button
-            variant="primary"
-            disabled={disabled}
-            onClick={() => {
-              onResume("round");
-            }}
-          >
-            <RotateCcw aria-hidden="true" />
-            Rerun step
+          )}
+          <Button disabled={disabled} onClick={onCancel}>
+            <Ban aria-hidden="true" />
+            Cancel
           </Button>
-        )}
-        <Button disabled={disabled} onClick={onCancel}>
-          <Ban aria-hidden="true" />
-          Cancel
-        </Button>
+        </div>
       </div>
     </Callout>
   );
