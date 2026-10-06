@@ -193,12 +193,26 @@ await type(
 );
 await criteria.getByRole("button", { name: "Add", exact: true }).click();
 await say("Criteria are a list: add, edit, reorder; the numbers stay in step", 3200);
+await scrollTo(main().getByRole("region", { name: "Sections" }));
+await main().getByRole("button", { name: "Edit section Risks" }).click();
+const risks = main().getByRole("textbox", { name: "Section Risks" });
+await risks.focus();
+await risks.evaluate((el) => {
+  el.setSelectionRange(el.value.length, el.value.length);
+});
+await risks.pressSequentially(" Keys are never logged.", { delay: 28 });
+await say("Or edit one section: the rest of the file comes back byte for byte", 3200);
+await main().getByRole("button", { name: "Apply section Risks" }).click();
 await scrollTo(main().getByRole("region", { name: "Your changes" }));
 await say("Before saving: a line diff of everything that will be sent", 3200);
 await main().getByRole("button", { name: "Save", exact: true }).click();
 await nameIfAsked();
 await editor.waitFor({ state: "detached" });
 await say("Saved through the same validation and hash check as any edit");
+const audit = main().getByRole("region", { name: "Audit" });
+await audit.getByRole("button", { name: /Edits in place/ }).click();
+await scrollTo(audit);
+await say("The edit is on record: who, when, and the lines that changed", 3200);
 
 // Request changes with a note tied to a criterion.
 await visit("/requests/req-spec-review-b");
@@ -218,6 +232,10 @@ await say("Sent back for a redraft, with the note on record");
 
 // Plan review.
 await visit("/requests/req-plan-review");
+await scrollTo(main().getByRole("region", { name: "Changes since you rejected" }));
+await say("A redraft opens on what changed: your note, against its section", 3400);
+await say("And whether the drafter was given the note", 2600);
+await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
 await say("Plan review: which ticket claims each acceptance criterion", 3200);
 await scrollTo(main().getByRole("region", { name: "Criteria coverage" }));
 await say("A criterion no ticket claims is called out", 3000);
