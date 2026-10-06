@@ -265,4 +265,67 @@ describe("a ticket's header lines and covered criteria as fields", () => {
     });
     expect(shown).toBe(TICKET.replace("go test ./...", "make verify"));
   });
+
+  test("ticket list editors rewrite the shared draft and Save sends untouched bytes", async () => {
+    const content = TICKET.replace(
+      "- a.go\n\n### Steps\n\n1. s\n",
+      "- a.go\n* b.go\n\n### Steps\n\n1. s\n2) second\n",
+    );
+    const { server } = await edit(content, {
+      extra: [{ on: "PUT /requests/req-1/tickets/1", reply: json(planReview(content)) }],
+    });
+    const panelNode = panel();
+    const steps = within(panelNode).getByRole("region", { name: "Steps" });
+    const files = within(panelNode).getByRole("region", { name: "Files to touch" });
+
+    await userEvent.type(within(steps).getByRole("textbox", { name: "Step 1" }), " updated");
+    await userEvent.type(within(files).getByRole("textbox", { name: "New file" }), "c.go{Enter}");
+    await userEvent.click(within(steps).getByRole("button", { name: "Remove step 2" }));
+    await userEvent.click(within(files).getByRole("button", { name: "Move file 2 up" }));
+
+    const expected =
+      "Verify-Command: go test ./...\n" +
+      "Allowed-Files: a.go\n" +
+      "Required-Changed-Files: a.go\n\n" +
+      "## Goal\n\n" +
+      "g\n\n" +
+      "## Plan\n\n" +
+      "### Files to touch\n\n" +
+      "* b.go\n" +
+      "- a.go\n" +
+      "- c.go\n\n" +
+      "### Steps\n\n" +
+      "1. s updated\n\n" +
+      "### Tests to add\n\n" +
+      "- t\n\n" +
+      "### Acceptance criteria covered\n\n" +
+      "- 1\n\n" +
+      "## Out of scope\n\n" +
+      "none\n";
+    await userEvent.click(within(panelNode).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(server.sent("PUT /requests/req-1/tickets/1")).toHaveLength(1);
+    });
+    expect(server.sent("PUT /requests/req-1/tickets/1")[0]?.body).toEqual({
+      content: expected,
+      base_sha256: sha256Hex(content),
+    });
+  });
+
+  test("a step line that reads as a required heading is refused, and the text keeps its sections", async () => {
+    await edit(TICKET);
+    const panelNode = panel();
+    const steps = within(panelNode).getByRole("region", { name: "Steps" });
+    const raw = within(panelNode).getByRole("textbox", { name: /^Edit / });
+
+    await userEvent.type(
+      within(steps).getByRole("textbox", { name: "Step 1" }),
+      "\n## Out of scope",
+    );
+
+    expect(within(steps).getByText(/would add or move a section heading/)).toBeVisible();
+    // Everything typed before the heading line was written; the heading line was not.
+    expect(raw).toHaveValue(TICKET.replace("1. s\n", "1. s\n## Out of scop\n"));
+  });
 });

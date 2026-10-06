@@ -17,7 +17,12 @@ import {
   sections,
   setCoveredCriteria,
   setSectionBody,
+  addSectionListItem,
   setCriterionBody,
+  moveSectionListItem,
+  removeSectionListItem,
+  sectionListItems,
+  setSectionListItem,
   setTicketHeaderValue,
   ticketHeaderValue,
 } from "./structuredEdit";
@@ -377,5 +382,66 @@ describe("sections", () => {
     expect(sectionBodyProblem(H, "fine\n### Not required")).toBeNull();
     expect(sectionBodyProblem(H, "a\n  ## Scope \nb")).toMatch(/## Scope/);
     expect(sectionBodyProblem(H, "# Spec")).not.toBeNull();
+  });
+});
+
+const LIST_TICKET =
+  "preamble\r\n## Goal\r\ng\r\n## Plan\r\n### Files to touch\r\n\r\n- a.go\r\n  generated\r\n* b.go\r\n\r\n### Steps\r\n\r\n1) first\r\n  detail\r\n2. second\r\n\r\n### Tests to add\r\n- test\r\n### Acceptance criteria covered\r\n- 1\r\n## Out of scope\r\nnone";
+
+describe("ticket plan section lists", () => {
+  test("reads numbered and bullet items through the next required heading", () => {
+    expect(sectionListItems(LIST_TICKET, "### Steps")).toEqual([
+      { body: "first\n  detail" },
+      { body: "second" },
+    ]);
+    expect(sectionListItems(LIST_TICKET, "### Files to touch")).toEqual([
+      { body: "a.go\n  generated" },
+      { body: "b.go" },
+    ]);
+    expect(sectionListItems("## Goal\n", "### Steps")).toBeNull();
+  });
+
+  test("edits, adds, removes and moves only the named section items", () => {
+    expect(setSectionListItem(LIST_TICKET, "### Steps", 0, "updated\n2. continuation")).toBe(
+      "preamble\r\n## Goal\r\ng\r\n## Plan\r\n### Files to touch\r\n\r\n- a.go\r\n  generated\r\n* b.go\r\n\r\n### Steps\r\n\r\n1) updated\r\n   2. continuation\r\n2. second\r\n\r\n### Tests to add\r\n- test\r\n### Acceptance criteria covered\r\n- 1\r\n## Out of scope\r\nnone",
+    );
+    expect(addSectionListItem(LIST_TICKET, "### Files to touch", "c.go")).toBe(
+      "preamble\r\n## Goal\r\ng\r\n## Plan\r\n### Files to touch\r\n\r\n- a.go\r\n  generated\r\n* b.go\r\n- c.go\r\n\r\n### Steps\r\n\r\n1) first\r\n  detail\r\n2. second\r\n\r\n### Tests to add\r\n- test\r\n### Acceptance criteria covered\r\n- 1\r\n## Out of scope\r\nnone",
+    );
+    expect(removeSectionListItem(LIST_TICKET, "### Steps", 0)).toBe(
+      "preamble\r\n## Goal\r\ng\r\n## Plan\r\n### Files to touch\r\n\r\n- a.go\r\n  generated\r\n* b.go\r\n\r\n### Steps\r\n\r\n1. second\r\n\r\n### Tests to add\r\n- test\r\n### Acceptance criteria covered\r\n- 1\r\n## Out of scope\r\nnone",
+    );
+    expect(moveSectionListItem(LIST_TICKET, "### Files to touch", 0, 1)).toBe(
+      "preamble\r\n## Goal\r\ng\r\n## Plan\r\n### Files to touch\r\n\r\n* b.go\r\n- a.go\r\n  generated\r\n\r\n### Steps\r\n\r\n1) first\r\n  detail\r\n2. second\r\n\r\n### Tests to add\r\n- test\r\n### Acceptance criteria covered\r\n- 1\r\n## Out of scope\r\nnone",
+    );
+  });
+
+  test("keeps no-op text, final-newline state, and item delimiter", () => {
+    const text = "## Goal\n## Plan\n### Steps\n7) one\n8) two";
+    expect(setSectionListItem(text, "### Steps", 0, "one")).toBe(text);
+    expect(moveSectionListItem(text, "### Steps", 0, -1)).toBe(text);
+    expect(addSectionListItem(text, "### Steps", "three")).toBe(
+      "## Goal\n## Plan\n### Steps\n1) one\n2) two\n3) three",
+    );
+  });
+
+  test("a list runs to the next required heading the file has, not only the one listed after it", () => {
+    // No "### Tests to add": Steps ends at "### Acceptance criteria covered".
+    const text = "## Goal\n## Plan\n### Steps\n1. one\n### Acceptance criteria covered\n- 1\n";
+    expect(sectionListItems(text, "### Steps")).toEqual([{ body: "one" }]);
+    expect(addSectionListItem(text, "### Steps", "two")).toBe(
+      "## Goal\n## Plan\n### Steps\n1. one\n2. two\n### Acceptance criteria covered\n- 1\n",
+    );
+  });
+
+  test("a body's trailing blank lines are not written: Enter at the end of an item adds no line", () => {
+    const text = "## Goal\n## Plan\n### Steps\n\n1. one\n\n### Tests to add\n- t\n";
+    expect(setSectionListItem(text, "### Steps", 0, "one\n")).toBe(text);
+    expect(setSectionListItem(text, "### Steps", 0, "one\n  more\n\n")).toBe(
+      "## Goal\n## Plan\n### Steps\n\n1. one\n  more\n\n### Tests to add\n- t\n",
+    );
+    expect(setCriterionBody("## Acceptance criteria\n\n1. a\n\n## Risks\n", 0, "a\n")).toBe(
+      "## Acceptance criteria\n\n1. a\n\n## Risks\n",
+    );
   });
 });
