@@ -262,3 +262,91 @@ export function setCoveredCriteria(text: string, numbers: readonly number[]): st
   lines.splice(from, to - from, ...items);
   return lines.join("\n");
 }
+
+/** One required section of a file as an editor shows it. */
+export interface SectionSlice {
+  readonly heading: string;
+  /** The section's body lines joined with "\n" (see `sections`); "" when absent or empty. */
+  readonly body: string;
+  /** Whether the heading was found, in order. */
+  readonly present: boolean;
+}
+
+interface SectionSpan {
+  /** Index of the heading line. */
+  readonly at: number;
+  /** First body line, and one past the last body line. */
+  readonly start: number;
+  readonly end: number;
+}
+
+function sectionSpan(lines: readonly string[], headings: readonly string[], heading: string) {
+  const index = headings.indexOf(heading);
+  if (index === -1) return null;
+  const positions = headingPositions(lines, headings);
+  const at = positions[index] ?? -1;
+  if (at === -1) return null;
+  const next = positions.slice(index + 1).find((p) => p !== -1) ?? lines.length;
+  // Blank lines (and the empty piece after a final newline) just before the
+  // next heading or the end separate the sections: they belong to no body.
+  let end = next;
+  while (end > at + 1 && trimSpace(lines[end - 1] ?? "") === "") end--;
+  const span: SectionSpan = { at, start: at + 1, end };
+  return span;
+}
+
+/**
+ * The body of each required heading: the lines after its heading line up to
+ * the next required heading found (or the end of the file), without the blank
+ * lines that end that stretch. Leading blank lines, interior blank lines and
+ * every line's own bytes (a CR, trailing spaces) are kept. A container's body
+ * ("## Plan") ends at its first sub-heading. A heading not found is absent.
+ */
+export function sections(text: string, headings: readonly string[]): SectionSlice[] {
+  const lines = text.split("\n");
+  return headings.map((heading) => {
+    const span = sectionSpan(lines, headings, heading);
+    if (span === null) return { heading, body: "", present: false };
+    return { heading, body: lines.slice(span.start, span.end).join("\n"), present: true };
+  });
+}
+
+function withoutCr(body: string): string {
+  return body.replace(/\r(?=\n|$)/g, "");
+}
+
+/**
+ * `text` with one section's body replaced and every other line untouched.
+ * Only the body lines (see `sections`) are replaced; the blank lines after
+ * them stay, so `setSectionBody(t, h, x, sections(t, h)[i].body) === t`. A body
+ * that differs from the current one only in CR line endings counts as equal.
+ * New lines take the document's line ending (CRLF when the heading line has
+ * one). An empty `body` removes the body lines. An absent heading returns `text`.
+ */
+export function setSectionBody(
+  text: string,
+  headings: readonly string[],
+  heading: string,
+  body: string,
+): string {
+  const lines = text.split("\n");
+  const span = sectionSpan(lines, headings, heading);
+  if (span === null) return text;
+  const current = lines.slice(span.start, span.end).join("\n");
+  if (body === current || withoutCr(body) === withoutCr(current)) return text;
+  const eol = (lines[span.at] ?? "").endsWith("\r") ? "\r" : "";
+  const replacement =
+    body === ""
+      ? []
+      : withoutCr(body)
+          .split("\n")
+          .map((l) => l + eol);
+  return [...lines.slice(0, span.start), ...replacement, ...lines.slice(span.end)].join("\n");
+}
+
+/** Why `body` cannot be a section's body, or null: a line equal to a required heading changes the structure. */
+export function sectionBodyProblem(headings: readonly string[], body: string): string | null {
+  const clash = body.split("\n").find((line) => headings.includes(trimSpace(line)));
+  if (clash === undefined) return null;
+  return `A line reading "${trimSpace(clash)}" would add or move a section heading; edit the whole file to do that.`;
+}
