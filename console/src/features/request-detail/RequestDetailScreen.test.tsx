@@ -519,3 +519,25 @@ test("a back link returns to the board", async () => {
   await loaded("T");
   expect(screen.getByRole("link", { name: "Back to board" })).toHaveAttribute("href", "/");
 });
+
+test("a request in pr_review shows the server's next step: what its pull request waits on", async () => {
+  const next =
+    "review https://github.com/acme/app/pull/6: approve and merge it, or leave review comments. The request is done when every pull request is merged";
+  openRequest(
+    requestWire({
+      state: "pr_review",
+      title: "Add idempotency keys",
+      next_action: next,
+      tickets: [
+        ticketWire({
+          index: 1,
+          runId: "run-1",
+          prUrl: "https://github.com/acme/app/pull/6",
+          prState: "ready",
+        }),
+      ],
+    }),
+  );
+  await loaded();
+  expect(screen.getByTestId("next-action-banner")).toHaveTextContent(next);
+});
