@@ -2,8 +2,8 @@ import type { RequestSummary } from "@/domain/request";
 
 /**
  * The five groups a request's state sorts and colors by -- "waiting-on-you =
- * review states; working = drafting/planning/building/pr_review; done;
- * failed = quarantined/cancelled". The single implementation: the board, triage
+ * review states, halted, quarantined; working =
+ * drafting/planning/building/pr_review; done; failed = cancelled". The single implementation: the board, triage
  * and the request ordering all read it. The board's own filter only needs the
  * three-way RequestBoardSection below.
  *
@@ -14,9 +14,9 @@ import type { RequestSummary } from "@/domain/request";
  * (status.ts maps `halted` to needsHuman). Found in review: the grouping
  * disagreed with that vocabulary, so a halted request was sorted into
  * "Finished" on the board and silently excluded from the "needs you"
- * tab-title count. Deliberately still distinct from `quarantined`/
- * `cancelled`, which stay `failed`: those are genuine dead ends from this
- * console's perspective (no resume affordance here).
+ * tab-title count. `quarantined` is here for the same reason: the request
+ * page offers Retry, Send back and Cancel for it, so it waits on the operator
+ * and is not finished. Only `cancelled` is a dead end.
  */
 export type RequestStageGroup = "review" | "working" | "done" | "failed" | "other";
 
@@ -25,6 +25,7 @@ const REVIEW_STATES: ReadonlySet<string> = new Set([
   "oracle_review",
   "plan_review",
   "halted",
+  "quarantined",
   "resume_review",
 ]);
 // submitted is working, not "other": other rendered under Finished, so a
@@ -38,7 +39,7 @@ const WORKING_STATES: ReadonlySet<string> = new Set([
   "pr_review",
 ]);
 const DONE_STATES: ReadonlySet<string> = new Set(["done"]);
-const FAILED_STATES: ReadonlySet<string> = new Set(["quarantined", "cancelled"]);
+const FAILED_STATES: ReadonlySet<string> = new Set(["cancelled"]);
 
 export function requestStageGroup(state: string): RequestStageGroup {
   if (REVIEW_STATES.has(state)) return "review";

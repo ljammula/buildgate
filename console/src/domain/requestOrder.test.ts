@@ -68,7 +68,7 @@ describe("sortedRequests", () => {
   test("done and failed requests sort after review and working", () => {
     const sorted = sortedRequests([
       summary({ id: "done", state: "done" }),
-      summary({ id: "failed", state: "quarantined" }),
+      summary({ id: "failed", state: "cancelled" }),
       summary({ id: "review", state: "spec_review" }),
       summary({ id: "working", state: "building" }),
     ]);

@@ -99,11 +99,13 @@ test("section headers group requests into Needs you / Working / Finished with co
       { id: "req-working", state: "building", title: "In progress" },
       { id: "req-done", state: "done", title: "Wrapped up" },
       { id: "req-failed", state: "quarantined", title: "Blocked" },
+      { id: "req-cancelled", state: "cancelled", title: "Dropped" },
     ]),
   });
-  expect(await screen.findByText("Needs you (1)")).toBeInTheDocument();
+  // A quarantined request waits on the operator's triage; it is not finished.
+  expect(await screen.findByText("Needs you (2)")).toBeInTheDocument();
   expect(screen.getByText("Working (1)")).toBeInTheDocument();
-  // done + quarantined both collapse into "Finished", not a fifth bucket.
+  // done + cancelled both collapse into "Finished", not a fifth bucket.
   expect(screen.getByText("Finished (2)")).toBeInTheDocument();
 });
 

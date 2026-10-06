@@ -6,6 +6,7 @@ import {
   filtersFromSearchParams,
   matchesRequestBoardFilters,
   requestBoardFiltersEqual,
+  requestStageGroup,
   requestStageGroupOf,
   sectionForRequest,
   sectionForState,
@@ -58,6 +59,12 @@ describe("sectionForState", () => {
     expect(sectionForState("halted")).toBe("needsYou");
   });
 
+  test("quarantined is needsYou: the request page offers retry, send back and cancel for it", () => {
+    expect(sectionForState("quarantined")).toBe("needsYou");
+    expect(requestStageGroup("quarantined")).toBe("review");
+    expect(requestStageGroup("cancelled")).toBe("failed");
+  });
+
   test("drafting/building/pr_review states are working", () => {
     expect(sectionForState("submitted")).toBe("working");
     expect(sectionForState("building")).toBe("working");
@@ -66,7 +73,6 @@ describe("sectionForState", () => {
 
   test("done, failed, and unmapped states are finished", () => {
     expect(sectionForState("done")).toBe("finished");
-    expect(sectionForState("quarantined")).toBe("finished");
     expect(sectionForState("cancelled")).toBe("finished");
     expect(sectionForState("some_new_state")).toBe("finished");
   });
@@ -123,9 +129,9 @@ describe("section filter", () => {
     requests.filter((r) => matchesRequestBoardFilters(r, filters({ section }))).map((r) => r.id);
 
   test("each section shows only its own requests", () => {
-    expect(matching("needsYou")).toEqual(["waiting"]);
+    expect(matching("needsYou")).toEqual(["waiting", "stopped"]);
     expect(matching("working")).toEqual(["busy"]);
-    expect(matching("finished")).toEqual(["shipped", "stopped"]);
+    expect(matching("finished")).toEqual(["shipped"]);
   });
 });
 

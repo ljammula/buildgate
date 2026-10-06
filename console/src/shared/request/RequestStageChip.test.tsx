@@ -36,3 +36,11 @@ test("a pr_review chip on a row that needs you takes the needs-you status", () =
   rerender(<RequestStageChip state="pr_review" />);
   expect(screen.getByText("PR review").closest("[data-tone]")).toHaveAttribute("data-tone", "info");
 });
+
+test("a quarantined chip that needs you keeps its failure colour", () => {
+  render(<RequestStageChip state="quarantined" needsYou />);
+  expect(screen.getByText("Quarantined").closest("[data-tone]")).toHaveAttribute(
+    "data-tone",
+    "danger",
+  );
+});
