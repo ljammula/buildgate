@@ -1,0 +1,9 @@
+event: progress
+data: {"ts":"2026-09-10T09:10:00Z","source":"factory","stage":"build","event":"start","round":1,"max_rounds":3}
+
+event: progress
+data: {"ts":"2026-09-10T09:24:00Z","source":"agent","stage":"build","event":"round_summary","round":1,"max_rounds":3,"detail":"478.3k tokens"}
+
+event: progress
+data: {"ts":"2026-09-10T09:25:00Z","source":"factory","stage":"build","event":"end","outcome":"pass"}
+

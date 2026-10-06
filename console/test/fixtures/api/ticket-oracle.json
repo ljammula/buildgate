@@ -1,0 +1,16 @@
+{
+  "files": [
+    {
+      "name": "RUN_COMMAND.txt",
+      "size": 22,
+      "sha256": "0e2df58c76e6bce05db5cd535c182f7b4c09dc25dc1aa6b18d55a386529b20e6"
+    },
+    {
+      "name": "idempotency_test.go",
+      "size": 78,
+      "sha256": "76091dc812a8875488fec26588be42547efd5f22474b71a71824e0fd11a6b93d"
+    }
+  ],
+  "problems": [],
+  "state": "plan_review"
+}

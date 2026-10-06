@@ -1,0 +1,15 @@
+[
+  {
+    "index": 1,
+    "at": "2026-09-10T09:08:00Z",
+    "by": "alice",
+    "reason": "split the migration out",
+    "from_state": "plan_review",
+    "files": [
+      "spec.md",
+      "tickets/001.spec.md",
+      "tickets/002.spec.md"
+    ],
+    "feedback_supplied": true
+  }
+]

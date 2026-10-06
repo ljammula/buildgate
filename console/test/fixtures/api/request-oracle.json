@@ -1,0 +1,42 @@
+{
+  "files": [
+    {
+      "name": "MANIFEST.json",
+      "size": 144,
+      "sha256": "d695223c4e8731b03194202a243375877e2dd5ba14df5566047fc875e867a9af"
+    },
+    {
+      "name": "RUN_COMMAND.txt",
+      "size": 22,
+      "sha256": "0e2df58c76e6bce05db5cd535c182f7b4c09dc25dc1aa6b18d55a386529b20e6"
+    },
+    {
+      "name": "idempotency_test.go",
+      "size": 78,
+      "sha256": "76091dc812a8875488fec26588be42547efd5f22474b71a71824e0fd11a6b93d"
+    }
+  ],
+  "problems": [],
+  "oracle_draft": {
+    "status": "drafted",
+    "detail": "one criterion is covered",
+    "proposed_command": "go test ./.oracle/...",
+    "files": [
+      "idempotency_test.go"
+    ],
+    "criteria": [
+      {
+        "number": 1,
+        "eligible": true
+      },
+      {
+        "number": 2,
+        "eligible": false,
+        "reason": "needs a second account"
+      }
+    ],
+    "model": "gpt-5.6-luna",
+    "thinking": "high"
+  },
+  "state": "oracle_review"
+}

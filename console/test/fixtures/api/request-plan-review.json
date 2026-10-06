@@ -1,0 +1,111 @@
+{
+  "id": "req-plan-review",
+  "workspace": "/repos/app",
+  "project": "app",
+  "source": {
+    "kind": "text"
+  },
+  "state": "plan_review",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_drafting",
+      "at": "2026-09-10T09:00:00Z",
+      "by": "factoryd"
+    },
+    {
+      "from": "spec_drafting",
+      "to": "spec_review",
+      "at": "2026-09-10T09:05:00Z",
+      "by": "factoryd",
+      "reason": "spec drafted"
+    }
+  ],
+  "submitted_at": "2026-09-10T09:00:00Z",
+  "updated_at": "2026-09-10T09:05:00Z",
+  "entered_at": "2026-09-10T09:05:00Z",
+  "ticket_count": 2,
+  "approved_by": "alice",
+  "approved_at": "2026-09-10T09:06:00Z",
+  "spec_evidence": {
+    "usage": {
+      "input": 1150,
+      "output": 50,
+      "totalTokens": 1200
+    },
+    "agent_exit_code": 0,
+    "duration_s": 41.5,
+    "agents_md_used": true,
+    "model": "gpt-5.6-luna",
+    "thinking": "high",
+    "spend": {
+      "role": "planning",
+      "model": "gpt-5.6-luna",
+      "input_tokens": 1150,
+      "output_tokens": 50,
+      "cost_micro_usd": 12000,
+      "at": "2026-09-10T09:00:00Z"
+    }
+  },
+  "plan_evidence": {
+    "usage": {
+      "input": 850,
+      "output": 50,
+      "totalTokens": 900
+    },
+    "agent_exit_code": 0,
+    "duration_s": 30,
+    "agents_md_used": false,
+    "model": "gpt-5.6-luna"
+  },
+  "rejections": [
+    {
+      "by": "alice",
+      "at": "2026-09-10T09:08:00Z",
+      "reason": "split the migration out",
+      "from_state": "plan_review",
+      "for_stage": "planning"
+    }
+  ],
+  "title": "Add idempotency keys to checkout",
+  "spec": "# Idempotency keys for checkout\n\n## Problem\n\nA retried checkout charges the card twice.\n\n## Acceptance criteria\n\n1. A repeated request with the same key returns the first response.\n2. A key is scoped to one account.\n",
+  "spec_full_path": "/data/requests/req-plan-review/spec.md",
+  "tickets": [
+    {
+      "index": 1,
+      "spec_path": "/data/requests/req-plan-review/tickets/001.spec.md",
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "full_path": "/data/requests/req-plan-review/tickets/001.spec.md"
+    },
+    {
+      "index": 2,
+      "spec_path": "/data/requests/req-plan-review/tickets/002.spec.md",
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "full_path": "/data/requests/req-plan-review/tickets/002.spec.md"
+    }
+  ],
+  "cost_summary": {
+    "spec": 0.012,
+    "plan": 0,
+    "runs": 0,
+    "total": 0.012,
+    "currency": "usd",
+    "complete": false,
+    "tokens": 2100,
+    "tokens_complete": true,
+    "by_model": [
+      {
+        "model": "gpt-5.6-luna",
+        "tokens": 900
+      },
+      {
+        "role": "planning",
+        "model": "gpt-5.6-luna",
+        "tokens": 1200,
+        "cost_micro_usd": 12000
+      }
+    ]
+  },
+  "approve_next_state": "building",
+  "next_action": "review the drafted tickets: `factoryd approve req-plan-review`, or `factoryd reject -reason ... req-plan-review` to redraft"
+}

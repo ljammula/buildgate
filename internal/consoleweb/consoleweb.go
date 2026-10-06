@@ -63,13 +63,23 @@ server against this API -- see <code>console/README.md</code>.</p>
 // without this check such a binary would answer / with a raw directory
 // listing of the bundle instead of the console or the placeholder.
 func Embedded() bool {
-	for _, name := range []string{"main.dart.js", "index.html"} {
-		if _, err := fs.Stat(fsys, name); err != nil {
-			return false
+	if _, err := fs.Stat(fsys, "index.html"); err != nil {
+		return false
+	}
+	for _, entry := range bundleEntryPoints {
+		if _, err := fs.Stat(fsys, entry); err == nil {
+			return true
 		}
 	}
-	return true
+	return false
 }
+
+// bundleEntryPoints names the file each console build always writes
+// beside index.html: the Flutter Web build's entry script, and the build
+// manifest of the React console (console-react/, `make
+// console-react-build`), which is embedded in place of the Flutter one
+// while it is being proven.
+var bundleEntryPoints = []string{"main.dart.js", ".vite/manifest.json"}
 
 // Handler serves the embedded console bundle with SPA fallback: a request
 // path with no file extension that doesn't match a real embedded file

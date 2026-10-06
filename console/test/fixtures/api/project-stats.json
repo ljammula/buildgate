@@ -1,0 +1,14 @@
+{
+  "project": "app",
+  "total_runs": 3,
+  "accepted": 3,
+  "accepted_via_override": 3,
+  "override_rate_percent": 3,
+  "quarantined_by_cause": {
+    "every-field key": 3
+  },
+  "halted": 3,
+  "median_accepted_cost_micro_usd": 3,
+  "median_accepted_cost_subscription_billed": true,
+  "median_accepted_tokens": 3
+}

@@ -1,0 +1,219 @@
+{
+  "id": "req-every-field",
+  "workspace": "/repos/app",
+  "project": "app",
+  "source": {
+    "kind": "issue",
+    "issue_ref": "acme/app#43"
+  },
+  "state": "resume_review",
+  "history": [
+    {
+      "from": "building",
+      "to": "resume_review",
+      "at": "2026-09-10T09:50:00Z",
+      "by": "factoryd",
+      "reason": "the build was lost"
+    }
+  ],
+  "submitted_at": "2026-09-10T09:00:00Z",
+  "updated_at": "2026-09-10T09:00:00Z",
+  "entered_at": "2026-09-10T09:00:00Z",
+  "waiting_since": "2026-09-10T09:00:00Z",
+  "last_notified_at": "2026-09-10T09:00:00Z",
+  "notify_count": 3,
+  "ticket_index": 1,
+  "ticket_count": 1,
+  "error": "every-field error",
+  "resume": {
+    "from_state": "building",
+    "lost_run_id": "every-field lost_run_id",
+    "generation": 3,
+    "at": "2026-09-10T09:00:00Z",
+    "refused": [
+      "every-field refused"
+    ]
+  },
+  "resume_decision": {
+    "verb": "every-field verb",
+    "generation": 3,
+    "by": "every-field by",
+    "at": "2026-09-10T09:00:00Z"
+  },
+  "quarantine_check": "every-field quarantine_check",
+  "approved_by": "every-field approved_by",
+  "approved_at": "2026-09-10T09:00:00Z",
+  "spec_evidence": {
+    "usage": {
+      "input": 100,
+      "output": 50,
+      "totalTokens": 150
+    },
+    "agent_exit_code": 3,
+    "duration_s": 1.5,
+    "agents_md_used": true,
+    "model": "every-field model",
+    "thinking": "every-field thinking",
+    "spend": {
+      "role": "every-field role",
+      "model": "every-field model",
+      "input_tokens": 3,
+      "output_tokens": 3,
+      "cost_micro_usd": 3,
+      "spend_partial": true,
+      "skills": [
+        "every-field skills"
+      ],
+      "skills_sha256": "every-field skills_sha256",
+      "design_guide": "every-field design_guide",
+      "design_guide_sha256": "every-field design_guide_sha256",
+      "at": "2026-09-10T09:00:00Z"
+    }
+  },
+  "plan_evidence": {
+    "usage": {
+      "input": 100,
+      "output": 50,
+      "totalTokens": 150
+    },
+    "agent_exit_code": 3,
+    "duration_s": 1.5,
+    "agents_md_used": true,
+    "model": "every-field model",
+    "thinking": "every-field thinking",
+    "spend": {
+      "role": "every-field role",
+      "model": "every-field model",
+      "input_tokens": 3,
+      "output_tokens": 3,
+      "cost_micro_usd": 3,
+      "spend_partial": true,
+      "skills": [
+        "every-field skills"
+      ],
+      "skills_sha256": "every-field skills_sha256",
+      "design_guide": "every-field design_guide",
+      "design_guide_sha256": "every-field design_guide_sha256",
+      "at": "2026-09-10T09:00:00Z"
+    }
+  },
+  "verify_command": "every-field verify_command",
+  "full_suite_command": "every-field full_suite_command",
+  "full_suite_source": "every-field full_suite_source",
+  "no_commit_oracles": true,
+  "preflight_profile": "every-field preflight_profile",
+  "rejections": [
+    {
+      "by": "every-field by",
+      "at": "2026-09-10T09:00:00Z",
+      "reason": "every-field reason",
+      "from_state": "spec_review",
+      "for_stage": "spec_drafting"
+    }
+  ],
+  "draft_oracles": true,
+  "spec_imported": true,
+  "plan_imported": true,
+  "oracle_draft": {
+    "status": "drafted",
+    "detail": "every-field detail",
+    "proposed_command": "every-field proposed_command",
+    "files": [
+      "every-field files"
+    ],
+    "compile_problems": [
+      "every-field compile_problems"
+    ],
+    "spec_warnings": [
+      "every-field spec_warnings"
+    ],
+    "auto_redrafted": true,
+    "generated_run_command_sha256": "every-field generated_run_command_sha256",
+    "criteria": [
+      {
+        "number": 3,
+        "eligible": true,
+        "reason": "every-field reason"
+      }
+    ],
+    "model": "every-field model",
+    "thinking": "every-field thinking",
+    "spend": {
+      "role": "every-field role",
+      "model": "every-field model",
+      "input_tokens": 3,
+      "output_tokens": 3,
+      "cost_micro_usd": 3,
+      "spend_partial": true,
+      "skills": [
+        "every-field skills"
+      ],
+      "skills_sha256": "every-field skills_sha256",
+      "design_guide": "every-field design_guide",
+      "design_guide_sha256": "every-field design_guide_sha256",
+      "at": "2026-09-10T09:00:00Z"
+    }
+  },
+  "oracle_skip_warning": "every-field oracle_skip_warning",
+  "models": {
+    "every-field key": "every-field models"
+  },
+  "harnesses": {
+    "every-field key": "every-field harnesses"
+  },
+  "title": "Add idempotency keys to checkout",
+  "spec": "# Idempotency keys for checkout\n\n## Problem\n\nA retried checkout charges the card twice.\n\n## Acceptance criteria\n\n1. A repeated request with the same key returns the first response.\n2. A key is scoped to one account.\n",
+  "spec_full_path": "/data/requests/req-every-field/spec.md",
+  "tickets": [
+    {
+      "index": 1,
+      "spec_path": "/data/requests/req-every-field/tickets/001.spec.md",
+      "run_id": "run-quarantined",
+      "branch": "every-field branch",
+      "pr_url": "every-field pr_url",
+      "pr_state": "every-field pr_state",
+      "seen_thread_ids": [
+        "every-field seen_thread_ids"
+      ],
+      "last_polled_at": "2026-09-10T09:00:00Z",
+      "pr_base": "every-field pr_base",
+      "rounds": [
+        {
+          "index": 3,
+          "kind": "every-field kind",
+          "thread_ids": [
+            "every-field thread_ids"
+          ],
+          "run_id": "every-field run_id",
+          "outcome": "failed",
+          "at": "2026-09-10T09:00:00Z",
+          "error": "every-field error",
+          "start_failure": true,
+          "pushed": true
+        }
+      ],
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "full_path": "/data/requests/req-every-field/tickets/001.spec.md"
+    }
+  ],
+  "cost_summary": {
+    "spec": 0.000003,
+    "plan": 0.000003,
+    "oracle": 0.000003,
+    "runs": 0,
+    "total": 0.000009,
+    "currency": "usd",
+    "complete": false,
+    "tokens": 18,
+    "tokens_complete": false,
+    "by_model": [
+      {
+        "role": "every-field role",
+        "model": "every-field model",
+        "tokens": 18,
+        "cost_micro_usd": 9
+      }
+    ]
+  },
+  "next_action": "the lost building step cannot be resumed (every-field refused); `factoryd resume -from scratch req-every-field` rebuilds the ticket, or `factoryd cancel req-every-field`"
+}

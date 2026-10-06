@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:console/content_hash.dart';
 import 'package:console/models.dart';
@@ -120,5 +121,66 @@ void main() {
 
       expect(expectedSha256For(request), isEmpty);
     });
+  });
+
+  // The same file internal/request's golden_vectors_test.go reads: one set
+  // of inputs and expected digests for the console and the server.
+  group('golden vectors (test/fixtures/vectors/content-hash.json)', () {
+    final vectors =
+        jsonDecode(
+              File(
+                'test/fixtures/vectors/content-hash.json',
+              ).readAsStringSync(),
+            )
+            as Map<String, dynamic>;
+
+    for (final d in (vectors['digests'] as List).cast<Map<String, dynamic>>()) {
+      test('digest: ${d['name']}', () {
+        if (d['text'] != null) {
+          expect(sha256Hex(d['text'] as String), d['sha256']);
+        } else {
+          expect(
+            sha256HexBytes(base64Decode(d['base64'] as String)),
+            d['sha256'],
+          );
+        }
+      });
+    }
+
+    for (final a
+        in (vectors['approvals'] as List).cast<Map<String, dynamic>>()) {
+      test('approval: ${a['name']}', () {
+        final request = RequestSummary.fromJson(
+          jsonDecode(
+                requestJson(
+                  id: 'req-1',
+                  state: a['state'] as String,
+                  spec: a['spec'] as String,
+                  tickets: [
+                    for (final t
+                        in (a['tickets'] as List).cast<Map<String, dynamic>>())
+                      requestTicketJson(
+                        index: t['index'] as int,
+                        specPath: t['spec_path'] as String,
+                        content: t['content'] as String,
+                      ),
+                  ],
+                ),
+              )
+              as Map<String, dynamic>,
+        );
+        expect(expectedSha256For(request), a['want']);
+      });
+    }
+
+    for (final o
+        in (vectors['oracle_approvals'] as List).cast<Map<String, dynamic>>()) {
+      test('oracle approval: ${o['name']}', () {
+        expect(
+          oracleExpectedSha256((o['shown'] as Map).cast<String, String>()),
+          o['want'],
+        );
+      });
+    }
   });
 }

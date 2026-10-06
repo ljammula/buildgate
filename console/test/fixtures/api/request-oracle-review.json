@@ -1,0 +1,94 @@
+{
+  "id": "req-oracle-review",
+  "workspace": "/repos/app",
+  "project": "app",
+  "source": {
+    "kind": "issue",
+    "issue_ref": "acme/app#42"
+  },
+  "state": "oracle_review",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_drafting",
+      "at": "2026-09-10T09:00:00Z",
+      "by": "factoryd"
+    },
+    {
+      "from": "spec_drafting",
+      "to": "spec_review",
+      "at": "2026-09-10T09:05:00Z",
+      "by": "factoryd",
+      "reason": "spec drafted"
+    }
+  ],
+  "submitted_at": "2026-09-10T09:00:00Z",
+  "updated_at": "2026-09-10T09:05:00Z",
+  "entered_at": "2026-09-10T09:05:00Z",
+  "waiting_since": "2026-09-10T09:09:00Z",
+  "spec_evidence": {
+    "usage": {
+      "input": 1150,
+      "output": 50,
+      "totalTokens": 1200
+    },
+    "agent_exit_code": 0,
+    "duration_s": 41.5,
+    "agents_md_used": true,
+    "model": "gpt-5.6-luna",
+    "thinking": "high",
+    "spend": {
+      "role": "planning",
+      "model": "gpt-5.6-luna",
+      "input_tokens": 1150,
+      "output_tokens": 50,
+      "cost_micro_usd": 12000,
+      "at": "2026-09-10T09:00:00Z"
+    }
+  },
+  "draft_oracles": true,
+  "oracle_draft": {
+    "status": "drafted",
+    "detail": "one criterion is covered",
+    "proposed_command": "go test ./.oracle/...",
+    "files": [
+      "idempotency_test.go"
+    ],
+    "criteria": [
+      {
+        "number": 1,
+        "eligible": true
+      },
+      {
+        "number": 2,
+        "eligible": false,
+        "reason": "needs a second account"
+      }
+    ],
+    "model": "gpt-5.6-luna",
+    "thinking": "high"
+  },
+  "title": "Add idempotency keys to checkout",
+  "spec": "# Idempotency keys for checkout\n\n## Problem\n\nA retried checkout charges the card twice.\n\n## Acceptance criteria\n\n1. A repeated request with the same key returns the first response.\n2. A key is scoped to one account.\n",
+  "spec_full_path": "/data/requests/req-oracle-review/spec.md",
+  "cost_summary": {
+    "spec": 0.012,
+    "plan": 0,
+    "runs": 0,
+    "total": 0.012,
+    "currency": "usd",
+    "complete": true,
+    "tokens": 1200,
+    "tokens_complete": true,
+    "by_model": [
+      {
+        "role": "planning",
+        "model": "gpt-5.6-luna",
+        "tokens": 1200,
+        "cost_micro_usd": 12000
+      }
+    ]
+  },
+  "approve_next_state": "planning",
+  "next_action": "review the drafted oracle (or leave it absent/empty to skip): `factoryd approve req-oracle-review`, or `factoryd reject -reason ... req-oracle-review` to redraft"
+}

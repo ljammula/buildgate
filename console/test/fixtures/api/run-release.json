@@ -1,0 +1,25 @@
+{
+  "run_id": "run-accepted",
+  "project": "app",
+  "decision": {
+    "run_id": "run-accepted",
+    "project": "app",
+    "allowed": false,
+    "reasons": [
+      "kill switch is engaged for project \"app\""
+    ],
+    "evaluated_at": "2026-09-10T09:27:00Z"
+  },
+  "kill_switch": {
+    "project": "app",
+    "engaged": true,
+    "history": [
+      {
+        "engaged": true,
+        "by": "operator@example.com",
+        "reason": "incident 42",
+        "at": "2026-09-10T09:26:00Z"
+      }
+    ]
+  }
+}

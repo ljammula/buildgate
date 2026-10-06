@@ -1,0 +1,254 @@
+[
+  {
+    "pattern": "GET /healthz",
+    "path": "/healthz",
+    "file": "healthz.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /console-config.json",
+    "path": "/console-config.json",
+    "file": "console-config.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /projects",
+    "path": "/projects",
+    "file": "projects.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /projects/{project}/release",
+    "path": "/projects/app/release",
+    "file": "project-release.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /projects/{project}/stats",
+    "path": "/projects/app/stats",
+    "file": "project-stats.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /queue-run",
+    "path": "/queue-run",
+    "file": "queue-run.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /daemons",
+    "path": "/daemons",
+    "file": "daemons.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /workspaces",
+    "path": "/workspaces",
+    "file": "workspaces.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs",
+    "path": "/runs",
+    "file": "runs.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}",
+    "path": "/runs/run-accepted",
+    "file": "run-accepted.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}",
+    "path": "/runs/run-quarantined",
+    "file": "run-quarantined.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}",
+    "path": "/runs/run-running",
+    "file": "run-running.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}",
+    "path": "/runs/run-every-field",
+    "file": "run-every-field.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}",
+    "path": "/runs/run-missing",
+    "file": "error-not-found.json",
+    "status": 404,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/events",
+    "path": "/runs/run-accepted/events",
+    "file": "run-events.sse",
+    "status": 200,
+    "content_type": "text/event-stream"
+  },
+  {
+    "pattern": "GET /runs/{id}/progress",
+    "path": "/runs/run-accepted/progress",
+    "file": "run-progress.sse",
+    "status": 200,
+    "content_type": "text/event-stream"
+  },
+  {
+    "pattern": "GET /runs/{id}/log",
+    "path": "/runs/run-accepted/log",
+    "file": "run-log.txt",
+    "status": 200,
+    "content_type": "text/plain"
+  },
+  {
+    "pattern": "GET /runs/{id}/diff",
+    "path": "/runs/run-accepted/diff",
+    "file": "run-diff.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/release",
+    "path": "/runs/run-accepted/release",
+    "file": "run-release.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/release",
+    "path": "/runs/run-quarantined/release",
+    "file": "run-release-no-decision.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests",
+    "path": "/requests",
+    "file": "requests.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/events",
+    "path": "/requests/events",
+    "file": "request-events.sse",
+    "status": 200,
+    "content_type": "text/event-stream"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-spec-review",
+    "file": "request-spec-review.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-oracle-review",
+    "file": "request-oracle-review.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-plan-review",
+    "file": "request-plan-review.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-building",
+    "file": "request-building.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-done",
+    "file": "request-done.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-quarantined",
+    "file": "request-quarantined.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-halted",
+    "file": "request-halted.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-every-field",
+    "file": "request-every-field.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}/oracle",
+    "path": "/requests/req-oracle-review/oracle",
+    "file": "request-oracle.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}/oracle/{name}",
+    "path": "/requests/req-oracle-review/oracle/RUN_COMMAND.txt",
+    "file": "request-oracle-file.txt",
+    "status": 200,
+    "content_type": "text/plain"
+  },
+  {
+    "pattern": "GET /requests/{id}/tickets/{n}/oracle",
+    "path": "/requests/req-plan-review/tickets/1/oracle",
+    "file": "ticket-oracle.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}/tickets/{n}/oracle/{name}",
+    "path": "/requests/req-plan-review/tickets/1/oracle/RUN_COMMAND.txt",
+    "file": "ticket-oracle-file.txt",
+    "status": 200,
+    "content_type": "text/plain"
+  },
+  {
+    "pattern": "GET /requests/{id}/revisions",
+    "path": "/requests/req-plan-review/revisions",
+    "file": "request-revisions.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}/revisions/{n}",
+    "path": "/requests/req-plan-review/revisions/1",
+    "file": "request-revision.json",
+    "status": 200,
+    "content_type": "application/json"
+  }
+]
