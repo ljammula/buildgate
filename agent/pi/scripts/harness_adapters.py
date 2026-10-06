@@ -880,8 +880,9 @@ class CopilotAdapter:
 			key_env, headers = placeholders
 			if headers:
 				raise SystemExit(
-					f"harness copilot: this route needs the credential header(s) {', '.join(sorted(headers))}, "
-					"which the Copilot CLI cannot send; use the pi or codex harness on this route"
+					f"harness copilot: not supported on a route with the credential header(s) {', '.join(sorted(headers))} "
+					"(a chatgpt-codex route): the backend's final response event carries no output items, so the "
+					"Copilot CLI ends each turn without a tool call; use the pi or codex harness on this route"
 				)
 			api_key = os.environ.get(key_env, "")
 			if not api_key:

@@ -562,7 +562,7 @@ and reaching the model only through its sandbox's supervisor:
 | `pi` (default) | Pi | any route api |
 | `pifork` | A fork of Pi | a digest-pinned `sandbox_image`; any route api |
 | `codex` | Codex CLI | a model on an `openai-responses` route (`api: openai-responses`, or a `chatgpt-codex` route); config validation refuses it on completions or anthropic-messages |
-| `copilot` | Copilot CLI (bring-your-own-key, no GitHub login) | any route api, except a `chatgpt-codex` route (the CLI cannot send its account header) |
+| `copilot` | Copilot CLI (bring-your-own-key, no GitHub login) | any route api, except a `chatgpt-codex` route (its final response event carries no output items, so the CLI makes no tool calls) |
 
 Session config (`allowed_harnesses` is what a request may pick from;
 `harness` must be in it):

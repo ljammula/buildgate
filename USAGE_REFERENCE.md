@@ -923,7 +923,7 @@ roles:
 | Harness | Model api it can use | Notes |
 |---|---|---|
 | `codex` | `openai-responses` only (a `chatgpt-codex` route, or a model with `api: openai-responses`) | Config load and `doctor` refuse it on a completions or anthropic-messages model |
-| `copilot` | any, except a `chatgpt-codex` route | Bring-your-own-key, no GitHub login; its provider key is the route's placeholder; refused on a route that needs a further credential header; reports no token counts, so read the meter's figure |
+| `copilot` | any, except a `chatgpt-codex` route | Bring-your-own-key, no GitHub login; its provider key is the route's placeholder; refused on a `chatgpt-codex` route, whose final `response.completed` event has an empty `output` (the CLI then ends each turn without a tool call); reports no token counts, so read the meter's figure |
 
 Both take the role's `models.<m>.id` as their model. `doctor` prints each
 role's harness on its `roles resolve` row and runs `<binary> --version`

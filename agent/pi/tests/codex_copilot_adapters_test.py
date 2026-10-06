@@ -453,7 +453,7 @@ class CopilotPlaceholderEnvTests(unittest.TestCase):
 	def test_refuses_a_route_that_needs_extra_credential_headers(self):
 		env = {"FACTORY_MODEL_KEY_ENV": "BG_CHATGPT_TOKEN", "FACTORY_MODEL_HEADERS_JSON": '{"chatgpt-account-id": "BG_CHATGPT_ACCOUNT"}'}
 		with tempfile.TemporaryDirectory() as tmp, route("openai-responses", **env):
-			with self.assertRaisesRegex(SystemExit, "chatgpt-account-id.*cannot send"):
+			with self.assertRaisesRegex(SystemExit, "chatgpt-account-id.*no output items.*pi or codex"):
 				self._invocation(tmp)
 
 	def test_refuses_a_key_name_with_no_value(self):
