@@ -1298,9 +1298,39 @@ func (r *Request) NextAction() string {
 		return r.quarantinedNextAction()
 	case StateHalted:
 		return r.haltedNextAction()
+	case StatePRReview:
+		return r.prReviewNextAction()
 	default:
 		return ""
 	}
+}
+
+// prReviewNextAction is NextAction's own StatePRReview branch: what each
+// ticket's pull request waits on, grouped by its PRState. The factory never
+// merges, so every branch of it ends at a person: reviewing, merging, or
+// waiting for the pull request under this one. Empty while no ticket has a
+// pull request yet.
+func (r *Request) prReviewNextAction() string {
+	byState := map[string][]string{}
+	for _, t := range r.Tickets {
+		if t.PRURL != "" {
+			byState[t.PRState] = append(byState[t.PRState], t.PRURL)
+		}
+	}
+	var parts []string
+	add := func(state, format string) {
+		if urls := byState[state]; len(urls) > 0 {
+			parts = append(parts, fmt.Sprintf(format, strings.Join(urls, ", ")))
+		}
+	}
+	add("ready", "review %s: approve and merge it, or leave review comments -- an unresolved thread from a trusted author (`pr_trusted_authors`) starts a corrective round on the same branch")
+	add("approved", "merge %s: it is approved, and the factory never merges")
+	add("stacked", "%s is stacked on an earlier ticket's pull request: merge that one first")
+	add("draft", "%s is still a draft: the factory marks it ready once its checks pass and no review thread is open")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ") + ". The request is done when every pull request is merged"
 }
 
 // quarantinedNextAction is NextAction's own StateQuarantined branch. A

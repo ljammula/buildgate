@@ -187,7 +187,18 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   the PR. The factory never merges.
 
 `factoryd status` appends each `pr_review` request's per-ticket PR state
-(`tickets: 1:approved 2:open`). The same two verbs are on HTTP: `POST
+(`tickets: 1:approved 2:open`). The request's next step, in the console's
+"Next" line and in `GET /requests`' `next_action`, says what each open pull
+request waits on:
+
+| PR state | Next step named |
+|---|---|
+| `ready` | Review it: approve and merge, or leave review comments for a corrective round |
+| `approved` | Merge it; the factory never merges |
+| `stacked` | Merge the earlier ticket's pull request first |
+| `draft` | Nothing yet: the factory marks it ready once checks pass and no thread is open |
+
+The same two verbs are on HTTP: `POST
 /requests/{id}/approve`, `POST /requests/{id}/reject`, gated by
 `Authorization: Bearer <token>` — same class of write as `/runs/{id}/override`.
 
