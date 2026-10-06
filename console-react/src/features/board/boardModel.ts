@@ -1,3 +1,4 @@
+import { formatAgeCompact } from "@/domain/elapsed";
 import type { QueueRunStatus } from "@/domain/ops";
 import type { RequestSummary } from "@/domain/request";
 
@@ -12,12 +13,12 @@ const QUEUE_RUN_DEPENDENT_STATES: ReadonlySet<string> = new Set([
   "building",
 ]);
 
-/** "Ns/Nm/Nh" since a heartbeat; null when it is not a parseable timestamp. */
+/** "Ns", "Nm", "2h 05m", "3d 4h" since a heartbeat; null when it is not a parseable timestamp. */
 function heartbeatAge(lastHeartbeat: string, now: Date): string | null {
   const at = Date.parse(lastHeartbeat);
   if (Number.isNaN(at)) return null;
   const seconds = Math.max(0, Math.floor((now.getTime() - at) / 1000));
-  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h`;
+  if (seconds >= 3600) return formatAgeCompact(seconds * 1000);
   if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
   return `${seconds}s`;
 }

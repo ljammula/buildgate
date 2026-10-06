@@ -7,6 +7,7 @@ import {
   currentContentFor,
   errorText,
   formatWhen,
+  isAutomatedActor,
   nextActionText,
   parseAcceptanceCriteria,
   pipelineSteps,
@@ -15,6 +16,7 @@ import {
   resumePlan,
   revisionDiffText,
   showsNextBanner,
+  stepShowsDetail,
   ticketsLeadContent,
 } from "./requestDetailLogic";
 import { historyWire, requestWire, ticketWire } from "./testRequests";
@@ -367,4 +369,43 @@ test("audit and rejection lines", () => {
   expect(rejectionHeading({ ...base, forStage: "plan_review" })).toBe(
     "Sent back by bob at x (from spec_review, for plan_review)",
   );
+});
+
+describe("stepShowsDetail", () => {
+  const entry = (by: string) => ({
+    from: "a",
+    to: "b",
+    at: "2026-09-10T09:00:00Z",
+    by,
+    reason: "",
+  });
+
+  test("a pending step is a bare line", () => {
+    expect(stepShowsDetail({ status: "pending", entry: null })).toBe(false);
+  });
+
+  test("a completed step made by the factory is one line, whichever spelling it used", () => {
+    expect(stepShowsDetail({ status: "done", entry: entry("factory") })).toBe(false);
+    expect(stepShowsDetail({ status: "done", entry: entry("factoryd") })).toBe(false);
+    expect(stepShowsDetail({ status: "done", entry: null })).toBe(false);
+  });
+
+  test("a completed step an operator decided keeps who and when", () => {
+    expect(stepShowsDetail({ status: "done", entry: entry("jane") })).toBe(true);
+  });
+
+  test("the current, failed and needs-you steps always keep their lines", () => {
+    for (const status of ["current", "failed", "needsYou"] as const) {
+      expect(stepShowsDetail({ status, entry: null })).toBe(true);
+    }
+  });
+});
+
+describe("isAutomatedActor", () => {
+  test("only a person's name is not automated", () => {
+    expect(isAutomatedActor("factory")).toBe(true);
+    expect(isAutomatedActor("factoryd")).toBe(true);
+    expect(isAutomatedActor("")).toBe(true);
+    expect(isAutomatedActor("jane")).toBe(false);
+  });
 });

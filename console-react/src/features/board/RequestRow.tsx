@@ -1,6 +1,11 @@
 import { Link } from "react-router";
 
-import { formatRequestTokenTotal, formatUsageSummary, requestTokenTotal } from "@/domain/cost";
+import {
+  formatRequestTokenTotal,
+  formatUsageSummary,
+  formatUsageTokens,
+  requestTokenTotal,
+} from "@/domain/cost";
 import { sectionForRequest } from "@/domain/boardFilters";
 import {
   type RequestSummary,
@@ -13,16 +18,18 @@ import {
 import { requestPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
-import { WaitingBadge } from "@/shared/request/WaitingBadge";
+import { RequestStatusUnit } from "@/shared/request/RequestStatusUnit";
 import { CompactId } from "@/ui/CompactId";
 import { cn } from "@/ui/cn";
 import { TableCell, TableRow } from "@/ui/Table";
-import { LocalTimeText } from "@/ui/Time";
+import { RelativeTime } from "@/ui/RelativeTime";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 
 export interface RequestRowProps {
   readonly request: RequestSummary;
   readonly now: Date;
+  /** The project column: absent when every request is in one project, which then says nothing. */
+  readonly showProject: boolean;
 }
 
 /**
@@ -30,7 +37,7 @@ export interface RequestRowProps {
  * it, so a click anywhere opens the request and the keyboard reaches it with
  * one Tab stop.
  */
-export function RequestRow({ request, now }: RequestRowProps) {
+export function RequestRow({ request, now, showProject }: RequestRowProps) {
   const needsYou = sectionForRequest(request) === "needsYou";
   const awaitingPr = requestAwaitingPullRequest(request);
   const job = requestRunningJob(request);
@@ -62,15 +69,14 @@ export function RequestRow({ request, now }: RequestRowProps) {
       )}
     >
       <TableCell>
-        <div className="flex flex-col items-start gap-1">
+        <RequestStatusUnit request={request} now={now}>
           <RequestStageChip
             state={request.state}
             awaitingPullRequest={awaitingPr}
             waitingOn={request.waitingOn}
             needsYou={needsYou}
           />
-          <WaitingBadge request={request} now={now} />
-        </div>
+        </RequestStatusUnit>
       </TableCell>
       <TableCell>
         <Link
@@ -87,9 +93,11 @@ export function RequestRow({ request, now }: RequestRowProps) {
           className="text-fg-subtle flex text-xs"
         />
       </TableCell>
-      <TableCell className="text-fg-muted truncate" title={request.project}>
-        {request.project}
-      </TableCell>
+      {showProject ? (
+        <TableCell className="text-fg-muted truncate" title={request.project}>
+          {request.project}
+        </TableCell>
+      ) : null}
       <TableCell>
         <div className="flex flex-col items-start gap-1">
           {progressLines.map((line) => (
@@ -118,10 +126,12 @@ export function RequestRow({ request, now }: RequestRowProps) {
         </div>
       </TableCell>
       <TableCell className="text-fg-muted font-mono text-xs break-words">
-        {/* The server's cost_summary (model id and tokens, no dollar figure)
-            when the list provided one, else the older token-total proxy. */}
+        {/* One token figure from the server's cost_summary (no dollar figure),
+            the model breakdown on hover; else the older token-total proxy. */}
         {cost !== null ? (
-          <span data-testid="request-cost-total">{formatUsageSummary(cost)}</span>
+          <span data-testid="request-cost-total" title={formatUsageSummary(cost)}>
+            {formatUsageTokens(cost)}
+          </span>
         ) : (
           <span data-testid="request-token-total">
             {formatRequestTokenTotal(requestTokenTotal(request))}
@@ -129,7 +139,7 @@ export function RequestRow({ request, now }: RequestRowProps) {
         )}
       </TableCell>
       <TableCell className="text-fg-muted text-xs whitespace-nowrap tabular-nums">
-        <LocalTimeText value={request.updatedAt} />
+        <RelativeTime value={request.updatedAt} />
       </TableCell>
     </TableRow>
   );

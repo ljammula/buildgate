@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { Ban, FileSearch, RotateCcw, ShieldCheck, Undo2 } from "lucide-react";
 
 import { useApi } from "@/api/ApiProvider";
+import { digestText } from "@/domain/digest";
 import type { RequestSummary } from "@/domain/request";
 import { runOverridePath, runPath } from "@/routes/paths";
 import { EscapedText } from "@/shared/oracle/EscapedText";
@@ -9,6 +10,7 @@ import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
 import { CompactId } from "@/ui/CompactId";
 import { CopyableCommand } from "@/ui/CopyableCommand";
+import { Disclosure } from "@/ui/Disclosure";
 
 import { quarantinedTicket, recoveryPlan } from "./requestDetailLogic";
 
@@ -25,7 +27,9 @@ export interface RecoveryCalloutProps {
  * The halted/quarantined callout: a kind-specific explanation (the server's
  * next_action when it gave one), Retry and Cancel, Send back when the server
  * says it would accept one, the copyable CLI equivalent, and for a
- * quarantine a link to the ticket's run. Always shown for these states and
+ * quarantine a link to the ticket's run. Reads cause (whole), evidence link,
+ * the lead action, a one-line explanation, then one closed disclosure for the
+ * rest. Always shown for these states and
  * never "waiting on you" with nothing offered: without write access the
  * buttons are disabled, not hidden.
  */
@@ -38,6 +42,7 @@ export function RecoveryCallout({
 }: RecoveryCalloutProps) {
   const { canWrite } = useApi();
   const plan = recoveryPlan(request);
+  const explanation = digestText(plan.explanation);
   const disabled = acting || !canWrite;
   // The receipts of the run that stopped: its log, diff and gates.
   const evidence = quarantinedTicket(request);
@@ -89,7 +94,6 @@ export function RecoveryCallout({
             />
           </p>
         )}
-        <p className="break-words whitespace-pre-wrap">{plan.explanation}</p>
         <div className="flex flex-wrap items-center gap-2">
           {plan.sendBackIsPrimary ? sendBack : null}
           <Button variant="primary" disabled={disabled} onClick={onRetry}>
@@ -102,26 +106,46 @@ export function RecoveryCallout({
           </Button>
           {plan.sendBackIsPrimary ? null : sendBack}
         </div>
-        <CopyableCommand command={plan.cliEquivalent} />
-        {plan.overrideTicket === null ? null : (
-          <div className="flex flex-col items-start gap-2">
-            <p>
-              Correcting the ticket&apos;s own run record (accepted vs. halted) is a separate,
-              optional action -- it does not affect whether Retry above will work.
-            </p>
-            <Button asChild>
-              <Link
-                to={runOverridePath(
-                  plan.overrideTicket.runId,
-                  `Request ${request.id} ticket ${plan.overrideTicket.index} quarantined`,
-                )}
-              >
-                <ShieldCheck aria-hidden="true" />
-                Review the ticket&apos;s run override
-              </Link>
-            </Button>
-          </div>
-        )}
+        <p
+          data-testid="recovery-explanation"
+          title={explanation.truncated ? plan.explanation : undefined}
+          className="text-fg-muted text-xs break-words whitespace-pre-wrap"
+        >
+          {explanation.head}
+        </p>
+        {/* One closed place for every other way out: the whole explanation
+            when it was cut, the terminal equivalent of the lead action, and
+            the run record's own correction. */}
+        <Disclosure
+          bare
+          title="Other ways to resolve this"
+          headingLevel="h3"
+          testId="recovery-more"
+        >
+          {explanation.truncated ? (
+            <p className="break-words whitespace-pre-wrap">{plan.explanation}</p>
+          ) : null}
+          <CopyableCommand command={plan.cliEquivalent} />
+          {plan.overrideTicket === null ? null : (
+            <div className="flex flex-col items-start gap-2">
+              <p>
+                Correcting the ticket&apos;s own run record (accepted vs. halted) is a separate,
+                optional action -- it does not affect whether Retry above will work.
+              </p>
+              <Button asChild>
+                <Link
+                  to={runOverridePath(
+                    plan.overrideTicket.runId,
+                    `Request ${request.id} ticket ${plan.overrideTicket.index} quarantined`,
+                  )}
+                >
+                  <ShieldCheck aria-hidden="true" />
+                  Review the ticket&apos;s run override
+                </Link>
+              </Button>
+            </div>
+          )}
+        </Disclosure>
       </div>
     </Callout>
   );

@@ -1,4 +1,4 @@
-import { elapsedBetween, formatDuration, tryParseTimestamp } from "@/domain/elapsed";
+import { elapsedBetween, formatElapsedCompact, tryParseTimestamp } from "@/domain/elapsed";
 import type { ProgressEvent, Run } from "@/domain/run";
 import { runIsTerminalForDisplay } from "@/domain/run";
 import { laterOf, stageLabels } from "@/domain/runDetail";
@@ -48,7 +48,9 @@ export function computeStatusStrip(
     .at(-1);
   const over = runIsTerminalForDisplay(run);
   const terminalAt = finishedAt !== undefined ? finishedAt.ts.toISOString() : run.updatedAt;
-  const elapsed = formatDuration(elapsedBetween(run.createdAt, over ? terminalAt : null, now));
+  const elapsed = formatElapsedCompact(
+    elapsedBetween(run.createdAt, over ? terminalAt : null, now),
+  );
 
   if (over) return { label, round, elapsed, lastActivity: null };
   const lastProgress = laterOf(
@@ -56,5 +58,10 @@ export function computeStatusStrip(
     tryParseTimestamp(run.lastProgressAt ?? ""),
   );
   const since = (lastProgress ?? tryParseTimestamp(run.createdAt))?.toISOString() ?? run.createdAt;
-  return { label, round, elapsed, lastActivity: formatDuration(elapsedBetween(since, null, now)) };
+  return {
+    label,
+    round,
+    elapsed,
+    lastActivity: formatElapsedCompact(elapsedBetween(since, null, now)),
+  };
 }

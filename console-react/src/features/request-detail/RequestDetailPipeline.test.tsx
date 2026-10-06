@@ -273,7 +273,8 @@ describe("the order of the tickets and the plan", () => {
     expect(
       before(
         screen.getByRole("region", { name: "Tickets" }),
-        screen.getByRole("region", { name: "Ticket 1 plan" }),
+        // Folded to a disclosure once building: it is a heading, not a region.
+        screen.getByRole("heading", { name: "Ticket 1 plan" }),
       ),
     ).toBe(true);
   });
@@ -519,5 +520,91 @@ describe("compare with a rejected revision", () => {
     await waitFor(() => {
       expect(screen.queryByRole("region", { name: "Revisions" })).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("the compact stepper", () => {
+  const history = [
+    historyWire({
+      from: "submitted",
+      to: "spec_drafting",
+      at: "2026-09-15T09:00:00Z",
+      by: "factoryd",
+    }),
+    historyWire({
+      from: "spec_drafting",
+      to: "spec_review",
+      at: "2026-09-15T09:05:00Z",
+      by: "factory",
+      reason: "spec drafted",
+    }),
+    historyWire({
+      from: "spec_review",
+      to: "planning",
+      at: "2026-09-15T09:10:00Z",
+      by: "jane",
+      reason: "approved",
+    }),
+    historyWire({ from: "planning", to: "plan_review", at: "2026-09-15T09:15:00Z", by: "factory" }),
+  ];
+
+  test("a step the factory completed is one line, with no when, who or why", async () => {
+    openRequest(requestWire({ state: "plan_review", title: "Compact", history }));
+    await screen.findByRole("heading", { level: 1, name: "Compact" });
+
+    for (const name of ["submitted", "spec_drafting", "spec_review"]) {
+      expect(step(name).querySelectorAll("p")).toHaveLength(1);
+    }
+    expect(screen.queryByText("spec drafted")).not.toBeInTheDocument();
+    expect(screen.queryByText(/factoryd?\b/)).not.toBeInTheDocument();
+  });
+
+  test("a step a person decided keeps who, when and why", async () => {
+    openRequest(requestWire({ state: "plan_review", title: "Compact", history }));
+    await screen.findByRole("heading", { level: 1, name: "Compact" });
+
+    expect(within(step("planning")).getByText(/· jane$/)).toBeInTheDocument();
+    expect(within(step("planning")).getByText("approved")).toBeInTheDocument();
+  });
+
+  test("the current step is emphasised and keeps its when", async () => {
+    openRequest(requestWire({ state: "plan_review", title: "Compact", history }));
+    await screen.findByRole("heading", { level: 1, name: "Compact" });
+
+    expect(status("plan_review")).toBe("current");
+    expect(within(step("plan_review")).getByText("Plan review")).toHaveClass("font-semibold");
+    expect(step("plan_review").querySelectorAll("p").length).toBeGreaterThan(1);
+  });
+
+  test("a failed step keeps its reason, cut to a sentence with the whole text one click away", async () => {
+    const reason = `ticket 1 halted: build failed. ${"detail ".repeat(60)}`;
+    openRequest(
+      requestWire({
+        state: "halted",
+        title: "Failed",
+        history: [
+          historyWire({
+            from: "plan_review",
+            to: "building",
+            at: "2026-09-15T09:00:00Z",
+            by: "jane",
+          }),
+          historyWire({
+            from: "building",
+            to: "halted",
+            at: "2026-09-15T09:30:00Z",
+            by: "factory",
+            reason,
+          }),
+        ],
+      }),
+    );
+    await screen.findByRole("heading", { level: 1, name: "Failed" });
+
+    const failed = step("building");
+    expect(within(failed).getByText("ticket 1 halted: build failed.")).toBeInTheDocument();
+    const full = within(failed).getByRole("heading", { name: "Full reason" }).closest("details");
+    expect(full?.open).toBe(false);
+    expect(full?.textContent).toContain(reason.trim());
   });
 });

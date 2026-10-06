@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
+import { Disclosure } from "@/ui/Disclosure";
 import { Markdown } from "@/ui/Markdown";
 
 import { FileEditor } from "./FileEditor";
@@ -28,6 +29,12 @@ export interface FileContentSectionProps {
   readonly onFetchCurrent: () => Promise<string>;
   /** Extra content under the text (the parsed acceptance criteria). */
   readonly children?: ReactNode;
+  /**
+   * Fold the file to a closed disclosure with this one line, for a state in
+   * which it is a receipt and no longer what the operator is deciding on
+   * (requestDetailLogic.foldsContent). Undefined leaves it open, whole.
+   */
+  readonly foldedSummary?: string;
 }
 
 const COPIED_MS = 2000;
@@ -84,8 +91,57 @@ export function FileContentSection({
   onSave,
   onFetchCurrent,
   children,
+  foldedSummary,
 }: FileContentSectionProps) {
   const [raw, setRaw] = useState(true);
+  const rawSwitch = (
+    <label className="text-fg-muted flex items-center gap-1.5 text-xs">
+      Raw
+      <input
+        type="checkbox"
+        role="switch"
+        checked={raw}
+        onChange={(event) => {
+          setRaw(event.target.checked);
+        }}
+      />
+    </label>
+  );
+  const pathRow = (
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-fg-muted min-w-0 truncate font-mono text-xs">
+        {fullPath !== "" ? fullPath : path}
+      </p>
+      {fullPath !== "" ? <CopyPathButton fullPath={fullPath} /> : null}
+    </div>
+  );
+  const text = raw ? (
+    <div
+      data-testid="markdown-raw-content"
+      className="border-border bg-surface-sunken max-h-[32rem] overflow-auto rounded-md border p-3"
+    >
+      <EscapedText text={content} className="font-mono text-xs" />
+    </div>
+  ) : (
+    <div
+      data-testid="markdown-rendered-content"
+      className="border-border max-h-[32rem] overflow-auto rounded-md border p-3"
+    >
+      <Markdown source={content} />
+    </div>
+  );
+  // Never while editing: an open editor is a decision in progress.
+  if (foldedSummary !== undefined && !editing) {
+    return (
+      <Disclosure title={title} summary={foldedSummary} testId={`content-${path}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">{pathRow}</div>
+          {rawSwitch}
+        </div>
+        {text}
+      </Disclosure>
+    );
+  }
   return (
     <Panel
       title={title}
@@ -99,27 +155,12 @@ export function FileContentSection({
                 Edit
               </Button>
             ) : null}
-            <label className="text-fg-muted flex items-center gap-1.5 text-xs">
-              Raw
-              <input
-                type="checkbox"
-                role="switch"
-                checked={raw}
-                onChange={(event) => {
-                  setRaw(event.target.checked);
-                }}
-              />
-            </label>
+            {rawSwitch}
           </>
         )
       }
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-fg-muted min-w-0 truncate font-mono text-xs">
-          {fullPath !== "" ? fullPath : path}
-        </p>
-        {fullPath !== "" ? <CopyPathButton fullPath={fullPath} /> : null}
-      </div>
+      {pathRow}
       {editing ? (
         <FileEditor
           path={path}
@@ -128,20 +169,8 @@ export function FileContentSection({
           onFetchCurrent={onFetchCurrent}
           onClose={onStopEdit}
         />
-      ) : raw ? (
-        <div
-          data-testid="markdown-raw-content"
-          className="border-border bg-surface-sunken max-h-[32rem] overflow-auto rounded-md border p-3"
-        >
-          <EscapedText text={content} className="font-mono text-xs" />
-        </div>
       ) : (
-        <div
-          data-testid="markdown-rendered-content"
-          className="border-border max-h-[32rem] overflow-auto rounded-md border p-3"
-        >
-          <Markdown source={content} />
-        </div>
+        text
       )}
       {children}
     </Panel>

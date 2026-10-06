@@ -198,3 +198,18 @@ test("run list row shows the request title when requestId resolves", async () =>
   expect(await screen.findByText("Add the widget")).toBeInTheDocument();
   expect(screen.getByText("Ticket ticket-accepted")).toBeInTheDocument();
 });
+
+test("the Created column reads a relative age, with the exact local time on hover", async () => {
+  const createdAt = new Date(Date.now() - 2 * 60 * 60_000 - 5 * 60_000).toISOString();
+  renderApp(<RunListScreen />, {
+    server: [
+      { on: "GET /runs", reply: () => json([runJson({ created_at: createdAt })]) },
+      noRequests,
+    ],
+  });
+
+  const when = await screen.findByText("2h 05m ago");
+  expect(when.tagName).toBe("TIME");
+  expect(when).toHaveAttribute("dateTime", createdAt);
+  expect(when.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+});

@@ -110,3 +110,38 @@ test("a failed refresh keeps the last figures under a warning, and Retry waits f
   expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
   expect(calls).toBe(1);
 });
+
+test("blocks with nothing in them are absent: no Halted row at zero, no empty quarantine section", async () => {
+  renderStats("checkouts", () =>
+    json({
+      project: "checkouts",
+      total_runs: 2,
+      accepted: 2,
+      accepted_via_override: 0,
+      override_rate_percent: 0,
+      halted: 0,
+      median_accepted_tokens: 12300,
+    }),
+  );
+  await screen.findByText("Override rate (accepted)");
+
+  expect(screen.queryByText("Halted")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Quarantined by cause" })).not.toBeInTheDocument();
+  expect(screen.queryByText("No quarantined runs recorded.")).not.toBeInTheDocument();
+});
+
+test("a halted run and a quarantine cause each bring their block back", async () => {
+  renderStats("checkouts", () =>
+    json({
+      project: "checkouts",
+      total_runs: 3,
+      accepted: 1,
+      accepted_via_override: 0,
+      halted: 2,
+      quarantined_by_cause: { canonical_verify: 1 },
+    }),
+  );
+
+  expect(await screen.findByText("Halted")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Quarantined by cause" })).toBeInTheDocument();
+});

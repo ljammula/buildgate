@@ -1,6 +1,7 @@
 import { CircleAlert, CircleCheck, CircleDashed, Hourglass, type LucideIcon } from "lucide-react";
 
 import type { RequestSummary } from "@/domain/request";
+import { DigestedText } from "@/shared/request/DigestedText";
 import { ElapsedText, useNow } from "@/ui/Time";
 import { cn } from "@/ui/cn";
 
@@ -8,7 +9,9 @@ import {
   type PipelineStep,
   type StepStatus,
   formatWhen,
+  isAutomatedActor,
   pipelineSteps,
+  stepShowsDetail,
 } from "./requestDetailLogic";
 
 const GLYPHS: Readonly<Record<StepStatus, { icon: LucideIcon; text: string; word: string }>> = {
@@ -32,11 +35,12 @@ function StepView({
   const Icon = glyph.icon;
   const emphasize = step.status !== "done" && step.status !== "pending";
   const entry = step.entry;
+  const detail = stepShowsDetail(step);
   return (
     <li
       data-testid={`pipeline-step-${step.step}`}
       data-status={step.status}
-      className="flex gap-2 py-1.5"
+      className={cn("flex gap-2", detail ? "py-1.5" : "py-0.5")}
     >
       <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", glyph.text)} />
       <div className="min-w-0 text-sm">
@@ -44,7 +48,7 @@ function StepView({
           {step.label}
           <span className="sr-only"> ({glyph.word})</span>
         </p>
-        {step.showsBuildProgress ? (
+        {!detail ? null : step.showsBuildProgress ? (
           <p className="text-fg-muted text-xs">
             {request.ticketCount > 0
               ? `ticket ${request.ticketIndex}/${request.ticketCount} · `
@@ -52,18 +56,21 @@ function StepView({
             <ElapsedText since={request.enteredAt} />
           </p>
         ) : entry === null ? (
-          emphasize ? (
-            <p className="text-fg-muted text-xs">{formatWhen(request.enteredAt, now)}</p>
-          ) : null
+          <p className="text-fg-muted text-xs">{formatWhen(request.enteredAt, now)}</p>
         ) : (
           <>
-            <p className="text-fg-muted text-xs">{`${formatWhen(entry.at, now)} · ${entry.by}`}</p>
+            <p className="text-fg-muted text-xs">
+              {isAutomatedActor(entry.by)
+                ? formatWhen(entry.at, now)
+                : `${formatWhen(entry.at, now)} · ${entry.by}`}
+            </p>
             {entry.reason === "" ? null : (
-              // Capped: a halt reason can run to a paragraph, and the full
-              // text is on the page already (recovery callout, Detail row).
-              <p className="text-fg-subtle line-clamp-4 text-xs break-words" title={entry.reason}>
-                {entry.reason}
-              </p>
+              // A halt reason can run to a paragraph: its first sentence here,
+              // the whole text one click away (it is on the page already, in
+              // the recovery callout, but only a stepper reader needs this).
+              <div className="text-fg-subtle text-xs">
+                <DigestedText text={entry.reason} max={120} fullLabel="Full reason" />
+              </div>
             )}
           </>
         )}
@@ -73,9 +80,10 @@ function StepView({
 }
 
 /**
- * "Where is my ask in the pipeline?": one row per step with a glyph and the
- * history entry that reached it (when, by whom, why), never a bare state
- * word. See pipelineSteps for how a history maps onto the steps.
+ * "Where is my ask in the pipeline?": one row per step with a glyph. A
+ * completed step is one line unless a person decided it; the current step, a
+ * failure and a needs-you step carry their when and why. See pipelineSteps for
+ * how a history maps onto the steps.
  */
 export function PipelineStepper({ request }: { readonly request: RequestSummary }) {
   const now = useNow(60_000);

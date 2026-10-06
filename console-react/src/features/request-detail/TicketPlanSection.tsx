@@ -2,6 +2,7 @@ import { useUpdateRequestTicket } from "@/api/requestQueries";
 import type { RequestSummary, RequestTicket } from "@/domain/request";
 
 import { FileContentSection } from "./FileContentSection";
+import { foldsContent, planSummary } from "./requestDetailLogic";
 
 export interface TicketPlanSectionProps {
   readonly request: RequestSummary;
@@ -14,7 +15,7 @@ export interface TicketPlanSectionProps {
   readonly onFetchCurrent: () => Promise<string>;
 }
 
-/** One ticket's plan file, editable in plan_review. */
+/** One ticket's plan file, editable and whole in plan_review; one closed line once the approval is behind it. */
 export function TicketPlanSection({
   request,
   ticket,
@@ -39,6 +40,7 @@ export function TicketPlanSection({
         await update.mutateAsync({ content, baseSha256 });
       }}
       onFetchCurrent={onFetchCurrent}
+      {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
     />
   );
 }

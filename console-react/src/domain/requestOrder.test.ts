@@ -109,7 +109,7 @@ describe("waitingBadgeLabel", () => {
       waitingSince: "2026-09-10T09:00:00Z",
     });
     expect(waitingBadgeLabel(request, new Date("2026-09-10T11:05:00Z"))).toBe(
-      "Waiting on you · 2h 5m",
+      "Waiting on you · 2h 05m",
     );
   });
 

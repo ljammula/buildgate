@@ -7,7 +7,8 @@ import { runPath } from "@/routes/paths";
 import { TableCell, TableRow } from "@/ui/Table";
 import { ShortPath } from "@/ui/ShortPath";
 import { StatusChipForToken } from "@/ui/StatusChip";
-import { ElapsedText, LocalTimeText, StallChip } from "@/ui/Time";
+import { RelativeTime } from "@/ui/RelativeTime";
+import { ElapsedText, StallChip } from "@/ui/Time";
 
 export interface RunRowProps {
   readonly run: Run;
@@ -56,7 +57,7 @@ export function RunRow({ run, request }: RunRowProps) {
         )}
       </TableCell>
       <TableCell className="text-xs whitespace-nowrap tabular-nums">
-        <LocalTimeText value={run.createdAt} />
+        <RelativeTime value={run.createdAt} />
       </TableCell>
       <TableCell className="truncate font-mono text-xs" title={run.id}>
         {run.id}

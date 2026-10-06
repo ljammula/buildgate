@@ -7,7 +7,6 @@ import {
   Moon,
   Plus,
   ServerCog,
-  ShieldCheck,
   Sun,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
@@ -24,6 +23,7 @@ import {
   runsPath,
   triagePath,
 } from "@/routes/paths";
+import { BrandMark } from "@/ui/BrandMark";
 import { Button } from "@/ui/Button";
 import { NavCount } from "@/shared/shell/NavCount";
 import { useNeedsYouCount } from "@/shared/shell/useNeedsYouCount";
@@ -96,12 +96,7 @@ export function AppShell({ children }: AppShellProps) {
           to={boardPath()}
           className="flex h-8 items-center gap-2.5 rounded-md px-1.5 font-semibold tracking-tight text-fg"
         >
-          <span
-            aria-hidden
-            className="grid size-6 place-items-center rounded-md bg-accent text-accent-fg"
-          >
-            <ShieldCheck className="size-4" />
-          </span>
+          <BrandMark className="size-6" />
           Buildgate
         </Link>
         <Button asChild variant="primary" className="w-full">

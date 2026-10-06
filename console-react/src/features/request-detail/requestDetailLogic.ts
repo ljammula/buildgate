@@ -79,6 +79,83 @@ export function parseAcceptanceCriteria(spec: string): string[] {
   return items;
 }
 
+// Once the operator has approved, the spec and each ticket's plan are receipts,
+// not a decision: they fold to one line. Written as the states that fold, never
+// as "every state but the review ones": a state added later keeps its
+// documents open until someone decides it should not, and spec_review,
+// oracle_review and plan_review are never in this set (the approval is bound
+// to the text on screen, so it is shown whole).
+const FOLDED_CONTENT_STATES: ReadonlySet<string> = new Set([
+  "planning",
+  "building",
+  "pr_review",
+  "resume_review",
+  "halted",
+  "quarantined",
+  "done",
+  "cancelled",
+]);
+
+/** Whether the spec and ticket plans fold to a one-line disclosure in `state`. */
+export function foldsContent(state: string): boolean {
+  return FOLDED_CONTENT_STATES.has(state);
+}
+
+function plural(n: number, one: string): string {
+  return `${n} ${one}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * The one line a folded spec leaves: its title and how many acceptance
+ * criteria it carries. Never empty: "spec.md" when it has neither.
+ */
+export function specSummary(spec: string): string {
+  const title = /^#\s+(.+)$/m.exec(spec)?.[1]?.trim() ?? "";
+  const criteria = parseAcceptanceCriteria(spec).length;
+  const parts = [
+    title,
+    criteria > 0 ? `${criteria} acceptance ${criteria === 1 ? "criterion" : "criteria"}` : "",
+  ];
+  const line = parts.filter((p) => p !== "").join(" · ");
+  return line === "" ? "spec.md" : line;
+}
+
+/**
+ * The one line a folded ticket plan leaves: the files it may touch (the first
+ * three, then a count) and how many steps it has. Never empty.
+ */
+export function planSummary(content: string): string {
+  const allowed = /^Allowed-Files:\s*(.+)$/m.exec(content)?.[1] ?? "";
+  const files = allowed
+    .split(",")
+    .map((f) => f.trim())
+    .filter((f) => f !== "");
+  const steps = stepCount(content);
+  const parts: string[] = [];
+  if (files.length > 0) {
+    const shown = files.slice(0, 3).join(", ");
+    parts.push(`files: ${shown}${files.length > 3 ? ` +${files.length - 3} more` : ""}`);
+  }
+  if (steps > 0) parts.push(plural(steps, "step"));
+  return parts.length === 0 ? "plan" : parts.join(" · ");
+}
+
+// The numbered items under a "Steps" heading, up to the next heading.
+function stepCount(content: string): number {
+  let count = 0;
+  let inSteps = false;
+  for (const line of content.split("\n")) {
+    const heading = line.trimEnd();
+    if (/^#{1,6}\s+/.test(heading)) {
+      if (inSteps) break;
+      inSteps = /^#{1,6}\s+steps\s*$/i.test(heading);
+      continue;
+    }
+    if (inSteps && /^\s*\d+[.)]\s+\S/.test(line)) count += 1;
+  }
+  return count;
+}
+
 /**
  * What a revision's snapshotted path is compared against: spec.md against
  * the request's own spec, a ticket spec path against that ticket's content.
@@ -277,6 +354,28 @@ export function pipelineSteps(request: RequestSummary): PipelineStep[] {
       showsBuildProgress: step === "building" && status === "current",
     };
   });
+}
+
+/**
+ * Whether a history entry was made by the factory itself rather than by an
+ * operator. History says "factory" in some entries and "factoryd" in others
+ * for the same thing, so neither is worth printing beside a step: only a
+ * person's name is a decision someone should be able to see.
+ */
+export function isAutomatedActor(by: string): boolean {
+  return by === "" || by === "factory" || by === "factoryd";
+}
+
+/**
+ * Whether the stepper draws a step's own lines (when, who, why) or leaves it
+ * a bare line. A pending step has none. A completed step keeps them only when
+ * a person decided it: the approval or rejection that moved the request on is
+ * the audit trail. The current, failed and needs-you steps always keep them.
+ */
+export function stepShowsDetail(step: Pick<PipelineStep, "status" | "entry">): boolean {
+  if (step.status === "pending") return false;
+  if (step.status !== "done") return true;
+  return step.entry !== null && !isAutomatedActor(step.entry.by);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

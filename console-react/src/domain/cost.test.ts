@@ -7,7 +7,9 @@ import {
   formatRequestTokenTotal,
   formatTokenCount,
   formatUsageLines,
+  formatUsageFigure,
   formatUsageSummary,
+  formatUsageTokens,
   requestTokenTotal,
 } from "@/domain/cost";
 import { type RequestSummary, decodeRequestSummary } from "@/domain/request";
@@ -347,5 +349,42 @@ describe("golden vectors (test/fixtures/vectors/cost.json)", () => {
     expect(formatUsageSummary(summary)).toBe(v.summary);
     expect(formatUsageLines(summary)).toEqual(v.lines);
     expect(formatCostPerAcceptedTicket(summary)).toBe(v.per_accepted_ticket);
+  });
+});
+
+describe("formatUsageTokens and formatUsageFigure", () => {
+  test("the token figure is only the number, with no model name", () => {
+    const summary = costSummary({
+      byModel: [modelUsage({ model: "gpt-5.6-luna", tokens: 478300 })],
+      tokens: 478300,
+    });
+    expect(formatUsageTokens(summary)).toBe("478.3k tokens");
+  });
+
+  test("several models add up, and a lower bound is marked", () => {
+    const summary = costSummary({
+      byModel: [modelUsage({ tokens: 400 }), modelUsage({ tokens: 100 })],
+      tokensComplete: false,
+    });
+    expect(formatUsageTokens(summary)).toBe("≥ 500 tokens");
+  });
+
+  test("nothing known is an em dash", () => {
+    expect(formatUsageTokens(costSummary())).toBe("—");
+  });
+
+  test("the rail figure leads with the dollars when a model recorded a cost", () => {
+    const summary = costSummary({
+      byModel: [
+        modelUsage({ model: "a", tokens: 478300, costMicroUsd: 1_500_000 }),
+        modelUsage({ model: "b", tokens: 1200, costMicroUsd: 10_000 }),
+      ],
+      tokens: 479500,
+    });
+    expect(formatUsageFigure(summary)).toBe("$1.51 · 479.5k tokens");
+  });
+
+  test("without a recorded cost the figure is just the tokens", () => {
+    expect(formatUsageFigure(costSummary({ tokens: 1000 }))).toBe("1.0k tokens");
   });
 });

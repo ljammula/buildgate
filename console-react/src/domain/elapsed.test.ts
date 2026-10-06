@@ -1,7 +1,10 @@
 import {
   elapsedBetween,
   formatDuration,
+  formatAgeCompact,
+  formatElapsedCompact,
   formatLocalTimestamp,
+  relativeAge,
   stallChipDisplay,
   stallStatus,
   tryParseTimestamp,
@@ -103,5 +106,54 @@ describe("utcTooltip", () => {
   test("shows the UTC value, or null when unparseable", () => {
     expect(utcTooltip("2026-09-18T11:00:00Z")).toBe("UTC: 2026-09-18T11:00:00.000Z");
     expect(utcTooltip("not-a-date")).toBeNull();
+  });
+});
+
+describe("formatElapsedCompact", () => {
+  const minute = 60_000;
+  test.each([
+    [0, "00:00"],
+    [20 * minute, "20:00"],
+    [59 * minute + 59_000, "59:59"],
+    [60 * minute, "1h 00m"],
+    [125 * minute, "2h 05m"],
+    [23 * 60 * minute + 59 * minute, "23h 59m"],
+    [24 * 60 * minute, "1d 0h"],
+    [(3 * 24 + 4) * 60 * minute + 30 * minute, "3d 4h"],
+    [-5000, "00:00"],
+  ])("%d ms reads %s", (ms, want) => {
+    expect(formatElapsedCompact(ms)).toBe(want);
+  });
+});
+
+describe("relativeAge", () => {
+  const now = new Date("2026-10-05T12:00:00Z");
+  test.each([
+    ["2026-10-05T11:59:30Z", "just now"],
+    ["2026-10-05T11:55:00Z", "5m ago"],
+    ["2026-10-05T09:55:00Z", "2h 05m ago"],
+    ["2026-10-02T08:00:00Z", "3d 4h ago"],
+    ["2026-10-05T12:00:30Z", "just now"],
+  ])("%s reads %s", (at, want) => {
+    expect(relativeAge(at, now)).toBe(want);
+  });
+
+  test("an empty or unparseable timestamp comes back verbatim", () => {
+    expect(relativeAge("", now)).toBe("");
+    expect(relativeAge("soon", now)).toBe("soon");
+  });
+});
+
+describe("formatAgeCompact", () => {
+  const minute = 60_000;
+  test.each([
+    [0, "0m"],
+    [45 * minute, "45m"],
+    [60 * minute, "1h"],
+    [125 * minute, "2h 05m"],
+    [24 * 60 * minute, "1d"],
+    [(3 * 24 + 4) * 60 * minute, "3d 4h"],
+  ])("%d ms reads %s", (ms, want) => {
+    expect(formatAgeCompact(ms)).toBe(want);
   });
 });

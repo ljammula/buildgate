@@ -1,3 +1,4 @@
+import { formatAgeCompact } from "@/domain/elapsed";
 import { type RequestStageGroup, requestStageGroupOf } from "@/domain/boardFilters";
 import { type RequestSummary, requestWaitingSinceOrEnteredAt } from "@/domain/request";
 
@@ -37,20 +38,12 @@ export function sortedRequests(requests: readonly RequestSummary[]): RequestSumm
   });
 }
 
-function formatAge(ms: number): string {
-  const minutes = Math.max(0, Math.floor(ms / 60_000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
-}
-
 /** "Waiting on you · 45m" for a request that needs the operator; null otherwise. */
 export function waitingBadgeLabel(request: RequestSummary, now: Date): string | null {
   if (requestStageGroupOf(request) !== "review") return null;
   const since = Date.parse(requestWaitingSinceOrEnteredAt(request));
   if (Number.isNaN(since)) return "Waiting on you";
-  return `Waiting on you · ${formatAge(now.getTime() - since)}`;
+  return `Waiting on you · ${formatAgeCompact(now.getTime() - since)}`;
 }
 
 /** How many requests wait on the operator: the tab title's count. */

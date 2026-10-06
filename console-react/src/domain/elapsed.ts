@@ -34,6 +34,48 @@ export function formatDuration(durationMs: number): string {
     : `${two(minutes)}:${two(seconds)}`;
 }
 
+// The long end of a duration: "2h 05m" past an hour, "3d 4h" past a day. Whole
+// seconds are noise at that scale, so both drop them.
+function longForm(totalMinutes: number): string {
+  const days = Math.trunc(totalMinutes / 1440);
+  const hours = Math.trunc(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  return `${hours}h ${two(minutes)}m`;
+}
+
+/**
+ * An elapsed duration for reading, not for a stopwatch: "mm:ss" under an
+ * hour (the same as formatDuration), "2h 05m" from an hour, "3d 4h" from a
+ * day. A negative duration (clock skew) renders as zero.
+ */
+export function formatElapsedCompact(durationMs: number): string {
+  const clamped = durationMs < 0 ? 0 : durationMs;
+  const totalMinutes = Math.trunc(clamped / 60_000);
+  return totalMinutes < 60 ? formatDuration(clamped) : longForm(totalMinutes);
+}
+
+/** An age: "5m", "2h 05m", "2h", "3d 4h". Under a minute is relativeAge's "just now". */
+export function formatAgeCompact(ageMs: number): string {
+  const clamped = ageMs < 0 ? 0 : ageMs;
+  const totalMinutes = Math.trunc(clamped / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  // An exact hour or day drops the zero tail: "2h", "1d".
+  return longForm(totalMinutes).replace(/ 00m$/, "").replace(/ 0h$/, "");
+}
+
+/**
+ * "just now", "5m ago", "2h 05m ago", "3d 4h ago" for how long before `now`
+ * `value` was; the raw value for an empty or unparseable timestamp. The exact
+ * time belongs in a tooltip beside it (ui/RelativeTime does that).
+ */
+export function relativeAge(value: string, now: Date): string {
+  const parsed = tryParseTimestamp(value);
+  if (parsed === null) return value;
+  const ageMs = now.getTime() - parsed.getTime();
+  return ageMs < 60_000 ? "just now" : `${formatAgeCompact(ageMs)} ago`;
+}
+
 /**
  * Parses an RFC3339 timestamp, returning null (rather than throwing) for an
  * empty or unparseable value.

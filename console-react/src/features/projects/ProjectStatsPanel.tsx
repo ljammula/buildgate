@@ -23,7 +23,8 @@ function StatsBody({ stats }: { readonly stats: ProjectStats }) {
           { label: "Project", value: <span className="font-mono">{stats.project}</span> },
           { label: "Total runs", value: stats.totalRuns },
           { label: "Accepted", value: stats.accepted },
-          { label: "Halted", value: stats.halted },
+          // Nothing halted is the usual answer, and a row that says so is noise.
+          ...(stats.halted === 0 ? [] : [{ label: "Halted", value: stats.halted }]),
           {
             label: "Override rate (accepted)",
             value:
@@ -40,18 +41,17 @@ function StatsBody({ stats }: { readonly stats: ProjectStats }) {
           },
         ]}
       />
-      <Section title="Quarantined by cause">
-        {causes.length === 0 ? (
-          <p className="text-sm text-fg-muted">No quarantined runs recorded.</p>
-        ) : (
+      {/* Absent, not "none recorded", when nothing was quarantined. */}
+      {causes.length === 0 ? null : (
+        <Section title="Quarantined by cause">
           <ProjectFieldList
             fields={causes.map(([cause, count]) => ({
               label: cause,
               value: count,
             }))}
           />
-        )}
-      </Section>
+        </Section>
+      )}
     </>
   );
 }

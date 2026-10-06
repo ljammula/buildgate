@@ -118,7 +118,7 @@ test("a halted request lands in Needs you, not Finished, and counts toward the t
   expect(screen.getByText("Finished (1)")).toBeInTheDocument();
   expect(screen.getByText("Needs a retry")).toBeInTheDocument();
   await waitFor(() => {
-    expect(document.title).toBe("(1) Factory Console");
+    expect(document.title).toBe("(1) Buildgate");
   });
 });
 
@@ -130,7 +130,7 @@ test("the tab title shows (?) once a poll fails", async () => {
   server.set("GET /requests", () => apiErrorResponse(500, "down"));
   await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await waitFor(() => {
-    expect(document.title).toBe("(?) Factory Console");
+    expect(document.title).toBe("(?) Buildgate");
   });
 });
 
@@ -191,8 +191,9 @@ test("a filter that matches nothing says so", async () => {
   expect(await screen.findByText("No requests found.")).toBeInTheDocument();
 });
 
-test("the needs-you banner selects the needs-you filter", async () => {
+test("the needs-you banner appears only when a filter hides the Needs you section, and selects it", async () => {
   const { location } = renderApp(<BoardScreen />, {
+    path: "/?group=finished",
     server: board([
       { id: "req-a", state: "spec_review", title: "Review me" },
       { id: "req-b", state: "done", title: "Old" },
@@ -205,6 +206,84 @@ test("the needs-you banner selects the needs-you filter", async () => {
   expect(screen.queryByText("Old")).not.toBeInTheDocument();
   // Already looking at it: the banner goes.
   expect(screen.queryByTestId("needs-you-banner")).not.toBeInTheDocument();
+});
+
+test("the needs-you banner is absent while the Needs you section is on the board", async () => {
+  renderApp(<BoardScreen />, {
+    server: board([
+      { id: "req-a", state: "spec_review", title: "Review me" },
+      { id: "req-b", state: "done", title: "Old" },
+    ]),
+  });
+  expect(await screen.findByRole("heading", { name: "Needs you (1)" })).toBeInTheDocument();
+  expect(screen.queryByTestId("needs-you-banner")).not.toBeInTheDocument();
+});
+
+test("the worker-down banner stays", async () => {
+  renderApp(<BoardScreen />, {
+    server: board(
+      [{ id: "req-a", state: "building", title: "Working" }],
+      [
+        {
+          on: "GET /queue-run",
+          reply: () => json({ state: "stale", last_heartbeat: "2026-09-24T09:00:00Z" }),
+        },
+      ],
+    ),
+  });
+  expect(await screen.findByTestId("worker-down-banner")).toBeInTheDocument();
+});
+
+describe("one project", () => {
+  test("hides the Project column and the project filter chip", async () => {
+    renderApp(<BoardScreen />, {
+      server: board([
+        { id: "req-a", state: "done", project: "app", title: "One" },
+        { id: "req-b", state: "building", project: "app", title: "Two" },
+      ]),
+    });
+    await screen.findByText("One");
+
+    expect(screen.queryByRole("columnheader", { name: "Project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Project" })).not.toBeInTheDocument();
+  });
+
+  test("shows both again once there are two projects", async () => {
+    renderApp(<BoardScreen />, {
+      server: board([
+        { id: "req-a", state: "done", project: "app", title: "One" },
+        { id: "req-b", state: "done", project: "api", title: "Two" },
+      ]),
+    });
+    await screen.findByText("One");
+
+    expect(screen.getAllByRole("columnheader", { name: "Project" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("group", { name: "Project" })).toBeInTheDocument();
+  });
+});
+
+test("a request waiting on the operator shows its state and its wait as one unit", async () => {
+  const waitingSince = new Date(Date.now() - 5 * 60_000).toISOString();
+  renderApp(<BoardScreen />, {
+    server: board([{ id: "req-a", state: "spec_review", title: "Review me", waitingSince }]),
+  });
+
+  const unit = await screen.findByTestId("request-status-unit");
+  expect(within(unit).getByText("Spec review")).toBeInTheDocument();
+  expect(within(unit).getByTestId("waiting-badge")).toHaveTextContent("Waiting on you · 5m");
+});
+
+test("the Updated column reads a relative age with the exact local time on hover", async () => {
+  const updatedAt = new Date(Date.now() - 3 * 60 * 60_000 - 5 * 60_000).toISOString();
+  renderApp(<BoardScreen />, {
+    server: board([{ id: "req-a", state: "done", title: "Old", updatedAt }]),
+  });
+
+  const row = await screen.findByTestId("request-req-a");
+  const when = within(row).getByText(/ago$/);
+  expect(when).toHaveTextContent("3h 05m ago");
+  expect(when.tagName).toBe("TIME");
+  expect(when.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
 });
 
 test("a building request with tickets shows the fan-out roll-up strip", async () => {
@@ -250,9 +329,10 @@ test("the board row shows the server cost_summary usage figure when present", as
       },
     ]),
   });
-  expect(await screen.findByTestId("request-cost-total")).toHaveTextContent(
-    "gpt-5.6-luna · 478.3k tokens",
-  );
+  // One figure; the model is on hover.
+  const figure = await screen.findByTestId("request-cost-total");
+  expect(figure).toHaveTextContent(/^478\.3k tokens$/);
+  expect(figure).toHaveAttribute("title", "gpt-5.6-luna · 478.3k tokens");
   expect(screen.queryByTestId("request-token-total")).not.toBeInTheDocument();
 });
 

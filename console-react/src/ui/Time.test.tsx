@@ -69,7 +69,7 @@ describe("ElapsedText", () => {
   test("a finished span is fixed and starts no timer", () => {
     vi.useFakeTimers();
     render(<ElapsedText since="2026-09-18T11:00:00Z" until="2026-09-18T12:01:01Z" />);
-    expect(screen.getByText("01:01:01")).toBeInTheDocument();
+    expect(screen.getByText("1h 01m")).toBeInTheDocument();
     expect(vi.getTimerCount()).toBe(0);
   });
 

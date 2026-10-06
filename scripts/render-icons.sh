@@ -17,6 +17,10 @@
 #                                           maskable safe zone
 #   internal/notify/buildgate-icon.png      256px, embedded into factoryd for
 #                                           desktop notifications' -contentImage
+#   console-react/public/buildgate.svg      the mark, copied: the React
+#                                           console's sidebar mark and tab icon
+#   console-react/public/favicon.png        32px, the tab icon the "needs you"
+#                                           badge is drawn onto
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -58,3 +62,11 @@ render "$src" 512 "$root/console/web/icons/Icon-512.png"
 render "$work/maskable.svg" 192 "$root/console/web/icons/Icon-maskable-192.png"
 render "$work/maskable.svg" 512 "$root/console/web/icons/Icon-maskable-512.png"
 render "$src" 256 "$root/internal/notify/buildgate-icon.png"
+
+# The React console (console-react/public is served at the bundle's root):
+# the mark itself for the sidebar and the tab icon, and a 32px PNG the
+# "needs you" tab badge is drawn onto.
+mkdir -p "$root/console-react/public"
+cp "$src" "$root/console-react/public/buildgate.svg"
+echo "wrote $root/console-react/public/buildgate.svg"
+render "$src" 32 "$root/console-react/public/favicon.png"

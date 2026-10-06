@@ -1,7 +1,7 @@
 // The run detail screen's pure rules: the Timeline's stage rows and glyphs,
 // the attempt card's exit and model lines. Time is a parameter (`now`).
 import { formatTokenCount } from "@/domain/cost";
-import { formatDuration } from "@/domain/elapsed";
+import { formatElapsedCompact } from "@/domain/elapsed";
 import type { Attempt, GateResult, ProgressEvent, Run } from "@/domain/run";
 import { agentEvidenceRoundOutcome, runIsTerminal } from "@/domain/run";
 
@@ -220,8 +220,8 @@ export function durationText(
   glyph: StageGlyph,
 ): string | null {
   if (start === null) return null;
-  if (end !== null) return formatDuration(end.getTime() - start.getTime());
-  if (glyph === "running") return formatDuration(now.getTime() - start.getTime());
+  if (end !== null) return formatElapsedCompact(end.getTime() - start.getTime());
+  if (glyph === "running") return formatElapsedCompact(now.getTime() - start.getTime());
   return null;
 }
 
@@ -400,7 +400,7 @@ function roundSubRow(round: RoundInfo, now: Date): TimelineSubRow {
   const duration =
     round.start === null
       ? null
-      : formatDuration((round.end ?? now).getTime() - round.start.getTime());
+      : formatElapsedCompact((round.end ?? now).getTime() - round.start.getTime());
   return subRow({ label: text, glyph, durationText: duration });
 }
 

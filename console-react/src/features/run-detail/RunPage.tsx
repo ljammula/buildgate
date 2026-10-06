@@ -18,8 +18,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/Tabs";
 /**
  * One run: its Overview, and its diff and release decision as views selected
  * by the URL (`?view=diff|release`), so a reload or a shared link lands on
- * the same view. A view's data is fetched only while it is selected; the
- * progress feed lives here so it survives a switch of view.
+ * the same view. A view's data is fetched only while it is selected (the
+ * Overview's Release card alone asks for an accepted run's decision, to show
+ * its verdict); the progress feed lives here so it survives a switch of view.
  */
 export function RunPage({ id }: { id: string }) {
   const { config } = useApi();

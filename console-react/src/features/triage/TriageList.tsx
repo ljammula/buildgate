@@ -32,7 +32,7 @@ export function TriageList({ requests, focusedId, onFocus }: TriageListProps) {
               )}
             >
               <span className="min-w-0">
-                <span className="text-fg block truncate text-sm font-medium">
+                <span className="text-fg line-clamp-2 text-sm font-medium">
                   {request.title !== "" ? request.title : request.id}
                 </span>
                 <span className="text-fg-muted block truncate text-xs">{request.project}</span>

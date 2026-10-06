@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   elapsedBetween,
-  formatDuration,
+  formatElapsedCompact,
   formatLocalTimestamp,
   stallChipDisplay,
   tryParseTimestamp,
@@ -68,7 +68,7 @@ export interface ElapsedTextProps {
   readonly className?: string;
 }
 
-/** "mm:ss" (or "hh:mm:ss") elapsed between two instants, ticking while open-ended. */
+/** Elapsed between two instants ("mm:ss", then "2h 05m", "3d 4h"), ticking while open-ended. */
 export function ElapsedText({
   since,
   until = null,
@@ -77,7 +77,7 @@ export function ElapsedText({
 }: ElapsedTextProps) {
   const now = useNow(until === null ? intervalMs : null);
   const ms = elapsedBetween(since, until, now);
-  return <span className={cn("tabular-nums", className)}>{formatDuration(ms)}</span>;
+  return <span className={cn("tabular-nums", className)}>{formatElapsedCompact(ms)}</span>;
 }
 
 /**

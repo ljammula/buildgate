@@ -91,7 +91,7 @@ export function BoardScreen() {
               onRetryWorker={() => void queueRun.refetch()}
               streamError={streamError}
               needsYouCount={needsHuman ?? 0}
-              needsYouSelected={controls.filters.section === "needsYou"}
+              needsYouVisible={sections.some((entry) => entry.section === "needsYou")}
               onViewNeedsYou={() => {
                 controls.selectSection("needsYou");
               }}
@@ -118,6 +118,7 @@ export function BoardScreen() {
                   section={entry.section}
                   requests={entry.requests}
                   now={now}
+                  showProject={distinctProjects(requests).length > 1}
                 />
               ))
             )}

@@ -517,6 +517,72 @@ describe("reading order when a request stops", () => {
     expect(evidence.compareDocumentPosition(retry) & before).toBeTruthy();
   });
 
+  test("the terminal command and the run-record correction sit in one closed disclosure after the actions", async () => {
+    openRequest(
+      requestWire({
+        state: "quarantined",
+        title: "Stopped",
+        error: "verify failed after 3 rounds",
+        ticket_index: 1,
+        tickets: [ticketWire({ index: 1, runId: "run-1" })],
+      }),
+    );
+    await heading("Stopped");
+    const box = callout();
+    const more = within(box).getByTestId<HTMLDetailsElement>("recovery-more");
+
+    expect(more.open).toBe(false);
+    expect(
+      within(more).getByRole("heading", { name: "Other ways to resolve this" }),
+    ).toBeInTheDocument();
+    expect(within(more).getByText("factoryd retry req-1")).toBeInTheDocument();
+    expect(within(more).getByText(/Correcting the ticket's own run record/)).toBeInTheDocument();
+    expect(
+      within(more).getByRole("link", { name: "Review the ticket's run override" }),
+    ).toBeInTheDocument();
+    // The actions are outside it and first.
+    for (const name of ["Retry request", "Cancel request", "Send back to planning"]) {
+      const button = within(box).queryByRole("button", { name });
+      if (button !== null) {
+        expect(more.contains(button)).toBe(false);
+        expect(
+          button.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      }
+    }
+    await userEvent.click(
+      within(more).getByRole("heading", { name: "Other ways to resolve this" }),
+    );
+    expect(more.open).toBe(true);
+  });
+
+  test("a long explanation shows its first sentence, with the whole one inside the disclosure", async () => {
+    const rest =
+      "Then check the branch and merge it yourself if the pull request cannot be opened.";
+    openRequest(
+      requestWire({
+        state: "halted",
+        title: "Stopped",
+        next_action: `Open the pull request by hand. ${rest}`,
+      }),
+    );
+    await heading("Stopped");
+
+    expect(screen.getByTestId("recovery-explanation")).toHaveTextContent(
+      /^Open the pull request by hand\.$/,
+    );
+    const more = screen.getByTestId("recovery-more");
+    expect(within(more).getByText(`Open the pull request by hand. ${rest}`)).toBeInTheDocument();
+  });
+
+  test("the cause stays whole, however long", async () => {
+    const cause = `ticket 1 was accepted but its pull request could not be opened: ${"gh said no. ".repeat(40)}END`;
+    openRequest(requestWire({ state: "halted", title: "Stopped", error: cause }));
+    await heading("Stopped");
+
+    expect(screen.getByTestId("recovery-cause")).toHaveTextContent(cause);
+  });
+
   test("no run, no evidence link", async () => {
     openRequest(requestWire({ state: "halted", title: "No run yet" }));
     await heading("No run yet");

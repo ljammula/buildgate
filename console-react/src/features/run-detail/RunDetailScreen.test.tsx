@@ -364,17 +364,29 @@ test("the diff view is not offered when no diff snapshot exists", async () => {
 // The run page reaches the release view, which renders the run's real recorded
 // decision from the backing endpoint, not a locally inferred one.
 test("run detail screen navigates to the release view", async () => {
-  const { server, location } = renderRun(acceptedRun(), {
+  const { location } = renderRun(acceptedRun(), {
     routes: [{ on: "GET /runs/run-accepted/release", reply: json(deniedRelease) }],
   });
 
   const tab = await screen.findByRole("tab", { name: "View release decision" });
-  expect(server.sent("GET /runs/run-accepted/release")).toHaveLength(0);
+  // The Overview's Release card already shows the verdict: no explanation sentence.
+  expect(await screen.findByText("Denied")).toBeInTheDocument();
+  expect(screen.queryByText(/The factory-owned release decision/)).not.toBeInTheDocument();
   await userEvent.click(tab);
 
   expect(await screen.findByText("Denied")).toBeInTheDocument();
   expect(screen.getByText("Kill switch engaged")).toBeInTheDocument();
   expect(location()).toBe("/runs/run-accepted?view=release");
+});
+
+test("the Release card explains itself, and asks for nothing, while no decision can exist", async () => {
+  const { server } = renderRun(quarantinedRun(), {
+    routes: [{ on: "GET /runs/run-quarantined/release", reply: json(deniedRelease) }],
+  });
+
+  expect(await screen.findByText(/The factory-owned release decision/)).toBeInTheDocument();
+  expect(server.sent("GET /runs/run-quarantined/release")).toHaveLength(0);
+  expect(screen.queryByText("Denied")).not.toBeInTheDocument();
 });
 
 // A truncated diff is visibly flagged, not silently presented as the complete
@@ -516,7 +528,7 @@ describe("Timeline", () => {
     });
     // A running stage also carries its live elapsed time.
     expect(within(list).getByTestId("timeline-row-preflight").textContent).toMatch(
-      /^RunningPreflight\d+:\d\d/,
+      /^RunningPreflight(\d+:\d\d|\d+h \d\dm|\d+d \d+h)/,
     );
     expect(within(list).getByTestId("timeline-row-verify").textContent).toBe("PendingVerify");
     for (const item of within(list).getAllByRole("listitem")) {

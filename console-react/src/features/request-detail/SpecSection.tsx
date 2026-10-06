@@ -3,6 +3,7 @@ import type { RequestSummary } from "@/domain/request";
 
 import { AcceptanceCriteriaList } from "./AcceptanceCriteriaList";
 import { FileContentSection } from "./FileContentSection";
+import { foldsContent, specSummary } from "./requestDetailLogic";
 
 export interface SpecSectionProps {
   readonly request: RequestSummary;
@@ -13,7 +14,7 @@ export interface SpecSectionProps {
   readonly onFetchCurrent: () => Promise<string>;
 }
 
-/** spec.md, with the parsed acceptance criteria under it. Editable in spec_review. */
+/** spec.md, with the parsed acceptance criteria under it. Editable in spec_review, and whole there; one closed line once the approval is behind it. */
 export function SpecSection({
   request,
   editable,
@@ -37,6 +38,7 @@ export function SpecSection({
         await update.mutateAsync({ content, baseSha256 });
       }}
       onFetchCurrent={onFetchCurrent}
+      {...(foldsContent(request.state) ? { foldedSummary: specSummary(request.spec) } : {})}
     >
       <AcceptanceCriteriaList spec={request.spec} />
     </FileContentSection>

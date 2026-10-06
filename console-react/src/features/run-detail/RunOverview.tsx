@@ -2,20 +2,20 @@ import { useRef, useState } from "react";
 
 import { formatLocalTimestamp } from "@/domain/elapsed";
 import type { Run } from "@/domain/run";
-import { composeServiceAddress } from "@/domain/run";
-import { AttemptCard } from "@/features/run-detail/AttemptCard";
+import { runIsTerminalForDisplay } from "@/domain/run";
+import { attemptsSummary, gatesSummary } from "@/domain/runSummary";
+import { AttemptsBlock } from "@/features/run-detail/AttemptsBlock";
 import { BuildLogPane } from "@/features/run-detail/BuildLogPane";
+import { ComposeBlock } from "@/features/run-detail/ComposeBlock";
 import { EvidenceCard } from "@/features/run-detail/EvidenceCard";
-import { Field, Fields } from "@/features/run-detail/Fields";
+import { GatesBlock } from "@/features/run-detail/GatesBlock";
 import { OverrideSection } from "@/features/run-detail/OverrideSection";
-import { RunSummarySection } from "@/features/run-detail/RunSummarySection";
+import { RunFactsCard } from "@/features/run-detail/RunFactsCard";
+import { RunReleaseCard } from "@/features/run-detail/RunReleaseCard";
+import { RunVerdictLine } from "@/features/run-detail/RunVerdictLine";
 import { Timeline } from "@/features/run-detail/Timeline";
 import type { RunProgress } from "@/features/run-detail/useRunProgress";
-import { CompactId } from "@/ui/CompactId";
 import { Section } from "@/ui/PageLayout";
-
-// Label column of the side column's facts: the main column's 11rem would leave a 22rem card with no room for a value.
-const sideFields = "grid-cols-[6.5rem_minmax(0,1fr)]";
 
 export interface RunOverviewProps {
   readonly run: Run;
@@ -24,7 +24,14 @@ export interface RunOverviewProps {
   readonly temporalUiUrl: string | null;
 }
 
-/** Every section of the run's evidence, the Timeline first: "what is it doing right now" comes before anything that only exists once a stage has finished. */
+/**
+ * The run's evidence. A finished run opens with its verdict in one line, then
+ * whatever failed (open, first), the Timeline and the build log, then the
+ * attempts, gates and compose services as closed one-line blocks. A block
+ * with nothing in it yet is absent, not "None". The Timeline stays ahead of
+ * anything that only exists once a stage has finished: "what is it doing
+ * right now" comes first on a live run.
+ */
 export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOverviewProps) {
   const [logOn, setLogOn] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
@@ -37,11 +44,17 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
     if (pane !== null && typeof pane.scrollIntoView === "function") pane.scrollIntoView();
   }
 
-  const diff = run.diffStat;
-  const files = run.changedFiles;
+  const over = runIsTerminalForDisplay(run);
+  const attemptsFailed = run.attempts.length > 0 && attemptsSummary(run.attempts).failed;
+  const gatesFailed = run.gateResults.length > 0 && gatesSummary(run.gateResults).failed;
+  const attempts = <AttemptsBlock attempts={run.attempts} onOpenLog={openLog} />;
+  const gates = <GatesBlock gates={run.gateResults} />;
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="flex min-w-0 flex-col gap-4">
+        {over ? <RunVerdictLine run={run} /> : null}
+        {gatesFailed ? gates : null}
+        {attemptsFailed ? attempts : null}
         <Section title="Timeline" card>
           <Timeline run={run} events={progress.events} error={progress.error} />
         </Section>
@@ -50,42 +63,9 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
             <BuildLogPane runId={run.id} enabled={logOn} onEnabledChange={setLogOn} />
           </div>
         </Section>
-        <Section title="Attempts" card>
-          {run.attempts.length === 0 ? (
-            <Fields>
-              <Field label="Attempts">None</Field>
-            </Fields>
-          ) : (
-            run.attempts.map((attempt, i) => (
-              <AttemptCard
-                key={`${attempt.startedAt}-${i}`}
-                attempt={attempt}
-                onOpenLog={openLog}
-              />
-            ))
-          )}
-        </Section>
-        <Section title="Gate results" card>
-          {run.gateResults.length === 0 ? (
-            <Fields>
-              <Field label="Gate results">None</Field>
-            </Fields>
-          ) : (
-            run.gateResults.map((gate, i) => (
-              <EvidenceCard
-                key={`${gate.check}-${i}`}
-                title={gate.check}
-                lines={[
-                  `Command: ${gate.command.join(" ")}`,
-                  `Passed: ${gate.passed ? "Yes" : "No"}`,
-                  `Exit code: ${gate.exitCode}`,
-                  `Duration: ${gate.durationMs} ms`,
-                  `Log SHA-256: ${gate.logSha256}`,
-                ]}
-              />
-            ))
-          )}
-        </Section>
+        {attemptsFailed ? null : attempts}
+        {gatesFailed ? null : gates}
+        <ComposeBlock phases={run.composePhases} />
         {run.notifications.length > 0 ? (
           <Section title="Notifications" card>
             {run.notifications.map((n, i) => (
@@ -116,74 +96,9 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
       </div>
       <div className="flex min-w-0 flex-col gap-4">
         {run.state === "quarantined" ? <OverrideSection runId={run.id} /> : null}
-        <RunSummarySection run={run} streamError={streamError} temporalUiUrl={temporalUiUrl} />
-        <Section title="Commit and artifact evidence" card>
-          <Fields className={sideFields}>
-            <Field label="Base SHA" mono>
-              <CompactId value={run.baseSha} max={20} label="base SHA" />
-            </Field>
-            <Field label="Result SHA" mono>
-              {run.resultSha === null ? (
-                "Not available"
-              ) : (
-                <CompactId value={run.resultSha} max={20} label="result SHA" />
-              )}
-            </Field>
-            <Field label="Spec SHA-256" mono>
-              <CompactId value={run.specSha256} max={20} label="spec SHA-256" />
-            </Field>
-            <Field label="Committed by factoryd">{run.committedByFactoryd ? "Yes" : "No"}</Field>
-          </Fields>
-        </Section>
-        <Section title="Changed files" card>
-          <Fields className={sideFields}>
-            {files === null ? (
-              <Field label="Files">Not collected</Field>
-            ) : files.length === 0 ? (
-              <Field label="Files">None</Field>
-            ) : (
-              files.map((file) => (
-                <Field key={file} label="File" mono>
-                  {file}
-                </Field>
-              ))
-            )}
-            <Field label="Diff stat">
-              {diff === null
-                ? "Not available"
-                : `${diff.filesChanged} files, +${diff.insertions}, -${diff.deletions}`}
-            </Field>
-          </Fields>
-        </Section>
-        {run.composePhases.length > 0 ? (
-          <Section title="Compose services" card>
-            {run.composePhases.map((phase, i) => (
-              <EvidenceCard
-                key={`${phase.phase}-${i}`}
-                title={phase.phase === "" ? "run" : phase.phase}
-                lines={
-                  phase.enabled
-                    ? phase.services.map(
-                        (svc) =>
-                          `${svc.name}: ${svc.image} at ${composeServiceAddress(svc)}${
-                            svc.digest === "" ? "" : ` (${svc.digest})`
-                          }`,
-                      )
-                    : [`Not launched: ${phase.disabledReason}`]
-                }
-              />
-            ))}
-          </Section>
-        ) : null}
+        <RunFactsCard run={run} streamError={streamError} temporalUiUrl={temporalUiUrl} />
         {/* Always offered, not only for an accepted run: the release view reports the project kill switch's state and history too, and a run with no decision is itself the answer to "was this released?", stated there explicitly. */}
-        <Section title="Release" card>
-          <Fields className={sideFields}>
-            <Field label="Decision">
-              The factory-owned release decision for this run, and the project kill switch it was
-              evaluated against.
-            </Field>
-          </Fields>
-        </Section>
+        <RunReleaseCard runId={run.id} accepted={run.state === "accepted"} />
       </div>
     </div>
   );

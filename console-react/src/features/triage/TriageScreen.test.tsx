@@ -281,3 +281,41 @@ test("the decision bar is a sticky footer that holds Approve, Reject and the key
   expect(within(bar).getByRole("button", { name: "Reject (r)" })).toBeInTheDocument();
   expect(within(bar).getByText(/j\/k move/)).toBeInTheDocument();
 });
+
+test("the focused request's facts are one meta line, and the text under review stays whole", async () => {
+  const spec = `# Spec\n\n${"A line of the spec under review.\n".repeat(80)}END-OF-SPEC\n`;
+  renderApp(<TriageScreen />, {
+    server: triage(
+      [
+        {
+          id: "req-a",
+          state: "spec_review",
+          title: "First",
+          project: "app",
+          rejections: [
+            { by: "jane", at: "2026-09-10T09:00:00Z", reason: "vague", from_state: "spec_review" },
+          ],
+          costSummary: {
+            spec: 0,
+            plan: 0,
+            runs: 0,
+            total: 0,
+            currency: "usd",
+            complete: true,
+            tokens_complete: true,
+            tokens: 478300,
+            by_model: [{ model: "gpt-5.6-luna", tokens: 478300 }],
+          },
+        },
+      ],
+      [{ ...requestJson({ id: "req-a", state: "spec_review", title: "First" }), spec }],
+    ),
+  });
+
+  const meta = await screen.findByTestId("triage-meta");
+  expect(meta).toHaveTextContent("app · 478.3k tokens · 1 prior rejection");
+  expect(screen.queryByText(/Usage so far/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Project:/)).not.toBeInTheDocument();
+  const artifact = await screen.findByTestId("triage-artifact-content");
+  expect(artifact.textContent).toContain("END-OF-SPEC");
+});

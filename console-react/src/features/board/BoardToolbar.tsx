@@ -23,7 +23,7 @@ export interface BoardToolbarProps {
   readonly onToggleProject: (project: string) => void;
 }
 
-/** Search, the section filter, the project filter and the live indicator. */
+/** Search, the section filter, the project filter (only with more than one project to choose) and the live indicator. */
 export function BoardToolbar({
   filters,
   searchText,
@@ -70,7 +70,7 @@ export function BoardToolbar({
           <FreshnessIndicator freshness={freshness} lastUpdateAt={lastUpdateAt} />
         </div>
       </div>
-      {allProjects.length > 0 ? (
+      {allProjects.length > 1 ? (
         <div role="group" aria-label="Project" className="flex flex-wrap items-center gap-1.5">
           {allProjects.map((project) => (
             <FilterChip

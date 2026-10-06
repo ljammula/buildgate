@@ -20,7 +20,7 @@ export function WaitingBadge({ request, now }: WaitingBadgeProps) {
     <span
       data-testid="waiting-badge"
       className={cn(
-        "rounded-full border px-2 py-0.5 text-xs font-medium",
+        "rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         toneClasses.warning.text,
         toneClasses.warning.border,
         toneClasses.warning.soft,

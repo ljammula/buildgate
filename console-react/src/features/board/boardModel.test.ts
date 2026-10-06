@@ -23,6 +23,15 @@ describe("queueRunWarning", () => {
     );
   });
 
+  test("a heartbeat from days ago reads days and hours, not hundreds of hours", () => {
+    const text = queueRunWarning(
+      { state: "stale", lastHeartbeat: "2026-09-20T05:05:00Z" },
+      [],
+      now,
+    );
+    expect(text).toContain("(last heartbeat 4d 4h ago)");
+  });
+
   test("stale without a parseable heartbeat has no age", () => {
     expect(queueRunWarning({ state: "stale", lastHeartbeat: "" }, [], now)).toBe(
       "worker is not running -- requests won't advance; start `factoryd worker`",

@@ -1,9 +1,9 @@
 import { Check, X } from "lucide-react";
 
-import { formatUsageLines } from "@/domain/cost";
+import { formatUsageFigure, formatUsageLines } from "@/domain/cost";
 import type { RequestSummary } from "@/domain/request";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
-import { WaitingBadge } from "@/shared/request/WaitingBadge";
+import { RequestStatusUnit } from "@/shared/request/RequestStatusUnit";
 import { Button } from "@/ui/Button";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { Spinner } from "@/ui/Feedback";
@@ -42,30 +42,31 @@ export function TriageDetail({
   onReject,
 }: TriageDetailProps) {
   const cost = request.costSummary;
+  const meta = [
+    request.project,
+    request.ticketCount > 0 ? `Ticket ${request.ticketIndex} / ${request.ticketCount}` : "",
+    cost === null ? "" : formatUsageFigure(cost),
+    request.rejections.length > 0
+      ? `${request.rejections.length} prior ${request.rejections.length === 1 ? "rejection" : "rejections"}`
+      : "",
+  ].filter((part) => part !== "");
   const content = detail === null ? "" : artifactContent(detail);
   return (
     <div className="border-border flex min-w-0 flex-col gap-3 rounded-lg border p-4">
       <h2 className="text-fg text-base font-semibold">
         {request.title !== "" ? request.title : request.id}
       </h2>
-      <div className="flex flex-wrap items-center gap-2">
+      <RequestStatusUnit request={request} now={now}>
         <RequestStageChip state={request.state} needsYou />
-        <WaitingBadge request={request} now={now} />
-      </div>
-      <div className="text-fg-muted flex flex-col gap-0.5 text-sm">
-        <span>{`Project: ${request.project}`}</span>
-        {request.ticketCount > 0 ? (
-          <span>{`Ticket ${request.ticketIndex} / ${request.ticketCount}`}</span>
-        ) : null}
-        {cost === null ? (
-          <span>Usage so far: —</span>
-        ) : (
-          formatUsageLines(cost).map((line) => <span key={line}>{`Usage so far: ${line}`}</span>)
-        )}
-        {request.rejections.length > 0 ? (
-          <span>{`Prior rejections: ${request.rejections.length}`}</span>
-        ) : null}
-      </div>
+      </RequestStatusUnit>
+      {/* One line of context: the text under review is the content. */}
+      <p
+        data-testid="triage-meta"
+        title={cost === null ? undefined : formatUsageLines(cost).join("\n")}
+        className="text-fg-muted text-sm"
+      >
+        {meta.join(" · ")}
+      </p>
       {request.tickets.length > 0 ? <TicketRollupStrip request={request} /> : null}
       <h3 className="text-fg text-sm font-semibold">Under review:</h3>
       {detail !== null ? (

@@ -110,6 +110,30 @@ export function formatUsageSummary(summary: CostSummary): string {
 }
 
 /**
+ * One token figure for a whole request: "478.3k tokens", "≥ 500 tokens" when
+ * the figure is a lower bound, "—" when nothing is known. Where
+ * formatUsageSummary names the model, this is only the number; the model
+ * breakdown belongs in a tooltip or a disclosure.
+ */
+export function formatUsageTokens(summary: CostSummary): string {
+  const total =
+    summary.tokens ??
+    (summary.byModel.length === 0 ? null : summary.byModel.reduce((sum, m) => sum + m.tokens, 0));
+  if (total === null) return "—";
+  return `${summary.tokensComplete ? "" : "≥ "}${formatTokenCount(total)} tokens`;
+}
+
+/**
+ * The request rail's single usage figure: "$1.51 · 479.3k tokens", the dollar
+ * part only when some model recorded a cost.
+ */
+export function formatUsageFigure(summary: CostSummary): string {
+  const micro = summary.byModel.reduce((sum, m) => sum + m.costMicroUsd, 0);
+  const tokens = formatUsageTokens(summary);
+  return micro > 0 ? `$${(micro / 1e6).toFixed(2)} · ${tokens}` : tokens;
+}
+
+/**
  * formatModelUsageDetailLine extends formatModelUsageLine with M3-C1's
  * own role + cost breakdown: "planning · gpt-5.6-luna · 150 tokens ·
  * $1.50" when usage.role/usage.costMicroUsd are populated. Falls back
