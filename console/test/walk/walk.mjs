@@ -571,6 +571,14 @@ step("request-plan-approve", async () => {
   const listing = (await api("/requests/req-plan-review/tickets/1/oracle")).body;
   const approve = main().getByRole("button", { name: "Approve", exact: true });
   check(await approve.isDisabled(), "the plan can be approved before its oracle files were shown");
+  // The spec is not on the page at plan review: the coverage view is where
+  // a ticket's "- 1" meets the criterion's text.
+  const coverage = main().getByRole("region", { name: "Criteria coverage" });
+  await coverage.getByRole("status").waitFor();
+  check(
+    (await coverage.getByRole("rowheader").count()) > 0,
+    "the coverage view lists no acceptance criterion",
+  );
   for (const file of listing.files) {
     await main()
       .getByRole("button", { name: new RegExp(`^${file.name.replace(".", "\\.")}`) })

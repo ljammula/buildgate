@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -40,9 +41,18 @@ type ticketSkeletonVector struct {
 	HeadersMissing []string `json:"headers_missing"`
 }
 
+type planCoverageVector struct {
+	Name          string   `json:"name"`
+	Spec          string   `json:"spec"`
+	Tickets       []string `json:"tickets"`
+	CriteriaCount int      `json:"criteria_count"`
+	Unclaimed     []int    `json:"unclaimed"`
+}
+
 type specSkeletonVectors struct {
 	Specs   []specSkeletonVector   `json:"specs"`
 	Tickets []ticketSkeletonVector `json:"tickets"`
+	Plans   []planCoverageVector   `json:"plans"`
 }
 
 // headingNamedBy returns the heading err's message quotes after prefix, or
@@ -103,6 +113,36 @@ func ticketSkeletonOutcome(v ticketSkeletonVector) ticketSkeletonVector {
 	}
 }
 
+// planCoverageOutcome reads the unclaimed numbers back out of
+// ValidatePlanCoverage's own message, so the vector records what that
+// function decided and not a second computation of it.
+func planCoverageOutcome(t *testing.T, v planCoverageVector) planCoverageVector {
+	t.Helper()
+	count, err := SpecAcceptanceCriteriaCount(v.Spec)
+	if err != nil {
+		count = 0
+	}
+	unclaimed := []int{}
+	if err := ValidatePlanCoverage(count, v.Tickets); err != nil {
+		list, ok := strings.CutPrefix(err.Error(), "acceptance criteria claimed by no ticket: ")
+		if !ok {
+			t.Fatalf("plan %q: unexpected coverage error %q", v.Name, err)
+		}
+		for _, field := range strings.Fields(strings.Trim(list, "[]")) {
+			n, err := strconv.Atoi(field)
+			if err != nil {
+				t.Fatalf("plan %q: %v", v.Name, err)
+			}
+			unclaimed = append(unclaimed, n)
+		}
+	}
+	tickets := v.Tickets
+	if tickets == nil {
+		tickets = []string{}
+	}
+	return planCoverageVector{Name: v.Name, Spec: v.Spec, Tickets: tickets, CriteriaCount: count, Unclaimed: unclaimed}
+}
+
 // TestSpecSkeletonGoldenVectors pins what the spec and ticket structure
 // checks decide for each vector, so the console's mirror of them is tested
 // against the server's own answers.
@@ -115,8 +155,8 @@ func TestSpecSkeletonGoldenVectors(t *testing.T) {
 	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatalf("decode golden vectors: %v", err)
 	}
-	if len(want.Specs) == 0 || len(want.Tickets) == 0 {
-		t.Fatalf("golden vectors are missing a section: %d specs, %d tickets", len(want.Specs), len(want.Tickets))
+	if len(want.Specs) == 0 || len(want.Tickets) == 0 || len(want.Plans) == 0 {
+		t.Fatalf("golden vectors are missing a section: %d specs, %d tickets, %d plans", len(want.Specs), len(want.Tickets), len(want.Plans))
 	}
 	var got specSkeletonVectors
 	for _, v := range want.Specs {
@@ -124,6 +164,9 @@ func TestSpecSkeletonGoldenVectors(t *testing.T) {
 	}
 	for _, v := range want.Tickets {
 		got.Tickets = append(got.Tickets, ticketSkeletonOutcome(v))
+	}
+	for _, v := range want.Plans {
+		got.Plans = append(got.Plans, planCoverageOutcome(t, v))
 	}
 
 	if os.Getenv("FACTORYD_UPDATE_GOLDEN") == "1" {
@@ -147,6 +190,11 @@ func TestSpecSkeletonGoldenVectors(t *testing.T) {
 	for i, v := range got.Tickets {
 		if !reflect.DeepEqual(v, want.Tickets[i]) {
 			t.Errorf("ticket %q: got %+v, want %+v", v.Name, v, want.Tickets[i])
+		}
+	}
+	for i, v := range got.Plans {
+		if !reflect.DeepEqual(v, want.Plans[i]) {
+			t.Errorf("plan %q: got %+v, want %+v", v.Name, v, want.Plans[i])
 		}
 	}
 }

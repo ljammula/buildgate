@@ -518,5 +518,101 @@
       "covered": [],
       "headers_missing": []
     }
+  ],
+  "plans": [
+    {
+      "name": "every criterion claimed",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 3\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": []
+    },
+    {
+      "name": "one criterion claimed twice",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n- 3\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 2\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": []
+    },
+    {
+      "name": "unclaimed criteria",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 2\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": [
+        1,
+        3
+      ]
+    },
+    {
+      "name": "no tickets",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [],
+      "criteria_count": 3,
+      "unclaimed": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "name": "a ticket that does not parse claims nothing",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 3 and more\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": [
+        3
+      ]
+    },
+    {
+      "name": "a ticket without the plan headings claims nothing",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
+        "- 3\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": [
+        3
+      ]
+    },
+    {
+      "name": "a claim past the last criterion",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n- 3\n- 7\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": []
+    },
+    {
+      "name": "criterion zero and a repeat",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 0\n- 1\n- 1\n- 2\n- 3\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 3,
+      "unclaimed": []
+    },
+    {
+      "name": "a spec with no numbered criteria",
+      "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\nIt works.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "tickets": [
+        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+      ],
+      "criteria_count": 0,
+      "unclaimed": []
+    }
   ]
 }
