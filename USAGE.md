@@ -24,7 +24,8 @@ The shortest path from a fresh install to a reviewable pull request:
 
 | Document | Read it for |
 |---|---|
-| [`README.md`](README.md) | What buildgate is, architecture, phase status |
+| [`README.md`](README.md) | What buildgate is, install, architecture |
+| [`STATUS.md`](STATUS.md) | What works, what is opt-in, every known limit |
 | [`DEMO.md`](DEMO.md) | A scripted walkthrough for showing it to someone |
 | `USAGE.md` (this file) | Commands, request lifecycle, config, troubleshooting |
 | [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | Per-command flags, session-config keys, model routes, `.factory.yml`, oracle/request-driver internals |
@@ -621,9 +622,24 @@ every request verb takes `-config`):
 | Local model host serialization | Automatic (`internal/modelhost`, keyed by the selected route's own `upstream` host) — no manual "one job at a time" discipline needed. Waiting shows as a `model_host_lock` event / `waiting` chip |
 | Compose sidecar serialization | Automatic: at most `compose_services_concurrency` (default 1) runs on this machine have compose sidecars, across every data dir and factoryd process. A run takes its slot before its first phase and holds it to the end, so the wait never counts against its timeout; the wait itself is bounded by one run's timeout, after which the run halts naming the holder. The daemon's recovery of a crashed submission takes the slot too, deferring to its next scan while it is busy. Waiting shows as a `compose_services_lock` event / `waiting` chip |
 
-Details on notifications, install-service, and reaching the console:
-[README.md § Desktop notifications](README.md#desktop-notifications),
-[README.md § Operations](README.md#operations).
+Every command and flag:
+[USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
+
+### Desktop notifications
+
+On macOS, `factoryd` notifies when a run halts, is quarantined, or is
+accepted (`FACTORYD_DESKTOP_NOTIFICATIONS=0` opts out).
+
+| Setup | Banner |
+|---|---|
+| Default | A plain `osascript` banner; clicking it does nothing useful |
+| [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) on `PATH` (`brew install terminal-notifier`) | Adds a "Next: ..." line. Clicking opens the run's console page when `FACTORYD_CONSOLE_URL` is set, else the run directory in Finder |
+
+`terminal-notifier` shows nothing until macOS approves it:
+
+1. Fire it once so macOS lists it: `terminal-notifier -title factoryd -message test -execute "open /tmp"`.
+2. System Settings → Notifications → `terminal-notifier` (`fr.julienxx.oss.terminal-notifier`): Allow Notifications on, alert style Banners or Alerts (not None), Show in Notification Center on.
+3. Re-run step 1; clicking the banner should open `/tmp`.
 
 ### Profiles
 
