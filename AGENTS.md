@@ -268,6 +268,16 @@ lifecycle, or the `BG_SERVICE_*` worker wiring) also runs `make
 live-compose`: one real todo-kafka-service ticket with its Postgres,
 Kafka and Redis sidecars, which `live-smoke` deliberately omits.
 
+A change to the PR-review pipeline (`internal/requestdriver/pr_review_driver.go`,
+`internal/forge`'s review state, the round's addendum or replies) also runs
+`make live-round`: one real pull request on `LIVE_ROUND_REPO`'s origin,
+reviewed by a second `gh` account (`LIVE_ROUND_REVIEWER`, in the config's
+`pr_trusted_authors`), which passes only when every review comment is
+answered by a pushed commit within `max_review_rounds`.
+`make live-round-results` prints the share of reviewer comments resolved
+within the cap over the recorded runs; `scripts/live_round.py`'s doc comment
+has the settings.
+
 Track the goal here as **a live one-shot acceptance rate**, not
 "spotless": what fraction of real tickets submitted through `factoryd`
 reach an accepted, human-reviewable PR with zero manual intervention.
