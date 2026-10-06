@@ -5,6 +5,7 @@ import { parseSseFrame, watchSse } from "@/api/sse";
 import type { ApiError } from "@/domain/apiError";
 import { asObject } from "@/domain/decode";
 import {
+  type RejectionAnchor,
   type RequestSummary,
   type RevisionDetail,
   type RevisionSummary,
@@ -144,12 +145,14 @@ export interface RejectRequestOptions {
   readonly by?: string | null;
   /** "plan" or "spec": send a quarantined or halted request back instead. */
   readonly to?: string | null;
+  /** Notes tied to places in the reviewed files. With at least one, `reason` may be "". */
+  readonly anchors?: readonly RejectionAnchor[];
 }
 
 /**
  * POST /requests/{id}/reject: sends a request in spec_review or plan_review
- * back to the prior drafting state, with the reason appended to request.md
- * so the redraft sees it. `by` optionally names the rejecting operator,
+ * back to the prior drafting state; the redraft reads the reason, and each
+ * anchored note as a line naming its file, section and item. `by` optionally names the rejecting operator,
  * symmetric with {@link approveRequest}.
  *
  * `to` ("plan" or "spec") sends a quarantined or halted request back
@@ -168,6 +171,16 @@ export async function rejectRequest(
     reason: options.reason,
     ...(options.by ? { by: options.by } : {}),
     ...(options.to ? { to: options.to } : {}),
+    ...(options.anchors !== undefined && options.anchors.length > 0
+      ? {
+          anchors: options.anchors.map((a) => ({
+            path: a.path,
+            ...(a.section === "" ? {} : { section: a.section }),
+            ...(a.item === 0 ? {} : { item: a.item }),
+            note: a.note,
+          })),
+        }
+      : {}),
   };
   return decodeRequestSummary(
     asObject(

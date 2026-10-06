@@ -11,12 +11,14 @@ export interface ReasonFlowProps {
   readonly tone?: "primary" | "danger";
   /** One line under the title: what confirming does. */
   readonly description?: ReactNode;
-  /** Extra controls under the reason field (the send-back target). */
+  /** Extra controls under the reason field (the send-back target, the anchored notes). */
   readonly children?: ReactNode;
+  /** The reason may be left empty: something in `children` carries the feedback instead. */
+  readonly reasonOptional?: boolean;
   readonly pending: boolean;
   readonly error: unknown;
   readonly onOpenChange: (open: boolean) => void;
-  /** Sends the trimmed, non-empty reason; the returned promise settles with the new record. */
+  /** Sends the trimmed reason (non-empty unless `reasonOptional`); the returned promise settles with the new record. */
   readonly write: (reason: string) => Promise<RequestSummary>;
   readonly onDone?: ((request: RequestSummary) => void) | undefined;
 }
@@ -33,6 +35,7 @@ export function ReasonFlow({
   tone = "primary",
   description,
   children,
+  reasonOptional = false,
   pending,
   error,
   onOpenChange,
@@ -41,8 +44,9 @@ export function ReasonFlow({
 }: ReasonFlowProps) {
   const [reason, setReason] = useState("");
   const trimmed = reason.trim();
+  const missing = trimmed === "" && !reasonOptional;
   async function confirm() {
-    if (trimmed === "") return;
+    if (missing) return;
     try {
       const updated = await write(trimmed);
       onDone?.(updated);
@@ -59,7 +63,7 @@ export function ReasonFlow({
       {...(description === undefined ? {} : { description })}
       confirmLabel={confirmLabel}
       tone={tone}
-      confirmDisabled={trimmed === ""}
+      confirmDisabled={missing}
       pending={pending}
       error={error}
       onConfirm={() => void confirm()}

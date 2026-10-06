@@ -191,6 +191,15 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
 /requests/{id}/approve`, `POST /requests/{id}/reject`, gated by
 `Authorization: Bearer <token>` — same class of write as `/runs/{id}/override`.
 
+`POST /requests/{id}/reject` body:
+
+| Field | Meaning |
+|---|---|
+| `reason` | Free text for the redraft. Required unless `anchors` has an entry |
+| `by` | Who rejected; recorded on the rejection |
+| `to` | `plan` or `spec`: send a quarantined or halted request back instead |
+| `anchors` | Notes tied to places in the reviewed files: `[{"path": "spec.md", "section": "## Acceptance criteria", "item": 2, "note": "..."}]`. `section` and `item` are optional; each field is put on one line; at most 50. The rejection's reason becomes one line per anchor (`- spec.md, ## Acceptance criteria, number 2: ...`) followed by `reason`, and that text is what the redraft reads. Not accepted with `to` |
+
 ## Handing over a finished spec and plan (`submit -spec-file`, `-plan-dir`)
 
 ```text

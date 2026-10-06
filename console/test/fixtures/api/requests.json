@@ -345,7 +345,16 @@
         "at": "2026-09-10T09:00:00Z",
         "reason": "every-field reason",
         "from_state": "spec_review",
-        "for_stage": "spec_drafting"
+        "for_stage": "spec_drafting",
+        "anchors": [
+          {
+            "path": "every-field path",
+            "section": "every-field section",
+            "item": 3,
+            "note": "every-field note"
+          }
+        ],
+        "note": "every-field note"
       }
     ],
     "draft_oracles": true,

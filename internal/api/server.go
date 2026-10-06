@@ -2414,6 +2414,10 @@ type rejectRequestBody struct {
 	// doc comment. Omitted (the default) keeps the prior, Reject-only
 	// behavior for every existing caller.
 	To string `json:"to,omitempty"`
+	// Anchors optionally ties notes to places in the reviewed files
+	// (request.RejectionAnchor). With at least one, Reason may be empty.
+	// Refused together with To: a send-back has no document under review.
+	Anchors []request.RejectionAnchor `json:"anchors,omitempty"`
 }
 
 // retryOrCancelRequestBody is POST /requests/{id}/retry and POST
@@ -3586,6 +3590,10 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		loaded *request.Request
 		err    error
 	)
+	if body.To != "" && len(body.Anchors) > 0 {
+		writeError(w, http.StatusBadRequest, "anchors apply to a review rejection, not to a send-back (to)")
+		return
+	}
 	if body.To != "" {
 		target := request.SendBackTarget(body.To)
 		if !target.Valid() {
@@ -3594,7 +3602,7 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		loaded, err = request.SendBack(s.dataDir, id, by, body.Reason, target, time.Now())
 	} else {
-		loaded, err = request.Reject(s.dataDir, id, by, body.Reason, time.Now())
+		loaded, err = request.RejectAnchored(s.dataDir, id, by, body.Reason, body.Anchors, time.Now())
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")

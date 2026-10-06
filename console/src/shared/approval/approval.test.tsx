@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 
@@ -505,4 +505,108 @@ test("backing out of the resume confirmation sends nothing", async () => {
   await userEvent.click(await screen.findByRole("button", { name: "Back" }));
   expect(screen.getByText("dialog closed")).toBeInTheDocument();
   expect(server.requests).toHaveLength(0);
+});
+
+describe("Request changes with notes on specific places", () => {
+  const rejectRoute = {
+    on: "POST /requests/req-spec-review/reject",
+    reply: json(rawFixture("request-spec-review.json")),
+  };
+
+  async function addNote(user: ReturnType<typeof userEvent.setup>, place: string, note: string) {
+    await user.selectOptions(await screen.findByLabelText("Place"), place);
+    await user.type(screen.getByLabelText("Note on this place"), note);
+    await user.click(screen.getByRole("button", { name: "Add note" }));
+  }
+
+  test("the places offered are the shown spec's sections and criteria", async () => {
+    setOperatorName("jane");
+    renderApp(<Host request={specReview()} render={(props) => <RejectDialog {...props} />} />);
+
+    const options = within(await screen.findByLabelText("Place")).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "spec.md · the whole file",
+      "spec.md · Problem",
+      "spec.md · Acceptance criteria",
+      "spec.md · Acceptance criteria · 1. A repeated request with the same key returns the first response.",
+      "spec.md · Acceptance criteria · 2. A key is scoped to one account.",
+    ]);
+  });
+
+  test("notes alone are enough: they are sent as anchors, with an empty reason", async () => {
+    setOperatorName("jane");
+    const { server } = renderApp(
+      <Host request={specReview()} render={(props) => <RejectDialog {...props} />} />,
+      { server: [rejectRoute] },
+    );
+    const user = userEvent.setup();
+    const confirm = await screen.findByRole("button", { name: "Request changes" });
+    expect(confirm).toBeDisabled();
+
+    await addNote(
+      user,
+      "spec.md · Acceptance criteria · 2. A key is scoped to one account.",
+      "which account?",
+    );
+    await addNote(user, "spec.md · Problem", "say who is charged{Enter}");
+
+    expect(
+      within(screen.getByRole("list", { name: "Anchored notes" }))
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      "spec.md · Acceptance criteria · number 2: which account?",
+      "spec.md · Problem: say who is charged",
+    ]);
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
+    });
+    expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+      reason: "",
+      by: "jane",
+      anchors: [
+        { path: "spec.md", section: "## Acceptance criteria", item: 2, note: "which account?" },
+        { path: "spec.md", section: "## Problem", note: "say who is charged" },
+      ],
+    });
+  });
+
+  test("a removed note is not sent, and the reason is required again", async () => {
+    setOperatorName("jane");
+    const { server } = renderApp(
+      <Host request={specReview()} render={(props) => <RejectDialog {...props} />} />,
+      { server: [rejectRoute] },
+    );
+    const user = userEvent.setup();
+    await addNote(user, "spec.md · the whole file", "start over");
+    await user.click(screen.getByRole("button", { name: "Remove note 1" }));
+
+    const confirm = screen.getByRole("button", { name: "Request changes" });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByLabelText("Reason"), "too broad");
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
+    });
+    expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+      reason: "too broad",
+      by: "jane",
+    });
+  });
+
+  test("a state with no document sections offers no places, only the reason", async () => {
+    setOperatorName("jane");
+    renderApp(
+      <Host
+        request={{ ...specReview(), state: "oracle_review" }}
+        render={(props) => <RejectDialog {...props} />}
+      />,
+    );
+    await screen.findByLabelText("Reason");
+    expect(screen.queryByLabelText("Place")).not.toBeInTheDocument();
+  });
 });

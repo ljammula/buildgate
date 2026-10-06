@@ -2339,3 +2339,55 @@ func TestRequestDetailReportsSendBackTargets(t *testing.T) {
 		})
 	}
 }
+
+// TestRejectRequestHandlerRecordsAnchors: notes tied to places in the
+// reviewed file are recorded on the rejection, the reason is their composed
+// text, and no free reason is needed beside them.
+func TestRejectRequestHandlerRecordsAnchors(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+
+	recorder := httptest.NewRecorder()
+	body := `{"by":"alice","anchors":[{"path":"spec.md","section":"## Acceptance criteria","item":2,"note":"which\naccount?"}]}`
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", body))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var got request.Request
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.State != request.StateSpecDrafting || len(got.Rejections) != 1 {
+		t.Fatalf("state = %q, rejections = %+v", got.State, got.Rejections)
+	}
+	rej := got.Rejections[0]
+	if rej.Reason != "- spec.md, ## Acceptance criteria, number 2: which account?" {
+		t.Errorf("Reason = %q", rej.Reason)
+	}
+	if len(rej.Anchors) != 1 || rej.Anchors[0].Item != 2 || rej.Anchors[0].Note != "which account?" {
+		t.Errorf("Anchors = %+v", rej.Anchors)
+	}
+}
+
+func TestRejectRequestHandlerRefusesBadAnchors(t *testing.T) {
+	for name, body := range map[string]string{
+		"an empty note":          `{"reason":"r","anchors":[{"path":"spec.md","note":""}]}`,
+		"a path with a newline":  `{"reason":"r","anchors":[{"path":"spec.md\n# x","note":"n"}]}`,
+		"anchors on a send-back": `{"reason":"r","to":"plan","anchors":[{"path":"spec.md","note":"n"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+			recorder := httptest.NewRecorder()
+			NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", body))
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			r, err := request.Load(dataDir, "req-1")
+			if err != nil || r.State != request.StateSpecReview || len(r.Rejections) != 0 {
+				t.Errorf("a refused rejection changed the request: %+v, %v", r, err)
+			}
+		})
+	}
+}

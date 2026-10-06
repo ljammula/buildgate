@@ -551,13 +551,26 @@ step("request-changes", async () => {
   await main().getByRole("button", { name: "Request changes", exact: true }).click();
   const confirm = dialog().getByRole("button", { name: "Request changes", exact: true });
   check(await confirm.isDisabled(), "a rejection with no reason can be sent");
-  await dialog().getByLabel("Reason").fill("Criterion 2 does not say which account.");
+  // A note tied to the criterion itself, beside the free reason: the server
+  // records the place, and the reason every reader sees names it.
+  await dialog()
+    .getByLabel("Place", { exact: true })
+    .selectOption({ label: "spec.md · Acceptance criteria · 2. A key is scoped to one account." });
+  await dialog().getByLabel("Note on this place").fill("does not say which account");
+  await dialog().getByRole("button", { name: "Add note", exact: true }).click();
+  await dialog().getByRole("list", { name: "Anchored notes" }).waitFor();
+  await dialog().getByLabel("Reason").fill("Otherwise fine.");
   await confirmDialog("Request changes");
   const after = await request("req-spec-review-b");
   check(after.state !== "spec_review", "the request stayed in spec_review");
   check(
-    after.rejections?.at(-1)?.reason === "Criterion 2 does not say which account.",
-    "the reason was not recorded",
+    after.rejections?.at(-1)?.reason ===
+      "- spec.md, ## Acceptance criteria, number 2: does not say which account\n\nOtherwise fine.",
+    `the reason was not recorded as composed: ${after.rejections?.at(-1)?.reason}`,
+  );
+  check(
+    after.rejections.at(-1).anchors?.[0]?.item === 2,
+    "the rejection does not carry its anchor",
   );
   check(after.rejections.at(-1).by === "walk-operator", "the rejection has no operator");
 });
@@ -752,7 +765,7 @@ step("request-revisions", async () => {
   await main()
     .getByRole("button", { name: /Rejection history/ })
     .click();
-  await page.getByText("Criterion 2 does not say which account.").first().waitFor();
+  await page.getByText("does not say which account", { exact: false }).first().waitFor();
 });
 
 step("triage-approve", async () => {

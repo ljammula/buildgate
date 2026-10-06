@@ -335,6 +335,21 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 // latest), so removing the request.md copy loses no information a
 // redraft needs.
 func Reject(dataDir, id, by, reason string, now time.Time) (*Request, error) {
+	return RejectAnchored(dataDir, id, by, reason, nil, now)
+}
+
+// RejectAnchored is Reject with notes tied to places in the reviewed files
+// (RejectionAnchor). The rejection is recorded under AnchoredReason(anchors,
+// note), which is what every reader of a reason sees, the redraft's
+// feedback file included; the anchors and the free note are also kept on
+// the Rejection as given, for a console to show against the document. note
+// may be empty when there is at least one anchor.
+func RejectAnchored(dataDir, id, by, note string, anchors []RejectionAnchor, now time.Time) (*Request, error) {
+	anchors, err := NormalizeRejectionAnchors(anchors)
+	if err != nil {
+		return nil, fmt.Errorf("request %s: %w", id, err)
+	}
+	reason := AnchoredReason(anchors, note)
 	if reason == "" {
 		return nil, fmt.Errorf("request %s: reject requires a reason", id)
 	}
@@ -390,12 +405,16 @@ func Reject(dataDir, id, by, reason string, now time.Time) (*Request, error) {
 	if _, err := SnapshotRevision(dataDir, id, by, reason, fromState, relPaths, now); err != nil {
 		return nil, err
 	}
-	r.Rejections = append(r.Rejections, Rejection{
+	rejection := Rejection{
 		By:        by,
 		At:        now.UTC().Format(time.RFC3339Nano),
 		Reason:    reason,
 		FromState: fromState,
-	})
+	}
+	if len(anchors) > 0 {
+		rejection.Anchors, rejection.Note = anchors, note
+	}
+	r.Rejections = append(r.Rejections, rejection)
 	if err := r.Save(dataDir); err != nil {
 		return nil, err
 	}
