@@ -391,7 +391,7 @@ Latest release tag: **`m6`**. By convention a tag is cut only after `make live-s
 | Code review stage, combined conformity + code review call | ✅ Done |
 | Cost: per-model prices, rollups by role × model, launch budgets | ✅ Done (`factoryd cost`) |
 | Compose service dependencies | ✅ Done |
-| Copilot route + Copilot CLI harness, live | 🟡 Waiting on the office walk (paid seat) |
+| Copilot route + Copilot CLI harness, live | 🟡 Waiting on a walk with a paid Copilot seat |
 | A run interrupted by sleep, stop, crash or reboot | ✅ `worker` on Temporal: the lost step waits in `resume_review` for `factoryd resume` (a build continues in its kept worktree from the last completed round) or `resume -from scratch` / `cancel`; there is no automatic retry. |
 | Merge/deploy | ⬛ **Permanently human-gated by design**: release decisions are recorded, never acted on |
 

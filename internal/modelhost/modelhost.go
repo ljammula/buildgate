@@ -115,7 +115,7 @@ func ShouldLock(upstream string) bool {
 
 // isPrivateHost reports whether host is a loopback/RFC1918/Tailscale
 // CGNAT address, or ends in .local/.lan -- the address shapes an
-// operator's own machine or home/office network model host actually
+// operator's own machine or private-network model host actually
 // uses. A plain public DNS name that isn't one of those suffixes (e.g.
 // chatgpt.com) is not resolved here -- this package does no DNS lookups
 // of its own (a lookup would make ShouldLock's result depend on network

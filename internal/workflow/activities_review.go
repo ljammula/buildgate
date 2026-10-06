@@ -22,7 +22,7 @@ import (
 // progress feed's end outcome. The combined step exits
 // reviewstep.CombinedExitBase + bits, so its pass is 40, not 0; reading it
 // as "exit != 0 fails" marked every passing combined review failed on the
-// console's Timeline (found in the 2026-09-29 office walkthrough) while
+// console's Timeline (found in a 2026-09-29 walkthrough) while
 // the gates, which decode it with GateExitCodes, passed. Mirrors the
 // cmd/factoryd's decoding.
 func reviewStepPassed(stepName string, exitCode int) bool {
