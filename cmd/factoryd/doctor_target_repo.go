@@ -72,8 +72,11 @@ func doctorTargetRepoChecks(ctx context.Context, in doctorInputs) []doctorCheck 
 		checks = append(checks, doctorCheck{Name: fmt.Sprintf("compose service %s (%s): %s", s.Name, s.Image, strings.Join(sandbox.ComposeServiceWorkerEnv(s), " "))})
 	}
 	for _, r := range verdict.Rejected {
-		checks = append(checks, doctorCheck{Name: "compose service " + r.Service, Err: fmt.Errorf("rejected: %s", r.Reason),
-			Fix: "a run against this repo halts before its build until this is fixed in the compose file or the compose_services_* settings"})
+		fix := "a run against this repo halts before its build until this is fixed in the compose file or the compose_services_* settings"
+		if r.AllowRegistry != "" {
+			fix += "; `factoryd doctor -target-repo " + in.targetRepo + " -fix` offers to add " + r.AllowRegistry + " to compose_services_allowed_registries"
+		}
+		checks = append(checks, doctorCheck{Name: "compose service " + r.Service, Err: fmt.Errorf("rejected: %s", r.Reason), Fix: fix})
 	}
 	for _, r := range verdict.Skipped {
 		checks = append(checks, doctorCheck{Name: "compose service " + r.Service, Err: fmt.Errorf("skipped: %s", r.Reason), Advisory: true})

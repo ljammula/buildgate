@@ -996,3 +996,24 @@ services:
 		t.Fatalf("PublishedPorts = %+v, want %+v", services[0].PublishedPorts, want)
 	}
 }
+
+// TestRejectionNamesTheRegistryThatWouldAdmitTheImage: only a service
+// rejected for its image carries AllowRegistry, and it is the narrow
+// namespace, never the whole registry of a namespaced image.
+func TestRejectionNamesTheRegistryThatWouldAdmitTheImage(t *testing.T) {
+	compose := "services:\n  kafka:\n    image: apache/kafka:3.8.0\n  search:\n    image: ghcr.io/acme/search:1\n  db:\n    image: postgres:16\n    privileged: true\n"
+	_, rejected, _, err := ParseFile([]byte(compose), Options{AllowedImageRegistries: []string{"docker.io/library/"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range rejected {
+		got[r.Service] = r.AllowRegistry
+	}
+	want := map[string]string{"kafka": "docker.io/apache/", "search": "ghcr.io/acme/", "db": ""}
+	for service, registry := range want {
+		if got[service] != registry {
+			t.Errorf("AllowRegistry for %s = %q, want %q (all: %v)", service, got[service], registry, got)
+		}
+	}
+}

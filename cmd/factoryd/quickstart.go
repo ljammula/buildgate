@@ -540,6 +540,12 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 	if err != nil {
 		return err
 	}
+	// The repo's compose images under a registry the config does not allow
+	// would halt its first build. Say so now, and add the prefixes only on
+	// a yes (offerComposeRegistries); non-interactively it only says so.
+	if settings, settingsErr := loadSettingsForConfig(configPath); settingsErr == nil && settings.ComposeServices {
+		offerComposeRegistries(p, w, false, !opts.NonInteractive, settings, repoRoot, configPath, "factoryd quickstart")
+	}
 
 	temporalAddress := dp.temporal.ensure(context.Background(), w)
 
