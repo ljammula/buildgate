@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 import { useApi } from "@/api/ApiProvider";
 import type { Http } from "@/api/http";
 import { keepNewer } from "@/api/keepNewer";
-import { getQueueRunStatus, listDaemons, listWorkspaces } from "@/api/ops";
+import { getQueueRunStatus, listWorkspaces } from "@/api/ops";
 import {
   type CheckProjectInput,
   checkProject,
@@ -33,7 +33,7 @@ import {
 } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
 import { compareTimestamps } from "@/domain/elapsed";
-import type { DaemonStatus, QueueRunStatus, WorkspaceHint } from "@/domain/ops";
+import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
 import type { ProjectReleaseView, ReleaseView } from "@/domain/release";
 import { type Run, type RunDiff, runIsTerminal } from "@/domain/run";
@@ -246,13 +246,5 @@ export function useWorkspaces(): UseQueryResult<WorkspaceHint[]> {
   return useQuery({
     queryKey: queryKeys.ops.workspaces(),
     queryFn: ({ signal }) => listWorkspaces(http, signal),
-  });
-}
-
-export function useDaemons(): UseQueryResult<DaemonStatus[]> {
-  const { http } = useApi();
-  return useQuery({
-    queryKey: queryKeys.ops.daemons(),
-    queryFn: ({ signal }) => listDaemons(http, signal),
   });
 }

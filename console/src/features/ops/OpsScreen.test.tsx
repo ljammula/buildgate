@@ -24,7 +24,6 @@ describe("OpsScreen", () => {
           on: "GET /queue-run",
           reply: json({ state: "alive", last_heartbeat: "2026-09-10T09:00:00Z" }),
         },
-        { on: "GET /daemons", reply: apiErrorResponse(404, "not found") },
         { on: "GET /projects", reply: json([project]) },
         {
           on: "GET /projects/checkouts/stats",
@@ -65,7 +64,6 @@ describe("OpsScreen", () => {
           on: "GET /queue-run",
           reply: json({ state: "alive", last_heartbeat: "2026-09-10T09:00:00Z" }),
         },
-        { on: "GET /daemons", reply: apiErrorResponse(404, "not found") },
         { on: "GET /projects", reply: json([{ ...project, project: "broken" }]) },
         { on: "GET /projects/broken/stats", reply: apiErrorResponse(403, "forbidden") },
         { on: "GET /projects/broken/release", reply: apiErrorResponse(403, "forbidden") },
@@ -89,7 +87,6 @@ describe("OpsScreen", () => {
           on: "GET /queue-run",
           reply: json({ state: "alive", last_heartbeat: "2026-09-10T09:00:00Z" }),
         },
-        { on: "GET /daemons", reply: apiErrorResponse(404, "not found") },
         { on: "GET /projects", reply: json([]) },
       ],
     });
