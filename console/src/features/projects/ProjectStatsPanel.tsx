@@ -58,12 +58,21 @@ function StatsBody({ stats }: { readonly stats: ProjectStats }) {
  * warning; Retry is disabled while a refresh is in flight. Keyed by the
  * project in the screen, so another project starts from nothing.
  */
-export function ProjectStatsPanel({ project }: { readonly project: string }) {
+export function ProjectStatsPanel({
+  project,
+  withForm = true,
+}: {
+  readonly project: string;
+  /** False inside a project's own row, where there is no other project to load. */
+  readonly withForm?: boolean;
+}) {
   const query = useProjectStats(project);
   const load = useLoadProject(project, projectStatsPath, () => void query.refetch());
   return (
     <>
-      <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
+      {withForm ? (
+        <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
+      ) : null}
       {query.isFetching ? <Spinner label="Loading stats" /> : null}
       {query.data === undefined ? (
         query.error === null ? null : (
