@@ -425,15 +425,22 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	planReview.Tickets = []request.Ticket{{Index: 1, SpecPath: ticketPath(planReview.ID, 1)}, {Index: 2, SpecPath: ticketPath(planReview.ID, 2)}}
 	planReview.ApprovedBy, planReview.ApprovedAt = "alice", stamp(6)
 	planReview.PlanEvidence = &request.PlanEvidence{Usage: usage(900), DurationS: 30, Model: "gpt-5.6-luna"}
-	planReview.Rejections = []request.Rejection{{By: "alice", At: stamp(8), Reason: "split the migration out", FromState: request.StatePlanReview, ForStage: request.StatePlanning}}
+	// A re-review: the plan was rejected once with a note on ticket 1's
+	// steps, and the ticket on disk is the redraft. The revision below holds
+	// the rejected text, so the console has a section that changed to show.
+	planAnchors := []request.RejectionAnchor{{Path: "tickets/001.spec.md", Section: "### Steps", Note: "split the migration out"}}
+	planReason := request.AnchoredReason(planAnchors, "Otherwise fine.")
+	planReview.Rejections = []request.Rejection{{By: "alice", At: stamp(8), Reason: planReason, FromState: request.StatePlanReview, Anchors: planAnchors, Note: "Otherwise fine."}}
 	writeTickets(planReview.ID, 2)
+	write(ticketPath(planReview.ID, 1), strings.Replace(seedApprovableRequestTicket, "1. s\n", "1. migrate and switch over in one step\n", 1))
 	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "RUN_COMMAND.txt"), contractOracleRunCommand)
 	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "idempotency_test.go"), contractOracleTest)
 	saveRequest(planReview)
-	if _, err := request.SnapshotRevision(dataDir, planReview.ID, "alice", "split the migration out", request.StatePlanReview,
+	if _, err := request.SnapshotRevision(dataDir, planReview.ID, "alice", planReason, request.StatePlanReview,
 		[]string{"spec.md", "tickets/001.spec.md", "tickets/002.spec.md"}, at.Add(8*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	write(ticketPath(planReview.ID, 1), seedApprovableRequestTicket)
 
 	building := newRequest("req-building", request.StateBuilding)
 	building.TicketCount, building.TicketIndex = 2, 2

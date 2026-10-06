@@ -2,11 +2,11 @@
   "index": 1,
   "at": "2026-09-10T09:08:00Z",
   "by": "alice",
-  "reason": "split the migration out",
+  "reason": "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
   "from_state": "plan_review",
   "files": {
     "spec.md": "# Idempotency keys for checkout\n\n## Problem\n\nA retried checkout charges the card twice.\n\n## Acceptance criteria\n\n1. A repeated request with the same key returns the first response.\n2. A key is scoped to one account.\n",
-    "tickets/001.spec.md": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+    "tickets/001.spec.md": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. migrate and switch over in one step\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
     "tickets/002.spec.md": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
   }
 }

@@ -62,9 +62,16 @@
     {
       "by": "alice",
       "at": "2026-09-10T09:08:00Z",
-      "reason": "split the migration out",
+      "reason": "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
       "from_state": "plan_review",
-      "for_stage": "planning"
+      "anchors": [
+        {
+          "path": "tickets/001.spec.md",
+          "section": "### Steps",
+          "note": "split the migration out"
+        }
+      ],
+      "note": "Otherwise fine."
     }
   ],
   "title": "Add idempotency keys to checkout",
