@@ -363,7 +363,7 @@ make bar                 # -draft-oracles default-on bar (hours; human at oracle
 make bar-test            # offline tests for bar's verdict logic
 ```
 
-- `make verify`'s tests run through `scripts/test-sharded.sh`: one `cmd/factoryd` race test binary, run as 4 processes split by `scripts/factoryd-test-shards.txt`, alongside `go test -race` over every other package. New tests land in the last shard automatically; the run fails if a test is in zero or two shards or the shard file names a missing test.
+- `make verify`'s tests run through `scripts/test-sharded.sh`: one `cmd/factoryd` race test binary, run as 2 to 8 processes sized from the machine's cores and memory (`TEST_SHARDS=<n>` overrides), alongside `go test -race` over every other package. Each run deals the tests to shards by the measured seconds in `scripts/factoryd-test-timings.txt`, so a new test needs no entry; `TEST_SHARDS_RECORD=1 make test` re-measures them. The run fails if a test is in zero or two shards.
 - `make verify-live` fails loudly without Docker; needs Temporal at `TEMPORAL_ADDRESS` (default `localhost:7233`) or the `temporal` CLI. On colima it roots scratch dirs under `~/buildgate` so the VM can see them.
 - `make proving-ground`: fixtures in `scripts/proving-ground/fixtures.json`, each pinned to a `base_ref`, one at a time. `PROVING_GROUND_TEMPORAL=<addr>` also runs each through Temporal as a separate `path: temporal` row.
 

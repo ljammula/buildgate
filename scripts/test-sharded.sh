@@ -27,8 +27,22 @@
 # the fifo closes and the server is killed. Without the temporal CLI the
 # tests that need it skip. The operator's :7233 is never used.
 #
-# Shards 1..N-1 are the name lists in scripts/factoryd-test-shards.txt;
-# shard N is everything else (-test.skip of every listed name).
+# How many shards: as many as this machine carries. TEST_SHARDS=<n> sets it;
+# otherwise it is the smaller of cores/3 and memory/6 GiB, between 2 and 8
+# (each shard is a race-detector process; the other packages run beside
+# them).
+#
+# Which test goes where is decided on every run, so there is no shard list to
+# edit. scripts/factoryd-test-timings.txt holds the measured seconds of each
+# test that takes a second or more, and `rest`, the sum of the others. Every
+# test the binary lists gets a weight (its seconds, or an even share of
+# `rest` when it is not in the file, as a new test is) and they are dealt
+# heaviest-first to whichever shard has the least so far. A name in the file
+# that no longer exists is ignored.
+#
+# TEST_SHARDS_RECORD=1 runs the shards with -test.v and rewrites the timings
+# file from what it measured. Do that when the per-shard times printed at the
+# end drift well apart.
 #
 # Usage: scripts/test-sharded.sh <package>...   (the Makefile passes GO_PACKAGES)
 set -euo pipefail
@@ -37,7 +51,7 @@ FACTORYD_PKG=buildgate/cmd/factoryd
 TIMEOUT=20m
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-shard_file="$repo_root/scripts/factoryd-test-shards.txt"
+timings_file="$repo_root/scripts/factoryd-test-timings.txt"
 factoryd_dir="$repo_root/cmd/factoryd"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/test-sharded.XXXXXX")"
 temporal_pid=""
@@ -67,41 +81,86 @@ go test -race -c -o "$tmp/factoryd.test" ./cmd/factoryd
 # TestMain builds the factoryd binary from ".".
 (cd "$factoryd_dir" && "$tmp/factoryd.test" -test.list '.*') | sort > "$tmp/all.txt"
 
-grep -v '^#' "$shard_file" | grep -v '^$' > "$tmp/shards.txt"
-explicit_shards="$(cut -d' ' -f1 "$tmp/shards.txt" | sort -un)"
-last_shard=$(($(printf '%s\n' "$explicit_shards" | tail -1) + 1))
-run_regex=()
-for shard in $explicit_shards; do
-	run_regex[shard]="$(awk -v s="$shard" '$1 == s { print $2 }' "$tmp/shards.txt" | anchored_regex)"
-done
-skip_regex="$(cut -d' ' -f2 "$tmp/shards.txt" | anchored_regex)"
+# shard_count prints how many shards this machine should run.
+shard_count() {
+	if [ -n "${TEST_SHARDS:-}" ]; then
+		case "$TEST_SHARDS" in
+			'' | *[!0-9]* | 0 | 1)
+				echo "test-sharded: TEST_SHARDS must be a number of at least 2, got \"$TEST_SHARDS\"" >&2
+				exit 1
+				;;
+		esac
+		echo "$TEST_SHARDS"
+		return
+	fi
+	local cores mem_kib n
+	cores="$(getconf _NPROCESSORS_ONLN 2> /dev/null || echo 4)"
+	if [ -r /proc/meminfo ]; then
+		mem_kib="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
+	else
+		mem_kib="$(($(sysctl -n hw.memsize 2> /dev/null || echo 17179869184) / 1024))"
+	fi
+	n=$((cores / 3))
+	[ "$n" -le $((mem_kib / 1024 / 1024 / 6)) ] || n=$((mem_kib / 1024 / 1024 / 6))
+	[ "$n" -ge 2 ] || n=2
+	[ "$n" -le 8 ] || n=8
+	echo "$n"
+}
+shards="$(shard_count)"
 
-repeated="$(cut -d' ' -f2 "$tmp/shards.txt" | sort | uniq -d)"
+grep -v '^#' "$timings_file" | grep -v '^$' > "$tmp/timings.txt" || true
+bad="$(awk 'NF != 2 || $1 !~ /^[0-9]+(\.[0-9]+)?$/' "$tmp/timings.txt")"
+if [ -n "$bad" ]; then
+	echo "test-sharded: $timings_file has lines that are not \"<seconds> <TestName>\":" >&2
+	echo "$bad" >&2
+	exit 1
+fi
+repeated="$(cut -d' ' -f2 "$tmp/timings.txt" | sort | uniq -d)"
 if [ -n "$repeated" ]; then
-	echo "test-sharded: $shard_file names a test more than once:" >&2
+	echo "test-sharded: $timings_file names a test more than once:" >&2
 	echo "$repeated" >&2
 	exit 1
 fi
-stale="$(cut -d' ' -f2 "$tmp/shards.txt" | sort | comm -23 - "$tmp/all.txt")"
-if [ -n "$stale" ]; then
-	echo "test-sharded: $shard_file names tests that do not exist:" >&2
-	echo "$stale" >&2
-	exit 1
-fi
+
+# Weigh every listed test ("<seconds> <TestName>"), then deal them
+# heaviest-first: "<shard> <TestName>".
+awk '
+	NR == FNR { if ($2 == "rest") rest = $1; else timed[$2] = $1; next }
+	{ names[++count] = $1; if (!($1 in timed)) untimed++ }
+	END {
+		share = untimed ? rest / untimed : 0
+		for (i = 1; i <= count; i++)
+			printf "%.4f %s\n", (names[i] in timed) ? timed[names[i]] : share, names[i]
+	}' "$tmp/timings.txt" "$tmp/all.txt" | sort -k1,1 -rn -k2,2 | awk -v n="$shards" '
+	{
+		best = 1
+		for (i = 2; i <= n; i++) if (load[i] + 0 < load[best] + 0) best = i
+		load[best] += $1
+		print best, $2
+	}' > "$tmp/shards.txt"
+run_regex=()
+for shard in $(seq 1 "$shards"); do
+	run_regex[shard]="$(awk -v s="$shard" '$1 == s { print $2 }' "$tmp/shards.txt" | anchored_regex)"
+done
+
 # Collect each shard's matches with the same regexes the shards run with;
 # the result must be the test list itself, with nothing missing or doubled.
-{
-	for shard in $explicit_shards; do
-		grep -E "${run_regex[shard]}" "$tmp/all.txt" || true
-	done
-	grep -Ev "$skip_regex" "$tmp/all.txt" || true
-} | sort > "$tmp/assigned.txt"
+for shard in $(seq 1 "$shards"); do
+	grep -E "${run_regex[shard]}" "$tmp/all.txt" || true
+done | sort > "$tmp/assigned.txt"
 if ! diff -u "$tmp/all.txt" "$tmp/assigned.txt" > "$tmp/shard-check.diff"; then
 	echo "test-sharded: a cmd/factoryd test is in zero shards (-) or more than one (+):" >&2
 	cat "$tmp/shard-check.diff" >&2
 	exit 1
 fi
-echo "test-sharded: shard check ok: $(wc -l < "$tmp/all.txt" | tr -d ' ') cmd/factoryd tests, each in exactly one of $last_shard shards"
+echo "test-sharded: shard check ok: $(wc -l < "$tmp/all.txt" | tr -d ' ') cmd/factoryd tests, each in exactly one of $shards shards"
+
+# TEST_SHARDS_RECORD=1: verbose output, so each test's time can be read back.
+record="${TEST_SHARDS_RECORD:-0}"
+verbose_flag=()
+if [ "$record" = 1 ]; then
+	verbose_flag=(-test.v)
+fi
 
 # start_test_temporal launches the shared test Temporal server and exports
 # its address; it returns quietly (tests skip) when the temporal CLI is
@@ -147,7 +206,7 @@ run_timed() {
 
 # TEST_SHARDS_SEQUENTIAL=1 runs the shards and then the other packages one
 # after another (the other packages with go test -p 2) instead of all at once:
-# slower, but peak memory is about one race binary's instead of five, for a
+# slower, but peak memory is about one race binary's instead of one per shard, for a
 # machine whose memory is mostly held by the Docker VM.
 sequential="${TEST_SHARDS_SEQUENTIAL:-0}"
 other_flags=()
@@ -173,12 +232,10 @@ run_factoryd_shard() {
 }
 
 names=()
-for shard in $explicit_shards; do
-	launch run_factoryd_shard "factoryd-shard-$shard" "$tmp/factoryd.test" -test.paniconexit0 -test.timeout "$TIMEOUT" -test.run "${run_regex[shard]}"
+for shard in $(seq 1 "$shards"); do
+	launch run_factoryd_shard "factoryd-shard-$shard" "$tmp/factoryd.test" -test.paniconexit0 ${verbose_flag[@]+"${verbose_flag[@]}"} -test.timeout "$TIMEOUT" -test.run "${run_regex[shard]}"
 	names+=("factoryd-shard-$shard")
 done
-launch run_factoryd_shard "factoryd-shard-$last_shard" "$tmp/factoryd.test" -test.paniconexit0 -test.timeout "$TIMEOUT" -test.skip "$skip_regex"
-names+=("factoryd-shard-$last_shard")
 if [ "${#other_packages[@]}" -gt 0 ]; then
 	launch run_timed other-packages go test -race ${other_flags[@]+"${other_flags[@]}"} -timeout "$TIMEOUT" "${other_packages[@]}"
 	names+=(other-packages)
@@ -201,4 +258,38 @@ for name in "${names[@]}"; do
 		echo "test-sharded: end of $name output"
 	fi
 done
+# record_timings rewrites the timings file from the verbose shard logs. A
+# test that paused for t.Parallel shared its shard with the others that did,
+# so it counts for a quarter of its elapsed time. Tests of a second or more
+# are listed; the rest are summed into `rest`.
+record_timings() {
+	local logs=()
+	for name in "${names[@]}"; do
+		case "$name" in factoryd-shard-*) logs+=("$tmp/$name.log") ;; esac
+	done
+	{
+		sed -n '/^#/p' "$timings_file"
+		cat "${logs[@]}" | awk '
+			/^=== PAUSE / { paused[$3] = 1 }
+			/^--- (PASS|FAIL|SKIP): / {
+				secs = $4
+				gsub(/[()s]/, "", secs)
+				elapsed[$3] = secs
+			}
+			END {
+				rest = 0
+				for (name in elapsed) {
+					cost = (name in paused) ? elapsed[name] / 4 : elapsed[name] + 0
+					if (cost >= 1) printf "%d %s\n", cost + 0.5, name
+					else rest += cost
+				}
+				printf "%d rest\n", rest + 0.5
+			}' | sort -k1,1 -rn -k2,2
+	} > "$tmp/timings.new"
+	mv "$tmp/timings.new" "$timings_file"
+	echo "test-sharded: rewrote $timings_file from this run"
+}
+if [ "$record" = 1 ] && [ "$failed" -eq 0 ]; then
+	record_timings
+fi
 exit "$failed"
