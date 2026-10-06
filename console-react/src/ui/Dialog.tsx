@@ -13,7 +13,12 @@ export interface DialogContentProps extends ComponentProps<typeof DialogPrimitiv
   readonly showClose?: boolean;
 }
 
-export function DialogContent({ className, children, showClose = true, ...props }: DialogContentProps) {
+export function DialogContent({
+  className,
+  children,
+  showClose = true,
+  ...props
+}: DialogContentProps) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-bg/70" />
@@ -44,7 +49,10 @@ export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElem
 
 export function DialogTitle({ className, ...props }: ComponentProps<typeof DialogPrimitive.Title>) {
   return (
-    <DialogPrimitive.Title className={cn("text-base font-semibold text-fg", className)} {...props} />
+    <DialogPrimitive.Title
+      className={cn("text-base font-semibold text-fg", className)}
+      {...props}
+    />
   );
 }
 

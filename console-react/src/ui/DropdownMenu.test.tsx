@@ -12,13 +12,18 @@ import {
 } from "@/ui/DropdownMenu";
 
 beforeAll(() => {
-  Element.prototype.hasPointerCapture ??= () => false;
-  Element.prototype.scrollIntoView ??= () => undefined;
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    scrollIntoView: () => undefined,
+  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 function Example({ onSelect }: { onSelect: () => void }) {

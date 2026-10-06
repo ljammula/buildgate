@@ -26,7 +26,12 @@ export function CopyableCommand({
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+    },
+    [],
+  );
 
   async function copy() {
     try {
@@ -36,7 +41,9 @@ export function CopyableCommand({
     }
     setCopied(true);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+    timer.current = setTimeout(() => {
+      setCopied(false);
+    }, COPIED_MS);
   }
 
   return (

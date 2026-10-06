@@ -14,8 +14,10 @@ import {
 } from "@/ui/Dialog";
 
 beforeAll(() => {
-  Element.prototype.hasPointerCapture ??= () => false;
-  Element.prototype.scrollIntoView ??= () => undefined;
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    scrollIntoView: () => undefined,
+  });
 });
 
 function Example() {

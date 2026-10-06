@@ -11,7 +11,13 @@ export interface PageHeaderProps {
 }
 
 /** Renders the page's single h1. */
-export function PageHeader({ title, description, actions, breadcrumbs, className }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  description,
+  actions,
+  breadcrumbs,
+  className,
+}: PageHeaderProps) {
   return (
     <header className={cn("flex flex-col gap-2 border-b border-border px-6 py-5", className)}>
       {breadcrumbs ? <div className="text-xs text-fg-muted">{breadcrumbs}</div> : null}

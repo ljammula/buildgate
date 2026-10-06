@@ -5,11 +5,14 @@ import { Button } from "@/ui/Button";
 import { Tooltip, TooltipProvider } from "@/ui/Tooltip";
 
 beforeAll(() => {
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 test("shows its content on focus and describes the trigger", async () => {
@@ -23,5 +26,7 @@ test("shows its content on focus and describes the trigger", async () => {
   expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   await userEvent.tab();
   expect(await screen.findByRole("tooltip")).toHaveTextContent("Copy the run id");
-  expect(screen.getByRole("button", { name: "Copy" })).toHaveAccessibleDescription("Copy the run id");
+  expect(screen.getByRole("button", { name: "Copy" })).toHaveAccessibleDescription(
+    "Copy the run id",
+  );
 });

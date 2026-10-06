@@ -23,18 +23,22 @@ src/
   platform/   the only code that touches browser globals (storage, location, title)
   routes/     the route table and typed link builders: every path is written here once
   ui/         shared presentational components. No data fetching
+  shared/     components more than one feature uses that fetch or write data
+              (the approve/reject dialogs, the oracle panels, the app shell)
   features/   one folder per screen area: its screen, local components, hooks, tests
   app/        App, router wiring, providers
   test/       test setup and fixture readers
 ```
 
 ```text
-app ──> features ──> ui ──> domain
-           │
-           ├──> api ──────> domain
-           ├──> routes ───> domain
-           └──> platform ─> domain
-features/X never imports features/Y (navigate with a routes/ link builder)
+app ──> features ──> shared ──> ui ──> domain
+           │           │
+           │           ├──> api ──────> domain
+           │           ├──> routes ───> domain
+           │           └──> platform ─> domain
+           └──> (also ui, api, routes, platform directly)
+features/X never imports features/Y: navigate with a routes/ link builder, and
+move what two features both need into shared/
 domain imports nothing outside domain
 ```
 

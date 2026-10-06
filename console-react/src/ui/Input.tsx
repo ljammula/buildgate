@@ -61,7 +61,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
 
 interface ControlA11yProps {
   id?: string;
-  "aria-describedby"?: string;
+  "aria-describedby"?: string | undefined;
   "aria-invalid"?: boolean;
 }
 

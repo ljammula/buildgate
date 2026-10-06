@@ -148,7 +148,8 @@ export function pathForRoute(route: RequestBoardRouteConfig): string {
   }
 }
 
-function boardPath(filters: RequestBoardFilters): string {
+/** The board, with its filters in the query string. */
+export function boardPath(filters: RequestBoardFilters = emptyFilters): string {
   const params = new URLSearchParams();
   for (const project of [...filters.projects].sort()) params.append("project", project);
   if (filters.section !== null) params.set("group", filters.section);
@@ -184,3 +185,51 @@ export function opsPath(): string {
 export function newRequestPath(): string {
   return "/requests/new";
 }
+
+// The screens below have no deep link in the route state above: they are
+// reached from another screen. Their paths sit under /app/ or in a query
+// string because a bare /projects or /runs/{id}/diff is an API read, which a
+// browser reload would answer with JSON instead of the console.
+
+export function triagePath(): string {
+  return "/triage";
+}
+
+export function projectsPath(): string {
+  return "/app/projects";
+}
+
+export function newRunPath(): string {
+  return "/app/runs/new";
+}
+
+export type RunView = "diff" | "release";
+
+/** A run's diff or release view: the run page with `?view=`. */
+export function runViewPath(id: string, view: RunView): string {
+  return `${runPath(id)}?view=${view}`;
+}
+
+/** The view a run page URL asks for; null for the run page itself. */
+export function parseRunView(search: string): RunView | null {
+  const view = new URLSearchParams(search).get("view");
+  return view === "diff" || view === "release" ? view : null;
+}
+
+/**
+ * The router's patterns, one per screen. Every `:param` is decoded by the
+ * router and encoded by the builders above, exactly once each way.
+ */
+export const routePatterns = {
+  board: "/",
+  triage: "/triage",
+  newRequest: "/requests/new",
+  requestDetail: "/requests/:id",
+  runs: "/runs",
+  runDetail: "/runs/:id",
+  newRun: "/app/runs/new",
+  projects: "/app/projects",
+  projectStats: "/projects/:project/stats",
+  projectRelease: "/projects/:project/release",
+  ops: "/ops",
+} as const;

@@ -1,13 +1,6 @@
 import { render, screen } from "@testing-library/react";
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeaderCell,
-  TableRow,
-} from "@/ui/Table";
+import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
 
 function Example() {
   return (

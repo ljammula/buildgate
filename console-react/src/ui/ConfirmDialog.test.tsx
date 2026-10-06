@@ -4,8 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { ConfirmDialog } from "@/ui/ConfirmDialog";
 
 beforeAll(() => {
-  Element.prototype.hasPointerCapture ??= () => false;
-  Element.prototype.scrollIntoView ??= () => undefined;
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    scrollIntoView: () => undefined,
+  });
 });
 
 function setup(onConfirm: () => void | Promise<void>) {
@@ -28,7 +30,12 @@ function setup(onConfirm: () => void | Promise<void>) {
 
 test("confirming runs the action once and closes on resolve", async () => {
   let resolve: () => void = () => undefined;
-  const onConfirm = vi.fn(() => new Promise<void>((r) => (resolve = r)));
+  const onConfirm = vi.fn(
+    () =>
+      new Promise<void>((r) => {
+        resolve = r;
+      }),
+  );
   const onOpenChange = setup(onConfirm);
   expect(screen.getByRole("dialog", { name: "Cancel run?" })).toBeInTheDocument();
   const confirm = screen.getByRole("button", { name: "Cancel run" });
@@ -37,7 +44,9 @@ test("confirming runs the action once and closes on resolve", async () => {
   expect(confirm).toBeDisabled();
   expect(onOpenChange).not.toHaveBeenCalled();
   resolve();
-  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  await vi.waitFor(() => {
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });
 
 test("stays open and re-enables when the action rejects", async () => {

@@ -1,5 +1,5 @@
 import { Hourglass, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   elapsedBetween,
@@ -18,19 +18,32 @@ import { toneClasses } from "@/ui/tone";
  * ticks (a finished duration). Render stays pure: the clock is read in an
  * effect-driven subscription, and the interval is cleared on unmount.
  */
-export function useNow(intervalMs: number | null): Date | null {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-    if (intervalMs === null) return undefined;
-    const id = setInterval(() => {
-      setNow(new Date());
-    }, intervalMs);
-    return () => {
-      clearInterval(id);
+export function useNow(intervalMs: number | null): Date {
+  const [store] = useState(() => {
+    let snapshot: number | null = null;
+    return {
+      read: (): number => (snapshot ??= Date.now()),
+      tick: (): void => {
+        snapshot = Date.now();
+      },
     };
-  }, [intervalMs]);
-  return now;
+  });
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      if (intervalMs === null) return () => undefined;
+      store.tick();
+      const id = setInterval(() => {
+        store.tick();
+        notify();
+      }, intervalMs);
+      return () => {
+        clearInterval(id);
+      };
+    },
+    [intervalMs, store],
+  );
+  const ms = useSyncExternalStore(subscribe, store.read);
+  return useMemo(() => new Date(ms), [ms]);
 }
 
 /**
@@ -56,10 +69,14 @@ export interface ElapsedTextProps {
 }
 
 /** "mm:ss" (or "hh:mm:ss") elapsed between two instants, ticking while open-ended. */
-export function ElapsedText({ since, until = null, intervalMs = 1000, className }: ElapsedTextProps) {
+export function ElapsedText({
+  since,
+  until = null,
+  intervalMs = 1000,
+  className,
+}: ElapsedTextProps) {
   const now = useNow(until === null ? intervalMs : null);
-  const reference = now ?? new Date(0);
-  const ms = until === null && now === null ? 0 : elapsedBetween(since, until, reference);
+  const ms = elapsedBetween(since, until, now);
   return <span className={cn("tabular-nums", className)}>{formatDuration(ms)}</span>;
 }
 

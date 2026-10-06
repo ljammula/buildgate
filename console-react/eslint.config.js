@@ -8,7 +8,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-const layers = ["domain", "api", "platform", "routes", "ui", "features", "app"];
+const layers = ["domain", "api", "platform", "routes", "ui", "shared", "features", "app"];
 
 // What each layer may import from the others. A layer always may import
 // itself.
@@ -18,8 +18,9 @@ const allowed = {
   routes: ["domain"],
   api: ["domain"],
   ui: ["domain"],
-  features: ["domain", "api", "platform", "routes", "ui"],
-  app: ["domain", "api", "platform", "routes", "ui", "features"],
+  shared: ["domain", "api", "platform", "routes", "ui"],
+  features: ["domain", "api", "platform", "routes", "ui", "shared"],
+  app: ["domain", "api", "platform", "routes", "ui", "shared", "features"],
 };
 
 // A cross-directory import goes through the "@/" alias, so the patterns

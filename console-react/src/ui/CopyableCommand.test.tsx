@@ -5,7 +5,9 @@ import { CopyableCommand } from "@/ui/CopyableCommand";
 
 test("copies the exact command and the button name becomes Copied", async () => {
   const writeText = vi.fn(() => Promise.resolve());
-  render(<CopyableCommand command="factoryd approve run-1" label="Approve" writeText={writeText} />);
+  render(
+    <CopyableCommand command="factoryd approve run-1" label="Approve" writeText={writeText} />,
+  );
   expect(screen.getByText("factoryd approve run-1")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Copy command" }));
   expect(writeText).toHaveBeenCalledWith("factoryd approve run-1");

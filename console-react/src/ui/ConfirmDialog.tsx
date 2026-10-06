@@ -56,7 +56,12 @@ export function ConfirmDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (pending ? undefined : onOpenChange(next))}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!pending) onOpenChange(next);
+      }}
+    >
       <DialogContent showClose={false}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
