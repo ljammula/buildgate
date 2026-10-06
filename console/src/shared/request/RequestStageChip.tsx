@@ -1,5 +1,5 @@
 import { headTruncate } from "@/domain/middleTruncate";
-import { statusForToken } from "@/domain/status";
+import { AWAITING_PR_LABEL, statusForToken } from "@/domain/status";
 import { StatusChip } from "@/ui/StatusChip";
 
 export interface RequestStageChipProps {
@@ -29,7 +29,7 @@ export function RequestStageChip({
   waitingOn = null,
   needsYou = false,
 }: RequestStageChipProps) {
-  if (awaitingPullRequest) return <StatusChip status="done" label="accepted · awaiting PR" />;
+  if (awaitingPullRequest) return <StatusChip status="done" label={AWAITING_PR_LABEL} />;
   if (waitingOn !== null && waitingOn !== "") {
     return (
       <StatusChip

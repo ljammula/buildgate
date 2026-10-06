@@ -4,7 +4,7 @@ import { RequestStageChip } from "./RequestStageChip";
 
 test("chip shows a calm accepted label, not halted", () => {
   render(<RequestStageChip state="halted" awaitingPullRequest />);
-  expect(screen.getByText("accepted · awaiting PR")).toBeInTheDocument();
+  expect(screen.getByText("Accepted · awaiting PR")).toBeInTheDocument();
   expect(screen.queryByText("Halted")).not.toBeInTheDocument();
   expect(screen.queryByText("halted")).not.toBeInTheDocument();
 });

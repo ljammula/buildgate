@@ -3,6 +3,7 @@ import { CircleCheck, CircleX } from "lucide-react";
 import { useApi } from "@/api/ApiProvider";
 import type { RequestSummary } from "@/domain/request";
 import { Button } from "@/ui/Button";
+import { REQUEST_VERBS } from "@/domain/status";
 
 import { isReviewState } from "./requestDetailLogic";
 import { type RequestDialogs, awaitsTicketOracle } from "./useRequestDialogs";
@@ -77,7 +78,7 @@ export function ReviewActions({
         }}
       >
         <CircleX aria-hidden="true" />
-        Request changes
+        {REQUEST_VERBS.requestChanges}
       </Button>
     </>
   );

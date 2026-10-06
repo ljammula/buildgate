@@ -10,12 +10,12 @@ import {
   requestAwaitingPullRequest,
   requestAwaitingPullRequestLabel,
 } from "@/domain/request";
-import { stateLabel } from "@/domain/status";
+import { requestVerbs, stateLabel } from "@/domain/status";
 import { unifiedLineDiff } from "@/domain/textDiff";
 
-/** Approve / Request changes are legal from these states only (the server refuses any other). */
+/** Approve / Request changes are legal from the states whose row lists them (the server refuses any other). */
 export function isReviewState(state: string): boolean {
-  return state === "spec_review" || state === "oracle_review" || state === "plan_review";
+  return requestVerbs(state).includes("approve");
 }
 
 /**
