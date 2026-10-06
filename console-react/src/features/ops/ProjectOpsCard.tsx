@@ -1,4 +1,7 @@
 import { formatMedianAcceptedTokens } from "@/domain/cost";
+import { Link } from "react-router";
+
+import { projectReleasePath, projectStatsPath } from "@/routes/paths";
 import { Card } from "@/ui/Card";
 import { KillSwitchChip } from "@/ui/StatusChip";
 
@@ -22,6 +25,15 @@ export function ProjectOpsCard({ row }: ProjectOpsCardProps) {
         <h2 className="font-mono text-base font-semibold text-fg">{row.summary.project}</h2>
         <KillSwitchChip engaged={engaged} />
       </div>
+      <p className="text-xs">
+        <Link to={projectStatsPath(row.summary.project)} className="text-accent hover:underline">
+          Stats
+        </Link>
+        {" · "}
+        <Link to={projectReleasePath(row.summary.project)} className="text-accent hover:underline">
+          Release
+        </Link>
+      </p>
       {stats === null ? (
         <p className="text-sm text-fg-muted">Stats unavailable for this project.</p>
       ) : (

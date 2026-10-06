@@ -1,8 +1,6 @@
+import { needsYouPollMs } from "@/api/polling";
 import { useRequests } from "@/api/requestQueries";
-import { needsHumanCount } from "@/domain/requestOrder";
-
-/** How often the sidebar's count is refreshed: a poll, not a second event stream. */
-export const needsYouPollMs = 10_000;
+import { needsYouRequests } from "@/shared/request/needsYou";
 
 /**
  * How many requests wait on the operator, on every page. It reads the board's
@@ -13,5 +11,5 @@ export const needsYouPollMs = 10_000;
 export function useNeedsYouCount(): number | null {
   const { data, isError } = useRequests(needsYouPollMs);
   if (data === undefined || isError) return null;
-  return needsHumanCount(data);
+  return needsYouRequests(data).length;
 }

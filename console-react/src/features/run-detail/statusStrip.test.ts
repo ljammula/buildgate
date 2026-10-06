@@ -34,6 +34,7 @@ test("a running run shows its stage, round, elapsed time and last activity", () 
     elapsed: "02:00",
     // The newer of the feed's last factory line (12:00:10) and the run's field (none).
     lastActivity: "01:50",
+    latest: null,
   });
 });
 
@@ -54,4 +55,15 @@ test("a finished run counts elapsed time to its finished line and has no last ac
   expect(strip.elapsed).toBe("03:00");
   expect(strip.lastActivity).toBeNull();
   expect(strip.round).toBeNull();
+});
+
+test("a running run's latest agent note is what it is doing now; a finished run has none", () => {
+  const running = decodeRun(inProgressRun(), "test");
+  const notes = [
+    event({ source: "worker", stage: "agent", event: "note", round: 1, detail: "read: main.go" }),
+    event({ source: "worker", stage: "agent", event: "note", round: 1, detail: "edit: main.go" }),
+  ];
+  expect(computeStatusStrip(notes, running, now).latest).toBe("edit: main.go");
+  const done = decodeRun(acceptedRun(), "test");
+  expect(computeStatusStrip(notes, done, now).latest).toBeNull();
 });

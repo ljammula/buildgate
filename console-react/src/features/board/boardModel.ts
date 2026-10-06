@@ -1,4 +1,4 @@
-import { formatAgeCompact } from "@/domain/elapsed";
+import { formatAgeCompact, formatAgeSeconds } from "@/domain/elapsed";
 import type { QueueRunStatus } from "@/domain/ops";
 import type { RequestSummary } from "@/domain/request";
 
@@ -78,6 +78,6 @@ export function freshnessLabel(
     case "recent":
       return lastUpdateAtMs === null || lastUpdateAtMs === 0
         ? "Connecting…"
-        : `Last updated ${Math.max(0, Math.floor((now.getTime() - lastUpdateAtMs) / 1000))}s ago`;
+        : `Last updated ${formatAgeSeconds(now.getTime() - lastUpdateAtMs)} ago`;
   }
 }

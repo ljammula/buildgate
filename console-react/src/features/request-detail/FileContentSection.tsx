@@ -5,9 +5,11 @@ import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
 import { Disclosure } from "@/ui/Disclosure";
 import { Markdown } from "@/ui/Markdown";
+import { useCopied } from "@/ui/useCopied";
 
 import { FileEditor } from "./FileEditor";
 import { Panel } from "./Panel";
+import type { EditorBinding } from "./useEditSession";
 
 export interface FileContentSectionProps {
   readonly title: string;
@@ -27,6 +29,8 @@ export interface FileContentSectionProps {
   readonly onStopEdit: () => void;
   readonly onSave: (content: string, baseSha256: string) => Promise<void>;
   readonly onFetchCurrent: () => Promise<string>;
+  /** The page's edit session for this file; see `useEditSession`. */
+  readonly session?: EditorBinding;
   /** Extra content under the text (the parsed acceptance criteria). */
   readonly children?: ReactNode;
   /**
@@ -37,36 +41,15 @@ export interface FileContentSectionProps {
   readonly foldedSummary?: string;
 }
 
-const COPIED_MS = 2000;
-
 /** The button that copies the file's real path so the operator can edit it in their own editor. */
 function CopyPathButton({ fullPath }: { readonly fullPath: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(
-    () => () => {
-      clearTimeout(timer.current);
-    },
-    [],
-  );
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(fullPath);
-    } catch {
-      return;
-    }
-    setCopied(true);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      setCopied(false);
-    }, COPIED_MS);
-  }
+  const { copied, copy } = useCopied();
   return (
     <Button
       variant="ghost"
       size="icon"
       aria-label={copied ? "Path copied" : "Copy path to edit this file"}
-      onClick={() => void copy()}
+      onClick={() => void copy(fullPath)}
     >
       {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
     </Button>
@@ -90,10 +73,18 @@ export function FileContentSection({
   onStopEdit,
   onSave,
   onFetchCurrent,
+  session,
   children,
   foldedSummary,
 }: FileContentSectionProps) {
   const [raw, setRaw] = useState(true);
+  // Focus goes back to Edit when the editor closes, not to the page's top.
+  const editButton = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButton.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
   const rawSwitch = (
     <label className="text-fg-muted flex items-center gap-1.5 text-xs">
       Raw
@@ -150,7 +141,7 @@ export function FileContentSection({
         editing ? null : (
           <>
             {editable ? (
-              <Button size="sm" variant="ghost" onClick={onStartEdit}>
+              <Button ref={editButton} size="sm" variant="ghost" onClick={onStartEdit}>
                 <Pencil aria-hidden="true" />
                 Edit
               </Button>
@@ -168,6 +159,7 @@ export function FileContentSection({
           onSave={onSave}
           onFetchCurrent={onFetchCurrent}
           onClose={onStopEdit}
+          {...(session === undefined ? {} : { session })}
         />
       ) : (
         text

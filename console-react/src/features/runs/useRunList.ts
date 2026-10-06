@@ -1,16 +1,9 @@
 import { useMemo } from "react";
 
+import { runListRefreshMs } from "@/api/polling";
 import { useRequests } from "@/api/requestQueries";
 import { useRuns } from "@/api/runQueries";
 import type { RequestSummary } from "@/domain/request";
-
-/**
- * How often the list re-polls GET /runs on its own (found via the
- * console-observability review, 2026-09-10): a list that only reloaded on an
- * explicit refresh left an operator watching a stale list while the factory
- * built a ticket.
- */
-export const runListAutoRefreshMs = 5000;
 
 /**
  * The run list's data: the runs (the authority, with their own error) and the
@@ -19,7 +12,7 @@ export const runListAutoRefreshMs = 5000;
  * blanks or flags the runs list.
  */
 export function useRunList() {
-  const runs = useRuns(runListAutoRefreshMs);
+  const runs = useRuns(runListRefreshMs);
   const requests = useRequests();
   const requestsById = useMemo(
     () => new Map<string, RequestSummary>((requests.data ?? []).map((r) => [r.id, r])),

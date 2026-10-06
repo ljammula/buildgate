@@ -1,6 +1,8 @@
 import { RefreshCw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 
+import { queryKeys } from "@/api/queryKeys";
 import { useRequestBoard } from "@/api/requestQueries";
 import { Button } from "@/ui/Button";
 import { EmptyState, Spinner } from "@/ui/Feedback";
@@ -11,15 +13,16 @@ import { TriageWorkspace } from "./TriageWorkspace";
 import { isNonEmpty, triageRequests } from "./triageModel";
 
 /**
- * Batch triage at /triage: the requests waiting on a spec or plan decision in
- * one keyboard-driven list (j/k move, a approve, r reject), each decided
- * through the same confirm dialogs as the request page. Deliberately no
+ * Batch triage at /triage: every request that needs the operator, in one
+ * keyboard-driven list (j/k move). A spec or plan review is decided here (a
+ * approve, r reject) through the same confirm dialogs as the request page;
+ * any other state links to its request page. Deliberately no
  * multi-select and no "approve all": batch navigation is fine, batch approval
  * would make the human gate a formality.
  */
 export function TriageScreen() {
   const { query } = useRequestBoard();
-  const [refreshes, setRefreshes] = useState(0);
+  const client = useQueryClient();
   const data = query.data;
   const requests = useMemo(() => (data === undefined ? [] : triageRequests(data)), [data]);
 
@@ -29,8 +32,8 @@ export function TriageScreen() {
       size="icon"
       aria-label="Refresh"
       onClick={() => {
-        void query.refetch();
-        setRefreshes((n) => n + 1);
+        // The list and the focused detail (the only detail query on screen).
+        void client.invalidateQueries({ queryKey: queryKeys.requests.all });
       }}
     >
       <RefreshCw aria-hidden="true" />
@@ -50,7 +53,7 @@ export function TriageScreen() {
             </div>
           )
         ) : isNonEmpty(requests) ? (
-          <TriageWorkspace requests={requests} refreshes={refreshes} />
+          <TriageWorkspace requests={requests} />
         ) : (
           <EmptyState title="Nothing needs you right now." />
         )}

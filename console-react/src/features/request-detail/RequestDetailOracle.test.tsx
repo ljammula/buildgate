@@ -374,6 +374,30 @@ describe("plan_review ticket oracle files", () => {
     });
   });
 
+  test("the reason Approve is off sits beside the header button and scrolls to the files", async () => {
+    openPlan(files);
+    await ready();
+    await screen.findByText("Ticket oracle files");
+    const reason = screen.getByTestId("approve-needs-oracle");
+    expect(reason).toHaveTextContent("Open every oracle file first");
+    expect(approveButton()).toBeDisabled();
+    // Beside the button: the same header, before it.
+    expect(approveButton().parentElement).toContainElement(reason);
+
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    await userEvent.click(reason);
+    expect(scroll).toHaveBeenCalled();
+
+    await toggle(ticketPanel(), "1/RUN_COMMAND.txt");
+    await toggle(ticketPanel(), "1/a_oracle_test.go");
+    await toggle(ticketPanel(), "2/RUN_COMMAND.txt");
+    await waitFor(() => {
+      expect(approveButton()).toBeEnabled();
+    });
+    expect(screen.queryByTestId("approve-needs-oracle")).not.toBeInTheDocument();
+    scroll.mockRestore();
+  });
+
   test("a collapsed ticket oracle file is not shown: Approve disables again", async () => {
     openPlan({ 1: files[1] ?? {} });
     await ready();

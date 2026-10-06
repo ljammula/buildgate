@@ -16,7 +16,7 @@ export function TicketsSection({ request }: { readonly request: RequestSummary }
       {tickets.map((ticket) => (
         // Keyed by index: a retry landing a new runId under the same ticket
         // must update this card, not be matched to a neighbour's.
-        <TicketCard key={ticket.index} ticket={ticket} />
+        <TicketCard key={ticket.index} ticket={ticket} live={request.state === "building"} />
       ))}
     </Panel>
   );

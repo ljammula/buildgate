@@ -5,10 +5,10 @@
 // equals the listing's. Content is fetched per (file, listed hash): a changed
 // listing is a different query, so stale bytes are never shown for a new
 // hash, and a collapsed file is never refetched.
-import { useQueries } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { FetchedOracleFile } from "@/api/oracle";
+import { type OracleFileRef, useOracleFiles } from "@/api/requestQueries";
 import { shownOracleFiles } from "@/domain/oracle";
 
 /** One listed file, as the store needs it. */
@@ -17,9 +17,10 @@ export interface OracleFileSource {
   readonly key: string;
   /** The listing's hash for it. */
   readonly sha256: string;
-  /** TanStack Query key of its content (the store appends the listed hash). */
-  readonly queryKey: readonly unknown[];
-  readonly fetch: (signal: AbortSignal) => Promise<FetchedOracleFile>;
+  /** The file's name in its listing. */
+  readonly name: string;
+  /** Set for a ticket's file; absent for the request's own. */
+  readonly ticket?: number;
 }
 
 /** What a file tile reads and does. */
@@ -35,11 +36,13 @@ export interface OracleFileStore {
 }
 
 /**
+ * @param id the request the files belong to
  * @param sources every listed file (empty while no listing has loaded)
  * @param alwaysLoad keys fetched even while collapsed (MANIFEST.json, whose
  * content feeds the coverage list); fetching never counts as showing.
  */
 export function useOracleFileStore(
+  id: string,
   sources: readonly OracleFileSource[],
   alwaysLoad: readonly string[] = [],
 ): OracleFileStore {
@@ -49,15 +52,13 @@ export function useOracleFileStore(
   const open = new Set([...opened].filter((key) => listed.has(key)));
   const wanted = sources.filter((s) => open.has(s.key) || alwaysLoad.includes(s.key));
 
-  const results = useQueries({
-    queries: wanted.map((s) => ({
-      queryKey: [...s.queryKey, s.sha256],
-      queryFn: ({ signal }: { signal: AbortSignal }) => s.fetch(signal),
-      retry: false,
-      staleTime: Infinity,
-      refetchOnWindowFocus: false,
-    })),
-  });
+  const results = useOracleFiles(
+    id,
+    wanted.map((s): OracleFileRef => {
+      const ref = { name: s.name, sha256: s.sha256 };
+      return s.ticket === undefined ? ref : { ...ref, ticket: s.ticket };
+    }),
+  );
 
   const contents = new Map<string, FetchedOracleFile>();
   const errors = new Map<string, unknown>();

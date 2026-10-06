@@ -360,6 +360,15 @@ test("a failed cancel shows the server's message and keeps the reason", async ()
   expect(screen.getByLabelText("Reason")).toHaveValue("nope");
 });
 
+test("the cancel dialog states its consequence", async () => {
+  renderApp(<Host request={specReview()} render={(props) => <CancelDialog {...props} />} />);
+  expect(
+    await screen.findByText(
+      "The request is marked cancelled for good. A build already running is not stopped; its result is discarded.",
+    ),
+  ).toBeInTheDocument();
+});
+
 test("a 503 on a write is marked temporary, a 409 is not", async () => {
   renderApp(<Host request={specReview()} render={(props) => <CancelDialog {...props} />} />, {
     server: [

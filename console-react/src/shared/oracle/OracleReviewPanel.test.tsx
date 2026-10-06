@@ -174,6 +174,21 @@ test("editing RUN_COMMAND.txt PUTs the content and shows the saved file", async 
   expect(screen.queryByRole("textbox", { name: "RUN_COMMAND.txt content" })).toBeNull();
 });
 
+test("Use suggestion puts the proposed command in the editor, sends nothing, and goes away once it matches", async () => {
+  const server = oracleServer(FILES);
+  server.draft = { status: "drafted", detail: "", proposed_command: "go test ./internal/a/..." };
+  const { server: fake } = setup(server);
+  await loaded();
+  await toggle(panel(), "RUN_COMMAND.txt");
+  await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  await userEvent.click(screen.getByRole("button", { name: "Use suggestion" }));
+  expect(screen.getByRole("textbox", { name: "RUN_COMMAND.txt content" })).toHaveValue(
+    "go test ./internal/a/...",
+  );
+  expect(screen.queryByRole("button", { name: "Use suggestion" })).toBeNull();
+  expect(fake.sent("PUT /requests/req-1/oracle/RUN_COMMAND.txt")).toHaveLength(0);
+});
+
 test("a 422 from saving RUN_COMMAND.txt renders inline and keeps the editor open", async () => {
   const server = oracleServer(FILES);
   server.putError = "RUN_COMMAND.txt does not run a test";

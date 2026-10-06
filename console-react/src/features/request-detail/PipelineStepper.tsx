@@ -1,5 +1,13 @@
-import { CircleAlert, CircleCheck, CircleDashed, Hourglass, type LucideIcon } from "lucide-react";
+import {
+  Ban,
+  CircleAlert,
+  CircleCheck,
+  CircleDashed,
+  Hourglass,
+  type LucideIcon,
+} from "lucide-react";
 
+import { formatWhen } from "@/domain/elapsed";
 import type { RequestSummary } from "@/domain/request";
 import { DigestedText } from "@/shared/request/DigestedText";
 import { ElapsedText, useNow } from "@/ui/Time";
@@ -8,8 +16,8 @@ import { cn } from "@/ui/cn";
 import {
   type PipelineStep,
   type StepStatus,
-  formatWhen,
   isAutomatedActor,
+  pipelineOutcome,
   pipelineSteps,
   stepShowsDetail,
 } from "./requestDetailLogic";
@@ -20,6 +28,7 @@ const GLYPHS: Readonly<Record<StepStatus, { icon: LucideIcon; text: string; word
   pending: { icon: CircleDashed, text: "text-fg-subtle", word: "pending" },
   failed: { icon: CircleAlert, text: "text-tone-danger", word: "failed" },
   needsYou: { icon: Hourglass, text: "text-tone-warning", word: "needs you" },
+  stopped: { icon: Ban, text: "text-tone-danger", word: "stopped" },
 };
 
 function StepView({
@@ -88,11 +97,42 @@ function StepView({
 export function PipelineStepper({ request }: { readonly request: RequestSummary }) {
   const now = useNow(60_000);
   const steps = pipelineSteps(request);
+  const outcome = pipelineOutcome(request);
   return (
-    <ol aria-label="Pipeline steps" className="flex flex-col">
-      {steps.map((step) => (
-        <StepView key={step.step} step={step} request={request} now={now} />
-      ))}
-    </ol>
+    <>
+      <ol aria-label="Pipeline steps" className="flex flex-col">
+        {steps.map((step) => (
+          <StepView key={step.step} step={step} request={request} now={now} />
+        ))}
+      </ol>
+      {outcome === null ? null : (
+        // A request that ended outside the pipeline says so: its steps alone
+        // read as "stopped somewhere", with no sign it was cancelled.
+        <div
+          data-testid="pipeline-outcome"
+          data-state={outcome.state}
+          className="border-border mt-1 flex gap-2 border-t pt-2"
+        >
+          <Ban aria-hidden="true" className="text-tone-danger mt-0.5 size-4 shrink-0" />
+          <div className="min-w-0 text-sm">
+            <p className="font-semibold">{outcome.label}</p>
+            {outcome.entry === null ? null : (
+              <p className="text-fg-muted text-xs">
+                {isAutomatedActor(outcome.entry.by)
+                  ? formatWhen(outcome.entry.at, now)
+                  : `${formatWhen(outcome.entry.at, now)} · ${outcome.entry.by}`}
+              </p>
+            )}
+            {outcome.entry === null ||
+            outcome.entry.reason === "" ||
+            outcome.reasonShownAtStep ? null : (
+              <div className="text-fg-subtle text-xs">
+                <DigestedText text={outcome.entry.reason} max={120} fullLabel="Full reason" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

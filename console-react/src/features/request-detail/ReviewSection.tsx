@@ -5,6 +5,7 @@ import { TicketOraclePanel } from "@/shared/oracle/TicketOraclePanel";
 import { Callout } from "@/ui/Feedback";
 
 import { Panel } from "./Panel";
+import { ticketOracleAnchorId } from "./ReviewActions";
 import { type RequestDialogs, awaitsTicketOracle } from "./useRequestDialogs";
 
 export interface ReviewSectionProps {
@@ -58,11 +59,13 @@ export function ReviewSection({
         />
       ) : null}
       {awaitsTicketOracle(request) ? (
-        <TicketOraclePanel
-          key={`ticket-oracle-${request.id}-${request.updatedAt}-${dialogs.ticketOracleNonce}`}
-          request={request}
-          onChanged={dialogs.onTicketOracleChanged}
-        />
+        <div id={ticketOracleAnchorId}>
+          <TicketOraclePanel
+            key={`ticket-oracle-${request.id}-${request.updatedAt}-${dialogs.ticketOracleNonce}`}
+            request={request}
+            onChanged={dialogs.onTicketOracleChanged}
+          />
+        </div>
       ) : null}
       {anyEditorOpen ? (
         <p className="text-fg-muted text-sm">

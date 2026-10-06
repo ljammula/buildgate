@@ -1,8 +1,7 @@
 // Pure rules of the request page: which stage sections and callouts a state
 // shows, what a recovery callout says, and how the pipeline stepper reads a
 // request's history. No React, no clock (callers pass `now`).
-import { ApiError } from "@/domain/apiError";
-import { formatLocalTimestamp, tryParseTimestamp } from "@/domain/elapsed";
+import { formatLocalTimestamp } from "@/domain/elapsed";
 import {
   type RequestSummary,
   type RequestTicket,
@@ -171,20 +170,10 @@ export function currentContentFor(request: RequestSummary, path: string): string
   return "";
 }
 
-/** The server's own text for a failed write; a 503 is marked as retryable. */
-export function errorText(error: unknown): string {
-  if (error instanceof ApiError) {
-    return error.isRetryable
-      ? `${error.serverMessage} (temporary: try again)`
-      : error.serverMessage;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
 /** The recovery callout of a halted or quarantined request. */
 export interface RecoveryPlan {
   readonly quarantined: boolean;
-  /** Accepted, only the pull request is missing: neutral, and Retry rebuilds. */
+  /** Accepted, only the pull request is missing: neutral. */
   readonly awaitingPullRequest: boolean;
   readonly headline: string;
   readonly explanation: string;
@@ -208,6 +197,17 @@ export function quarantinedTicket(request: RequestSummary): RequestTicket | null
   return request.tickets.find((t) => t.runId !== "") ?? null;
 }
 
+// The server says what a retry does: its own text for an accepted request
+// with no pull request states "(no rebuild)", and the label must not say the
+// opposite beside it (found dogfooding, 2026-10-05). A server that says
+// nothing keeps the older rule: a retry from there is a fresh, paid run.
+function retryLabel(request: RequestSummary, awaitingPullRequest: boolean): string {
+  if (!awaitingPullRequest) return "Retry request";
+  return /no rebuild/i.test(`${request.nextAction}\n${request.error}`)
+    ? "Retry request (opens the PR only)"
+    : "Retry request (rebuilds)";
+}
+
 export function recoveryPlan(request: RequestSummary): RecoveryPlan {
   const quarantined = request.state === "quarantined";
   const awaitingPullRequest = requestAwaitingPullRequest(request);
@@ -228,7 +228,7 @@ export function recoveryPlan(request: RequestSummary): RecoveryPlan {
     awaitingPullRequest,
     headline,
     explanation,
-    retryLabel: awaitingPullRequest ? "Retry request (rebuilds)" : "Retry request",
+    retryLabel: retryLabel(request, awaitingPullRequest),
     showSendBack: request.canSendBack,
     sendBackLabel: target === "plan" ? "Send back to planning" : "Send back to spec",
     sendBackIsPrimary,
@@ -292,49 +292,69 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
   done: "Done",
 };
 
-export type StepStatus = "done" | "current" | "pending" | "failed" | "needsYou";
+export type StepStatus = "done" | "current" | "pending" | "failed" | "needsYou" | "stopped";
 
 export interface PipelineStep {
   readonly step: string;
   readonly label: string;
   readonly status: StepStatus;
-  /** The history entry that reached this step (the terminal move itself, for a failed one). */
+  /** The history entry that reached this step (the move out of it, for the step a request stopped at). */
   readonly entry: RequestTransition | null;
   /** The current building step shows ticket progress and elapsed time instead of an entry. */
   readonly showsBuildProgress: boolean;
 }
 
+const TERMINAL_STATES: ReadonlySet<string> = new Set(["quarantined", "halted", "cancelled"]);
+
+/**
+ * The step a terminal request stopped at, and the move that took it out of
+ * it. The last entry's `from` is not enough: a request cancelled out of
+ * quarantine moved `quarantined -> cancelled`, and `quarantined` is not a
+ * pipeline step, so every step read pending (a real cancelled request). The
+ * most recent move out of a pipeline step is where it stopped.
+ */
+function stoppedAt(
+  request: RequestSummary,
+  steps: readonly string[],
+): { readonly step: string; readonly entry: RequestTransition } | null {
+  for (let i = request.history.length - 1; i >= 0; i--) {
+    const entry = request.history[i];
+    if (entry !== undefined && steps.includes(entry.from)) return { step: entry.from, entry };
+  }
+  return null;
+}
+
 /**
  * Where the request is in the pipeline: each step's glyph status and the
- * history entry behind it. A terminal request marks the step it was on when
- * it stopped (the one the last entry moved out of) as failed, or as
- * needs-you when only the pull request is missing. A record with no history
- * falls back to `state` for the current step and leaves the rest pending.
+ * history entry behind it. A terminal request marks the step it stopped at
+ * (see `stoppedAt`) as failed, as needs-you when only the pull request is
+ * missing, or as stopped when the operator cancelled it; the steps before it
+ * are done. A record with no history falls back to `state` for the current
+ * step and leaves the rest pending.
  */
 export function pipelineSteps(request: RequestSummary): PipelineStep[] {
-  const terminal =
-    request.state === "quarantined" || request.state === "halted" || request.state === "cancelled";
+  const terminal = TERMINAL_STATES.has(request.state);
   const resumeReview = request.state === "resume_review";
-  const last = request.history[request.history.length - 1] ?? null;
-  const activeState = resumeReview
-    ? (request.resume?.fromState ?? "")
-    : terminal
-      ? (last?.from ?? "")
-      : request.state;
   const visitedOracleStage =
     request.draftOracles ||
     OPTIONAL_ORACLE_STEPS.has(request.state) ||
     request.history.some((e) => OPTIONAL_ORACLE_STEPS.has(e.to));
   const steps = PIPELINE_STEPS.filter((s) => visitedOracleStage || !OPTIONAL_ORACLE_STEPS.has(s));
+  const stopped = terminal ? stoppedAt(request, steps) : null;
+  const activeState = resumeReview
+    ? (request.resume?.fromState ?? "")
+    : terminal
+      ? (stopped?.step ?? "")
+      : request.state;
   const currentIndex = steps.findIndex((s) => s === activeState);
-  const failureEntry = terminal ? last : null;
 
   const statusAt = (i: number): StepStatus => {
     if (i < currentIndex) return "done";
     if (i > currentIndex) return "pending";
     if (resumeReview) return "needsYou";
     if (!terminal) return "current";
-    return requestAwaitingPullRequest(request) ? "needsYou" : "failed";
+    if (requestAwaitingPullRequest(request)) return "needsYou";
+    return request.state === "cancelled" ? "stopped" : "failed";
   };
   const lastEntryReaching = (step: string): RequestTransition | null => {
     for (let i = request.history.length - 1; i >= 0; i--) {
@@ -350,10 +370,56 @@ export function pipelineSteps(request: RequestSummary): PipelineStep[] {
       step,
       label: STEP_LABELS[step] ?? step,
       status,
-      entry: terminal && i === currentIndex ? failureEntry : lastEntryReaching(step),
+      entry: terminal && i === currentIndex ? (stopped?.entry ?? null) : lastEntryReaching(step),
       showsBuildProgress: step === "building" && status === "current",
     };
   });
+}
+
+/** How a terminal request ended, drawn under the steps. */
+export interface PipelineOutcome {
+  readonly state: string;
+  readonly label: string;
+  /** The move into the terminal state: who, when, why. */
+  readonly entry: RequestTransition | null;
+  /** The stopped step already prints this entry, so the row need not repeat its reason. */
+  readonly reasonShownAtStep: boolean;
+}
+
+/**
+ * The terminal state a request is in, visible as such: cancelled,
+ * quarantined or halted. Null for a live request, and for a halt where only
+ * the pull request is missing (nothing failed; its step reads needs-you).
+ */
+export function pipelineOutcome(request: RequestSummary): PipelineOutcome | null {
+  if (!TERMINAL_STATES.has(request.state) || requestAwaitingPullRequest(request)) return null;
+  let entry: RequestTransition | null = null;
+  for (let i = request.history.length - 1; i >= 0; i--) {
+    const candidate = request.history[i];
+    if (candidate?.to === request.state) {
+      entry = candidate;
+      break;
+    }
+  }
+  const stepEntry = pipelineSteps(request).find(
+    (s) => s.status === "failed" || s.status === "stopped",
+  )?.entry;
+  return {
+    state: request.state,
+    label: stateLabel(request.state),
+    entry,
+    reasonShownAtStep: entry !== null && stepEntry === entry,
+  };
+}
+
+/** Every history entry that moved the request into cancelled, quarantined or halted, oldest first. */
+export function terminalEntries(request: RequestSummary): RequestTransition[] {
+  return request.history.filter((e) => TERMINAL_STATES.has(e.to));
+}
+
+/** "Cancelled by jane at 2026-09-12 10:00:00". */
+export function terminalEntryLine(entry: RequestTransition): string {
+  return `${stateLabel(entry.to)} by ${entry.by === "" ? "the factory" : entry.by} at ${formatLocalTimestamp(entry.at)}`;
 }
 
 /**
@@ -376,24 +442,6 @@ export function stepShowsDetail(step: Pick<PipelineStep, "status" | "entry">): b
   if (step.status === "pending") return false;
   if (step.status !== "done") return true;
   return step.entry !== null && !isAutomatedActor(step.entry.by);
-}
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/**
- * An RFC 3339 timestamp as local "HH:mm" when it falls on `now`'s day, or
- * "MMM d HH:mm" otherwise; the raw value when empty or unparseable.
- */
-export function formatWhen(at: string, now: Date): string {
-  const parsed = tryParseTimestamp(at);
-  if (parsed === null) return at;
-  const two = (n: number): string => n.toString().padStart(2, "0");
-  const hm = `${two(parsed.getHours())}:${two(parsed.getMinutes())}`;
-  const sameDay =
-    parsed.getFullYear() === now.getFullYear() &&
-    parsed.getMonth() === now.getMonth() &&
-    parsed.getDate() === now.getDate();
-  return sameDay ? hm : `${MONTHS[parsed.getMonth()] ?? ""} ${parsed.getDate()} ${hm}`;
 }
 
 /** "Approved by jane at 2026-09-12 10:00:00". */
@@ -463,4 +511,38 @@ export function revisionDiffText(request: RequestSummary, detail: RevisionDetail
     out += "\n";
   }
   return out;
+}
+
+/**
+ * What an open editor tells its operator when a newer record arrives under
+ * it. States the request's new state, and what that means for the text: a
+ * changed file (Save will show the difference, the server's 409 stays the
+ * arbiter) or a file that can no longer be saved (the text stays to copy).
+ */
+export function editChangeNotice(options: {
+  readonly state: string;
+  readonly contentChanged: boolean;
+  readonly editable: boolean;
+}): string {
+  const parts = [
+    `This request changed while you were editing: it is now ${stateLabel(options.state)}.`,
+  ];
+  if (options.contentChanged) {
+    parts.push(
+      "The file on the server is not the one you started from; Save will show you the difference.",
+    );
+  }
+  if (!options.editable) {
+    parts.push(
+      "This file can no longer be edited in this state, so Save is off; your text stays here to copy.",
+    );
+  }
+  return parts.join(" ");
+}
+
+/** Why Save is off for an editor whose file stopped being editable; null while it is editable. */
+export function editBlockedReason(state: string, editable: boolean): string | null {
+  return editable
+    ? null
+    : `Save is off: this file can no longer be edited (the request is now ${stateLabel(state)}).`;
 }

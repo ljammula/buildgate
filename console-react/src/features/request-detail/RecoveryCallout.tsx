@@ -42,7 +42,12 @@ export function RecoveryCallout({
 }: RecoveryCalloutProps) {
   const { canWrite } = useApi();
   const plan = recoveryPlan(request);
-  const explanation = digestText(plan.explanation);
+  // A server sentence that names a command or a branch is what the operator
+  // needs to act (merge the branch by hand): never cut it, and when it is the
+  // only instruction (no cause box above) show it whole as well.
+  const digest = digestText(plan.explanation);
+  const needsWhole = digest.truncated && (plan.explanation.includes("`") || request.error === "");
+  const explanation = needsWhole ? { head: plan.explanation, truncated: false } : digest;
   const disabled = acting || !canWrite;
   // The receipts of the run that stopped: its log, diff and gates.
   const evidence = quarantinedTicket(request);

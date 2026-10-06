@@ -3,9 +3,10 @@ import { Link } from "react-router";
 
 import { opsPath, projectReleasePath, projectStatsPath, projectsPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
-import { Callout, EmptyState, Spinner } from "@/ui/Feedback";
-import { ErrorCallout, describeError } from "@/ui/ErrorDisplay";
+import { EmptyState, Spinner } from "@/ui/Feedback";
+import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
+import { StaleWarning } from "@/ui/StaleWarning";
 import { Table, TableBody, TableFrame, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
 
 import { ProjectLookupDialog } from "./ProjectLookupDialog";
@@ -37,7 +38,12 @@ export function RunListScreen() {
               title="Project release"
               pathFor={projectReleasePath}
               trigger={
-                <Button variant="ghost" size="icon" aria-label="Project release">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Project release"
+                  title="Project release"
+                >
                   <Shield aria-hidden="true" />
                 </Button>
               }
@@ -46,12 +52,17 @@ export function RunListScreen() {
               title="Project stats"
               pathFor={projectStatsPath}
               trigger={
-                <Button variant="ghost" size="icon" aria-label="Project stats">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Project stats"
+                  title="Project stats"
+                >
                   <BarChart3 aria-hidden="true" />
                 </Button>
               }
             />
-            <Button asChild variant="ghost" size="icon" aria-label="Operations">
+            <Button asChild variant="ghost" size="icon" aria-label="Operations" title="Operations">
               <Link to={opsPath()}>
                 <LayoutDashboard aria-hidden="true" />
               </Link>
@@ -60,6 +71,7 @@ export function RunListScreen() {
               variant="ghost"
               size="icon"
               aria-label="Refresh"
+              title="Refresh"
               disabled={loading}
               onClick={() => void refresh()}
             >
@@ -78,17 +90,12 @@ export function RunListScreen() {
         ) : (
           <>
             {runs.error === null ? null : (
-              <Callout tone="warning" data-testid="run-list-stale-banner">
-                <div className="flex items-center justify-between gap-3">
-                  <span>
-                    Showing the last successfully loaded data -- refresh failed:{" "}
-                    {describeError(runs.error).raw}
-                  </span>
-                  <Button size="sm" disabled={loading} onClick={() => void refresh()}>
-                    Retry
-                  </Button>
-                </div>
-              </Callout>
+              <StaleWarning
+                error={runs.error}
+                retrying={loading}
+                onRetry={() => void refresh()}
+                testId="run-list-stale-banner"
+              />
             )}
             {runs.data.length === 0 ? (
               <EmptyState title="No runs found." />

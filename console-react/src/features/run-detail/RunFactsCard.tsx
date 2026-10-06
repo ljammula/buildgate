@@ -5,17 +5,15 @@ import { describeError } from "@/ui/ErrorDisplay";
 import { formatModelUsageLine } from "@/domain/cost";
 import type { Run } from "@/domain/run";
 import { runTokensText } from "@/domain/runSummary";
-import { Field, Fields } from "@/features/run-detail/Fields";
 import { Badge } from "@/ui/Badge";
 import { Button } from "@/ui/Button";
 import { CompactId } from "@/ui/CompactId";
 import { Disclosure } from "@/ui/Disclosure";
+import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Section } from "@/ui/PageLayout";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StatusChipForToken } from "@/ui/StatusChip";
 
-// Label column of the side column's facts: the main column's 11rem would leave a 22rem card with no room for a value.
-const sideFields = "grid-cols-[5.5rem_minmax(0,1fr)]";
 // Past this many files the list is folded; the diff view has them all.
 const FILES_SHOWN = 8;
 
@@ -76,18 +74,18 @@ export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardPr
   const tokens = runTokensText(run);
   return (
     <Section title="Run" card>
-      <Fields className={sideFields}>
-        <Field label="State">
+      <DescriptionList labelWidth="sm">
+        <DescriptionItem label="State">
           <StatusChipForToken token={run.state} />
-        </Field>
-        <Field label="Run ID" mono>
+        </DescriptionItem>
+        <DescriptionItem label="Run ID" mono>
           <CompactId value={run.id} max={22} label="run id" />
-        </Field>
-        <Field label="Updated">
+        </DescriptionItem>
+        <DescriptionItem label="Updated">
           <RelativeTime value={run.updatedAt} />
-        </Field>
+        </DescriptionItem>
         {tokens === null ? null : (
-          <Field label="Usage">
+          <DescriptionItem label="Usage">
             <span>{tokens}</span>
             <Disclosure bare title="By model" headingLevel="h3">
               <ul className="text-fg-muted text-xs">
@@ -98,12 +96,14 @@ export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardPr
                 ))}
               </ul>
             </Disclosure>
-          </Field>
+          </DescriptionItem>
         )}
         {streamError !== null ? (
-          <Field label="Live updates">Disconnected: {describeError(streamError).raw}</Field>
+          <DescriptionItem label="Live updates">
+            Disconnected: {describeError(streamError).raw}
+          </DescriptionItem>
         ) : null}
-      </Fields>
+      </DescriptionList>
       {run.baseSha === "" && run.resultSha === null ? null : (
         <div className="flex flex-col gap-1.5 border-t border-border pt-3">
           <h3 className="text-xs font-semibold text-fg-muted">Commit and artifact evidence</h3>

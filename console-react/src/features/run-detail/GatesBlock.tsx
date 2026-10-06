@@ -2,6 +2,7 @@ import { CircleAlert, CircleCheck } from "lucide-react";
 
 import type { GateResult } from "@/domain/run";
 import { formatGateDuration, gatesSummary } from "@/domain/runSummary";
+import { listKeys } from "@/features/run-detail/listKeys";
 import { CompactId } from "@/ui/CompactId";
 import { Disclosure } from "@/ui/Disclosure";
 import { cn } from "@/ui/cn";
@@ -42,6 +43,7 @@ export function GatesBlock({ gates }: { readonly gates: readonly GateResult[] })
   if (gates.length === 0) return null;
   const summary = gatesSummary(gates);
   const ordered = [...gates.filter((g) => !g.passed), ...gates.filter((g) => g.passed)];
+  const keys = listKeys(ordered, (gate) => gate.check);
   return (
     <Disclosure
       title="Gate results"
@@ -52,7 +54,7 @@ export function GatesBlock({ gates }: { readonly gates: readonly GateResult[] })
     >
       <ul className="flex flex-col gap-2">
         {ordered.map((gate, i) => (
-          <GateRow key={`${gate.check}-${i}`} gate={gate} />
+          <GateRow key={keys[i]} gate={gate} />
         ))}
       </ul>
     </Disclosure>

@@ -1,12 +1,7 @@
+import { maxSseFailuresBeforeDisconnected } from "@/api/polling";
 import type { ApiError } from "@/domain/apiError";
 
 import { type BoardFreshness, boardFreshness } from "./boardModel";
-
-/**
- * How many connection attempts may end, since the stream was last open,
- * before the indicator calls it an outage rather than a blip.
- */
-export const maxSseFailuresBeforeDisconnected = 3;
 
 /**
  * The indicator state for the board's event stream: live while connected,

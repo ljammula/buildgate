@@ -2,7 +2,8 @@ import { useState } from "react";
 
 import { useRequestRevision, useRequestRevisions } from "@/api/requestQueries";
 import { formatLocalTimestamp } from "@/domain/elapsed";
-import type { RequestSummary, RevisionSummary } from "@/domain/request";
+import { type RequestSummary, type RevisionSummary, rejectionStage } from "@/domain/request";
+import { EscapedText } from "@/shared/oracle/EscapedText";
 import { DiffView } from "@/ui/DiffView";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Select } from "@/ui/Input";
@@ -16,23 +17,39 @@ function revisionLabel(revision: RevisionSummary): string {
 }
 
 /**
- * Opt-in compare of the current document against a rejected revision of it.
- * Offered only when a rejection of THIS stage exists (the caller checks):
- * a request rejected at spec_review has no ticket revision at plan_review.
- * Revisions are fetched only once the switch is on; a sole revision is
- * selected for the operator.
+ * What changed since the operator rejected this document: their last note,
+ * quoted, and the diff between the rejected revision and the current text.
+ * Open by default (the switch turns it off): at a re-review this is the
+ * question, and the full current text stays whole below it, because the
+ * approval is bound to that text and not to the diff. Offered only when a
+ * rejection of THIS stage exists (the caller checks): a request rejected at
+ * spec_review has no ticket revision at plan_review. The latest revision is
+ * selected unless the operator picks another.
  */
 export function RevisionCompare({ request }: { readonly request: RequestSummary }) {
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [picked, setPicked] = useState<number | null>(null);
   const revisions = useRequestRevisions(request.id, enabled);
   const list = revisions.data ?? [];
-  // A lone prior revision needs no picking.
-  const selected = picked ?? (list.length === 1 ? (list[0]?.index ?? null) : null);
+  const latest = list.reduce<number | null>(
+    (best, r) => (best === null || r.index > best ? r.index : best),
+    null,
+  );
+  const selected = picked ?? latest;
   const detail = useRequestRevision(request.id, selected);
+  const note = [...request.rejections].reverse().find((r) => rejectionStage(r) === request.state);
 
   return (
     <Panel title="Revisions">
+      {note === undefined ? null : (
+        <blockquote
+          data-testid="revision-note"
+          className="border-border flex flex-col gap-1 border-l-2 pl-3 text-sm"
+        >
+          <p className="text-fg-muted text-xs">{`You asked (${note.by}, ${formatLocalTimestamp(note.at)}):`}</p>
+          <EscapedText text={note.reason} />
+        </blockquote>
+      )}
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
@@ -77,9 +94,12 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
               <ErrorCallout error={detail.error} />
             </div>
           ) : (
-            <div data-testid="revision-diff" className="max-h-[28rem] overflow-auto">
-              <DiffView diff={revisionDiffText(request, detail.data)} />
-            </div>
+            <>
+              <h3 className="text-sm font-semibold">Changes since you rejected</h3>
+              <div data-testid="revision-diff" className="max-h-[28rem] overflow-auto">
+                <DiffView diff={revisionDiffText(request, detail.data)} />
+              </div>
+            </>
           )}
         </>
       )}

@@ -36,6 +36,7 @@ function CancelBody({ requestId, by, onOpenChange, onDone }: BodyProps) {
       title="Cancel this request"
       confirmLabel="Cancel request"
       tone="danger"
+      description="The request is marked cancelled for good. A build already running is not stopped; its result is discarded."
       pending={cancel.isPending}
       error={cancel.error}
       onOpenChange={onOpenChange}

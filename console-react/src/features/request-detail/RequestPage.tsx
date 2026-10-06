@@ -1,8 +1,7 @@
-import { useState } from "react";
-
 import { useApi } from "@/api/ApiProvider";
 import type { RequestSummary } from "@/domain/request";
 import { rejectionStage } from "@/domain/request";
+import { ConfirmDialog } from "@/ui/ConfirmDialog";
 import { PageBody } from "@/ui/PageLayout";
 
 import { AuditSection } from "./AuditSection";
@@ -18,12 +17,9 @@ import { RevisionCompare } from "./RevisionCompare";
 import { ReviewActions } from "./ReviewActions";
 import { StageSection } from "./StageSection";
 import { TicketsSection } from "./TicketsSection";
-import {
-  contentFiles,
-  nextActionText,
-  showsNextBanner,
-  ticketsLeadContent,
-} from "./requestDetailLogic";
+import { nextActionText, showsNextBanner, ticketsLeadContent } from "./requestDetailLogic";
+import { useEditSession } from "./useEditSession";
+import { useLeaveGuard } from "./useLeaveGuard";
 import { useRequestDialogs } from "./useRequestDialogs";
 
 export interface RequestPageProps {
@@ -54,13 +50,11 @@ export function RequestPage({
 }: RequestPageProps) {
   const { canWrite } = useApi();
   const dialogs = useRequestDialogs(request);
-  const files = contentFiles(request, canWrite);
-  const [editing, setEditing] = useState<string | null>(null);
-  // An editor closes the moment its file stops being editable (the request
-  // moved on, or a live update changed its state): the edit would be
-  // refused, and Approve must not stay disabled for an editor nobody sees.
-  const editorOpen = editing !== null && files.some((f) => f.id === editing && f.editable);
-  if (editing !== null && !editorOpen) setEditing(null);
+  // The open editor and its unsaved text: see useEditSession. A newer record
+  // never closes an editor that holds unsaved text.
+  const edit = useEditSession(request, canWrite);
+  const editorOpen = edit.editingId !== null;
+  const leaveGuard = useLeaveGuard(edit.armed);
 
   const next = nextActionText(request);
   const leads = ticketsLeadContent(request);
@@ -99,9 +93,13 @@ export function RequestPage({
             {comparable ? <RevisionCompare request={request} /> : null}
             <ContentSections
               request={request}
-              files={files}
-              editing={editing}
-              setEditing={setEditing}
+              files={edit.files}
+              editing={edit.editingId}
+              setEditing={(id) => {
+                if (id === null) edit.stop();
+                else edit.start(id);
+              }}
+              session={edit.binding}
               refetchRequest={refetchRequest}
             />
             {leads ? null : tickets}
@@ -116,6 +114,19 @@ export function RequestPage({
         </div>
       </PageBody>
       <RequestDialogs request={request} dialogs={dialogs} />
+      <ConfirmDialog
+        open={leaveGuard.asking}
+        onOpenChange={(open) => {
+          if (!open) leaveGuard.stay();
+        }}
+        title="Leave this page?"
+        confirmLabel="Leave and discard"
+        cancelLabel="Stay and keep editing"
+        tone="danger"
+        onConfirm={leaveGuard.leave}
+      >
+        Your edit has not been saved. Leaving discards it.
+      </ConfirmDialog>
     </>
   );
 }

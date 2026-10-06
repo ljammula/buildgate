@@ -1,14 +1,16 @@
-import { ApiError } from "@/domain/apiError";
 import { type RequestSummary, decodeRequestSummary } from "@/domain/request";
 
 import {
   approvedLine,
   contentFiles,
   currentContentFor,
-  errorText,
-  formatWhen,
+  editBlockedReason,
+  editChangeNotice,
   isAutomatedActor,
   nextActionText,
+  pipelineOutcome,
+  terminalEntries,
+  terminalEntryLine,
   parseAcceptanceCriteria,
   pipelineSteps,
   recoveryPlan,
@@ -341,25 +343,6 @@ describe("pipelineSteps", () => {
   });
 });
 
-describe("formatWhen", () => {
-  test("HH:mm on the same local day, 'MMM d HH:mm' otherwise, the raw text when unparseable", () => {
-    const now = new Date(2026, 8, 15, 12, 0, 0);
-    expect(formatWhen(new Date(2026, 8, 15, 9, 5).toISOString(), now)).toBe("09:05");
-    expect(formatWhen(new Date(2026, 8, 14, 23, 59).toISOString(), now)).toBe("Sep 14 23:59");
-    expect(formatWhen("not a time", now)).toBe("not a time");
-    expect(formatWhen("", now)).toBe("");
-  });
-});
-
-test("errorText gives the server's message, marking a 503 retryable", () => {
-  expect(errorText(new ApiError(422, JSON.stringify({ error: "bad spec" })))).toBe("bad spec");
-  expect(errorText(new ApiError(503, JSON.stringify({ error: "try later" })))).toBe(
-    "try later (temporary: try again)",
-  );
-  expect(errorText(new Error("plain"))).toBe("plain");
-  expect(errorText("odd")).toBe("odd");
-});
-
 test("audit and rejection lines", () => {
   expect(approvedLine("jane", "not a time")).toBe("Approved by jane at not a time");
   const base = { by: "bob", at: "x", fromState: "spec_review" };
@@ -407,5 +390,178 @@ describe("isAutomatedActor", () => {
     expect(isAutomatedActor("factoryd")).toBe(true);
     expect(isAutomatedActor("")).toBe(true);
     expect(isAutomatedActor("jane")).toBe(false);
+  });
+});
+
+// The history of a real cancelled request (spec drafting halted and retried,
+// built, quarantined, then cancelled by the operator), as the server sent it.
+const cancelledHistory = [
+  { from: "submitted", to: "spec_drafting", at: "2026-10-06T03:55:07Z", by: "factory" },
+  {
+    from: "spec_drafting",
+    to: "halted",
+    at: "2026-10-06T04:00:00Z",
+    by: "factory",
+    reason: "spec drafting failed: draft_spec.py exited 2",
+  },
+  {
+    from: "halted",
+    to: "spec_drafting",
+    at: "2026-10-06T04:03:35Z",
+    by: "dogfood-operator",
+    reason: "retried after: spec drafting failed",
+  },
+  {
+    from: "spec_drafting",
+    to: "spec_review",
+    at: "2026-10-06T04:07:10Z",
+    by: "factory",
+    reason: "spec drafted",
+  },
+  {
+    from: "spec_review",
+    to: "planning",
+    at: "2026-10-06T04:07:21Z",
+    by: "dogfood-operator",
+    reason: "approved",
+  },
+  {
+    from: "planning",
+    to: "plan_review",
+    at: "2026-10-06T04:07:54Z",
+    by: "factory",
+    reason: "plan drafted: 1 tickets",
+  },
+  {
+    from: "plan_review",
+    to: "building",
+    at: "2026-10-06T04:07:59Z",
+    by: "dogfood-operator",
+    reason: "approved",
+  },
+  {
+    from: "building",
+    to: "quarantined",
+    at: "2026-10-06T04:13:12Z",
+    by: "factory",
+    reason: "ticket 1/1 quarantined: required_files_changed: internal/domain/domain.go untouched",
+  },
+  {
+    from: "quarantined",
+    to: "cancelled",
+    at: "2026-10-06T04:13:53Z",
+    by: "dogfood-operator",
+    reason: "The modulo operation already exists in domain.go; the ticket was redundant.",
+  },
+];
+
+describe("a request cancelled out of quarantine", () => {
+  const request = req("cancelled", { history: cancelledHistory });
+
+  test("steps before the one it stopped at are done, that step is stopped, the rest pending", () => {
+    const status = Object.fromEntries(pipelineSteps(request).map((s) => [s.step, s.status]));
+    expect(status).toEqual({
+      submitted: "done",
+      spec_drafting: "done",
+      spec_review: "done",
+      planning: "done",
+      plan_review: "done",
+      building: "stopped",
+      pr_review: "pending",
+      done: "pending",
+    });
+  });
+
+  test("the stopped step carries the move that took it out of the step, not the cancel", () => {
+    const building = pipelineSteps(request).find((s) => s.step === "building");
+    expect(building?.entry?.to).toBe("quarantined");
+  });
+
+  test("the outcome names the terminal state with who, when and why", () => {
+    const outcome = pipelineOutcome(request);
+    expect(outcome?.label).toBe("Cancelled");
+    expect(outcome?.entry?.by).toBe("dogfood-operator");
+    expect(outcome?.entry?.reason).toContain("already exists");
+    expect(outcome?.reasonShownAtStep).toBe(false);
+  });
+
+  test("the audit lists every halt, quarantine and cancel, oldest first", () => {
+    const lines = terminalEntries(request).map((e) => terminalEntryLine(e).split(" at ")[0]);
+    expect(lines).toEqual([
+      "Halted by factory",
+      "Quarantined by factory",
+      "Cancelled by dogfood-operator",
+    ]);
+  });
+});
+
+describe("a halted request", () => {
+  test("is failed at the step it halted in, and its outcome does not repeat that step's reason", () => {
+    const request = req("halted", {
+      history: [
+        { from: "submitted", to: "spec_drafting", at: "2026-10-06T03:55:07Z", by: "factory" },
+        {
+          from: "spec_drafting",
+          to: "halted",
+          at: "2026-10-06T04:00:00Z",
+          by: "factory",
+          reason: "boom",
+        },
+      ],
+    });
+    expect(pipelineSteps(request).find((s) => s.status === "failed")?.step).toBe("spec_drafting");
+    expect(pipelineOutcome(request)?.reasonShownAtStep).toBe(true);
+  });
+
+  test("accepted with no pull request is needs-you and has no outcome row", () => {
+    const request = req("halted", {
+      halt_kind: "accepted_no_pr",
+      history: [
+        { from: "building", to: "halted", at: "2026-10-06T04:00:00Z", by: "factory", reason: "x" },
+      ],
+    });
+    expect(pipelineSteps(request).find((s) => s.step === "building")?.status).toBe("needsYou");
+    expect(pipelineOutcome(request)).toBeNull();
+  });
+});
+
+describe("retry label", () => {
+  const awaiting = {
+    halt_kind: "accepted_no_pr",
+    ticket_count: 1,
+    tickets: [ticketWire({ index: 1, runId: "r1" })],
+  };
+
+  test("says nothing about a rebuild when the server says there is none", () => {
+    const plan = recoveryPlan(
+      req("halted", {
+        ...awaiting,
+        next_action: "`factoryd retry x` re-attempts only the PR (no rebuild)",
+      }),
+    );
+    expect(plan.retryLabel).toBe("Retry request (opens the PR only)");
+  });
+
+  test("keeps the rebuild warning when the server is silent, and the plain name for any other halt", () => {
+    expect(recoveryPlan(req("halted", awaiting)).retryLabel).toBe("Retry request (rebuilds)");
+    expect(recoveryPlan(req("halted", { next_action: "no rebuild here" })).retryLabel).toBe(
+      "Retry request",
+    );
+  });
+});
+
+describe("editor notices", () => {
+  test("a changed request states its new state; a locked file says Save is off", () => {
+    expect(editChangeNotice({ state: "planning", contentChanged: false, editable: false })).toBe(
+      "This request changed while you were editing: it is now Planning. " +
+        "This file can no longer be edited in this state, so Save is off; your text stays here to copy.",
+    );
+    expect(
+      editChangeNotice({ state: "spec_review", contentChanged: true, editable: true }),
+    ).toContain("Save will show you the difference.");
+    expect(editBlockedReason("planning", true)).toBeNull();
+    expect(editBlockedReason("planning", false)).toBe(
+      "Save is off: this file can no longer be edited (the request is now Planning).",
+    );
   });
 });

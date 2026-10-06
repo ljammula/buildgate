@@ -1,8 +1,8 @@
-import { Play, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Link } from "react-router";
 
 import { useProjects } from "@/api/runQueries";
-import { newRunPath } from "@/routes/paths";
+import { newRunPath, projectReleasePath, projectStatsPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -57,8 +57,8 @@ export function ProjectListScreen() {
                   <TableHeaderCell className="w-56">Kill-switch id</TableHeaderCell>
                   <TableHeaderCell className="w-24">Runs</TableHeaderCell>
                   <TableHeaderCell className="w-44">Last run</TableHeaderCell>
-                  <TableHeaderCell className="w-12">
-                    <span className="sr-only">Start a run</span>
+                  <TableHeaderCell className="w-32">
+                    <span className="sr-only">Stats and release</span>
                   </TableHeaderCell>
                 </TableRow>
               </TableHead>
@@ -89,8 +89,20 @@ export function ProjectListScreen() {
                       <TableCell className="text-xs whitespace-nowrap tabular-nums">
                         <LocalTimeText value={project.lastRunAt} />
                       </TableCell>
-                      <TableCell className="text-right text-fg-muted">
-                        <Play aria-hidden="true" className="inline size-4" />
+                      <TableCell className="text-right text-xs whitespace-nowrap">
+                        <Link
+                          to={projectStatsPath(project.project)}
+                          className="text-accent hover:underline"
+                        >
+                          Stats
+                        </Link>
+                        {" · "}
+                        <Link
+                          to={projectReleasePath(project.project)}
+                          className="text-accent hover:underline"
+                        >
+                          Release
+                        </Link>
                       </TableCell>
                     </TableRow>
                   );

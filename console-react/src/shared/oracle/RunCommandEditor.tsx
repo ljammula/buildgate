@@ -27,6 +27,8 @@ export interface RunCommandEditorProps {
   readonly saveError: unknown;
   readonly onSave: (content: string) => void;
   readonly onCancel: () => void;
+  /** The oracle draft's proposed command; when it differs from the field, "Use suggestion" puts it there (saving is still the operator's act). */
+  readonly suggestion?: string;
 }
 
 /** The RUN_COMMAND.txt editor: a field, a preview of invisible characters, Save and Cancel. */
@@ -36,6 +38,7 @@ export function RunCommandEditor({
   saveError,
   onSave,
   onCancel,
+  suggestion = "",
 }: RunCommandEditorProps) {
   const [text, setText] = useState(() => editableRunCommandText(initialText));
   const hasHidden = escapeInvisible(text) !== text;
@@ -66,6 +69,19 @@ export function RunCommandEditor({
         </div>
       ) : null}
       <div className="flex justify-end gap-2">
+        {suggestion !== "" && suggestion !== text ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mr-auto"
+            disabled={saving}
+            onClick={() => {
+              setText(suggestion);
+            }}
+          >
+            Use suggestion
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
           Cancel
         </Button>

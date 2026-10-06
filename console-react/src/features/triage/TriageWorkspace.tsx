@@ -1,8 +1,8 @@
-import { compareTimestamps } from "@/domain/elapsed";
 import { useEffect, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import { useRequest } from "@/api/requestQueries";
+import { compareTimestamps } from "@/domain/elapsed";
 import type { RequestSummary } from "@/domain/request";
 import { ApproveDialog } from "@/shared/approval/ApproveDialog";
 import { RejectDialog } from "@/shared/approval/RejectDialog";
@@ -10,13 +10,12 @@ import { useNow } from "@/ui/Time";
 
 import { TriageDetail } from "./TriageDetail";
 import { TriageList } from "./TriageList";
-import { type NonEmptyRequests } from "./triageModel";
+import { TriageOtherDetail } from "./TriageOtherDetail";
+import { type NonEmptyRequests, decidesInPlace } from "./triageModel";
 import { useTriageKeys } from "./useTriageKeys";
 
 export interface TriageWorkspaceProps {
   readonly requests: NonEmptyRequests;
-  /** Bumped by the Refresh button: the focused detail is fetched again. */
-  readonly refreshes: number;
 }
 
 interface Focus {
@@ -35,7 +34,7 @@ interface Deciding {
  * follows the request's id; when it leaves the list (just approved) it falls
  * to the same position, clamped.
  */
-export function TriageWorkspace({ requests, refreshes }: TriageWorkspaceProps) {
+export function TriageWorkspace({ requests }: TriageWorkspaceProps) {
   const { canWrite } = useApi();
   const now = useNow(30_000);
   const [focus, setFocus] = useState<Focus>({ id: requests[0].id, index: 0 });
@@ -51,7 +50,6 @@ export function TriageWorkspace({ requests, refreshes }: TriageWorkspaceProps) {
       requests={requests}
       focused={focused}
       focusedIndex={focusedIndex}
-      refreshes={refreshes}
       canWrite={canWrite}
       now={now}
       deciding={deciding}
@@ -68,7 +66,6 @@ interface FocusedProps {
   readonly requests: NonEmptyRequests;
   readonly focused: RequestSummary;
   readonly focusedIndex: number;
-  readonly refreshes: number;
   readonly canWrite: boolean;
   readonly now: Date;
   readonly deciding: Deciding | null;
@@ -77,11 +74,38 @@ interface FocusedProps {
 }
 
 // Keyed by the focused id, so each request gets its own detail query state.
-function TriageFocused({
+function TriageFocused(props: FocusedProps) {
+  return decidesInPlace(props.focused) ? (
+    <TriageDecidable {...props} />
+  ) : (
+    <TriageOther {...props} />
+  );
+}
+
+// A request that needs you but is decided on its own page: no detail fetch, no a/r.
+function TriageOther({ requests, focused, focusedIndex, now, onFocus }: FocusedProps) {
+  useTriageKeys(
+    {
+      move: (delta) => {
+        onFocus(focusedIndex + delta);
+      },
+      approve: () => undefined,
+      reject: () => undefined,
+    },
+    false,
+  );
+  return (
+    <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+      <TriageList requests={requests} focusedId={focused.id} onFocus={onFocus} />
+      <TriageOtherDetail request={focused} now={now} />
+    </div>
+  );
+}
+
+function TriageDecidable({
   requests,
   focused,
   focusedIndex,
-  refreshes,
   canWrite,
   now,
   deciding,
@@ -90,19 +114,16 @@ function TriageFocused({
 }: FocusedProps) {
   const detailQuery = useRequest(focused.id);
   const detail = detailQuery.data ?? null;
-  const { refetch, isFetching } = detailQuery;
+  const { refetch } = detailQuery;
 
-  // Fetch the content again when the operator hits Refresh, and when the
-  // board record is newer than the one shown: found in review, a spec edited
-  // while the request stayed in the same review state kept serving the old
-  // text, so an operator could approve content they never saw.
+  // The board record is newer than the detail shown: fetch it again. Found in
+  // review, a spec edited while the request stayed in the same review state
+  // kept serving the old text, so an operator could approve content they
+  // never saw. (The Refresh button invalidates from its own click handler.)
   const detailStale = detail !== null && compareTimestamps(focused.updatedAt, detail.updatedAt) > 0;
   useEffect(() => {
-    if (refreshes > 0) void refetch();
-  }, [refreshes, refetch]);
-  useEffect(() => {
-    if (detailStale && !isFetching) void refetch();
-  }, [detailStale, isFetching, refetch]);
+    if (detailStale) void refetch();
+  }, [detailStale, refetch]);
 
   const decide = (kind: Deciding["kind"]): void => {
     if (!canWrite || detail === null) return;

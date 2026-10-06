@@ -556,7 +556,7 @@ describe("reading order when a request stops", () => {
     expect(more.open).toBe(true);
   });
 
-  test("a long explanation shows its first sentence, with the whole one inside the disclosure", async () => {
+  test("a long explanation that is the only instruction is shown whole, with no click", async () => {
     const rest =
       "Then check the branch and merge it yourself if the pull request cannot be opened.";
     openRequest(
@@ -569,10 +569,43 @@ describe("reading order when a request stops", () => {
     await heading("Stopped");
 
     expect(screen.getByTestId("recovery-explanation")).toHaveTextContent(
-      /^Open the pull request by hand\.$/,
+      `Open the pull request by hand. ${rest}`,
+    );
+  });
+
+  test("an explanation that names a command or a branch is never cut", async () => {
+    const next =
+      "`factoryd retry req-1` with pull requests enabled to open it, or merge branch `factoryd/add-a-min-3c0e1ad229a3` by hand";
+    openRequest(
+      requestWire({
+        state: "halted",
+        title: "Stopped",
+        error: "no pull request was opened",
+        next_action: next,
+      }),
+    );
+    await heading("Stopped");
+
+    expect(screen.getByTestId("recovery-explanation")).toHaveTextContent(next);
+  });
+
+  test("a long plain explanation beside a cause shows its first sentence, the whole one in the disclosure", async () => {
+    const rest = "Then wait for the operator to look at the evidence of the stopped run.";
+    openRequest(
+      requestWire({
+        state: "halted",
+        title: "Stopped",
+        error: "the worker stopped",
+        next_action: `Look at the evidence. ${rest}`,
+      }),
+    );
+    await heading("Stopped");
+
+    expect(screen.getByTestId("recovery-explanation")).toHaveTextContent(
+      /^Look at the evidence\.$/,
     );
     const more = screen.getByTestId("recovery-more");
-    expect(within(more).getByText(`Open the pull request by hand. ${rest}`)).toBeInTheDocument();
+    expect(within(more).getByText(`Look at the evidence. ${rest}`)).toBeInTheDocument();
   });
 
   test("the cause stays whole, however long", async () => {

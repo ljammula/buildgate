@@ -1,7 +1,6 @@
 import type { HttpConfig } from "@/api/http";
 
-// Build-time settings, the same five the Flutter console took as
-// --dart-define. A token set here is baked into the bundle, so it is for a
+// Build-time settings (Vite env). A token set here is baked into the bundle, so it is for a
 // console built for one deployment; the server never serves one at runtime.
 const env = import.meta.env;
 

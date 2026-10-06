@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { formatLocalTimestamp } from "@/domain/elapsed";
+import { setOperatorName } from "@/platform/operatorIdentity";
 import { RunDetailScreen } from "@/features/run-detail/RunDetailScreen";
 import {
   acceptedRun,
@@ -26,6 +27,11 @@ beforeAll(() => {
     hasPointerCapture: () => false,
     scrollIntoView: () => undefined,
   });
+});
+
+beforeEach(() => {
+  // The operator name is stored once per browser: each test starts without one.
+  setOperatorName("");
 });
 
 type Wire = Record<string, unknown>;
@@ -235,6 +241,7 @@ test("accepted run detail screen does not attempt to watch further updates", asy
 });
 
 test("quarantined run override posts attribution and updates state", async () => {
+  setOperatorName("operator@example.com");
   const { server } = renderRun(quarantinedRun(), {
     tokens: { overrideToken: "override-token" },
     routes: [
@@ -247,7 +254,6 @@ test("quarantined run override posts attribution and updates state", async () =>
 
   await userEvent.click(await screen.findByRole("button", { name: "Override run" }));
   const dialog = await screen.findByRole("dialog", { name: "Override quarantined run" });
-  await userEvent.type(within(dialog).getByLabelText("Operator"), "operator@example.com");
   await userEvent.type(
     within(dialog).getByLabelText("Reason"),
     "Reviewed the verification evidence",
@@ -270,6 +276,7 @@ test("quarantined run override posts attribution and updates state", async () =>
 });
 
 test("the override dialog opens with the reason the request page carried", async () => {
+  setOperatorName("operator@example.com");
   renderRun(quarantinedRun(), {
     tokens: { overrideToken: "override-token" },
     query: `?reason=${encodeURIComponent("Request req-1 ticket 1 quarantined")}`,
@@ -280,12 +287,27 @@ test("the override dialog opens with the reason the request page carried", async
   expect(within(dialog).getByLabelText("Reason")).toHaveValue("Request req-1 ticket 1 quarantined");
 });
 
-test("the override dialog sends nothing until operator and reason are filled in", async () => {
+test("the override dialog asks for the operator name first when none is stored", async () => {
+  const { server } = renderRun(quarantinedRun(), { tokens: { overrideToken: "override-token" } });
+
+  await userEvent.click(await screen.findByRole("button", { name: "Override run" }));
+  const prompt = await screen.findByRole("dialog", { name: "Your name" });
+  await userEvent.type(within(prompt).getByLabelText("Operator name"), "Kanna");
+  await userEvent.click(within(prompt).getByRole("button", { name: "Continue" }));
+
+  expect(
+    await screen.findByRole("dialog", { name: "Override quarantined run" }),
+  ).toBeInTheDocument();
+  expect(server.sent("POST /runs/run-quarantined/override")).toHaveLength(0);
+});
+
+test("the override dialog sends nothing until a reason is filled in", async () => {
+  setOperatorName("operator@example.com");
   const { server } = renderRun(quarantinedRun(), { tokens: { overrideToken: "override-token" } });
 
   await userEvent.click(await screen.findByRole("button", { name: "Override run" }));
   const dialog = await screen.findByRole("dialog", { name: "Override quarantined run" });
-  await userEvent.type(within(dialog).getByLabelText("Operator"), "  ");
+  await userEvent.type(within(dialog).getByLabelText("Reason"), "  ");
   await userEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
 
   expect(server.sent("POST /runs/run-quarantined/override")).toHaveLength(0);
@@ -371,7 +393,7 @@ test("run detail screen navigates to the release view", async () => {
   const tab = await screen.findByRole("tab", { name: "View release decision" });
   // The Overview's Release card already shows the verdict: no explanation sentence.
   expect(await screen.findByText("Denied")).toBeInTheDocument();
-  expect(screen.queryByText(/The factory-owned release decision/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Not evaluated yet")).not.toBeInTheDocument();
   await userEvent.click(tab);
 
   expect(await screen.findByText("Denied")).toBeInTheDocument();
@@ -379,12 +401,12 @@ test("run detail screen navigates to the release view", async () => {
   expect(location()).toBe("/runs/run-accepted?view=release");
 });
 
-test("the Release card explains itself, and asks for nothing, while no decision can exist", async () => {
+test("the Release card says Not evaluated yet, and asks for nothing, while no decision can exist", async () => {
   const { server } = renderRun(quarantinedRun(), {
     routes: [{ on: "GET /runs/run-quarantined/release", reply: json(deniedRelease) }],
   });
 
-  expect(await screen.findByText(/The factory-owned release decision/)).toBeInTheDocument();
+  expect(await screen.findByText("Not evaluated yet")).toBeInTheDocument();
   expect(server.sent("GET /runs/run-quarantined/release")).toHaveLength(0);
   expect(screen.queryByText("Denied")).not.toBeInTheDocument();
 });

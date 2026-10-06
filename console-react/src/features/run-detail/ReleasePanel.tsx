@@ -3,8 +3,9 @@ import { RefreshCw } from "lucide-react";
 import { useRunRelease } from "@/api/runQueries";
 import { ReleaseDetails } from "@/features/run-detail/ReleaseDetails";
 import { Button } from "@/ui/Button";
-import { ErrorCallout, describeError } from "@/ui/ErrorDisplay";
-import { Callout, Spinner } from "@/ui/Feedback";
+import { ErrorCallout } from "@/ui/ErrorDisplay";
+import { Spinner } from "@/ui/Feedback";
+import { StaleWarning } from "@/ui/StaleWarning";
 import { Tooltip } from "@/ui/Tooltip";
 
 /**
@@ -31,20 +32,14 @@ export function ReleasePanel({ runId }: { runId: string }) {
     content = (
       <>
         {release.isError ? (
-          <Callout tone="warning" data-testid="release-stale-banner">
-            <p>
-              Showing the last successfully loaded data -- refresh failed:{" "}
-              {describeError(release.error, { startClass: true }).nextStep}
-            </p>
-            <Button
-              size="sm"
-              className="mt-2"
-              disabled={loading}
-              onClick={() => void release.refetch()}
-            >
-              Retry
-            </Button>
-          </Callout>
+          <StaleWarning
+            error={release.error}
+            detail="next-step"
+            startClass
+            retrying={loading}
+            onRetry={() => void release.refetch()}
+            testId="release-stale-banner"
+          />
         ) : null}
         <ReleaseDetails release={release.data} />
       </>

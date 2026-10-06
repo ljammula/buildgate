@@ -1,9 +1,11 @@
 import { useProjectRelease } from "@/api/runQueries";
 import type { ProjectReleaseView } from "@/domain/release";
 import { projectReleasePath } from "@/routes/paths";
+import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Section } from "@/ui/PageLayout";
+import { StaleWarning } from "@/ui/StaleWarning";
 import { KillSwitchChip } from "@/ui/StatusChip";
 import {
   Table,
@@ -16,28 +18,25 @@ import {
 } from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
 
-import { ProjectFieldList } from "./ProjectFieldList";
 import { ProjectIdForm } from "./ProjectIdForm";
-import { StaleWarning } from "./StaleWarning";
 import { useLoadProject } from "./useLoadProject";
 
 function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
   const { killSwitch } = release;
   return (
     <>
-      <ProjectFieldList
-        fields={[
-          { label: "Project", value: <span className="font-mono">{release.project}</span> },
-          { label: "State", value: <KillSwitchChip engaged={killSwitch.engaged} /> },
-          {
-            label: "Control",
-            value:
-              "Engage and disengage from the command line (factoryd kill-switch). It is " +
-              "deliberately not a console action, so hitting it never depends on a healthy " +
-              "factoryd serve.",
-          },
-        ]}
-      />
+      <DescriptionList labelWidth="lg">
+        <DescriptionItem label="Project">
+          <span className="font-mono">{release.project}</span>
+        </DescriptionItem>
+        <DescriptionItem label="State">
+          <KillSwitchChip engaged={killSwitch.engaged} />
+        </DescriptionItem>
+        <DescriptionItem label="Control">
+          Engage and disengage from the command line (factoryd kill-switch). It is deliberately not
+          a console action, so hitting it never depends on a healthy factoryd serve.
+        </DescriptionItem>
+      </DescriptionList>
       <Section title="History">
         {killSwitch.history.length === 0 ? (
           <p className="text-sm text-fg-muted">
@@ -98,7 +97,7 @@ export function ProjectReleasePanel({ project }: { readonly project: string }) {
           {query.error === null ? null : (
             <StaleWarning
               error={query.error}
-              fetching={query.isFetching}
+              retrying={query.isFetching}
               onRetry={() => void query.refetch()}
             />
           )}

@@ -8,7 +8,9 @@ import { TimelineNotStarted } from "@/features/run-detail/TimelineNotStarted";
 import { TimelineRowItem } from "@/features/run-detail/TimelineRowItem";
 import { COLLAPSE_AT, firstUntouchedTail } from "@/features/run-detail/timelineFold";
 import { computeStatusStrip } from "@/features/run-detail/statusStrip";
+import { stallChipDisplay } from "@/domain/elapsed";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
+import { Callout } from "@/ui/Feedback";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip, useNow } from "@/ui/Time";
 
@@ -47,6 +49,17 @@ export function Timeline({ run, events, error }: TimelineProps) {
         <StallChip run={run} />
         <StatusChipForToken token={run.state} />
       </div>
+      {strip.lastActivity !== null && stallChipDisplay(run)?.kind === "stalled" ? (
+        <Callout tone="danger" data-testid="stall-explanation">
+          Stalled: nothing has been reported for {strip.lastActivity}. The worker may have stopped;
+          check that `factoryd worker` is running.
+        </Callout>
+      ) : null}
+      {strip.latest !== null ? (
+        <p data-testid="timeline-latest" className="truncate text-xs text-fg-muted">
+          Latest: {strip.latest}
+        </p>
+      ) : null}
       <ol aria-label="Timeline stages" className="divide-y divide-border/60">
         {shown.map((row) => (
           <TimelineRowItem key={row.rowKey} row={row} />

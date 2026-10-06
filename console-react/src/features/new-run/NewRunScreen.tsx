@@ -6,10 +6,10 @@
 // All are optional; none means a blank, from-scratch ("Custom") run.
 import { Play } from "lucide-react";
 import { type SyntheticEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { useStartRun } from "@/api/runQueries";
-import { runPath } from "@/routes/paths";
+import { newRequestPath, runPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { Field, Input } from "@/ui/Input";
@@ -61,6 +61,14 @@ export function NewRunScreen() {
                 <p className="mt-1 text-sm text-fg-muted">
                   Provide the ticket and the repository execution locations. The run will appear in
                   the detail view after factoryd accepts it.
+                </p>
+                <p className="mt-1 text-sm text-fg-muted">
+                  This builds one ticket from a spec that already exists, with no drafting or
+                  approval step. To start from a description, use{" "}
+                  <Link to={newRequestPath()} className="text-accent hover:underline">
+                    New request
+                  </Link>
+                  .
                 </p>
               </div>
               <div className="flex flex-col gap-4 border-b border-border p-4">

@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/domain/apiError";
 import { sha256Hex } from "@/domain/contentHash";
 import { Button } from "@/ui/Button";
+import { ConfirmDialog } from "@/ui/ConfirmDialog";
+import { CopyButton } from "@/ui/CopyButton";
 import { TextDiffView } from "@/ui/DiffView";
 import { Textarea } from "@/ui/Input";
+import { describeError } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 
-import { errorText } from "./requestDetailLogic";
+import type { EditorBinding } from "./useEditSession";
 
 export interface FileEditorProps {
   /** The file's request-relative path; names the editor. */
@@ -20,6 +23,8 @@ export interface FileEditorProps {
   readonly onFetchCurrent: () => Promise<string>;
   /** Leaves the editor (saved, cancelled, or the operator discarded their edit). */
   readonly onClose: () => void;
+  /** Newer-record notice, dirty reporting and the save lock; see `useEditSession`. */
+  readonly session?: EditorBinding;
 }
 
 /**
@@ -31,6 +36,9 @@ export interface FileEditorProps {
  * the operator either discards their edit or keeps it re-based onto the
  * reported hash (an informed overwrite of what they just saw). Any other
  * failure (a 422's validation message) shows verbatim and keeps the edit.
+ * Keyboard: the text is focused on open, Cmd/Ctrl+S saves, Esc cancels (asking
+ * first when there is unsaved text). A newer record arriving never discards
+ * the text: see `session`.
  */
 export function FileEditor({
   path,
@@ -38,8 +46,24 @@ export function FileEditor({
   onSave,
   onFetchCurrent,
   onClose,
+  session,
 }: FileEditorProps) {
+  const [opened] = useState(initialContent);
   const [text, setText] = useState(initialContent);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const dirty = text !== opened;
+  const blockedReason = session?.blockedReason ?? null;
+  const onDirtyChange = session?.onDirtyChange;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    const el = field.current;
+    if (el === null) return;
+    el.focus();
+    el.setSelectionRange(0, 0);
+  }, []);
   const [baseSha256, setBaseSha256] = useState(() => sha256Hex(initialContent));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -58,6 +82,21 @@ export function FileEditor({
       setConflictFetchError(error);
     } finally {
       setLoadingConflict(false);
+    }
+  }
+
+  function requestClose() {
+    if (dirty) setConfirmingDiscard(true);
+    else onClose();
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      if (!saving && blockedReason === null) void save();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      requestClose();
     }
   }
 
@@ -87,15 +126,38 @@ export function FileEditor({
 
   return (
     <div className="flex flex-col gap-2">
+      {session?.notice == null ? null : (
+        <div
+          role="alert"
+          data-testid="edit-changed-notice"
+          className="bg-tone-warning-soft border-tone-warning-border flex flex-col gap-2 rounded-md border p-3 text-sm"
+        >
+          <p>{session.notice}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={session.onKeepEditing}>
+              Keep editing
+            </Button>
+            <Button onClick={onClose}>Discard my changes</Button>
+          </div>
+        </div>
+      )}
       <Textarea
+        ref={field}
         mono
+        readOnly={blockedReason !== null}
         aria-label={`Edit ${path}`}
         rows={14}
         value={text}
         onChange={(event) => {
           setText(event.target.value);
         }}
+        onKeyDown={onKeyDown}
       />
+      {blockedReason === null ? null : (
+        <p data-testid="edit-blocked" className="text-fg-muted text-sm">
+          {blockedReason}
+        </p>
+      )}
       {conflict !== null ? (
         <div
           role="alert"
@@ -110,7 +172,7 @@ export function FileEditor({
           {loadingConflict ? <Spinner label="Loading the current content" /> : null}
           {conflictFetchError === null ? null : (
             <p className="text-tone-danger">
-              {`Could not load the current content to diff: ${errorText(conflictFetchError)}`}
+              {`Could not load the current content to diff: ${describeError(conflictFetchError).raw}`}
             </p>
           )}
           {currentText === null ? null : (
@@ -136,17 +198,33 @@ export function FileEditor({
         </div>
       ) : saveError === null ? null : (
         <p role="alert" className="text-tone-danger text-sm">
-          {`Could not save: ${errorText(saveError)}`}
+          {`Could not save: ${describeError(saveError).raw}`}
         </p>
       )}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" disabled={saving} onClick={onClose}>
+        {blockedReason === null ? null : <CopyButton text={text} label="Copy my text" />}
+        <Button variant="ghost" disabled={saving} onClick={requestClose}>
           Cancel
         </Button>
-        <Button variant="primary" disabled={saving} onClick={() => void save()}>
+        <Button
+          variant="primary"
+          disabled={saving || blockedReason !== null}
+          onClick={() => void save()}
+        >
           {saving ? "Saving..." : "Save"}
         </Button>
       </div>
+      <ConfirmDialog
+        open={confirmingDiscard}
+        onOpenChange={setConfirmingDiscard}
+        title="Discard your changes?"
+        confirmLabel="Discard changes"
+        cancelLabel="Keep editing"
+        tone="danger"
+        onConfirm={onClose}
+      >
+        {`Your edit to ${path} has not been saved.`}
+      </ConfirmDialog>
     </div>
   );
 }

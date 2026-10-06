@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router";
 
 import { ApiProvider } from "@/api/ApiProvider";
 import type { Http } from "@/api/http";
+import { defaultQueryStaleTimeMs } from "@/api/polling";
 import type { ConsoleConfig } from "@/domain/ops";
 import { BoardScreen } from "@/features/board/BoardScreen";
 import { NewRequestScreen } from "@/features/new-request/NewRequestScreen";
@@ -32,7 +33,7 @@ function newQueryClient(): QueryClient {
         // A read that failed is shown with its error and a Retry; it is not
         // retried silently behind a spinner.
         retry: false,
-        staleTime: 2_000,
+        staleTime: defaultQueryStaleTimeMs,
         refetchOnWindowFocus: true,
       },
     },

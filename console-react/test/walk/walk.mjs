@@ -373,9 +373,25 @@ step("new-run-check", async () => {
 
 step("triage-keys", async () => {
   await visit("/triage");
-  await button(/Approve \(a\)/).waitFor();
+  // Triage lists everything that needs the operator. What it cannot decide
+  // in place links to the request page; a spec or plan is decided here.
+  const elsewhere = page.getByRole("link", { name: "Open request" });
+  const inPlace = button(/Approve \(a\)/);
+  await elsewhere.or(inPlace).first().waitFor();
+  const count = await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: /^Triage/ })
+    .innerText();
+  check(/\d/.test(count), `the sidebar shows no Triage count: ${count}`);
+  const specRow = page
+    .getByRole("main")
+    .getByRole("button", { name: /Spec review/ })
+    .first();
+  await specRow.click();
+  await inPlace.waitFor();
   await page.keyboard.press("j");
   await page.keyboard.press("k");
+  await specRow.click();
   await page.keyboard.press("r");
   await dialog().waitFor();
   await nameIfAsked();

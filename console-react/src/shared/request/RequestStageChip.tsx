@@ -1,3 +1,4 @@
+import { headTruncate } from "@/domain/middleTruncate";
 import { statusForToken } from "@/domain/status";
 import { StatusChip } from "@/ui/StatusChip";
 
@@ -14,11 +15,6 @@ export interface RequestStageChipProps {
   readonly waitingOn?: string | null;
   /** The request waits on a human: a pr_review request whose PRs all wait on their reviewer takes the needs-you colour, matching its board section. */
   readonly needsYou?: boolean;
-}
-
-// Ids run to the full slug-plus-timestamp length, too long for a chip.
-function shortWaitingOnId(id: string): string {
-  return id.length > 12 ? `${id.substring(0, 12)}…` : id;
 }
 
 /**
@@ -38,7 +34,7 @@ export function RequestStageChip({
     return (
       <StatusChip
         status={statusForToken(state)}
-        label={`Queued behind ${shortWaitingOnId(waitingOn)}`}
+        label={`Queued behind ${headTruncate(waitingOn, 12, "…")}`}
       />
     );
   }

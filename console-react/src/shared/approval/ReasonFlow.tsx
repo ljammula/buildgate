@@ -9,6 +9,8 @@ export interface ReasonFlowProps {
   readonly title: string;
   readonly confirmLabel: string;
   readonly tone?: "primary" | "danger";
+  /** One line under the title: what confirming does. */
+  readonly description?: ReactNode;
   /** Extra controls under the reason field (the send-back target). */
   readonly children?: ReactNode;
   readonly pending: boolean;
@@ -29,6 +31,7 @@ export function ReasonFlow({
   title,
   confirmLabel,
   tone = "primary",
+  description,
   children,
   pending,
   error,
@@ -53,6 +56,7 @@ export function ReasonFlow({
       open
       onOpenChange={onOpenChange}
       title={title}
+      {...(description === undefined ? {} : { description })}
       confirmLabel={confirmLabel}
       tone={tone}
       confirmDisabled={trimmed === ""}

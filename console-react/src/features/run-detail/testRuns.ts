@@ -1,5 +1,5 @@
-// Run and release bodies the run-page tests serve: the wire shapes the Dart
-// console's tests used, as objects a test can adjust before serving.
+// Run and release bodies the run-page tests serve, as objects a test can
+// adjust before serving.
 
 type Wire = Record<string, unknown>;
 

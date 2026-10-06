@@ -1,16 +1,36 @@
 import type { RequestSummary } from "@/domain/request";
+import { EscapedText } from "@/shared/oracle/EscapedText";
 
 import { Panel } from "./Panel";
 import { RejectionHistory } from "./RejectionHistory";
-import { approvedLine } from "./requestDetailLogic";
+import { approvedLine, terminalEntries, terminalEntryLine } from "./requestDetailLogic";
 
-/** Who approved the request and when, and its rejection history. Hidden when there is neither. */
+/**
+ * Who approved the request and when, every time it was cancelled, halted or
+ * quarantined (who, when, why), and its rejection history. Hidden when there
+ * is none of them.
+ */
 export function AuditSection({ request }: { readonly request: RequestSummary }) {
-  if (request.approvedBy === "" && request.rejections.length === 0) return null;
+  const stops = terminalEntries(request);
+  if (request.approvedBy === "" && request.rejections.length === 0 && stops.length === 0) {
+    return null;
+  }
   return (
     <Panel title="Audit">
       {request.approvedBy === "" ? null : (
         <p className="text-sm">{approvedLine(request.approvedBy, request.approvedAt)}</p>
+      )}
+      {stops.length === 0 ? null : (
+        <ul data-testid="audit-stops" className="flex flex-col gap-2">
+          {stops.map((entry, i) => (
+            <li key={i} className="text-sm">
+              <p>{terminalEntryLine(entry)}</p>
+              {entry.reason === "" ? null : (
+                <EscapedText text={entry.reason} className="text-fg-muted text-xs" />
+              )}
+            </li>
+          ))}
+        </ul>
       )}
       {request.rejections.length === 0 ? null : (
         <RejectionHistory rejections={request.rejections} />

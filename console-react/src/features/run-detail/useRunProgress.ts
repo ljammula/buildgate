@@ -1,10 +1,14 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import { watchRunProgress } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
 import type { ProgressEvent } from "@/domain/run";
-import { addProgressEvent, emptyProgressFeed } from "@/features/run-detail/progressEvents";
+import {
+  addProgressEvent,
+  emptyProgressFeed,
+  type ProgressFeed,
+} from "@/features/run-detail/progressEvents";
 
 export interface RunProgress {
   readonly events: readonly ProgressEvent[];
@@ -20,10 +24,34 @@ export interface RunProgress {
  */
 export function useRunProgress(id: string): RunProgress {
   const { http } = useApi();
-  const [feed, add] = useReducer(addProgressEvent, emptyProgressFeed);
-  const [error, setError] = useState<ApiError | null>(null);
+  const [state, setState] = useState<FeedState>({ id, feed: emptyProgressFeed, error: null });
 
-  useEffect(() => watchRunProgress(http, id, { onValue: add, onError: setError }), [http, id]);
+  useEffect(
+    () =>
+      watchRunProgress(http, id, {
+        // A value from run `id` replaces whatever a previous run left behind.
+        onValue: (event) => {
+          setState((s) => ({
+            id,
+            feed: addProgressEvent(s.id === id ? s.feed : emptyProgressFeed, event),
+            error: s.id === id ? s.error : null,
+          }));
+        },
+        onError: (error) => {
+          setState((s) => ({ id, feed: s.id === id ? s.feed : emptyProgressFeed, error }));
+        },
+      }),
+    [http, id],
+  );
 
-  return { events: feed.events, error };
+  // Another run's feed is never shown, even for the render before its first event.
+  return state.id === id ? { events: state.feed.events, error: state.error } : noProgress;
 }
+
+interface FeedState {
+  readonly id: string;
+  readonly feed: ProgressFeed;
+  readonly error: ApiError | null;
+}
+
+const noProgress: RunProgress = { events: [], error: null };

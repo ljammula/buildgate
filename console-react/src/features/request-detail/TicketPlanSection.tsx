@@ -2,6 +2,7 @@ import { useUpdateRequestTicket } from "@/api/requestQueries";
 import type { RequestSummary, RequestTicket } from "@/domain/request";
 
 import { FileContentSection } from "./FileContentSection";
+import type { EditorBinding } from "./useEditSession";
 import { foldsContent, planSummary } from "./requestDetailLogic";
 
 export interface TicketPlanSectionProps {
@@ -13,6 +14,7 @@ export interface TicketPlanSectionProps {
   readonly onStopEdit: () => void;
   /** The server's current content of THIS ticket, after a refetch. */
   readonly onFetchCurrent: () => Promise<string>;
+  readonly session?: EditorBinding;
 }
 
 /** One ticket's plan file, editable and whole in plan_review; one closed line once the approval is behind it. */
@@ -24,6 +26,7 @@ export function TicketPlanSection({
   onStartEdit,
   onStopEdit,
   onFetchCurrent,
+  session,
 }: TicketPlanSectionProps) {
   const update = useUpdateRequestTicket(request.id, ticket.index);
   return (
@@ -40,6 +43,7 @@ export function TicketPlanSection({
         await update.mutateAsync({ content, baseSha256 });
       }}
       onFetchCurrent={onFetchCurrent}
+      {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
     />
   );

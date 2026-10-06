@@ -76,15 +76,34 @@ test("shows only needsHuman requests, oldest wait first", async () => {
   expect(await screen.findByText(/# Old spec/)).toBeInTheDocument();
 });
 
-test("never lists an oracle_review request (CLI-only until step 7)", async () => {
+test("lists an oracle_review request with its state, a reason and a link, and no Approve", async () => {
   renderApp(<TriageScreen />, {
     server: triage([
-      { id: "req-oracle", state: "oracle_review", title: "Oracle" },
-      { id: "req-spec", state: "spec_review", title: "Spec" },
+      {
+        id: "req-oracle",
+        state: "oracle_review",
+        title: "Oracle",
+        enteredAt: "2026-09-10T08:00:00Z",
+      },
+      { id: "req-spec", state: "spec_review", title: "Spec", enteredAt: "2026-09-11T08:00:00Z" },
     ]),
   });
-  expect(await screen.findByTestId("triage-row-req-spec")).toBeInTheDocument();
-  expect(row("req-oracle")).not.toBeInTheDocument();
+  expect(await screen.findByTestId("triage-row-req-oracle")).toBeInTheDocument();
+  expect(row("req-spec")).toBeInTheDocument();
+  // The oldest wait is focused: an oracle review is opened, never approved here.
+  expect(screen.getByTestId("triage-reason")).toHaveTextContent(
+    "The drafted acceptance tests wait for your review.",
+  );
+  expect(screen.getByRole("link", { name: "Open request" })).toHaveAttribute(
+    "href",
+    "/requests/req-oracle",
+  );
+  expect(screen.queryByRole("button", { name: "Approve (a)" })).not.toBeInTheDocument();
+  await userEvent.keyboard("a");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  // Moving on to the spec review brings Approve and Reject back.
+  await userEvent.keyboard("j");
+  expect(await screen.findByRole("button", { name: "Approve (a)" })).toBeInTheDocument();
 });
 
 test("j/k move the focused row", async () => {
@@ -229,15 +248,15 @@ test("shows a message when nothing needs a human", async () => {
   expect(await screen.findByText("Nothing needs you right now.")).toBeInTheDocument();
 });
 
-test("excludes a halted request", async () => {
+test("lists a halted request with a reason and a link to it", async () => {
   renderApp(<TriageScreen />, {
-    server: triage([
-      { id: "req-halted", state: "halted", title: "Halted" },
-      { id: "req-a", state: "spec_review", title: "Needs review" },
-    ]),
+    server: triage([{ id: "req-halted", state: "halted", title: "Halted" }]),
   });
-  expect(await screen.findByTestId("triage-row-req-a")).toBeInTheDocument();
-  expect(row("req-halted")).not.toBeInTheDocument();
+  expect(await screen.findByTestId("triage-row-req-halted")).toBeInTheDocument();
+  expect(screen.getByTestId("triage-reason")).toHaveTextContent(
+    "The build halted and needs your decision.",
+  );
+  expect(screen.getByRole("link", { name: "Open request" })).toBeInTheDocument();
 });
 
 test("a failed load shows the error", async () => {

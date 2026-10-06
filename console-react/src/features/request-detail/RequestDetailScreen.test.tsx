@@ -300,8 +300,11 @@ test("shows the rejection history when rejections are present", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "Rejection history (1)" }));
 
-  expect(screen.getByText(`Rejected by jane at ${stamp} (from spec_review)`)).toBeInTheDocument();
-  expect(screen.getByText("scope is too broad")).toBeInTheDocument();
+  const history = screen.getByTestId("rejection-history");
+  expect(
+    within(history).getByText(`Rejected by jane at ${stamp} (from spec_review)`),
+  ).toBeVisible();
+  expect(within(history).getByText("scope is too broad")).toBeVisible();
 });
 
 test("a send-back note reads as sent back, with the stage it feeds", async () => {

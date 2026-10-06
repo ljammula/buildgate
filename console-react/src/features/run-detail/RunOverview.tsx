@@ -9,6 +9,7 @@ import { BuildLogPane } from "@/features/run-detail/BuildLogPane";
 import { ComposeBlock } from "@/features/run-detail/ComposeBlock";
 import { EvidenceCard } from "@/features/run-detail/EvidenceCard";
 import { GatesBlock } from "@/features/run-detail/GatesBlock";
+import { listKeys } from "@/features/run-detail/listKeys";
 import { OverrideSection } from "@/features/run-detail/OverrideSection";
 import { RunFactsCard } from "@/features/run-detail/RunFactsCard";
 import { RunReleaseCard } from "@/features/run-detail/RunReleaseCard";
@@ -49,6 +50,8 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
   const gatesFailed = run.gateResults.length > 0 && gatesSummary(run.gateResults).failed;
   const attempts = <AttemptsBlock attempts={run.attempts} onOpenLog={openLog} />;
   const gates = <GatesBlock gates={run.gateResults} />;
+  const notificationKeys = listKeys(run.notifications, (n) => `${n.sentAt}-${n.state}`);
+  const overrideKeys = listKeys(run.overrides, (o) => `${o.at}-${o.by}`);
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="flex min-w-0 flex-col gap-4">
@@ -70,7 +73,7 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
           <Section title="Notifications" card>
             {run.notifications.map((n, i) => (
               <EvidenceCard
-                key={`${n.sentAt}-${i}`}
+                key={notificationKeys[i]}
                 title={n.state}
                 lines={[
                   n.reason,
@@ -86,7 +89,7 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
           <Section title="Overrides" card>
             {run.overrides.map((o, i) => (
               <EvidenceCard
-                key={`${o.at}-${i}`}
+                key={overrideKeys[i]}
                 title={`${o.priorState} → ${o.newState}`}
                 lines={[`By: ${o.by}`, `At: ${formatLocalTimestamp(o.at)}`, `Reason: ${o.reason}`]}
               />

@@ -4,11 +4,11 @@ import { useLocation } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
 import { useOverrideRun } from "@/api/runQueries";
-import { Fields, Field } from "@/features/run-detail/Fields";
 import { OverrideDialog } from "@/features/run-detail/OverrideDialog";
 import { parseRunOverrideReason } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
+import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Section } from "@/ui/PageLayout";
 
 /**
@@ -26,15 +26,17 @@ export function OverrideSection({ runId }: { runId: string }) {
   const initialReason = parseRunOverrideReason(useLocation().search);
   return (
     <Section title="Operator override" card>
-      <Fields className="grid-cols-[6.5rem_minmax(0,1fr)]">
-        <Field label="Action">Move this quarantined run to an accepted or halted state.</Field>
+      <DescriptionList labelWidth="sm">
+        <DescriptionItem label="Action">
+          Move this quarantined run to an accepted or halted state.
+        </DescriptionItem>
         {override.error ? (
-          <Field label="Error">
+          <DescriptionItem label="Error">
             <p className="mb-1">Could not override run.</p>
             <ErrorCallout error={override.error} />
-          </Field>
+          </DescriptionItem>
         ) : null}
-      </Fields>
+      </DescriptionList>
       <div>
         <Button
           variant="primary"

@@ -1,25 +1,15 @@
-import type { ReactNode } from "react";
-
 import { describeError } from "@/ui/ErrorDisplay";
 import { formatUsageFigure, formatUsageLines } from "@/domain/cost";
 import type { RequestSummary } from "@/domain/request";
 import { requestAwaitingPullRequest } from "@/domain/request";
 import { DigestedText } from "@/shared/request/DigestedText";
 import { CompactId } from "@/ui/CompactId";
+import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Disclosure } from "@/ui/Disclosure";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 
 import { Panel } from "./Panel";
-
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 text-sm">
-      <dt className="text-xs leading-5 text-fg-muted">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
-    </div>
-  );
-}
 
 export interface RequestFactsProps {
   readonly request: RequestSummary;
@@ -38,20 +28,20 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
   const breakdown = summary === null ? [] : formatUsageLines(summary);
   return (
     <Panel title="Request">
-      <dl className="flex flex-col gap-1.5">
-        <Fact label="Workspace">
+      <DescriptionList labelWidth="sm">
+        <DescriptionItem label="Workspace">
           <CompactId
             value={request.workspace}
             max={22}
             label="workspace path"
             className="text-xs"
           />
-        </Fact>
-        <Fact label="Updated">
+        </DescriptionItem>
+        <DescriptionItem label="Updated">
           <RelativeTime value={request.updatedAt} />
-        </Fact>
+        </DescriptionItem>
         {request.ticketCount > 0 ? (
-          <Fact label="Ticket">{`${request.ticketIndex} / ${request.ticketCount}`}</Fact>
+          <DescriptionItem label="Ticket">{`${request.ticketIndex} / ${request.ticketCount}`}</DescriptionItem>
         ) : null}
         {/* A halted or quarantined request shows its cause in the recovery
             callout, beside the actions. */}
@@ -59,15 +49,15 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
         request.state === "halted" ||
         request.state === "quarantined" ? null : (
           // The "Next" banner carries the next step; this is only the detail.
-          <Fact label={requestAwaitingPullRequest(request) ? "Detail" : "Error"}>
+          <DescriptionItem label={requestAwaitingPullRequest(request) ? "Detail" : "Error"}>
             <DigestedText text={request.error} fullLabel="Full text" />
-          </Fact>
+          </DescriptionItem>
         )}
         {refreshError === null ? null : (
-          <Fact label="Live updates">{`Refresh failed: ${describeError(refreshError).raw}`}</Fact>
+          <DescriptionItem label="Live updates">{`Refresh failed: ${describeError(refreshError).raw}`}</DescriptionItem>
         )}
         {summary === null ? null : (
-          <Fact label="Usage">
+          <DescriptionItem label="Usage">
             <span>{formatUsageFigure(summary)}</span>
             {breakdown.length > 0 ? (
               <Disclosure bare title="By role and model" headingLevel="h3">
@@ -78,9 +68,9 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
                 </ul>
               </Disclosure>
             ) : null}
-          </Fact>
+          </DescriptionItem>
         )}
-      </dl>
+      </DescriptionList>
       {request.state === "building" || request.state === "pr_review" ? (
         <TicketRollupStrip request={request} />
       ) : null}

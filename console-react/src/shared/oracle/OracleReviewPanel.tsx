@@ -8,29 +8,26 @@
 // expanded with content whose hash matches the listing's, and the hashes sent
 // are those of the bytes received. A collapsed file counts as not shown, and
 // so does everything while the listing is stale (a failed reload).
-import { Check, Pencil, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { Check, RefreshCw } from "lucide-react";
 
 import { useApi } from "@/api/ApiProvider";
-import { getRequestOracleFile } from "@/api/oracle";
-import { queryKeys } from "@/api/queryKeys";
-import { usePutOracleRunCommand, useRequestOracle } from "@/api/requestQueries";
+import { useRequestOracle } from "@/api/requestQueries";
 import { oracleExpectedSha256 } from "@/domain/contentHash";
 import { type OracleFileContent, parseOracleManifest } from "@/domain/oracle";
 import type { RequestSummary } from "@/domain/request";
 import { CoverageList } from "@/shared/oracle/CoverageList";
 import { CriteriaList } from "@/shared/oracle/CriteriaList";
 import { EscapedText } from "@/shared/oracle/EscapedText";
-import { OracleContentBox } from "@/shared/oracle/OracleContentBox";
 import { OracleFileTile } from "@/shared/oracle/OracleFileTile";
 import { OracleProblems } from "@/shared/oracle/OracleProblems";
-import { RunCommandEditor } from "@/shared/oracle/RunCommandEditor";
-import { StaleListingNotice } from "@/shared/oracle/StaleListingNotice";
+import { RunCommandBlock } from "@/shared/oracle/RunCommandBlock";
 import { oracleDraftStatusLabel } from "@/shared/oracle/oracleDraftStatus";
 import { type OracleFileSource, useOracleFileStore } from "@/shared/oracle/useOracleFileStore";
+import { useRunCommandEditing } from "@/shared/oracle/useRunCommandEditing";
 import { Button } from "@/ui/Button";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
+import { StaleWarning } from "@/ui/StaleWarning";
 
 const RUN_COMMAND_NAME = "RUN_COMMAND.txt";
 const MANIFEST_NAME = "MANIFEST.json";
@@ -60,22 +57,19 @@ export interface OracleReviewPanelProps {
  * button (name "Approve", or "Approve (skip oracle)" for an empty oracle/).
  */
 export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPanelProps) {
-  const { http, canWrite } = useApi();
+  const { canWrite } = useApi();
   const id = request.id;
   const listingQuery = useRequestOracle(id);
-  const putRunCommand = usePutOracleRunCommand(id);
-  const [editing, setEditing] = useState(false);
-  const [saveError, setSaveError] = useState<unknown>(null);
+  const runCommand = useRunCommandEditing(id);
 
   const listing = listingQuery.data;
   const sources: OracleFileSource[] = (listing?.files ?? []).map((f) => ({
     key: f.name,
     sha256: f.sha256,
-    queryKey: queryKeys.requests.oracleFile(id, f.name),
-    fetch: (signal) => getRequestOracleFile(http, id, f.name, signal),
+    name: f.name,
   }));
   const hasManifest = sources.some((s) => s.key === MANIFEST_NAME);
-  const store = useOracleFileStore(sources, hasManifest ? [MANIFEST_NAME] : []);
+  const store = useOracleFileStore(id, sources, hasManifest ? [MANIFEST_NAME] : []);
 
   const reload = async () => {
     await listingQuery.refetch();
@@ -107,61 +101,29 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
   const manifestText = store.content(MANIFEST_NAME)?.content.text;
   const manifest = manifestText === undefined ? null : parseOracleManifest(manifestText);
 
-  const save = (content: string) => {
-    setSaveError(null);
-    putRunCommand.mutate(
-      { content },
-      {
-        onSuccess: () => {
-          // The saved file must be re-fetched and re-shown before approval.
-          store.reopen(RUN_COMMAND_NAME);
-          setEditing(false);
-          void reload();
-        },
-        onError: setSaveError,
-      },
-    );
-  };
-
-  const runCommandBody = (content: OracleFileContent) => {
-    if (editing) {
-      return (
-        <RunCommandEditor
-          initialText={content.text}
-          saving={putRunCommand.isPending}
-          saveError={saveError}
-          onSave={save}
-          onCancel={() => {
-            setEditing(false);
-            setSaveError(null);
-          }}
-        />
-      );
-    }
-    return (
-      <>
-        <OracleContentBox keyId={RUN_COMMAND_NAME} content={content} />
-        {canWrite ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="self-end"
-            onClick={() => {
-              setSaveError(null);
-              setEditing(true);
-            }}
-          >
-            <Pencil aria-hidden="true" />
-            Edit
-          </Button>
-        ) : null}
-      </>
-    );
-  };
+  const runCommandBody = (content: OracleFileContent) => (
+    <RunCommandBlock
+      keyId={RUN_COMMAND_NAME}
+      content={content}
+      editing={runCommand}
+      canWrite={canWrite}
+      suggestion={listing.proposedCommand}
+      onSaved={() => {
+        // The saved file must be re-fetched and re-shown before approval.
+        store.reopen(RUN_COMMAND_NAME);
+        void reload();
+      }}
+    />
+  );
 
   return (
     <div data-testid="oracle-review-panel" className="flex flex-col items-stretch gap-3">
-      {listingQuery.isError ? <StaleListingNotice error={listingQuery.error} /> : null}
+      {listingQuery.isError ? (
+        <StaleWarning error={listingQuery.error} detail="callout" testId="oracle-stale-listing">
+          The files below are the last listing that loaded and may be out of date -- Approve is
+          disabled until Reload files succeeds.
+        </StaleWarning>
+      ) : null}
       {listing.draftStatus !== "" ? (
         <div data-testid="oracle-draft-status">
           <EscapedText

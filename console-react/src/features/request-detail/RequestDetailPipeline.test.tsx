@@ -290,14 +290,11 @@ describe("compare with a rejected revision", () => {
   };
 
   async function selectFirst() {
-    await userEvent.click(
-      await screen.findByRole("switch", { name: "Compare with rejected revision" }),
-    );
     const select = await screen.findByRole("combobox", { name: "Revision" });
     await userEvent.selectOptions(select, `Revision 1 — rejected by jane at ${stamp()}`);
   }
 
-  test("is opt-in and renders a diff once a revision is selected", async () => {
+  test("is on by default: the note is quoted and the diff shows with no click, beside the whole current text", async () => {
     openRequest(
       requestWire({
         state: "spec_review",
@@ -344,13 +341,16 @@ describe("compare with a rejected revision", () => {
       },
     );
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
-    // Default view: no diff, current content only.
-    expect(screen.queryByTestId("revision-diff")).not.toBeInTheDocument();
-    expect(screen.getByText(/New detail\./)).toBeInTheDocument();
-
-    await selectFirst();
+    expect(screen.getByRole("switch", { name: "Compare with rejected revision" })).toBeChecked();
+    expect(screen.getByTestId("revision-note")).toHaveTextContent("You asked (jane,");
+    expect(screen.getByTestId("revision-note")).toHaveTextContent("too broad");
+    // The full current text stays whole in its own card, whatever the diff shows.
+    expect(
+      within(screen.getByTestId("markdown-raw-content")).getByText(/New detail\./),
+    ).toBeVisible();
 
     const diff = await screen.findByTestId("revision-diff");
+    expect(screen.getByRole("heading", { name: "Changes since you rejected" })).toBeVisible();
     expect(within(diff).getAllByText(/Old detail\./).length).toBeGreaterThan(0);
     expect(within(diff).getAllByText(/New detail\./).length).toBeGreaterThan(0);
   });
@@ -466,8 +466,10 @@ describe("compare with a rejected revision", () => {
       },
     );
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
-    await userEvent.click(screen.getByRole("switch", { name: "Compare with rejected revision" }));
     expect(await screen.findByTestId("revision-diff")).toBeInTheDocument();
+    // The switch turns it off again.
+    await userEvent.click(screen.getByRole("switch", { name: "Compare with rejected revision" }));
+    expect(screen.queryByTestId("revision-diff")).not.toBeInTheDocument();
   });
 
   test("says so when no rejected revision is recorded, and shows a load failure", async () => {
@@ -487,7 +489,6 @@ describe("compare with a rejected revision", () => {
       extra: [{ on: "GET /requests/req-1/revisions", reply: json([]) }],
     });
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
-    await userEvent.click(screen.getByRole("switch", { name: "Compare with rejected revision" }));
     expect(await screen.findByText("No rejected revisions recorded.")).toBeInTheDocument();
     view.unmount();
 
@@ -497,7 +498,6 @@ describe("compare with a rejected revision", () => {
       ],
     });
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
-    await userEvent.click(screen.getByRole("switch", { name: "Compare with rejected revision" }));
     expect(await screen.findByText("Could not load revisions:")).toBeInTheDocument();
   });
 

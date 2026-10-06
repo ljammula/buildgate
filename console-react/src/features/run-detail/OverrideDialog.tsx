@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { OverrideRunInput } from "@/api/runs";
+import { OperatorGate } from "@/shared/approval/OperatorGate";
 import { Button } from "@/ui/Button";
 import {
   Dialog,
@@ -10,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/ui/Dialog";
-import { Field, Input, Select } from "@/ui/Input";
+import { Field, Select, Textarea } from "@/ui/Input";
 
 export interface OverrideDialogProps {
   readonly open: boolean;
@@ -20,20 +21,31 @@ export interface OverrideDialogProps {
   readonly initialReason?: string;
 }
 
-/** Collects who is overriding, why, and the state to move the quarantined run to. */
-export function OverrideDialog({
-  open,
-  onOpenChange,
-  onApply,
-  initialReason = "",
-}: OverrideDialogProps) {
-  const [by, setBy] = useState("");
+/**
+ * Collects why, and the state to move the quarantined run to. Who is the
+ * stored operator name, asked for once by the same prompt every other write
+ * uses.
+ */
+export function OverrideDialog({ onOpenChange, ...rest }: OverrideDialogProps) {
+  return (
+    <OperatorGate onOpenChange={onOpenChange}>
+      {(by) => <OverrideForm by={by} onOpenChange={onOpenChange} {...rest} />}
+    </OperatorGate>
+  );
+}
+
+interface OverrideFormProps extends OverrideDialogProps {
+  /** The operator's name, already known. */
+  readonly by: string;
+}
+
+function OverrideForm({ by, open, onOpenChange, onApply, initialReason = "" }: OverrideFormProps) {
   const [reason, setReason] = useState(initialReason);
   const [state, setState] = useState("accepted");
 
   function apply() {
-    if (by.trim() === "" || reason.trim() === "") return;
-    onApply({ by: by.trim(), reason: reason.trim(), state });
+    if (reason.trim() === "") return;
+    onApply({ by, reason: reason.trim(), state });
   }
 
   return (
@@ -46,16 +58,9 @@ export function OverrideDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <Field label="Operator">
-            <Input
-              value={by}
-              onChange={(e) => {
-                setBy(e.target.value);
-              }}
-            />
-          </Field>
           <Field label="Reason">
-            <Input
+            <Textarea
+              rows={3}
               value={reason}
               onChange={(e) => {
                 setReason(e.target.value);

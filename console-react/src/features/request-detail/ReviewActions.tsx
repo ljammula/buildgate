@@ -7,6 +7,9 @@ import { Button } from "@/ui/Button";
 import { isReviewState } from "./requestDetailLogic";
 import { type RequestDialogs, awaitsTicketOracle } from "./useRequestDialogs";
 
+/** The id of the element wrapping the plan_review ticket oracle panel. */
+export const ticketOracleAnchorId = "ticket-oracle-anchor";
+
 export interface ReviewActionsProps {
   readonly request: RequestSummary;
   readonly dialogs: RequestDialogs;
@@ -36,6 +39,21 @@ export function ReviewActions({
     awaitsTicketOracle(request) && dialogs.ticketOracle?.complete !== true;
   return (
     <>
+      {ticketOracleIncomplete ? (
+        // The reason is in the oracle panel far below; say it beside the button.
+        <button
+          type="button"
+          data-testid="approve-needs-oracle"
+          className="text-accent text-xs underline underline-offset-2"
+          onClick={() => {
+            document
+              .getElementById(ticketOracleAnchorId)
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        >
+          Open every oracle file first
+        </button>
+      ) : null}
       {request.state === "oracle_review" ? null : (
         <Button
           variant="primary"

@@ -1,5 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 
+import { decodeRequestSummary } from "@/domain/request";
+import { needsYouRequests } from "@/shared/request/needsYou";
 import { AppShell } from "@/shared/shell/AppShell";
 import { requestJson } from "@/test/requestFixtures";
 import { type FakeRoute, json, renderApp } from "@/test/render";
@@ -52,4 +54,26 @@ test("no pill when nothing waits, and none when the list cannot be read", async 
   });
   expect(screen.queryByTestId("nav-needs-you-count")).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("");
+});
+
+test("the Triage count is the number of rows Triage lists: every state that needs the operator", async () => {
+  const list = [
+    { id: "a", state: "spec_review" },
+    { id: "b", state: "oracle_review" },
+    { id: "c", state: "halted" },
+    { id: "d", state: "quarantined" },
+    { id: "e", state: "resume_review" },
+    { id: "f", state: "building" },
+    { id: "g", state: "done" },
+  ];
+  renderApp(<AppShell>x</AppShell>, { server: shell(list) });
+  await waitFor(() => {
+    expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(2);
+  });
+  for (const pill of screen.getAllByTestId("nav-needs-you-count")) {
+    expect(pill).toHaveTextContent("4");
+  }
+  // The same function lists the rows: it returns exactly those four (the board counts quarantined as failed).
+  const summaries = list.map((o) => decodeRequestSummary(requestJson(o), "test"));
+  expect(needsYouRequests(summaries).map((r) => r.id)).toHaveLength(4);
 });

@@ -2,13 +2,13 @@ import { useProjectStats } from "@/api/runQueries";
 import { formatMedianAcceptedTokens } from "@/domain/cost";
 import type { ProjectStats } from "@/domain/project";
 import { projectStatsPath } from "@/routes/paths";
+import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Section } from "@/ui/PageLayout";
+import { StaleWarning } from "@/ui/StaleWarning";
 
-import { ProjectFieldList } from "./ProjectFieldList";
 import { ProjectIdForm } from "./ProjectIdForm";
-import { StaleWarning } from "./StaleWarning";
 import { useLoadProject } from "./useLoadProject";
 
 const NO_DATA = "No accepted runs yet";
@@ -18,38 +18,35 @@ function StatsBody({ stats }: { readonly stats: ProjectStats }) {
   const causes = Object.entries(stats.quarantinedByCause);
   return (
     <>
-      <ProjectFieldList
-        fields={[
-          { label: "Project", value: <span className="font-mono">{stats.project}</span> },
-          { label: "Total runs", value: stats.totalRuns },
-          { label: "Accepted", value: stats.accepted },
-          // Nothing halted is the usual answer, and a row that says so is noise.
-          ...(stats.halted === 0 ? [] : [{ label: "Halted", value: stats.halted }]),
-          {
-            label: "Override rate (accepted)",
-            value:
-              rate === null
-                ? NO_DATA
-                : `${rate}% (${stats.acceptedViaOverride} of ${stats.accepted})`,
-          },
-          {
-            label: "Median accepted",
-            value:
-              stats.medianAcceptedTokens === null
-                ? NO_DATA
-                : formatMedianAcceptedTokens(stats.medianAcceptedTokens),
-          },
-        ]}
-      />
+      <DescriptionList labelWidth="lg">
+        <DescriptionItem label="Project">
+          <span className="font-mono">{stats.project}</span>
+        </DescriptionItem>
+        <DescriptionItem label="Total runs">{stats.totalRuns}</DescriptionItem>
+        <DescriptionItem label="Accepted">{stats.accepted}</DescriptionItem>
+        {/* Nothing halted is the usual answer, and a row that says so is noise. */}
+        {stats.halted === 0 ? null : (
+          <DescriptionItem label="Halted">{stats.halted}</DescriptionItem>
+        )}
+        <DescriptionItem label="Override rate (accepted)">
+          {rate === null ? NO_DATA : `${rate}% (${stats.acceptedViaOverride} of ${stats.accepted})`}
+        </DescriptionItem>
+        <DescriptionItem label="Median accepted">
+          {stats.medianAcceptedTokens === null
+            ? NO_DATA
+            : formatMedianAcceptedTokens(stats.medianAcceptedTokens)}
+        </DescriptionItem>
+      </DescriptionList>
       {/* Absent, not "none recorded", when nothing was quarantined. */}
       {causes.length === 0 ? null : (
         <Section title="Quarantined by cause">
-          <ProjectFieldList
-            fields={causes.map(([cause, count]) => ({
-              label: cause,
-              value: count,
-            }))}
-          />
+          <DescriptionList labelWidth="lg">
+            {causes.map(([cause, count]) => (
+              <DescriptionItem key={cause} label={cause}>
+                {count}
+              </DescriptionItem>
+            ))}
+          </DescriptionList>
         </Section>
       )}
     </>
@@ -78,7 +75,7 @@ export function ProjectStatsPanel({ project }: { readonly project: string }) {
           {query.error === null ? null : (
             <StaleWarning
               error={query.error}
-              fetching={query.isFetching}
+              retrying={query.isFetching}
               onRetry={() => void query.refetch()}
             />
           )}

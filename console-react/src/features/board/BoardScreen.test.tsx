@@ -200,7 +200,7 @@ test("the needs-you banner appears only when a filter hides the Needs you sectio
     ]),
   });
   const banner = await screen.findByTestId("needs-you-banner");
-  expect(banner).toHaveTextContent("1 request(s) waiting for your review");
+  expect(banner).toHaveTextContent("1 request is waiting for your review");
   await userEvent.click(within(banner).getByRole("button", { name: "View" }));
   expect(location()).toBe("/?group=needs-you");
   expect(screen.queryByText("Old")).not.toBeInTheDocument();

@@ -11,6 +11,8 @@ export interface StatusStrip {
   readonly elapsed: string;
   /** Null for a run that is over: there is no "last activity" to report. */
   readonly lastActivity: string | null;
+  /** The agent's latest note (what it is doing right now); null for a run that is over or before its first note. Untrusted text. */
+  readonly latest: string | null;
 }
 
 /**
@@ -52,16 +54,20 @@ export function computeStatusStrip(
     elapsedBetween(run.createdAt, over ? terminalAt : null, now),
   );
 
-  if (over) return { label, round, elapsed, lastActivity: null };
+  if (over) return { label, round, elapsed, lastActivity: null, latest: null };
   const lastProgress = laterOf(
     factoryEvents.at(-1)?.ts ?? null,
     tryParseTimestamp(run.lastProgressAt ?? ""),
   );
   const since = (lastProgress ?? tryParseTimestamp(run.createdAt))?.toISOString() ?? run.createdAt;
+  const latestNote = events
+    .filter((e) => e.source === "worker" && e.stage === "agent" && e.event === "note")
+    .at(-1)?.detail;
   return {
     label,
     round,
     elapsed,
+    latest: latestNote === undefined || latestNote === "" ? null : latestNote,
     lastActivity: formatElapsedCompact(elapsedBetween(since, null, now)),
   };
 }

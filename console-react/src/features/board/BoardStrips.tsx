@@ -2,6 +2,7 @@ import type { ApiError } from "@/domain/apiError";
 import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
 import { describeError } from "@/ui/ErrorDisplay";
+import { StaleWarning } from "@/ui/StaleWarning";
 
 export interface BoardStripsProps {
   /** Config's release-policy warning: the policy denies every PR. */
@@ -58,7 +59,11 @@ export function BoardStrips(props: BoardStripsProps) {
       {props.needsYouCount > 0 && !props.needsYouVisible ? (
         <Callout tone="warning" data-testid="needs-you-banner">
           <div className="flex items-center justify-between gap-3">
-            <span>{`${props.needsYouCount} request(s) waiting for your review`}</span>
+            <span>
+              {props.needsYouCount === 1
+                ? "1 request is waiting for your review"
+                : `${props.needsYouCount} requests are waiting for your review`}
+            </span>
             <Button size="sm" onClick={props.onViewNeedsYou}>
               View
             </Button>
@@ -66,17 +71,13 @@ export function BoardStrips(props: BoardStripsProps) {
         </Callout>
       ) : null}
       {props.refreshError === null ? null : (
-        <Callout tone="warning" data-testid="request-list-stale-banner">
-          <div className="flex items-center justify-between gap-3">
-            <span>
-              Showing the last successfully loaded data -- refresh failed:{" "}
-              {describeError(props.refreshError).headline}
-            </span>
-            <Button size="sm" disabled={props.refreshing} onClick={props.onRetryRefresh}>
-              Retry
-            </Button>
-          </div>
-        </Callout>
+        <StaleWarning
+          error={props.refreshError}
+          detail="headline"
+          retrying={props.refreshing}
+          onRetry={props.onRetryRefresh}
+          testId="request-list-stale-banner"
+        />
       )}
     </>
   );

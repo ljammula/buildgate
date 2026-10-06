@@ -2,11 +2,15 @@ import { useEffect, useReducer } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import { watchRunLog } from "@/api/runs";
+import type { ApiError } from "@/domain/apiError";
 import { appendLog } from "@/features/run-detail/logBuffer";
+
+/** A failed log read: the server's refusal, or anything else the stream threw. */
+export type RunLogError = ApiError | Error;
 
 interface LogState {
   readonly text: string;
-  readonly error: unknown;
+  readonly error: RunLogError | null;
   readonly closed: boolean;
   /** Bumped by `retry`, so the subscription effect runs again. */
   readonly attempt: number;
@@ -14,7 +18,7 @@ interface LogState {
 
 type LogAction =
   | { readonly type: "chunk"; readonly chunk: string }
-  | { readonly type: "error"; readonly error: unknown }
+  | { readonly type: "error"; readonly error: RunLogError }
   | { readonly type: "done" }
   | { readonly type: "clear" }
   | { readonly type: "retry" };
@@ -38,7 +42,7 @@ function reduceLog(state: LogState, action: LogAction): LogState {
 
 export interface RunLog {
   readonly text: string;
-  readonly error: unknown;
+  readonly error: RunLogError | null;
   /** The server closed the stream (or it failed): nothing more will arrive. */
   readonly closed: boolean;
   readonly retry: () => void;
@@ -62,7 +66,10 @@ export function useRunLog(id: string, enabled: boolean): RunLog {
         dispatch({ type: "chunk", chunk });
       },
       onError: (error) => {
-        dispatch({ type: "error", error });
+        dispatch({
+          type: "error",
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
       },
       onDone: () => {
         dispatch({ type: "done" });

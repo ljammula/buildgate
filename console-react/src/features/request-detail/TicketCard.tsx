@@ -1,30 +1,58 @@
 import { CircleAlert, ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 
+import { useRunRecord } from "@/api/runQueries";
 import type { RequestTicket } from "@/domain/request";
+import { type Run, runIsTerminalForDisplay } from "@/domain/run";
+import { safeHttpUrl } from "@/domain/safeUrl";
 import { runPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { Spinner } from "@/ui/Feedback";
+import { RelativeTime } from "@/ui/RelativeTime";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
-import { useTicketRun } from "./useTicketRun";
+const runPollMs = 10_000;
 
-// Agent-supplied text must not become a link to a javascript: or data: URL.
-function isWebUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
-  }
+function RunActivity({ run }: { readonly run: Run }) {
+  const parts = [
+    run.currentStage === null ? "" : `Now: ${run.currentStage}`,
+    run.currentRound > 0
+      ? `round ${run.currentRound}${run.maxRounds > 0 ? `/${run.maxRounds}` : ""}`
+      : "",
+  ].filter((p) => p !== "");
+  if (parts.length === 0 && run.lastProgressAt === null) return null;
+  return (
+    <p data-testid="ticket-activity" className="text-fg-muted text-xs">
+      {parts.join(" · ")}
+      {run.lastProgressAt === null ? null : (
+        <>
+          {parts.length > 0 ? " · " : ""}last activity <RelativeTime value={run.lastProgressAt} />
+        </>
+      )}
+    </p>
+  );
 }
 
 /** One ticket: its own run's real state, PR state and link, and a link to the run. */
-export function TicketCard({ ticket }: { readonly ticket: RequestTicket }) {
-  const run = useTicketRun(ticket.runId);
+export function TicketCard({
+  ticket,
+  live,
+}: {
+  readonly ticket: RequestTicket;
+  readonly live: boolean;
+}) {
+  // The ticket's own run: the server's ticket JSON carries no run state. Keyed
+  // by run id, so a retry landing a new run under the same ticket fetches the
+  // new run. While the request builds, its run moves without the request
+  // changing, so it is polled.
+  const run = useRunRecord(ticket.runId, {
+    enabled: ticket.runId !== "",
+    ...(live ? { refetchIntervalMs: runPollMs } : {}),
+  });
+  const prHref = safeHttpUrl(ticket.prUrl);
   return (
     <Card data-testid={`ticket-card-${ticket.index}`}>
       <CardBody className="flex flex-col gap-2">
@@ -47,12 +75,15 @@ export function TicketCard({ ticket }: { readonly ticket: RequestTicket }) {
             <PrStateChip prState={ticket.prState} />
           ) : null}
         </div>
+        {run.data === undefined || runIsTerminalForDisplay(run.data) ? null : (
+          <RunActivity run={run.data} />
+        )}
         {ticket.prUrl === "" ? null : (
           <p className="text-sm break-all">
             PR:{" "}
-            {isWebUrl(ticket.prUrl) ? (
+            {prHref !== null ? (
               <a
-                href={ticket.prUrl}
+                href={prHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-accent underline underline-offset-2"

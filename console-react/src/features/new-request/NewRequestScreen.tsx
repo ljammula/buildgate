@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Loader2, Send } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
 import { useId, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
@@ -6,6 +6,7 @@ import { useWorkspaces } from "@/api/runQueries";
 import { OperatorGate } from "@/shared/approval/OperatorGate";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
+import { Disclosure } from "@/ui/Disclosure";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Callout, Spinner } from "@/ui/Feedback";
 import { Checkbox, Field, Input, Select, Textarea } from "@/ui/Input";
@@ -133,55 +134,43 @@ export function NewRequestScreen() {
               </div>
             </div>
             <div className="flex flex-col gap-3 border-b border-border px-4 py-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="self-start"
-                aria-expanded={advanced}
-                onClick={() => {
-                  setAdvanced((open) => !open);
-                }}
+              <Disclosure
+                bare
+                headingLevel={null}
+                title="Advanced"
+                open={advanced}
+                onOpenChange={setAdvanced}
               >
-                {advanced ? (
-                  <ChevronDown aria-hidden="true" />
-                ) : (
-                  <ChevronRight aria-hidden="true" />
-                )}
-                Advanced
-              </Button>
-              {advanced ? (
-                <>
-                  <Field label="Verify command">
-                    <Input
-                      className="font-mono"
-                      placeholder={verifyDefault}
-                      value={values.verifyCommand}
-                      onChange={(event) => {
-                        set({ verifyCommand: event.target.value });
-                      }}
-                    />
-                  </Field>
-                  <Field label="Full-suite command">
-                    <Input
-                      className="font-mono"
-                      placeholder="Repo-wide regression command; default: none, or .factory.yml full_suite_command"
-                      value={values.fullSuiteCommand}
-                      onChange={(event) => {
-                        set({ fullSuiteCommand: event.target.value });
-                      }}
-                    />
-                  </Field>
-                  <Field label="Preflight profile">
-                    <Input
-                      placeholder={'Empty (strict), or "brownfield"'}
-                      value={values.preflightProfile}
-                      onChange={(event) => {
-                        set({ preflightProfile: event.target.value });
-                      }}
-                    />
-                  </Field>
-                </>
-              ) : null}
+                <Field label="Verify command">
+                  <Input
+                    className="font-mono"
+                    placeholder={verifyDefault}
+                    value={values.verifyCommand}
+                    onChange={(event) => {
+                      set({ verifyCommand: event.target.value });
+                    }}
+                  />
+                </Field>
+                <Field label="Full-suite command">
+                  <Input
+                    className="font-mono"
+                    placeholder="Repo-wide regression command; default: none, or .factory.yml full_suite_command"
+                    value={values.fullSuiteCommand}
+                    onChange={(event) => {
+                      set({ fullSuiteCommand: event.target.value });
+                    }}
+                  />
+                </Field>
+                <Field label="Preflight profile">
+                  <Input
+                    placeholder={'Empty (strict), or "brownfield"'}
+                    value={values.preflightProfile}
+                    onChange={(event) => {
+                      set({ preflightProfile: event.target.value });
+                    }}
+                  />
+                </Field>
+              </Disclosure>
             </div>
             <div className="flex flex-col gap-3 bg-surface-sunken/50 p-4">
               {!canWrite ? (

@@ -1,5 +1,5 @@
 import type { RequestSummary } from "@/domain/request";
-import { sortedRequests } from "@/domain/requestOrder";
+import { needsYouRequests } from "@/shared/request/needsYou";
 
 export type NonEmptyRequests = readonly [RequestSummary, ...RequestSummary[]];
 
@@ -8,19 +8,41 @@ export function isNonEmpty(requests: readonly RequestSummary[]): requests is Non
 }
 
 /**
- * The requests triage lists: spec_review and plan_review, oldest wait first.
- * Literal states, not the board's "needs you" grouping: that also covers
- * `halted`, but this screen exists for the approve/reject decision, which the
- * server only accepts from these two states, so listing a halted request
- * would offer an action that just fails. oracle_review is excluded on
- * purpose too: approving it needs the request page's oracle panel, which
- * shows every oracle file and sends the hashes it displayed, so a triage
- * keystroke would approve blind.
+ * The requests triage lists: every request that needs the operator (the same
+ * set as the sidebar's count, `needsYouRequests`), oldest wait first.
  */
 export function triageRequests(requests: readonly RequestSummary[]): RequestSummary[] {
-  return sortedRequests(
-    requests.filter((r) => r.state === "spec_review" || r.state === "plan_review"),
-  );
+  return needsYouRequests(requests);
+}
+
+/**
+ * Whether Approve and Reject act on the request here: only spec_review and
+ * plan_review, whose spec or plan is shown in full. oracle_review is decided
+ * on the request page, where the oracle panel shows every file and sends the
+ * hashes it displayed, so a triage keystroke would approve blind; the other
+ * states have their own recovery actions there.
+ */
+export function decidesInPlace(request: RequestSummary): boolean {
+  return request.state === "spec_review" || request.state === "plan_review";
+}
+
+const reasonFallback: Readonly<Record<string, string>> = {
+  oracle_review: "The drafted acceptance tests wait for your review.",
+  resume_review: "A resume plan waits for your approval.",
+  halted: "The build halted and needs your decision.",
+  quarantined: "A ticket was quarantined and needs your triage.",
+  pr_review: "Its pull requests wait on their reviewer.",
+};
+
+/**
+ * The one sentence on why a request needs the operator: the server's next
+ * step, else a fixed line per state. A review state's next step names CLI
+ * commands for buttons the request page has, so those take the fixed line.
+ */
+export function triageReason(request: RequestSummary): string {
+  const reviewState = request.state === "oracle_review" || request.state === "resume_review";
+  if (request.nextAction !== "" && !reviewState) return request.nextAction;
+  return reasonFallback[request.state] ?? "This request waits on you.";
 }
 
 /**
