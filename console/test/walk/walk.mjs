@@ -606,6 +606,19 @@ step("request-plan-approve", async () => {
   const listing = (await api("/requests/req-plan-review/tickets/1/oracle")).body;
   const approve = main().getByRole("button", { name: "Approve", exact: true });
   check(await approve.isDisabled(), "the plan can be approved before its oracle files were shown");
+  // This plan was rejected once: the re-review opens on what changed, with
+  // the note against the section it was written on and whether the drafter
+  // was given it, read from the server's own revision record.
+  const revision = (await api("/requests/req-plan-review/revisions")).body.at(-1);
+  check(revision.feedback_supplied === true, "the seeded revision records no hand-off");
+  const changes = main().getByRole("region", { name: "Changes since you rejected" });
+  await changes.getByText("The drafter was given this note for the redraft.").waitFor();
+  const noted = changes
+    .getByRole("list", { name: "Your notes on specific places" })
+    .getByRole("listitem");
+  await noted.getByText("tickets/001.spec.md · Steps").waitFor();
+  await noted.getByText("- 1. migrate and switch over in one step").waitFor();
+  await noted.getByText("+ 1. s", { exact: true }).waitFor();
   // The spec is not on the page at plan review: the coverage view is where
   // a ticket's "- 1" meets the criterion's text.
   const coverage = main().getByRole("region", { name: "Criteria coverage" });

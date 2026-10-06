@@ -61,8 +61,16 @@ export function rejectionWire(o: {
   at: string;
   reason: string;
   fromState: string;
+  anchors?: readonly Wire[];
+  note?: string;
 }): Wire {
-  return { by: o.by, at: o.at, reason: o.reason, from_state: o.fromState };
+  return {
+    by: o.by,
+    at: o.at,
+    reason: o.reason,
+    from_state: o.fromState,
+    ...(o.anchors === undefined ? {} : { anchors: o.anchors, note: o.note ?? "" }),
+  };
 }
 
 export function revisionWire(o: {
@@ -72,8 +80,10 @@ export function revisionWire(o: {
   reason: string;
   fromState: string;
   files: readonly string[] | Record<string, string>;
+  feedbackSupplied?: boolean;
 }): Wire {
   return {
+    ...(o.feedbackSupplied === undefined ? {} : { feedback_supplied: o.feedbackSupplied }),
     index: o.index,
     at: o.at,
     by: o.by,

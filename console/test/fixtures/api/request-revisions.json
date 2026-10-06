@@ -3,7 +3,7 @@
     "index": 1,
     "at": "2026-09-10T09:08:00Z",
     "by": "alice",
-    "reason": "split the migration out",
+    "reason": "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
     "from_state": "plan_review",
     "files": [
       "spec.md",

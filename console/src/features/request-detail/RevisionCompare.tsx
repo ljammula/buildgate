@@ -3,22 +3,26 @@ import { useState } from "react";
 import { useRequestRevision, useRequestRevisions } from "@/api/requestQueries";
 import { formatLocalTimestamp } from "@/domain/elapsed";
 import { type RequestSummary, type RevisionSummary, rejectionStage } from "@/domain/request";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { anchoredChanges, rejectionForRevision } from "@/domain/reviewAnchors";
 import { DiffView } from "@/ui/DiffView";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Select } from "@/ui/Input";
 import { Spinner } from "@/ui/Feedback";
 
 import { Panel } from "./Panel";
-import { revisionDiffText } from "./requestDetailLogic";
+import { RejectionNote } from "./RejectionNote";
+import { currentContentFor, revisionDiffText } from "./requestDetailLogic";
 
 function revisionLabel(revision: RevisionSummary): string {
   return `Revision ${revision.index} — rejected by ${revision.by} at ${formatLocalTimestamp(revision.at)}`;
 }
 
 /**
- * What changed since the operator rejected this document: their last note,
- * quoted, and the diff between the rejected revision and the current text.
+ * What changed since the operator rejected this document: their note,
+ * quoted, whether the drafter was given it, each anchored note against the
+ * section or criterion it was written on, and the diff between the rejected
+ * revision and the current text. The note is the selected revision's own
+ * (the latest rejection of this stage until the revisions load).
  * Open by default (the switch turns it off): at a re-review this is the
  * question, and the full current text stays whole below it, because the
  * approval is bound to that text and not to the diff. Offered only when a
@@ -37,18 +41,29 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
   );
   const selected = picked ?? latest;
   const detail = useRequestRevision(request.id, selected);
-  const note = [...request.rejections].reverse().find((r) => rejectionStage(r) === request.state);
+  const summary = list.find((r) => r.index === selected) ?? null;
+  const note =
+    (summary === null ? null : rejectionForRevision(request.rejections, summary)) ??
+    [...request.rejections].reverse().find((r) => rejectionStage(r) === request.state);
+  // The feedback record and the rejected text belong to the revision the
+  // note was written on: neither is shown beside another revision's note.
+  const own =
+    note !== undefined && summary !== null && rejectionForRevision([note], summary) !== null
+      ? summary
+      : null;
 
   return (
-    <Panel title="Revisions">
+    <Panel title="Changes since you rejected">
       {note === undefined ? null : (
-        <blockquote
-          data-testid="revision-note"
-          className="border-border flex flex-col gap-1 border-l-2 pl-3 text-sm"
-        >
-          <p className="text-fg-muted text-xs">{`You asked (${note.by}, ${formatLocalTimestamp(note.at)}):`}</p>
-          <EscapedText text={note.reason} />
-        </blockquote>
+        <RejectionNote
+          rejection={note}
+          feedbackSupplied={own === null ? null : own.feedbackSupplied}
+          changes={
+            own !== null && detail.data !== undefined && detail.data.index === own.index
+              ? anchoredChanges(note, detail.data.files, (path) => currentContentFor(request, path))
+              : null
+          }
+        />
       )}
       <label className="flex items-center gap-2 text-sm">
         <input
@@ -95,7 +110,7 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
             </div>
           ) : (
             <>
-              <h3 className="text-sm font-semibold">Changes since you rejected</h3>
+              <h3 className="text-sm font-semibold">Every change since that revision</h3>
               <div data-testid="revision-diff" className="max-h-[28rem] overflow-auto">
                 <DiffView diff={revisionDiffText(request, detail.data)} />
               </div>
