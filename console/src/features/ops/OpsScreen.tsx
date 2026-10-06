@@ -5,6 +5,7 @@ import { Callout, EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
 
+import { DaemonStatusCard } from "./DaemonStatusCard";
 import { ProjectOpsCard } from "./ProjectOpsCard";
 import { useProjectOps } from "./useProjectOps";
 
@@ -62,7 +63,12 @@ export function OpsScreen() {
           </Button>
         }
       />
-      <PageBody>{body}</PageBody>
+      <PageBody>
+        <div className="flex flex-col gap-3">
+          <DaemonStatusCard />
+          {body}
+        </div>
+      </PageBody>
     </>
   );
 }
