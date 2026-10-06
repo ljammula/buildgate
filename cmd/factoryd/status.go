@@ -162,7 +162,8 @@ type requestStatusEntry struct {
 	// one entry per ticket that has an open pull request -- the
 	// PR-review driver's own per-ticket PR status (Ticket.PRState: "open"
 	// -- the default, shown when PRState is still "" -- "ready", "approved", or
-	// "merged"). Empty when this request has no ticket with a PR yet
+	// "merged"), followed by ",ready-to-merge" when the poll's last
+	// ready-to-merge check passed (Ticket.MergeReadiness). Empty when this request has no ticket with a PR yet
 	// (every state before building/pr_review, or a ticket not yet
 	// opened).
 	Tickets string `json:"tickets,omitempty"`
@@ -187,6 +188,10 @@ func requestTicketPRSummary(r *request.Request) string {
 		state := t.PRState
 		if state == "" {
 			state = "open"
+		}
+		// The poll's last ready-to-merge check, when it passed.
+		if t.MergeReadiness != nil && t.MergeReadiness.Ready {
+			state += ",ready-to-merge"
 		}
 		parts = append(parts, fmt.Sprintf("%d:%s", t.Index, state))
 	}

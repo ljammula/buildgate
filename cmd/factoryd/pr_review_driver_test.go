@@ -2450,6 +2450,128 @@ func TestRunCorrectiveRoundReplyForAHaltedRoundAndNoneForAStartFailure(t *testin
 	}
 }
 
+// acceptAndReview makes ticket i's fixture run an accepted one whose
+// code_review gate passed: the build the ready-to-merge bar wants behind a
+// pull request's head.
+func acceptAndReview(t *testing.T, dataDir string, i int, gates ...run.GateResult) {
+	t.Helper()
+	loaded, err := run.Load(dataDir, fmt.Sprintf("run-%d", i))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.State = run.StateAccepted
+	loaded.GateResults = gates
+	if err := loaded.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPRPollChecksTheReadyToMergeBar: each poll that finds no new thread
+// records whether the pull request is ready to merge, and every reason it
+// is not.
+func TestPRPollChecksTheReadyToMergeBar(t *testing.T) {
+	yes, no := true, false
+	head := testTicketRunResultSHA(1)
+	reviewed := run.GateResult{Check: "code_review", Passed: true}
+	untrusted := []forge.Thread{{ID: "t1", Author: "mallory", Body: "hm", CommentID: 9}}
+	cases := []struct {
+		name      string
+		state     forge.ReviewState
+		gates     []run.GateResult
+		deny      bool
+		wantReady bool
+		wantBlock []string
+	}{
+		{"everything in place", forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: head}, []run.GateResult{reviewed}, false, true, nil},
+		{"no checks configured counts as none failing", forge.ReviewState{State: "OPEN", HeadSHA: head}, []run.GateResult{reviewed}, false, true, nil},
+		{"a draft that just went ready", forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &yes, HeadSHA: head}, []run.GateResult{reviewed}, false, true, nil},
+		{"checks failing", forge.ReviewState{State: "OPEN", ChecksPassing: &no, HeadSHA: head}, []run.GateResult{reviewed}, false, false, []string{"its checks are pending or failing"}},
+		{"a draft with failing checks stays a draft", forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &no, HeadSHA: head}, []run.GateResult{reviewed}, false, false, []string{"it is still a draft", "its checks are pending or failing"}},
+		{"an untrusted reviewer's open thread", forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: head, BlocksReadyThreads: untrusted}, []run.GateResult{reviewed}, false, false, []string{"1 review thread(s) are open"}},
+		{"changes requested", forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: head, ReviewDecision: forge.ReviewDecisionChangesRequested}, []run.GateResult{reviewed}, false, false, []string{"a reviewer requested changes"}},
+		{"someone pushed to the branch", forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: "ffffffffffffffffffffffffffffffffffffffff"}, []run.GateResult{reviewed}, false, false, []string{"its head ffffffffffff is not the commit the factory last built and reviewed"}},
+		{"built with code review off", forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: head}, nil, false, false, []string{"has no code review of the whole diff on record"}},
+		{"release decision withdrawn", forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: head}, []run.GateResult{reviewed}, true, false, []string{"the release decision for run run-1 does not allow it"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			r, dataDir := stubPRReviewTestFixture(t, 1)
+			acceptAndReview(t, dataDir, 1, tc.gates...)
+			if tc.deny {
+				if err := release.SaveDecision(dataDir, release.Decision{RunID: "run-1", Project: "widget", Allowed: false, Evaluated: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stubPRReviewDeps(dp, t, tc.state, nil)
+			fakeForgeOf(dp).markPullRequestReadyFn = func(ctx context.Context, prURL string) error { return nil }
+			if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			got := r.Tickets[0].MergeReadiness
+			if got == nil {
+				t.Fatal("the poll recorded no readiness check")
+			}
+			if got.Ready != tc.wantReady || got.HeadSHA != tc.state.HeadSHA || got.CheckedAt == "" {
+				t.Errorf("readiness = %+v, want ready=%v for head %s", got, tc.wantReady, tc.state.HeadSHA)
+			}
+			if len(got.Blockers) != len(tc.wantBlock) {
+				t.Fatalf("blockers = %q, want %q", got.Blockers, tc.wantBlock)
+			}
+			for i, want := range tc.wantBlock {
+				if !strings.Contains(got.Blockers[i], want) {
+					t.Errorf("blocker %d = %q, want it to say %q", i, got.Blockers[i], want)
+				}
+			}
+			if summary := requestTicketPRSummary(r); strings.Contains(summary, "ready-to-merge") != tc.wantReady {
+				t.Errorf("status summary = %q, want ready-to-merge shown only when ready", summary)
+			}
+		})
+	}
+}
+
+// TestReadyToMergeFollowsTheLastPushedRoundAndClearsWhileOneRuns: after an
+// accepted round is pushed, the bar is checked against that round's run,
+// not the ticket's first build; and a round under way has no readiness.
+func TestReadyToMergeFollowsTheLastPushedRoundAndClearsWhileOneRuns(t *testing.T) {
+	dp := newTestDeps(t)
+	yes := true
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
+	r, dataDir := stubPRReviewTestFixture(t, 1)
+	acceptAndReview(t, dataDir, 1, run.GateResult{Check: "code_review", Passed: true})
+	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
+	roundSHA := "cafef00dcafef00dcafef00dcafef00dcafef00d"
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: testTicketRunResultSHA(1), BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	var duringRound *request.MergeReadiness
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		duringRound = r.Tickets[0].MergeReadiness
+		a := &run.Run{ID: argValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: roundSHA, Branch: argValue(args, "-on-branch"), GateResults: []run.GateResult{{Check: "code_review", Passed: true}}}
+		return saveAcceptedRoundRun(t, dataDir, a)
+	}
+	fakeForgeOf(dp).pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
+		testLastPushedSHA[branch] = sha
+		return nil
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+	now := time.Now()
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now); err != nil {
+		t.Fatal(err)
+	}
+	if duringRound != nil || r.Tickets[0].MergeReadiness != nil {
+		t.Fatalf("readiness during the round = %+v, after it = %+v; want none until the next poll checks", duringRound, r.Tickets[0].MergeReadiness)
+	}
+	// The reviewer resolved the thread; the head is the round's commit.
+	fakeForgeOf(dp).readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: roundSHA}, nil
+	}
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Tickets[0].MergeReadiness; got == nil || !got.Ready {
+		t.Fatalf("readiness = %+v, want ready against the pushed round's run", got)
+	}
+}
+
 // TestRunCorrectiveRoundResolvesOutcomeFromOnReadyRunIDNotTicketFlag pins the
 // live bug found via -diff-base's own live re-validation: run_ticket.go
 // never saves a run under exactly the "-ticket" value it was given unless

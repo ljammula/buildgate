@@ -152,6 +152,10 @@ type Ticket struct {
 	// "closed" (closed without merging -- the request halts in this
 	// case, see advancePRReview's own doc comment).
 	PRState string `json:"pr_state,omitempty"`
+	// MergeReadiness is the PR-review poll's last check of whether this
+	// ticket's open pull request is ready to merge. Nil until a poll has
+	// checked it, while a corrective round runs, and once it has merged.
+	MergeReadiness *MergeReadiness `json:"merge_readiness,omitempty"`
 	// SeenThreadIDs is every review-thread id the PR-review poll has
 	// already acted on (turned into a corrective round) for this
 	// ticket's PR -- forge.NewUnresolvedThreads' own "seen" filter, so a
@@ -179,6 +183,24 @@ const (
 	RoundQuarantined RoundOutcome = "quarantined"
 	RoundHalted      RoundOutcome = "halted"
 )
+
+// MergeReadiness is one check of a pull request against the bar the factory
+// means by "ready to merge": it is out of draft, its checks pass, no review
+// thread is open, no reviewer has requested changes, its head is the commit
+// the factory last built, the release decision for that build still allows
+// it, and that build's code review of the whole pull request diff passed.
+// It is a statement for the person who merges, read from GitHub and the
+// run record at CheckedAt; nothing the factory does is conditioned on it,
+// and the factory never merges.
+type MergeReadiness struct {
+	Ready     bool   `json:"ready"`
+	CheckedAt string `json:"checked_at"`
+	// HeadSHA is the pull request's head when it was checked.
+	HeadSHA string `json:"head_sha,omitempty"`
+	// Blockers says, one sentence each, what the bar still lacks. Empty
+	// exactly when Ready.
+	Blockers []string `json:"blockers,omitempty"`
+}
 
 // ConformityRoundKind marks a Round as an automatic spec_conformity
 // corrective round rather than the PR-review corrective round -- see Round.Kind's own
@@ -1331,6 +1353,14 @@ func (r *Request) prReviewNextAction() string {
 			parts = append(parts, failed.nextAction(t.PRURL))
 			continue
 		}
+		if mr := t.MergeReadiness; mr != nil && (t.PRState == "ready" || t.PRState == "approved") {
+			if mr.Ready {
+				byState[mergeReadyKey] = append(byState[mergeReadyKey], t.PRURL)
+			} else {
+				parts = append(parts, fmt.Sprintf("%s is not ready to merge: %s. Review comments from a trusted author (`pr_trusted_authors`) start a corrective round on the same branch", t.PRURL, strings.Join(mr.Blockers, "; ")))
+			}
+			continue
+		}
 		byState[t.PRState] = append(byState[t.PRState], t.PRURL)
 	}
 	add := func(state, format string) {
@@ -1338,6 +1368,7 @@ func (r *Request) prReviewNextAction() string {
 			parts = append(parts, fmt.Sprintf(format, strings.Join(urls, ", ")))
 		}
 	}
+	add(mergeReadyKey, "merge %s: ready to merge -- checks pass, no review thread is open, and the last code review of the whole diff is clean; the factory never merges")
 	add("ready", "review %s: approve and merge it, or leave review comments -- an unresolved thread from a trusted author (`pr_trusted_authors`) starts a corrective round on the same branch")
 	add("approved", "merge %s: it is approved, and the factory never merges")
 	add("stacked", "%s is stacked on an earlier ticket's pull request: merge that one first")
@@ -1347,6 +1378,10 @@ func (r *Request) prReviewNextAction() string {
 	}
 	return strings.Join(parts, "; ") + ". The request is done when every pull request is merged"
 }
+
+// mergeReadyKey groups, in prReviewNextAction, the pull requests whose last
+// MergeReadiness check passed. It is not a PRState.
+const mergeReadyKey = "ready to merge"
 
 // lastFailedReviewRound returns t's most recent PR-review round when that
 // round did not end accepted, else nil: a later accepted round answers an

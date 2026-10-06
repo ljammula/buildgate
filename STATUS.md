@@ -37,6 +37,31 @@ passes on that commit, and other machines upgrade by tag, not from `main`.
 | CI | 🟡 | Manual by operator decision; run `make ci` locally |
 | Merge / deploy | ⬛ | Permanently human-gated: release decisions are recorded, never acted on |
 
+## Ready to merge
+
+What the factory delivers is a pull request that is ready to merge. Each
+poll of an open pull request checks it against this bar and records the
+result on the ticket (`merge_readiness`), with every item it lacks:
+
+| The bar | Checked against |
+|---|---|
+| Out of draft, and not stacked on another ticket's unmerged pull request | GitHub |
+| Checks pass (a repository with no checks has none failing) | GitHub's status rollup |
+| No review thread is open, from any person, trusted or not | GitHub; a thread the factory answered stays open until a person resolves it |
+| No reviewer has requested changes | GitHub's review decision |
+| Its head is the commit the factory last built: the ticket's build, or the last corrective round accepted and pushed | The run's `ResultSHA` |
+| The release decision for that build still allows it | The recorded decision, re-read |
+| That build's code review of the whole pull request diff passed | The run's `code_review` gate; a build with code review off does not meet the bar |
+
+| Where it shows | |
+|---|---|
+| `factoryd status` | `tickets: 1:ready,ready-to-merge` |
+| Next step (`status`, the console, `GET /requests`) | "merge <url>: ready to merge", or "<url> is not ready to merge:" and what it lacks |
+| Request page | "Ready to merge" on the ticket, or the list of what it lacks |
+
+A reviewer's approval is not part of the bar: where the repository requires
+one, GitHub enforces it. Merging stays a person's action.
+
 ## Known limits
 
 | Limit | Detail |

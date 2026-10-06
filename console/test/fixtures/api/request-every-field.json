@@ -192,6 +192,14 @@
       "branch": "every-field branch",
       "pr_url": "every-field pr_url",
       "pr_state": "every-field pr_state",
+      "merge_readiness": {
+        "ready": true,
+        "checked_at": "2026-09-10T09:00:00Z",
+        "head_sha": "every-field head_sha",
+        "blockers": [
+          "every-field blockers"
+        ]
+      },
       "seen_thread_ids": [
         "every-field seen_thread_ids"
       ],
