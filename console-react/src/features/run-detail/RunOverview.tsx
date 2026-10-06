@@ -13,6 +13,7 @@ import { listKeys } from "@/features/run-detail/listKeys";
 import { OverrideSection } from "@/features/run-detail/OverrideSection";
 import { RunFactsCard } from "@/features/run-detail/RunFactsCard";
 import { RunReleaseCard } from "@/features/run-detail/RunReleaseCard";
+import { RunStopCallout } from "./RunStopCallout";
 import { RunVerdictLine } from "@/features/run-detail/RunVerdictLine";
 import { Timeline } from "@/features/run-detail/Timeline";
 import type { RunProgress } from "@/features/run-detail/useRunProgress";
@@ -56,6 +57,7 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="flex min-w-0 flex-col gap-4">
         {over ? <RunVerdictLine run={run} /> : null}
+        <RunStopCallout run={run} />
         {gatesFailed ? gates : null}
         {attemptsFailed ? attempts : null}
         <Section title="Timeline" card>

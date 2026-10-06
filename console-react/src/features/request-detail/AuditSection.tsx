@@ -1,3 +1,4 @@
+import { stopText } from "@/domain/runStop";
 import type { RequestSummary } from "@/domain/request";
 import { EscapedText } from "@/shared/oracle/EscapedText";
 
@@ -26,7 +27,12 @@ export function AuditSection({ request }: { readonly request: RequestSummary }) 
             <li key={i} className="text-sm">
               <p>{terminalEntryLine(entry)}</p>
               {entry.reason === "" ? null : (
-                <EscapedText text={entry.reason} className="text-fg-muted text-xs" />
+                <EscapedText
+                  text={[stopText(entry.reason).summary, stopText(entry.reason).cause]
+                    .filter((part) => part !== "")
+                    .join("\n")}
+                  className="text-fg-muted text-xs whitespace-pre-wrap"
+                />
               )}
             </li>
           ))}

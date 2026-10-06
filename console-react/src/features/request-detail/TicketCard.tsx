@@ -4,7 +4,9 @@ import { Link } from "react-router";
 import { useRunRecord } from "@/api/runQueries";
 import type { RequestTicket } from "@/domain/request";
 import { type Run, runIsTerminalForDisplay } from "@/domain/run";
+import { runStop } from "@/domain/runStop";
 import { safeHttpUrl } from "@/domain/safeUrl";
+import { EscapedText } from "@/shared/oracle/EscapedText";
 import { runPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";
@@ -53,6 +55,7 @@ export function TicketCard({
     ...(live ? { refetchIntervalMs: runPollMs } : {}),
   });
   const prHref = safeHttpUrl(ticket.prUrl);
+  const stop = run.data === undefined ? null : runStop(run.data);
   return (
     <Card data-testid={`ticket-card-${ticket.index}`}>
       <CardBody className="flex flex-col gap-2">
@@ -77,6 +80,16 @@ export function TicketCard({
         </div>
         {run.data === undefined || runIsTerminalForDisplay(run.data) ? null : (
           <RunActivity run={run.data} />
+        )}
+        {stop === null || stop.cause === "" ? null : (
+          <p
+            data-testid={`ticket-stop-cause-${ticket.index}`}
+            className="font-mono text-xs break-words whitespace-pre-wrap"
+          >
+            {/* Why this ticket's run stopped, here where the request names
+                only the stage: the run's own cause usually names the fix. */}
+            <EscapedText text={stop.cause} />
+          </p>
         )}
         {ticket.prUrl === "" ? null : (
           <p className="text-sm break-all">

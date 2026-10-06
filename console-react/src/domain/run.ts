@@ -298,6 +298,16 @@ export interface Run {
   readonly specSha256: string;
   readonly state: string;
   /**
+   * Why a halted or quarantined run stopped, in the server's words
+   * (run.Run.HaltError). Empty for a run that has not stopped that way. It
+   * can be a long chain of wrapped errors: runStopCause digests it.
+   */
+  readonly haltError: string;
+  /** The machine code of the stop (run.Run.HaltReasonCode), e.g. "compose_services_rejected". */
+  readonly haltReasonCode: string;
+  /** The factory's own triage sentence for a stopped run; empty when none was written. */
+  readonly triage: string;
+  /**
    * Mirrors run.Run.HaltConfirmed; see runIsTerminal for why a "halted"
    * state alone is not enough to know a run is truly done. Absent on a
    * run.json predating the field, with the same conservative default as the
@@ -385,6 +395,9 @@ export function decodeRun(o: JsonObject, at: string): Run {
     specPath: reqString(o, "spec_path", at),
     specSha256: reqString(o, "spec_sha256", at),
     state: reqString(o, "state", at),
+    haltError: optString(o, "halt_error", at),
+    haltReasonCode: optString(o, "halt_reason_code", at),
+    triage: optString(o, "triage", at),
     haltConfirmed: optBoolean(o, "halt_confirmed", at),
     baseSha: reqString(o, "base_sha", at),
     resultSha: stringOrNull(o, "result_sha", at),

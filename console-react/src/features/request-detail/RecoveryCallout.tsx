@@ -1,3 +1,4 @@
+import { stopText } from "@/domain/runStop";
 import { Link } from "react-router";
 import { Ban, FileSearch, RotateCcw, ShieldCheck, Undo2 } from "lucide-react";
 
@@ -42,6 +43,7 @@ export function RecoveryCallout({
 }: RecoveryCalloutProps) {
   const { canWrite } = useApi();
   const plan = recoveryPlan(request);
+  const stop = stopText(request.error);
   // A server sentence that names a command or a branch is what the operator
   // needs to act (merge the branch by hand): never cut it, and when it is the
   // only instruction (no cause box above) show it whole as well.
@@ -72,12 +74,28 @@ export function RecoveryCallout({
             are: it was once only in the side column, with "the cause named
             above" pointing at nothing (found dogfooding, 2026-10-05). */}
         {request.error === "" ? null : (
-          <p
+          <div
             data-testid="recovery-cause"
-            className="border-border bg-surface-sunken text-fg rounded-md border px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap"
+            className="border-border bg-surface-sunken text-fg flex flex-col gap-1.5 rounded-md border px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap"
           >
-            <EscapedText text={request.error} />
-          </p>
+            {/* The factory's summary, then the innermost cause (it usually
+                names the fix); the wrapped workflow error stays a click away. */}
+            <p>
+              <EscapedText text={stop.summary} />
+            </p>
+            {stop.cause === "" ? null : (
+              <p className="text-tone-danger">
+                <EscapedText text={stop.cause} />
+              </p>
+            )}
+            {stop.full === "" ? null : (
+              <Disclosure title="Full error" headingLevel={null} bare>
+                <p className="text-fg-muted mt-1">
+                  <EscapedText text={stop.full} />
+                </p>
+              </Disclosure>
+            )}
+          </div>
         )}
         {evidence === null ? null : (
           <p
