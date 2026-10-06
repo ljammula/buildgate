@@ -9,6 +9,7 @@ import { useCopied } from "@/ui/useCopied";
 
 import { FileEditor } from "./FileEditor";
 import { Panel } from "./Panel";
+import type { StructureKind } from "./StructureChecklist";
 import type { EditorBinding } from "./useEditSession";
 
 export interface FileContentSectionProps {
@@ -31,6 +32,8 @@ export interface FileContentSectionProps {
   readonly onFetchCurrent: () => Promise<string>;
   /** The page's edit session for this file; see `useEditSession`. */
   readonly session?: EditorBinding;
+  /** The structure rules the editor checks this file against while typing. */
+  readonly structure: StructureKind;
   /** Extra content under the text (the parsed acceptance criteria). */
   readonly children?: ReactNode;
   /**
@@ -74,6 +77,7 @@ export function FileContentSection({
   onSave,
   onFetchCurrent,
   session,
+  structure,
   children,
   foldedSummary,
 }: FileContentSectionProps) {
@@ -159,6 +163,7 @@ export function FileContentSection({
           onSave={onSave}
           onFetchCurrent={onFetchCurrent}
           onClose={onStopEdit}
+          structure={structure}
           {...(session === undefined ? {} : { session })}
         />
       ) : (

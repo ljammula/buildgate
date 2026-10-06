@@ -43,6 +43,7 @@ export function TicketPlanSection({
         await update.mutateAsync({ content, baseSha256 });
       }}
       onFetchCurrent={onFetchCurrent}
+      structure="ticket"
       {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
     />

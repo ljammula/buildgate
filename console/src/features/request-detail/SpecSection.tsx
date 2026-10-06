@@ -41,6 +41,7 @@ export function SpecSection({
         await update.mutateAsync({ content, baseSha256 });
       }}
       onFetchCurrent={onFetchCurrent}
+      structure="spec"
       {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: specSummary(request.spec) } : {})}
     >

@@ -1,0 +1,522 @@
+{
+  "specs": [
+    {
+      "name": "well-formed",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "empty",
+      "text": "",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": []
+    },
+    {
+      "name": "crlf line endings",
+      "text": "# Spec\r\n\r\n## Problem\r\n\r\np\r\n\r\n## Scope\r\n\r\ns\r\n\r\n## Non-goals\r\n\r\nn\r\n\r\n## Affected services and packages\r\n\r\na\r\n\r\n## Acceptance criteria\r\n\r\n1. It adds.\r\n2. It subtracts.\r\n\r\n## Risks\r\n\r\nr\r\n\r\n## Open questions\r\n\r\nnone\r\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "heading in another case",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance Criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": false,
+      "missing_heading": "## Acceptance criteria",
+      "criteria_section_empty": false,
+      "criteria": []
+    },
+    {
+      "name": "heading out of order",
+      "text": "# Spec\n\n## Scope\n\ns\n\n## Problem\n\np\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": false,
+      "missing_heading": "## Scope",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "indented heading still counts",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n   ## Risks  \n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "heading padded with a no-break space",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n ## Risks \n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "heading padded with a zero-width no-break space",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n﻿## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": false,
+      "missing_heading": "## Risks",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts. ﻿## Risks r"
+      ]
+    },
+    {
+      "name": "heading padded with a next-line character",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "last heading missing",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n",
+      "valid": false,
+      "missing_heading": "## Open questions",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "criteria section blank",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n \n\t\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": false,
+      "missing_heading": "",
+      "criteria_section_empty": true,
+      "criteria": []
+    },
+    {
+      "name": "criteria section prose only",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\nIt works.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": []
+    },
+    {
+      "name": "multi-line criterion with a numbered sub-list",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds\n   two numbers:\n   1) ints\n   2) floats\n\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds two numbers: 1) ints 2) floats",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "parenthesis numbering and a preamble",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\nPreamble.\n1) It adds.\n2) It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1) It adds.",
+        "2) It subtracts."
+      ]
+    },
+    {
+      "name": "number without text is not a criterion",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds. 2."
+      ]
+    },
+    {
+      "name": "number without a space is not a criterion",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2.It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds. 2.It subtracts."
+      ]
+    },
+    {
+      "name": "indented first criterion",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n  1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "tab-indented criterion folds into the one before",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n\t2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds. 2. It subtracts."
+      ]
+    },
+    {
+      "name": "vertical tab after the number is not a separator",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2.\u000bIt subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds. 2.\u000bIt subtracts."
+      ]
+    },
+    {
+      "name": "full-width digits are not a number",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n２. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds. ２. It subtracts."
+      ]
+    },
+    {
+      "name": "extra section ends the criteria",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Notes\n\n3. Not a criterion.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "a deeper heading does not end the criteria",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n### Detail\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds. ### Detail",
+        "2. It subtracts."
+      ]
+    },
+    {
+      "name": "criteria heading twice: the first one is read",
+      "text": "# Spec\n\n## Acceptance criteria\n\n1. Early.\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. Early."
+      ]
+    },
+    {
+      "name": "removal note after the last heading",
+      "text": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n\n## Criteria removed by factoryd\n\n- x\n",
+      "valid": true,
+      "missing_heading": "",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "name": "well-formed",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "empty",
+      "text": "",
+      "plan_valid": false,
+      "missing_heading": "## Goal",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": [
+        "Verify-Command:",
+        "Allowed-Files:",
+        "Required-Changed-Files:"
+      ]
+    },
+    {
+      "name": "crlf line endings",
+      "text": "Verify-Command: true\r\nAllowed-Files: a.go\r\nRequired-Changed-Files: a.go\r\n\r\n## Goal\r\n\r\ng\r\n\r\n## Plan\r\n\r\n### Files to touch\r\n\r\n- a.go\r\n\r\n### Steps\r\n\r\n1. s\r\n\r\n### Tests to add\r\n\r\n- t\r\n\r\n### Acceptance criteria covered\r\n\r\n- 1\r\n\r\n## Out of scope\r\n\r\nnone\r\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "no header lines",
+      "text": "## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": [
+        "Verify-Command:",
+        "Allowed-Files:",
+        "Required-Changed-Files:"
+      ]
+    },
+    {
+      "name": "indented header line",
+      "text": "Verify-Command: true\n  Allowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": [
+        "Allowed-Files:"
+      ]
+    },
+    {
+      "name": "header only inside a fence",
+      "text": "```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n```\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": [
+        "Verify-Command:",
+        "Allowed-Files:",
+        "Required-Changed-Files:"
+      ]
+    },
+    {
+      "name": "header after a closed fence",
+      "text": "```\nx\n```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "longer fence closed only by a longer one",
+      "text": "````\n```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n````\nVerify-Command: true\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": [
+        "Allowed-Files:",
+        "Required-Changed-Files:"
+      ]
+    },
+    {
+      "name": "tilde fence with an info string",
+      "text": "~~~text\nVerify-Command: x\n~~~\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": [
+        "Verify-Command:"
+      ]
+    },
+    {
+      "name": "unclosed fence hides the headers",
+      "text": "```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": [
+        "Verify-Command:",
+        "Allowed-Files:",
+        "Required-Changed-Files:"
+      ]
+    },
+    {
+      "name": "two backticks are not a fence",
+      "text": "``\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "heading missing",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "### Tests to add",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "heading out of order",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Tests to add\n\n- t\n\n### Steps\n\n1. s\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "### Tests to add",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "empty section",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "## Goal",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "empty out of scope",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "## Out of scope",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "plan container may be empty",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: several forms",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n* 2\n3\n-4\n  - 05\n\n## Out of scope\n\nnone\n",
+      "plan_valid": true,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: a range is refused",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1-3\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: two on a line is refused",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1, 2\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: prose is refused",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- criterion two\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: blank only",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "### Acceptance criteria covered",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: past the integer range is refused",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 9223372036854775808\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: plus bullet is refused",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n+ 1\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "",
+      "covered": [],
+      "headers_missing": []
+    },
+    {
+      "name": "covered: empty section and bad list",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- x\n\n## Out of scope\n\nnone\n",
+      "plan_valid": false,
+      "missing_heading": "",
+      "empty_section": "## Goal",
+      "covered": [],
+      "headers_missing": []
+    }
+  ]
+}
