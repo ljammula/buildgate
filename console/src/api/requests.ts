@@ -200,6 +200,12 @@ export interface UpdateRequestContentOptions {
    * stale content.
    */
   readonly baseSha256?: string | null;
+  /**
+   * The operator saving the edit, recorded on the request's edit history.
+   * Omitted when no name is known: the server then records its own API
+   * principal.
+   */
+  readonly by?: string | null;
 }
 
 /**
@@ -223,6 +229,7 @@ export async function updateRequestSpec(
   const body = {
     content,
     ...(options.baseSha256 != null ? { base_sha256: options.baseSha256 } : {}),
+    ...(options.by != null && options.by !== "" ? { by: options.by } : {}),
   };
   return decodeRequestSummary(
     asObject(await http.sendJson("PUT", `${requestPath(id)}/spec`, "override", body, signal), at),
@@ -248,6 +255,7 @@ export async function updateRequestTicket(
   const body = {
     content,
     ...(options.baseSha256 != null ? { base_sha256: options.baseSha256 } : {}),
+    ...(options.by != null && options.by !== "" ? { by: options.by } : {}),
   };
   return decodeRequestSummary(
     asObject(

@@ -78,6 +78,7 @@ test("saving an edited spec calls PUT with the edited body and the hash of what 
   expect(server.sent("PUT /requests/req-1/spec")[0]?.body).toEqual({
     content: "# Spec\n\nEdited detail.",
     base_sha256: sha256Hex("# Spec\n\nOriginal detail."),
+    by: "operator",
   });
   // The editor closes and the screen shows the saved content, fed from the
   // PUT response with no extra GET.
@@ -250,6 +251,7 @@ test("'Keep editing (base = current)' on a 409 conflict re-bases base_sha256 to 
   expect(server.sent("PUT /requests/req-1/spec")[1]?.body).toEqual({
     content: "My unsaved edit.",
     base_sha256: "deadbeef",
+    by: "operator",
   });
 });
 
@@ -305,6 +307,7 @@ describe("a ticket plan file at plan_review", () => {
     expect(server.sent("PUT /requests/req-1/tickets/1")[0]?.body).toEqual({
       content: "Verify-Command: true\n## Edited",
       base_sha256: sha256Hex("Verify-Command: true\n## Ticket one\n"),
+      by: "operator",
     });
     expect(await screen.findByText(/## Edited/)).toBeInTheDocument();
   });
@@ -337,4 +340,35 @@ test("an open editor closes when the request moves on and its file is no longer 
     expect(screen.queryByRole("textbox", { name: "Edit spec.md" })).not.toBeInTheDocument();
   });
   expect(server.sent("GET /requests/req-1")).toHaveLength(2);
+});
+
+test("the audit lists an in-place edit with its changed lines and whether a drafter was given it", async () => {
+  openRequest(
+    requestWire({
+      state: "spec_review",
+      title: "Edited once",
+      spec: "# Spec\n\nnew",
+      edits: [
+        {
+          by: "kanna",
+          at: "2026-09-10T09:00:00Z",
+          path: "spec.md",
+          from_state: "spec_review",
+          revision: 1,
+          diff: "- old\n+ new\n",
+        },
+      ],
+    }),
+  );
+  await screen.findByRole("heading", { level: 1, name: "Edited once" });
+  const audit = screen.getByRole("region", { name: "Audit" });
+  await userEvent.click(within(audit).getByRole("button", { name: /Edits in place \(1\)/ }));
+  const history = within(audit).getByTestId("edit-history");
+  expect(history).toHaveTextContent("Edited by kanna at");
+  expect(history).toHaveTextContent("spec.md");
+  expect(history).toHaveTextContent("- old");
+  expect(history).toHaveTextContent("+ new");
+  expect(history).toHaveTextContent(
+    "Not sent to a drafter: nothing has redrafted this file since.",
+  );
 });

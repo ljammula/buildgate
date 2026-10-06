@@ -1,6 +1,7 @@
 import { useUpdateRequestTicket } from "@/api/requestQueries";
 import type { RequestSummary, RequestTicket } from "@/domain/request";
 import { specAcceptanceCriteria } from "@/domain/specSkeleton";
+import { getOperatorName } from "@/platform/operatorIdentity";
 
 import { FileContentSection } from "./FileContentSection";
 import type { EditorBinding } from "./useEditSession";
@@ -41,7 +42,7 @@ export function TicketPlanSection({
       onStartEdit={onStartEdit}
       onStopEdit={onStopEdit}
       onSave={async (content, baseSha256) => {
-        await update.mutateAsync({ content, baseSha256 });
+        await update.mutateAsync({ content, baseSha256, by: getOperatorName() });
       }}
       onFetchCurrent={onFetchCurrent}
       structure="ticket"

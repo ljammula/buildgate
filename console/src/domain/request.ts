@@ -227,6 +227,49 @@ function decodeRejection(o: JsonObject, at: string): Rejection {
 }
 
 /**
+ * One in-place edit an operator saved to a reviewed file (Go's
+ * request.Edit): who, when, which file, and the changed lines.
+ */
+export interface RequestEdit {
+  readonly by: string;
+  readonly at: string;
+  /** Request-relative file: "spec.md", "tickets/001.spec.md". */
+  readonly path: string;
+  /** The review state the edit was made in. */
+  readonly fromState: string;
+  /** The revision holding the whole text the edit replaced. */
+  readonly revision: number;
+  /** Changed lines with context, each prefixed "- ", "+ " or "  ". */
+  readonly diff: string;
+  readonly diffTruncated: boolean;
+}
+
+function decodeRequestEdit(o: JsonObject, at: string): RequestEdit {
+  return {
+    by: reqString(o, "by", at),
+    at: reqString(o, "at", at),
+    path: reqString(o, "path", at),
+    fromState: optString(o, "from_state", at),
+    revision: numberOr(o, "revision", at, 0),
+    diff: optString(o, "diff", at),
+    diffTruncated: optBoolean(o, "diff_truncated", at),
+  };
+}
+
+/**
+ * The rejection that handed an edit to the drafter: the first rejection of
+ * the edit's own stage made at or after it (the server quotes an edit in
+ * that rejection's feedback). Null while no such rejection exists: nothing
+ * has redrafted the file, so no drafter has been told.
+ */
+export function editHandoff(edit: RequestEdit, rejections: readonly Rejection[]): Rejection | null {
+  const when = Date.parse(edit.at);
+  return (
+    rejections.find((r) => rejectionStage(r) === edit.fromState && Date.parse(r.at) >= when) ?? null
+  );
+}
+
+/**
  * The review stage this rejection's revision belongs to (Go's
  * Rejection.Stage): forStage when a send-back set it, else fromState.
  */
@@ -254,6 +297,8 @@ export interface RevisionSummary {
    * server kept this, which is also a redraft that never saw the note.
    */
   readonly feedbackSupplied: boolean;
+  /** "" for a rejection's snapshot; "edit" for the text an operator's in-place edit replaced. */
+  readonly kind: string;
 }
 
 function decodeRevisionSummary(o: JsonObject, at: string): RevisionSummary {
@@ -265,6 +310,7 @@ function decodeRevisionSummary(o: JsonObject, at: string): RevisionSummary {
     fromState: reqString(o, "from_state", at),
     files: stringList(o, "files", at),
     feedbackSupplied: optBoolean(o, "feedback_supplied", at),
+    kind: optString(o, "kind", at),
   };
 }
 
@@ -427,6 +473,8 @@ export interface RequestSummary {
   readonly planEvidence: PlanEvidence | null;
   /** Empty for a request never rejected, or one predating the field. */
   readonly rejections: readonly Rejection[];
+  /** Every in-place edit an operator saved, oldest first. */
+  readonly edits: readonly RequestEdit[];
   /**
    * Server-computed spend rollup. The contract fixtures carry it on both
    * routes; null when absent.
@@ -521,6 +569,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     specEvidence: optObject(o, "spec_evidence", at, decodeSpecEvidence),
     planEvidence: optObject(o, "plan_evidence", at, decodePlanEvidence),
     rejections: objectList(o, "rejections", at, decodeRejection),
+    edits: objectList(o, "edits", at, decodeRequestEdit),
     costSummary: optObject(o, "cost_summary", at, decodeCostSummary),
     history: objectList(o, "history", at, decodeRequestTransition),
     oracleDraftStatus: oracleDraftField(oracleDraft, "status"),
