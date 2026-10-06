@@ -42,6 +42,9 @@ type Revision struct {
 	// existed, so it decodes as false) can tell a redraft that never saw
 	// their note apart from one that did.
 	FeedbackSupplied bool `json:"feedback_supplied"`
+	// Kind is empty for a rejection's snapshot and RevisionKindEdit for the
+	// text an operator's in-place edit replaced (SnapshotEdit).
+	Kind string `json:"kind,omitempty"`
 }
 
 func revisionsDir(dataDir, id string) string {
@@ -89,7 +92,7 @@ func SnapshotRevision(dataDir, id, by, reason string, fromState State, relPaths 
 		return 0, err
 	}
 	matchesRevision := func(rev Revision) bool {
-		return rev.By == by && rev.Reason == reason && rev.FromState == fromState
+		return rev.Kind == "" && rev.By == by && rev.Reason == reason && rev.FromState == fromState
 	}
 	revisionMatches := 0
 	var lastMatch Revision
@@ -155,22 +158,29 @@ func SnapshotRevision(dataDir, id, by, reason string, fromState State, relPaths 
 		// state Reject actually snapshots a revision from.
 		FeedbackSupplied: fromState == StateSpecReview || fromState == StateOracleReview || fromState == StatePlanReview,
 	}
+	if err := writeRevisionMeta(id, dir, meta); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// writeRevisionMeta publishes meta as dir's meta.json. Write-then-rename,
+// same as Request.Save: a crash or concurrent ListRevisions read between
+// the two steps must never observe a missing or truncated meta.json.
+func writeRevisionMeta(id, dir string, meta Revision) error {
 	b, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		return 0, fmt.Errorf("request %s: marshal revision meta: %w", id, err)
+		return fmt.Errorf("request %s: marshal revision meta: %w", id, err)
 	}
-	// Write-then-rename, same as Request.Save: a crash or concurrent
-	// ListRevisions read between the two steps must never observe a
-	// missing or truncated meta.json.
 	metaPath := filepath.Join(dir, revisionMetaFileName)
 	tmp := metaPath + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return 0, fmt.Errorf("request %s: write revision meta: %w", id, err)
+		return fmt.Errorf("request %s: write revision meta: %w", id, err)
 	}
 	if err := os.Rename(tmp, metaPath); err != nil {
-		return 0, fmt.Errorf("request %s: finalize revision meta: %w", id, err)
+		return fmt.Errorf("request %s: finalize revision meta: %w", id, err)
 	}
-	return n, nil
+	return nil
 }
 
 // nextRevisionIndex returns 1 plus the highest existing revisions/<n>

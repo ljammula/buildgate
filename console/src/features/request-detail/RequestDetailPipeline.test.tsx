@@ -498,6 +498,42 @@ describe("compare with a rejected revision", () => {
     expect(within(diff).getAllByText(/New ticket detail\./).length).toBeGreaterThan(0);
   });
 
+  test("an operator's own edit revision is not offered as a rejected revision", async () => {
+    const meta = { at: "2026-09-10T09:00:00Z", by: "jane", reason: "r", fromState: "spec_review" };
+    openRequest(
+      requestWire({
+        state: "spec_review",
+        title: "Rejected once",
+        spec: "new",
+        rejections: [rejectionWire(meta)],
+      }),
+      {
+        extra: [
+          {
+            on: "GET /requests/req-1/revisions",
+            reply: json([
+              revisionWire({ ...meta, index: 1, files: ["spec.md"] }),
+              {
+                ...revisionWire({ ...meta, index: 2, reason: "", files: ["spec.md"] }),
+                kind: "edit",
+              },
+            ]),
+          },
+          {
+            on: "GET /requests/req-1/revisions/1",
+            reply: json(revisionWire({ ...meta, index: 1, files: { "spec.md": "old" } })),
+          },
+        ],
+      },
+    );
+    await screen.findByRole("heading", { level: 1, name: "Rejected once" });
+    await screen.findByTestId("revision-diff");
+    const options = within(screen.getByRole("combobox", { name: "Revision" })).getAllByRole(
+      "option",
+    );
+    expect(options.map((o) => o.textContent.slice(0, 10))).toEqual(["Select a r", "Revision 1"]);
+  });
+
   test("a sole revision is selected for the operator", async () => {
     openRequest(
       requestWire({

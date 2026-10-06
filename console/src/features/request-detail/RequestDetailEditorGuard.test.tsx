@@ -108,6 +108,7 @@ describe("a newer record arriving under an editor", () => {
     expect(view.server.sent("PUT /requests/req-1/spec")[0]?.body).toEqual({
       content: "# Spec\n\nMine.",
       base_sha256: sha256Hex(ORIGINAL),
+      by: "operator",
     });
   });
 
@@ -214,6 +215,7 @@ describe("editor keyboard", () => {
     expect(view.server.sent("PUT /requests/req-1/spec")[0]?.body).toEqual({
       content: "edited",
       base_sha256: sha256Hex(ORIGINAL),
+      by: "operator",
     });
   });
 

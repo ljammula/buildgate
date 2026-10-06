@@ -840,6 +840,11 @@ func PlanFeedbackPath(dataDir, id string) string {
 // TestOracleFeedbackOnlyCarriesOracleStageRejections and its spec/plan
 // siblings.
 //
+// An in-place edit (Request.Edits) made in the stage before one of its
+// rejections is quoted in that rejection's section (editsBefore). An edit
+// with no later rejection of its stage reaches no drafter: nothing redrafts
+// the file it is already in.
+//
 // A send-back to spec (SendBack, sendback.go: ForStage ==
 // StateSpecReview) also resets every downstream stage's feedback: oracle
 // and plan notes recorded before it were written against a spec that has
@@ -849,6 +854,7 @@ func PlanFeedbackPath(dataDir, id string) string {
 // ones, not on every spec_review rejection.
 func stageFeedback(r *Request, stage State, label string) string {
 	var b strings.Builder
+	var previous time.Time
 	for _, rej := range r.Rejections {
 		if stage != StateSpecReview && rej.ForStage == StateSpecReview {
 			b.Reset()
@@ -858,6 +864,13 @@ func stageFeedback(r *Request, stage State, label string) string {
 			continue
 		}
 		fmt.Fprintf(&b, "## %s rejected %s by %s\n\n%s\n\n", label, rej.At, sanitizeFeedbackBy(rej.By), rej.Reason)
+		// The operator's own edits to the draft this rejection sends back
+		// ride in its section, so a redraft that rewrites the file is told
+		// to keep them.
+		if at, err := time.Parse(time.RFC3339Nano, rej.At); err == nil {
+			b.WriteString(editsBefore(r, stage, previous, at))
+			previous = at
+		}
 	}
 	return b.String()
 }
