@@ -252,6 +252,9 @@
               "every-field thread_ids"
             ],
             "run_id": "every-field run_id",
+            "prior_run_ids": [
+              "every-field prior_run_ids"
+            ],
             "outcome": "failed",
             "at": "2026-09-10T09:00:00Z",
             "error": "every-field error",

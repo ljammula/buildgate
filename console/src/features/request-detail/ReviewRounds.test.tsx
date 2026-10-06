@@ -94,6 +94,37 @@ test("ended rounds are listed newest first with outcome, effect, cause and run",
   expect(screen.getByTestId("next-action-banner")).toHaveTextContent(next);
 });
 
+test("a round that needed a fix attempt links each earlier attempt's run", async () => {
+  openRequest(
+    prReview({
+      rounds: [
+        {
+          index: 1,
+          run_id: "r1-fix1",
+          prior_run_ids: ["r1"],
+          outcome: "accepted",
+          at: "2026-10-06T07:00:00Z",
+          pushed: true,
+        },
+      ],
+    }),
+    { extra: [runRoute] },
+  );
+  const block = await rounds();
+
+  expect(within(block).getByRole("listitem")).toHaveTextContent(
+    "After 1 attempt the review gate refused:",
+  );
+  expect(within(block).getByRole("link", { name: "Round 1 attempt 1 run" })).toHaveAttribute(
+    "href",
+    "/runs/r1",
+  );
+  expect(within(block).getByRole("link", { name: "Round 1 run" })).toHaveAttribute(
+    "href",
+    "/runs/r1-fix1",
+  );
+});
+
 test("a round under way sits above the rounds that ended, numbered after them", async () => {
   openRequest(
     prReview({
