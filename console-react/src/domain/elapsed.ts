@@ -5,13 +5,11 @@
 //
 // stallStatus (below) is the "silence is a bug" rule (progress-contract.md,
 // 2026-09-18): the shared rule every screen that shows a run uses to decide
-// whether to flag it as stalled. This used to be computed client-side,
-// independently of cmd/factoryd's own copy of the same rule, and the two
-// drifted (see internal/progress.Stalled's own doc comment). The rule now
-// lives once, server-side, in internal/progress.Stalled; every route this
-// console reads a Run from is the same factoryd HTTP API, so stallStatus
-// simply trusts the server's `stalled` verdict instead of re-deriving it from
-// timestamps.
+// whether to flag it as stalled. The rule lives once, server-side, in
+// internal/progress.Stalled: a client-side copy drifted from the server's (see
+// that function's doc comment). Every route this console reads a Run from is
+// the same factoryd HTTP API, so stallStatus trusts the server's `stalled`
+// verdict instead of re-deriving it from timestamps.
 //
 // Durations are milliseconds (a number). Time is a parameter: nothing here
 // reads the clock.
@@ -74,6 +72,11 @@ export function relativeAge(value: string, now: Date): string {
   if (parsed === null) return value;
   const ageMs = now.getTime() - parsed.getTime();
   return ageMs < 60_000 ? "just now" : `${formatAgeCompact(ageMs)} ago`;
+}
+
+/** A whole-seconds age: "0s", "75s" (no minutes form), for a counter that ticks every second. A negative age renders as "0s". */
+export function formatAgeSeconds(ageMs: number): string {
+  return `${Math.max(0, Math.floor(ageMs / 1000))}s`;
 }
 
 /**
@@ -144,6 +147,23 @@ export function formatLocalTimestamp(value: string): string {
   );
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * An RFC 3339 timestamp as local "HH:mm" when it falls on `now`'s day, or
+ * "MMM d HH:mm" otherwise; the raw value when empty or unparseable.
+ */
+export function formatWhen(at: string, now: Date): string {
+  const parsed = tryParseTimestamp(at);
+  if (parsed === null) return at;
+  const hm = `${two(parsed.getHours())}:${two(parsed.getMinutes())}`;
+  const sameDay =
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate();
+  return sameDay ? hm : `${MONTHS[parsed.getMonth()] ?? ""} ${parsed.getDate()} ${hm}`;
+}
+
 /** The full UTC value shown on hover next to a local time, as ISO-8601 with milliseconds. */
 export function utcTooltip(value: string): string | null {
   const parsed = tryParseTimestamp(value);
@@ -160,10 +180,10 @@ export function stallStatus(run: Pick<Run, "stalled">): "stalled" | null {
 }
 
 /** What the "silence is a bug" chip shows for a run; null renders nothing. */
-export interface StallChipDisplay {
+interface StallChipDisplay {
   readonly kind: "stalled" | "waiting";
   readonly label: string;
-  /** Dart: red for stalled, amber.shade800 for waiting. */
+  /** Danger for stalled, warning for waiting. */
   readonly tone: "danger" | "warning";
   readonly icon: "warning_amber" | "hourglass_top";
 }

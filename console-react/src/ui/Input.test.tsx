@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { Checkbox, Field, Input, Select, Textarea } from "@/ui/Input";
+import { Checkbox, Field, FormField, Input, Select, Textarea } from "@/ui/Input";
 
 test("Field wires label, hint and error to the control", () => {
   render(
@@ -48,4 +48,8 @@ test("controls accept typing, selection and toggling", async () => {
   expect(screen.getByRole("combobox", { name: "Mode" })).toHaveValue("b");
   await userEvent.click(screen.getByRole("checkbox", { name: "Auto" }));
   expect(screen.getByRole("checkbox", { name: "Auto" })).toBeChecked();
+});
+
+test("FormField is the same component as Field", () => {
+  expect(FormField).toBe(Field);
 });

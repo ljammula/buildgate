@@ -13,6 +13,7 @@
 //     not cancelled holds its connection and its server handler open for
 //     the life of the tab.
 import { type Http, type TokenKind, isAbort } from "@/api/http";
+import { defaultInitialBackoffMs, defaultMaxBackoffMs } from "@/api/polling";
 import { ApiError } from "@/domain/apiError";
 
 /**
@@ -155,9 +156,6 @@ export interface WatchOptions<T> {
   readonly initialBackoffMs?: number;
   readonly maxBackoffMs?: number;
 }
-
-export const defaultInitialBackoffMs = 1_000;
-export const defaultMaxBackoffMs = 30_000;
 
 /**
  * Runs `connect` again and again, forwarding every value, until a value is

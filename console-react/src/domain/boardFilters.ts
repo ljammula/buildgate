@@ -155,10 +155,6 @@ export const emptyRequestBoardFilters: RequestBoardFilters = {
   search: "",
 };
 
-export function requestBoardFiltersIsEmpty(filters: RequestBoardFilters): boolean {
-  return filters.projects.size === 0 && filters.section === null && filters.search === "";
-}
-
 /** Value equality: the project set compares by members, not identity. */
 export function requestBoardFiltersEqual(a: RequestBoardFilters, b: RequestBoardFilters): boolean {
   return (

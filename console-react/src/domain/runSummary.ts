@@ -69,7 +69,7 @@ export function composeServiceLine(phase: ComposePhase): string[] {
 }
 
 /** Every token the run's models spent, null when nothing recorded a figure. */
-export function runTokens(run: Pick<Run, "byModel">): number | null {
+function runTokens(run: Pick<Run, "byModel">): number | null {
   if (run.byModel.length === 0) return null;
   return run.byModel.reduce((sum, m) => sum + m.tokens, 0);
 }

@@ -23,7 +23,7 @@ import { cn } from "@/ui/cn";
 import { toneClasses } from "@/ui/tone";
 
 /** The glyph for a domain StatusIcon name. Decorative: the chip's text carries the meaning. */
-export function StatusIconGlyph({ icon, className }: { icon: StatusIcon; className?: string }) {
+function StatusIconGlyph({ icon, className }: { icon: StatusIcon; className?: string }) {
   const props = { "aria-hidden": true, className: cn("size-3.5 shrink-0", className) };
   switch (icon) {
     case "priority_high":

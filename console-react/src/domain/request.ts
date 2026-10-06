@@ -352,7 +352,7 @@ export interface RequestSummary {
   readonly rejections: readonly Rejection[];
   /**
    * Server-computed spend rollup. The contract fixtures carry it on both
-   * routes (the Dart console assumed the list only); null when absent.
+   * routes; null when absent.
    */
   readonly costSummary: CostSummary | null;
   /** Empty for a request predating the field or never moved out of its initial state. */

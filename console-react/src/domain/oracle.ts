@@ -2,6 +2,7 @@
 // /requests/{id}/oracle serves, one fetched file, and the MANIFEST.json that
 // maps files to spec criteria. An oracle file is code the operator is about
 // to approve, so what counts as "shown" is decided here, purely.
+import { headTruncate } from "@/domain/middleTruncate";
 import { decodeUtf8Escaping } from "@/domain/textEscape";
 import {
   type JsonObject,
@@ -28,8 +29,8 @@ export function decodeOracleFileInfo(o: JsonObject, at: string): OracleFileInfo 
   };
 }
 
-// Dart's Object.toString for the values a tolerant list may hold, so a
-// non-string element is shown rather than rejected.
+// Text for the values a tolerant list may hold, so a non-string element is
+// shown rather than rejected.
 function textOf(value: unknown): string {
   if (typeof value === "string") return value;
   if (value !== null && typeof value === "object") return JSON.stringify(value);
@@ -180,8 +181,8 @@ export function keptOpenOracleKeys(
 }
 
 /** The first 12 hex characters of a hash, as a file tile's subtitle shows it. */
-export function shortOracleHash(sha256: string): string {
-  return sha256.length > 12 ? sha256.slice(0, 12) : sha256;
+function shortOracleHash(sha256: string): string {
+  return headTruncate(sha256, 12);
 }
 
 /** A file tile's subtitle: `22 bytes · sha256 0e2df58c76e6`. */

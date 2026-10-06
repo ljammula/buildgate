@@ -2,9 +2,9 @@ import type { StatusTone } from "@/domain/status";
 
 /**
  * The classes that draw each domain StatusTone, in one place so a chip, a
- * callout and a table cell colour the same state the same way. The Flutter
- * console's three greys (neutral, neutralOnDark, muted) differed only to
- * stay legible on each brightness; the theme tokens do that here.
+ * callout and a table cell colour the same state the same way. The three
+ * greys (neutral, neutralOnDark, muted) differ only to stay legible on each
+ * brightness; the theme tokens do that.
  */
 export interface ToneClasses {
   readonly text: string;

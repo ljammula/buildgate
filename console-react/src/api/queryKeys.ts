@@ -15,13 +15,20 @@ export const queryKeys = {
       ["requests", "detail", id, "tickets", ticket, "oracle"] as const,
     ticketOracleFile: (id: string, ticket: number, name: string) =>
       ["requests", "detail", id, "tickets", ticket, "oracle", "file", name] as const,
+    /** One oracle file's content at the listed hash: a changed listing is a different query. */
+    oracleFileAt: (id: string, name: string, sha256: string) =>
+      ["requests", "detail", id, "oracle", "file", name, sha256] as const,
+    ticketOracleFileAt: (id: string, ticket: number, name: string, sha256: string) =>
+      ["requests", "detail", id, "tickets", ticket, "oracle", "file", name, sha256] as const,
   },
   runs: {
     all: ["runs"] as const,
     list: () => ["runs", "list"] as const,
     detail: (id: string) => ["runs", "detail", id] as const,
-    diff: (id: string) => ["runs", "detail", id, "diff"] as const,
-    release: (id: string) => ["runs", "detail", id, "release"] as const,
+    /** The prefix of everything a run's end state settles: its diff and release decision. */
+    evidence: (id: string) => ["runs", "detail", id, "evidence"] as const,
+    diff: (id: string) => ["runs", "detail", id, "evidence", "diff"] as const,
+    release: (id: string) => ["runs", "detail", id, "evidence", "release"] as const,
   },
   projects: {
     all: ["projects"] as const,
@@ -35,3 +42,25 @@ export const queryKeys = {
     workspaces: () => ["ops", "workspaces"] as const,
   },
 };
+
+/** The segment after `["requests", "detail", id]` that each kind of query under a request uses. */
+const underRequestSegments: ReadonlySet<unknown> = new Set(["revisions", "oracle", "tickets"]);
+
+/**
+ * True for a query keyed under the request `id` but not the request's own
+ * detail record: its revisions, its oracle listing and files, and its tickets'
+ * oracle listings and files. Not the detail, not the list.
+ */
+export function isUnderRequest(key: readonly unknown[], id: string): boolean {
+  return (
+    key[0] === "requests" &&
+    key[1] === "detail" &&
+    key[2] === id &&
+    underRequestSegments.has(key[3])
+  );
+}
+
+/** True for an oracle listing or file query, of the request or of one of its tickets. */
+export function isOracleKey(key: readonly unknown[]): boolean {
+  return key.includes("oracle");
+}

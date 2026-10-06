@@ -74,6 +74,9 @@ export interface FieldProps {
   readonly className?: string;
 }
 
+/** The form wrapper's other name: `Field` also names a label/value row elsewhere, `FormField` does not. */
+export { Field as FormField };
+
 export function Field({ label, hint, error, children, className }: FieldProps) {
   const id = useId();
   const controlId = children.props.id ?? id;

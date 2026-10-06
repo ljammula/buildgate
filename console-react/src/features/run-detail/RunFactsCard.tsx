@@ -1,3 +1,4 @@
+import { safeHttpUrl } from "@/domain/safeUrl";
 import { ArrowRight, ExternalLink } from "lucide-react";
 
 import { describeError } from "@/ui/ErrorDisplay";
@@ -64,9 +65,12 @@ function ChangedFiles({ run }: { readonly run: Run }) {
 export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardProps) {
   // Offered only when the server advertises a Temporal UI and this run
   // recorded its workflow id: either missing means there is nothing to link to.
+  // The address comes from the server's configuration: only an http(s) one
+  // is made a link.
+  const temporalBase = temporalUiUrl === null ? null : safeHttpUrl(temporalUiUrl);
   const temporalHref =
-    temporalUiUrl !== null && temporalUiUrl !== "" && run.temporalWorkflowId !== ""
-      ? `${temporalUiUrl}/namespaces/default/workflows/${encodeURIComponent(run.temporalWorkflowId)}`
+    temporalBase !== null && run.temporalWorkflowId !== ""
+      ? `${temporalBase.replace(/\/$/, "")}/namespaces/default/workflows/${encodeURIComponent(run.temporalWorkflowId)}`
       : null;
   // Tokens only: the operator explicitly does not want a dollar figure here.
   const tokens = runTokensText(run);

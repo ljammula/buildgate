@@ -105,6 +105,15 @@ test("a 403 that is a token refusal keeps the token advice", () => {
 });
 
 describe("ErrorCallout", () => {
+  test("headingLevel sets the headline's level, default 3", () => {
+    const { rerender } = render(<ErrorCallout error="boom" />);
+    expect(screen.getByRole("heading", { level: 3, name: "Something went wrong" })).toBeVisible();
+    rerender(<ErrorCallout error="boom" headingLevel={2} />);
+    expect(screen.getByRole("heading", { level: 2, name: "Something went wrong" })).toBeVisible();
+    rerender(<ErrorCallout error="boom" headingLevel={4} />);
+    expect(screen.getByRole("heading", { level: 4 })).toBeVisible();
+  });
+
   test("shows the server's own message as the next step, one part per line, with nothing left to disclose", () => {
     render(<ErrorCallout error={new ApiError(500, '{"error":"spec.md bad | oracle missing"}')} />);
     expect(screen.getByRole("heading", { name: "Request failed (500)" })).toBeInTheDocument();

@@ -9,7 +9,7 @@ import { Button } from "@/ui/Button";
  * collapsed "Details" section. Nothing is hidden, only demoted below the
  * actionable summary.
  */
-export interface ErrorSummary {
+interface ErrorSummary {
   readonly headline: string;
   readonly nextStep: string;
   readonly raw: string;
@@ -127,6 +127,8 @@ export interface ErrorCalloutProps {
   readonly onRetry?: () => void | Promise<void>;
   /** See describeError: pass true from a screen whose call is start-token-gated. */
   readonly startClass?: boolean;
+  /** The headline's heading level, to fit the page's outline; default 3. */
+  readonly headingLevel?: 2 | 3 | 4;
 }
 
 /**
@@ -135,7 +137,13 @@ export interface ErrorCalloutProps {
  * collapsed "Details" disclosure (omitted when the next step is that text). All text is rendered as text: server and
  * agent text is untrusted.
  */
-export function ErrorCallout({ error, onRetry, startClass = false }: ErrorCalloutProps) {
+export function ErrorCallout({
+  error,
+  onRetry,
+  startClass = false,
+  headingLevel = 3,
+}: ErrorCalloutProps) {
+  const Heading = `h${headingLevel}` as const;
   const summary = describeError(error, { startClass });
   const [pending, setPending] = useState(false);
   const retry = async () => {
@@ -149,7 +157,7 @@ export function ErrorCallout({ error, onRetry, startClass = false }: ErrorCallou
   };
   return (
     <div role="alert" className="flex flex-col items-start gap-1 text-sm">
-      <h3 className="text-tone-danger font-semibold">{summary.headline}</h3>
+      <Heading className="text-tone-danger font-semibold">{summary.headline}</Heading>
       <p className="text-fg whitespace-pre-line">{summary.nextStep}</p>
       {onRetry !== undefined && (
         <Button size="sm" disabled={pending} onClick={() => void retry()}>

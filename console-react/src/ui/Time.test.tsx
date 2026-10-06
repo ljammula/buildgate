@@ -66,6 +66,40 @@ describe("ElapsedText", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  test("fifty counters share one timer, and unmounting them all leaves none", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-18T11:00:05Z"));
+    const { unmount } = render(
+      <>
+        {Array.from({ length: 50 }, (_, i) => (
+          <ElapsedText key={i} since="2026-09-18T11:00:00Z" />
+        ))}
+      </>,
+    );
+    expect(vi.getTimerCount()).toBe(1);
+    expect(screen.getAllByText("00:05")).toHaveLength(50);
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getAllByText("00:07")).toHaveLength(50);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("each distinct interval has its own timer, which stops with its last subscriber", () => {
+    vi.useFakeTimers();
+    const a = render(<ElapsedText since="" intervalMs={1000} />);
+    const b = render(<ElapsedText since="" intervalMs={60_000} />);
+    const c = render(<ElapsedText since="" intervalMs={1000} />);
+    expect(vi.getTimerCount()).toBe(2);
+    a.unmount();
+    expect(vi.getTimerCount()).toBe(2);
+    c.unmount();
+    expect(vi.getTimerCount()).toBe(1);
+    b.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   test("a finished span is fixed and starts no timer", () => {
     vi.useFakeTimers();
     render(<ElapsedText since="2026-09-18T11:00:00Z" until="2026-09-18T12:01:01Z" />);

@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { lexer, type Token, type Tokens } from "marked";
+import { lexer, type MarkedToken, type Token, type Tokens } from "marked";
 
 import { escapeInvisible } from "@/domain/textEscape";
 import { cn } from "@/ui/cn";
@@ -15,9 +15,8 @@ import { cn } from "@/ui/cn";
 // - Anything that could make the browser act on agent text is rendered as
 //   visible text instead: raw HTML (literal `<script>` characters on screen),
 //   images (no outbound request from agent text), and a link whose scheme is
-//   not http or https. The Dart console is stricter still and never navigates
-//   at all; here an http(s) link is a real anchor, and its target is always
-//   written out beside the label so a label cannot hide where it goes.
+//   not http or https. An http(s) link is a real anchor, and its target is
+//   always written out beside the label so a label cannot hide where it goes.
 // Invisible and bidi characters are made visible with escapeInvisible, as for
 // any text an operator reads before approving.
 
@@ -43,6 +42,16 @@ function safeHref(href: string): string | null {
   }
 }
 
+/**
+ * marked's `Token` includes a catch-all member with `type: string`, which
+ * stops a switch on `type` narrowing. This is the one place that says "treat
+ * it as one of the known kinds"; a kind marked does not know matches no case
+ * below and takes the `default`, which reads only `raw` (on every member).
+ */
+function asMarked(token: Token): MarkedToken {
+  return token as MarkedToken;
+}
+
 function rawText(token: { readonly raw: string }): ReactNode {
   return t(token.raw);
 }
@@ -51,35 +60,35 @@ function inline(tokens: readonly Token[] | undefined, depth: number): ReactNode[
   return (tokens ?? []).map((token, i) => <Inline key={i} token={token} depth={depth} />);
 }
 
-function Inline({ token, depth }: { readonly token: Token; readonly depth: number }): ReactNode {
-  if (depth > MAX_DEPTH) return rawText(token);
+function Inline({
+  token: input,
+  depth,
+}: {
+  readonly token: Token;
+  readonly depth: number;
+}): ReactNode {
+  if (depth > MAX_DEPTH) return rawText(input);
+  const token = asMarked(input);
   switch (token.type) {
     case "text":
     case "escape":
-      return t((token as Tokens.Text).text);
+      return t(token.text);
     case "strong":
-      return (
-        <strong className="font-semibold">
-          {inline((token as Tokens.Strong).tokens, depth + 1)}
-        </strong>
-      );
+      return <strong className="font-semibold">{inline(token.tokens, depth + 1)}</strong>;
     case "em":
-      return <em>{inline((token as Tokens.Em).tokens, depth + 1)}</em>;
+      return <em>{inline(token.tokens, depth + 1)}</em>;
     case "del":
-      return <del>{inline((token as Tokens.Del).tokens, depth + 1)}</del>;
+      return <del>{inline(token.tokens, depth + 1)}</del>;
     case "codespan":
       return (
-        <code className="rounded bg-surface-sunken px-1 font-mono text-xs">
-          {t((token as Tokens.Codespan).text)}
-        </code>
+        <code className="rounded bg-surface-sunken px-1 font-mono text-xs">{t(token.text)}</code>
       );
     case "br":
       return <br />;
     case "link": {
-      const link = token as Tokens.Link;
-      const label = inline(link.tokens, depth + 1);
-      const href = safeHref(link.href);
-      const autolink = link.href === link.text;
+      const label = inline(token.tokens, depth + 1);
+      const href = safeHref(token.href);
+      const autolink = token.href === token.text;
       return (
         <>
           {href === null ? (
@@ -94,8 +103,8 @@ function Inline({ token, depth }: { readonly token: Token; readonly depth: numbe
               {label}
             </a>
           )}
-          {link.href === "" || (autolink && href !== null) ? null : (
-            <span className="text-fg-muted"> ({t(link.href)})</span>
+          {token.href === "" || (autolink && href !== null) ? null : (
+            <span className="text-fg-muted"> ({t(token.href)})</span>
           )}
         </>
       );
@@ -127,37 +136,39 @@ function blocks(tokens: readonly Token[], depth: number): ReactNode[] {
   return tokens.map((token, i) => <Block key={i} token={token} depth={depth} />);
 }
 
-function Block({ token, depth }: { readonly token: Token; readonly depth: number }): ReactNode {
-  if (depth > MAX_DEPTH) return <p className="my-1 whitespace-pre-wrap">{rawText(token)}</p>;
+function Block({
+  token: input,
+  depth,
+}: {
+  readonly token: Token;
+  readonly depth: number;
+}): ReactNode {
+  if (depth > MAX_DEPTH) return <p className="my-1 whitespace-pre-wrap">{rawText(input)}</p>;
+  const token = asMarked(input);
   switch (token.type) {
     case "space":
     case "checkbox":
       return null;
     case "heading": {
       // Page title is the h1, so a document "# Title" is an h2.
-      const Tag = `h${Math.min((token as Tokens.Heading).depth + 1, 6)}` as
-        "h2" | "h3" | "h4" | "h5" | "h6";
-      return (
-        <Tag className="mt-3 mb-1 font-semibold">{inline((token as Tokens.Heading).tokens, 0)}</Tag>
-      );
+      const Tag = `h${Math.min(token.depth + 1, 6)}` as "h2" | "h3" | "h4" | "h5" | "h6";
+      return <Tag className="mt-3 mb-1 font-semibold">{inline(token.tokens, 0)}</Tag>;
     }
     case "paragraph":
-      return <p className="my-1">{inline((token as Tokens.Paragraph).tokens, 0)}</p>;
+      return <p className="my-1">{inline(token.tokens, 0)}</p>;
     case "text": {
       // A tight list item's text, or stray top-level text.
-      const text = token as Tokens.Text;
-      return <>{text.tokens ? inline(text.tokens, 0) : t(text.text)}</>;
+      return <>{token.tokens ? inline(token.tokens, 0) : t(token.text)}</>;
     }
     case "list": {
-      const list = token as Tokens.List;
-      const Tag = list.ordered ? "ol" : "ul";
-      const start = typeof list.start === "number" && list.start !== 1 ? list.start : undefined;
+      const Tag = token.ordered ? "ol" : "ul";
+      const start = typeof token.start === "number" && token.start !== 1 ? token.start : undefined;
       return (
         <Tag
-          className={cn("my-1 pl-6", list.ordered ? "list-decimal" : "list-disc")}
-          {...(list.ordered && start !== undefined ? { start } : {})}
+          className={cn("my-1 pl-6", token.ordered ? "list-decimal" : "list-disc")}
+          {...(token.ordered && start !== undefined ? { start } : {})}
         >
-          {list.items.map((item, i) => (
+          {token.items.map((item, i) => (
             <li key={i} className={cn(item.task && "list-none")}>
               {item.task ? (
                 <input
@@ -178,29 +189,28 @@ function Block({ token, depth }: { readonly token: Token; readonly depth: number
     case "blockquote":
       return (
         <blockquote className="my-1 border-l-[3px] border-border pl-3 text-fg-muted">
-          {blocks((token as Tokens.Blockquote).tokens, depth + 1)}
+          {blocks(token.tokens, depth + 1)}
         </blockquote>
       );
     case "code":
       return (
         <pre className="my-1 overflow-x-auto rounded-md bg-surface-sunken p-2 font-mono text-xs">
-          <code>{t((token as Tokens.Code).text)}</code>
+          <code>{t(token.text)}</code>
         </pre>
       );
     case "table": {
-      const table = token as Tokens.Table;
       return (
         <div className="my-1 overflow-x-auto">
           <table className="border-collapse text-sm">
             <thead>
               <tr>
-                {table.header.map((cell, i) => (
+                {token.header.map((cell, i) => (
                   <Cell key={i} cell={cell} header />
                 ))}
               </tr>
             </thead>
             <tbody>
-              {table.rows.map((row, r) => (
+              {token.rows.map((row, r) => (
                 <tr key={r}>
                   {row.map((cell, i) => (
                     <Cell key={i} cell={cell} header={false} />

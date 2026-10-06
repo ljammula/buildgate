@@ -5,13 +5,17 @@
 import {
   type QueryClient,
   type UseQueryResult,
+  queryOptions,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
+import type { Http } from "@/api/http";
+import { keepNewer } from "@/api/keepNewer";
 import {
   type FetchedOracleFile,
   type PutOracleRunCommandOptions,
@@ -21,7 +25,8 @@ import {
   getRequestTicketOracleFile,
   putRequestOracleRunCommand,
 } from "@/api/oracle";
-import { queryKeys } from "@/api/queryKeys";
+import { requestListRefreshMs } from "@/api/polling";
+import { isOracleKey, isUnderRequest, queryKeys } from "@/api/queryKeys";
 import {
   type ApproveRequestOptions,
   type CreateRequestOptions,
@@ -43,13 +48,10 @@ import {
   updateRequestTicket,
   watchRequests,
 } from "@/api/requests";
-import type { ApiError } from "@/domain/apiError";
+import { ApiError } from "@/domain/apiError";
 import { compareTimestamps } from "@/domain/elapsed";
 import type { OracleListing } from "@/domain/oracle";
 import type { RequestSummary, RevisionDetail, RevisionSummary } from "@/domain/request";
-
-/** The board's poll, as a fallback under the event stream. */
-export const requestListRefreshMs = 5_000;
 
 /**
  * Whichever of two records of one request is newer. An event from the
@@ -102,6 +104,27 @@ function cacheRequest(client: QueryClient, request: RequestSummary, isDetail: bo
   }
 }
 
+/**
+ * The request list's query: the one definition the board, the sidebar count
+ * and the run list's titles share (one cache entry). A fetched list never
+ * replaces a newer record already in the cache.
+ */
+export function requestListOptions(http: Http) {
+  return queryOptions({
+    queryKey: queryKeys.requests.list(),
+    queryFn: ({ signal }) => listRequests(http, signal),
+    structuralSharing: keepNewer(mergeRequestList),
+  });
+}
+
+/** One request's full detail record (`GET /requests/{id}`). */
+export function requestDetailOptions(http: Http, id: string) {
+  return queryOptions({
+    queryKey: queryKeys.requests.detail(id),
+    queryFn: ({ signal }) => getRequest(http, id, signal),
+  });
+}
+
 export interface RequestBoard {
   readonly query: UseQueryResult<RequestSummary[]>;
   /** True while the event stream is connected; false while it reconnects. */
@@ -129,14 +152,8 @@ export function useRequestBoard(): RequestBoard {
   const [failedAttempts, setFailedAttempts] = useState(0);
 
   const query = useQuery({
-    queryKey: queryKeys.requests.list(),
-    queryFn: ({ signal }) => listRequests(http, signal),
+    ...requestListOptions(http),
     refetchInterval: requestListRefreshMs,
-    structuralSharing: (cached, fetched) =>
-      mergeRequestList(
-        cached as RequestSummary[] | undefined,
-        fetched as readonly RequestSummary[],
-      ),
   });
 
   useEffect(() => {
@@ -150,6 +167,8 @@ export function useRequestBoard(): RequestBoard {
       },
       onConnectionChange: (connected) => {
         setLive(connected);
+        // A stream that opens again has recovered: the error banner goes.
+        if (connected) setStreamError(null);
         setFailedAttempts((count) => (connected ? 0 : count + 1));
       },
     });
@@ -170,24 +189,40 @@ export function useRequestBoard(): RequestBoard {
 export function useRequests(refetchIntervalMs?: number): UseQueryResult<RequestSummary[]> {
   const { http } = useApi();
   return useQuery({
-    queryKey: queryKeys.requests.list(),
-    queryFn: ({ signal }) => listRequests(http, signal),
+    ...requestListOptions(http),
     // Polled only when a caller asks (the sidebar's count); never an event stream.
     ...(refetchIntervalMs === undefined ? {} : { refetchInterval: refetchIntervalMs }),
-    structuralSharing: (cached, fetched) =>
-      mergeRequestList(
-        cached as RequestSummary[] | undefined,
-        fetched as readonly RequestSummary[],
-      ),
   });
 }
 
 export function useRequest(id: string): UseQueryResult<RequestSummary> {
   const { http } = useApi();
-  return useQuery({
-    queryKey: queryKeys.requests.detail(id),
-    queryFn: ({ signal }) => getRequest(http, id, signal),
-  });
+  return useQuery(requestDetailOptions(http, id));
+}
+
+/**
+ * Keeps one request's detail current from the board-wide event stream: an
+ * event for `id` whose `updatedAt` or state differs from the cached detail
+ * marks the detail stale (the stream's summary has no spec or ticket content,
+ * so it never replaces the detail). A stream failure is ignored: the detail's
+ * own refresh and retry remain. Pair it with `useRequest(id)`.
+ */
+export function useRequestDetailEvents(id: string): void {
+  const { http } = useApi();
+  const client = useQueryClient();
+  useEffect(() => {
+    const unsubscribe = watchRequests(http, {
+      onValue: (event) => {
+        if (event.id !== id) return;
+        const current = client.getQueryData<RequestSummary>(queryKeys.requests.detail(id));
+        if (current?.updatedAt === event.updatedAt && current.state === event.state) return;
+        void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id), exact: true });
+      },
+      onError: () => undefined,
+      onConnectionChange: () => undefined,
+    });
+    return unsubscribe;
+  }, [http, client, id]);
 }
 
 export function useRequestRevisions(id: string, enabled = true): UseQueryResult<RevisionSummary[]> {
@@ -222,42 +257,81 @@ export function useRequestOracle(id: string, enabled = true): UseQueryResult<Ora
   });
 }
 
-export function useRequestOracleFile(
-  id: string,
-  name: string | null,
-): UseQueryResult<FetchedOracleFile> {
-  const { http } = useApi();
-  return useQuery({
-    queryKey: queryKeys.requests.oracleFile(id, name ?? ""),
-    queryFn: ({ signal }) => getRequestOracleFile(http, id, name ?? "", signal),
-    enabled: name !== null,
-  });
-}
+/** A ticket's oracle listing; a server without the route, or a ticket it does not know, has no files. */
+const noTicketFiles: OracleListing = {
+  files: [],
+  problems: [],
+  state: "",
+  draftStatus: "",
+  draftDetail: "",
+  proposedCommand: "",
+};
 
-export function useTicketOracle(
-  id: string,
-  ticket: number,
-  enabled = true,
-): UseQueryResult<OracleListing> {
-  const { http } = useApi();
-  return useQuery({
+/** One ticket's oracle listing, with a 404 read as "no files". */
+export function ticketOracleListingOptions(http: Http, id: string, ticket: number) {
+  return queryOptions({
     queryKey: queryKeys.requests.ticketOracle(id, ticket),
-    queryFn: ({ signal }) => getRequestTicketOracle(http, id, ticket, signal),
-    enabled,
+    queryFn: async ({ signal }): Promise<OracleListing> => {
+      try {
+        return await getRequestTicketOracle(http, id, ticket, signal);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return noTicketFiles;
+        throw error;
+      }
+    },
   });
 }
 
-export function useTicketOracleFile(
+/**
+ * The oracle listing of each of `tickets` (ticket indexes), as results in the
+ * same order. A 404 is an empty listing, not an error.
+ */
+export function useTicketOracleListings(
   id: string,
-  ticket: number,
-  name: string | null,
-): UseQueryResult<FetchedOracleFile> {
+  tickets: readonly number[],
+): UseQueryResult<OracleListing>[] {
   const { http } = useApi();
-  return useQuery({
-    queryKey: queryKeys.requests.ticketOracleFile(id, ticket, name ?? ""),
-    queryFn: ({ signal }) => getRequestTicketOracleFile(http, id, ticket, name ?? "", signal),
-    enabled: name !== null,
+  return useQueries({
+    queries: tickets.map((ticket) => ticketOracleListingOptions(http, id, ticket)),
   });
+}
+
+/** One oracle file a review may show: the request's own, or a ticket's when `ticket` is set. */
+export interface OracleFileRef {
+  readonly name: string;
+  /** The listing's hash for it: part of the query key, so a changed listing refetches. */
+  readonly sha256: string;
+  readonly ticket?: number;
+}
+
+/**
+ * One oracle file's content at its listed hash. Never refetched on its own
+ * (the hash in the key is the version) and never retried: an error is shown.
+ */
+export function oracleFileOptions(http: Http, id: string, file: OracleFileRef) {
+  const { name, sha256, ticket } = file;
+  return queryOptions({
+    queryKey:
+      ticket === undefined
+        ? queryKeys.requests.oracleFileAt(id, name, sha256)
+        : queryKeys.requests.ticketOracleFileAt(id, ticket, name, sha256),
+    queryFn: ({ signal }): Promise<FetchedOracleFile> =>
+      ticket === undefined
+        ? getRequestOracleFile(http, id, name, signal)
+        : getRequestTicketOracleFile(http, id, ticket, name, signal),
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** The content of each of `files`, as results in the same order; pass only the files to fetch. */
+export function useOracleFiles(
+  id: string,
+  files: readonly OracleFileRef[],
+): UseQueryResult<FetchedOracleFile>[] {
+  const { http } = useApi();
+  return useQueries({ queries: files.map((file) => oracleFileOptions(http, id, file)) });
 }
 
 /**
@@ -276,15 +350,12 @@ function useRequestWrite<TInput>(write: (input: TInput) => Promise<RequestSummar
       // refetch fired by the very approval that left that state is refused
       // (409) while its panel is still unmounting (found on the live walk,
       // 2026-10-05). A panel that is still wanted refetches when it renders.
-      const under = queryKeys.requests.detail(request.id);
-      const isOracle = (key: readonly unknown[]) => key.includes("oracle");
+      const id = request.id;
       void client.invalidateQueries({
-        queryKey: under,
-        predicate: (query) => query.queryKey.length > 3 && !isOracle(query.queryKey),
+        predicate: (query) => isUnderRequest(query.queryKey, id) && !isOracleKey(query.queryKey),
       });
       void client.invalidateQueries({
-        queryKey: under,
-        predicate: (query) => isOracle(query.queryKey),
+        predicate: (query) => isUnderRequest(query.queryKey, id) && isOracleKey(query.queryKey),
         refetchType: "none",
       });
     },

@@ -1,17 +1,19 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
 
-import { ApiProvider } from "@/api/ApiProvider";
-import { createHttp } from "@/api/http";
+import { queryKeys } from "@/api/queryKeys";
+import { hang, harness } from "@/api/apiTestHarness";
 import {
   mergeRequestList,
   newerRequest,
   upsertRequest,
   useApproveRequest,
+  useOracleFiles,
   useRequest,
   useRequestBoard,
+  useRequestDetailEvents,
+  useRequestRevisions,
   useRequests,
+  useTicketOracleListings,
 } from "@/api/requestQueries";
 import { asObject } from "@/domain/decode";
 import { type RequestSummary, decodeRequestList } from "@/domain/request";
@@ -54,43 +56,6 @@ describe("merging request records", () => {
     expect(upsertRequest(undefined, base)).toEqual([base]);
   });
 });
-
-interface Route {
-  readonly match: (url: string, init: RequestInit) => boolean;
-  readonly respond: () => Response | Promise<Response>;
-}
-
-function harness(routes: Route[]) {
-  const calls: { url: string; init: RequestInit }[] = [];
-  const fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = input instanceof Request ? input.url : input.toString();
-    calls.push({ url, init: init ?? {} });
-    const route = routes.find((r) => r.match(url, init ?? {}));
-    if (!route) return Promise.resolve(new Response('{"error": "no route"}', { status: 404 }));
-    return Promise.resolve(route.respond());
-  }) as typeof globalThis.fetch;
-  const http = createHttp({
-    baseUrl: "",
-    readToken: null,
-    startToken: null,
-    overrideToken: null,
-    fetch,
-  });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>
-      <ApiProvider
-        http={http}
-        config={{ writesEnabled: true, temporalUiUrl: null, releasePolicyWarning: null }}
-      >
-        {children}
-      </ApiProvider>
-    </QueryClientProvider>
-  );
-  return { wrapper, client, calls };
-}
-
-const hang = () => new Response(new ReadableStream<Uint8Array>({ start: () => undefined }));
 
 describe("useRequests", () => {
   test("polls only when given an interval, and never opens the event stream", async () => {
@@ -248,5 +213,178 @@ describe("useApproveRequest", () => {
       expected_sha256: { "spec.md": "abc" },
     });
     expect(calls.filter((c) => c.url === "/requests/req-spec-review")).toHaveLength(1);
+  });
+});
+
+describe("useApproveRequest invalidation", () => {
+  test("refetches revisions, only marks oracle queries, and leaves the list alone", async () => {
+    const detail = readFixtureJson("api/request-spec-review.json") as Record<string, unknown>;
+    const { wrapper, client, calls } = harness([
+      {
+        match: (url, init) => url === "/requests/req-spec-review/approve" && init.method === "POST",
+        respond: () => new Response(JSON.stringify(detail)),
+      },
+      {
+        match: (url) => url === "/requests/req-spec-review/revisions",
+        respond: () => new Response("[]"),
+      },
+    ]);
+    const k = queryKeys.requests;
+    client.setQueryData(k.list(), []);
+    client.setQueryData(k.oracleFileAt("req-spec-review", "a", "h"), "file");
+    client.setQueryData(k.ticketOracle("req-spec-review", 1), "listing");
+    const revisions = renderHook(
+      () => ({
+        rev: useRequestRevisions("req-spec-review"),
+        a: useApproveRequest("req-spec-review"),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(revisions.result.current.rev.isSuccess).toBe(true);
+    });
+    await act(async () => {
+      await revisions.result.current.a.mutateAsync({ by: "a", expectedSha256: {} });
+    });
+    const stale = (key: readonly unknown[]) => client.getQueryState(key)?.isInvalidated;
+    expect(stale(k.oracleFileAt("req-spec-review", "a", "h"))).toBe(true);
+    expect(stale(k.ticketOracle("req-spec-review", 1))).toBe(true);
+    expect(stale(k.list())).toBe(false);
+    await waitFor(() => {
+      expect(calls.filter((c) => c.url.endsWith("/revisions"))).toHaveLength(2);
+    });
+    expect(calls.some((c) => c.url.endsWith("/oracle"))).toBe(false);
+  });
+});
+
+describe("useOracleFiles", () => {
+  test("fetches each file at its hash, a request's and a ticket's, in order", async () => {
+    const { wrapper, client, calls } = harness([
+      {
+        match: (url) => url === "/requests/r1/oracle/a.txt",
+        respond: () => new Response(readFixtureText("api/request-oracle-file.txt")),
+      },
+      {
+        match: (url) => url === "/requests/r1/tickets/2/oracle/b.txt",
+        respond: () => new Response(readFixtureText("api/ticket-oracle-file.txt")),
+      },
+    ]);
+    const { result, unmount } = renderHook(
+      () =>
+        useOracleFiles("r1", [
+          { name: "a.txt", sha256: "h1" },
+          { name: "b.txt", sha256: "h2", ticket: 2 },
+        ]),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.every((q) => q.isSuccess)).toBe(true);
+    });
+    expect(calls.map((c) => c.url)).toEqual([
+      "/requests/r1/oracle/a.txt",
+      "/requests/r1/tickets/2/oracle/b.txt",
+    ]);
+    expect(client.getQueryData(queryKeys.requests.oracleFileAt("r1", "a.txt", "h1"))).toBeDefined();
+    expect(
+      client.getQueryData(queryKeys.requests.ticketOracleFileAt("r1", 2, "b.txt", "h2")),
+    ).toBeDefined();
+    unmount();
+  });
+
+  test("a failed file is not retried and reports its error", async () => {
+    const { wrapper, calls } = harness([]);
+    const { result, unmount } = renderHook(
+      () => useOracleFiles("r1", [{ name: "a.txt", sha256: "h" }]),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current[0]?.isError).toBe(true);
+    });
+    expect(calls).toHaveLength(1);
+    unmount();
+  });
+});
+
+describe("useTicketOracleListings", () => {
+  test("reads a 404 as an empty listing and other failures as errors", async () => {
+    const { wrapper } = harness([
+      {
+        match: (url) => url === "/requests/r1/tickets/1/oracle",
+        respond: () => new Response(readFixtureText("api/ticket-oracle.json")),
+      },
+      {
+        match: (url) => url === "/requests/r1/tickets/2/oracle",
+        respond: () => new Response('{"error": "no such ticket"}', { status: 404 }),
+      },
+      {
+        match: (url) => url === "/requests/r1/tickets/3/oracle",
+        respond: () => new Response('{"error": "boom"}', { status: 500 }),
+      },
+    ]);
+    const { result, unmount } = renderHook(() => useTicketOracleListings("r1", [1, 2, 3]), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.every((q) => !q.isPending)).toBe(true);
+    });
+    expect(result.current[0]?.data?.files.length).toBeGreaterThan(0);
+    expect(result.current[1]?.data).toMatchObject({ files: [], problems: [] });
+    expect(result.current[2]?.isError).toBe(true);
+    unmount();
+  });
+});
+
+describe("useRequestDetailEvents", () => {
+  test("an event for this request that changes it marks the detail stale; others do not", async () => {
+    const detail = readFixtureJson("api/request-spec-review.json") as Record<string, unknown>;
+    const other = { ...detail, id: "someone-else", updated_at: "2026-09-10T13:00:00Z" };
+    const changed = { ...detail, state: "planning", updated_at: "2026-09-10T12:00:00Z" };
+    let detailFetches = 0;
+    let push: (event: object) => void = () => undefined;
+    const { wrapper } = harness([
+      {
+        match: (url) => url === "/requests/events",
+        respond: () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                push = (event) => {
+                  controller.enqueue(
+                    new TextEncoder().encode(`event: state\ndata: ${JSON.stringify(event)}\n\n`),
+                  );
+                };
+              },
+            }),
+          ),
+      },
+      {
+        match: (url) => url === "/requests/req-spec-review",
+        respond: () => {
+          detailFetches += 1;
+          return new Response(JSON.stringify(detail));
+        },
+      },
+    ]);
+    const { result, unmount } = renderHook(
+      () => {
+        useRequestDetailEvents("req-spec-review");
+        return useRequest("req-spec-review");
+      },
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    await waitFor(() => {
+      push(other);
+      expect(detailFetches).toBe(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(detailFetches).toBe(1);
+    push(changed);
+    await waitFor(() => {
+      expect(detailFetches).toBe(2);
+    });
+    unmount();
   });
 });

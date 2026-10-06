@@ -3,7 +3,9 @@ import {
   formatDuration,
   formatAgeCompact,
   formatElapsedCompact,
+  formatAgeSeconds,
   formatLocalTimestamp,
+  formatWhen,
   relativeAge,
   stallChipDisplay,
   stallStatus,
@@ -188,5 +190,28 @@ describe("compareTimestamps", () => {
 
   test("an unreadable timestamp orders as equal", () => {
     expect(compareTimestamps("", "2026-10-06T03:50:20Z")).toBe(0);
+  });
+});
+
+describe("formatAgeSeconds", () => {
+  test("whole seconds, floored, with no minutes form", () => {
+    expect(formatAgeSeconds(0)).toBe("0s");
+    expect(formatAgeSeconds(999)).toBe("0s");
+    expect(formatAgeSeconds(5_400)).toBe("5s");
+    expect(formatAgeSeconds(75_000)).toBe("75s");
+  });
+
+  test("a negative age (clock skew) is 0s", () => {
+    expect(formatAgeSeconds(-3_000)).toBe("0s");
+  });
+});
+
+describe("formatWhen", () => {
+  test("HH:mm on the same local day, 'MMM d HH:mm' otherwise, the raw text when unparseable", () => {
+    const now = new Date(2026, 8, 15, 12, 0, 0);
+    expect(formatWhen(new Date(2026, 8, 15, 9, 5).toISOString(), now)).toBe("09:05");
+    expect(formatWhen(new Date(2026, 8, 14, 23, 59).toISOString(), now)).toBe("Sep 14 23:59");
+    expect(formatWhen("not a time", now)).toBe("not a time");
+    expect(formatWhen("", now)).toBe("");
   });
 });

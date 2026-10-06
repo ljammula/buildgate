@@ -13,36 +13,62 @@ import type { Run } from "@/domain/run";
 import { cn } from "@/ui/cn";
 import { toneClasses } from "@/ui/tone";
 
+interface SharedClock {
+  now: number;
+  readonly listeners: Set<() => void>;
+  timer: ReturnType<typeof setInterval> | undefined;
+}
+
+// One timer per interval value, shared by every subscriber: fifty elapsed
+// counters on a screen are one setInterval, not fifty. It starts with the
+// first subscriber and stops, and is forgotten, with the last.
+const clocks = new Map<number, SharedClock>();
+
+function clockFor(intervalMs: number): SharedClock {
+  let clock = clocks.get(intervalMs);
+  if (clock === undefined) {
+    clock = { now: Date.now(), listeners: new Set(), timer: undefined };
+    clocks.set(intervalMs, clock);
+  }
+  return clock;
+}
+
+function subscribeClock(intervalMs: number, notify: () => void): () => void {
+  const clock = clockFor(intervalMs);
+  if (clock.listeners.size === 0) {
+    clock.now = Date.now();
+    clock.timer = setInterval(() => {
+      clock.now = Date.now();
+      for (const listener of [...clock.listeners]) listener();
+    }, intervalMs);
+  }
+  clock.listeners.add(notify);
+  return () => {
+    clock.listeners.delete(notify);
+    if (clock.listeners.size === 0) {
+      clearInterval(clock.timer);
+      clocks.delete(intervalMs);
+    }
+  };
+}
+
 /**
  * The current instant, refreshed every `intervalMs`; a null interval never
- * ticks (a finished duration). Render stays pure: the clock is read in an
- * effect-driven subscription, and the interval is cleared on unmount.
+ * ticks (a finished duration). All callers with the same interval share one
+ * timer. Render stays pure: the clock is read through a subscription.
  */
 export function useNow(intervalMs: number | null): Date {
-  const [store] = useState(() => {
-    let snapshot: number | null = null;
-    return {
-      read: (): number => (snapshot ??= Date.now()),
-      tick: (): void => {
-        snapshot = Date.now();
-      },
-    };
-  });
+  const [frozen] = useState(() => Date.now());
   const subscribe = useCallback(
-    (notify: () => void) => {
-      if (intervalMs === null) return () => undefined;
-      store.tick();
-      const id = setInterval(() => {
-        store.tick();
-        notify();
-      }, intervalMs);
-      return () => {
-        clearInterval(id);
-      };
-    },
-    [intervalMs, store],
+    (notify: () => void) =>
+      intervalMs === null ? () => undefined : subscribeClock(intervalMs, notify),
+    [intervalMs],
   );
-  const ms = useSyncExternalStore(subscribe, store.read);
+  const read = useCallback(
+    () => (intervalMs === null ? frozen : clockFor(intervalMs).now),
+    [intervalMs, frozen],
+  );
+  const ms = useSyncExternalStore(subscribe, read);
   return useMemo(() => new Date(ms), [ms]);
 }
 

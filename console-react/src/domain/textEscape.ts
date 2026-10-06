@@ -67,7 +67,7 @@ export function segmentEscapes(text: string): readonly EscapeSegment[] {
   };
 
   // Iterating a string yields code points; a lone surrogate comes through as
-  // itself, like Dart's `runes`.
+  // itself.
   for (const ch of text) {
     const rune = ch.codePointAt(0) ?? 0;
     if (rune >= BYTE_ESCAPE_BASE + 0x80 && rune <= BYTE_ESCAPE_BASE + 0xff) {

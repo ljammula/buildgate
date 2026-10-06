@@ -3,26 +3,19 @@
 // icon always means the same thing to an operator regardless of which screen
 // they are looking at.
 //
-// The Flutter console named a Material colour and icon per status. Here each
-// is a semantic name the UI layer maps to a real colour and icon:
+// Each status is a semantic name the UI layer maps to a real colour and icon:
 //
-//   Dart colour                     StatusTone      used for
-//   Colors.amber.shade800           "warning"       needsHuman; the waiting chip
-//   Colors.blue                     "info"          working
-//   Colors.green                    "success"       done
-//   Colors.red                      "danger"        failed; stalled; kill switch engaged
-//   Colors.grey.shade700 (light)    "neutral"       unknown on a light surface
-//   Colors.grey.shade400 (dark)     "neutralOnDark" unknown on a dark surface
-//   Colors.blueGrey                 "muted"         kill switch clear
+//   StatusTone      used for
+//   "warning"       needsHuman; the waiting chip
+//   "info"          working
+//   "success"       done
+//   "danger"        failed; stalled; kill switch engaged
+//   "neutral"       unknown on a light surface
+//   "neutralOnDark" unknown on a dark surface
+//   "muted"         kill switch clear
 //
-//   Dart icon                       StatusIcon
-//   Icons.priority_high             "priority_high"
-//   Icons.autorenew                 "autorenew"
-//   Icons.check_circle              "check_circle"
-//   Icons.error                     "error"
-//   Icons.help_outline              "help_outline"
-//   Icons.warning_amber             "warning_amber"
-//   Icons.check_circle_outline      "check_circle_outline"
+// StatusIcon names: priority_high, autorenew, check_circle, error,
+// help_outline, warning_amber, check_circle_outline.
 
 /**
  * needsHuman must be reserved for states that are genuinely operator-actionable
