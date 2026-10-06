@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ApiError } from "@/domain/apiError";
 import { Button } from "@/ui/Button";
 import {
   Dialog,
@@ -84,6 +85,10 @@ export function FlowDialog({
         </DialogHeader>
         {children}
         {hasError ? <ErrorCallout error={error} /> : null}
+        {/* A 503 is the server failing to check, not refusing: say that trying again may work. */}
+        {error instanceof ApiError && error.isRetryable ? (
+          <p className="text-fg-muted text-sm">(temporary: try again)</p>
+        ) : null}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="ghost" disabled={pending}>

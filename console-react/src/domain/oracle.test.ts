@@ -18,15 +18,24 @@ test("GET /requests/{id}/oracle decodes, with the drafting record", () => {
     "GET /requests/{id}/oracle",
   );
   expect(listing.files).toEqual([
+    {
+      name: "MANIFEST.json",
+      size: 144,
+      sha256: "d695223c4e8731b03194202a243375877e2dd5ba14df5566047fc875e867a9af",
+    },
     { name: "RUN_COMMAND.txt", size: 22, sha256: RUN_COMMAND_SHA },
     {
       name: "idempotency_test.go",
-      size: 15,
-      sha256: "eb06238620bab6c0a14810ad6af6e5f2d34ed7d404a8d5025fe5001aeee2a5f2",
+      size: 78,
+      sha256: "76091dc812a8875488fec26588be42547efd5f22474b71a71824e0fd11a6b93d",
     },
   ]);
-  expect(listing.problems).toHaveLength(1);
-  expect(listing.problems[0]).toMatch(/^no MANIFEST\.json -- add MANIFEST\.json mapping/);
+  expect(listing.files.map((f) => f.name)).toEqual([
+    "MANIFEST.json",
+    "RUN_COMMAND.txt",
+    "idempotency_test.go",
+  ]);
+  expect(listing.problems).toEqual([]);
   expect(listing.state).toBe("oracle_review");
   expect(listing.draftStatus).toBe("drafted");
   expect(listing.draftDetail).toBe("one criterion is covered");
@@ -38,13 +47,34 @@ test("a ticket's oracle listing has no drafting record", () => {
     asObject(readFixtureJson("api/ticket-oracle.json"), "ticket-oracle.json"),
     "GET /requests/{id}/tickets/{n}/oracle",
   );
-  expect(listing.files).toEqual([{ name: "RUN_COMMAND.txt", size: 22, sha256: RUN_COMMAND_SHA }]);
-  expect(listing.problems).toHaveLength(1);
-  expect(listing.problems[0]).toMatch(/^the runtime canary cannot be built/);
+  expect(listing.files).toEqual([
+    { name: "RUN_COMMAND.txt", size: 22, sha256: RUN_COMMAND_SHA },
+    {
+      name: "idempotency_test.go",
+      size: 78,
+      sha256: "76091dc812a8875488fec26588be42547efd5f22474b71a71824e0fd11a6b93d",
+    },
+  ]);
+  expect(listing.problems).toEqual([]);
   expect(listing.state).toBe("plan_review");
   expect(listing.draftStatus).toBe("");
   expect(listing.draftDetail).toBe("");
   expect(listing.proposedCommand).toBe("");
+});
+
+test("parseOracleManifest parses the MANIFEST the seed writes", () => {
+  const text =
+    '[{"criterion": "A repeated request with the same key returns the first response.", "oracle_file": "idempotency_test.go", "criterion_index": 1}]';
+  expect(parseOracleManifest(text)).toEqual([
+    {
+      criterion: "A repeated request with the same key returns the first response.",
+      oracleFile: "idempotency_test.go",
+      rationale: "",
+      targetPath: "",
+      supersedes: [],
+      criterionIndex: 1,
+    },
+  ]);
 });
 
 test("a file without a name names the route and the field", () => {

@@ -119,7 +119,7 @@ describe("useRequestBoard", () => {
     await waitFor(() => {
       expect(result.current.query.data?.find((r) => r.id === first.id)?.state).toBe("cancelled");
     });
-    expect(result.current.query.data).toHaveLength(6);
+    expect(result.current.query.data).toHaveLength(8);
     expect(result.current.live).toBe(true);
     unmount();
   });
@@ -146,7 +146,7 @@ describe("useRequestBoard", () => {
       { wrapper },
     );
     await waitFor(() => {
-      expect(result.current.data).toHaveLength(6);
+      expect(result.current.data).toHaveLength(8);
     });
     fail = true;
     await act(async () => {
@@ -155,7 +155,7 @@ describe("useRequestBoard", () => {
     await waitFor(() => {
       expect(result.current.isError).toBe(true);
     });
-    expect(result.current.data).toHaveLength(6);
+    expect(result.current.data).toHaveLength(8);
     unmount();
   });
 
@@ -176,7 +176,7 @@ describe("useRequestBoard", () => {
       expect(result.current.streamError?.serverMessage).toBe("requests endpoint is not authorized");
     });
     await waitFor(() => {
-      expect(result.current.query.data).toHaveLength(6);
+      expect(result.current.query.data).toHaveLength(8);
     });
     expect(result.current.live).toBe(false);
     unmount();

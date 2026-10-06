@@ -48,14 +48,15 @@ describe("listings", () => {
     expect(calls[0]!.init.headers).toEqual(READ);
     expect(listing.state).toBe("oracle_review");
     expect(listing.files.map((f) => [f.name, f.size, f.sha256])).toEqual([
+      ["MANIFEST.json", 144, "d695223c4e8731b03194202a243375877e2dd5ba14df5566047fc875e867a9af"],
       ["RUN_COMMAND.txt", 22, FILE_SHA],
       [
         "idempotency_test.go",
-        15,
-        "eb06238620bab6c0a14810ad6af6e5f2d34ed7d404a8d5025fe5001aeee2a5f2",
+        78,
+        "76091dc812a8875488fec26588be42547efd5f22474b71a71824e0fd11a6b93d",
       ],
     ]);
-    expect(listing.problems).toHaveLength(1);
+    expect(listing.problems).toEqual([]);
     expect(listing.draftStatus).toBe("drafted");
     expect(listing.proposedCommand).toBe("go test ./.oracle/...");
   });

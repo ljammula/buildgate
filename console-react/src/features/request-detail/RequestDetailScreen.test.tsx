@@ -120,6 +120,8 @@ test("a ticket card shows a waiting chip for its queued run", async () => {
           reply: json(
             runWire("run-running.json", {
               id: "run-1",
+              stalled: false,
+              stalled_since_seconds: null,
               waiting_reason: "behind 1 run(s) on foo/bar",
             }),
           ),
@@ -505,9 +507,7 @@ test("the header shows the state, the running job and how long the request has w
     }),
   );
   await loaded("T");
-  expect(screen.getByTestId("request-detail-waiting-badge")).toHaveTextContent(
-    /^Waiting on you · /,
-  );
+  expect(screen.getByText(/^Waiting on you · /)).toBeInTheDocument();
   expect(screen.getByText("req-1")).toBeInTheDocument();
 });
 

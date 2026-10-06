@@ -16,12 +16,19 @@ export interface OverrideDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onApply: (values: OverrideRunInput) => void;
+  /** The reason the dialog opens with (the request page's quarantine callout knows it); empty when none. */
+  readonly initialReason?: string;
 }
 
 /** Collects who is overriding, why, and the state to move the quarantined run to. */
-export function OverrideDialog({ open, onOpenChange, onApply }: OverrideDialogProps) {
+export function OverrideDialog({
+  open,
+  onOpenChange,
+  onApply,
+  initialReason = "",
+}: OverrideDialogProps) {
   const [by, setBy] = useState("");
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(initialReason);
   const [state, setState] = useState("accepted");
 
   function apply() {

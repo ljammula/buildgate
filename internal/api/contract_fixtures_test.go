@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,6 +89,8 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-plan-review", File: "request-plan-review.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-building", File: "request-building.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-done", File: "request-done.json"},
+		{Pattern: "GET /requests/{id}", Path: "/requests/req-quarantined", File: "request-quarantined.json"},
+		{Pattern: "GET /requests/{id}", Path: "/requests/req-halted", File: "request-halted.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-every-field", File: "request-every-field.json"},
 		{Pattern: "GET /requests/{id}/oracle", Path: "/requests/req-oracle-review/oracle", File: "request-oracle.json"},
 		{Pattern: "GET /requests/{id}/oracle/{name}", Path: "/requests/req-oracle-review/oracle/RUN_COMMAND.txt", File: "request-oracle-file.txt"},
@@ -99,7 +103,7 @@ func contractRoutes() []contractRoute {
 
 // contractRequestIDs is every seeded request, so the request event stream's
 // fixture knows how many events its first snapshot holds.
-var contractRequestIDs = []string{"req-building", "req-done", "req-every-field", "req-oracle-review", "req-plan-review", "req-spec-review"}
+var contractRequestIDs = []string{"req-building", "req-done", "req-every-field", "req-halted", "req-oracle-review", "req-plan-review", "req-quarantined", "req-spec-review"}
 
 // TestConsoleContractFixtures serves every read route from a fixed data
 // directory and compares the response with its committed fixture.
@@ -195,6 +199,8 @@ func TestConsoleContractFixtures(t *testing.T) {
 		route.ContentType, _, _ = strings.Cut(resp.Header.Get("Content-Type"), ";")
 
 		body = []byte(normalize.Replace(string(body)))
+		// How long a run has been silent is measured from the wall clock.
+		body = stalledSince.ReplaceAll(body, []byte(`"stalled_since_seconds":86400`))
 		if route.ContentType == "application/json" {
 			var indented bytes.Buffer
 			if err := json.Indent(&indented, body, "", "  "); err != nil {
@@ -239,6 +245,8 @@ func TestConsoleContractFixtures(t *testing.T) {
 		}
 	}
 }
+
+var stalledSince = regexp.MustCompile(`"stalled_since_seconds":\s*\d+`)
 
 // readSSEEvents reads the first n events (blank-line-terminated blocks) of
 // a stream that never ends.
@@ -329,6 +337,10 @@ A retried checkout charges the card twice.
 
 const contractOracleRunCommand = "go test ./.oracle/...\n"
 
+// contractOracleTest is a test file the oracle checks accept: a Go test
+// declaring a TestOracle function.
+const contractOracleTest = "package oracle\n\nimport \"testing\"\n\nfunc TestOracleIdempotency(t *testing.T) {}\n"
+
 // seedContractFixtureData writes the data directory the fixtures are
 // served from: one request in each state the console draws differently,
 // the runs behind them, and one request and one run with every field set.
@@ -403,7 +415,9 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 		Model:    "gpt-5.6-luna", Thinking: "high",
 	}
 	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "RUN_COMMAND.txt"), contractOracleRunCommand)
-	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "idempotency_test.go"), "package oracle\n")
+	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "idempotency_test.go"), contractOracleTest)
+	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "MANIFEST.json"),
+		`[{"criterion": "A repeated request with the same key returns the first response.", "oracle_file": "idempotency_test.go", "criterion_index": 1}]`+"\n")
 	saveRequest(oracleReview)
 
 	planReview := newRequest("req-plan-review", request.StatePlanReview)
@@ -414,6 +428,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	planReview.Rejections = []request.Rejection{{By: "alice", At: stamp(8), Reason: "split the migration out", FromState: request.StatePlanReview, ForStage: request.StatePlanning}}
 	writeTickets(planReview.ID, 2)
 	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "RUN_COMMAND.txt"), contractOracleRunCommand)
+	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "idempotency_test.go"), contractOracleTest)
 	saveRequest(planReview)
 	if _, err := request.SnapshotRevision(dataDir, planReview.ID, "alice", "split the migration out", request.StatePlanReview,
 		[]string{"spec.md", "tickets/001.spec.md", "tickets/002.spec.md"}, at.Add(8*time.Minute)); err != nil {
@@ -440,6 +455,27 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	done.Tickets = []request.Ticket{{Index: 1, SpecPath: ticketPath(done.ID, 1), RunID: "run-every-field", PRURL: "https://github.com/acme/app/pull/6", PRState: "merged"}}
 	writeTickets(done.ID, 1)
 	saveRequest(done)
+
+	// A quarantined request an operator can send back, and a halted one:
+	// the two states whose recovery actions the console offers.
+	quarantinedRequest := newRequest("req-quarantined", request.StateQuarantined)
+	quarantinedRequest.TicketCount, quarantinedRequest.TicketIndex = 1, 1
+	quarantinedRequest.Tickets = []request.Ticket{{Index: 1, SpecPath: ticketPath(quarantinedRequest.ID, 1), RunID: "run-quarantined"}}
+	quarantinedRequest.Error = "ticket 1 was quarantined: verify failed after 3 rounds"
+	quarantinedRequest.QuarantineCheck = "verify"
+	quarantinedRequest.ApprovedBy, quarantinedRequest.ApprovedAt = "alice", stamp(6)
+	specSum := sha256.Sum256([]byte(contractSpec))
+	quarantinedRequest.ApprovedSHA256 = map[string]string{"spec.md": hex.EncodeToString(specSum[:])}
+	writeTickets(quarantinedRequest.ID, 1)
+	saveRequest(quarantinedRequest)
+
+	halted := newRequest("req-halted", request.StateHalted)
+	halted.TicketCount, halted.TicketIndex = 1, 1
+	halted.Tickets = []request.Ticket{{Index: 1, SpecPath: ticketPath(halted.ID, 1), RunID: "run-accepted", Branch: "factory/req-halted-1"}}
+	halted.Error = "ticket 1 was accepted but its pull request could not be opened: gh: not logged in"
+	halted.HaltKind = request.HaltAcceptedNoPR
+	writeTickets(halted.ID, 1)
+	saveRequest(halted)
 
 	everyRequest := newRequest("req-every-field", request.StateResumeReview)
 	fillEveryField(reflect.ValueOf(everyRequest).Elem(), "")
@@ -522,7 +558,9 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	running := runBase("run-running", run.StateSliceRunning, "req-building")
 	running.CreatedAt, running.UpdatedAt = stamp(45), stamp(46)
 	seedRun(t, dataDir, running)
-	appendProgress(t, dataDir, running.ID, progress.Event{Ts: stamp(46), Source: "factory", Stage: "build", Event: "start", Round: 2, MaxRounds: 3})
+	// The progress feed's own timestamp layout (milliseconds), so the stall
+	// computation reads it: this run has been silent since.
+	appendProgress(t, dataDir, running.ID, progress.Event{Ts: at.Add(46 * time.Minute).Format("2006-01-02T15:04:05.000Z07:00"), Source: "factory", Stage: "build", Event: "start", Round: 2, MaxRounds: 3})
 
 	var every run.Run
 	fillEveryField(reflect.ValueOf(&every).Elem(), "")

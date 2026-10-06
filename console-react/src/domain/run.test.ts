@@ -95,10 +95,12 @@ describe("fixtures", () => {
   test("api/run-running.json decodes", () => {
     const r = decodeRun(asObject(readFixtureJson("api/run-running.json"), "f"), "GET /runs/{id}");
     expect(r.state).toBe("slice_running");
-    expect(r.lastProgressAt).toBe("2026-09-10T09:46:00Z");
+    expect(r.lastProgressAt).toBe("2026-09-10T09:46:00.000Z");
     expect(r.currentStage).toBe("build");
-    expect(r.stalled).toBe(false);
-    expect(r.stalledSinceSeconds).toBeNull();
+    expect(r.stalled).toBe(true);
+    expect(r.stalledSinceSeconds).toBe(86400);
+    expect(r.currentRound).toBe(0);
+    expect(r.maxRounds).toBe(0);
     expect(r.waitingReason).toBeNull();
     expect(runIsTerminal(r)).toBe(false);
   });

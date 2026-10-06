@@ -169,8 +169,10 @@ test("GET /requests decodes every fixture row", () => {
     "req-building",
     "req-done",
     "req-every-field",
+    "req-halted",
     "req-oracle-review",
     "req-plan-review",
+    "req-quarantined",
     "req-spec-review",
   ]);
   const building = list[0]!;
@@ -183,7 +185,7 @@ test("GET /requests decodes every fixture row", () => {
   expect(building.spec).toBe("");
   expect(building.nextAction).toBe("");
   expect(list[1]!.tickets[0]!.prState).toBe("merged");
-  expect(list[3]!.oracleDraftStatus).toBe("drafted");
+  expect(list[4]!.oracleDraftStatus).toBe("drafted");
 });
 
 test("request-spec-review decodes", () => {
@@ -357,12 +359,36 @@ test("request-every-field leaves only fields the API sends in other states unset
   expect(r.canSendBackToPlan).toBe(false);
 });
 
+test("request-quarantined decodes with its send-back fields and quarantine check", () => {
+  const r = detail("request-quarantined");
+  expect(r.id).toBe("req-quarantined");
+  expect(r.state).toBe("quarantined");
+  expect(r.canSendBack).toBe(true);
+  expect(r.canSendBackToPlan).toBe(true);
+  expect(r.quarantineCheck).toBe("verify");
+  expect(r.haltKind).toBe("");
+  expect(r.tickets).toHaveLength(1);
+  expect(r.tickets[0]!.runId).toBe("run-quarantined");
+});
+
+test("request-halted decodes with its halt kind and no send-back", () => {
+  const r = detail("request-halted");
+  expect(r.id).toBe("req-halted");
+  expect(r.state).toBe("halted");
+  expect(r.haltKind).toBe("accepted_no_pr");
+  expect(r.canSendBack).toBe(false);
+  expect(r.canSendBackToPlan).toBe(false);
+  expect(r.quarantineCheck).toBeNull();
+  expect(r.tickets).toHaveLength(1);
+  expect(r.tickets[0]!.runId).toBe("run-accepted");
+});
+
 test("request-events.sse frames decode as requests", () => {
   const frames = readFixtureText("api/request-events.sse")
     .split("\n")
     .filter((line) => line.startsWith("data: "))
     .map((line) => JSON.parse(line.slice("data: ".length)) as unknown);
-  expect(frames).toHaveLength(6);
+  expect(frames).toHaveLength(8);
   const decoded = frames.map((frame, i) =>
     decodeRequestSummary(asObject(frame, "event"), `event ${i}`),
   );
@@ -370,8 +396,10 @@ test("request-events.sse frames decode as requests", () => {
     "req-building",
     "req-done",
     "req-every-field",
+    "req-halted",
     "req-oracle-review",
     "req-plan-review",
+    "req-quarantined",
     "req-spec-review",
   ]);
   expect(decoded[0]!.activeJob?.stage).toBe("build");

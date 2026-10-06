@@ -12,12 +12,10 @@ import {
   pipelineSteps,
   recoveryPlan,
   rejectionHeading,
-  requestNeedsYou,
   resumePlan,
   revisionDiffText,
   showsNextBanner,
   ticketsLeadContent,
-  waitingBadge,
 } from "./requestDetailLogic";
 import { historyWire, requestWire, ticketWire } from "./testRequests";
 
@@ -348,38 +346,6 @@ describe("formatWhen", () => {
     expect(formatWhen(new Date(2026, 8, 14, 23, 59).toISOString(), now)).toBe("Sep 14 23:59");
     expect(formatWhen("not a time", now)).toBe("not a time");
     expect(formatWhen("", now)).toBe("");
-  });
-});
-
-describe("waiting on the operator", () => {
-  const now = new Date("2026-09-10T11:20:00Z");
-
-  test("the badge shows the age since waiting began, in minutes then hours", () => {
-    expect(waitingBadge(req("spec_review", { waiting_since: "2026-09-10T11:05:00Z" }), now)).toBe(
-      "Waiting on you · 15m",
-    );
-    expect(waitingBadge(req("spec_review", { waiting_since: "2026-09-10T09:20:00Z" }), now)).toBe(
-      "Waiting on you · 2h",
-    );
-    expect(waitingBadge(req("spec_review", { waiting_since: "2026-09-10T09:05:00Z" }), now)).toBe(
-      "Waiting on you · 2h 15m",
-    );
-  });
-
-  test("falls back to entered_at, says so plainly when it is unparseable, and is null when nobody is waited on", () => {
-    expect(waitingBadge(req("spec_review"), now)).toBe("Waiting on you · 2h 15m");
-    expect(waitingBadge(req("spec_review", { entered_at: "?" }), now)).toBe("Waiting on you");
-    expect(waitingBadge(req("building"), now)).toBeNull();
-  });
-
-  test("a pr_review request needs the operator only while every opened PR waits on its reviewer", () => {
-    const pr = (prState: string) => ticketWire({ index: 1, prUrl: "https://x/1", prState });
-    expect(requestNeedsYou(req("pr_review", { tickets: [pr("ready")] }))).toBe(true);
-    expect(requestNeedsYou(req("pr_review", { tickets: [pr("ready"), pr("merged")] }))).toBe(true);
-    expect(requestNeedsYou(req("pr_review", { tickets: [pr("ready"), pr("open")] }))).toBe(false);
-    expect(requestNeedsYou(req("pr_review", { tickets: [pr("merged")] }))).toBe(false);
-    expect(requestNeedsYou(req("halted"))).toBe(true);
-    expect(requestNeedsYou(req("building"))).toBe(false);
   });
 });
 

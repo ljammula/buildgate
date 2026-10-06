@@ -53,6 +53,13 @@ echo "walk: seeding $walk_dir/data"
 (cd "$root" && FACTORYD_CONTRACT_FIXTURE_DIR="$walk_dir/data" \
   FACTORYD_CONTRACT_FIXTURE_WORKSPACE="$walk_dir/workspace" \
   go test ./internal/api -run TestWriteContractFixtureDataDir -count=1 >/dev/null)
+# A second copy of two requests, so the walk can take both exits from one
+# state (approve and request changes; retry and cancel).
+for id in req-spec-review req-halted; do
+  cp -R "$walk_dir/data/requests/$id" "$walk_dir/data/requests/$id-b"
+  sed -i '' "s/\"id\": \"$id\"/\"id\": \"$id-b\"/; s#requests/$id/#requests/$id-b/#g" \
+    "$walk_dir/data/requests/$id-b/request.json"
+done
 # New request needs a workspace that is a git repository.
 if [ ! -d "$walk_dir/workspace/.git" ]; then
   git -C "$walk_dir/workspace" init -q

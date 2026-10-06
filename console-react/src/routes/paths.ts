@@ -223,3 +223,17 @@ export const routePatterns = {
   projectRelease: "/projects/:project/release",
   ops: "/ops",
 } as const;
+
+/**
+ * A run's page with the operator-override reason pre-filled: the request
+ * page's quarantined callout sends the operator here with the reason it
+ * already knows, so they do not retype it.
+ */
+export function runOverridePath(id: string, reason: string): string {
+  return reason === "" ? runPath(id) : `${runPath(id)}?reason=${encodeURIComponent(reason)}`;
+}
+
+/** The override reason a run page URL carries; empty when none. */
+export function parseRunOverrideReason(search: string): string {
+  return new URLSearchParams(search).get("reason") ?? "";
+}

@@ -268,9 +268,21 @@ function useRequestWrite<TInput>(write: (input: TInput) => Promise<RequestSummar
     mutationFn: write,
     onSuccess: (request) => {
       cacheRequest(client, request, true);
+      // Everything under the request is stale now. The oracle listings are
+      // only marked, not refetched: they are served in one state only, so a
+      // refetch fired by the very approval that left that state is refused
+      // (409) while its panel is still unmounting (found on the live walk,
+      // 2026-10-05). A panel that is still wanted refetches when it renders.
+      const under = queryKeys.requests.detail(request.id);
+      const isOracle = (key: readonly unknown[]) => key.includes("oracle");
       void client.invalidateQueries({
-        queryKey: queryKeys.requests.detail(request.id),
-        predicate: (query) => query.queryKey.length > 3,
+        queryKey: under,
+        predicate: (query) => query.queryKey.length > 3 && !isOracle(query.queryKey),
+      });
+      void client.invalidateQueries({
+        queryKey: under,
+        predicate: (query) => isOracle(query.queryKey),
+        refetchType: "none",
       });
     },
   });

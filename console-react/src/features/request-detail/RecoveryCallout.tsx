@@ -3,7 +3,7 @@ import { Ban, RotateCcw, ShieldCheck, Undo2 } from "lucide-react";
 
 import { useApi } from "@/api/ApiProvider";
 import type { RequestSummary } from "@/domain/request";
-import { runPath } from "@/routes/paths";
+import { runOverridePath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
 import { CopyableCommand } from "@/ui/CopyableCommand";
@@ -75,7 +75,12 @@ export function RecoveryCallout({
             optional action -- it does not affect whether Retry above will work.
           </p>
           <Button asChild>
-            <Link to={runPath(plan.overrideTicket.runId)}>
+            <Link
+              to={runOverridePath(
+                plan.overrideTicket.runId,
+                `Request ${request.id} ticket ${plan.overrideTicket.index} quarantined`,
+              )}
+            >
               <ShieldCheck aria-hidden="true" />
               Review the ticket&apos;s run override
             </Link>

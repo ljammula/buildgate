@@ -269,6 +269,17 @@ test("quarantined run override posts attribution and updates state", async () =>
   expect(screen.queryByRole("button", { name: "Override run" })).not.toBeInTheDocument();
 });
 
+test("the override dialog opens with the reason the request page carried", async () => {
+  renderRun(quarantinedRun(), {
+    tokens: { overrideToken: "override-token" },
+    query: `?reason=${encodeURIComponent("Request req-1 ticket 1 quarantined")}`,
+  });
+
+  await userEvent.click(await screen.findByRole("button", { name: "Override run" }));
+  const dialog = await screen.findByRole("dialog", { name: "Override quarantined run" });
+  expect(within(dialog).getByLabelText("Reason")).toHaveValue("Request req-1 ticket 1 quarantined");
+});
+
 test("the override dialog sends nothing until operator and reason are filled in", async () => {
   const { server } = renderRun(quarantinedRun(), { tokens: { overrideToken: "override-token" } });
 

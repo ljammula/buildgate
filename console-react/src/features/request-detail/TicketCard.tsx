@@ -3,13 +3,13 @@ import { Link } from "react-router";
 
 import type { RequestTicket } from "@/domain/request";
 import { runPath } from "@/routes/paths";
+import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { Spinner } from "@/ui/Feedback";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
-import { TicketPrChip } from "./TicketPrChip";
 import { useTicketRun } from "./useTicketRun";
 
 // Agent-supplied text must not become a link to a javascript: or data: URL.
@@ -44,7 +44,7 @@ export function TicketCard({ ticket }: { readonly ticket: RequestTicket }) {
             />
           ) : null}
           {ticket.prState !== "" && ticket.prUrl !== "" ? (
-            <TicketPrChip prState={ticket.prState} />
+            <PrStateChip prState={ticket.prState} />
           ) : null}
         </div>
         {ticket.prUrl === "" ? null : (

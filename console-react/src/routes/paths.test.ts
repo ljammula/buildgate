@@ -8,6 +8,8 @@ import {
   requestDetailRoute,
   runDetailRoute,
   runListRoute,
+  runOverridePath,
+  parseRunOverrideReason,
 } from "@/routes/paths";
 
 test("/requests/{id} parses to a requestDetail deep link", () => {
@@ -88,4 +90,13 @@ test("a bare / with filters still parses to the board config, unaffected by the 
   expect(config.deepLink).toBe("none");
   expect(config.triage).toBe(false);
   expect(config.filters.projects).toEqual(new Set(["checkouts"]));
+});
+
+test("a run's override reason round-trips through its URL exactly once encoded", () => {
+  const reason = "verify failed: 100% of rounds & more?";
+  const url = new URL(runOverridePath("run 1", reason), "http://x.invalid");
+  expect(url.pathname).toBe("/runs/run%201");
+  expect(parseRunOverrideReason(url.search)).toBe(reason);
+  expect(runOverridePath("run-1", "")).toBe("/runs/run-1");
+  expect(parseRunOverrideReason("")).toBe("");
 });

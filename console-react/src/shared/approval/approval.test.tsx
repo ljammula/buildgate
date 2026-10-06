@@ -356,7 +356,23 @@ test("a failed cancel shows the server's message and keeps the reason", async ()
   await userEvent.type(await screen.findByLabelText("Reason"), "nope");
   await userEvent.click(screen.getByRole("button", { name: "Cancel request" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("cannot cancel now");
+  expect(screen.queryByText("(temporary: try again)")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Reason")).toHaveValue("nope");
+});
+
+test("a 503 on a write is marked temporary, a 409 is not", async () => {
+  renderApp(<Host request={specReview()} render={(props) => <CancelDialog {...props} />} />, {
+    server: [
+      {
+        on: "POST /requests/req-spec-review/cancel",
+        reply: apiErrorResponse(503, "could not check the build"),
+      },
+    ],
+  });
+  await userEvent.type(await screen.findByLabelText("Reason"), "nope");
+  await userEvent.click(screen.getByRole("button", { name: "Cancel request" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("could not check the build");
+  expect(screen.getByText("(temporary: try again)")).toBeInTheDocument();
 });
 
 test("send back defaults to plan and sends the target", async () => {

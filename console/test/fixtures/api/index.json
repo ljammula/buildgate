@@ -190,6 +190,20 @@
   },
   {
     "pattern": "GET /requests/{id}",
+    "path": "/requests/req-quarantined",
+    "file": "request-quarantined.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
+    "path": "/requests/req-halted",
+    "file": "request-halted.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /requests/{id}",
     "path": "/requests/req-every-field",
     "file": "request-every-field.json",
     "status": 200,

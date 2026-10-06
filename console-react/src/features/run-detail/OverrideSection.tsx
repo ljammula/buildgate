@@ -1,10 +1,12 @@
 import { Loader2, ShieldAlert } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
 import { useOverrideRun } from "@/api/runQueries";
 import { Fields, Field } from "@/features/run-detail/Fields";
 import { OverrideDialog } from "@/features/run-detail/OverrideDialog";
+import { parseRunOverrideReason } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Section } from "@/ui/PageLayout";
@@ -21,6 +23,7 @@ export function OverrideSection({ runId }: { runId: string }) {
   const { hasOverrideToken } = useApi();
   const override = useOverrideRun(runId);
   const [open, setOpen] = useState(false);
+  const initialReason = parseRunOverrideReason(useLocation().search);
   return (
     <Section title="Operator override">
       <Fields>
@@ -52,6 +55,7 @@ export function OverrideSection({ runId }: { runId: string }) {
         <OverrideDialog
           open
           onOpenChange={setOpen}
+          initialReason={initialReason}
           onApply={(values) => {
             setOpen(false);
             override.mutate(values);

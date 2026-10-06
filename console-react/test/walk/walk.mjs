@@ -13,6 +13,7 @@
 //     step it happened in.
 //
 // Each step prints PASS or FAIL and leaves a screenshot in <walk-dir>/shots.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -72,6 +73,8 @@ async function api(pathname, headers = {}) {
   }
 }
 const startHeaders = { Authorization: `Bearer ${token}` };
+
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
@@ -377,6 +380,336 @@ step("triage-keys", async () => {
   await dialog().waitFor({ state: "detached" });
 });
 
+const main = () => page.getByRole("main");
+const request = async (id) => (await api(`/requests/${id}`)).body;
+
+/** Confirm the dialog that is open with its button, and wait for it to close. */
+async function confirmDialog(name) {
+  await nameIfAsked();
+  await dialog().getByRole("button", { name, exact: true }).click();
+  await dialog().waitFor({ state: "detached" });
+}
+
+step("request-page", async () => {
+  await visit("/requests/req-spec-review");
+  await heading("Add idempotency keys to checkout", { level: 1 }).waitFor();
+  await page.getByText("Acceptance criteria (2)").waitFor();
+  await page.getByText("A key is scoped to one account.").first().waitFor();
+  // Rendered and raw views of the same spec.
+  await page.getByLabel("Raw").uncheck();
+  await heading("Idempotency keys for checkout").waitFor();
+  await page.getByLabel("Raw").check();
+  await link("Back to board").click();
+  await heading("Requests", { level: 1 }).waitFor();
+});
+
+const validSpec = `# Spec
+
+## Problem
+
+A retried checkout charges the card twice.
+
+## Scope
+
+The checkout endpoint.
+
+## Non-goals
+
+Refunds.
+
+## Affected services and packages
+
+checkout
+
+## Acceptance criteria
+
+1. A repeated request with the same key returns the first response.
+2. A key is scoped to one account.
+3. A key expires after 24 hours.
+
+## Risks
+
+None known.
+
+## Open questions
+
+None.
+`;
+
+step("request-edit-refused", async () => {
+  // The server validates a spec's structure: a save it refuses keeps the
+  // operator's text and shows the server's reason.
+  await visit("/requests/req-spec-review");
+  await main().getByRole("button", { name: "Edit", exact: true }).click();
+  const editor = main().getByRole("textbox", { name: "Edit spec.md" });
+  await editor.fill("just one line\n");
+  allowed = [/^422 PUT \/requests\/req-spec-review\/spec$/];
+  await main().getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText(/Could not save: .*missing required heading/).waitFor();
+  check((await editor.inputValue()) === "just one line\n", "the refused text was lost");
+  await main().getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByText("Acceptance criteria (2)").waitFor();
+});
+
+step("request-edit-spec", async () => {
+  await visit("/requests/req-spec-review");
+  await main().getByRole("button", { name: "Edit", exact: true }).click();
+  await main().getByRole("textbox", { name: "Edit spec.md" }).fill(validSpec);
+  check(
+    await main().getByRole("button", { name: "Approve", exact: true }).isDisabled(),
+    "Approve stayed enabled with unsaved edits",
+  );
+  await main().getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText("Acceptance criteria (3)").waitFor();
+  check(
+    (await request("req-spec-review")).spec === validSpec,
+    "the server's spec is not the text that was saved",
+  );
+  check(
+    await main().getByRole("button", { name: "Approve", exact: true }).isEnabled(),
+    "Approve stayed disabled after the save",
+  );
+});
+
+step("request-approve-spec", async () => {
+  await visit("/requests/req-spec-review");
+  const shown = await request("req-spec-review");
+  await main().getByRole("button", { name: "Approve", exact: true }).click();
+  await dialog().getByText("Spec review → Planning").waitFor();
+  await confirmDialog("Approve");
+  const after = await request("req-spec-review");
+  check(after.state === "planning", `state is ${after.state}, want planning`);
+  check(after.approved_by === "walk-operator", `approved_by is ${after.approved_by}`);
+  check(
+    after.approved_sha256["spec.md"] === sha256(shown.spec),
+    "the approval is not bound to the spec that was shown",
+  );
+  // The page moves on without a reload.
+  await page.getByText("Planning").first().waitFor();
+  check(
+    (await main().getByRole("button", { name: "Approve", exact: true }).count()) === 0,
+    "Approve is still offered after the approval",
+  );
+});
+
+step("request-changes", async () => {
+  await visit("/requests/req-spec-review-b");
+  await main().getByRole("button", { name: "Request changes", exact: true }).click();
+  const confirm = dialog().getByRole("button", { name: "Request changes", exact: true });
+  check(await confirm.isDisabled(), "a rejection with no reason can be sent");
+  await dialog().getByLabel("Reason").fill("Criterion 2 does not say which account.");
+  await confirmDialog("Request changes");
+  const after = await request("req-spec-review-b");
+  check(after.state !== "spec_review", "the request stayed in spec_review");
+  check(
+    after.rejections?.at(-1)?.reason === "Criterion 2 does not say which account.",
+    "the reason was not recorded",
+  );
+  check(after.rejections.at(-1).by === "walk-operator", "the rejection has no operator");
+});
+
+step("request-oracle-approve", async () => {
+  await visit("/requests/req-oracle-review");
+  const listing = (await api("/requests/req-oracle-review/oracle")).body;
+  check(listing.files.length === 3, `the oracle has ${listing.files.length} files, want 3`);
+  // Every file has to be opened before the approval is offered.
+  const approve = main().getByRole("button", { name: "Approve", exact: true });
+  check(await approve.isDisabled(), "Approve is enabled before any oracle file was shown");
+  for (const file of listing.files) {
+    await main()
+      .getByRole("button", { name: new RegExp(`^${file.name.replace(".", "\\.")}`) })
+      .click();
+  }
+  await page.getByText("func TestOracleIdempotency").waitFor();
+  await approve.click();
+  await confirmDialog("Approve");
+  const after = await request("req-oracle-review");
+  check(after.state === "planning", `state is ${after.state}, want planning`);
+  for (const file of listing.files) {
+    check(
+      after.approved_sha256[`oracle/${file.name}`] === file.sha256,
+      `oracle/${file.name} is not pinned to the hash that was shown`,
+    );
+  }
+});
+
+step("request-plan-approve", async () => {
+  await visit("/requests/req-plan-review");
+  const shown = await request("req-plan-review");
+  const listing = (await api("/requests/req-plan-review/tickets/1/oracle")).body;
+  const approve = main().getByRole("button", { name: "Approve", exact: true });
+  check(await approve.isDisabled(), "the plan can be approved before its oracle files were shown");
+  for (const file of listing.files) {
+    await main()
+      .getByRole("button", { name: new RegExp(`^${file.name.replace(".", "\\.")}`) })
+      .click();
+  }
+  await page.getByText(`${listing.files.length} of ${listing.files.length} shown`).waitFor();
+  await approve.click();
+  await dialog().getByText("Plan review → Building").waitFor();
+  await confirmDialog("Approve");
+  const after = await request("req-plan-review");
+  check(after.state === "building", `state is ${after.state}, want building`);
+  for (const ticket of shown.tickets) {
+    const key = `tickets/${String(ticket.index).padStart(3, "0")}.spec.md`;
+    check(
+      after.approved_sha256[key] === sha256(ticket.content),
+      `${key} is not bound to the plan that was shown`,
+    );
+  }
+  for (const file of listing.files) {
+    check(
+      after.approved_sha256[`tickets/001.oracle/${file.name}`] === file.sha256,
+      `tickets/001.oracle/${file.name} is not pinned`,
+    );
+  }
+});
+
+step("request-building", async () => {
+  await visit("/requests/req-building");
+  const pr = main().getByRole("link", { name: "https://github.com/acme/app/pull/7" });
+  check(
+    (await pr.getAttribute("target")) === "_blank",
+    "the pull request link does not open a new tab",
+  );
+  check(
+    (await pr.getAttribute("rel"))?.includes("noopener"),
+    "the pull request link has no rel=noopener",
+  );
+  await main().getByRole("link", { name: "View run" }).first().click();
+  await page.waitForURL(/\/runs\/run-/);
+});
+
+step("request-send-back", async () => {
+  await visit("/requests/req-quarantined");
+  await page
+    .getByText(/verify failed after 3 rounds/)
+    .first()
+    .waitFor();
+  await main().getByRole("button", { name: "Send back to planning", exact: true }).click();
+  await dialog().getByLabel("Reason").fill("The plan misses the account scoping.");
+  await nameIfAsked();
+  await dialog()
+    .getByRole("button", { name: /^Send back/ })
+    .click();
+  await dialog().waitFor({ state: "detached" });
+  const after = await request("req-quarantined");
+  check(after.state !== "quarantined", "the request stayed quarantined");
+  check(
+    after.rejections?.at(-1)?.reason === "The plan misses the account scoping.",
+    "the send-back reason was not recorded",
+  );
+});
+
+step("request-override-link", async () => {
+  await visit("/requests/req-halted");
+  await page
+    .getByText(/its pull request could not be opened/)
+    .first()
+    .waitFor();
+  await visit("/runs/run-quarantined?reason=Request%20req-quarantined%20ticket%201%20quarantined");
+  // No override token on this server: the action explains itself, disabled.
+  check(
+    await button("Override run").isDisabled(),
+    "Override run is enabled with no override token",
+  );
+});
+
+step("request-retry", async () => {
+  await visit("/requests/req-halted");
+  await main()
+    .getByRole("button", { name: /^Retry request/ })
+    .click();
+  await dialog().getByLabel("Reason").fill("gh is logged in again.");
+  await nameIfAsked();
+  allowed = [/^(4|5)\d\d POST \/requests\/req-halted\/retry$/];
+  const answered = page.waitForResponse((r) => r.url().endsWith("/requests/req-halted/retry"));
+  await dialog()
+    .getByRole("button", { name: /^Retry/ })
+    .click();
+  const response = await answered;
+  if (response.ok()) {
+    await dialog().waitFor({ state: "detached" });
+    check(
+      (await request("req-halted")).state !== "halted",
+      "the request stayed halted after an accepted retry",
+    );
+  } else {
+    // No forge behind this server: the refusal must be on screen, in the dialog.
+    await dialog().getByRole("alert").waitFor();
+    console.log(
+      `      (retry refused by the server with ${response.status()}; its message is shown in the dialog)`,
+    );
+    await dialog().getByRole("button", { name: "Cancel", exact: true }).click();
+  }
+});
+
+step("request-cancel", async () => {
+  await visit("/requests/req-halted-b");
+  await main().getByRole("button", { name: "Cancel request", exact: true }).click();
+  await dialog().getByLabel("Reason").fill("No longer needed.");
+  await nameIfAsked();
+  await dialog()
+    .getByRole("button", { name: /^Cancel request/ })
+    .click();
+  await dialog().waitFor({ state: "detached" });
+  const after = await request("req-halted-b");
+  check(after.state === "cancelled", `state is ${after.state}, want cancelled`);
+  await page.getByText("Cancelled").first().waitFor();
+});
+
+step("request-resume", async () => {
+  await visit("/requests/req-every-field");
+  await main().getByRole("button", { name: "Rebuild from scratch", exact: true }).click();
+  await nameIfAsked();
+  allowed = [/^(4|5)\d\d POST \/requests\/req-every-field\/resume$/];
+  const answered = page.waitForResponse((r) =>
+    r.url().endsWith("/requests/req-every-field/resume"),
+  );
+  await dialog().getByRole("button").last().click();
+  const response = await answered;
+  if (response.ok()) {
+    await dialog().waitFor({ state: "detached" });
+    check(
+      (await request("req-every-field")).state !== "resume_review",
+      "the request stayed in resume_review",
+    );
+  } else {
+    await dialog().getByRole("alert").waitFor();
+    console.log(
+      `      (resume refused by the server with ${response.status()}; its message is shown in the dialog)`,
+    );
+  }
+});
+
+step("request-revisions", async () => {
+  await visit("/requests/req-spec-review-b");
+  // The rejection made earlier in this walk left a revision to compare with.
+  const revisions = (await api("/requests/req-spec-review-b/revisions")).body;
+  check(revisions.length >= 1, "the rejection left no revision");
+  await main()
+    .getByRole("button", { name: /Rejection history/ })
+    .click();
+  await page.getByText("Criterion 2 does not say which account.").first().waitFor();
+});
+
+step("triage-approve", async () => {
+  await visit("/triage");
+  const left = (await api("/requests")).body.filter(
+    (r) => r.state === "spec_review" || r.state === "plan_review",
+  );
+  if (left.length === 0) {
+    await page
+      .getByText(/Nothing|No requests|all clear/i)
+      .first()
+      .waitFor();
+    return;
+  }
+  await page.keyboard.press("a");
+  await dialog().getByText("Approve this request?").waitFor();
+  await dialog().getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
 // ---------------------------------------------------------------- runner
 
 for (const { name, run } of steps) {
@@ -411,7 +744,14 @@ for (const { name, run } of steps) {
           ),
       )
       .catch(() => []);
-    console.log(`      at ${page.url()}\n      controls: ${controls.join(" | ")}`);
+    const open = await dialog()
+      .first()
+      .innerText()
+      .catch(() => "");
+    console.log(
+      `      at ${page.url()}\n      controls: ${controls.join(" | ")}${open ? `\n      dialog: ${open.replace(/\n+/g, " / ").slice(0, 400)}` : ""}`,
+    );
+    await page.keyboard.press("Escape").catch(() => undefined);
   }
 }
 

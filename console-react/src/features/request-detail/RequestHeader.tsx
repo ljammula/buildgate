@@ -2,21 +2,21 @@ import { RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
+import { requestStageGroupOf } from "@/domain/boardFilters";
 import {
   type RequestSummary,
   activeJobLabel,
   requestAwaitingPullRequest,
   requestRunningJob,
+  requestShortTitle,
 } from "@/domain/request";
 import { boardPath } from "@/routes/paths";
+import { RequestStageChip } from "@/shared/request/RequestStageChip";
+import { WaitingBadge } from "@/shared/request/WaitingBadge";
 import { Badge } from "@/ui/Badge";
 import { Button } from "@/ui/Button";
 import { PageHeader } from "@/ui/PageLayout";
 import { useNow } from "@/ui/Time";
-import { requestShortTitle } from "@/domain/request";
-
-import { RequestStateChip } from "./RequestStateChip";
-import { requestNeedsYou, waitingBadge } from "./requestDetailLogic";
 
 export interface RequestHeaderProps {
   /** Null while loading or when the load failed: a bare "Request detail" header. */
@@ -30,25 +30,20 @@ export interface RequestHeaderProps {
 function RequestChips({ request }: { readonly request: RequestSummary }) {
   const now = useNow(60_000);
   const job = requestRunningJob(request);
-  const badge = waitingBadge(request, now);
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <span className="font-mono text-xs">{request.id}</span>
       <span>{request.project}</span>
-      <RequestStateChip
+      <RequestStageChip
         state={request.state}
         awaitingPullRequest={requestAwaitingPullRequest(request)}
         waitingOn={request.waitingOn}
-        needsYou={requestNeedsYou(request)}
+        needsYou={requestStageGroupOf(request) === "review"}
       />
       {job === null ? null : (
         <Badge data-testid="request-detail-active-job">{activeJobLabel(job)}</Badge>
       )}
-      {badge === null ? null : (
-        <Badge tone="warning" data-testid="request-detail-waiting-badge">
-          {badge}
-        </Badge>
-      )}
+      <WaitingBadge request={request} now={now} />
     </span>
   );
 }

@@ -4,6 +4,7 @@ import { ApiError } from "@/domain/apiError";
 import { escapeInvisible } from "@/domain/textEscape";
 import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
+import { describeError } from "@/ui/ErrorDisplay";
 import { Textarea } from "@/ui/Input";
 
 /**
@@ -39,11 +40,7 @@ export function RunCommandEditor({
   const [text, setText] = useState(() => editableRunCommandText(initialText));
   const hasHidden = escapeInvisible(text) !== text;
   const errorText =
-    saveError instanceof ApiError
-      ? saveError.serverMessage
-      : saveError instanceof Error
-        ? saveError.message
-        : String(saveError);
+    saveError instanceof ApiError ? saveError.serverMessage : describeError(saveError).raw;
   return (
     <div className="flex w-full flex-col gap-1">
       <Textarea

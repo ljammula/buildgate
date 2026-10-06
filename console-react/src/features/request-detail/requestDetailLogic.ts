@@ -10,7 +10,6 @@ import {
   type RevisionDetail,
   requestAwaitingPullRequest,
   requestAwaitingPullRequestLabel,
-  requestWaitingSinceOrEnteredAt,
 } from "@/domain/request";
 import { stateLabel } from "@/domain/status";
 import { unifiedLineDiff } from "@/domain/textDiff";
@@ -18,43 +17,6 @@ import { unifiedLineDiff } from "@/domain/textDiff";
 /** Approve / Request changes are legal from these states only (the server refuses any other). */
 export function isReviewState(state: string): boolean {
   return state === "spec_review" || state === "oracle_review" || state === "plan_review";
-}
-
-// Review states plus the recovery states: a request here waits on a human.
-const NEEDS_YOU_STATES: ReadonlySet<string> = new Set([
-  "spec_review",
-  "oracle_review",
-  "plan_review",
-  "halted",
-  "resume_review",
-]);
-
-/**
- * Whether the request waits on the operator: a review or recovery state, or
- * a pr_review request whose opened PRs all wait on their reviewer (at least
- * one not yet merged). The same rule the board groups by.
- */
-export function requestNeedsYou(request: RequestSummary): boolean {
-  if (request.state === "pr_review") {
-    const prStates = request.tickets
-      .filter((t) => t.prUrl !== "" && t.prState !== "")
-      .map((t) => t.prState);
-    const waiting = (s: string): boolean => s === "ready" || s === "stacked";
-    return prStates.some(waiting) && prStates.every((s) => waiting(s) || s === "merged");
-  }
-  return NEEDS_YOU_STATES.has(request.state);
-}
-
-/** "Waiting on you · 45m" for a request that needs the operator; null otherwise. */
-export function waitingBadge(request: RequestSummary, now: Date): string | null {
-  if (!requestNeedsYou(request)) return null;
-  const since = Date.parse(requestWaitingSinceOrEnteredAt(request));
-  if (Number.isNaN(since)) return "Waiting on you";
-  const minutes = Math.max(0, Math.floor((now.getTime() - since) / 60_000));
-  if (minutes < 60) return `Waiting on you · ${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return `Waiting on you · ${remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`}`;
 }
 
 /**

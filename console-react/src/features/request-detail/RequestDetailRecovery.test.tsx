@@ -41,6 +41,22 @@ describe("the halted/quarantined recovery callout", () => {
     ).toBeInTheDocument();
   });
 
+  test("the quarantined callout links to the run override with the reason pre-filled", async () => {
+    openRequest(
+      requestWire({
+        state: "quarantined",
+        title: "Quarantined",
+        ticket_index: 1,
+        tickets: [ticketWire({ index: 1, runId: "run-1" })],
+      }),
+    );
+    await heading("Quarantined");
+
+    expect(
+      within(callout()).getByRole("link", { name: "Review the ticket's run override" }),
+    ).toHaveAttribute("href", "/runs/run-1?reason=Request%20req-1%20ticket%201%20quarantined");
+  });
+
   test("the quarantined callout links to the run override with a write path configured", async () => {
     openRequest(
       requestWire({
@@ -55,7 +71,7 @@ describe("the halted/quarantined recovery callout", () => {
     expect(callout()).toBeInTheDocument();
     expect(
       within(callout()).getByRole("link", { name: "Review the ticket's run override" }),
-    ).toHaveAttribute("href", "/runs/run-1");
+    ).toHaveAttribute("href", expect.stringMatching(/^\/runs\/run-1/));
     // Retry and the run override are independent actions, not a sequence:
     // the callout names `factoryd retry` as the recovery and says the
     // override is separate and optional (found in review).
@@ -380,6 +396,7 @@ describe("resume_review", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
 
     expect(await within(dialog).findByText(/could not check the lost build/)).toBeInTheDocument();
+    expect(within(dialog).getByText("(temporary: try again)")).toBeInTheDocument();
     // The confirm button is live again: Resume can simply be pressed once more.
     expect(within(dialog).getByRole("button", { name: "Resume" })).toBeEnabled();
   });
