@@ -189,6 +189,7 @@ Inside `building`, one ticket at a time:
 | Lost steps | A lost build keeps its worktree for `factoryd resume`; nothing reruns a lost step on its own |
 | `code_review` | `-code-review-policy off\|advisory\|required`; CLI default `off`, `quickstart` writes `required` for new configs |
 | The PR | Title from the ticket's `## Goal`; branch `factoryd/<slug>-<shorthash>`; opens as a draft, and `factoryd` marks it ready (`gh pr ready`) once checks pass and no reviewer thread blocks it |
+| Ready to merge | The deliverable. Checked on every poll: out of draft, checks pass, no review thread open, head is the commit the factory built, and that build's code review of the whole diff passed. `factoryd status` and the request page say so, or name what is missing: [STATUS.md § Ready to merge](STATUS.md#ready-to-merge). Merging is yours |
 | `factoryd retry` | Re-runs a halted or quarantined request. On an accepted ticket whose PR never opened, it re-opens only the PR, pinned to the accepted commit (`ResultSHA`), after re-running the release decision; a denial falls back to a full rebuild of that ticket only |
 | Following a run | `factoryd watch <run-or-request-id>`, the console's Timeline and Pipeline views, or the Temporal Web UI: [USAGE.md § Observe and control](USAGE.md#observe-and-control) |
 

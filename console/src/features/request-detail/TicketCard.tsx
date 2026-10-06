@@ -13,7 +13,7 @@ import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { Spinner } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
-import { StatusChipForToken } from "@/ui/StatusChip";
+import { StatusChip, StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
 import { ReviewRounds } from "./ReviewRounds";
@@ -110,6 +110,7 @@ export function TicketCard({
             )}
           </p>
         )}
+        <MergeReadinessLine ticket={ticket} />
         <ReviewRounds ticket={ticket} />
         {ticket.runId === "" ? null : (
           <div>
@@ -123,5 +124,43 @@ export function TicketCard({
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/**
+ * The last ready-to-merge check of the ticket's open pull request: a chip
+ * when it passed, else each thing the bar still lacks. Nothing before the
+ * first check, while a round runs, or once the pull request has merged.
+ */
+function MergeReadinessLine({ ticket }: { readonly ticket: RequestTicket }) {
+  const readiness = ticket.mergeReadiness;
+  if (readiness === null || ticket.prUrl === "" || ticket.prState === "merged") return null;
+  return (
+    <div data-testid={`ticket-merge-readiness-${ticket.index}`} className="flex flex-col gap-1">
+      {readiness.ready ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <StatusChip status="done" label="Ready to merge" />
+          <span className="text-fg-muted">
+            checks pass, no review thread is open, last code review of the whole diff clean
+          </span>
+        </div>
+      ) : (
+        <>
+          <p className="text-fg-muted text-xs font-semibold">Not ready to merge</p>
+          <ul className="list-disc pl-5 text-sm">
+            {readiness.blockers.map((blocker) => (
+              <li key={blocker}>
+                <EscapedText text={blocker} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {readiness.checkedAt === "" ? null : (
+        <span className="text-fg-subtle text-xs">
+          checked <RelativeTime value={readiness.checkedAt} />
+        </span>
+      )}
+    </div>
   );
 }

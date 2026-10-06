@@ -497,6 +497,7 @@ func prPollDue(lastPolledAt string, interval time.Duration, now time.Time) (bool
 func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *request.Ticket, state forge.ReviewState, now time.Time) error {
 	if state.MergedAt != nil {
 		ticket.PRState = "merged"
+		ticket.MergeReadiness = nil
 		allMerged := true
 		for _, t := range r.Tickets {
 			if t.PRState != "merged" {
@@ -783,6 +784,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 	// `ticket.PRState = "approved"`/`ContinueAfterPRApproval` starting the
 	// next ticket, even though it visibly blocks readiness (found via
 	// review, GitHub Codex App, PR #154 round 2).
+	ticket.MergeReadiness = checkMergeReadiness(dataDir, ticket, state, now)
 	if state.ReviewDecision == forge.ReviewDecisionApproved && len(state.BlocksReadyThreads) == 0 {
 		ticket.PRState = "approved"
 		if err := r.Save(dataDir); err != nil {
@@ -794,6 +796,90 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 		return nil
 	}
 	return r.Save(dataDir)
+}
+
+// checkMergeReadiness checks ticket's open pull request against the
+// ready-to-merge bar (request.MergeReadiness) and names everything it still
+// lacks. It is called at the end of a poll that found no new thread to act
+// on, after the ready flip, so ticket.PRState is this poll's.
+//
+// "The last code review of the whole diff" is the code_review gate of the
+// run whose commit is the pull request's head (CurrentPRHeadRunID): the
+// ticket's first build, or the last corrective round that was accepted and
+// pushed, each of which reviews the diff from the ticket's base. A head the
+// factory did not build (someone pushed to the branch) has no such review,
+// and neither has a run built with code review off: both are blockers, not
+// passes. A repository with no checks configured has none failing.
+func checkMergeReadiness(dataDir string, ticket *request.Ticket, state forge.ReviewState, now time.Time) *request.MergeReadiness {
+	var blockers []string
+	switch {
+	case ticket.PRState == "stacked":
+		blockers = append(blockers, "it is stacked on an earlier ticket's pull request, which must merge first")
+	case state.IsDraft && ticket.PRState != "ready":
+		blockers = append(blockers, "it is still a draft")
+	}
+	if state.ChecksPassing != nil && !*state.ChecksPassing {
+		blockers = append(blockers, "its checks are pending or failing")
+	}
+	if n := len(state.BlocksReadyThreads); n > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d review thread(s) are open", n))
+	}
+	if state.ReviewDecision == forge.ReviewDecisionChangesRequested {
+		blockers = append(blockers, "a reviewer requested changes")
+	}
+	blockers = append(blockers, headReviewBlockers(dataDir, CurrentPRHeadRunID(ticket), state.HeadSHA)...)
+	return &request.MergeReadiness{
+		Ready:     len(blockers) == 0,
+		CheckedAt: now.UTC().Format(time.RFC3339Nano),
+		HeadSHA:   state.HeadSHA,
+		Blockers:  blockers,
+	}
+}
+
+// headReviewBlockers is checkMergeReadiness's half about the build behind
+// the pull request's head: headRunID must be an accepted run whose result
+// is headSHA, whose release decision still allows it, and whose code_review
+// gate ran and passed.
+func headReviewBlockers(dataDir, headRunID, headSHA string) []string {
+	loaded, err := run.Load(dataDir, headRunID)
+	if err != nil {
+		return []string{fmt.Sprintf("the run behind its head (%s) could not be read", headRunID)}
+	}
+	if loaded.State != run.StateAccepted {
+		return []string{fmt.Sprintf("the run behind its head (%s) is %s, not accepted", headRunID, loaded.State)}
+	}
+	if !prHeadIsRun(dataDir, headRunID, headSHA) {
+		return []string{fmt.Sprintf("its head %s is not the commit the factory last built and reviewed (%s)", shortSHA(headSHA), shortSHA(loaded.ResultSHA))}
+	}
+	var blockers []string
+	if allowed, err := decisionStillAllows(dataDir, headRunID); err != nil || !allowed {
+		blockers = append(blockers, fmt.Sprintf("the release decision for run %s does not allow it", headRunID))
+	}
+	reviewed := false
+	for _, g := range loaded.GateResults {
+		if g.Check != "code_review" {
+			continue
+		}
+		reviewed = true
+		if !g.Passed {
+			blockers = append(blockers, "the last code review of the whole diff did not pass")
+		}
+	}
+	if !reviewed {
+		blockers = append(blockers, fmt.Sprintf("run %s has no code review of the whole diff on record (code review was off)", headRunID))
+	}
+	return blockers
+}
+
+// shortSHA is sha's first 12 characters, or "unknown" when it is empty.
+func shortSHA(sha string) string {
+	if sha == "" {
+		return "unknown"
+	}
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // RunCorrectiveRound is the PR-review driver's own core: newThreads
@@ -845,6 +931,9 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	}
 
 	roundRunID := fmt.Sprintf("%s-%03d-review%d", r.ID, ticket.Index, roundIndex)
+	// An open thread is being acted on: the last readiness check no longer
+	// describes the pull request. The poll after the round checks again.
+	ticket.MergeReadiness = nil
 
 	// The ticket's original run's own BaseSHA -- the PR's real starting
 	// point -- becomes this round's -diff-base, so the diff-shape gates

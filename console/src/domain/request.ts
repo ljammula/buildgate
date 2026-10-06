@@ -90,6 +90,20 @@ export interface RequestTicket {
   readonly reviewRounds: readonly ReviewRound[];
   /** The run of a corrective round under way now; "" when none is. Sent by GET /requests/{id} only. */
   readonly activeRoundRunId: string;
+  /** The PR-review poll's last ready-to-merge check; null until one has run. */
+  readonly mergeReadiness: MergeReadiness | null;
+}
+
+/**
+ * One check of a ticket's pull request against the ready-to-merge bar (Go's
+ * request.MergeReadiness): out of draft, checks passing, no open review
+ * thread, and a clean code review of the whole diff at its head.
+ */
+export interface MergeReadiness {
+  readonly ready: boolean;
+  readonly checkedAt: string;
+  /** What the bar still lacks, one sentence each; empty when ready. */
+  readonly blockers: readonly string[];
 }
 
 /**
@@ -137,6 +151,11 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
       .filter((entry) => entry.kind === "")
       .map((entry) => entry.round),
     activeRoundRunId: optString(o, "active_round_run_id", at),
+    mergeReadiness: optObject(o, "merge_readiness", at, (m, mAt) => ({
+      ready: optBoolean(m, "ready", mAt),
+      checkedAt: optString(m, "checked_at", mAt),
+      blockers: stringList(m, "blockers", mAt),
+    })),
     index: reqNumber(o, "index", at),
     specPath: optString(o, "spec_path", at),
     runId: optString(o, "run_id", at),

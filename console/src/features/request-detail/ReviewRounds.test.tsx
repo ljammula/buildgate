@@ -141,3 +141,44 @@ test("a round under way sits above the rounds that ended, numbered after them", 
       .map((item) => item.textContent.slice(0, 7)),
   ).toEqual(["Round 2", "Round 1"]);
 });
+
+test("a pull request that passed the ready-to-merge check says so on its ticket", async () => {
+  openRequest(prReview({ merge_readiness: { ready: true, checked_at: "2026-10-06T07:00:00Z" } }), {
+    extra: [runRoute],
+  });
+  await screen.findByRole("heading", { level: 1, name: "Liveness endpoint" });
+
+  expect(screen.getByTestId("ticket-merge-readiness-1")).toHaveTextContent(
+    "Ready to mergechecks pass, no review thread is open, last code review of the whole diff clean",
+  );
+});
+
+test("a pull request below the bar lists what it lacks, as text", async () => {
+  openRequest(
+    prReview({
+      merge_readiness: {
+        ready: false,
+        checked_at: "2026-10-06T07:00:00Z",
+        blockers: ["its checks are pending or failing", "1 review thread(s) are open <b>x</b>"],
+      },
+    }),
+    { extra: [runRoute] },
+  );
+  await screen.findByRole("heading", { level: 1, name: "Liveness endpoint" });
+  const block = screen.getByTestId("ticket-merge-readiness-1");
+
+  expect(block).toHaveTextContent("Not ready to merge");
+  expect(
+    within(block)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["its checks are pending or failing", "1 review thread(s) are open <b>x</b>"]);
+  expect(block.querySelector("b")).toBeNull();
+});
+
+test("a ticket no poll has checked shows no readiness", async () => {
+  openRequest(prReview({}), { extra: [runRoute] });
+  await screen.findByRole("heading", { level: 1, name: "Liveness endpoint" });
+
+  expect(screen.queryByTestId("ticket-merge-readiness-1")).not.toBeInTheDocument();
+});
