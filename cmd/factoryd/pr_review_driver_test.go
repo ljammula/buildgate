@@ -702,8 +702,8 @@ func TestRunCorrectiveRoundQuarantineDoesNotPush(t *testing.T) {
 	if pushCalls != 0 {
 		t.Errorf("push calls = %d, want 0 (quarantined round must not push)", pushCalls)
 	}
-	if replyCalls != 0 {
-		t.Errorf("reply calls = %d, want 0 (nothing was pushed, nothing to reply about)", replyCalls)
+	if replyCalls != 1 {
+		t.Errorf("reply calls = %d, want 1 (the reviewer is told the round pushed nothing)", replyCalls)
 	}
 	if r.State != request.StatePRReview {
 		t.Errorf("request state = %q, want it to remain pr_review", r.State)
@@ -2353,6 +2353,100 @@ func TestRunCorrectiveRoundCancelledDuringARoundRecordsNothing(t *testing.T) {
 	}
 	if builds != 1 || onDisk.State != request.StateCancelled || len(onDisk.Tickets[0].Rounds) != 0 {
 		t.Fatalf("builds = %d, state on disk = %q, rounds on disk = %+v; want one build and the cancel left as it was", builds, onDisk.State, onDisk.Tickets[0].Rounds)
+	}
+}
+
+// TestRunCorrectiveRoundQuarantinedRepliesOnTheThread: a round that pushed
+// nothing says so on each thread it was started for: attempted, not pushed,
+// the gates that failed and what the review flagged, and what happens next.
+// The last round under the cap says no rounds remain.
+func TestRunCorrectiveRoundQuarantinedRepliesOnTheThread(t *testing.T) {
+	dp := newTestDeps(t)
+	threads := []forge.Thread{
+		{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5},
+		{ID: "thread-2", Path: "b.go", Line: 2, Author: "alice", Body: "and this", CommentID: 6},
+	}
+	r, dataDir := stubPRReviewTestFixture(t, 1)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		q := reviewFlaggedRoundRun(argValue(args, "-ticket"), "nil map write @octocat ```\n# heading")
+		q.HaltError = "exec /Users/someone/secret/path failed"
+		return q.Save(dataDir)
+	}
+	replies := map[int64][]string{}
+	fakeForgeOf(dp).replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error {
+		replies[commentID] = append(replies[commentID], body)
+		return nil
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 2}
+	now := time.Now()
+	for i := 0; i < 2; i++ {
+		if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now.Add(time.Duration(i)*2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(replies[5]) != 2 || len(replies[6]) != 2 {
+		t.Fatalf("replies = %v, want one per thread per round", replies)
+	}
+	first, last := replies[5][0], replies[5][1]
+	for _, want := range []string{"Attempted in corrective round 1 of 2", "not pushed", "`code_review`", "`code review: a.go:2`", "nil map write", "The pull request is unchanged.", "round 2 starts on the next poll"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("round 1's reply lacks %q:\n%s", want, first)
+		}
+	}
+	if strings.Contains(first, "/Users/someone") {
+		t.Errorf("the reply carries the run's halt error, which can hold local paths:\n%s", first)
+	}
+	if !strings.Contains(first, "````\nnil map write @octocat ```") {
+		t.Errorf("the review's text is not fenced past its own backticks:\n%s", first)
+	}
+	if !strings.Contains(last, "Attempted in corrective round 2 of 2") || !strings.Contains(last, "No rounds remain") {
+		t.Errorf("the last round's reply should say no rounds remain:\n%s", last)
+	}
+}
+
+// TestRunCorrectiveRoundReplyForAHaltedRoundAndNoneForAStartFailure: a round
+// whose build stopped says so without the error text; a round that never
+// started used no slot, is retried every poll, and posts nothing.
+func TestRunCorrectiveRoundReplyForAHaltedRoundAndNoneForAStartFailure(t *testing.T) {
+	cases := []struct {
+		name        string
+		saved       *run.Run
+		wantReplies int
+	}{
+		{"halted after it started", &run.Run{State: run.StateHalted, HaltError: "relay at /Users/someone/x unreachable", Attempts: []run.Attempt{{}}}, 1},
+		{"never started", nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
+			r, dataDir := stubPRReviewTestFixture(t, 1)
+			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+				if tc.saved == nil {
+					return errors.New("git worktree add: branch is checked out elsewhere")
+				}
+				saved := *tc.saved
+				saved.ID = argValue(args, "-ticket")
+				return saved.Save(dataDir)
+			}
+			var bodies []string
+			fakeForgeOf(dp).replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error {
+				bodies = append(bodies, body)
+				return nil
+			}
+			cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+			if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if len(bodies) != tc.wantReplies {
+				t.Fatalf("replies = %v, want %d", bodies, tc.wantReplies)
+			}
+			if tc.wantReplies == 1 && (!strings.Contains(bodies[0], "the build stopped before it was judged") || strings.Contains(bodies[0], "/Users/someone")) {
+				t.Errorf("reply = %q, want the stopped-build wording without the error text", bodies[0])
+			}
+		})
 	}
 }
 

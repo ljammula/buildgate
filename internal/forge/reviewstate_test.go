@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,6 +167,60 @@ func TestParseReviewThreadsTrustedAuthorIsActionable(t *testing.T) {
 	}
 	if len(blocksReady) != 1 || len(actionable) != 1 || actionable[0].Author != "alice" {
 		t.Fatalf("blocksReady = %+v, actionable = %+v, want alice actionable", blocksReady, actionable)
+	}
+}
+
+// threadsJSON is one unresolved review thread with the given comments
+// (author, body), oldest first, as reviewThreadsQuery returns it.
+func threadsJSON(comments ...[2]string) []byte {
+	var nodes []string
+	for i, c := range comments {
+		nodes = append(nodes, fmt.Sprintf(`{"author":{"login":%q},"body":%q,"path":"main.go","line":9,"databaseId":%d}`, c[0], c[1], 100+i))
+	}
+	return []byte(`{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"comments":{"nodes":[` + strings.Join(nodes, ",") + `]}}]}}}}}`)
+}
+
+// TestParseReviewThreadsTheFactorysOwnReplyDoesNotSpeakForTheThread: a
+// thread the factory replied on is still the reviewer's. It keeps blocking
+// the ready flip, stays actionable, and is described by the reviewer's
+// comment (so its seen key does not change when the factory replies).
+func TestParseReviewThreadsTheFactorysOwnReplyDoesNotSpeakForTheThread(t *testing.T) {
+	data := threadsJSON([2]string{"alice", "set an Allow header"}, [2]string{"factory", "Attempted in corrective round 1 of 3"}, [2]string{"Factory", "Addressed in abc."})
+	blocksReady, actionable, err := parseReviewThreads(data, AuthorPolicy{Trusted: []string{"alice"}}, "factory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocksReady) != 1 || len(actionable) != 1 {
+		t.Fatalf("blocksReady = %+v, actionable = %+v; want the reviewer's thread in both after the factory's replies", blocksReady, actionable)
+	}
+	if got := actionable[0]; got.Author != "alice" || got.Body != "set an Allow header" || got.CommentID != 100 {
+		t.Errorf("thread = %+v, want it described by alice's comment (id 100)", got)
+	}
+}
+
+// TestParseReviewThreadsAThreadOfOnlyTheFactorysCommentsIsExcluded: the
+// factory's own account still never blocks or triggers anything by itself.
+func TestParseReviewThreadsAThreadOfOnlyTheFactorysCommentsIsExcluded(t *testing.T) {
+	blocksReady, actionable, err := parseReviewThreads(threadsJSON([2]string{"factory", "note to self"}, [2]string{"factory", "and another"}), AuthorPolicy{Trusted: []string{"factory"}}, "factory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocksReady) != 0 || len(actionable) != 0 {
+		t.Fatalf("blocksReady = %+v, actionable = %+v; want neither", blocksReady, actionable)
+	}
+}
+
+// TestParseReviewThreadsAReviewersReplyAfterTheFactorysIsTheLatest: a
+// reviewer answering the factory's reply is the thread's latest comment, so
+// its seen key changes and the reply can start another round.
+func TestParseReviewThreadsAReviewersReplyAfterTheFactorysIsTheLatest(t *testing.T) {
+	data := threadsJSON([2]string{"alice", "set an Allow header"}, [2]string{"factory", "Addressed in abc."}, [2]string{"alice", "still missing on HEAD"})
+	_, actionable, err := parseReviewThreads(data, AuthorPolicy{Trusted: []string{"alice"}}, "factory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actionable) != 1 || actionable[0].Body != "still missing on HEAD" || actionable[0].CommentID != 102 {
+		t.Fatalf("actionable = %+v, want alice's reply (id 102)", actionable)
 	}
 }
 

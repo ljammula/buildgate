@@ -959,7 +959,16 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		// Quarantined or halted: never push, request stays in pr_review,
 		// one notification dispatched -- see this file's own doc comment.
 		notifyRoundOutcome(dataDir, r, ticket, roundIndex, outcome, errText, now)
-		return r.Save(dataDir)
+		if err := r.Save(dataDir); err != nil {
+			return err
+		}
+		// The reviewer is told on their own thread, after the round is on
+		// disk. A start failure is not: it used no round and is retried on
+		// the next poll, so it would repeat the same reply every poll.
+		if !attempt.startFailure {
+			replyRoundNotPushed(dp, ctx, dataDir, r, ticket, newThreads, attempt, countedRounds+1, cfg.MaxReviewRounds)
+		}
+		return nil
 	}
 
 	// len(ticket.Rounds)-1, not roundIndex: Round.Index is the 1-based
@@ -1309,6 +1318,117 @@ diff, so a finding may be about code the earlier attempt did not touch.
 Fix every finding below as well as the reviewer comments; keep or rework
 the earlier attempt's changes as needed.
 `
+
+// maxReplyFindings and maxReplyDetailBytes bound what a "not pushed" reply
+// quotes from the review: it is a note to a reviewer on GitHub, not the
+// evidence, which stays on the run.
+const (
+	maxReplyFindings    = 5
+	maxReplyDetailBytes = 600
+)
+
+// replyRoundNotPushed answers each thread a round was started for when the
+// round did not end accepted: that it was attempted, that nothing was
+// pushed, the gate's reason, and what happens to the thread next. Without
+// it the reviewer saw nothing on the pull request at all: no commit, no
+// reply, and after the last round a request that had quietly stopped (found
+// live, 2026-10-06, three quarantined rounds on one pull request). A reply
+// that cannot be posted is logged; the round's record is already saved.
+// The reply does not make the thread the factory's own
+// (forge.latestCommentNotBy), so it still blocks the ready flip and still
+// starts the next round.
+func replyRoundNotPushed(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, threads []forge.Thread, attempt roundAttempt, round, maxRounds int) {
+	body := RoundNotPushedReply(dataDir, attempt.runID, attempt.outcome, round, maxRounds)
+	replyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for _, t := range threads {
+		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, body); err != nil {
+			log.Printf("request %s: ticket %d: reply on thread %s that round %d pushed nothing: %v", r.ID, ticket.Index, t.ID, round, err)
+		}
+	}
+}
+
+// RoundNotPushedReply is the text replyRoundNotPushed posts. It is public
+// on the pull request, so it carries only the round's number, the names of
+// the gates that failed, and what the review flagged; never a halt error,
+// which can hold local paths and command lines. The review's text comes
+// from a model reading a worker-writable workspace, so each piece is
+// flattened or capped and placed in code formatting, where GitHub renders
+// no mention, link or markup.
+func RoundNotPushedReply(dataDir, runID string, outcome request.RoundOutcome, round, maxRounds int) string {
+	var b strings.Builder
+	loaded, err := run.Load(dataDir, runID)
+	if outcome == request.RoundQuarantined && err == nil {
+		fmt.Fprintf(&b, "Attempted in corrective round %d of %d: a change was built and not pushed, because it did not pass %s.\n", round, maxRounds, failedGateNames(loaded))
+		b.WriteString(replyFindings(loaded))
+	} else {
+		fmt.Fprintf(&b, "Attempted in corrective round %d of %d: the build stopped before it was judged, so nothing was pushed.\n", round, maxRounds)
+	}
+	b.WriteString("\nThe pull request is unchanged. ")
+	if round < maxRounds {
+		fmt.Fprintf(&b, "While this thread is open, round %d starts on the next poll.", round+1)
+	} else {
+		b.WriteString("No rounds remain, so this comment now waits for a person.")
+	}
+	return b.String()
+}
+
+// failedGateNames lists runRecord's failed gates as inline code, in the
+// order they ran.
+func failedGateNames(runRecord *run.Run) string {
+	var names []string
+	for _, g := range runRecord.GateResults {
+		if !g.Passed {
+			names = append(names, "`"+replyInline(g.Check)+"`")
+		}
+	}
+	if len(names) == 0 {
+		return "every gate"
+	}
+	return strings.Join(names, ", ")
+}
+
+// replyFindings renders what the review flagged in runRecord for a reply:
+// the flagged criteria and blocking findings a fix attempt is given
+// (flaggedConformityVerdicts, blockingCodeReviewFindings), at most
+// maxReplyFindings of them, or "" when there are none.
+func replyFindings(runRecord *run.Run) string {
+	type item struct{ label, detail string }
+	var items []item
+	for _, v := range flaggedConformityVerdicts(runRecord) {
+		items = append(items, item{"acceptance criterion: " + v.Criterion, v.Detail})
+	}
+	for _, f := range blockingCodeReviewFindings(runRecord) {
+		loc := f.File
+		if loc != "" && f.Line > 0 {
+			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
+		}
+		detail := f.Summary
+		if f.FailureScenario != "" {
+			detail += "\n\nFailure scenario: " + f.FailureScenario
+		}
+		items = append(items, item{"code review: " + loc, detail})
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nWhat the review flagged:\n\n")
+	for i, it := range items {
+		if i == maxReplyFindings {
+			fmt.Fprintf(&b, "%d more not shown.\n", len(items)-maxReplyFindings)
+			break
+		}
+		fmt.Fprintf(&b, "`%s`\n\n%s\n", replyInline(it.label), fenceVerbatim(capConformityDetail(it.detail, maxReplyDetailBytes)))
+	}
+	return b.String()
+}
+
+// replyInline makes s safe inside an inline code span: one bounded line
+// (flattenConformityField) with no backtick to close the span.
+func replyInline(s string) string {
+	return strings.ReplaceAll(flattenConformityField(s, MaxConformityCriterionBytes), "`", "'")
+}
 
 // WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md
 // (<ticket>-<round>-fix<n> for the round's n-th fix attempt):

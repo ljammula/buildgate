@@ -26,7 +26,8 @@ const (
 )
 
 // Thread is one unresolved PR review thread, described by its latest
-// comment -- the comment whose author decides whether the thread is
+// comment not written by the factory's own account (latestCommentNotBy)
+// -- the comment whose author decides whether the thread is
 // hard-excluded (see isHardExcludedAuthor) or actionable (see
 // isActionableAuthor) and whose body is what a caller would act on. ID is
 // GitHub's own review-thread node id (stable across polls), so a caller
@@ -38,7 +39,7 @@ type Thread struct {
 	Author    string
 	Body      string
 	CreatedAt time.Time
-	// CommentID is the latest comment's REST-numeric id (GraphQL's own
+	// CommentID is that comment's REST-numeric id (GraphQL's own
 	// databaseId for a PullRequestReviewComment) -- the PR-review poll's
 	// reply mechanism needs this to target GitHub's REST "reply to a review
 	// comment" endpoint (POST .../pulls/comments/{id}/replies), which
@@ -352,7 +353,10 @@ func parseReviewThreads(data []byte, policy AuthorPolicy, selfLogin string) (blo
 		if len(comments) == 0 {
 			continue
 		}
-		latest := comments[len(comments)-1]
+		latest, ok := latestCommentNotBy(comments, selfLogin)
+		if !ok {
+			continue
+		}
 		login := latest.Author.Login
 		if isHardExcludedAuthor(login, selfLogin) {
 			continue
@@ -372,6 +376,24 @@ func parseReviewThreads(data []byte, policy AuthorPolicy, selfLogin string) (blo
 		}
 	}
 	return blocksReady, actionable, nil
+}
+
+// latestCommentNotBy returns the last of comments (oldest first) whose
+// author is not selfLogin, and false when every one is selfLogin's. The
+// factory's own replies never speak for a thread: after it answers a
+// reviewer ("Addressed in <sha>.", or that a round pushed nothing) the
+// thread is still the reviewer's comment, so it keeps blocking the ready
+// flip until a person resolves it, and a round that pushed nothing leaves
+// it able to start the next one. Judged by its last comment alone, a thread
+// the factory had replied to read as the factory's own and dropped out of
+// both lists. selfLogin "" skips nothing.
+func latestCommentNotBy(comments []ghReviewComment, selfLogin string) (ghReviewComment, bool) {
+	for i := len(comments) - 1; i >= 0; i-- {
+		if selfLogin == "" || !strings.EqualFold(comments[i].Author.Login, selfLogin) {
+			return comments[i], true
+		}
+	}
+	return ghReviewComment{}, false
 }
 
 // reviewThreadsPageInfo extracts one reviewThreadsQuery response page's
@@ -407,7 +429,9 @@ func parsePullRequestURL(prURL string) (owner, repo string, number int, err erro
 }
 
 // reviewThreadsQuery fetches every review thread's resolution state and
-// latest comment -- gh pr view --json has no field for isResolved, only
+// its last 50 comments (parseReviewThreads wants the
+// latest one the factory did not write, and the factory replies at most
+// once per corrective round) -- gh pr view --json has no field for isResolved, only
 // GraphQL exposes it, so this is the only way to tell an addressed thread
 // from an outstanding one. $cursor is optional (omitted on the first
 // page's request) so a PR with more than 100 threads is fetched a page at
@@ -423,7 +447,7 @@ const reviewThreadsQuery = `query($owner: String!, $repo: String!, $number: Int!
         nodes {
           id
           isResolved
-          comments(last: 1) {
+          comments(last: 50) {
             nodes {
               author { login }
               body
