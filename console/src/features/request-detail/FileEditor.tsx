@@ -14,6 +14,7 @@ import { CriteriaListEditor } from "./CriteriaListEditor";
 import { SectionEditor } from "./SectionEditor";
 import { StructureChecklist, type StructureKind } from "./StructureChecklist";
 import { TicketFieldsEditor } from "./TicketFieldsEditor";
+import { TicketListEditor } from "./TicketListEditor";
 import type { EditorBinding } from "./useEditSession";
 
 export interface FileEditorProps {
@@ -164,12 +165,26 @@ export function FileEditor({
           {structure === "spec" ? (
             <CriteriaListEditor text={text} onChange={setText} disabled={blockedReason !== null} />
           ) : (
-            <TicketFieldsEditor
-              text={text}
-              onChange={setText}
-              specCriteria={specCriteria ?? []}
-              disabled={blockedReason !== null}
-            />
+            <>
+              <TicketFieldsEditor
+                text={text}
+                onChange={setText}
+                specCriteria={specCriteria ?? []}
+                disabled={blockedReason !== null}
+              />
+              <TicketListEditor
+                text={text}
+                heading="### Steps"
+                onChange={setText}
+                disabled={blockedReason !== null}
+              />
+              <TicketListEditor
+                text={text}
+                heading="### Files to touch"
+                onChange={setText}
+                disabled={blockedReason !== null}
+              />
+            </>
           )}
           <SectionEditor
             kind={structure}
