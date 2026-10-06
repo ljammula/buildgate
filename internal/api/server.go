@@ -2464,6 +2464,9 @@ type requestSummaryView struct {
 	// ActiveJob is the request's running drafting job, read from its own
 	// file (request.LoadActiveJob), never from request.json.
 	ActiveJob *request.ActiveJob `json:"active_job,omitempty"`
+	// NextAction: see requestDetailView.NextAction. Derived in memory from
+	// the loaded request, so a list of N requests costs no extra reads.
+	NextAction string `json:"next_action,omitempty"`
 }
 
 // CostSummary is requestSummaryView's own "cost_summary" field: a
@@ -3385,6 +3388,7 @@ func (s *Server) requestSummaryViewFor(req *request.Request, waitingOn string, r
 		Title:       request.Title(s.dataDir, req.ID),
 		CostSummary: s.computeCostSummary(req, runsByRequest),
 		ActiveJob:   request.LoadActiveJob(s.dataDir, req.ID),
+		NextAction:  req.NextAction(),
 	}
 	view.WaitingOn = waitingOn
 	return view

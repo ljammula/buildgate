@@ -2391,3 +2391,28 @@ func TestRejectRequestHandlerRefusesBadAnchors(t *testing.T) {
 		})
 	}
 }
+
+// TestListRequestsIncludesNextAction: a list entry carries the same
+// server-derived next_action sentence GET /requests/{id} does.
+func TestListRequestsIncludesNextAction(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir, WithReadToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodGet, "/requests", "test-token", ""))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var got []struct {
+		ID         string `json:"id"`
+		NextAction string `json:"next_action"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := "review the drafted spec: `factoryd approve req-1`, or `factoryd reject -reason ... req-1` to redraft"
+	if len(got) != 1 || got[0].NextAction != want {
+		t.Errorf("got = %+v, want one entry with next_action %q", got, want)
+	}
+}
