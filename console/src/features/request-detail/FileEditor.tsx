@@ -10,6 +10,7 @@ import { Textarea } from "@/ui/Input";
 import { describeError } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 
+import { StructureChecklist, type StructureKind } from "./StructureChecklist";
 import type { EditorBinding } from "./useEditSession";
 
 export interface FileEditorProps {
@@ -25,6 +26,8 @@ export interface FileEditorProps {
   readonly onClose: () => void;
   /** Newer-record notice, dirty reporting and the save lock; see `useEditSession`. */
   readonly session?: EditorBinding;
+  /** Shows the live structure checklist for this kind of file beside the text. */
+  readonly structure?: StructureKind;
 }
 
 /**
@@ -36,6 +39,8 @@ export interface FileEditorProps {
  * the operator either discards their edit or keeps it re-based onto the
  * reported hash (an informed overwrite of what they just saw). Any other
  * failure (a 422's validation message) shows verbatim and keeps the edit.
+ * With `structure`, a checklist of what that 422 would name follows the text
+ * as it is typed; it never blocks Save.
  * Keyboard: the text is focused on open, Cmd/Ctrl+S saves, Esc cancels (asking
  * first when there is unsaved text). A newer record arriving never discards
  * the text: see `session`.
@@ -47,6 +52,7 @@ export function FileEditor({
   onFetchCurrent,
   onClose,
   session,
+  structure,
 }: FileEditorProps) {
   const [opened] = useState(initialContent);
   const [text, setText] = useState(initialContent);
@@ -141,18 +147,24 @@ export function FileEditor({
           </div>
         </div>
       )}
-      <Textarea
-        ref={field}
-        mono
-        readOnly={blockedReason !== null}
-        aria-label={`Edit ${path}`}
-        rows={14}
-        value={text}
-        onChange={(event) => {
-          setText(event.target.value);
-        }}
-        onKeyDown={onKeyDown}
-      />
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
+        <Textarea
+          ref={field}
+          mono
+          readOnly={blockedReason !== null}
+          aria-label={`Edit ${path}`}
+          rows={structure === undefined ? 14 : 22}
+          className="min-w-0 lg:flex-1"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+          onKeyDown={onKeyDown}
+        />
+        {structure === undefined ? null : (
+          <StructureChecklist kind={structure} text={text} className="lg:w-72 lg:shrink-0" />
+        )}
+      </div>
       {blockedReason === null ? null : (
         <p data-testid="edit-blocked" className="text-fg-muted text-sm">
           {blockedReason}

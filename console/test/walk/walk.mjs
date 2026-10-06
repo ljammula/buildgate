@@ -461,7 +461,15 @@ step("request-edit-refused", async () => {
   await visit("/requests/req-spec-review");
   await main().getByRole("button", { name: "Edit", exact: true }).click();
   const editor = main().getByRole("textbox", { name: "Edit spec.md" });
+  // The checklist beside the text follows it as it is typed, and never blocks Save.
+  const checklist = main().getByRole("region", { name: "Structure checklist" });
+  await checklist.getByText("6 to fix.", { exact: false }).waitFor();
   await editor.fill("just one line\n");
+  await checklist.getByText("9 to fix.", { exact: false }).waitFor();
+  check(
+    (await checklist.locator('li[data-ok="false"]').first().innerText()).includes("# Spec"),
+    "the checklist does not name the first missing heading",
+  );
   allowed = [/^422 PUT \/requests\/req-spec-review\/spec$/];
   await main().getByRole("button", { name: "Save", exact: true }).click();
   await page.getByText(/Could not save: .*missing required heading/).waitFor();
@@ -474,6 +482,11 @@ step("request-edit-spec", async () => {
   await visit("/requests/req-spec-review");
   await main().getByRole("button", { name: "Edit", exact: true }).click();
   await main().getByRole("textbox", { name: "Edit spec.md" }).fill(validSpec);
+  // A text the checklist calls complete is one the server then accepts.
+  await main()
+    .getByRole("region", { name: "Structure checklist" })
+    .getByText("Structure is complete.", { exact: false })
+    .waitFor();
   check(
     await main().getByRole("button", { name: "Approve", exact: true }).isDisabled(),
     "Approve stayed enabled with unsaved edits",

@@ -27,7 +27,7 @@ test/walk/run.sh       # the live walk: a real factoryd, a real browser, every s
 | ------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
 | Unit and component tests | `npm run test`                                                                 | Logic and rendering, in isolation, against a fake server (`src/test/render.tsx`)                          |
 | Contract fixtures        | `go test ./internal/api -run TestConsoleContractFixtures`, then `npm run test` | A Go response shape the decoders cannot read                                                              |
-| Golden vectors           | The Go and Vitest suites                                                       | The server and the console disagreeing on a content hash or a token count                                 |
+| Golden vectors           | The Go and Vitest suites                                                       | The server and the console disagreeing on a content hash, a token count or a spec/ticket structure check  |
 | Lint boundaries          | `npm run lint`                                                                 | A layer importing what it may not; HTML from untrusted text; `fetch` or `localStorage` in the wrong layer |
 | Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 36 steps, each write checked against the server's own record    |
 
@@ -128,7 +128,7 @@ quiet surfaces, colour reserved for state.
 
 `test/fixtures/` is read by Go and these tests (`src/test/fixtures.ts`):
 
-| Directory  | Written by                                                                         | What it pins                                                                                                                             |
-| ---------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `api/`     | `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/api -run TestConsoleContractFixtures` | The response of every read route, from a fixed data directory. `index.json` maps each file to its route. Every decoder decodes its files |
-| `vectors/` | By hand                                                                            | Inputs and expected outputs for content hashing and token/cost formatting, which the server and the console must compute identically     |
+| Directory  | Written by                                                                                                                               | What it pins                                                                                                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api/`     | `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/api -run TestConsoleContractFixtures`                                                       | The response of every read route, from a fixed data directory. `index.json` maps each file to its route. Every decoder decodes its files                                                          |
+| `vectors/` | By hand; `spec-skeleton.json`'s expectations by `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/request -run TestSpecSkeletonGoldenVectors` | Inputs and expected outputs for content hashing, token/cost formatting and the spec/ticket structure checks (`domain/specSkeleton.ts`), which the server and the console must compute identically |
