@@ -6,6 +6,7 @@ import {
   decodeHealth,
   decodeQueueRunStatus,
   decodeWorkspaceHintList,
+  workerLiveness,
 } from "@/domain/ops";
 import { readFixtureJson } from "@/test/fixtures";
 
@@ -88,4 +89,11 @@ test("the server's error body decodes", () => {
   );
   expect(body).toEqual({ error: "run not found" });
   expect(() => decodeApiErrorBody({}, "GET /runs/{id}")).toThrow(/GET \/runs\/\{id\}\.error:/);
+});
+
+test("a worker heartbeat state reads as running, stale or not running", () => {
+  expect(workerLiveness("alive")).toEqual({ label: "Running", tone: "success", alive: true });
+  expect(workerLiveness("stale")).toEqual({ label: "Stale", tone: "warning", alive: false });
+  expect(workerLiveness("absent")).toEqual({ label: "Not running", tone: "danger", alive: false });
+  expect(workerLiveness("something-new").label).toBe("Not running");
 });

@@ -20,6 +20,11 @@ describe("OpsScreen", () => {
   it("lists every project with its quarantine breakdown and kill-switch state", async () => {
     renderApp(<OpsScreen />, {
       server: [
+        {
+          on: "GET /queue-run",
+          reply: json({ state: "alive", last_heartbeat: "2026-09-10T09:00:00Z" }),
+        },
+        { on: "GET /daemons", reply: apiErrorResponse(404, "not found") },
         { on: "GET /projects", reply: json([project]) },
         {
           on: "GET /projects/checkouts/stats",
@@ -56,6 +61,11 @@ describe("OpsScreen", () => {
   it("a project whose stats/release calls fail still renders, marked unavailable", async () => {
     renderApp(<OpsScreen />, {
       server: [
+        {
+          on: "GET /queue-run",
+          reply: json({ state: "alive", last_heartbeat: "2026-09-10T09:00:00Z" }),
+        },
+        { on: "GET /daemons", reply: apiErrorResponse(404, "not found") },
         { on: "GET /projects", reply: json([{ ...project, project: "broken" }]) },
         { on: "GET /projects/broken/stats", reply: apiErrorResponse(403, "forbidden") },
         { on: "GET /projects/broken/release", reply: apiErrorResponse(403, "forbidden") },
@@ -73,7 +83,16 @@ describe("OpsScreen", () => {
   });
 
   it("no projects recorded yet is reported plainly", async () => {
-    renderApp(<OpsScreen />, { server: [{ on: "GET /projects", reply: json([]) }] });
+    renderApp(<OpsScreen />, {
+      server: [
+        {
+          on: "GET /queue-run",
+          reply: json({ state: "alive", last_heartbeat: "2026-09-10T09:00:00Z" }),
+        },
+        { on: "GET /daemons", reply: apiErrorResponse(404, "not found") },
+        { on: "GET /projects", reply: json([]) },
+      ],
+    });
 
     expect(await screen.findByText("No projects recorded yet.")).toBeInTheDocument();
   });

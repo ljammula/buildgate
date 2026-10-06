@@ -1,5 +1,6 @@
 // Operational shapes: workspace hints, the console's own config, daemon and
 // worker liveness, the health probe and the server's error body.
+import type { StatusTone } from "@/domain/status";
 import {
   type JsonObject,
   decodeList,
@@ -123,4 +124,22 @@ export interface Health {
 
 export function decodeHealth(o: JsonObject, at: string): Health {
   return { status: reqString(o, "status", at) };
+}
+
+/** How a worker heartbeat state reads to an operator, and the tone it is drawn in. */
+export interface WorkerLiveness {
+  readonly label: "Running" | "Stale" | "Not running";
+  readonly tone: StatusTone;
+  readonly alive: boolean;
+}
+
+/**
+ * GET /queue-run's `state` for display. Anything but "alive" and "stale"
+ * (a state a newer server adds included) reads as not running: the card
+ * then offers the command that starts one.
+ */
+export function workerLiveness(state: string): WorkerLiveness {
+  if (state === "alive") return { label: "Running", tone: "success", alive: true };
+  if (state === "stale") return { label: "Stale", tone: "warning", alive: false };
+  return { label: "Not running", tone: "danger", alive: false };
 }
