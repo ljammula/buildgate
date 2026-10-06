@@ -42,7 +42,7 @@ package main
 // boundary in between -- the expected production deployment target for a
 // daemon that itself needs the Docker socket), no such remapping happens
 // and host-visible ownership genuinely reflects the container's UID; this
-// is a property of colima's (and likely Docker Desktop's) shared-mount
+// is a property of colima's shared-mount
 // implementation specifically. This matters beyond test hygiene: it means
 // the gap where worker-authored content is indistinguishable from
 // factoryd's own is NOT actually closed by this mechanism on such a host,

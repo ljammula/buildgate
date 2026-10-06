@@ -1501,7 +1501,7 @@ func doctorCheckDockerReachable(ctx context.Context, dockerBinary string) doctor
 func dockerReachableFix() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "run `brew install colima docker && colima start` (the chosen Mac backend), or start Docker Desktop, and confirm -sandbox-docker names a real executable"
+		return "run `brew install colima docker && colima start` (the Mac backend), and confirm -sandbox-docker names a real executable"
 	case "linux":
 		return "run `sudo systemctl start docker` (and add yourself to the docker group), and confirm -sandbox-docker names a real executable"
 	default:
@@ -1530,7 +1530,7 @@ func doctorCheckBuildx(ctx context.Context, dockerBinary string) doctorCheck {
 // dockerBuildxFix names the per-platform fix for a missing buildx plugin.
 func dockerBuildxFix() string {
 	if runtime.GOOS == "darwin" {
-		return "run `brew install docker-buildx && mkdir -p ~/.docker/cli-plugins && ln -sf \"$(brew --prefix)/lib/docker/cli-plugins/docker-buildx\" ~/.docker/cli-plugins/docker-buildx` (Docker Desktop already includes it)"
+		return "run `brew install docker-buildx && mkdir -p ~/.docker/cli-plugins && ln -sf \"$(brew --prefix)/lib/docker/cli-plugins/docker-buildx\" ~/.docker/cli-plugins/docker-buildx`"
 	}
 	return "install the Docker buildx plugin (docker-buildx-plugin on Debian/Ubuntu) -- see https://docs.docker.com/build/install-buildx/"
 }

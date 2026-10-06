@@ -126,7 +126,7 @@ About ten minutes from a Mac with only Homebrew, most of it image builds.
 # 1. Prerequisites (skip what you have). Docker needs the buildx plugin.
 brew install go python gh git colima docker docker-buildx
 mkdir -p ~/.docker/cli-plugins && ln -sf "$(brew --prefix)/lib/docker/cli-plugins/docker-buildx" ~/.docker/cli-plugins/docker-buildx
-colima start --memory 4          # Docker Desktop works too
+colima start --memory 4
 gh auth login
 
 # 2. Install (clone, build the images, install factoryd)
@@ -156,8 +156,8 @@ make install
 ```
 
 Prerequisites: Go, Docker with the `buildx` plugin, `gh`, `python3` (Flutter
-optional, for the console). Docker Desktop includes `buildx`; with Homebrew's
-CLI-only `docker` + `colima`, run `brew install docker-buildx` and link it:
+optional, for the console). With Homebrew's `docker` + `colima`, run
+`brew install docker-buildx` and link it:
 `mkdir -p ~/.docker/cli-plugins && ln -sf "$(brew --prefix)/lib/docker/cli-plugins/docker-buildx" ~/.docker/cli-plugins/docker-buildx`.
 `make install` checks for it first and `factoryd doctor` warns when it is
 missing. `make install` puts `factoryd` in `$(go env GOPATH)/bin` (usually
@@ -364,7 +364,7 @@ make bar-test            # offline tests for bar's verdict logic
 ```
 
 - `make verify`'s tests run through `scripts/test-sharded.sh`: one `cmd/factoryd` race test binary, run as 4 processes split by `scripts/factoryd-test-shards.txt`, alongside `go test -race` over every other package. New tests land in the last shard automatically; the run fails if a test is in zero or two shards or the shard file names a missing test.
-- `make verify-live` fails loudly without Docker; needs Temporal at `TEMPORAL_ADDRESS` (default `localhost:7233`) or the `temporal` CLI. On Docker Desktop/colima it roots scratch dirs under `~/buildgate` so the VM can see them.
+- `make verify-live` fails loudly without Docker; needs Temporal at `TEMPORAL_ADDRESS` (default `localhost:7233`) or the `temporal` CLI. On colima it roots scratch dirs under `~/buildgate` so the VM can see them.
 - `make proving-ground`: fixtures in `scripts/proving-ground/fixtures.json`, each pinned to a `base_ref`, one at a time. `PROVING_GROUND_TEMPORAL=<addr>` also runs each through Temporal as a separate `path: temporal` row.
 
 **CI** (`.github/workflows/ci.yml`) is manual-only by operator decision:

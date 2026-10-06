@@ -298,7 +298,6 @@ docker-buildx-check:
 		echo "docker buildx (BuildKit) is required to build the images -- install it, then re-run:" >&2; \
 		if [ "$$(uname)" = Darwin ]; then \
 			echo "  brew install docker-buildx && mkdir -p ~/.docker/cli-plugins && ln -sf \"\$$(brew --prefix)/lib/docker/cli-plugins/docker-buildx\" ~/.docker/cli-plugins/docker-buildx" >&2; \
-			echo "  (Docker Desktop already includes buildx.)" >&2; \
 		else \
 			echo "  install your distribution's docker-buildx-plugin: https://docs.docker.com/build/install-buildx/" >&2; \
 		fi; \

@@ -197,7 +197,7 @@ func runTests(m *testing.M) int {
 
 	// realHomeForLiveDocker captures the actual operator's $HOME before it
 	// is overwritten below, for the one test that needs a real docker
-	// binary rather than this package-wide fake: a Docker Desktop backend
+	// binary rather than this package-wide fake: a Docker CLI
 	// running through colima keeps its own context (which socket to talk
 	// to) in a config file under the real $HOME, not something
 	// XDG_CONFIG_HOME governs, so that one test cannot simply leave HOME

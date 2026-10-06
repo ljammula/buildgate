@@ -59,8 +59,7 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
 fi
 
 # Same reasoning as scripts/live-smoke.sh's own top-of-file comment: a Docker
-# backend that only shares $HOME with its VM (Docker Desktop's default file
-# sharing, colima's own default) accepts a bind mount under the OS temp dir
+# backend that only shares $HOME with its VM (colima's own default) accepts a bind mount under the OS temp dir
 # (Go's own t.TempDir(), under /var/folders on macOS) without complaint, but
 # the container then can't see anything written there -- every
 # DOCKER_SANDBOX_LIVE=1 test in internal/sandbox/docker_test.go and friends

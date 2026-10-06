@@ -6,7 +6,7 @@
 # call beyond `submit` and `serve`/`worker`, and no manual Refresh.
 #
 # What it does:
-#   1. Fresh scratch dir under $HOME (Docker Desktop/colima must be able to
+#   1. Fresh scratch dir under $HOME (colima must be able to
 #      mount it), a disposable clone of CONSOLE_WALK_REPO, and a session
 #      config copied from CONSOLE_WALK_CONFIG with data_dir pointed at the
 #      scratch dir, open_pull_request: false, and a workspaces: entry for

@@ -55,8 +55,8 @@ func TestDockerfileProjectBakesMissingDependency(t *testing.T) {
 	// below) -- baking and using it is this test's whole point.
 	//
 	// liveRoot, not t.TempDir(): matches every other live Docker test in
-	// this repo (see TestRunLiveDocker's own comment) -- Docker Desktop for
-	// macOS's default file sharing covers /Users but not the system temp
+	// this repo (see TestRunLiveDocker's own comment) -- a macOS
+	// Docker VM's default file sharing covers /Users but not the system temp
 	// dir t.TempDir() resolves under, so a bind mount from there silently
 	// mounts an empty directory instead of failing loudly.
 	liveRoot := os.Getenv("DOCKER_SANDBOX_LIVE_ROOT")
@@ -82,7 +82,7 @@ func TestDockerfileProjectBakesMissingDependency(t *testing.T) {
 
 	// --user matches the invoking host user, not the image's own baked-in
 	// USER 65532:65532 -- found live on a real Linux CI runner (works
-	// without this on Docker Desktop for macOS, whose bind-mount sharing
+	// without this on a macOS Docker VM, whose bind-mount sharing
 	// normalizes permissions leniently, but a real Linux engine enforces
 	// the bind-mounted directory's actual host ownership, and UID 65532
 	// has no relation to whatever host account is running this test).
