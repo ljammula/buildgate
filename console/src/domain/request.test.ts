@@ -359,6 +359,10 @@ test("request-every-field decodes with every optional field populated", () => {
       prState: "every-field pr_state",
       content: expect.stringContaining("Verify-Command: true") as string,
       fullPath: "/data/requests/req-every-field/tickets/001.spec.md",
+      // The fixture's one round carries a kind (a conformity round), so it is
+      // not a review round.
+      reviewRounds: [],
+      activeRoundRunId: "",
     },
   ]);
   expect(r.costSummary?.currency).toBe("usd");
@@ -498,4 +502,49 @@ test("a rejection's anchored notes are decoded; a plain rejection has none", () 
   ]);
   expect(withAnchors.rejections[0]?.note).toBe("Otherwise fine.");
   expect(withAnchors.rejections[1]).toMatchObject({ anchors: [], note: "" });
+});
+
+test("a ticket's PR-review rounds are decoded; conformity rounds are left out", () => {
+  const r = request({
+    state: "pr_review",
+    tickets: [
+      {
+        index: 1,
+        active_round_run_id: "req-1-001-review3-x",
+        rounds: [
+          { index: 1, kind: "spec_conformity", run_id: "c1", outcome: "accepted", at: "t0" },
+          {
+            index: 1,
+            thread_ids: ["T1"],
+            run_id: "r1",
+            outcome: "quarantined",
+            at: "2026-10-06T07:26:19Z",
+            error: "policy gate did not pass: code_review",
+          },
+          { index: 2, run_id: "r2", outcome: "accepted", at: "2026-10-06T07:40:00Z", pushed: true },
+        ],
+      },
+      { index: 2 },
+    ],
+  });
+  expect(r.tickets[0]?.reviewRounds).toEqual([
+    {
+      index: 1,
+      runId: "r1",
+      outcome: "quarantined",
+      at: "2026-10-06T07:26:19Z",
+      error: "policy gate did not pass: code_review",
+      pushed: false,
+    },
+    {
+      index: 2,
+      runId: "r2",
+      outcome: "accepted",
+      at: "2026-10-06T07:40:00Z",
+      error: "",
+      pushed: true,
+    },
+  ]);
+  expect(r.tickets[0]?.activeRoundRunId).toBe("req-1-001-review3-x");
+  expect(r.tickets[1]).toMatchObject({ reviewRounds: [], activeRoundRunId: "" });
 });

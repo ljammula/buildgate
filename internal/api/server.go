@@ -3111,6 +3111,43 @@ type requestTicketView struct {
 	// console's viewer and this server share a home directory (see
 	// homeRelativePath's own doc comment).
 	FullPath string `json:"full_path,omitempty"`
+	// ActiveRoundRunID is the run of a PR-review corrective round that is
+	// under way on this ticket, set only on GET /requests/{id} for a request
+	// in pr_review. The ticket itself records a round when the round ends
+	// (request.Round), so until then nothing on the request named it: the
+	// page showed "ready for review" over a build in progress (found on a
+	// real corrective round, 2026-10-06).
+	ActiveRoundRunID string `json:"active_round_run_id,omitempty"`
+}
+
+// activeRoundRunIDs returns, per ticket index, the run of a PR-review
+// corrective round still under way for req: a run that names req as its
+// request, carries the round ticket id of that ticket
+// ("<request>-NNN-review<k>-..."), is not yet recorded in the ticket's
+// rounds, and has not reached a terminal state. Best effort: an unreadable
+// runs directory yields none.
+func activeRoundRunIDs(dataDir string, req *request.Request) map[int]string {
+	if req.State != request.StatePRReview {
+		return nil
+	}
+	byRequest, err := run.ListByRequestID(dataDir)
+	if err != nil {
+		return nil
+	}
+	out := map[int]string{}
+	for _, ticket := range req.Tickets {
+		recorded := map[string]bool{}
+		for _, round := range ticket.Rounds {
+			recorded[round.RunID] = true
+		}
+		prefix := fmt.Sprintf("%s-%03d-review", req.ID, ticket.Index)
+		for _, candidate := range byRequest[req.ID] {
+			if strings.HasPrefix(candidate.ID, prefix) && !recorded[candidate.ID] && !candidate.TerminalConfirmed() {
+				out[ticket.Index] = candidate.ID
+			}
+		}
+	}
+	return out
 }
 
 // requestDetailView is GET /requests/{id}'s JSON shape: requestSummaryView
@@ -3285,12 +3322,14 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 	}
 	if len(loaded.Tickets) > 0 {
 		view.Tickets = make([]requestTicketView, 0, len(loaded.Tickets))
+		activeRounds := activeRoundRunIDs(dataDir, loaded)
 		for _, ticket := range loaded.Tickets {
 			resolved := resolveTicketSpecPath(dataDir, id, ticket.SpecPath)
 			view.Tickets = append(view.Tickets, requestTicketView{
-				Ticket:   ticket,
-				Content:  readRequestFileBestEffort(resolved),
-				FullPath: homeRelativePath(absPathBestEffort(resolved)),
+				Ticket:           ticket,
+				Content:          readRequestFileBestEffort(resolved),
+				FullPath:         homeRelativePath(absPathBestEffort(resolved)),
+				ActiveRoundRunID: activeRounds[ticket.Index],
 			})
 		}
 	}

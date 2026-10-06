@@ -24,6 +24,12 @@ export function isReviewState(state: string): boolean {
  * both, and never a guess for any other state.
  */
 export function nextActionText(request: RequestSummary): string | null {
+  // A corrective round under way outranks the server's sentence, which is
+  // written from the request record and does not know a round has started.
+  const building = request.tickets.find((t) => t.activeRoundRunId !== "");
+  if (building !== undefined) {
+    return `A corrective round is building on ticket ${building.index}'s pull request. Nothing to do until it ends; its run is on the ticket below.`;
+  }
   if (request.nextAction !== "") return request.nextAction;
   if (requestAwaitingPullRequest(request)) return requestAwaitingPullRequestLabel(request);
   return null;

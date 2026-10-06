@@ -16,6 +16,8 @@ import { RelativeTime } from "@/ui/RelativeTime";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
+import { ReviewRounds } from "./ReviewRounds";
+
 const runPollMs = 10_000;
 
 function RunActivity({ run }: { readonly run: Run }) {
@@ -108,6 +110,7 @@ export function TicketCard({
             )}
           </p>
         )}
+        <ReviewRounds ticket={ticket} />
         {ticket.runId === "" ? null : (
           <div>
             <Button asChild size="sm">

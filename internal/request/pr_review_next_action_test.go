@@ -63,3 +63,43 @@ func TestNextActionForPRReviewIsEmptyWithoutAnOpenPullRequest(t *testing.T) {
 		t.Errorf("no open pull request: NextAction() = %q, want empty", got)
 	}
 }
+
+// TestNextActionForPRReviewNamesAFailedCorrectiveRound: found on a real
+// corrective round. The round was quarantined, nothing was pushed, and the
+// request still said "review ... or leave review comments".
+func TestNextActionForPRReviewNamesAFailedCorrectiveRound(t *testing.T) {
+	r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
+	r.State = StatePRReview
+	r.Tickets = []Ticket{{
+		Index: 1, PRURL: "https://example.test/pull/1", PRState: "ready",
+		Rounds: []Round{
+			{Index: 1, RunID: "run-r1", Outcome: RoundAccepted},
+			{Index: 2, RunID: "run-r2", Outcome: RoundQuarantined, Error: "policy gate did not pass: code_review"},
+		},
+	}}
+	got := r.NextAction()
+	for _, want := range []string{
+		"corrective round 2 on https://example.test/pull/1 was quarantined and pushed nothing",
+		"(policy gate did not pass: code_review)",
+		"max_review_rounds",
+		"resolve the thread",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("NextAction() = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "approve and merge it") {
+		t.Errorf("NextAction() = %q, still reads as a plain review", got)
+	}
+
+	// A later accepted round answers the failure, and a conformity round is
+	// not a PR-review round.
+	r.Tickets[0].Rounds = append(r.Tickets[0].Rounds, Round{Index: 3, Outcome: RoundAccepted})
+	if got := r.NextAction(); !strings.Contains(got, "approve and merge it") {
+		t.Errorf("after an accepted round: NextAction() = %q", got)
+	}
+	r.Tickets[0].Rounds = []Round{{Index: 1, Kind: ConformityRoundKind, Outcome: RoundQuarantined}}
+	if got := r.NextAction(); !strings.Contains(got, "approve and merge it") {
+		t.Errorf("a conformity round only: NextAction() = %q", got)
+	}
+}
