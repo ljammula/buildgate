@@ -93,6 +93,18 @@ export function optString(o: JsonObject, key: string, at: string, fallback = "")
   return absent(value) ? fallback : asString(value, `${at}.${key}`);
 }
 
+/** An optional string that is null when absent: "not known" stays apart from "". */
+export function stringOrNull(o: JsonObject, key: string, at: string): string | null {
+  const value = o[key];
+  return absent(value) ? null : asString(value, `${at}.${key}`);
+}
+
+/** An optional boolean that is null when absent: "not run" stays apart from false. */
+export function booleanOrNull(o: JsonObject, key: string, at: string): boolean | null {
+  const value = o[key];
+  return absent(value) ? null : asBoolean(value, `${at}.${key}`);
+}
+
 /** An optional number: null when absent or null, so "unknown" stays apart from 0. */
 export function optNumber(o: JsonObject, key: string, at: string): number | null {
   const value = o[key];
