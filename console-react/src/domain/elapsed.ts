@@ -77,6 +77,30 @@ export function relativeAge(value: string, now: Date): string {
 }
 
 /**
+ * Orders two server timestamps: negative when `a` is earlier, positive when
+ * later, 0 when they are the same instant or either cannot be read.
+ *
+ * Never compare them as text. Go writes RFC 3339 with the fraction's
+ * trailing zeros dropped, so "…05Z" sorts after "…05.5Z" as text ("Z" is
+ * above "."), and a local offset breaks text order outright. A newer event
+ * lost to an older cached record that way (found in review, 2026-10-05).
+ * Instants in the same millisecond compare by their written fraction.
+ */
+export function compareTimestamps(a: string, b: string): number {
+  const left = Date.parse(a);
+  const right = Date.parse(b);
+  if (Number.isNaN(left) || Number.isNaN(right)) return 0;
+  if (left !== right) return left - right;
+  return fractionOf(a) - fractionOf(b);
+}
+
+/** The fraction of a second a timestamp carries, as a number in [0, 1). */
+function fractionOf(value: string): number {
+  const match = /T\d{2}:\d{2}:\d{2}(\.\d+)?/.exec(value);
+  return match?.[1] === undefined ? 0 : Number(`0${match[1]}`);
+}
+
+/**
  * Parses an RFC3339 timestamp, returning null (rather than throwing) for an
  * empty or unparseable value.
  */

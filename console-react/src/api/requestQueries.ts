@@ -44,6 +44,7 @@ import {
   watchRequests,
 } from "@/api/requests";
 import type { ApiError } from "@/domain/apiError";
+import { compareTimestamps } from "@/domain/elapsed";
 import type { OracleListing } from "@/domain/oracle";
 import type { RequestSummary, RevisionDetail, RevisionSummary } from "@/domain/request";
 
@@ -53,11 +54,11 @@ export const requestListRefreshMs = 5_000;
 /**
  * Whichever of two records of one request is newer. An event from the
  * stream can arrive before an older list response that was already in
- * flight; the older record must not overwrite the newer one. `updated_at`
- * is RFC 3339 UTC, so it orders as text.
+ * flight; the older record must not overwrite the newer one. A tie goes
+ * to the incoming record.
  */
 export function newerRequest(current: RequestSummary, incoming: RequestSummary): RequestSummary {
-  return incoming.updatedAt >= current.updatedAt ? incoming : current;
+  return compareTimestamps(incoming.updatedAt, current.updatedAt) >= 0 ? incoming : current;
 }
 
 /** A fetched list with any newer record already in the cache kept in place. */

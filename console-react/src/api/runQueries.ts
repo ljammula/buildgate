@@ -23,6 +23,7 @@ import {
   watchRun,
 } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
+import { compareTimestamps } from "@/domain/elapsed";
 import type { DaemonStatus, QueueRunStatus, WorkspaceHint } from "@/domain/ops";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
 import type { ProjectReleaseView, ReleaseView } from "@/domain/release";
@@ -37,12 +38,9 @@ export function useRuns(refetchIntervalMs?: number): UseQueryResult<Run[]> {
   });
 }
 
-/**
- * Whichever record of one run is newer; `updated_at` is RFC 3339 UTC, so it
- * orders as text.
- */
+/** Whichever record of one run is newer; a tie goes to the incoming one. */
 export function newerRun(cached: Run | undefined, incoming: Run): Run {
-  return cached && cached.updatedAt > incoming.updatedAt ? cached : incoming;
+  return cached && compareTimestamps(cached.updatedAt, incoming.updatedAt) > 0 ? cached : incoming;
 }
 
 export interface LiveRun {

@@ -1,3 +1,4 @@
+import { compareTimestamps } from "@/domain/elapsed";
 import { useEffect, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
@@ -95,7 +96,7 @@ function TriageFocused({
   // board record is newer than the one shown: found in review, a spec edited
   // while the request stayed in the same review state kept serving the old
   // text, so an operator could approve content they never saw.
-  const detailStale = detail !== null && focused.updatedAt > detail.updatedAt;
+  const detailStale = detail !== null && compareTimestamps(focused.updatedAt, detail.updatedAt) > 0;
   useEffect(() => {
     if (refreshes > 0) void refetch();
   }, [refreshes, refetch]);

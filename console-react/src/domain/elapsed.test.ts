@@ -9,6 +9,7 @@ import {
   stallStatus,
   tryParseTimestamp,
   utcTooltip,
+  compareTimestamps,
 } from "@/domain/elapsed";
 
 // formatLocalTimestamp renders in the process time zone; pin it so the
@@ -155,5 +156,37 @@ describe("formatAgeCompact", () => {
     [(3 * 24 + 4) * 60 * minute, "3d 4h"],
   ])("%d ms reads %s", (ms, want) => {
     expect(formatAgeCompact(ms)).toBe(want);
+  });
+});
+
+describe("compareTimestamps", () => {
+  test("a dropped fraction does not sort after a written one", () => {
+    // As text, "…05Z" > "…05.5Z".
+    expect(compareTimestamps("2026-10-06T10:00:05Z", "2026-10-06T10:00:05.5Z")).toBeLessThan(0);
+    expect(compareTimestamps("2026-10-06T10:00:05.5Z", "2026-10-06T10:00:05Z")).toBeGreaterThan(0);
+  });
+
+  test("fractions of different lengths compare by value", () => {
+    expect(
+      compareTimestamps("2026-10-06T04:13:53.20754Z", "2026-10-06T04:13:53.819097Z"),
+    ).toBeLessThan(0);
+    expect(
+      compareTimestamps("2026-10-06T04:13:53.9Z", "2026-10-06T04:13:53.819097Z"),
+    ).toBeGreaterThan(0);
+  });
+
+  test("instants in the same millisecond compare by their fraction", () => {
+    expect(
+      compareTimestamps("2026-10-06T04:13:53.000469Z", "2026-10-06T04:13:53.000470Z"),
+    ).toBeLessThan(0);
+  });
+
+  test("an offset is an instant, not text", () => {
+    expect(compareTimestamps("2026-10-05T22:50:20-05:00", "2026-10-06T03:50:21Z")).toBeLessThan(0);
+    expect(compareTimestamps("2026-10-05T22:50:20-05:00", "2026-10-06T03:50:20Z")).toBe(0);
+  });
+
+  test("an unreadable timestamp orders as equal", () => {
+    expect(compareTimestamps("", "2026-10-06T03:50:20Z")).toBe(0);
   });
 });
