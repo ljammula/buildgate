@@ -144,6 +144,33 @@ export interface Rejection {
    * (Go's Rejection.ForStage).
    */
   readonly forStage: string | null;
+  /**
+   * Notes tied to places in the reviewed files, and the free note beside
+   * them. `reason` already carries all of it as text; these let a screen
+   * show each note against the document. Empty for a plain rejection.
+   */
+  readonly anchors: readonly RejectionAnchor[];
+  readonly note: string;
+}
+
+/** One note of a rejection tied to a place in a reviewed file (Go's RejectionAnchor). */
+export interface RejectionAnchor {
+  /** Request-relative file: "spec.md", "tickets/001.spec.md". */
+  readonly path: string;
+  /** The heading the note is under, as written in the file; "" for the whole file. */
+  readonly section: string;
+  /** The 1-based numbered item under the section; 0 for the section as a whole. */
+  readonly item: number;
+  readonly note: string;
+}
+
+export function decodeRejectionAnchor(o: JsonObject, at: string): RejectionAnchor {
+  return {
+    path: reqString(o, "path", at),
+    section: optString(o, "section", at),
+    item: numberOr(o, "item", at, 0),
+    note: reqString(o, "note", at),
+  };
 }
 
 export function decodeRejection(o: JsonObject, at: string): Rejection {
@@ -153,6 +180,8 @@ export function decodeRejection(o: JsonObject, at: string): Rejection {
     reason: reqString(o, "reason", at),
     fromState: reqString(o, "from_state", at),
     forStage: stringOrNull(o, "for_stage", at),
+    anchors: objectList(o, "anchors", at, decodeRejectionAnchor),
+    note: optString(o, "note", at),
   };
 }
 

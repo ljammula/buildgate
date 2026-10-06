@@ -622,6 +622,13 @@ type Rejection struct {
 	// for Reject, whose FromState already is that stage. Read through
 	// Stage, never directly.
 	ForStage State `json:"for_stage,omitempty"`
+	// Anchors are the notes of this rejection tied to places in the
+	// reviewed files, and Note the reviewer's free text beside them; both
+	// set only by RejectAnchored with at least one anchor. Reason already
+	// carries all of it as text (AnchoredReason): these are for showing
+	// each note against the document, never for building feedback.
+	Anchors []RejectionAnchor `json:"anchors,omitempty"`
+	Note    string            `json:"note,omitempty"`
 }
 
 // Stage is the review stage rej's Reason belongs to -- ForStage when

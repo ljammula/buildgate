@@ -132,7 +132,15 @@ test("a rejection's stage is its send-back stage, else the state it was rejected
   const r = detail("request-plan-review");
   expect(rejectionStage(r.rejections[0]!)).toBe("planning");
   expect(
-    rejectionStage({ by: "a", at: "t", reason: "r", fromState: "halted", forStage: null }),
+    rejectionStage({
+      by: "a",
+      at: "t",
+      reason: "r",
+      fromState: "halted",
+      forStage: null,
+      anchors: [],
+      note: "",
+    }),
   ).toBe("halted");
 });
 
@@ -242,6 +250,8 @@ test("request-plan-review decodes", () => {
       reason: "split the migration out",
       fromState: "plan_review",
       forStage: "planning",
+      anchors: [],
+      note: "",
     },
   ]);
 });
@@ -320,6 +330,15 @@ test("request-every-field decodes with every optional field populated", () => {
       reason: "every-field reason",
       fromState: "spec_review",
       forStage: "spec_drafting",
+      anchors: [
+        {
+          path: "every-field path",
+          section: "every-field section",
+          item: 3,
+          note: "every-field note",
+        },
+      ],
+      note: "every-field note",
     },
   ]);
   expect(r.history).toEqual([
@@ -454,4 +473,29 @@ test("listRevisions/getRevision parse the revision routes", () => {
       "x",
     )[0]!.files,
   ).toEqual([]);
+});
+
+test("a rejection's anchored notes are decoded; a plain rejection has none", () => {
+  const withAnchors = request({
+    rejections: [
+      {
+        by: "a",
+        at: "t",
+        reason: "- spec.md, ## Scope: too wide\n\nOtherwise fine.",
+        from_state: "spec_review",
+        note: "Otherwise fine.",
+        anchors: [
+          { path: "spec.md", section: "## Scope", note: "too wide" },
+          { path: "spec.md", section: "## Acceptance criteria", item: 2, note: "which account?" },
+        ],
+      },
+      { by: "a", at: "t", reason: "plain", from_state: "spec_review" },
+    ],
+  });
+  expect(withAnchors.rejections[0]?.anchors).toEqual([
+    { path: "spec.md", section: "## Scope", item: 0, note: "too wide" },
+    { path: "spec.md", section: "## Acceptance criteria", item: 2, note: "which account?" },
+  ]);
+  expect(withAnchors.rejections[0]?.note).toBe("Otherwise fine.");
+  expect(withAnchors.rejections[1]).toMatchObject({ anchors: [], note: "" });
 });

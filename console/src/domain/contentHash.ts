@@ -71,7 +71,8 @@ export function expectedSha256For(request: RequestSummary): Record<string, strin
   }
 }
 
-function ticketRelPath(specPath: string): string | null {
+/** A ticket file's request-relative path ("tickets/001.spec.md") from its `spec_path`; null when it has none. */
+export function ticketRelPath(specPath: string): string | null {
   const normalized = specPath.replaceAll("\\", "/");
   // The *last* "/tickets/" segment, not the first -- found in review: an
   // absolute -data-dir that itself contains a directory literally named
