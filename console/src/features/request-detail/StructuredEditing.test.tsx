@@ -331,4 +331,21 @@ describe("a ticket's header lines and covered criteria as fields", () => {
     // Everything typed before the heading line was written; the heading line was not.
     expect(raw).toHaveValue(TICKET.replace("1. s\n", "1. s\n## Out of scop\n"));
   });
+
+  test("a step whose first line the parser reads as blank is not written, so the next step is safe", async () => {
+    const content = TICKET.replace("1. s\n", "1. one\n2. two\n3. three\n");
+    await edit(content);
+    const panelNode = panel();
+    const steps = within(panelNode).getByRole("region", { name: "Steps" });
+    const raw = within(panelNode).getByRole("textbox", { name: /^Edit / });
+    const step2 = within(steps).getByRole("textbox", { name: "Step 2" });
+
+    // U+0085 is a space to the server's parser and not to String.trim().
+    fireEvent.change(step2, { target: { value: "\u0085" } });
+    expect(raw).toHaveValue(content);
+    fireEvent.change(step2, { target: { value: "\u0085x" } });
+
+    // Step 2 alone changed: step 3 is still step 3.
+    expect(raw).toHaveValue(content.replace("2. two\n", "2. \u0085x\n"));
+  });
 });

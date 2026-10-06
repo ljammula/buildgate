@@ -858,6 +858,11 @@ func stageFeedback(r *Request, stage State, label string) string {
 	for _, rej := range r.Rejections {
 		if stage != StateSpecReview && rej.ForStage == StateSpecReview {
 			b.Reset()
+			// Edits made before the send-back were to a draft of the spec
+			// it replaced: they are dropped with the notes.
+			if at, err := time.Parse(time.RFC3339Nano, rej.At); err == nil {
+				previous = at
+			}
 			continue
 		}
 		if rej.Stage() != stage {

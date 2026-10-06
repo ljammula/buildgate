@@ -36,7 +36,11 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
   const revisions = useRequestRevisions(request.id, enabled);
   // An operator's own edit also leaves a revision (the text it replaced):
   // this panel compares with what was rejected, so those are not offered.
-  const list = (revisions.data ?? []).filter((r) => r.kind !== "edit");
+  // Nor are another stage's: at plan review the spec's rejected drafts are
+  // not what the operator is re-reading.
+  const list = (revisions.data ?? []).filter(
+    (r) => r.kind !== "edit" && r.fromState === request.state,
+  );
   const latest = list.reduce<number | null>(
     (best, r) => (best === null || r.index > best ? r.index : best),
     null,

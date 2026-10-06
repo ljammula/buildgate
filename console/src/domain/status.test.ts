@@ -132,7 +132,8 @@ test("each request state has one label and the verbs an operator has there", () 
     "Approve",
     "Request changes",
   ]);
-  expect(requestVerbs("plan_review")).toEqual(requestVerbs("oracle_review"));
+  expect(requestVerbs("plan_review")).toEqual(["approve", "requestChanges"]);
+  expect(requestVerbs("oracle_review")).toEqual(["approve", "requestChanges"]);
   expect(requestVerbs("quarantined").map((v) => REQUEST_VERBS[v])).toEqual([
     "Retry request",
     "Send back",

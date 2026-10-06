@@ -56,6 +56,23 @@ function stripEol(line: string): string {
   return line.endsWith("\r") ? line.slice(0, -1) : line;
 }
 
+/**
+ * `replacement` for the lines up to `lastIndex`, ending as the file did when
+ * that is the file's last line: text after the final line break carries no
+ * CR, and one written there would be a byte nobody typed.
+ */
+function endingAsTheFileDid(
+  replacement: readonly string[],
+  lines: readonly string[],
+  lastIndex: number,
+): string[] {
+  const out = [...replacement];
+  if (lastIndex !== lines.length - 1 || out.length === 0) return out;
+  const cr = (lines[lastIndex] ?? "").endsWith("\r") ? "\r" : "";
+  out[out.length - 1] = stripEol(out[out.length - 1] ?? "") + cr;
+  return out;
+}
+
 function layout(
   text: string,
   range: { readonly start: number; readonly end: number } | null,
@@ -145,7 +162,11 @@ export function setCriterionBody(text: string, index: number, body: string): str
   const span = doc?.spans[index];
   if (doc === null || span === undefined) return text;
   if (body === bodyOf(doc.lines, span)) return text;
-  const replacement = itemLines(prefixFor(doc, span, index + 1), body, doc.eol);
+  const replacement = endingAsTheFileDid(
+    itemLines(prefixFor(doc, span, index + 1), body, doc.eol),
+    doc.lines,
+    span.last,
+  );
   doc.lines.splice(span.first, span.last - span.first + 1, ...replacement);
   return doc.lines.join("\n");
 }
@@ -273,11 +294,15 @@ export function setSectionListItem(
   if (doc === null || span === undefined) return text;
   const pattern = heading === "### Steps" ? PREFIX : BULLET_PREFIX;
   if (body === bodyOf(doc.lines, span, pattern)) return text;
-  const replacement = itemLines(
-    sectionPrefix(doc, heading, span, index + 1),
-    body,
-    doc.eol,
-    heading === "### Steps" ? CRITERION_ITEM : BULLET_ITEM,
+  const replacement = endingAsTheFileDid(
+    itemLines(
+      sectionPrefix(doc, heading, span, index + 1),
+      body,
+      doc.eol,
+      heading === "### Steps" ? CRITERION_ITEM : BULLET_ITEM,
+    ),
+    doc.lines,
+    span.last,
   );
   doc.lines.splice(span.first, span.last - span.first + 1, ...replacement);
   return doc.lines.join("\n");
@@ -499,10 +524,13 @@ function withoutCr(body: string): string {
 /**
  * `text` with one section's body replaced and every other line untouched.
  * Only the body lines (see `sections`) are replaced; the blank lines after
- * them stay, so `setSectionBody(t, h, x, sections(t, h)[i].body) === t`. A body
- * that differs from the current one only in CR line endings counts as equal.
- * New lines take the document's line ending (CRLF when the heading line has
- * one). An empty `body` removes the body lines. An absent heading returns `text`.
+ * them stay, so `setSectionBody(t, h, x, sections(t, h)[i].body) === t`.
+ * Within the body, lines the new text keeps at its start and at its end come
+ * back with their own bytes (a CR included), so a document of mixed line
+ * endings changes only where the operator typed; a new line takes the
+ * heading line's ending. Trailing blank lines of `body` are not written
+ * (they are the spacing before the next heading, which stays). An empty
+ * `body` removes the body lines. An absent heading returns `text`.
  */
 export function setSectionBody(
   text: string,
@@ -513,21 +541,72 @@ export function setSectionBody(
   const lines = text.split("\n");
   const span = sectionSpan(lines, headings, heading);
   if (span === null) return text;
-  const current = lines.slice(span.start, span.end).join("\n");
-  if (body === current || withoutCr(body) === withoutCr(current)) return text;
-  const eol = (lines[span.at] ?? "").endsWith("\r") ? "\r" : "";
-  const replacement =
-    body === ""
-      ? []
-      : withoutCr(body)
-          .split("\n")
-          .map((l) => l + eol);
-  return [...lines.slice(0, span.start), ...replacement, ...lines.slice(span.end)].join("\n");
+  const old = lines.slice(span.start, span.end);
+  const next = withoutCr(body).split("\n");
+  while (next.length > 0 && trimSpace(next[next.length - 1] ?? "") === "") next.pop();
+  const same = (a: string | undefined, b: string | undefined) => stripEol(a ?? "") === b;
+  if (old.length === next.length && old.every((line, i) => same(line, next[i]))) return text;
+  let head = 0;
+  while (head < old.length && head < next.length && same(old[head], next[head])) head++;
+  let tail = 0;
+  while (
+    tail < old.length - head &&
+    tail < next.length - head &&
+    same(old[old.length - 1 - tail], next[next.length - 1 - tail])
+  ) {
+    tail++;
+  }
+  const headingLine = lines[span.at] ?? "";
+  // A heading that is the file's last line has no line break of its own to
+  // copy: the lines before it say what the document uses.
+  const crlf =
+    span.at === lines.length - 1
+      ? lines.slice(0, -1).some((line) => line.endsWith("\r"))
+      : headingLine.endsWith("\r");
+  const eol = crlf ? "\r" : "";
+  // The file's last line has no line break; kept as a line that others now
+  // follow, it needs the one its neighbours have.
+  const endsFile = span.end === lines.length && old.length > 0;
+  const lastHadCr = (old[old.length - 1] ?? "").endsWith("\r");
+  if (endsFile) old[old.length - 1] = stripEol(old[old.length - 1] ?? "") + eol;
+  const written = [
+    ...old.slice(0, head),
+    ...next.slice(head, next.length - tail).map((line) => line + eol),
+    ...old.slice(old.length - tail),
+  ];
+  const before = lines.slice(0, span.start);
+  if (span.at === lines.length - 1 && written.length > 0) {
+    // The heading now has lines after it, and the new last line ends the file.
+    before[span.at] = headingLine + eol;
+    written[written.length - 1] = stripEol(written[written.length - 1] ?? "");
+    return [...before, ...written].join("\n");
+  }
+  if (endsFile && written.length > 0) {
+    const last = written.length - 1;
+    written[last] = stripEol(written[last] ?? "") + (lastHadCr ? "\r" : "");
+  }
+  return [...before, ...written, ...lines.slice(span.end)].join("\n");
 }
 
-/** Why `body` cannot be a section's body, or null: a line equal to a required heading changes the structure. */
-export function sectionBodyProblem(headings: readonly string[], body: string): string | null {
-  const clash = body.split("\n").find((line) => headings.includes(trimSpace(line)));
-  if (clash === undefined) return null;
-  return `A line reading "${trimSpace(clash)}" would add or move a section heading; edit the whole file to do that.`;
+const ACCEPTANCE_CRITERIA_HEADING = "## Acceptance criteria";
+
+/**
+ * Why `body` cannot be the body of `heading`, or null. A line equal to a
+ * required heading changes the file's structure; under the acceptance
+ * criteria, any "## " line does, because the criteria end at the first one.
+ */
+export function sectionBodyProblem(
+  headings: readonly string[],
+  body: string,
+  heading = "",
+): string | null {
+  const lines = body.split("\n").map(trimSpace);
+  const clash = lines.find((line) => headings.includes(line));
+  if (clash !== undefined) {
+    return `A line reading "${clash}" would add or move a section heading; edit the whole file to do that.`;
+  }
+  if (heading === ACCEPTANCE_CRITERIA_HEADING && lines.some((line) => line.startsWith("## "))) {
+    return 'A line starting "## " ends the acceptance criteria there, so the criteria after it would not be read; edit the whole file to add a section.';
+  }
+  return null;
 }

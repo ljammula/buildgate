@@ -372,3 +372,40 @@ test("the audit lists an in-place edit with its changed lines and whether a draf
     "Not sent to a drafter: nothing has redrafted this file since.",
   );
 });
+
+test("an edit followed by a rejection of its stage is shown as part of that rejection's feedback", async () => {
+  openRequest(
+    requestWire({
+      state: "spec_review",
+      title: "Edited then rejected",
+      spec: "# Spec\n\nnew",
+      edits: [
+        {
+          by: "kanna",
+          at: "2026-09-10T09:00:00Z",
+          path: "spec.md",
+          from_state: "spec_review",
+          revision: 1,
+          diff: "- old\n+ new\n",
+        },
+      ],
+      rejections: [
+        {
+          by: "kanna",
+          at: "2026-09-10T09:05:00Z",
+          reason: "tighten it",
+          from_state: "spec_review",
+        },
+      ],
+    }),
+    {
+      extra: [{ on: "GET /requests/req-1/revisions", reply: json([]) }],
+    },
+  );
+  await screen.findByRole("heading", { level: 1, name: "Edited then rejected" });
+  const audit = screen.getByRole("region", { name: "Audit" });
+  await userEvent.click(within(audit).getByRole("button", { name: /Edits in place \(1\)/ }));
+  expect(within(audit).getByTestId("edit-history")).toHaveTextContent(
+    /In the feedback of the rejection of .*: a redraft from it is told to keep these lines\./,
+  );
+});
