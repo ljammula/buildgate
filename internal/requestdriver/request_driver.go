@@ -1474,48 +1474,15 @@ func capConformityDetail(s string, maxBytes int) string {
 	return strings.ToValidUTF8(s[:maxBytes], "") + "\n[detail truncated to fit the size limit]"
 }
 
-// WriteReviewAddendum writes
-// <request>/rounds/<ticket>-conformity<round>/addendum.md: the ticket's
-// own build spec (TicketBuildSpecContent -- its spec plus the
-// approved-spec acceptance criteria it covers, verbatim), plus a "##
-// Spec conformity review to address"
-// section listing each flagged criterion with the independent reviewer's
-// own verdict and detail (only when flaggedVerdicts is non-empty), plus a
-// "## Code review findings to address" section listing each blocking
-// ("high"-severity) code-review finding's location, severity, summary and
-// failure scenario (only when findings is non-empty) -- mirrors
-// WriteRoundAddendum's PR-review shape (pr_review_driver.go), built from
-// run.ReviewVerdict/run.CodeReviewFinding rather than a human's
-// forge.Thread. The ticket header (Allowed-Files:, Verify-Command:, ...)
-// is carried through unchanged, so a corrective round can never widen
-// scope beyond what the ticket already declared.
-//
-// Every value from an untrusted run.ReviewVerdict/run.CodeReviewFinding is
-// bounded before it is ever written, with the SAME helpers and caps for
-// both sections: the single-line fields (Criterion/Verdict, or a finding's
-// file:line/Severity) are flattened to one line and length-capped
-// (flattenConformityField) since they render OUTSIDE any fence, the
-// free-text field (Detail, or a finding's Summary/FailureScenario) is
-// length-capped BEFORE fencing (capConformityDetail) since CapFeedback's
-// own tail-keeping truncation could otherwise reopen an already-closed
-// fence, and at most maxConformityFlaggedVerdicts entries are included per
-// section, with the remainder counted in a trailing note -- so each
-// section is size-bounded without ever needing to truncate through the
-// middle of a fenced block (both found via adversarial review;
-// CapFeedback is deliberately not used here at all).
-func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex int) (string, error) {
-	// buildSpec, not the raw ticket spec: the corrective round's own
-	// -spec must carry the same acceptance-criteria text (exact field/
-	// error-code names) the ticket's first build received, not just its
-	// covered-criteria NUMBERS -- see TicketBuildSpecContent's own doc
-	// comment for why. Embedding both would duplicate the criteria
-	// section; this embeds the build spec once, then appends this
-	// round's own findings on top of it.
-	buildSpec, err := TicketBuildSpecContent(dataDir, requestID, *ticket)
-	if err != nil {
-		return "", fmt.Errorf("build spec for ticket %s: %w", ticket.SpecPath, err)
-	}
-
+// reviewFindingsSection renders the review gate's flagged spec-conformity
+// criteria and blocking code-review findings as the addendum sections a
+// corrective round's builder reads ("## Spec conformity review to address",
+// "## Code review findings to address"), each present only when it has
+// entries. WriteReviewAddendum's doc comment states the bounds every
+// untrusted value gets; both addendum writers (the first build's review
+// round and a PR-review round, WriteRoundAddendum) share this one renderer
+// so neither can drop them.
+func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding) string {
 	var section strings.Builder
 	if len(flaggedVerdicts) > 0 {
 		included := flaggedVerdicts
@@ -1564,6 +1531,52 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 			fmt.Fprintf(&section, "_%d more findings omitted._\n", omitted)
 		}
 	}
+	return section.String()
+}
+
+// WriteReviewAddendum writes
+// <request>/rounds/<ticket>-conformity<round>/addendum.md: the ticket's
+// own build spec (TicketBuildSpecContent -- its spec plus the
+// approved-spec acceptance criteria it covers, verbatim), plus a "##
+// Spec conformity review to address"
+// section listing each flagged criterion with the independent reviewer's
+// own verdict and detail (only when flaggedVerdicts is non-empty), plus a
+// "## Code review findings to address" section listing each blocking
+// ("high"-severity) code-review finding's location, severity, summary and
+// failure scenario (only when findings is non-empty) -- mirrors
+// WriteRoundAddendum's PR-review shape (pr_review_driver.go), built from
+// run.ReviewVerdict/run.CodeReviewFinding rather than a human's
+// forge.Thread. The ticket header (Allowed-Files:, Verify-Command:, ...)
+// is carried through unchanged, so a corrective round can never widen
+// scope beyond what the ticket already declared.
+//
+// Every value from an untrusted run.ReviewVerdict/run.CodeReviewFinding is
+// bounded before it is ever written, with the SAME helpers and caps for
+// both sections: the single-line fields (Criterion/Verdict, or a finding's
+// file:line/Severity) are flattened to one line and length-capped
+// (flattenConformityField) since they render OUTSIDE any fence, the
+// free-text field (Detail, or a finding's Summary/FailureScenario) is
+// length-capped BEFORE fencing (capConformityDetail) since CapFeedback's
+// own tail-keeping truncation could otherwise reopen an already-closed
+// fence, and at most maxConformityFlaggedVerdicts entries are included per
+// section, with the remainder counted in a trailing note -- so each
+// section is size-bounded without ever needing to truncate through the
+// middle of a fenced block (both found via adversarial review;
+// CapFeedback is deliberately not used here at all).
+func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex int) (string, error) {
+	// buildSpec, not the raw ticket spec: the corrective round's own
+	// -spec must carry the same acceptance-criteria text (exact field/
+	// error-code names) the ticket's first build received, not just its
+	// covered-criteria NUMBERS -- see TicketBuildSpecContent's own doc
+	// comment for why. Embedding both would duplicate the criteria
+	// section; this embeds the build spec once, then appends this
+	// round's own findings on top of it.
+	buildSpec, err := TicketBuildSpecContent(dataDir, requestID, *ticket)
+	if err != nil {
+		return "", fmt.Errorf("build spec for ticket %s: %w", ticket.SpecPath, err)
+	}
+
+	section := reviewFindingsSection(flaggedVerdicts, findings)
 
 	var b strings.Builder
 	b.WriteString(buildSpec)
@@ -1577,7 +1590,7 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
 		b.WriteString(closing + "\n")
 	}
-	b.WriteString(section.String())
+	b.WriteString(section)
 
 	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-conformity%d", ticket.Index, roundIndex))
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -2032,9 +2045,10 @@ func RequestSpecPath(dataDir, id string) string {
 }
 
 // ticketQueueEntry builds the QueueEntry shape shared by a ticket's
-// ordinary first build (BuildRequestBuildArgs) and its automatic review
-// corrective round (BuildReviewCorrectiveArgs) --
-// everything both need computed identically (the legacy
+// ordinary first build (BuildRequestBuildArgs), its automatic review
+// corrective round (BuildReviewCorrectiveArgs) and its PR-review corrective
+// round (RunCorrectiveRound, pr_review_driver.go) --
+// everything they need computed identically (the legacy
 // full-suite-command fallback, the reference oracle, the acceptance-
 // criteria file), varying only in id and specPath. Found via adversarial
 // review: BuildReviewCorrectiveArgs used to hand-build its own
@@ -2042,9 +2056,8 @@ func RequestSpecPath(dataDir, id string) string {
 // full-suite fallback, so a corrective round for a request submitted with
 // `factoryd submit -harness` silently reverted to the session's own default
 // harness instead of the request's actual one. One shared builder keeps
-// those two in step. The PR-review corrective round (RunCorrectiveRound,
-// pr_review_driver.go) still builds its own QueueEntry and has the same
-// gap: a known follow-up, not fixed here.
+// them in step: the PR-review round built its own too and ran with no
+// acceptance-criteria file, so no spec_conformity review at all.
 func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string) (*QueueEntry, error) {
 	// prBase: ticket N (N>1) stacks its draft PR on ticket N-1's own
 	// branch while that PR is still open and unmerged -- see

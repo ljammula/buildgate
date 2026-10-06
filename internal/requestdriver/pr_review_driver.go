@@ -844,14 +844,14 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
 	}
 
-	addendumPath, err := WriteRoundAddendum(dataDir, r.ID, ticket, newThreads, roundIndex)
+	// What the review gate flagged in the round before this one, when that
+	// round was quarantined: its commits are the tip this round builds on
+	// (priorRoundGateFindings), so its builder is told why they were
+	// refused, beside the reviewer's comments.
+	flaggedVerdicts, findings := priorRoundGateFindings(dataDir, r, ticket)
+	addendumPath, err := WriteRoundAddendum(dataDir, r.ID, ticket, newThreads, flaggedVerdicts, findings, roundIndex)
 	if err != nil {
 		return fmt.Errorf("request %s: ticket %d: round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
-	}
-
-	verifyCommand, err := ticketspec.ParseVerifyCommand(ticket.SpecPath)
-	if err != nil {
-		return fmt.Errorf("request %s: ticket %d: round %d: resolve verify command: %w", r.ID, ticket.Index, roundIndex, err)
 	}
 
 	roundRunID := fmt.Sprintf("%s-%03d-review%d", r.ID, ticket.Index, roundIndex)
@@ -884,56 +884,24 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// worse, attempt one against the wrong base.
 	roundCfg := cfg
 	roundCfg.OpenPullRequest = false
-	// The ticket's approved oracle (hash-verified moments ago by
-	// resolveTicketOracle) applies to a corrective round too. Without it the
-	// round has no factory-authored record for the committed oracle files and
-	// .buildgate/oracles.json that its cumulative -diff-base inventory lists,
-	// and the always-protected .buildgate/ directory would quarantine every
-	// otherwise-successful round (Codex review of #202). With it, the round
-	// re-derives the same pinned records (the host commit is a no-op because the
-	// bytes are already committed) and the hash-keyed exemptions apply.
-	oracleDir, oracleCommand, err := ResolveTicketOracle(dataDir, r, *ticket)
+	// The same QueueEntry builder as the ticket's first build and its
+	// automatic review round (ticketQueueEntry), so a PR-review round gets
+	// what they get: the approved oracle (without its factory-authored
+	// records the always-protected .buildgate/ directory would quarantine
+	// every otherwise-successful round), the request's full-suite command
+	// and its source, harness, model and preflight profile, and the
+	// ticket's acceptance-criteria file, so the round's review judges spec
+	// conformity as well as the code. SpecPath is addendumPath: the
+	// ticket's own spec plus this round's appended sections.
+	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, roundRunID, addendumPath)
 	if err != nil {
-		return fmt.Errorf("request %s: ticket %d: round %d: reference oracle: %w", r.ID, ticket.Index, roundIndex, err)
+		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
 	}
-	entry := &QueueEntry{
-		ReferenceOracleDir:     oracleDir,
-		ReferenceOracleCommand: oracleCommand,
-		ExecutionHarness:       r.Harnesses["execution"],
-		// The request's own full-suite command: without it a corrective round
-		// has no full_suite_verify gate, which the default release policy
-		// requires.
-		FullSuiteCommand: r.FullSuiteCommand,
-		// And its source, as BuildRequestBuildArgs forwards it: without it a
-		// "none" opt-out (empty command) was re-substituted with the verify
-		// command downstream, and a substituted command lost its evidence
-		// label (found in review of Phase 1).
-		FullSuiteSource: r.FullSuiteSource,
-		NoCommitOracles: r.NoCommitOracles,
-		ID:              roundRunID,
-		Workspace:       r.Workspace,
-		Project:         r.Project,
-		SpecPath:        addendumPath,
-		VerifyCommand:   verifyCommand,
-		// See BuildRequestBuildArgs' own comment on this same field: a
-		// corrective round is another QueueEntry-driven run of the same
-		// workspace, so it needs r.PreflightProfile carried onto it too,
-		// not just the ticket's first build.
-		PreflightProfile: r.PreflightProfile,
-		// IssueRef is deliberately left unset: a corrective round opens
-		// no PR of its own (see roundCfg.openPullRequest = false above),
-		// so there is no draft PR body for -pr-closes-issue to land in.
-		// RequestTicket: see QueueEntry.RequestTicket's own doc comment --
-		// SpecPath here is addendumPath, the ticket's own ticketspec-format
-		// spec plus appended reviewer comments, never a repo-native
-		// pi-harness ticket.
-		RequestTicket: true,
-		// ExecutionModel: carry the request's own execution-role choice
-		// forward into this corrective round, the same as ExecutionHarness/
-		// PreflightProfile/FullSuiteCommand above -- the round is another
-		// build of the same request's ticket, not a fresh choice point.
-		ExecutionModel: r.Models["execution"],
-	}
+	// A round opens no PR of its own (roundCfg.OpenPullRequest above), so
+	// it has no draft PR body for -pr-closes-issue to land in and no base
+	// to stack on.
+	entry.IssueRef = ""
+	entry.PRBase = ""
 	// ticketRun.DiffBaseSHA, when set, is itself an EARLIER round's own
 	// -diff-base override -- the ticket's true original base, threaded
 	// forward across rounds -- not ticketRun.BaseSHA, which for a run that
@@ -1220,13 +1188,63 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	return r.Save(dataDir)
 }
 
+// priorRoundGateFindings returns what the review gate flagged in ticket's
+// most recent PR-review round that ran, when that round was quarantined:
+// its run's flagged spec-conformity criteria and blocking code-review
+// findings. A quarantined round is never pushed, but its commits stay on
+// the local PR branch (PrepareOnBranch checks the branch itself out), so
+// the next round builds on top of them and these findings describe the
+// tree its builder starts from. Found live (2026-10-06, three rounds on one
+// pull request): each round was given only the reviewer's comment, built
+// on the refused commits, and was quarantined for the finding the round
+// before it had already been quarantined for.
+//
+// Nothing is returned after an accepted round (its findings were not
+// blocking) or a halted one (whether it committed is unknown), or when the
+// round's run record cannot be read: the round then runs as it did before
+// this existed, on the reviewer's comments alone.
+func priorRoundGateFindings(dataDir string, r *request.Request, ticket *request.Ticket) ([]run.ReviewVerdict, []run.CodeReviewFinding) {
+	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
+		rnd := ticket.Rounds[i]
+		if rnd.Kind != "" || rnd.StartFailure {
+			continue
+		}
+		if rnd.Outcome != request.RoundQuarantined {
+			return nil, nil
+		}
+		loaded, err := run.Load(dataDir, rnd.RunID)
+		if err != nil {
+			log.Printf("request %s: ticket %d: load quarantined round %d's run %s for its review findings: %v", r.ID, ticket.Index, rnd.Index, rnd.RunID, err)
+			return nil, nil
+		}
+		return flaggedConformityVerdicts(loaded), blockingCodeReviewFindings(loaded)
+	}
+	return nil, nil
+}
+
+// priorRoundFindingsNote opens the gate's sections in a PR-review round's
+// addendum. It is fixed text: nothing from a reviewer or a run reaches it.
+const priorRoundFindingsNote = `
+## Why the previous attempt was not pushed
+
+An earlier attempt at the reviewer comments above is already committed on
+this branch. The review gate refused it for the findings below, so it was
+not pushed to the pull request. The gate reviews the whole pull request
+diff, so a finding may be about code the earlier attempt did not touch.
+Fix every finding below as well as the reviewer comments; keep or rework
+the earlier attempt's changes as needed.
+`
+
 // WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md:
 // the ticket's own build spec (TicketBuildSpecContent -- its spec plus
 // the approved-spec acceptance criteria it covers, verbatim), plus a
 // "## Reviewer comments to address" section listing each of threads with
-// its path, line, author, and body verbatim -- becomes the corrective
-// round's own -spec.
-func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, roundIndex int) (string, error) {
+// its path, line, author, and body verbatim, plus, when the round before
+// this one was quarantined by the review gate (flaggedVerdicts/findings,
+// from priorRoundGateFindings), the gate's own sections as
+// reviewFindingsSection renders them -- becomes the corrective round's own
+// -spec.
+func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex int) (string, error) {
 	// buildSpec, not the raw ticket spec: this round's own -spec must
 	// carry the same acceptance-criteria text the ticket's first build
 	// received, not just the "### Acceptance criteria covered" numbers --
@@ -1240,13 +1258,28 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 	if len(buildSpec) == 0 || buildSpec[len(buildSpec)-1] != '\n' {
 		b.WriteString("\n")
 	}
+	// A spec that ends inside an unclosed fence would read the first
+	// fenceVerbatim opener below as that fence's close, leaving a comment
+	// body or a finding's detail as top-level lines (WriteReviewAddendum
+	// closes it for the same reason).
+	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
+		b.WriteString(closing + "\n")
+	}
 	b.WriteString("\n## Reviewer comments to address\n\n")
 	for _, t := range threads {
 		// Fenced, never inline: a comment body is untrusted text and
 		// ticketspec skips fenced content, so a reviewer cannot smuggle a
 		// top-level key line (Required-Content: is additive across lines)
 		// into the round's own gates (adversarial review finding).
-		fmt.Fprintf(&b, "- **%s:%d** (%s):\n\n%s\n", t.Path, t.Line, t.Author, fenceVerbatim(t.Body))
+		// The path and author sit outside the fence, so each is flattened
+		// to one bounded line first (flattenConformityField).
+		path := flattenConformityField(t.Path, MaxConformityCriterionBytes)
+		author := flattenConformityField(t.Author, MaxConformityCriterionBytes)
+		fmt.Fprintf(&b, "- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, fenceVerbatim(t.Body))
+	}
+	if section := reviewFindingsSection(flaggedVerdicts, findings); section != "" {
+		b.WriteString(priorRoundFindingsNote)
+		b.WriteString(section)
 	}
 
 	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-%d", ticket.Index, roundIndex))
