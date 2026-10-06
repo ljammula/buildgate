@@ -54,6 +54,18 @@ export function ReviewRounds({ ticket }: { readonly ticket: RequestTicket }) {
                 </Link>
               )}
             </div>
+            {round.priorRunIds.length === 0 ? null : (
+              // The round's earlier builds, each refused by the review gate
+              // and followed by a fix attempt; the run above is the last.
+              <p className="text-fg-muted flex flex-wrap items-center gap-2 text-xs">
+                <span>{`After ${round.priorRunIds.length} attempt${round.priorRunIds.length === 1 ? "" : "s"} the review gate refused:`}</span>
+                {round.priorRunIds.map((id, i) => (
+                  <Link key={id} to={runPath(id)} className={link}>
+                    {`Round ${round.index} attempt ${i + 1} run`}
+                  </Link>
+                ))}
+              </p>
+            )}
             {round.error === "" ? null : (
               // The run's own cause: machine text, shown as text.
               <p className="font-mono text-xs break-words whitespace-pre-wrap">

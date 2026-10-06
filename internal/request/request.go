@@ -199,11 +199,16 @@ type Round struct {
 	// field existed reads as a PR-review round, preserving their
 	// historical meaning) or ConformityRoundKind. See this type's own doc
 	// comment.
-	Kind      string       `json:"kind,omitempty"`
-	ThreadIDs []string     `json:"thread_ids"`
-	RunID     string       `json:"run_id"`
-	Outcome   RoundOutcome `json:"outcome"`
-	At        string       `json:"at"`
+	Kind      string   `json:"kind,omitempty"`
+	ThreadIDs []string `json:"thread_ids"`
+	RunID     string   `json:"run_id"`
+	// PriorRunIDs are the runs of a PR-review round's earlier attempts, in
+	// order: each was quarantined by the review gate alone and followed by
+	// a fix attempt on the same branch. RunID is the last attempt's run,
+	// the one Outcome describes. Empty for a round that took one build.
+	PriorRunIDs []string     `json:"prior_run_ids,omitempty"`
+	Outcome     RoundOutcome `json:"outcome"`
+	At          string       `json:"at"`
 	// Error is the underlying reason a non-accepted round actually
 	// failed: either the corrective runner's own returned error (an
 	// infrastructure failure -- the run never even started, or never
