@@ -378,7 +378,7 @@ describe("plan_review ticket oracle files", () => {
     await ready();
     await screen.findByText("Ticket oracle files");
     const reason = screen.getByTestId("approve-needs-oracle");
-    expect(reason).toHaveTextContent("Open every oracle file first");
+    expect(reason).toHaveTextContent("Open 3 oracle files first");
     expect(approveButton()).toBeDisabled();
     // Beside the button: the same header, before it.
     expect(approveButton().parentElement).toContainElement(reason);
@@ -388,7 +388,13 @@ describe("plan_review ticket oracle files", () => {
     expect(scroll).toHaveBeenCalled();
 
     await toggle(ticketPanel(), "1/RUN_COMMAND.txt");
+    await waitFor(() => {
+      expect(reason).toHaveTextContent("Open 2 oracle files first");
+    });
     await toggle(ticketPanel(), "1/a_oracle_test.go");
+    await waitFor(() => {
+      expect(reason).toHaveTextContent("Open 1 oracle file first");
+    });
     await toggle(ticketPanel(), "2/RUN_COMMAND.txt");
     await waitFor(() => {
       expect(approveButton()).toBeEnabled();

@@ -19,6 +19,12 @@ export interface ReviewActionsProps {
   readonly anyEditorOpen: boolean;
 }
 
+/** The reason beside a disabled plan Approve: how many files are left, when that is known. */
+export function oracleHint(remaining: number | null): string {
+  if (remaining === null || remaining < 1) return "Open every oracle file first";
+  return `Open ${remaining} oracle ${remaining === 1 ? "file" : "files"} first`;
+}
+
 /**
  * Approve and Request changes, offered only in the three review states
  * (the server refuses them from any other, `halted` included). Approve is
@@ -51,7 +57,7 @@ export function ReviewActions({
               ?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
         >
-          Open every oracle file first
+          {oracleHint(dialogs.ticketOracle?.remaining ?? null)}
         </button>
       ) : null}
       {request.state === "oracle_review" ? null : (

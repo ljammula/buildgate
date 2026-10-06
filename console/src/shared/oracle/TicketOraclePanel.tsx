@@ -18,11 +18,13 @@ import { StaleWarning } from "@/ui/StaleWarning";
  * What a TicketOraclePanel has displayed: every shown file's approval key
  * (`tickets/NNN.oracle/name`) -> sha256 of the bytes received, and whether
  * approval may proceed (all listings loaded fresh, no problems, every file
- * shown).
+ * shown). `remaining` is how many listed files are still unopened, or null
+ * while that is not known (a listing loading, failed or not yet fetched).
  */
 export interface TicketOracleShown {
   readonly hashes: Readonly<Record<string, string>>;
   readonly complete: boolean;
+  readonly remaining: number | null;
 }
 
 export interface TicketOraclePanelProps {
@@ -39,7 +41,7 @@ export interface TicketOraclePanelProps {
 }
 
 function sameShown(a: TicketOracleShown, b: TicketOracleShown): boolean {
-  if (a.complete !== b.complete) return false;
+  if (a.complete !== b.complete || a.remaining !== b.remaining) return false;
   const left = Object.entries(a.hashes);
   return (
     left.length === Object.keys(b.hashes).length &&
@@ -90,9 +92,13 @@ export function TicketOraclePanel({ request, onChanged }: TicketOraclePanelProps
     loaded.every((g) => g.listing !== undefined && g.listing.problems.length === 0) &&
     store.shown.size === sources.length;
 
+  const listingsKnown =
+    !loading && failure === undefined && loaded.every((g) => g.listing !== undefined);
+  const remaining = listingsKnown ? sources.length - store.shown.size : null;
+
   // What the parent is told: one object that keeps its identity until a hash
   // or `complete` actually changes (`store.shown` is a new Map every render).
-  const reported = useStableShown({ hashes: Object.fromEntries(store.shown), complete });
+  const reported = useStableShown({ hashes: Object.fromEntries(store.shown), complete, remaining });
   useEffect(() => {
     onChanged(reported);
   }, [reported, onChanged]);
