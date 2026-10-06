@@ -103,7 +103,11 @@ function recorder(page, c) {
     async finish() {
       await Promise.all(writes.map((w) => w.answered));
       return {
-        writes: writes.map(({ answered, ...rest }) => rest),
+        writes: writes.map((write) => {
+          const recorded = { ...write };
+          delete recorded.answered;
+          return recorded;
+        }),
         urlsWithToken,
       };
     },
@@ -337,7 +341,9 @@ for (const c of consoles) {
   await c.context.addInitScript(() => {
     try {
       window.localStorage.setItem("factoryOperatorName", "parity-operator");
-    } catch {}
+    } catch {
+      // Storage is unavailable: the consoles then prompt for the name.
+    }
   });
   c.page = await c.context.newPage();
   c.page.setDefaultTimeout(15000);

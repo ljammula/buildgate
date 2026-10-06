@@ -492,6 +492,20 @@ describe("Timeline", () => {
   // Regression: the whole Timeline once merged into one accessibility node and
   // the glyphs had no label, so a screen reader or Playwright could not tell
   // which stage passed. Each stage is its own list item and names its status.
+  test("stages that have not started fold into one row but stay in the list", async () => {
+    renderRun(inProgressRun(), { progress: inProgressFeed });
+    const list = await screen.findByRole("list", { name: "Timeline stages" });
+    const folded = await within(list).findByTestId("timeline-not-started");
+    expect(folded).toHaveTextContent(/\d+ later stages not started/);
+    // The started stages are listed on their own, outside the fold.
+    expect(within(folded).queryByTestId("timeline-row-preflight")).not.toBeInTheDocument();
+    expect(folded.querySelector("details")).not.toHaveAttribute("open");
+    // Every later stage name is still in the page, inside the fold.
+    for (const name of ["Verify", "Full suite", "Gates", "Evidence", "Finished"]) {
+      expect(within(folded).getByText(name)).toBeInTheDocument();
+    }
+  });
+
   test("each stage row is its own list item that names its status", async () => {
     renderRun(inProgressRun(), { progress: inProgressFeed });
 

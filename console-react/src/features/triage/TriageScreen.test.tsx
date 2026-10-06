@@ -262,3 +262,22 @@ test("Refresh fetches the list and the focused detail again", async () => {
   });
   expect(server.sent("GET /requests").length).toBeGreaterThanOrEqual(2);
 });
+
+test("the decision bar is a sticky footer that holds Approve, Reject and the key hints", async () => {
+  renderApp(<TriageScreen />, {
+    server: triage(
+      [{ id: "req-a", state: "spec_review", title: "First" }],
+      [
+        {
+          ...requestJson({ id: "req-a", state: "spec_review", title: "First" }),
+          spec: "A long spec",
+        },
+      ],
+    ),
+  });
+  const bar = await screen.findByTestId("triage-decision-bar");
+  expect(bar).toHaveClass("sticky", "bottom-0");
+  expect(within(bar).getByRole("button", { name: "Approve (a)" })).toBeInTheDocument();
+  expect(within(bar).getByRole("button", { name: "Reject (r)" })).toBeInTheDocument();
+  expect(within(bar).getByText(/j\/k move/)).toBeInTheDocument();
+});

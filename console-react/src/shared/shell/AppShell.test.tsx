@@ -1,0 +1,55 @@
+import { screen, waitFor } from "@testing-library/react";
+
+import { AppShell } from "@/shared/shell/AppShell";
+import { requestJson } from "@/test/requestFixtures";
+import { type FakeRoute, json, renderApp } from "@/test/render";
+
+function shell(list: Parameters<typeof requestJson>[0][]): FakeRoute[] {
+  return [{ on: "GET /requests", reply: () => json(list.map(requestJson)) }];
+}
+
+test("the sidebar counts the requests that wait on the operator, on Requests and Triage", async () => {
+  const { server } = renderApp(
+    <AppShell>
+      <p>page</p>
+    </AppShell>,
+    {
+      server: shell([
+        { id: "a", state: "spec_review" },
+        { id: "b", state: "plan_review" },
+        { id: "c", state: "building" },
+        { id: "d", state: "done" },
+      ]),
+    },
+  );
+  await waitFor(() => {
+    expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(2);
+  });
+  for (const pill of screen.getAllByTestId("nav-needs-you-count")) {
+    expect(pill).toHaveTextContent("2");
+  }
+  // The pill is for the eye; the links keep their names and the count is announced once.
+  expect(screen.getByRole("link", { name: "Requests" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Triage" })).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("2 requests need you.");
+  // No event stream is opened just to count.
+  expect(server.sent("GET /requests/events")).toHaveLength(0);
+});
+
+test("no pill when nothing waits, and none when the list cannot be read", async () => {
+  const idle = renderApp(<AppShell>x</AppShell>, {
+    server: shell([{ id: "c", state: "building" }]),
+  });
+  await waitFor(() => {
+    expect(screen.getByRole("status")).toHaveTextContent("Nothing is waiting on you.");
+  });
+  expect(screen.queryByTestId("nav-needs-you-count")).not.toBeInTheDocument();
+  idle.unmount();
+
+  renderApp(<AppShell>x</AppShell>, { server: [] });
+  await waitFor(() => {
+    expect(screen.getByRole("link", { name: "Requests" })).toBeInTheDocument();
+  });
+  expect(screen.queryByTestId("nav-needs-you-count")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("");
+});

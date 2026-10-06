@@ -8,6 +8,8 @@ export interface PageHeaderProps {
   readonly actions?: ReactNode;
   readonly breadcrumbs?: ReactNode;
   readonly className?: string;
+  /** Stay at the top of the viewport while the page scrolls, so the actions in it stay reachable. */
+  readonly sticky?: boolean;
 }
 
 /** Renders the page's single h1. */
@@ -17,9 +19,17 @@ export function PageHeader({
   actions,
   breadcrumbs,
   className,
+  sticky = false,
 }: PageHeaderProps) {
   return (
-    <header className={cn("flex flex-col gap-2 border-b border-border px-6 py-4", className)}>
+    <header
+      data-sticky={sticky || undefined}
+      className={cn(
+        "flex flex-col gap-2 border-b border-border px-6 py-4",
+        sticky && "sticky top-0 z-20 bg-bg",
+        className,
+      )}
+    >
       {breadcrumbs ? <div className="text-xs text-fg-muted">{breadcrumbs}</div> : null}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">

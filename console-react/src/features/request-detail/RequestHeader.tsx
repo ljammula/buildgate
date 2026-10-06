@@ -15,6 +15,7 @@ import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { WaitingBadge } from "@/shared/request/WaitingBadge";
 import { Badge } from "@/ui/Badge";
 import { Button } from "@/ui/Button";
+import { CompactId } from "@/ui/CompactId";
 import { PageHeader } from "@/ui/PageLayout";
 import { useNow } from "@/ui/Time";
 
@@ -32,7 +33,7 @@ function RequestChips({ request }: { readonly request: RequestSummary }) {
   const job = requestRunningJob(request);
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="font-mono text-xs">{request.id}</span>
+      <CompactId value={request.id} max={34} label="request id" className="text-xs" />
       <span>{request.project}</span>
       <RequestStageChip
         state={request.state}
@@ -57,6 +58,7 @@ function RequestChips({ request }: { readonly request: RequestSummary }) {
 export function RequestHeader({ request, refreshing, onRefresh, actions }: RequestHeaderProps) {
   return (
     <PageHeader
+      sticky
       title={request === null ? "Request detail" : requestShortTitle(request)}
       breadcrumbs={<Link to={boardPath()}>Back to board</Link>}
       {...(request === null ? {} : { description: <RequestChips request={request} /> })}

@@ -83,19 +83,24 @@ export function TriageDetail({
       )}
       {/* Offered only when the console can write: a refused write would just
           show the server's 403, so an action doomed to fail is not offered. */}
-      {canWrite ? (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" disabled={acting || detail === null} onClick={onApprove}>
-            <Check aria-hidden="true" />
-            Approve (a)
-          </Button>
-          <Button disabled={acting || detail === null} onClick={onReject}>
-            <X aria-hidden="true" />
-            Reject (r)
-          </Button>
-        </div>
-      ) : null}
-      <p className="text-fg-subtle text-xs">Keyboard: j/k move · a approve · r reject</p>
+      <div
+        data-testid="triage-decision-bar"
+        className="border-border bg-surface sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-col gap-2 rounded-b-lg border-t px-4 py-3"
+      >
+        {canWrite ? (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" disabled={acting || detail === null} onClick={onApprove}>
+              <Check aria-hidden="true" />
+              Approve (a)
+            </Button>
+            <Button disabled={acting || detail === null} onClick={onReject}>
+              <X aria-hidden="true" />
+              Reject (r)
+            </Button>
+          </div>
+        ) : null}
+        <p className="text-fg-subtle text-xs">Keyboard: j/k move · a approve · r reject</p>
+      </div>
     </div>
   );
 }

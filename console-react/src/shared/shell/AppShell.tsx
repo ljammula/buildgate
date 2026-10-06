@@ -25,6 +25,8 @@ import {
   triagePath,
 } from "@/routes/paths";
 import { Button } from "@/ui/Button";
+import { NavCount } from "@/shared/shell/NavCount";
+import { useNeedsYouCount } from "@/shared/shell/useNeedsYouCount";
 import { cn } from "@/ui/cn";
 
 interface NavItem {
@@ -86,6 +88,7 @@ export interface AppShellProps {
  */
 export function AppShell({ children }: AppShellProps) {
   const { canWrite } = useApi();
+  const needsYou = useNeedsYouCount();
   return (
     <div className="grid min-h-screen grid-cols-[14rem_minmax(0,1fr)] max-md:grid-cols-1">
       <aside className="sticky top-0 flex h-screen flex-col gap-3 border-r border-border bg-surface p-3 max-md:static max-md:h-auto">
@@ -107,6 +110,14 @@ export function AppShell({ children }: AppShellProps) {
             New request
           </Link>
         </Button>
+        {/* The count pills are decoration for the eye; this is the same fact for assistive technology. */}
+        <p role="status" className="sr-only">
+          {needsYou === null
+            ? ""
+            : needsYou === 0
+              ? "Nothing is waiting on you."
+              : `${needsYou} ${needsYou === 1 ? "request needs" : "requests need"} you.`}
+        </p>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 max-md:flex-row">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
@@ -127,6 +138,7 @@ export function AppShell({ children }: AppShellProps) {
                     className={cn("size-4", isActive ? "text-accent" : "text-fg-subtle")}
                   />
                   {label}
+                  {to === boardPath() || to === triagePath() ? <NavCount count={needsYou} /> : null}
                 </>
               )}
             </NavLink>

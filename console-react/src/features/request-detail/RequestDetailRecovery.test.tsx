@@ -494,3 +494,51 @@ describe("resume_review", () => {
     expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
   });
 });
+
+describe("reading order when a request stops", () => {
+  test("cause, then the run's evidence link, then the primary action", async () => {
+    openRequest(
+      requestWire({
+        state: "halted",
+        title: "Stopped",
+        error: "gh: not logged in",
+        ticket_index: 1,
+        tickets: [ticketWire({ index: 1, runId: "run-1" })],
+      }),
+    );
+    await heading("Stopped");
+    const box = callout();
+    const cause = within(box).getByTestId("recovery-cause");
+    const evidence = within(box).getByRole("link", { name: /Evidence: run log, diff and gates/ });
+    const retry = within(box).getByRole("button", { name: "Retry request" });
+    expect(evidence).toHaveAttribute("href", "/runs/run-1");
+    const before = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(cause.compareDocumentPosition(evidence) & before).toBeTruthy();
+    expect(evidence.compareDocumentPosition(retry) & before).toBeTruthy();
+  });
+
+  test("no run, no evidence link", async () => {
+    openRequest(requestWire({ state: "halted", title: "No run yet" }));
+    await heading("No run yet");
+    expect(screen.queryByTestId("recovery-evidence")).not.toBeInTheDocument();
+  });
+});
+
+describe("the request header", () => {
+  const longId = "add-subtract-numbers-to-add-py-add-a-sub-20261005-225506";
+
+  test("shows a long id compactly, with the whole id copyable and in the tooltip", async () => {
+    openRequest(requestWire({ id: longId, state: "building", title: "Long id" }), { id: longId });
+    await heading("Long id");
+    const copy = await screen.findByRole("button", { name: "Copy request id" });
+    expect(copy).toBeInTheDocument();
+    expect(screen.getAllByTitle(longId).length).toBeGreaterThan(0);
+    expect(screen.getByText(/^add-subtract.*225506$/, { selector: "[aria-hidden]" })).toBeVisible();
+  });
+
+  test("is sticky, so the decision buttons stay reachable while a long plan scrolls", async () => {
+    openRequest(requestWire({ state: "spec_review", title: "Reviewing" }));
+    const h1 = await heading("Reviewing");
+    expect(h1.closest("header")).toHaveAttribute("data-sticky", "true");
+  });
+});

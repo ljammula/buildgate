@@ -4,7 +4,9 @@ import type { ApiError } from "@/domain/apiError";
 import type { ProgressEvent, Run } from "@/domain/run";
 import { runIsTerminalForDisplay } from "@/domain/run";
 import { computeTimeline } from "@/domain/runDetail";
+import { TimelineNotStarted } from "@/features/run-detail/TimelineNotStarted";
 import { TimelineRowItem } from "@/features/run-detail/TimelineRowItem";
+import { COLLAPSE_AT, firstUntouchedTail } from "@/features/run-detail/timelineFold";
 import { computeStatusStrip } from "@/features/run-detail/statusStrip";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { StatusChipForToken } from "@/ui/StatusChip";
@@ -26,6 +28,9 @@ export function Timeline({ run, events, error }: TimelineProps) {
   const now = useNow(runIsTerminalForDisplay(run) ? null : 1000);
   const rows = useMemo(() => computeTimeline(events, now, run), [events, now, run]);
   const strip = computeStatusStrip(events, run, now);
+  const tail = firstUntouchedTail(rows);
+  const folded = rows.length - tail >= COLLAPSE_AT;
+  const shown = folded ? rows.slice(0, tail) : rows;
   return (
     <div className="flex flex-col gap-3">
       {error !== null ? <ErrorCallout error={error} /> : null}
@@ -43,9 +48,10 @@ export function Timeline({ run, events, error }: TimelineProps) {
         <StatusChipForToken token={run.state} />
       </div>
       <ol aria-label="Timeline stages" className="divide-y divide-border/60">
-        {rows.map((row) => (
+        {shown.map((row) => (
           <TimelineRowItem key={row.rowKey} row={row} />
         ))}
+        {folded ? <TimelineNotStarted rows={rows.slice(tail)} /> : null}
       </ol>
     </div>
   );

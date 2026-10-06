@@ -122,7 +122,7 @@ export interface RecoveryPlan {
   readonly overrideTicket: RequestTicket | null;
 }
 
-function quarantinedTicket(request: RequestSummary): RequestTicket | null {
+export function quarantinedTicket(request: RequestSummary): RequestTicket | null {
   // The ticket at the request's own current index triggered the quarantine;
   // fall back to the first ticket with a run.
   for (const ticket of request.tickets) {

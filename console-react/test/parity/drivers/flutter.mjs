@@ -8,7 +8,6 @@
 //     same-named button is the dialog's own (the confirm sheet's second
 //     "Approve", the dialog's "Request changes" and "Cancel request").
 // Exports the same functions as drivers/react.mjs.
-const MIN = 60_000;
 const origin = (page) => new URL(page.url()).origin;
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

@@ -12,7 +12,7 @@ describe("describeError classifies known failure modes", () => {
   });
 
   test("a 403 RunApiException is also a generic authorization failure", () => {
-    const summary = describeError(new ApiError(403, '{"error":"forbidden"}'));
+    const summary = describeError(new ApiError(403, '{"error":"read endpoint is not authorized"}'));
     expect(summary.headline).toBe("Not authorized");
   });
 
@@ -54,9 +54,12 @@ describe("describeError classifies known failure modes", () => {
 describe("describeError(startClass: true) (F: serve-start-token)", () => {
   test("a 401/403 points at the console link factoryd serve prints", () => {
     for (const status of [401, 403]) {
-      const summary = describeError(new ApiError(status, '{"error":"forbidden"}'), {
-        startClass: true,
-      });
+      const summary = describeError(
+        new ApiError(status, '{"error":"start endpoint is not authorized"}'),
+        {
+          startClass: true,
+        },
+      );
       expect(summary.headline).toBe("Not authorized");
       expect(summary.nextStep).toContain("factoryd serve");
       expect(summary.nextStep).toContain("#t=...");
@@ -75,6 +78,30 @@ describe("describeError(startClass: true) (F: serve-start-token)", () => {
     });
     expect(summary.headline).toBe("Can't reach factoryd");
   });
+});
+
+test("a 403 that states its reason shows the reason, not token advice", () => {
+  const summary = describeError(
+    new ApiError(
+      403,
+      '{"error":"workspace is not allowlisted: add it to the session config\'s workspaces list, or submit against a workspace an existing request already uses"}',
+    ),
+  );
+  expect(summary.headline).toBe("Request failed (403)");
+  expect(summary.nextStep).toBe(
+    "workspace is not allowlisted: add it to the session config's workspaces list, or submit against a workspace an existing request already uses",
+  );
+});
+
+test("a 403 that is a token refusal keeps the token advice", () => {
+  for (const message of [
+    "requests endpoint is not authorized",
+    "read endpoint is not authorized",
+  ]) {
+    const summary = describeError(new ApiError(403, JSON.stringify({ error: message })));
+    expect(summary.headline).toBe("Not authorized");
+    expect(summary.nextStep).toMatch(/token/);
+  }
 });
 
 describe("ErrorCallout", () => {

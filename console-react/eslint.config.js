@@ -189,4 +189,19 @@ export default tseslint.config(
     },
   },
   { files: ["eslint.config.js"], ...tseslint.configs.disableTypeChecked },
+  {
+    // The Node scripts that drive a browser or the toolchains: plain
+    // JavaScript outside the TypeScript project, and free to use fetch.
+    files: ["scripts/**/*.mjs", "test/**/*.mjs"],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      ...tseslint.configs.disableTypeChecked.languageOptions,
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      "no-restricted-globals": "off",
+      "no-restricted-properties": "off",
+    },
+  },
 );

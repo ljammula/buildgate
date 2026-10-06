@@ -5,6 +5,7 @@ import { formatModelUsageLine } from "@/domain/cost";
 import type { Run } from "@/domain/run";
 import { Field, Fields } from "@/features/run-detail/Fields";
 import { Button } from "@/ui/Button";
+import { CompactId } from "@/ui/CompactId";
 import { Section } from "@/ui/PageLayout";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { LocalTimeText } from "@/ui/Time";
@@ -30,7 +31,7 @@ export function RunSummarySection({ run, streamError, temporalUiUrl }: RunSummar
           <StatusChipForToken token={run.state} />
         </Field>
         <Field label="Run ID" mono>
-          {run.id}
+          <CompactId value={run.id} max={28} label="run id" />
         </Field>
         <Field label="Created">
           <LocalTimeText value={run.createdAt} />

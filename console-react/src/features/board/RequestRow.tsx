@@ -14,6 +14,7 @@ import { requestPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { WaitingBadge } from "@/shared/request/WaitingBadge";
+import { CompactId } from "@/ui/CompactId";
 import { cn } from "@/ui/cn";
 import { TableCell, TableRow } from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
@@ -40,10 +41,17 @@ export function RequestRow({ request, now }: RequestRowProps) {
   // A PR state with no PR URL is a record from before the server stopped
   // writing "draft" for an unopened PR: no chip for a PR that does not exist.
   const prTickets = request.tickets.filter((t) => t.prState !== "" && t.prUrl !== "");
+  // The row keeps its rhythm: a one-line gist here, the server's whole
+  // explanation in the tooltip and on the request page.
   const progressLines = [
-    job === null ? null : activeJobLabel(job),
-    awaitingPr ? requestAwaitingPullRequestLabel(request) : null,
-  ].filter((line): line is string => line !== null);
+    job === null ? null : { text: activeJobLabel(job), title: activeJobLabel(job) },
+    awaitingPr
+      ? {
+          text: "Built and verified · no PR opened",
+          title: requestAwaitingPullRequestLabel(request),
+        }
+      : null,
+  ].filter((line): line is { text: string; title: string } => line !== null);
 
   return (
     <TableRow
@@ -72,7 +80,12 @@ export function RequestRow({ request, now }: RequestRowProps) {
         >
           {requestShortTitle(request)}
         </Link>
-        <span className="text-fg-subtle font-mono text-xs">{request.id}</span>
+        <CompactId
+          value={request.id}
+          max={36}
+          copy={false}
+          className="text-fg-subtle flex text-xs"
+        />
       </TableCell>
       <TableCell className="text-fg-muted truncate" title={request.project}>
         {request.project}
@@ -80,8 +93,8 @@ export function RequestRow({ request, now }: RequestRowProps) {
       <TableCell>
         <div className="flex flex-col items-start gap-1">
           {progressLines.map((line) => (
-            <span key={line} className="text-fg-muted text-xs">
-              {line}
+            <span key={line.text} title={line.title} className="text-fg-muted line-clamp-2 text-xs">
+              {line.text}
             </span>
           ))}
           <div className="text-fg-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">

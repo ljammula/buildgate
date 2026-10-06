@@ -469,3 +469,28 @@ test("Refresh is a button named Refresh", async () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
 });
+
+test("an accepted-awaiting-PR row keeps one short line; the whole explanation is its tooltip", async () => {
+  const longId = "add-subtract-numbers-to-add-py-add-a-sub-20261005-225506";
+  renderApp(<BoardScreen />, {
+    server: [
+      {
+        on: "GET /requests",
+        reply: () =>
+          json([
+            {
+              ...requestJson({ id: longId, state: "halted", title: "Add subtract_numbers" }),
+              halt_kind: "accepted_no_pr",
+            },
+          ]),
+      },
+      { on: "GET /requests/events", reply: sseResponse("state") },
+    ],
+  });
+  const gist = await screen.findByText("Built and verified · no PR opened");
+  expect(gist.title).toMatch(/^Accepted, awaiting pull request: the code is built and verified/);
+  expect(screen.queryByText(/Run `factoryd retry/)).not.toBeInTheDocument();
+  // The long id is compact in the row, whole in the tooltip.
+  expect(screen.getByTitle(longId)).toBeInTheDocument();
+  expect(screen.getByText(/^add-subtract.*225506$/, { selector: "[aria-hidden]" })).toBeVisible();
+});

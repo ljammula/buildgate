@@ -1,14 +1,16 @@
 import { Link } from "react-router";
-import { Ban, RotateCcw, ShieldCheck, Undo2 } from "lucide-react";
+import { Ban, FileSearch, RotateCcw, ShieldCheck, Undo2 } from "lucide-react";
 
 import { useApi } from "@/api/ApiProvider";
 import type { RequestSummary } from "@/domain/request";
-import { runOverridePath } from "@/routes/paths";
+import { runOverridePath, runPath } from "@/routes/paths";
+import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
+import { CompactId } from "@/ui/CompactId";
 import { CopyableCommand } from "@/ui/CopyableCommand";
 
-import { recoveryPlan } from "./requestDetailLogic";
+import { quarantinedTicket, recoveryPlan } from "./requestDetailLogic";
 
 export interface RecoveryCalloutProps {
   readonly request: RequestSummary;
@@ -37,6 +39,8 @@ export function RecoveryCallout({
   const { canWrite } = useApi();
   const plan = recoveryPlan(request);
   const disabled = acting || !canWrite;
+  // The receipts of the run that stopped: its log, diff and gates.
+  const evidence = quarantinedTicket(request);
   const sendBack = plan.showSendBack ? (
     <Button
       variant={plan.sendBackIsPrimary ? "primary" : "secondary"}
@@ -54,6 +58,37 @@ export function RecoveryCallout({
       title={plan.headline}
     >
       <div className="flex flex-col gap-3">
+        {/* The cause, here where the explanation refers to it and the actions
+            are: it was once only in the side column, with "the cause named
+            above" pointing at nothing (found dogfooding, 2026-10-05). */}
+        {request.error === "" ? null : (
+          <p
+            data-testid="recovery-cause"
+            className="border-border bg-surface-sunken text-fg rounded-md border px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap"
+          >
+            <EscapedText text={request.error} />
+          </p>
+        )}
+        {evidence === null ? null : (
+          <p
+            data-testid="recovery-evidence"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1"
+          >
+            <Link
+              to={runPath(evidence.runId)}
+              className="text-accent inline-flex items-center gap-1.5 underline underline-offset-2"
+            >
+              <FileSearch aria-hidden="true" className="size-4" />
+              {`Evidence: run log, diff and gates (ticket ${evidence.index})`}
+            </Link>
+            <CompactId
+              value={evidence.runId}
+              max={24}
+              label="run id"
+              className="text-fg-muted text-xs"
+            />
+          </p>
+        )}
         <p className="break-words whitespace-pre-wrap">{plan.explanation}</p>
         <div className="flex flex-wrap items-center gap-2">
           {plan.sendBackIsPrimary ? sendBack : null}

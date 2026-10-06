@@ -11,6 +11,7 @@ import {
   useApproveRequest,
   useRequest,
   useRequestBoard,
+  useRequests,
 } from "@/api/requestQueries";
 import { asObject } from "@/domain/decode";
 import { type RequestSummary, decodeRequestList } from "@/domain/request";
@@ -90,6 +91,31 @@ function harness(routes: Route[]) {
 }
 
 const hang = () => new Response(new ReadableStream<Uint8Array>({ start: () => undefined }));
+
+describe("useRequests", () => {
+  test("polls only when given an interval, and never opens the event stream", async () => {
+    const { wrapper, calls } = harness([
+      { match: (url) => url === "/requests", respond: () => new Response("[]") },
+    ]);
+    const polled = renderHook(() => useRequests(20), { wrapper });
+    await waitFor(() => {
+      expect(calls.filter((c) => c.url === "/requests").length).toBeGreaterThanOrEqual(3);
+    });
+    expect(calls.some((c) => c.url === "/requests/events")).toBe(false);
+    polled.unmount();
+
+    const once = harness([
+      { match: (url) => url === "/requests", respond: () => new Response("[]") },
+    ]);
+    const plain = renderHook(() => useRequests(), { wrapper: once.wrapper });
+    await waitFor(() => {
+      expect(plain.result.current.isSuccess).toBe(true);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(once.calls.filter((c) => c.url === "/requests")).toHaveLength(1);
+    plain.unmount();
+  });
+});
 
 describe("useRequestBoard", () => {
   test("lists the requests and applies events from the stream", async () => {

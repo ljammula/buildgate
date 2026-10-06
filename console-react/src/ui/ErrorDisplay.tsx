@@ -46,7 +46,17 @@ function rawText(error: unknown): string {
 export function describeError(error: unknown, { startClass = false } = {}): ErrorSummary {
   if (error instanceof ApiError) {
     const raw = error.messageParts.join("\n");
-    if (error.status === 401 || error.status === 403) {
+    // A 403 is not always about a token: the server also refuses, with its
+    // reason, a workspace that is not allowlisted or an oracle file that was
+    // not shown. Its token refusals all read "<x> endpoint is not authorized"
+    // (internal/api); anything else is a reason the operator must read, and
+    // token advice in its place sent them to check a token that was fine
+    // (found dogfooding, 2026-10-05).
+    const refusedForAReason =
+      error.status === 403 &&
+      error.serverMessage !== error.body &&
+      !/\bis not authorized$/.test(error.serverMessage.trim());
+    if ((error.status === 401 || error.status === 403) && !refusedForAReason) {
       if (startClass) {
         return {
           headline: "Not authorized",

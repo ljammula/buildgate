@@ -11,6 +11,7 @@ import { OverrideSection } from "@/features/run-detail/OverrideSection";
 import { RunSummarySection } from "@/features/run-detail/RunSummarySection";
 import { Timeline } from "@/features/run-detail/Timeline";
 import type { RunProgress } from "@/features/run-detail/useRunProgress";
+import { CompactId } from "@/ui/CompactId";
 import { Section } from "@/ui/PageLayout";
 
 // Label column of the side column's facts: the main column's 11rem would leave a 22rem card with no room for a value.
@@ -119,13 +120,17 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
         <Section title="Commit and artifact evidence" card>
           <Fields className={sideFields}>
             <Field label="Base SHA" mono>
-              {run.baseSha}
+              <CompactId value={run.baseSha} max={20} label="base SHA" />
             </Field>
             <Field label="Result SHA" mono>
-              {run.resultSha ?? "Not available"}
+              {run.resultSha === null ? (
+                "Not available"
+              ) : (
+                <CompactId value={run.resultSha} max={20} label="result SHA" />
+              )}
             </Field>
             <Field label="Spec SHA-256" mono>
-              {run.specSha256}
+              <CompactId value={run.specSha256} max={20} label="spec SHA-256" />
             </Field>
             <Field label="Committed by factoryd">{run.committedByFactoryd ? "Yes" : "No"}</Field>
           </Fields>

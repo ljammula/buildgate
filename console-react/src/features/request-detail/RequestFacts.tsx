@@ -5,6 +5,7 @@ import { formatUsageLines } from "@/domain/cost";
 import type { RequestSummary } from "@/domain/request";
 import { requestAwaitingPullRequest } from "@/domain/request";
 import { EscapedText } from "@/shared/oracle/EscapedText";
+import { CompactId } from "@/ui/CompactId";
 import { LocalTimeText } from "@/ui/Time";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 
@@ -33,7 +34,12 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
       <dl className="flex flex-col gap-1.5">
         <Fact label="Project">{request.project}</Fact>
         <Fact label="Workspace">
-          <span className="font-mono text-xs break-all">{request.workspace}</span>
+          <CompactId
+            value={request.workspace}
+            max={22}
+            label="workspace path"
+            className="text-xs"
+          />
         </Fact>
         <Fact label="Submitted">
           <LocalTimeText value={request.submittedAt} />
@@ -44,7 +50,11 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
         {request.ticketCount > 0 ? (
           <Fact label="Ticket">{`${request.ticketIndex} / ${request.ticketCount}`}</Fact>
         ) : null}
-        {request.error === "" ? null : (
+        {/* A halted or quarantined request shows its cause in the recovery
+            callout, beside the actions. */}
+        {request.error === "" ||
+        request.state === "halted" ||
+        request.state === "quarantined" ? null : (
           // The "Next" banner carries the next step; this is only the detail.
           <Fact label={requestAwaitingPullRequest(request) ? "Detail" : "Error"}>
             <EscapedText text={request.error} />

@@ -166,11 +166,13 @@ export function useRequestBoard(): RequestBoard {
  * needs requests to label something else (the run list's titles). It shares
  * the board's cache entry.
  */
-export function useRequests(): UseQueryResult<RequestSummary[]> {
+export function useRequests(refetchIntervalMs?: number): UseQueryResult<RequestSummary[]> {
   const { http } = useApi();
   return useQuery({
     queryKey: queryKeys.requests.list(),
     queryFn: ({ signal }) => listRequests(http, signal),
+    // Polled only when a caller asks (the sidebar's count); never an event stream.
+    ...(refetchIntervalMs === undefined ? {} : { refetchInterval: refetchIntervalMs }),
     structuralSharing: (cached, fetched) =>
       mergeRequestList(
         cached as RequestSummary[] | undefined,
