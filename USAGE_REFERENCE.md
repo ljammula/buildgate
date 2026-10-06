@@ -177,9 +177,16 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   account and `[bot]` logins are always excluded; `-pr-ignore-authors`
   wins over trusted) becomes a corrective round against the ticket's
   existing branch (never a fresh worktree). Accepted: pushes the branch,
-  replies on each thread. Quarantined/halted: pushes nothing, stays in
-  `pr_review`, one notification. Capped at `-max-review-rounds` (default
-  `3`; key `max_review_rounds`), then halts naming the ticket.
+  replies "Addressed in <sha>." on each thread. Quarantined/halted: pushes
+  nothing, stays in `pr_review`, one notification, and replies on each
+  thread: the round's number, that nothing was pushed, the gates that
+  failed, what the review flagged, and whether another round follows.
+  Capped at `-max-review-rounds` (default `3`; key `max_review_rounds`),
+  then halts naming the ticket.
+- A thread is judged by its latest comment the factory's account did not
+  write. The factory's replies never resolve a thread and never clear it:
+  an answered thread blocks the ready flip until a person resolves it, and
+  starts no further round unless the reviewer comments again.
 - A round passes every gate the ticket's first build passes, judged on the
   whole pull request diff: verify, the full suite, the diff-shape gates,
   spec conformity against the ticket's acceptance criteria, and code review.
