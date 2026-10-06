@@ -917,7 +917,7 @@ func TestIntegrationServeListsDurableRuns(t *testing.T) {
 
 	client := &http.Client{Timeout: 100 * time.Millisecond}
 	var response *http.Response
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(serveStartTimeout)
 	for time.Now().Before(deadline) {
 		response, err = client.Get("http://" + addr + "/runs")
 		if err == nil {
@@ -977,14 +977,7 @@ func TestIntegrationServeShutsDownGracefullyOnSIGTERM(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 
-	client := &http.Client{Timeout: 100 * time.Millisecond}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := client.Get("http://" + addr + "/healthz"); err == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForServeHealthy(t, &http.Client{Timeout: 100 * time.Millisecond}, addr)
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("send SIGTERM: %v", err)
@@ -1079,14 +1072,7 @@ func TestIntegrationServeDrainsAPIStartedRunBeforeExiting(t *testing.T) {
 	})
 
 	httpClient := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if resp, getErr := httpClient.Get("http://" + addr + "/healthz"); getErr == nil {
-			resp.Body.Close()
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForServeHealthy(t, httpClient, addr)
 
 	repository := fmt.Sprintf("fixture/repo-drain-%d", time.Now().UnixNano())
 	terminateRepositoryOwnerAtCleanup(t, address, workflow.RepositoryOwnerWorkflowID(repository))
@@ -1281,14 +1267,7 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 	})
 
 	httpClient := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if resp, getErr := httpClient.Get("http://" + addr + "/healthz"); getErr == nil {
-			resp.Body.Close()
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForServeHealthy(t, httpClient, addr)
 
 	repository := fmt.Sprintf("fixture/repo-release-policy-%d", time.Now().UnixNano())
 	terminateRepositoryOwnerAtCleanup(t, address, workflow.RepositoryOwnerWorkflowID(repository))
@@ -1338,7 +1317,7 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 		t.Fatalf("start response has no run ID: %+v", started)
 	}
 
-	deadline = time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	var loaded *run.Run
 	for time.Now().Before(deadline) {
 		loaded, err = run.Load(dataDir, started.ID)
@@ -1439,4 +1418,26 @@ func TestIntegrationRunRefusesOverrideTokenInEnvironment(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dataDir, "runs")); !os.IsNotExist(err) {
 		t.Fatalf("runs dir stat = %v, want it to not exist — the guard must fire before ever creating one", err)
 	}
+}
+
+// serveStartTimeout is how long a test waits for a freshly started `factoryd
+// serve` to answer. On a loaded machine (every test shard and the other
+// packages at once) a start takes well over the two seconds these tests once
+// allowed, after which their first real request met a refused connection.
+const serveStartTimeout = 30 * time.Second
+
+// waitForServeHealthy waits for serve to answer /healthz and fails the test
+// if it never does.
+func waitForServeHealthy(t *testing.T, client *http.Client, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(serveStartTimeout)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get("http://" + addr + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("factoryd serve never answered /healthz on %s", addr)
 }
