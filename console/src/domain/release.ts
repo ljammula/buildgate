@@ -22,7 +22,7 @@ export interface ReleaseDecision {
   readonly evaluatedAt: string;
 }
 
-export function decodeReleaseDecision(o: JsonObject, at: string): ReleaseDecision {
+function decodeReleaseDecision(o: JsonObject, at: string): ReleaseDecision {
   return {
     runId: reqString(o, "run_id", at),
     project: reqString(o, "project", at),
@@ -40,7 +40,7 @@ export interface KillSwitchTransition {
   readonly at: string;
 }
 
-export function decodeKillSwitchTransition(o: JsonObject, at: string): KillSwitchTransition {
+function decodeKillSwitchTransition(o: JsonObject, at: string): KillSwitchTransition {
   return {
     engaged: reqBoolean(o, "engaged", at),
     by: reqString(o, "by", at),
@@ -60,7 +60,7 @@ export interface KillSwitchRecord {
   readonly history: readonly KillSwitchTransition[];
 }
 
-export function decodeKillSwitchRecord(o: JsonObject, at: string): KillSwitchRecord {
+function decodeKillSwitchRecord(o: JsonObject, at: string): KillSwitchRecord {
   return {
     project: reqString(o, "project", at),
     engaged: optBoolean(o, "engaged", at),
@@ -80,10 +80,7 @@ export interface DecisionRecordingFailure {
   readonly killSwitchReadable: boolean;
 }
 
-export function decodeDecisionRecordingFailure(
-  o: JsonObject,
-  at: string,
-): DecisionRecordingFailure {
+function decodeDecisionRecordingFailure(o: JsonObject, at: string): DecisionRecordingFailure {
   return {
     error: reqString(o, "error", at),
     at: reqString(o, "at", at),

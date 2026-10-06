@@ -21,7 +21,7 @@ export interface OracleFileInfo {
   readonly sha256: string;
 }
 
-export function decodeOracleFileInfo(o: JsonObject, at: string): OracleFileInfo {
+function decodeOracleFileInfo(o: JsonObject, at: string): OracleFileInfo {
   return {
     name: reqString(o, "name", at),
     size: numberOr(o, "size", at, 0),

@@ -3,10 +3,9 @@ import userEvent from "@testing-library/user-event";
 
 import { json } from "@/test/render";
 
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { historyWire, rejectionWire, requestWire, revisionWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const step = (name: string) => screen.getByTestId(`pipeline-step-${name}`);

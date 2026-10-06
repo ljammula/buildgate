@@ -5,13 +5,6 @@ import { apiErrorResponse, json, renderApp } from "@/test/render";
 
 import { RunListScreen } from "./RunListScreen";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 function runJson(overrides: Record<string, unknown> = {}) {
   return {
     id: "run-accepted",

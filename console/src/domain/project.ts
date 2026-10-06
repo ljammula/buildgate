@@ -38,7 +38,7 @@ export interface ProjectSummary {
   readonly lastRunAt: string;
 }
 
-export function decodeProjectSummary(o: JsonObject, at: string): ProjectSummary {
+function decodeProjectSummary(o: JsonObject, at: string): ProjectSummary {
   return {
     projectPath: reqString(o, "project_path", at),
     project: reqString(o, "project", at),
@@ -114,7 +114,7 @@ export interface ProjectCheckResult {
   readonly reasons: readonly string[];
 }
 
-export function decodeProjectCheckResult(o: JsonObject, at: string): ProjectCheckResult {
+function decodeProjectCheckResult(o: JsonObject, at: string): ProjectCheckResult {
   return {
     check: reqString(o, "check", at),
     path: reqString(o, "path", at),

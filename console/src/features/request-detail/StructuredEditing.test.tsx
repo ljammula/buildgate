@@ -4,10 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { sha256Hex } from "@/domain/contentHash";
 import { json } from "@/test/render";
 
-import { type OpenOptions, openRequest, seedOperator, stubRadix } from "./testHarness";
+import { type OpenOptions, openRequest, seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const SPEC =

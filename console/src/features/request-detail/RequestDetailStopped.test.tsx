@@ -4,10 +4,9 @@ import { screen, within } from "@testing-library/react";
 
 import { json } from "@/test/render";
 
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { historyWire, requestWire, runWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 // A real request: spec drafting halted and was retried, then built, was

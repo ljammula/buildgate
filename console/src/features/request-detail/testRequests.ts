@@ -1,5 +1,6 @@
 // Wire bodies the request-page tests serve, as objects a test adjusts before serving.
 import { readFixtureJson } from "@/test/fixtures";
+import { requestJson } from "@/test/requestFixtures";
 import { type FakeRoute, json } from "@/test/render";
 
 export type Wire = Record<string, unknown>;
@@ -15,23 +16,11 @@ export interface RequestWireOptions {
 /** A `GET /requests/{id}` body with these defaults. */
 export function requestWire({ id = "req-1", state, ...rest }: RequestWireOptions): Wire {
   return {
-    id,
-    workspace: "/repos/checkouts",
-    project: "checkouts",
-    state,
-    title: "",
-    submitted_at: "2026-09-10T09:00:00Z",
-    updated_at: "2026-09-10T09:05:00Z",
-    entered_at: "2026-09-10T09:05:00Z",
-    waiting_since: "",
-    ticket_index: 0,
-    ticket_count: 0,
+    ...requestJson({ id, state }),
     error: "",
     spec: "",
-    tickets: [],
     approved_by: "",
     approved_at: "",
-    rejections: [],
     history: [],
     next_action: "",
     approve_next_state: "",

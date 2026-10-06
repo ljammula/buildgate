@@ -81,7 +81,7 @@ export function attemptModelLine(
  * emit their own start/end pair under it (detail = gate name) -- see
  * `gateRow`, which fans those out into that one row's sub-rows.
  */
-export const stageOrder: readonly string[] = [
+const stageOrder: readonly string[] = [
   "prepare_workspace",
   "preflight",
   "build",
@@ -163,14 +163,14 @@ export function laterOf(a: Date | null, b: Date | null): Date | null {
   return a.getTime() > b.getTime() ? a : b;
 }
 
-export function firstStart(events: readonly ProgressEvent[]): Date | null {
+function firstStart(events: readonly ProgressEvent[]): Date | null {
   for (const event of events) {
     if (event.event === "start") return event.ts;
   }
   return null;
 }
 
-export function lastEnd(events: readonly ProgressEvent[]): Date | null {
+function lastEnd(events: readonly ProgressEvent[]): Date | null {
   let end: Date | null = null;
   for (const event of events) {
     if (event.event === "end") end = event.ts;
@@ -178,7 +178,7 @@ export function lastEnd(events: readonly ProgressEvent[]): Date | null {
   return end;
 }
 
-export function endOutcome(events: readonly ProgressEvent[]): string {
+function endOutcome(events: readonly ProgressEvent[]): string {
   let outcome = "";
   for (const event of events) {
     if (event.event === "end") outcome = event.outcome;
@@ -280,7 +280,7 @@ function simpleStageRow(
  * gates' own recorded evidence) when the progress feed has no named-gate
  * events to show -- see `gateRow`'s doc comment.
  */
-export function gateRowFromResults(results: readonly GateResult[]): TimelineRow {
+function gateRowFromResults(results: readonly GateResult[]): TimelineRow {
   const failed = results.filter((g) => !g.passed);
   const glyph: StageGlyph = failed.length === 0 ? "passed" : "failed";
   const subtitle =
@@ -346,7 +346,7 @@ function gateRow(
  * collection) -- "latest" in case a chained/reconciled run ever produced
  * more than one, though today's call sites emit at most one per run.
  */
-export function latestBuildNote(factoryEvents: readonly ProgressEvent[]): string | null {
+function latestBuildNote(factoryEvents: readonly ProgressEvent[]): string | null {
   let note: string | null = null;
   for (const event of factoryEvents) {
     if (event.event === "note" && event.detail !== "") note = event.detail;
@@ -361,7 +361,7 @@ export function latestBuildNote(factoryEvents: readonly ProgressEvent[]): string
  * after policy gates decide the run's terminal state, so a still-running
  * build has none of this yet).
  */
-export function evidenceRoundSubRows(run: TimelineRun): readonly TimelineSubRow[] {
+function evidenceRoundSubRows(run: TimelineRun): readonly TimelineSubRow[] {
   if (!runIsTerminal(run)) return [];
   const rounds = run.agentEvidence?.rounds ?? [];
   return rounds.map((rd) =>

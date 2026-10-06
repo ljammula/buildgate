@@ -24,7 +24,6 @@ const scrolled: Element[] = [];
 
 beforeAll(() => {
   Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
     scrollIntoView(this: Element) {
       scrolled.push(this);
     },

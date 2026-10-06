@@ -7,11 +7,10 @@ import { oracleServer } from "@/shared/oracle/oracleTestKit";
 import { json, renderApp } from "@/test/render";
 
 import { RequestDetailScreen } from "./RequestDetailScreen";
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 import { foldsContent, planSummary, specSummary } from "./requestDetailLogic";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const longSpec = `# Idempotency keys\n\n## Problem\n\n${"A retried checkout charges twice. ".repeat(60)}\n\n## Acceptance criteria\n\n1. A repeated key returns the first response.\n2. A key is scoped to one account.\n\n## Risks\n\nEND-OF-SPEC\n`;

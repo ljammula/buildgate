@@ -48,19 +48,19 @@ export function asArray(value: unknown, at: string): unknown[] {
   return value;
 }
 
-export function asString(value: unknown, at: string): string {
+function asString(value: unknown, at: string): string {
   if (typeof value !== "string")
     throw new DecodeError(at, `expected a string, got ${describe(value)}`);
   return value;
 }
 
-export function asNumber(value: unknown, at: string): number {
+function asNumber(value: unknown, at: string): number {
   if (typeof value !== "number" || !Number.isFinite(value))
     throw new DecodeError(at, `expected a number, got ${describe(value)}`);
   return value;
 }
 
-export function asBoolean(value: unknown, at: string): boolean {
+function asBoolean(value: unknown, at: string): boolean {
   if (typeof value !== "boolean")
     throw new DecodeError(at, `expected a boolean, got ${describe(value)}`);
   return value;

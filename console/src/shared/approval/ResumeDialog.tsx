@@ -22,7 +22,7 @@ interface ResumeCopy {
  * (`request.resume.fromState`) is always a rerun of that step, whatever
  * `from` says; only a lost build distinguishes Resume from Rebuild.
  */
-export function resumeCopy(request: ResumeDialogProps["request"], from: string): ResumeCopy {
+function resumeCopy(request: ResumeDialogProps["request"], from: string): ResumeCopy {
   const step = request.resume?.fromState ?? "";
   const rerun = step !== "" && step !== "building";
   if (rerun) {

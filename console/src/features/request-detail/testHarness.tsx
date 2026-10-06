@@ -5,15 +5,6 @@ import { type FakeRoute, type FakeServer, fakeServer, renderApp } from "@/test/r
 import { RequestDetailScreen } from "./RequestDetailScreen";
 import { type Wire, requestRoute } from "./testRequests";
 
-/** Radix needs these in jsdom; call from `beforeAll`. */
-export function stubRadix(): void {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    releasePointerCapture: () => undefined,
-    scrollIntoView: () => undefined,
-  });
-}
-
 /** A returning operator: the name prompt does not interrupt a flow. Call from `beforeEach`. */
 export function seedOperator(): void {
   setOperatorName("operator");

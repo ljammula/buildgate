@@ -28,7 +28,7 @@ function intOr0(value: unknown): number {
 }
 
 /** One readable step for a progress object, or null when it is not one (no string stage and event). */
-export function progressStep(e: Record<string, unknown>): string | null {
+function progressStep(e: Record<string, unknown>): string | null {
   const stage = e.stage;
   const kind = e.event;
   if (typeof stage !== "string" || typeof kind !== "string") return null;

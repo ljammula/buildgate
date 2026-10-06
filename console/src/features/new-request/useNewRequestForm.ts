@@ -29,7 +29,7 @@ export interface NewRequestErrors {
 }
 
 /** The two required fields; every Advanced field is an optional override of a server default. */
-export function validateNewRequest(values: NewRequestValues): NewRequestErrors {
+function validateNewRequest(values: NewRequestValues): NewRequestErrors {
   return {
     workspace: values.workspace.trim() === "" ? "Workspace path is required" : null,
     text: values.text.trim() === "" ? "Request is required" : null,

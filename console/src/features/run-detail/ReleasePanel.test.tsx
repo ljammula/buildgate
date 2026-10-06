@@ -13,13 +13,6 @@ import { apiErrorResponse, fakeServer, json, renderApp } from "@/test/render";
 
 const route = "GET /runs/run-accepted/release";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 function renderRelease(server: ReturnType<typeof fakeServer>, tokens = {}) {
   return renderApp(<ReleasePanel runId="run-accepted" />, { server, tokens });
 }

@@ -113,7 +113,7 @@ export interface CriterionBlock {
  * non-blank line up to the next one belongs to it. Lines before the first
  * criterion are dropped.
  */
-export function splitCriteriaBlocks(sectionLines: readonly string[]): CriterionBlock[] {
+function splitCriteriaBlocks(sectionLines: readonly string[]): CriterionBlock[] {
   const blocks: CriterionBlock[] = [];
   let current: string[] | null = null;
   const flush = () => {

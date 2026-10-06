@@ -22,13 +22,6 @@ import {
   sseResponse,
 } from "@/test/render";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 beforeEach(() => {
   // The operator name is stored once per browser: each test starts without one.
   setOperatorName("");

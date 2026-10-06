@@ -17,14 +17,6 @@ import { ResumeDialog } from "./ResumeDialog";
 import { RetryDialog } from "./RetryDialog";
 import { SendBackDialog } from "./SendBackDialog";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    releasePointerCapture: () => undefined,
-    scrollIntoView: () => undefined,
-  });
-});
-
 beforeEach(() => {
   setOperatorName("operator");
 });

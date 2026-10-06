@@ -56,7 +56,11 @@ const request = requestSummary({ state: "plan_review" }, [
 
 // What the plan's Approve does with the panel's report.
 function Host({ onApprove }: { onApprove: (hashes: Record<string, string>) => void }) {
-  const [shown, setShown] = useState<TicketOracleShown>({ hashes: {}, complete: false });
+  const [shown, setShown] = useState<TicketOracleShown>({
+    hashes: {},
+    complete: false,
+    remaining: null,
+  });
   return (
     <>
       <TicketOraclePanel request={request} onChanged={setShown} />
