@@ -13,13 +13,6 @@ import {
   DialogTrigger,
 } from "@/ui/Dialog";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 function Example() {
   return (
     <Dialog>

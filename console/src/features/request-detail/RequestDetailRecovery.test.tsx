@@ -3,10 +3,9 @@ import userEvent from "@testing-library/user-event";
 
 import { apiErrorResponse, json } from "@/test/render";
 
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const heading = (name: string) => screen.findByRole("heading", { level: 1, name });

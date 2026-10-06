@@ -1,5 +1,5 @@
 import { decodeRequestSummary } from "@/domain/request";
-import { requestJson, ticketJson } from "@/test/requestFixtures";
+import { requestJson, requestSummary, ticketJson } from "@/test/requestFixtures";
 
 import {
   artifactContent,
@@ -9,8 +9,8 @@ import {
   triageRequests,
 } from "./triageModel";
 
-function summary(o: Parameters<typeof requestJson>[0] & { spec?: string }) {
-  return decodeRequestSummary({ ...requestJson(o), spec: o.spec ?? "" }, "test");
+function summary(o: Parameters<typeof requestSummary>[0]) {
+  return requestSummary({ ...o, spec: o.spec ?? "" });
 }
 
 test("lists every request that needs the operator, oldest wait first", () => {

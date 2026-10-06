@@ -1,9 +1,8 @@
 import { screen, within } from "@testing-library/react";
 
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const SPEC =

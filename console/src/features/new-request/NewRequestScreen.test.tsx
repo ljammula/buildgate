@@ -7,13 +7,6 @@ import { type FakeRoute, apiErrorResponse, json, renderApp } from "@/test/render
 
 import { NewRequestScreen } from "./NewRequestScreen";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 beforeEach(() => {
   setOperatorName("operator");
 });

@@ -4,10 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { sha256Hex } from "@/domain/contentHash";
 import { apiErrorResponse, json } from "@/test/render";
 
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const approveButton = () => screen.getByRole("button", { name: "Approve" });

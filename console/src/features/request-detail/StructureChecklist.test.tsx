@@ -4,10 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { apiErrorResponse } from "@/test/render";
 
 import { StructureChecklist } from "./StructureChecklist";
-import { type OpenOptions, openRequest, seedOperator, stubRadix } from "./testHarness";
+import { type OpenOptions, openRequest, seedOperator } from "./testHarness";
 import { requestWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const SPEC =

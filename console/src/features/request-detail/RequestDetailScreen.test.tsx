@@ -5,10 +5,9 @@ import { json, renderApp } from "@/test/render";
 
 import { RequestDetailScreen } from "./RequestDetailScreen";
 
-import { openRequest, seedOperator, stubRadix } from "./testHarness";
+import { openRequest, seedOperator } from "./testHarness";
 import { rejectionWire, requestWire, runWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 const ALL_STATES = [

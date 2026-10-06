@@ -3,13 +3,6 @@ import userEvent from "@testing-library/user-event";
 
 import { ConfirmDialog } from "@/ui/ConfirmDialog";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 function setup(onConfirm: () => void | Promise<void>) {
   const onOpenChange = vi.fn();
   render(

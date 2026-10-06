@@ -9,14 +9,6 @@ import { TriageScreen } from "./TriageScreen";
 
 type RequestOptions = Parameters<typeof requestJson>[0];
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    releasePointerCapture: () => undefined,
-    scrollIntoView: () => undefined,
-  });
-});
-
 beforeEach(() => {
   setOperatorName("operator");
 });

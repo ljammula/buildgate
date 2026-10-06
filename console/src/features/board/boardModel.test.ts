@@ -1,10 +1,9 @@
-import { decodeRequestSummary } from "@/domain/request";
-import { requestJson } from "@/test/requestFixtures";
+import { requestSummary } from "@/test/requestFixtures";
 
 import { boardFreshness, freshnessLabel, queueRunWarning } from "./boardModel";
 
 function summary(o: { id: string; state: string }) {
-  return decodeRequestSummary(requestJson({ project: "app", ...o }), "test");
+  return requestSummary({ project: "app", ...o });
 }
 
 describe("queueRunWarning", () => {

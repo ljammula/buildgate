@@ -1,7 +1,6 @@
-import { decodeRequestSummary } from "@/domain/request";
 import { requestStageGroup } from "@/domain/boardFilters";
 import { needsHumanCount, sortedRequests, waitingBadgeLabel } from "@/domain/requestOrder";
-import { requestJson } from "@/test/requestFixtures";
+import { requestSummary } from "@/test/requestFixtures";
 
 function summary(o: {
   id: string;
@@ -10,15 +9,12 @@ function summary(o: {
   enteredAt?: string;
   waitingSince?: string;
 }) {
-  return decodeRequestSummary(
-    requestJson({
-      project: "app",
-      updatedAt: "2026-09-10T09:00:00Z",
-      enteredAt: "2026-09-10T09:00:00Z",
-      ...o,
-    }),
-    "test",
-  );
+  return requestSummary({
+    project: "app",
+    updatedAt: "2026-09-10T09:00:00Z",
+    enteredAt: "2026-09-10T09:00:00Z",
+    ...o,
+  });
 }
 
 const ids = (list: readonly { id: string }[]) => list.map((r) => r.id);

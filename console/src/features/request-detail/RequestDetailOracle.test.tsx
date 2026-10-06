@@ -8,10 +8,9 @@ import { bytesResponse, enc, oracleServer, toggle } from "@/shared/oracle/oracle
 import { type FakeRoute, apiErrorResponse, fakeServer, json, renderApp } from "@/test/render";
 
 import { RequestDetailScreen } from "./RequestDetailScreen";
-import { seedOperator, stubRadix } from "./testHarness";
+import { seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 
-beforeAll(stubRadix);
 beforeEach(seedOperator);
 
 type OracleFiles = Record<string, string>;

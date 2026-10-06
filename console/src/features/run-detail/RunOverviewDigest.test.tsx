@@ -11,13 +11,6 @@ import {
 } from "@/features/run-detail/testRuns";
 import { type FakeRoute, json, renderApp, sseResponse } from "@/test/render";
 
-beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
-});
-
 type Wire = Record<string, unknown>;
 
 function renderRun(run: Wire, routes: readonly FakeRoute[] = []) {

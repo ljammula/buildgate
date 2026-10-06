@@ -12,10 +12,6 @@ import {
 } from "@/ui/DropdownMenu";
 
 beforeAll(() => {
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    scrollIntoView: () => undefined,
-  });
   vi.stubGlobal(
     "ResizeObserver",
     class {

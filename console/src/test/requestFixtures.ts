@@ -1,4 +1,6 @@
 // Test builders for the JSON GET /requests answers.
+import { type RequestSummary, decodeRequestSummary } from "@/domain/request";
+
 export interface RequestJsonOptions {
   readonly id: string;
   readonly state: string;
@@ -49,4 +51,13 @@ export function ticketJson(o: {
     pr_state: prState,
     content: o.content ?? "",
   };
+}
+
+/** A decoded summary of `requestJson(o)`, for model tests that need no HTTP. */
+export function requestSummary(o: RequestJsonOptions & { readonly spec?: string }): RequestSummary {
+  const { spec, ...rest } = o;
+  return decodeRequestSummary(
+    { ...requestJson(rest), ...(spec === undefined ? {} : { spec }) },
+    "test",
+  );
 }
