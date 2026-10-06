@@ -45,16 +45,25 @@ function SectionRow({
 }: RowProps) {
   const label = name(heading);
   const [draft, setDraftState] = useState<string | null>(null);
+  // The section's text when the field opened: Apply replaces the section as
+  // it is now, so text that changed underneath would be lost unseen.
+  const [opened, setOpened] = useState("");
   const setDraft = (next: string | null) => {
     setDraftState(next);
     onOpenChange(heading, next !== null);
   };
-  const problem = draft === null ? null : sectionBodyProblem(headings, draft);
+  const shown = body.replace(/\r(?=\n|$)/g, "");
+  const moved = !present
+    ? "This section's heading is no longer in the text below, so there is nowhere to apply this. Copy what you need, then Cancel."
+    : shown !== opened
+      ? "This section changed in the text below since this field opened; applying would overwrite that. Copy what you need, Cancel, and open it again."
+      : null;
+  const problem = draft === null ? null : (moved ?? sectionBodyProblem(headings, draft, heading));
   return (
     <li className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
         <span className="font-mono text-xs">{label}</span>
-        {!present ? (
+        {!present && draft === null ? (
           <span className="text-fg-muted text-xs">missing</span>
         ) : draft === null ? (
           <Button
@@ -63,7 +72,8 @@ function SectionRow({
             disabled={disabled}
             aria-label={`Edit section ${label}`}
             onClick={() => {
-              setDraft(body.replace(/\r(?=\n|$)/g, ""));
+              setOpened(shown);
+              setDraft(shown);
             }}
           >
             Edit

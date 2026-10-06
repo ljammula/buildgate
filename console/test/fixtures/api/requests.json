@@ -368,17 +368,6 @@
         "note": "every-field note"
       }
     ],
-    "edits": [
-      {
-        "by": "every-field by",
-        "at": "2026-09-10T09:00:00Z",
-        "path": "every-field path",
-        "from_state": "",
-        "revision": 3,
-        "diff": "every-field diff",
-        "diff_truncated": true
-      }
-    ],
     "draft_oracles": true,
     "spec_imported": true,
     "plan_imported": true,

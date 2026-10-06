@@ -498,7 +498,7 @@ describe("compare with a rejected revision", () => {
     expect(within(diff).getAllByText(/New ticket detail\./).length).toBeGreaterThan(0);
   });
 
-  test("an operator's own edit revision is not offered as a rejected revision", async () => {
+  test("an operator's own edit revision, and another stage's, are not offered as rejected revisions", async () => {
     const meta = { at: "2026-09-10T09:00:00Z", by: "jane", reason: "r", fromState: "spec_review" };
     openRequest(
       requestWire({
@@ -517,6 +517,8 @@ describe("compare with a rejected revision", () => {
                 ...revisionWire({ ...meta, index: 2, reason: "", files: ["spec.md"] }),
                 kind: "edit",
               },
+              // A later rejection of another stage is not what this review re-reads.
+              revisionWire({ ...meta, index: 3, fromState: "plan_review", files: ["spec.md"] }),
             ]),
           },
           {

@@ -445,3 +445,74 @@ describe("ticket plan section lists", () => {
     );
   });
 });
+
+describe("section and list edits found by adversarial review", () => {
+  const H = ["# Spec", "## Problem", "## Scope"];
+
+  test("a CRLF file with no final newline gains no CR after its last line", () => {
+    const text = "# Spec\r\n## Problem\r\np\r\n## Scope\r\nfoo";
+    expect(setSectionBody(text, H, "## Scope", "bar")).toBe(
+      "# Spec\r\n## Problem\r\np\r\n## Scope\r\nbar",
+    );
+    expect(setSectionBody(text, H, "## Scope", "foo\nbar")).toBe(
+      "# Spec\r\n## Problem\r\np\r\n## Scope\r\nfoo\r\nbar",
+    );
+    const ticket = "## Goal\r\n## Plan\r\n### Steps\r\n1. one\r\n2. two";
+    expect(setSectionListItem(ticket, "### Steps", 1, "TWO")).toBe(
+      "## Goal\r\n## Plan\r\n### Steps\r\n1. one\r\n2. TWO",
+    );
+    expect(setCriterionBody("## Acceptance criteria\r\n1. a\r\n2. b", 1, "B")).toBe(
+      "## Acceptance criteria\r\n1. a\r\n2. B",
+    );
+  });
+
+  test("a heading that ends the file takes a line break when a body is added under it", () => {
+    expect(setSectionBody("# Spec\r\n## Problem\r\np\r\n## Scope", H, "## Scope", "s")).toBe(
+      "# Spec\r\n## Problem\r\np\r\n## Scope\r\ns",
+    );
+    expect(setSectionBody("# Spec\n## Problem\np\n## Scope", H, "## Scope", "s")).toBe(
+      "# Spec\n## Problem\np\n## Scope\ns",
+    );
+  });
+
+  test("in a file of mixed line endings only the typed lines change", () => {
+    const text = "# Spec\n## Problem\nline one\r\nline two\r\n## Scope\nx\n";
+    expect(setSectionBody(text, H, "## Problem", "line one\nline two\nline three")).toBe(
+      "# Spec\n## Problem\nline one\r\nline two\r\nline three\n## Scope\nx\n",
+    );
+    expect(setSectionBody(text, H, "## Problem", "line zero\nline one\nline two")).toBe(
+      "# Spec\n## Problem\nline zero\nline one\r\nline two\r\n## Scope\nx\n",
+    );
+    const crlfHeading = "# Spec\r\n## Problem\r\nline one\nline two\n## Scope\r\nx\r\n";
+    expect(setSectionBody(crlfHeading, H, "## Problem", "line one\nmiddle\nline two")).toBe(
+      "# Spec\r\n## Problem\r\nline one\nmiddle\r\nline two\n## Scope\r\nx\r\n",
+    );
+  });
+
+  test("a changed body set back to the original gives the original bytes", () => {
+    const text = "# Spec  \n\n## Problem\n\n  p one  \r\n\np two\n\n\n## Scope\ns";
+    const original = "\n  p one  \n\np two";
+    const changed = setSectionBody(text, H, "## Problem", `${original}\nextra`);
+    expect(changed).toBe("# Spec  \n\n## Problem\n\n  p one  \r\n\np two\nextra\n\n\n## Scope\ns");
+    expect(setSectionBody(changed, H, "## Problem", original)).toBe(text);
+  });
+
+  test("a body's trailing blank lines are not written", () => {
+    const text = "# Spec\n## Problem\np\n\n## Scope\ns\n";
+    expect(setSectionBody(text, H, "## Problem", "p\n\n\n")).toBe(text);
+    expect(setSectionBody(text, H, "## Problem", "p2\n\n")).toBe(
+      "# Spec\n## Problem\np2\n\n## Scope\ns\n",
+    );
+  });
+
+  test("under the acceptance criteria any '## ' line is refused: the criteria end there", () => {
+    const body = "1. a\n## Custom\n2. b";
+    expect(sectionBodyProblem(requiredSpecHeadings, body, "## Acceptance criteria")).toBe(
+      'A line starting "## " ends the acceptance criteria there, so the criteria after it would not be read; edit the whole file to add a section.',
+    );
+    expect(sectionBodyProblem(requiredSpecHeadings, body, "## Risks")).toBeNull();
+    expect(
+      sectionBodyProblem(requiredSpecHeadings, "1. a\n### Detail", "## Acceptance criteria"),
+    ).toBeNull();
+  });
+});

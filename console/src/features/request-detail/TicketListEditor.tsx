@@ -9,7 +9,7 @@ import {
   sectionListItems,
   setSectionListItem,
 } from "@/domain/structuredEdit";
-import { requiredTicketHeadings } from "@/domain/specSkeleton";
+import { requiredTicketHeadings, trimSpace } from "@/domain/specSkeleton";
 import { Button } from "@/ui/Button";
 import { Input, Textarea } from "@/ui/Input";
 
@@ -55,7 +55,7 @@ function TicketListRow({
   const draft = useFieldDraft(body, (next) => {
     const refused = sectionBodyProblem(requiredTicketHeadings, next);
     setProblem(refused);
-    if (refused === null && (next.split("\n")[0] ?? "").trim() !== "") onBody(next);
+    if (refused === null && trimSpace(next.split("\n")[0] ?? "") !== "") onBody(next);
   });
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;

@@ -12,13 +12,14 @@ function handoffLine(edit: RequestEdit, rejections: readonly Rejection[]): strin
   const rejection = editHandoff(edit, rejections);
   return rejection === null
     ? "Not sent to a drafter: nothing has redrafted this file since."
-    : `Given to the drafter with the rejection of ${formatLocalTimestamp(rejection.at)}.`;
+    : `In the feedback of the rejection of ${formatLocalTimestamp(rejection.at)}: a redraft from it is told to keep these lines.`;
 }
 
 /**
  * Every in-place edit an operator saved to the spec or a ticket: who, when,
- * which file, the changed lines, and whether a later rejection handed the
- * edit to the drafter. The lines are operator and agent text: shown through
+ * which file, the changed lines, and whether a later rejection carries the
+ * edit in its feedback (what a redraft from that rejection is given; whether
+ * one ran is the pipeline's to say). The lines are operator and agent text: shown through
  * the diff view, as text.
  */
 export function EditHistory({ edits, rejections }: EditHistoryProps) {

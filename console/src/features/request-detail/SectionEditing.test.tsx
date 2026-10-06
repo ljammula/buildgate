@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { sha256Hex } from "@/domain/contentHash";
@@ -89,4 +89,40 @@ test("outside editing the spec is shown whole and no section controls exist", as
   openRequest(specReview());
   await screen.findByRole("heading", { level: 1, name: "Calc" });
   expect(screen.queryByRole("button", { name: /Edit section/ })).toBeNull();
+});
+
+test("a section that changed below an open field is not overwritten by Apply", async () => {
+  await edit();
+  const raw = within(panel()).getByRole("textbox", { name: "Edit spec.md" });
+  await userEvent.click(within(panel()).getByRole("button", { name: "Edit section Risks" }));
+  await userEvent.type(within(panel()).getByRole("textbox", { name: "Section Risks" }), "!");
+  // The whole-file editor adds a line to the same section meanwhile.
+  fireEvent.change(raw, {
+    target: { value: shown(SPEC).replace("## Risks\nr\n", "## Risks\nr\nRAW LINE\n") },
+  });
+
+  expect(within(panel()).getByRole("button", { name: "Apply section Risks" })).toBeDisabled();
+  expect(
+    within(panel()).getByText(/changed in the text below since this field opened/),
+  ).toBeVisible();
+  expect(raw).toHaveValue(shown(SPEC).replace("## Risks\nr\n", "## Risks\nr\nRAW LINE\n"));
+});
+
+test("a heading removed below an open field leaves nowhere to apply, and says so", async () => {
+  await edit();
+  const raw = within(panel()).getByRole("textbox", { name: "Edit spec.md" });
+  await userEvent.click(within(panel()).getByRole("button", { name: "Edit section Risks" }));
+  fireEvent.change(raw, { target: { value: shown(SPEC).replace("## Risks\n", "") } });
+
+  expect(within(panel()).getByRole("button", { name: "Apply section Risks" })).toBeDisabled();
+  expect(within(panel()).getByText(/heading is no longer in the text below/)).toBeVisible();
+});
+
+test("closing the editor with a section field open asks before discarding it", async () => {
+  await edit();
+  await userEvent.click(within(panel()).getByRole("button", { name: "Edit section Risks" }));
+  await userEvent.type(within(panel()).getByRole("textbox", { name: "Section Risks" }), " more");
+  await userEvent.click(within(panel()).getByRole("button", { name: "Cancel" }));
+
+  expect(await screen.findByRole("dialog", { name: "Discard your changes?" })).toBeVisible();
 });

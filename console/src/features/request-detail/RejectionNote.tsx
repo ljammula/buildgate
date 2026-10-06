@@ -29,6 +29,13 @@ function AnchoredChangeBody({ change }: { readonly change: AnchoredChange }) {
       <p className="text-fg-muted text-xs">This place was not in the revision you rejected.</p>
     );
   }
+  if (change.movedTo !== null) {
+    return (
+      <p className="text-tone-warning text-xs">
+        {`Unchanged since you rejected: the same text is now number ${change.movedTo}.`}
+      </p>
+    );
+  }
   if (change.before === change.after) {
     return (
       <p className="text-tone-warning text-xs">
@@ -37,13 +44,20 @@ function AnchoredChangeBody({ change }: { readonly change: AnchoredChange }) {
     );
   }
   return (
-    <TextDiffView
-      before={change.before}
-      after={change.after}
-      beforeLabel="rejected"
-      afterLabel="current"
-      className="max-h-64 overflow-auto"
-    />
+    <>
+      {change.anchor.item === 0 ? null : (
+        <p className="text-fg-muted text-xs">
+          {`Compared with the criterion now at number ${change.anchor.item}; the list may have been renumbered.`}
+        </p>
+      )}
+      <TextDiffView
+        before={change.before}
+        after={change.after}
+        beforeLabel="rejected"
+        afterLabel="current"
+        className="max-h-64 overflow-auto"
+      />
+    </>
   );
 }
 

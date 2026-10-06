@@ -71,7 +71,8 @@ export function FileEditor({
   // A section field open with text not applied: Save would leave it behind.
   const [sectionPending, setSectionPending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
-  const dirty = text !== opened;
+  // An open section field counts: closing the editor would drop its text.
+  const dirty = text !== opened || sectionPending;
   const blockedReason = session?.blockedReason ?? null;
   const onDirtyChange = session?.onDirtyChange;
   useEffect(() => {
