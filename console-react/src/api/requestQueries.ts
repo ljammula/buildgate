@@ -107,6 +107,12 @@ export interface RequestBoard {
   readonly live: boolean;
   /** A permanent stream failure (a 4xx): the board is then kept fresh by polling only. */
   readonly streamError: ApiError | null;
+  /**
+   * Connection attempts that have ended since the stream was last open; 0
+   * while it is live. A board shows "disconnected" only after several, so
+   * one dropped connection that reconnects at once is not an alarm.
+   */
+  readonly failedAttempts: number;
 }
 
 /**
@@ -119,6 +125,7 @@ export function useRequestBoard(): RequestBoard {
   const client = useQueryClient();
   const [live, setLive] = useState(false);
   const [streamError, setStreamError] = useState<ApiError | null>(null);
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   const query = useQuery({
     queryKey: queryKeys.requests.list(),
@@ -140,7 +147,10 @@ export function useRequestBoard(): RequestBoard {
         setLive(false);
         setStreamError(error);
       },
-      onConnectionChange: setLive,
+      onConnectionChange: (connected) => {
+        setLive(connected);
+        setFailedAttempts((count) => (connected ? 0 : count + 1));
+      },
     });
     return () => {
       unsubscribe();
@@ -148,7 +158,25 @@ export function useRequestBoard(): RequestBoard {
     };
   }, [http, client]);
 
-  return { query, live, streamError };
+  return { query, live, streamError, failedAttempts };
+}
+
+/**
+ * The request list alone, with no event stream: for a screen that only
+ * needs requests to label something else (the run list's titles). It shares
+ * the board's cache entry.
+ */
+export function useRequests(): UseQueryResult<RequestSummary[]> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.requests.list(),
+    queryFn: ({ signal }) => listRequests(http, signal),
+    structuralSharing: (cached, fetched) =>
+      mergeRequestList(
+        cached as RequestSummary[] | undefined,
+        fetched as readonly RequestSummary[],
+      ),
+  });
 }
 
 export function useRequest(id: string): UseQueryResult<RequestSummary> {

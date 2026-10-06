@@ -1,13 +1,9 @@
-import { PageBody, PageHeader } from "@/ui/PageLayout";
+import { useParams } from "react-router";
 
-/** Placeholder until this screen is ported. */
+import { RunPage } from "@/features/run-detail/RunPage";
+
+/** The run page at `/runs/:id`. Keyed by id so every piece of per-run state starts fresh for another run. */
 export function RunDetailScreen() {
-  return (
-    <>
-      <PageHeader title="Run" />
-      <PageBody>
-        <p className="text-fg-muted">This screen is not ported yet.</p>
-      </PageBody>
-    </>
-  );
+  const { id = "" } = useParams();
+  return <RunPage key={id} id={id} />;
 }

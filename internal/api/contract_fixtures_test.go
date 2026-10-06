@@ -547,3 +547,22 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 		t.Fatalf("seeded %d requests, contractRequestIDs names %d", len(requests), len(contractRequestIDs))
 	}
 }
+
+// TestWriteContractFixtureDataDir writes the fixture data directory to
+// FACTORYD_CONTRACT_FIXTURE_DIR and its workspace to
+// FACTORYD_CONTRACT_FIXTURE_WORKSPACE, for a browser walk of the console
+// against `factoryd serve -data-dir`: the same records the contract
+// fixtures are served from. It is skipped unless both are set.
+func TestWriteContractFixtureDataDir(t *testing.T) {
+	dataDir := os.Getenv("FACTORYD_CONTRACT_FIXTURE_DIR")
+	workspace := os.Getenv("FACTORYD_CONTRACT_FIXTURE_WORKSPACE")
+	if dataDir == "" || workspace == "" {
+		t.Skip("set FACTORYD_CONTRACT_FIXTURE_DIR and FACTORYD_CONTRACT_FIXTURE_WORKSPACE to write the fixture data directory")
+	}
+	for _, dir := range []string{dataDir, workspace} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedContractFixtureData(t, dataDir, workspace)
+}

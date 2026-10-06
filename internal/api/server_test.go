@@ -51,6 +51,14 @@ func TestHealthzReturnsOK(t *testing.T) {
 // shadowing the other -- GET / must serve the (placeholder, in this
 // unbuilt checkout) console page, and GET /runs must still reach the real
 // API handler rather than falling through to the console's SPA fallback.
+// isConsoleShell reports whether body is the console's HTML page -- the
+// placeholder or whichever console bundle this binary embeds -- rather than
+// an API route's JSON. Every one of them is an HTML document; no API
+// response is.
+func isConsoleShell(body string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(body)), "<!doctype html")
+}
+
 func TestConsoleServedAtRootAlongsideAPIRoutes(t *testing.T) {
 	server := NewServer(filepath.Join(t.TempDir(), "does-not-exist"))
 
@@ -59,7 +67,7 @@ func TestConsoleServedAtRootAlongsideAPIRoutes(t *testing.T) {
 	if rootRec.Code != http.StatusOK {
 		t.Fatalf("GET /: status = %d, want %d", rootRec.Code, http.StatusOK)
 	}
-	if !strings.Contains(rootRec.Body.String(), "Factory Console") {
+	if !isConsoleShell(rootRec.Body.String()) {
 		t.Errorf("GET /: body = %q, want the console placeholder page", rootRec.Body.String())
 	}
 
@@ -91,7 +99,7 @@ func TestConsoleDeepLinkServesShellOnlyForRealBrowserNavigation(t *testing.T) {
 	if navRec.Code != http.StatusOK {
 		t.Fatalf("browser navigation: status = %d, want %d", navRec.Code, http.StatusOK)
 	}
-	if !strings.Contains(navRec.Body.String(), "Factory Console") {
+	if !isConsoleShell(navRec.Body.String()) {
 		t.Errorf("browser navigation: body = %q, want the console shell", navRec.Body.String())
 	}
 
@@ -100,7 +108,7 @@ func TestConsoleDeepLinkServesShellOnlyForRealBrowserNavigation(t *testing.T) {
 	if apiRec.Code != http.StatusNotFound {
 		t.Fatalf("plain API call: status = %d, want %d: %s", apiRec.Code, http.StatusNotFound, apiRec.Body.String())
 	}
-	if strings.Contains(apiRec.Body.String(), "Factory Console") {
+	if isConsoleShell(apiRec.Body.String()) {
 		t.Errorf("plain API call: body = %q, want the real JSON error, not the console shell", apiRec.Body.String())
 	}
 }
@@ -125,13 +133,13 @@ func TestConsoleDeepLinkCoversRunsListAndProjectStats(t *testing.T) {
 			if navRec.Code != http.StatusOK {
 				t.Fatalf("browser navigation: status = %d, want %d", navRec.Code, http.StatusOK)
 			}
-			if !strings.Contains(navRec.Body.String(), "Factory Console") {
+			if !isConsoleShell(navRec.Body.String()) {
 				t.Errorf("browser navigation: body = %q, want the console shell", navRec.Body.String())
 			}
 
 			apiRec := httptest.NewRecorder()
 			server.ServeHTTP(apiRec, httptest.NewRequest(http.MethodGet, path, nil))
-			if strings.Contains(apiRec.Body.String(), "Factory Console") {
+			if isConsoleShell(apiRec.Body.String()) {
 				t.Errorf("plain API call: body = %q, want the real JSON, not the console shell", apiRec.Body.String())
 			}
 		})

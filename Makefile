@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: console-react-test console-react-build meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -103,6 +103,20 @@ console-build:
 	rm -rf internal/consoleweb/dist && \
 	mkdir -p internal/consoleweb/dist && \
 	cp -r "$$tmp/build/web/." internal/consoleweb/dist/ && \
+	touch internal/consoleweb/dist/.gitkeep
+
+# The React console (console-react/), while it is being proven beside the
+# Flutter one: its own checks, and an opt-in build that embeds it in place of
+# the Flutter bundle. `make install` still embeds Flutter (console-build).
+# npm runs no install scripts (console-react/.npmrc).
+console-react-test:
+	cd console-react && npm ci && npm run check
+
+console-react-build:
+	cd console-react && npm ci && npm run build
+	rm -rf internal/consoleweb/dist
+	mkdir -p internal/consoleweb/dist
+	cp -R console-react/dist/. internal/consoleweb/dist/
 	touch internal/consoleweb/dist/.gitkeep
 
 # Best-effort console-build: silently skipped (the binary then serves

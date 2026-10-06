@@ -37,6 +37,14 @@ export function useRuns(refetchIntervalMs?: number): UseQueryResult<Run[]> {
   });
 }
 
+/**
+ * Whichever record of one run is newer; `updated_at` is RFC 3339 UTC, so it
+ * orders as text.
+ */
+export function newerRun(cached: Run | undefined, incoming: Run): Run {
+  return cached && cached.updatedAt > incoming.updatedAt ? cached : incoming;
+}
+
 export interface LiveRun {
   readonly query: UseQueryResult<Run>;
   /** A permanent stream failure (a 4xx: a rotated token, a pruned run). */
@@ -56,14 +64,19 @@ export function useRun(id: string): LiveRun {
   const query = useQuery({
     queryKey: queryKeys.runs.detail(id),
     queryFn: ({ signal }) => getRun(http, id, signal),
+    // A refetch that was already in flight must not replace a newer record
+    // the stream delivered meanwhile.
+    structuralSharing: (cached, fetched) => newerRun(cached as Run | undefined, fetched as Run),
   });
 
-  const terminal = query.data ? runIsTerminal(query.data) : false;
+  // The stream opens once the run is known and only while it can still
+  // change: a finished run makes no events request at all.
+  const watching = query.data !== undefined && !runIsTerminal(query.data);
   useEffect(() => {
-    if (terminal) return;
+    if (!watching) return;
     const unsubscribe = watchRun(http, id, {
       onValue: (run) => {
-        client.setQueryData(queryKeys.runs.detail(id), run);
+        client.setQueryData<Run>(queryKeys.runs.detail(id), (cached) => newerRun(cached, run));
         if (runIsTerminal(run)) {
           // The run's evidence (diff, release decision) is final only now.
           void client.invalidateQueries({
@@ -75,7 +88,7 @@ export function useRun(id: string): LiveRun {
       onError: setStreamError,
     });
     return unsubscribe;
-  }, [http, client, id, terminal]);
+  }, [http, client, id, watching]);
 
   return { query, streamError };
 }

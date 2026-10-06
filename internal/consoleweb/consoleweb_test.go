@@ -126,3 +126,38 @@ func TestUnbuiltIndexHTMLServesPlaceholder(t *testing.T) {
 		t.Errorf("GET /index.html = %d %q, want the placeholder page", rec.Code, rec.Body.String())
 	}
 }
+
+// TestReactBundleIsEmbedded: the React console's build has no main.dart.js;
+// its manifest marks it as a real bundle, and a deep link and an asset are
+// served from it.
+func TestReactBundleIsEmbedded(t *testing.T) {
+	withFS(t, fstest.MapFS{
+		"index.html":             {Data: []byte("<!doctype html><title>Buildgate</title>")},
+		".vite/manifest.json":    {Data: []byte("{}")},
+		"assets/index-abc123.js": {Data: []byte("// js")},
+	})
+	if !Embedded() {
+		t.Fatal("Embedded() = false for a bundle with index.html and a Vite manifest, want true")
+	}
+	for _, target := range []string{"/", "/requests/abc", "/app/projects"} {
+		rec := httptest.NewRecorder()
+		Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<title>Buildgate</title>") {
+			t.Errorf("GET %s = %d %q, want the bundle's index.html", target, rec.Code, rec.Body.String())
+		}
+	}
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "// js" {
+		t.Errorf("GET the asset = %d %q, want the file", rec.Code, rec.Body.String())
+	}
+}
+
+// TestManifestWithoutIndexServesPlaceholder: a manifest alone is a stale
+// bundle, like a main.dart.js alone.
+func TestManifestWithoutIndexServesPlaceholder(t *testing.T) {
+	withFS(t, fstest.MapFS{".vite/manifest.json": {Data: []byte("{}")}})
+	if Embedded() {
+		t.Fatal("Embedded() = true for a bundle with no index.html, want false")
+	}
+}

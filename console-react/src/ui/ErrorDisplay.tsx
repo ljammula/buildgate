@@ -78,9 +78,15 @@ export function describeError(error: unknown, { startClass = false } = {}): Erro
         raw,
       };
     }
+    // When the server said why in its own words, that is the next step: a
+    // refusal such as "no verify command resolvable: pass -verify-command..."
+    // is exactly what the operator needs, and it was once one click away
+    // behind Details (found on the live walk, 2026-10-05). A body that is not
+    // the server's error shape (a proxy's HTML page) stays behind Details.
+    const said = error.serverMessage !== error.body;
     return {
       headline: `Request failed (${error.status})`,
-      nextStep: "See details below.",
+      nextStep: said ? raw : "See details below.",
       raw,
     };
   }
@@ -116,7 +122,7 @@ export interface ErrorCalloutProps {
 /**
  * The shared rendering of an ErrorSummary: headline and next step as the
  * primary text, an optional Retry action, and the raw text demoted into a
- * collapsed "Details" disclosure. All text is rendered as text: server and
+ * collapsed "Details" disclosure (omitted when the next step is that text). All text is rendered as text: server and
  * agent text is untrusted.
  */
 export function ErrorCallout({ error, onRetry, startClass = false }: ErrorCalloutProps) {
@@ -134,18 +140,21 @@ export function ErrorCallout({ error, onRetry, startClass = false }: ErrorCallou
   return (
     <div role="alert" className="flex flex-col items-start gap-1 text-sm">
       <h3 className="text-tone-danger font-semibold">{summary.headline}</h3>
-      <p className="text-fg">{summary.nextStep}</p>
+      <p className="text-fg whitespace-pre-line">{summary.nextStep}</p>
       {onRetry !== undefined && (
         <Button size="sm" disabled={pending} onClick={() => void retry()}>
           Retry
         </Button>
       )}
-      <details className="w-full">
-        <summary className="text-fg-muted cursor-pointer select-none">Details</summary>
-        <pre className="bg-surface-sunken text-fg-muted mt-1 overflow-x-auto rounded-md p-2 text-xs whitespace-pre-wrap">
-          {summary.raw}
-        </pre>
-      </details>
+      {/* Nothing to disclose when the next step already is the whole text. */}
+      {summary.raw !== summary.nextStep && (
+        <details className="w-full">
+          <summary className="text-fg-muted cursor-pointer select-none">Details</summary>
+          <pre className="bg-surface-sunken text-fg-muted mt-1 overflow-x-auto rounded-md p-2 text-xs whitespace-pre-wrap">
+            {summary.raw}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

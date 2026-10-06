@@ -87,5 +87,5 @@ test("a bare / with filters still parses to the board config, unaffected by the 
   const config = parseRoute("/?project=checkouts");
   expect(config.deepLink).toBe("none");
   expect(config.triage).toBe(false);
-  expect(config.filters.projects).toEqual(["checkouts"]);
+  expect(config.filters.projects).toEqual(new Set(["checkouts"]));
 });

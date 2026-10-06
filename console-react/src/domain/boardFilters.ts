@@ -3,7 +3,8 @@ import type { RequestSummary } from "@/domain/request";
 /**
  * The five groups a request's state sorts and colors by -- "waiting-on-you =
  * review states; working = drafting/planning/building/pr_review; done;
- * failed = quarantined/cancelled". Private here: the board only needs the
+ * failed = quarantined/cancelled". The single implementation: the board, triage
+ * and the request ordering all read it. The board's own filter only needs the
  * three-way RequestBoardSection below.
  *
  * `review` means "waiting on you", not literally "in a review state" -- it
@@ -17,7 +18,7 @@ import type { RequestSummary } from "@/domain/request";
  * `cancelled`, which stay `failed`: those are genuine dead ends from this
  * console's perspective (no resume affordance here).
  */
-type RequestStageGroup = "review" | "working" | "done" | "failed" | "other";
+export type RequestStageGroup = "review" | "working" | "done" | "failed" | "other";
 
 const REVIEW_STATES: ReadonlySet<string> = new Set([
   "spec_review",
@@ -39,7 +40,7 @@ const WORKING_STATES: ReadonlySet<string> = new Set([
 const DONE_STATES: ReadonlySet<string> = new Set(["done"]);
 const FAILED_STATES: ReadonlySet<string> = new Set(["quarantined", "cancelled"]);
 
-function requestStageGroup(state: string): RequestStageGroup {
+export function requestStageGroup(state: string): RequestStageGroup {
   if (REVIEW_STATES.has(state)) return "review";
   if (WORKING_STATES.has(state)) return "working";
   if (DONE_STATES.has(state)) return "done";
@@ -54,7 +55,7 @@ function requestStageGroup(state: string): RequestStageGroup {
  * the factory. A `draft` or `approved` PR means the factory still has work
  * to do on it.
  */
-function requestStageGroupOf(request: RequestSummary): RequestStageGroup {
+export function requestStageGroupOf(request: RequestSummary): RequestStageGroup {
   if (request.state === "pr_review") {
     const prStates = request.tickets
       .filter((t) => t.prUrl !== "" && t.prState !== "")

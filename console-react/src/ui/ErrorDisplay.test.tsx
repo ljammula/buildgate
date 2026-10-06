@@ -78,13 +78,21 @@ describe("describeError(startClass: true) (F: serve-start-token)", () => {
 });
 
 describe("ErrorCallout", () => {
-  test("shows headline and next step, with the raw text under Details, one part per line", () => {
+  test("shows the server's own message as the next step, one part per line, with nothing left to disclose", () => {
     render(<ErrorCallout error={new ApiError(500, '{"error":"spec.md bad | oracle missing"}')} />);
     expect(screen.getByRole("heading", { name: "Request failed (500)" })).toBeInTheDocument();
+    expect(screen.getByText(/spec\.md bad/).textContent).toBe("spec.md bad\noracle missing");
+    expect(screen.queryByText("See details below.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Details")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  test("a body that is not the server's error shape stays behind Details", () => {
+    render(<ErrorCallout error={new ApiError(502, "<html>bad gateway</html>")} />);
+    expect(screen.getByRole("heading", { name: "Request failed (502)" })).toBeInTheDocument();
     expect(screen.getByText("See details below.")).toBeInTheDocument();
     expect(screen.getByText("Details")).toBeInTheDocument();
-    expect(screen.getByText(/spec\.md bad/).textContent).toBe("spec.md bad\noracle missing");
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.getByText("<html>bad gateway</html>")).toBeInTheDocument();
   });
 
   test("renders untrusted text as text, not markup", () => {

@@ -1,13 +1,12 @@
 // Pure route parsing/building for every addressable console path. Browser
 // history and location are deliberately outside this module.
 
-export type RequestBoardSection = "needs-you" | "working" | "finished";
-
-export interface RequestBoardFilters {
-  readonly projects: readonly string[];
-  readonly section: RequestBoardSection | null;
-  readonly search: string;
-}
+import {
+  type RequestBoardFilters,
+  emptyRequestBoardFilters,
+  filtersFromSearchParams,
+  toQueryParameters,
+} from "@/domain/boardFilters";
 
 export type RequestBoardDeepLink =
   | "none"
@@ -26,7 +25,7 @@ export interface RequestBoardRouteConfig {
   readonly deepLinkId: string | null;
 }
 
-const emptyFilters: RequestBoardFilters = { projects: [], section: null, search: "" };
+const emptyFilters = emptyRequestBoardFilters;
 
 function deepLink(
   kind: Exclude<RequestBoardDeepLink, "none">,
@@ -112,17 +111,7 @@ export function parseRoute(input: string | URL): RequestBoardRouteConfig {
   if (segments.length === 3 && segments[0] === "projects" && segments[2] === "stats") {
     return projectStatsRoute(decodeSegment(segmentAt(segments, 1)));
   }
-  return boardRoute(parseFilters(url));
-}
-
-function parseFilters(url: URL): RequestBoardFilters {
-  const projects = [...new Set(url.searchParams.getAll("project").filter((value) => value !== ""))];
-  const sectionValue = url.searchParams.get("group");
-  const section: RequestBoardSection | null =
-    sectionValue === "needs-you" || sectionValue === "working" || sectionValue === "finished"
-      ? sectionValue
-      : null;
-  return { projects, section, search: url.searchParams.get("q") ?? "" };
+  return boardRoute(filtersFromSearchParams(url.searchParams));
 }
 
 /** Builds a path with deep-link ids encoded exactly once. */
@@ -151,9 +140,10 @@ export function pathForRoute(route: RequestBoardRouteConfig): string {
 /** The board, with its filters in the query string. */
 export function boardPath(filters: RequestBoardFilters = emptyFilters): string {
   const params = new URLSearchParams();
-  for (const project of [...filters.projects].sort()) params.append("project", project);
-  if (filters.section !== null) params.set("group", filters.section);
-  if (filters.search !== "") params.set("q", filters.search);
+  for (const [key, value] of Object.entries(toQueryParameters(filters))) {
+    if (typeof value === "string") params.set(key, value);
+    else for (const item of value) params.append(key, item);
+  }
   const query = params.toString();
   return query === "" ? "/" : `/?${query}`;
 }

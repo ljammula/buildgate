@@ -6,11 +6,13 @@ import {
   filtersFromSearchParams,
   matchesRequestBoardFilters,
   requestBoardFiltersEqual,
+  requestStageGroupOf,
   sectionForRequest,
   sectionForState,
   toQueryParameters,
 } from "@/domain/boardFilters";
 import { type RequestSummary, decodeRequestSummary } from "@/domain/request";
+import { requestJson, ticketJson } from "@/test/requestFixtures";
 
 function summaryOf(args: {
   id: string;
@@ -199,4 +201,26 @@ test("distinctProjects sorts and de-duplicates", () => {
     summaryOf({ id: "c", state: "done", project: "billing" }),
   ];
   expect(distinctProjects(requests)).toEqual(["billing", "checkouts"]);
+});
+
+describe("requestStageGroupOf", () => {
+  const withPrs = (prStates: string[]) =>
+    decodeRequestSummary(
+      requestJson({
+        id: "r",
+        state: "pr_review",
+        tickets: prStates.map((prState, i) => ticketJson({ index: i + 1, prState })),
+      }),
+      "test",
+    );
+
+  test("a pr_review request whose PRs all wait on a human needs you", () => {
+    expect(requestStageGroupOf(withPrs(["ready", "merged"]))).toBe("review");
+    expect(requestStageGroupOf(withPrs(["stacked"]))).toBe("review");
+  });
+
+  test("a draft or approved PR means the factory still has work", () => {
+    expect(requestStageGroupOf(withPrs(["ready", "approved"]))).toBe("working");
+    expect(requestStageGroupOf(withPrs(["merged"]))).toBe("working");
+  });
 });
