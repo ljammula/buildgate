@@ -33,6 +33,8 @@ test/walk/run.sh       # the live walk: a real factoryd, a real browser, every s
 
 `scripts/console-walk/run.sh` (repository root) is the second walk: one real request through drafting, review and a build against a model route, driven only from the console (it needs Docker, the OpenShell gateway and Temporal; its header lists them).
 
+`WALK_SCRIPT=record.mjs test/walk/run.sh` records a captioned tour of the console against the same seeded server (`<walk-dir>/recording/console-tour.webm`; `demo/console-tour.webm` is one). It rewrites home-directory paths in the page before they are painted and fails if one is still visible, so the recording can be published as it is.
+
 `npx playwright install chromium` once before the walk; `WALK_BROWSER_CHANNEL=chrome` uses an installed Google Chrome instead.
 
 ## Add a screen

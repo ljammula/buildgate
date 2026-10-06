@@ -322,6 +322,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 |---|---|
 | [`DEMO.md`](DEMO.md) | A 20-30 minute live demo script |
 | [`demo/how-buildgate-works.html`](demo/how-buildgate-works.html) | Why, what and how, for an engineering team |
+| [`demo/console-tour.webm`](demo/console-tour.webm) | A short captioned recording of the operator console: board, triage, spec and plan review, editing, a build, and what a stopped request shows |
 | [`STATUS.md`](STATUS.md) | What works, what is opt-in, every known limit |
 | [`USAGE.md`](USAGE.md) | End-to-end walkthrough: `quickstart`, `submit`/`worker`, oracles, how Temporal runs a request and what happens to a lost step |
 | [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | Per-command flags, gotchas, harness/credential configs, session-config keys, repository-owner runs and daemons |
