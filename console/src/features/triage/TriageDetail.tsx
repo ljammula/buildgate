@@ -9,6 +9,7 @@ import { CodeBlock } from "@/ui/CodeBlock";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
+import { REQUEST_VERBS } from "@/domain/status";
 
 import { artifactContent } from "./triageModel";
 
@@ -92,15 +93,15 @@ export function TriageDetail({
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" disabled={acting || detail === null} onClick={onApprove}>
               <Check aria-hidden="true" />
-              Approve (a)
+              {`${REQUEST_VERBS.approve} (a)`}
             </Button>
             <Button disabled={acting || detail === null} onClick={onReject}>
               <X aria-hidden="true" />
-              Reject (r)
+              {`${REQUEST_VERBS.requestChanges} (r)`}
             </Button>
           </div>
         ) : null}
-        <p className="text-fg-subtle text-xs">Keyboard: j/k move · a approve · r reject</p>
+        <p className="text-fg-subtle text-xs">Keyboard: j/k move · a approve · r request changes</p>
       </div>
     </div>
   );

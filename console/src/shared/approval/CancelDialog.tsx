@@ -1,5 +1,6 @@
 import { useApi } from "@/api/ApiProvider";
 import { useCancelRequest } from "@/api/requestQueries";
+import { REQUEST_VERBS } from "@/domain/status";
 
 import type { FlowProps } from "./flowTypes";
 import { OperatorGate } from "./OperatorGate";
@@ -34,7 +35,7 @@ function CancelBody({ requestId, by, onOpenChange, onDone }: BodyProps) {
   return (
     <ReasonFlow
       title="Cancel this request"
-      confirmLabel="Cancel request"
+      confirmLabel={REQUEST_VERBS.cancel}
       tone="danger"
       description="The request is marked cancelled for good. A build already running is not stopped; its result is discarded."
       pending={cancel.isPending}

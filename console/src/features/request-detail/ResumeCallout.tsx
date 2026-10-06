@@ -4,6 +4,7 @@ import { useApi } from "@/api/ApiProvider";
 import type { RequestSummary } from "@/domain/request";
 import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
+import { REQUEST_VERBS } from "@/domain/status";
 
 import { resumePlan } from "./requestDetailLogic";
 
@@ -80,7 +81,7 @@ export function ResumeCallout({ request, acting, onResume, onCancel }: ResumeCal
           )}
           <Button disabled={disabled} onClick={onCancel}>
             <Ban aria-hidden="true" />
-            Cancel
+            {REQUEST_VERBS.cancel}
           </Button>
         </div>
       </div>

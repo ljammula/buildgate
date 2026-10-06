@@ -299,7 +299,7 @@ describe("resume_review", () => {
     expect(
       within(resumeCallout()).getByText("the factoryd worker stopped while the build ran"),
     ).toBeInTheDocument();
-    for (const name of ["Resume", "Rebuild from scratch", "Cancel"]) {
+    for (const name of ["Resume", "Rebuild from scratch", "Cancel request"]) {
       expect(within(resumeCallout()).getByRole("button", { name })).toBeInTheDocument();
     }
     expect(screen.queryByText(/^- /)).not.toBeInTheDocument();
@@ -410,7 +410,7 @@ describe("resume_review", () => {
       ],
     });
     await heading("T");
-    await userEvent.click(within(resumeCallout()).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(resumeCallout()).getByRole("button", { name: "Cancel request" }));
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByLabelText("Reason"), "not needed");
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel request" }));
@@ -464,7 +464,7 @@ describe("resume_review", () => {
       ],
     });
     await heading("T");
-    await userEvent.click(within(resumeCallout()).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(resumeCallout()).getByRole("button", { name: "Cancel request" }));
     const dialog = await screen.findByRole("dialog", { name: "Cancel this request" });
     await userEvent.type(within(dialog).getByLabelText("Reason"), "no longer needed");
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel request" }));
