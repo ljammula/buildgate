@@ -426,7 +426,8 @@
           "cost_micro_usd": 9
         }
       ]
-    }
+    },
+    "next_action": "the lost building step cannot be resumed (every-field refused); `factoryd resume -from scratch req-every-field` rebuilds the ticket, or `factoryd cancel req-every-field`"
   },
   {
     "id": "req-halted",
@@ -512,7 +513,8 @@
       ],
       "accepted_tickets": 1,
       "cost_per_accepted_ticket_micro_usd": 1512000
-    }
+    },
+    "next_action": "`factoryd retry req-halted` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `factory/req-halted-1` by hand"
   },
   {
     "id": "req-oracle-review",
@@ -602,7 +604,8 @@
           "cost_micro_usd": 12000
         }
       ]
-    }
+    },
+    "next_action": "review the drafted oracle (or leave it absent/empty to skip): `factoryd approve req-oracle-review`, or `factoryd reject -reason ... req-oracle-review` to redraft"
   },
   {
     "id": "req-plan-review",
@@ -712,7 +715,8 @@
           "cost_micro_usd": 12000
         }
       ]
-    }
+    },
+    "next_action": "review the drafted tickets: `factoryd approve req-plan-review`, or `factoryd reject -reason ... req-plan-review` to redraft"
   },
   {
     "id": "req-quarantined",
@@ -794,7 +798,8 @@
           "cost_micro_usd": 12000
         }
       ]
-    }
+    },
+    "next_action": "quarantined -- fix the cause named above, then `factoryd retry req-quarantined`, or send it back to planning to redraft the plan: `factoryd reject -to plan -reason \"...\" req-quarantined`"
   },
   {
     "id": "req-spec-review",
@@ -861,6 +866,7 @@
           "cost_micro_usd": 12000
         }
       ]
-    }
+    },
+    "next_action": "review the drafted spec: `factoryd approve req-spec-review`, or `factoryd reject -reason ... req-spec-review` to redraft"
   }
 ]

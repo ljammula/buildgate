@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 
 import type { RequestSummary } from "@/domain/request";
+import { DigestedText } from "@/shared/request/DigestedText";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { RequestStatusUnit } from "@/shared/request/RequestStatusUnit";
 import { requestPath } from "@/routes/paths";
@@ -27,9 +28,9 @@ export function TriageOtherDetail({ request, now }: TriageOtherDetailProps) {
       <RequestStatusUnit request={request} now={now}>
         <RequestStageChip state={request.state} needsYou />
       </RequestStatusUnit>
-      <p data-testid="triage-reason" className="text-fg text-sm">
-        {triageReason(request)}
-      </p>
+      <div data-testid="triage-reason" className="text-fg text-sm">
+        <DigestedText text={triageReason(request)} fullLabel="Full next step" />
+      </div>
       <div data-testid="triage-decision-bar" className="flex flex-col gap-2">
         <div>
           <Button variant="primary" asChild>

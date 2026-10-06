@@ -251,6 +251,29 @@ test("lists a halted request with a reason and a link to it", async () => {
   expect(screen.getByRole("link", { name: "Open request" })).toBeInTheDocument();
 });
 
+test("a halted request shows the server's next_action from the list entry", async () => {
+  renderApp(<TriageScreen />, {
+    server: [
+      {
+        on: "GET /requests",
+        reply: () =>
+          json([
+            {
+              ...requestJson({ id: "req-halted", state: "halted", title: "Halted" }),
+              next_action: "Fix the release policy, then run `factoryd retry req-halted`.",
+            },
+          ]),
+      },
+      { on: "GET /requests/events", reply: sseResponse("state") },
+    ],
+  });
+  expect(await screen.findByTestId("triage-row-req-halted")).toBeInTheDocument();
+  expect(screen.getByTestId("triage-reason")).toHaveTextContent(
+    "Fix the release policy, then run `factoryd retry req-halted`.",
+  );
+  expect(screen.queryByText("The build halted and needs your decision.")).not.toBeInTheDocument();
+});
+
 test("a failed load shows the error", async () => {
   renderApp(<TriageScreen />, {
     server: [{ on: "GET /requests", reply: () => apiErrorResponse(500, "boom") }],
