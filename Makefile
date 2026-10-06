@@ -1,4 +1,4 @@
-.PHONY: console-react-test console-react-build meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -79,55 +79,32 @@ coverage:
 	@echo "per-function detail: go tool cover -func=.coverage/merged.out"
 	@echo "HTML: go tool cover -html=.coverage/merged.out"
 
-# Flutter remains a separate toolchain and is intentionally not part of verify.
+# The console's checks (typecheck, lint, format, Vitest). Node and npm are a
+# separate toolchain and intentionally not part of verify.
 console-test:
-	cd console && flutter test
+	cd console && npm ci && npm run check
 
-# Builds the real Flutter Web console and embeds it into
+# Builds the React console (console/dist) and embeds it into
 # internal/consoleweb/dist so `factoryd serve` serves it directly, same
-# origin as the API (see that package's own doc comment) -- needs Flutter,
-# so this is never part of `verify`. API_BASE_URL= (empty) means "same
-# origin": console/lib/api_client.dart treats an empty base as a relative
-# request, which is exactly right once the console is served by the same
-# factoryd process it talks to.
-#
-# It builds from a temporary copy of console/: `flutter build` re-resolves
-# pubspec.lock (SDK-pinned packages move with the installed Flutter) and may
-# migrate analysis_options.yaml, and a tracked file changed in place stamps
-# the installed binary "-dirty", which `make install` and `factoryd upgrade`
-# then reject.
+# origin as the API (see that package's own doc comment) -- needs Node 20+
+# and npm, so this is never part of `verify`. The bundle calls the API by
+# relative URL, which is exactly right once the same origin serves both.
+# npm runs no install scripts (console/.npmrc).
 console-build:
-	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
-	rsync -a --exclude build --exclude .dart_tool console/ "$$tmp/" && \
-	(cd "$$tmp" && flutter build web --release --dart-define=API_BASE_URL=) && \
-	rm -rf internal/consoleweb/dist && \
-	mkdir -p internal/consoleweb/dist && \
-	cp -r "$$tmp/build/web/." internal/consoleweb/dist/ && \
-	touch internal/consoleweb/dist/.gitkeep
-
-# The React console (console-react/), while it is being proven beside the
-# Flutter one: its own checks, and an opt-in build that embeds it in place of
-# the Flutter bundle. `make install` still embeds Flutter (console-build).
-# npm runs no install scripts (console-react/.npmrc).
-console-react-test:
-	cd console-react && npm ci && npm run check
-
-console-react-build:
-	cd console-react && npm ci && npm run build
+	cd console && npm ci && npm run build
 	rm -rf internal/consoleweb/dist
 	mkdir -p internal/consoleweb/dist
-	cp -R console-react/dist/. internal/consoleweb/dist/
+	cp -R console/dist/. internal/consoleweb/dist/
 	touch internal/consoleweb/dist/.gitkeep
 
-# Best-effort console-build: silently skipped (the binary then serves
-# internal/consoleweb's built-in placeholder page) when Flutter isn't on
-# PATH, so `make install` keeps working on a machine that never installed
-# it.
+# Best-effort console-build: skipped (the binary then serves
+# internal/consoleweb's built-in placeholder page) when npm isn't on PATH,
+# so `make install` keeps working on a machine that never installed it.
 console-build-optional:
-	@if command -v flutter >/dev/null 2>&1; then \
+	@if command -v npm >/dev/null 2>&1; then \
 		$(MAKE) console-build; \
 	else \
-		echo "flutter not installed -- factoryd will serve the console placeholder page (see console/README.md for make console-build)"; \
+		echo "npm not installed -- factoryd will serve the console placeholder page (see console/README.md for make console-build)"; \
 	fi
 
 # agent/pi/'s own Python toolchain, same reasoning as console-test above --
@@ -139,15 +116,15 @@ agent-pi-test:
 # job runs (fmt-check/vet/test against a live Temporal dev server -- see that
 # job's own comments for why -- plus the live Docker test set), and adds
 # the two toolchains ci.yml doesn't cover yet: the Python harness test suite
-# (agent-pi-test above; it covers both engines) and, when Flutter is
+# (agent-pi-test above; it covers both engines) and, when npm is
 # installed, the console's own test suite. Not a Makefile alias for `verify`:
 # it needs Docker and (ideally) Temporal, same prerequisites as verify-live,
 # and takes minutes rather than verify's seconds.
 ci: fmt-check vet verify-live agent-pi-test with-spinner-test
-	@if command -v flutter >/dev/null 2>&1; then \
+	@if command -v npm >/dev/null 2>&1; then \
 		$(MAKE) console-test; \
 	else \
-		echo "flutter not installed -- skipping console-test (see console/README.md)"; \
+		echo "npm not installed -- skipping console-test (see console/README.md)"; \
 	fi
 
 # live-smoke runs factoryd's real pipeline (real sandbox through the
@@ -170,15 +147,14 @@ live-smoke:
 live-compose:
 	scripts/live-compose.sh
 
-# console-walk drives one real request through the embedded console as an
-# operator would -- submit, spec reject + redraft, edit, oracle and plan
-# approval, a Temporal build, the end state and a console retry -- with no
-# CLI call beyond submit/serve/worker and no manual Refresh. Needs a
-# FACTORYD_BIN built after `make console-build`, Docker, a model route in
-# CONSOLE_WALK_CONFIG, Temporal and node; ~10-20 minutes. See
-# scripts/console-walk/run.sh's own header.
+# console-walk is the console's live browser walk: a real factoryd serving a
+# seeded data directory, headless Chrome through every screen and action,
+# each write checked against the server's own record (console/test/walk/
+# run.sh's header). Needs Go, Node and Playwright's Chromium. The walk that
+# drives one real request through drafting and a build with a model route is
+# scripts/console-walk/run.sh (its header lists the prerequisites).
 console-walk:
-	scripts/console-walk/run.sh
+	console/test/walk/run.sh
 
 # live-smoke-results prints the last 20 recorded live-smoke runs (see
 # LIVE_SMOKE_RESULTS_FILE in scripts/live-smoke.sh's own top-of-file comment)

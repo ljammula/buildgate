@@ -135,7 +135,7 @@ start --memory 4`, then narrow its mounts — "Data directory and colima" below)
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
 processes inherit; an SSH `Host` alias maps to its real host, an
-unrecognized host gets an advisory only). Flutter is optional, only for
+unrecognized host gets an advisory only). Node 20+ and npm are optional, only for
 building the console. A model route (any OpenAI-compatible endpoint, an
 Anthropic key, GitHub Copilot, or a Codex login —
 [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-routes)).
@@ -820,7 +820,7 @@ What changes for a build:
 | Oracle stage for one request | `factoryd submit -draft-oracles ...`; add `-no-commit-oracles` to keep accepted oracles out of the repo |
 | Per-repo defaults | Commit `.factory.yml` |
 | Prove the pipeline end to end before merging pipeline changes | `make live-smoke` (real Docker, real model route, a few minutes) |
-| Unit and lint checks | `make verify` (Go), `make console-test` (Dart). CI is manual-only — run these yourself |
+| Unit and lint checks | `make verify` (Go), `make console-test` (console). CI is manual-only — run these yourself |
 
 ## Troubleshooting
 

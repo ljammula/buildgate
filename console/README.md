@@ -1,196 +1,134 @@
-# Factory Console
+# Buildgate console (React + TypeScript)
 
-Flutter Web operator console for `factoryd`: approve specs, oracles and
-plans; watch runs. To just use it, open the `View:` link `factoryd submit`
-prints, or run `factoryd console`: both start `factoryd serve` for the data
-dir when none is running. See [`DEMO.md`](../DEMO.md) for a walkthrough,
-[`README.md`](../README.md) for the system, and
-[`USAGE.md`](../USAGE.md#observe-and-control) for the path from
-`factoryd submit`/`worker` to this console.
+The operator console of `factoryd`: a static bundle built here and embedded in
+the binary (`internal/consoleweb`), served from the same origin as the API.
+It needs Node 20+ and npm.
 
-## Running it
-
-`factoryd serve` embeds the built console and serves it on the API's own
-origin (no Flutter toolchain, no second port, no CORS setup):
+## Commands
 
 ```sh
-factoryd serve    # startup log prints: console: http://<addr>/#t=<token>
+npm ci                 # install (scripts are disabled by .npmrc)
+npm run check          # typecheck, lint, format check, tests: the bar for every change
+npm run test -- src/domain/status.test.ts   # one file
+npm run dev            # dev server; set VITE_API_BASE_URL to a running factoryd
+npm run build          # static bundle in dist/
+test/walk/run.sh       # the live walk: a real factoryd, a real browser, every screen and action
 ```
 
-While it runs, `serve` records its address in `<data-dir>/console-address`
-(with its pid; removed on exit, ignored when the pid is dead). `factoryd
-submit` and `factoryd console` build their console links from that record
-for the same data dir; without a live `serve` (or `-console-base-url` /
-`FACTORYD_CONSOLE_URL`) they print no link rather than guess a port.
-With a stable start token (see below) the startup log prints the link
-without the `#t=` fragment; `factoryd console` prints the signed-in one.
+| From the repository root | What it does                                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `make console-test`      | `npm ci && npm run check`                                                                                  |
+| `make console-build`     | Builds the bundle and embeds it (`internal/consoleweb/dist`); the next `go build ./cmd/factoryd` serves it |
+| `make console-walk`      | `test/walk/run.sh`: the live walk below                                                                    |
 
-Building `factoryd` yourself: `make install` also builds the console when
-`flutter` is on `PATH` (`console-build-optional`); without Flutter the
-binary serves a placeholder page instead. `make console-build` builds it
-explicitly. Either way `internal/consoleweb/dist/` tracks only `.gitkeep`,
-so rebuilding leaves `git status` clean.
+## Checks, and what each one is for
 
-| Command | What it does |
-|---|---|
-| `make console-build` | `flutter build web`, copied into `internal/consoleweb/dist/` |
-| `make console-test` | `cd console && flutter test` |
-| `flutter analyze` | Static analysis (run from `console/`) |
+| Check                    | Run                                                                            | Catches                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Unit and component tests | `npm run test`                                                                 | Logic and rendering, in isolation, against a fake server (`src/test/render.tsx`)                          |
+| Contract fixtures        | `go test ./internal/api -run TestConsoleContractFixtures`, then `npm run test` | A Go response shape the decoders cannot read                                                              |
+| Golden vectors           | The Go and Vitest suites                                                       | The server and the console disagreeing on a content hash or a token count                                 |
+| Lint boundaries          | `npm run lint`                                                                 | A layer importing what it may not; HTML from untrusted text; `fetch` or `localStorage` in the wrong layer |
+| Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 36 steps, each write checked against the server's own record    |
 
-### Development workflow
+`scripts/console-walk/run.sh` (repository root) is the second walk: one real request through drafting, review and a build against a model route, driven only from the console (it needs Docker, the OpenShell gateway and Temporal; its header lists them).
 
-For hot reload and breakpoints, use Flutter's dev server against a
-separately running API:
+`npx playwright install chromium` once before the walk; `WALK_BROWSER_CHANNEL=chrome` uses an installed Google Chrome instead.
 
-```sh
-flutter run -d chrome --web-port=8091 --dart-define=API_BASE_URL=http://localhost:8090
-factoryd serve -cors-allow-origin=http://localhost:8091
-```
+## Add a screen
 
-`API_BASE_URL` defaults to `http://localhost:8090`. `serve` sets no CORS
-headers unless `-cors-allow-origin` names the exact console origin; a
-missing or mismatched origin fails closed with a browser CORS error.
+1. Path: add its pattern to `routePatterns` and a builder function in `src/routes/paths.ts`, with a test. A path that is also an API read (`/projects`, `/runs/{id}/diff`) would be answered with JSON on a reload: put the screen under `/app/` or in a query string, or add the path to `consoleDeepLinkPatterns` in `internal/api/server.go`.
+2. Folder: `src/features/<name>/` with `<Name>Screen.tsx` (thin: hooks and components), its components (one per file), and tests beside them.
+3. Route: one `<Route>` line in `src/app/App.tsx`; a navigation entry in `src/shared/shell/AppShell.tsx` if it is a top-level screen.
+4. Data: use the hooks in `src/api/*Queries.ts`. A screen never calls `fetch` or builds a query key.
+5. Tests: `renderApp(<NameScreen />, { server: [...], path, pattern })`. Assert by role and name, and assert what was sent with `server.sent("POST /...")`.
+6. Walk: a `step(...)` in `test/walk/walk.mjs` that opens the screen and performs each of its actions.
 
-## Screens
+## Add an API route
+
+| Step                         | Where                                                                                                                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Go handler and its route | `internal/api/server.go` (and the operator docs the repository's `AGENTS.md` names)                                                                                                                               |
+| A fixture of its response    | One line in `contractRoutes()` in `internal/api/contract_fixtures_test.go`, then `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/api -run TestConsoleContractFixtures`. The test fails until every GET route has one |
+| The type and decoder         | `src/domain/<resource>.ts`: `interface X` and `decodeX(o, at)`, with a test that decodes the fixture                                                                                                              |
+| The call                     | `src/api/<resource>.ts`: `getX(http, ..., signal)` naming the token kind its handler checks (`read`, `start` or `override`), with a test of the exact request it sends                                            |
+| The hook                     | `src/api/<resource>Queries.ts`: a query (key from `queryKeys`) or a mutation that caches the answer and invalidates what it changed                                                                               |
+
+## Module layout
 
 ```text
-Request board (/) --+-> Request detail (/requests/<id>)
-  |                 |     Pipeline stepper, spec/plan text,
-  |                 |     Edit / Approve / Request changes
-  |                 +-> New request (/requests/new)
-  |                 +-> Triage (keyboard review queue)
-  v
-Runs --+-> Run detail: Timeline, evidence, override
-       +-> New run, project release, project stats, Operations
+src/
+  domain/     pure TypeScript: types, decoders, formatting and rules. No React, no I/O
+  api/        the only code that talks HTTP: one file per resource, query hooks, SSE
+  platform/   the only code that touches browser globals (storage, location, title)
+  routes/     the route table and typed link builders: every path is written here once
+  ui/         shared presentational components. No data fetching
+  shared/     components more than one feature uses that fetch or write data
+              (the approve/reject dialogs, the oracle panels, the app shell)
+  features/   one folder per screen area: its screen, local components, hooks, tests
+  app/        App, router wiring, providers
+  test/       test setup and fixture readers
 ```
 
-**Request board.** Every request (`GET /requests`): waiting-on-you first
-(oldest first), then in-progress (most recently updated), then done or
-failed. Refreshes every 5s. Banners:
+```text
+app ──> features ──> shared ──> ui ──> domain
+           │           │
+           │           ├──> api ──────> domain
+           │           ├──> routes ───> domain
+           │           └──> platform ─> domain
+           └──> (also ui, api, routes, platform directly)
+features/X never imports features/Y: navigate with a routes/ link builder, and
+move what two features both need into shared/
+domain imports nothing outside domain
+```
 
-- **`worker` not alive** (`GET /queue-run`, reads its heartbeat
-  file): shown for a stale heartbeat, or for no heartbeat once a request
-  is waiting on a state only `worker` can advance.
-- **Release policy denies every PR** (`release_policy_warning` in
-  `GET /console-config.json`): the configured release policy can never
-  allow a release — the same check `factoryd doctor` warns about.
+`eslint.config.js` enforces every arrow, so a violation fails `npm run lint`.
+It also bans `dangerouslySetInnerHTML`, `innerHTML`, `eval`, `fetch` outside
+`api/`, and `localStorage` outside `platform/`.
 
-**Request detail** (`GET /requests/{id}`). A **Pipeline** stepper
-(submitted through done, each step timestamped and attributed), then the
-drafted spec or ticket plans. In `spec_review`/`oracle_review`/
-`plan_review`:
+## Conventions
 
-| Action | Route |
-|---|---|
-| Edit (spec) | `PUT /requests/{id}/spec` |
-| Edit (ticket plan) | `PUT /requests/{id}/tickets/{n}` |
-| Approve | `POST /requests/{id}/approve` |
-| Request changes | `POST /requests/{id}/reject` |
+| Topic            | Rule                                                                                                                                                                                                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Imports          | Across directories, through the `@/` alias (`@/domain/run`). Relative (`./x`) only inside one directory. No `../`                                                                                                                                                                  |
+| Exports          | Named exports only. No default exports, no barrel `index.ts` files                                                                                                                                                                                                                 |
+| Types            | `interface` with `readonly` fields for data. No `any`; `unknown` plus a decoder at the edge. No enums: a union of string literals, and `string` for a server-owned set that can grow (states)                                                                                      |
+| Decoders         | One per API shape, in `domain/`, written with `domain/decode.ts`. `decodeX(o: JsonObject, at: string): X`. Required fields throw with the route name; optional fields take a fallback; unknown fields are ignored. Field names are camelCase in TypeScript, snake_case on the wire |
+| Absence          | `null` for "not known" (never `undefined` in a decoded type); `""`, `0`, `false`, `[]` where Go omits a zero value                                                                                                                                                                 |
+| Pure logic       | Lives in `domain/`, as functions over domain types, with a unit test beside it. Time is a parameter (`now: Date`), never read inside                                                                                                                                               |
+| Components       | Function components. Props typed with an `interface XProps`. One component per file, named as the file. A screen composes hooks and components; logic over 20 lines moves to `domain/` or a hook                                                                                   |
+| Data fetching    | Only through the hooks `api/<resource>.ts` exports (`useRun(id)`, `useApproveRequest()`). Query keys and invalidation live there; a screen never builds a key                                                                                                                      |
+| State            | Server state in TanStack Query. Local UI state in `useState`/`useReducer`. No global store                                                                                                                                                                                         |
+| Untrusted text   | Specs, logs, halt reasons and diffs are agent-written. Render as text or through `ui/Markdown`; never as HTML                                                                                                                                                                      |
+| Styling          | Tailwind utility classes and the design tokens in `app/styles.css`. Variants with `class-variance-authority`; merge classes with `ui/cn`                                                                                                                                           |
+| Accessible names | Button, link and heading names are stable: the walk finds controls by them                                                                                                                                                                                                         |
+| Tests            | Beside the code as `x.test.ts(x)`. Vitest globals, Testing Library, queries by role and name. Expected values are written out, not computed by the code under test                                                                                                                 |
+| Comments         | Say why. Keep a rule's origin where it came from a found bug; no changelog narration                                                                                                                                                                                               |
 
-**Triage.** Keyboard list of pending spec and plan reviews: `j`/`k` move,
-`a`/`r` approve/reject through the same confirm flow. No approve-all.
-`oracle_review` is excluded (a keypress can't show oracle hashes); open
-those from request detail.
+## Visual language
 
-**New request** (`/requests/new`, `POST /requests`). Workspace, request
-text, optional "Draft oracles", and an Advanced section (verify command,
-full-suite command, preflight profile) hinting each workspace's
-`.factory.yml` default from `GET /workspaces`. The workspace is
-allowlisted: it must already be some request's workspace or be listed in
-the session config's `workspaces:` key. See
-[`USAGE.md` § Five repos, zero terminals](../USAGE.md#five-repos-zero-terminals-submit--worker).
+The console is a dense tool for engineers: dark by default, light on request,
+quiet surfaces, colour reserved for state.
 
-**Runs.** Run list (`GET /runs`),
-refreshed every 5s, with project and elapsed time per row. Run detail
-leads with a live **Timeline** (`GET /runs/{id}/progress`): workspace
-prep, preflight, build, verify, gates, evidence, conformity review,
-evaluate, finished — each pending/running/passed/failed, plus a status
-strip ("stage · round n/m · elapsed · state"). The live build log renders
-each worker `FACTORY_PROGRESS` line as one readable step, like `factoryd
-watch` ("round 1/3 started", "agent  read: main.go", a failed round's
-reason); any other line stays verbatim. Build-step round/action lines are
-the sandbox's own stdout: untrusted and informational only. Each attempt
-card names its kind (build, verify, review, ...); the combined review
-decodes its exit code ("Exit code: 40 (spec conformity passed, code review
-passed)"). A red **stalled** chip appears once a non-terminal
-run's progress is silent for 5 minutes (`internal/progress.StallAfter`,
-decided server-side); an amber **waiting: ...** chip when the factory has
-already explained the silence (e.g. queued behind another run on the same
-repo).
+| Topic        | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Colour       | Only the semantic tokens of `app/styles.css` (`bg-bg`, `bg-surface`, `bg-surface-raised`, `bg-surface-sunken`, `bg-surface-hover`, `border-border`, `text-fg`, `text-fg-muted`, `text-fg-subtle`, `bg-accent`, `text-accent`, `bg-accent-soft`, `text-tone-*`, `bg-tone-*-soft`, `border-tone-*-border`, `bg-diff-*`). Never a palette colour (`bg-zinc-900`), never a hex value, never a `dark:` variant: the tokens change with the theme                                                                                              |
+| State colour | A request, run or PR state is drawn from `domain/status` (`statusForToken` -> `statusTone`) through `ui/tone.ts`. Nothing else picks a colour for a state                                                                                                                                                                                                                                                                                                                                                                                |
+| Type         | `text-sm` (14px) body, `text-xs` for meta and table headers, `text-base`/`text-lg` `font-semibold` for headings. IDs, SHAs, paths, commands, logs, diffs and token counts are `font-mono`                                                                                                                                                                                                                                                                                                                                                |
+| Density      | Controls are 28-32px high (`h-7`, `h-8`). Table rows about 36px. Card padding `p-4`; page gutter `px-6 py-5`. Gaps on the 4px scale                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Shape        | `rounded-md` controls, `rounded-lg` cards and dialogs, 1px `border-border`. Shadows only on popovers and dialogs (`shadow-popover`)                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Icons        | `lucide-react`, 16px (`size-4`), `aria-hidden` beside a text label; an icon-only button has an `aria-label`                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Motion       | `transition-colors` only; no entrance animation on data                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Overload     | A passing step is one line; a failure opens itself and sorts first. A block with nothing in it is absent, never "None" or "Not available". Closed detail is a `ui/Disclosure` with a one-line summary. Ages are `ui/RelativeTime` (exact time on hover); keep the exact time where it is the information (audit lines, decision history). Long machine text is `shared/request/DigestedText`: first sentence, the whole one click away. What an approval is bound to (spec, plan, oracle files in a review state) is never folded or cut |
+| Focus        | Never remove the focus ring (`:focus-visible` is styled globally)                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Primitives   | Dialog, Tabs, Tooltip and DropdownMenu wrap the Radix primitive of the same name: it supplies focus trapping, keyboard handling and ARIA                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Components   | `class-variance-authority` for variants, `ui/cn` to merge a `className` prop, which every component accepts last. `ui/Button.tsx` is the pattern to copy                                                                                                                                                                                                                                                                                                                                                                                 |
 
-**Release screens.** The run-level screen shows a run's release decision
-and the project kill switch's state and history; the project-level screen
-(shield icon on the run list) shows just the kill switch. Both are
-read-only: engaging the kill switch stays on the `factoryd kill-switch`
-CLI so it never depends on a healthy `serve`.
+## Fixtures shared with Go
 
-**Costs on a subscription route.** The request board, Ops and project
-stats screens show a per-run or aggregate dollar figure even on
-`chatgpt-codex`/`github-copilot` routes, labeled so it's never mistaken
-for a real charge: a single run reads "(API-price est.; billed to your
-subscription)"; an aggregate that mixes routes reads "(includes
-subscription-billed runs; API-price est.)" (`console/lib/request_cost.dart`).
+`test/fixtures/` is read by Go and these tests (`src/test/fixtures.ts`):
 
-## Oracle review
-
-For a request submitted with `-draft-oracles`, the stepper shows
-`oracle_drafting` and `oracle_review` between spec and plan (skipped
-otherwise). See [`USAGE_REFERENCE.md`](../USAGE_REFERENCE.md), "Staged
-oracles".
-
-- **`oracle_drafting`**: shows the drafting job's status, including a
-  previous pass's outcome after a rejection.
-- **`oracle_review`**: lists every file of the request's `oracle/`
-  directory (`GET /requests/{id}/oracle[/{name}]`). Only
-  `RUN_COMMAND.txt` is editable (`PUT .../oracle/RUN_COMMAND.txt`).
-  **Approve stays disabled until every file has been expanded and its
-  displayed content matches the listed hash**; those hashes are sent with
-  the approval. Invisible or bidirectional Unicode is shown escaped. With
-  no files the button reads "Approve (skip oracle)".
-- **Skipped oracle**: approving past a failed drafting pass puts a
-  "Warning: ..." callout on every later screen for that request.
-- **`plan_review`**: each ticket's `<NNN>.oracle/` files are shown
-  read-only (`GET /requests/{id}/tickets/{n}/oracle[/{name}]`); plan
-  approval likewise waits until all are shown and hashed.
-
-The API refuses an `oracle_review` or `plan_review` approval that omits
-the hash of any oracle file it would pin. The CLI's `factoryd approve` is
-the deliberate exception.
-
-## Tokens and write access
-
-| Dart define | Used for |
-|---|---|
-| `API_START_TOKEN` (or `API_AUTH_TOKEN` fallback) | `POST /runs`, "Check project setup", Operations, release and stats screens |
-| `API_OVERRIDE_TOKEN` | Run override action |
-
-**A start token needs no dart-define.** With `FACTORYD_API_START_TOKEN`
-unset, `serve` uses a token and prints it in the console link
-(`http://<addr>/#t=<token>`). On first load the console
-(`start_token_web.dart`) stores the `#t=` fragment in `localStorage` and
-strips it from the address bar, keeping the path, so a deep link like
-`/requests/<id>#t=<token>` works too. Start-token routes still fail
-closed (403) without a valid token. A dart-defined token always wins
-over a stored one.
-
-Where the token comes from:
-
-| Launched by | Token | Survives restart? |
-|---|---|---|
-| Plain `factoryd serve` | Fresh per process | No: re-open the newly printed link |
-| `factoryd quickstart` (not `-no-serve`), `factoryd install-service` | `<session config dir>/serve-start-token` (mode `0600`) | Yes |
-
-`factoryd console [-open]` reprints (and optionally opens) the tokenized
-link. A 401/403 after a restart usually means a stale stored token; the
-error callout says so.
-
-**Write controls** (Approve, Request changes, Edit, Retry, Cancel, New
-request's Submit, run override) are enabled when `RunApi.canWrite` is
-true: an `API_OVERRIDE_TOKEN` is baked in, **or** `GET
-/console-config.json` reports `"writes_enabled": true`. A stock console
-on a loopback-bound `serve` gets writes with no token: the server itself
-allows them after its `Host`/`Origin` check (see `safety-contract.md`,
-"Console loopback writes"). Otherwise write buttons stay visible but
-disabled, with a note naming the fix (bind `serve` to loopback, or
-configure an override token). A write the server still refuses shows its
-403 reason in the error callout.
+| Directory  | Written by                                                                         | What it pins                                                                                                                             |
+| ---------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `api/`     | `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/api -run TestConsoleContractFixtures` | The response of every read route, from a fixed data directory. `index.json` maps each file to its route. Every decoder decodes its files |
+| `vectors/` | By hand                                                                            | Inputs and expected outputs for content hashing and token/cost formatting, which the server and the console must compute identically     |

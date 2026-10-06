@@ -13,7 +13,7 @@ func TestEmbeddedFalseWithPlaceholder(t *testing.T) {
 		t.Skip("dist/ holds a built bundle (make console-build); placeholder assertions describe the checked-in state")
 	}
 	// The checked-in dist/ ships only the placeholder page (no
-	// main.dart.js) until `make console-build` runs -- this test's own
+	// index.html) until `make console-build` runs -- this test's own
 	// build has not run that, so Embedded must report false.
 	if Embedded() {
 		t.Fatal("Embedded() = true, want false for the checked-in placeholder dist/")
@@ -30,7 +30,7 @@ func TestHandlerServesIndexAtRoot(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if !strings.Contains(rec.Body.String(), "Factory Console") {
+	if !strings.Contains(rec.Body.String(), "Buildgate console") {
 		t.Errorf("body = %q, want placeholder index.html content", rec.Body.String())
 	}
 }
@@ -45,7 +45,7 @@ func TestHandlerSPAFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if !strings.Contains(rec.Body.String(), "Factory Console") {
+	if !strings.Contains(rec.Body.String(), "Buildgate console") {
 		t.Errorf("body = %q, want index.html content served for a deep-link path", rec.Body.String())
 	}
 }
@@ -74,8 +74,7 @@ func TestHandlerServesRealFile(t *testing.T) {
 // TestHandlerFallbackOnlyForExtensionlessPaths proves an extensioned but
 // genuinely missing path 404s rather than being swallowed by the SPA
 // fallback -- only an extensionless path is assumed to be a console route
-// (see console/lib/main.dart's usePathUrlStrategy, which never produces
-// an extensioned path of its own). The path is one no build ever emits,
+// (console/src/routes/paths.ts never produces an extensioned path). The path is one no build ever emits,
 // so this holds whether or not `make console-build` has populated dist/
 // in the developer's checkout.
 func TestHandlerFallbackOnlyForExtensionlessPaths(t *testing.T) {
@@ -96,41 +95,37 @@ func withFS(t *testing.T, fake fstest.MapFS) {
 	t.Cleanup(func() { fsys = saved })
 }
 
-// TestStaleBundleWithoutIndexServesPlaceholder: a checkout built before
-// dist/index.html stopped being tracked keeps its gitignored main.dart.js
-// after pulling, but loses index.html. Found via adversarial review: with
-// Embedded() checking main.dart.js alone, / answered with a raw directory
-// listing of the bundle.
-func TestStaleBundleWithoutIndexServesPlaceholder(t *testing.T) {
-	withFS(t, fstest.MapFS{"main.dart.js": {Data: []byte("// js")}, "flutter.js": {Data: []byte("// js")}})
+// TestManifestWithoutIndexServesPlaceholder: a manifest with no index.html
+// is a partial bundle; with / answered by the file server it would be a raw
+// directory listing, so the placeholder is served instead.
+func TestManifestWithoutIndexServesPlaceholder(t *testing.T) {
+	withFS(t, fstest.MapFS{".vite/manifest.json": {Data: []byte("{}")}, "assets/index-abc123.js": {Data: []byte("// js")}})
 	if Embedded() {
 		t.Fatal("Embedded() = true for a bundle with no index.html, want false")
 	}
 	for _, target := range []string{"/", "/requests/abc"} {
 		rec := httptest.NewRecorder()
 		Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Factory Console is not embedded") {
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Buildgate console is not embedded") {
 			t.Errorf("GET %s = %d %q, want the placeholder page", target, rec.Code, rec.Body.String())
 		}
 	}
 }
 
-// TestUnbuiltIndexHTMLServesPlaceholder: before the placeholder moved into
-// placeholderHTML, an explicit /index.html reached it through the file
-// server; it must not become a bare 404 on an unbuilt binary.
+// TestUnbuiltIndexHTMLServesPlaceholder: an explicit /index.html on an
+// unbuilt binary gets the placeholder, not a bare 404.
 func TestUnbuiltIndexHTMLServesPlaceholder(t *testing.T) {
 	withFS(t, fstest.MapFS{".gitkeep": {Data: nil}})
 	rec := httptest.NewRecorder()
 	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.html", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Factory Console is not embedded") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Buildgate console is not embedded") {
 		t.Errorf("GET /index.html = %d %q, want the placeholder page", rec.Code, rec.Body.String())
 	}
 }
 
-// TestReactBundleIsEmbedded: the React console's build has no main.dart.js;
-// its manifest marks it as a real bundle, and a deep link and an asset are
-// served from it.
-func TestReactBundleIsEmbedded(t *testing.T) {
+// TestBundleIsEmbedded: index.html and the Vite manifest mark a real
+// bundle; a deep link and an asset are served from it.
+func TestBundleIsEmbedded(t *testing.T) {
 	withFS(t, fstest.MapFS{
 		"index.html":             {Data: []byte("<!doctype html><title>Buildgate</title>")},
 		".vite/manifest.json":    {Data: []byte("{}")},
@@ -150,14 +145,5 @@ func TestReactBundleIsEmbedded(t *testing.T) {
 	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != "// js" {
 		t.Errorf("GET the asset = %d %q, want the file", rec.Code, rec.Body.String())
-	}
-}
-
-// TestManifestWithoutIndexServesPlaceholder: a manifest alone is a stale
-// bundle, like a main.dart.js alone.
-func TestManifestWithoutIndexServesPlaceholder(t *testing.T) {
-	withFS(t, fstest.MapFS{".vite/manifest.json": {Data: []byte("{}")}})
-	if Embedded() {
-		t.Fatal("Embedded() = true for a bundle with no index.html, want false")
 	}
 }

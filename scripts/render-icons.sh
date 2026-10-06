@@ -9,17 +9,11 @@
 # its location with CHROME=/path/to/chrome.
 #
 # Outputs:
-#   console/web/favicon.png                 32px tab icon (the "needs you"
-#                                           badge in index.html draws at 32)
-#   console/web/icons/Icon-{192,512}.png    rounded tile, transparent corners
-#   console/web/icons/Icon-maskable-*.png   full-bleed tile, mark scaled to
-#                                           80% so it sits inside the
-#                                           maskable safe zone
 #   internal/notify/buildgate-icon.png      256px, embedded into factoryd for
 #                                           desktop notifications' -contentImage
-#   console-react/public/buildgate.svg      the mark, copied: the React
-#                                           console's sidebar mark and tab icon
-#   console-react/public/favicon.png        32px, the tab icon the "needs you"
+#   console/public/buildgate.svg            the mark, copied: the console's
+#                                           sidebar mark and tab icon
+#   console/public/favicon.png              32px, the tab icon the "needs you"
 #                                           badge is drawn onto
 set -eu
 
@@ -34,12 +28,6 @@ fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-
-# The maskable variant: square the tile's corners and shrink the mark about
-# the centre, so a launcher's circle/squircle mask never clips it.
-sed -e 's/rx="112"/rx="0"/' \
-	-e 's|<g id="mark">|<g id="mark" transform="translate(51.2 51.2) scale(0.8)">|' \
-	"$src" >"$work/maskable.svg"
 
 # render SVG SIZE OUT -- the SVG is inlined into the page rather than
 # referenced by <img src>, which headless Chrome can screenshot before the
@@ -56,17 +44,12 @@ render() {
 	echo "wrote $3"
 }
 
-render "$src" 32 "$root/console/web/favicon.png"
-render "$src" 192 "$root/console/web/icons/Icon-192.png"
-render "$src" 512 "$root/console/web/icons/Icon-512.png"
-render "$work/maskable.svg" 192 "$root/console/web/icons/Icon-maskable-192.png"
-render "$work/maskable.svg" 512 "$root/console/web/icons/Icon-maskable-512.png"
 render "$src" 256 "$root/internal/notify/buildgate-icon.png"
 
-# The React console (console-react/public is served at the bundle's root):
+# The console (console/public is served at the bundle's root):
 # the mark itself for the sidebar and the tab icon, and a 32px PNG the
 # "needs you" tab badge is drawn onto.
-mkdir -p "$root/console-react/public"
-cp "$src" "$root/console-react/public/buildgate.svg"
-echo "wrote $root/console-react/public/buildgate.svg"
-render "$src" 32 "$root/console-react/public/favicon.png"
+mkdir -p "$root/console/public"
+cp "$src" "$root/console/public/buildgate.svg"
+echo "wrote $root/console/public/buildgate.svg"
+render "$src" 32 "$root/console/public/favicon.png"

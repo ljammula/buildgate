@@ -10,7 +10,7 @@ import (
 )
 
 // contentHashVectorsPath is the golden file the console's own tests read
-// too (console/test/content_hash_test.dart): one set of inputs and expected
+// too (console/src/domain/contentHash.test.ts): one set of inputs and expected
 // digests, so the client that builds an approval's expected_sha256 and the
 // server that checks it cannot drift apart unnoticed.
 const contentHashVectorsPath = "../../console/test/fixtures/vectors/content-hash.json"

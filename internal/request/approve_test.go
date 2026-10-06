@@ -751,7 +751,7 @@ func TestApprovePlanRefusesASubdirectoryUnderTicketOracleDir(t *testing.T) {
 
 // TestApprovePlanToleratesConsoleExpectedSHA256MissingOracleEntries is
 // the regression test for a real finding (found via review): the
-// console's own expectedSha256For (console/lib/content_hash.dart) has
+// console's own expectedSha256For (console/src/domain/contentHash.ts) has
 // no way to compute a hash for oracle files -- it only ever emits
 // spec.md/tickets/<NNN>.spec.md keys -- so requiring an exact match
 // against the full relPath set (spec files AND oracle files) would make

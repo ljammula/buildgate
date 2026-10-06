@@ -121,7 +121,7 @@ bearer token is always a 403. The token is handled as follows:
   printed console link (`http://<addr>/#t=<token>`,
   `consoleLinkWithStartToken`). It is never a query parameter, because
   browsers never transmit fragments (RFC 3986 §3.5).
-  `captureStartTokenFromLocation` (`console/lib/start_token_web.dart`) stores
+  `captureStartTokenFromLocation` (`console/src/platform/startToken.ts`) stores
   it in origin-scoped `localStorage`, then strips it from the address bar
   with `history.replaceState`. The token exists in only three places:
   `serve`'s own stdout, that fragment, and that browser's storage.

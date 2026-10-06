@@ -53,7 +53,7 @@ The stand-ins cover the default request path (`spec_review` ->
 - **Phase 3 (chaos).** The plan document is the checklist. A script that
   fills a disk or restarts shared Docker/Temporal is too dangerous to
   leave lying around.
-- **Phase 4 (console).** `make console-walk` (`scripts/console-walk/`)
+- **Phase 4 (console).** `scripts/console-walk/run.sh`
   drives one scripted operator walk; the rest of the plan's checklist is
   manual.
 

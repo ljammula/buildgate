@@ -349,8 +349,8 @@ func WithReadToken(token string) Option {
 	}
 }
 
-// WithCORSAllowOrigin lets a single named browser origin (e.g. the Flutter
-// console's own dev server, http://localhost:PORT) read this Server's
+// WithCORSAllowOrigin lets a single named browser origin (e.g. the
+// console's own Vite dev server, http://localhost:PORT) read this Server's
 // responses cross-origin. Empty (the default) keeps CORS off entirely --
 // identical to this Server's behavior before this option existed. Never
 // reflects the request's own Origin back: only an exact match against the
@@ -749,7 +749,7 @@ type consoleConfigView struct {
 // consoleConfig serves the console's own runtime-config discovery point.
 // Unauthenticated, like the console's other static assets --
 // FACTORYD_API_READ_TOKEN/FACTORYD_API_START_TOKEN, if set, remain a
-// build-time console/lib/main.dart dart-define (see console/README.md),
+// build-time VITE_ variable (console/src/app/config.ts),
 // not something a runtime config route could hand a browser without
 // defeating the point of gating those tokens at all.
 func (s *Server) consoleConfig(w http.ResponseWriter, r *http.Request) {
@@ -763,9 +763,9 @@ func (s *Server) consoleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-// consoleDeepLinkPatterns are the GET routes console/lib/
-// request_board_route.dart's own router also makes a directly navigable
-// browser URL (its requestDetail/runDetail/projectRelease deep links) --
+// consoleDeepLinkPatterns are the GET routes the console's router
+// (console/src/routes/paths.ts) also makes a directly navigable browser URL
+// (its request detail, run detail and project release deep links) --
 // see ServeHTTP's own comment on the ambiguity this creates once the
 // console shares an origin with this Server. The runs list and project
 // stats page routes need no entry here at all: `/`, `/ops`, and
@@ -786,7 +786,7 @@ var consoleDeepLinkPatterns = map[string]bool{
 // preference is text/html -- what every mainstream browser sends for a
 // real top-level navigation (a typed URL, a refresh, a followed link),
 // and what neither curl, a Go http.Client/httptest request, nor a
-// browser's own fetch()/XHR call (used by console/lib/api_client.dart,
+// browser's own fetch()/XHR call (used by console/src/api/http.ts,
 // including for the very same paths this disambiguates) ever sends
 // without a caller explicitly setting it. A conservative, narrow signal
 // on purpose: it only ever changes behavior for the three routes
@@ -1091,8 +1091,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Three of the console's own directly-navigable browser URLs
-	// (request_board_route.dart's requestDetail/runDetail/projectRelease
-	// deep links) are identically shaped to an existing single-resource
+	// (the request detail, run detail and project release deep links of
+	// console/src/routes/paths.ts) are identically shaped to an existing single-resource
 	// API route this Server already serves as JSON: GET /requests/{id},
 	// GET /runs/{id}, GET /projects/{project}/release. That collision is
 	// harmless while the console is served from its own dev-server origin
@@ -1105,7 +1105,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// still needs the shell, not raw JSON, for the console's own router
 	// to ever run in the first place -- and the console's own already-
 	// running JS still needs the real JSON from that identical path once
-	// it has (see request_detail_screen.dart's own api.getRequest call).
+	// it has (see the request page's own getRequest call in console/src/api/requests.ts).
 	// serveConsoleDeepLink resolves the ambiguity: only a real top-level
 	// browser navigation (as opposed to curl, a Go http.Client, an
 	// existing test, or the console's own fetch()/XHR call) gets the
@@ -3132,10 +3132,10 @@ type requestDetailView struct {
 	// request to right now -- request.NextApprovalState, the same
 	// function approve() itself branches on -- omitted outside a review
 	// state (spec_review/oracle_review/plan_review). The console's own
-	// approve-confirm sheet used to guess this from a hardcoded Dart
+	// approve-confirm sheet must not guess this from a hardcoded
 	// table ("spec_review -> planning"), which is simply wrong for a
 	// -draft-oracles request (it goes to oracle_drafting) -- the server
-	// now names its own real next state instead.
+	// names its own real next state instead.
 	ApproveNextState request.State `json:"approve_next_state,omitempty"`
 	// NextAction is request.Request.NextAction()'s own one-sentence "what
 	// does the operator do next", empty when nothing currently waits on
@@ -4300,7 +4300,7 @@ func (s *Server) loopbackSameOriginWrite(r *http.Request) bool {
 // one of three browser-enumerated Content-Type values (application/
 // x-www-form-urlencoded, multipart/form-data, text/plain), never
 // application/json, so this closes that gap independently of the
-// Origin/Sec-Fetch-Site signals above. The console's own api_client.dart
+// Origin/Sec-Fetch-Site signals above. The console's own HTTP client (console/src/api/http.ts)
 // always sends application/json on every write route this gates.
 func loopbackWriteHasJSONContentType(r *http.Request) bool {
 	ct := r.Header.Get("Content-Type")

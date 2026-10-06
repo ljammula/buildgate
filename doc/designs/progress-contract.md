@@ -5,7 +5,7 @@ The progress feed is what lets an operator follow a run while it executes:
 route all read it. It is a small, append-only sidecar per run, written at
 every stage boundary by the command that prepares the run and by the
 workflow's Activities, plus
-lines relayed from the sandboxed worker's stdout. Every Go and Dart comment
+lines relayed from the sandboxed worker's stdout. Every Go and TypeScript comment
 that cites `progress-contract.md` means this file. Shipped 2026-09-17/18
 (see the `operator-follow-along` PR).
 
@@ -140,7 +140,7 @@ created_at`).
 
 - `factoryd watch <run-or-request-id>` (`cmd/factoryd/watch.go`) renders
   the feed as a transcript with a status footer and prints a final recap.
-- The console's run Timeline (`console/lib/run_detail_screen.dart`) and
+- The console's run Timeline (`console/src/features/run-detail/Timeline.tsx`) and
   the request Pipeline stepper (from `Request.History`, a separate
   per-request transition log in `internal/request`).
 - `RunWorkflow` also answers a `run-progress` query

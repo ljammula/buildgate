@@ -297,7 +297,7 @@ func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, p
 	flags.Var(&roleChoiceFlag{name: "model", example: "sonnet"}, "model", `choose the model for one role, within that role's own roles.<role>.allowed (routes:/models:/roles: session config): "role=model", e.g. -model execution=sonnet. Repeatable (-model execution=sonnet -model planning=opus). Only "planning" and "execution" are selectable -- review is never requester-selectable. The factory still owns every other per-role setting (routes, thinking). Must precede <workspace> on the command line`)
 	flags.String("config", "", "session config file to validate roles: against (default: the same search path `factoryd worker -config` uses). This command validates the resolved session config's roles: block once at start regardless. Must precede <workspace> on the command line")
 	dataDir = flags.String("data-dir", "data", "directory for durable queue and run records; must match what a later `factoryd worker` uses. Must precede <workspace> on the command line")
-	consoleBaseURL = flags.String("console-base-url", "", "base URL where the Flutter console web app (console/) is served, e.g. http://localhost:PORT -- NOT the factoryd API address. When set (or FACTORYD_CONSOLE_URL is), the printed request id is followed by a direct console link. Must precede <workspace> on the command line")
+	consoleBaseURL = flags.String("console-base-url", "", "base URL where the console web app (console/) is served, e.g. http://localhost:PORT -- NOT the factoryd API address. When set (or FACTORYD_CONSOLE_URL is), the printed request id is followed by a direct console link. Must precede <workspace> on the command line")
 	watch = flags.Bool("watch", false, "after submitting, attach to the request the same way `factoryd watch <id>` would (in-process, not a subprocess) instead of exiting immediately. Must precede <workspace> on the command line")
 	plainFlagUsage(flags)
 	return
@@ -394,7 +394,7 @@ func submitMain(dp *deps, args []string) error {
 // show), or no serve for this data dir.
 func noConsoleLinkHint(dataDir string) string {
 	if !consoleweb.Embedded() {
-		return "No console link: this factoryd was built without the console -- `make install` (with Flutter on PATH) embeds it."
+		return "No console link: this factoryd was built without the console -- `make install` (with Node and npm on PATH) embeds it."
 	}
 	if consolelink.ServeAddress(dataDir) == "" {
 		return "No console link: no `factoryd serve` is running for this data dir -- start one with `factoryd serve`."

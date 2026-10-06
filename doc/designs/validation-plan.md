@@ -59,7 +59,7 @@ building new coverage on top of a broken baseline:
 
 ```sh
 make verify                       # Go: fmt-check, vet, go test -race ./...
-make console-test                 # Dart: flutter test
+make console-test                 # console: typecheck, lint, format, Vitest
 python3 -m pytest agent/pi/tests/
 ```
 
@@ -288,46 +288,46 @@ durable evidence — none produces a silent `accepted`, an orphaned
 process/container/network, or an unattributed state change. Rows marked
 "characterize" produce a recorded observation, not a pass/fail.
 
-## Phase 4 — Console UX walkthrough (manual + widget tests)
+## Phase 4 — Console UX walkthrough (manual + component tests)
 
 Every console screen, walked against a *live* `factoryd serve` reading
 the same `data_dir` as Phases 1–2 (read routes are loopback-only by
 default; approve/reject/override need `FACTORYD_API_OVERRIDE_TOKEN`;
-`new_run_screen` needs `-api-allowed-sandbox-images` configured), covering both a healthy run and
+`NewRunScreen` needs `-api-allowed-sandbox-images` configured), covering both a healthy run and
 each edge case the screen exists to handle:
 
-- `run_list_screen` / `run_detail_screen` — a run from queued (`GET
+- `RunListScreen` / `RunDetailScreen` — a run from queued (`GET
   /queue`) through `accepted` and, separately, through `quarantined`;
   live status updates via the streamed `watchRun`. Restart `serve`
   mid-watch and confirm the console reconnects with backoff; rotate the
   read token and confirm the 4xx surfaces as an error rather than
   retrying forever.
-- `request_list_screen` / `request_detail_screen` — the Phase 1.7
+- `BoardScreen` / `RequestDetailScreen` — the Phase 1.7
   request lifecycle, approve and reject from the console, the board
   sorted waiting-on-you first, 5s refresh.
-- `new_run_screen` — submit a real run via `POST /runs`; confirm it
+- `NewRunScreen` — submit a real run via `POST /runs`; confirm it
   reaches the same preflight/gate/evidence path as CLI submission. One
   documented divergence is expected and not a finding: the registry
   proxy is not on the API path (`containment-matrix.md`, Package
   registry row), so a console-started run against a repo needing
   unbaked dependencies must fail loudly, not silently pass.
-- `diff_screen` (`GET /runs/{id}/diff`) — byte-equal to `diff.patch`
+- The run page's diff tab (`GET /runs/{id}/diff`) — byte-equal to `diff.patch`
   for the Phase 1.2 run.
-- `triage_screen` / `ops_screen` — operator triage against a real
+- `TriageScreen` / `OpsScreen` — operator triage against a real
   quarantined run, override from the console (`POST /runs/{id}/override`
   takes `by`/`reason`/`state`, mirroring `factoryd override`), and confirm
   the recorded override carries the `by` the console sent, while a
   request approve/reject from the console records `by: "api"` as
   `USAGE.md` §11 documents.
-- `release_screen` / `project_release_screen` — read-only decision and
+- The run page's release tab / `ProjectReleaseScreen` — read-only decision and
   kill-switch state, compared with `factoryd kill-switch -project <p>`
   output for the same project; a run with no decision renders "no
   decision", never allowed; the refresh action's stale-data warning on
-  a failed refresh; switch projects rapidly on `project_release_screen`
+  a failed refresh; switch projects rapidly on `ProjectReleaseScreen`
   and confirm no stale chip from the previous project lingers after the
   new one loads. Confirm by inspection that no control on either screen
   engages or disengages the switch, merges, pushes, or deploys.
-- `project_list_screen` / `project_stats_screen` (`GET /projects`,
+- `ProjectListScreen` / `ProjectStatsScreen` (`GET /projects`,
   `GET /projects/{project}/stats`) — aggregates equal what `factoryd
   status -json` computes from the same run records; the derived project
   id is shown.

@@ -93,7 +93,7 @@ func serveMainLogsBeforeFailingToBind(dp *deps, t *testing.T, args []string) str
 // TestServeGeneratesStartTokenWhenUnset proves that leaving
 // FACTORYD_API_START_TOKEN unset no longer leaves the start-run endpoint
 // in a permanently unreachable state for the console (which has no way to
-// ever learn a manually-configured env var, see console/lib/main.dart):
+// ever learn a manually-configured env var, see console/src/platform/startToken.ts):
 // serveMain generates its own per-process token and says so in its
 // startup log, instead of the old "start-run endpoint disabled" line.
 func TestServeGeneratesStartTokenWhenUnset(t *testing.T) {

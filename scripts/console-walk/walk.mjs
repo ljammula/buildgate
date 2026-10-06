@@ -1,6 +1,6 @@
 // walk.mjs <base-url> <workspace-path> <scratch-dir>
 //
-// Drives the embedded factoryd console the way an operator would, from
+// Drives the embedded factoryd console (the React bundle) the way an operator would, from
 // submitting a request through the console's own New request form (no
 // `factoryd submit` call at all) to a correctly explained
 // terminal state, asserting at each step that the console both let the
@@ -32,8 +32,9 @@
 //                  page links back to its request and finishes
 //   end-state      "Built and verified" callout with a Next that names the
 //                  branch and does not contradict itself
-//   retry          Retry request from the console; the ticket card switches
-//                  to the new run without a reload
+//   retry          Retry on the accepted run re-attempts only its pull
+//                  request; with no remote the server refuses and the
+//                  console shows its reason, the request unchanged
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,37 +78,13 @@ const page = await ctx.newPage();
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 300)); });
 
-// Flutter renders to a canvas; its accessibility tree is the only DOM text.
-const enableSemantics = async () => {
-  await page.evaluate(() => {
-    const e = document.querySelector('flt-semantics-placeholder');
-    if (e) e.click();
-  });
-  await page.waitForTimeout(500);
-};
-const screenText = () => page.evaluate(() =>
-  [...document.querySelectorAll('flt-semantics')]
-    .map((e) => (e.getAttribute('aria-label') || '') + ' ' + (e.textContent || ''))
-    .join('\n'));
+// Playwright locators wait for an element and scroll it into view; the walk
+// only adds the "no reload" rule to the failure message.
 const waitForText = async (re, timeout, what) => {
-  const end = Date.now() + timeout;
-  for (;;) {
-    // Flutter only exposes on-screen widgets: look where we are, then sweep
-    // the page from the top down (stepper text is at the top, editor-side
-    // text like the parsed criteria count further down).
-    if (re.test(await screenText())) return;
-    await page.mouse.move(6, 500);
-    await page.mouse.wheel(0, -20000);
-    await page.waitForTimeout(300);
-    let found = false;
-    for (let i = 0; i < 12 && !found; i++) {
-      if (re.test(await screenText())) { found = true; break; }
-      await page.mouse.wheel(0, 700);
-      await page.waitForTimeout(250);
-    }
-    if (found) return;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what ?? re} on screen (no reload allowed)`);
-    await page.waitForTimeout(2000);
+  try {
+    await page.getByText(re).filter({ visible: true }).first().waitFor({ timeout });
+  } catch {
+    throw new Error(`timed out waiting for ${what ?? re} on screen (no reload allowed)`);
   }
 };
 const waitForState = async (states, timeout) => {
@@ -119,41 +96,21 @@ const waitForState = async (states, timeout) => {
     await page.waitForTimeout(3000);
   }
 };
-// Flutter only puts on-screen widgets in its semantics tree: scroll the page
-// (from the left gutter, never inside an editor) until [locator] appears.
-const reveal = async (locator, timeout) => {
-  const end = Date.now() + timeout;
-  for (let dir = 1; ; dir = -dir) {
-    for (let i = 0; i < 8; i++) {
-      if (await locator.count()) return locator.first();
-      await page.mouse.move(6, 500);
-      await page.mouse.wheel(0, dir * 600);
-      await page.waitForTimeout(400);
-    }
-    if (Date.now() > end) throw new Error(`timed out revealing ${locator}`);
-    await page.waitForTimeout(2000);
-  }
-};
-const button = (name, opts = {}) =>
-  reveal(page.getByRole('button', { name, exact: opts.exact ?? true }), opts.timeout ?? MIN);
-// Flutter's dialog semantics role varies (dialog/alertdialog); a modal's
-// buttons are the last nodes in the tree, so the last same-named button is
-// the dialog's own.
+const main = () => page.getByRole('main');
+const dialog = () => page.getByRole('dialog');
+const button = (name, opts = {}) => main().getByRole('button', { name, exact: opts.exact ?? true }).first();
 // Expands every oracle file tile the server lists, by name: approval stays
-// disabled until each listed file has been shown, and Flutter only exposes
-// tiles that are on screen, so the walk scrolls to each one in turn.
+// disabled until each listed file has been shown.
 const showOracleFiles = async (listingPath) => {
   const listing = await api(listingPath);
   const names = (listing.files ?? []).map((f) => f.name);
   for (const name of names) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const tile = await reveal(page.getByRole('button', { name: new RegExp(escaped) }), MIN);
-    await tile.click();
-    await page.waitForTimeout(1500);
+    await main().getByRole('button', { name: new RegExp(`^${escaped}`) }).click();
   }
   return { names, problems: listing.problems ?? [] };
 };
-const dialogButton = (name) => page.getByRole('button', { name, exact: true }).last();
+const dialogButton = (name) => dialog().getByRole('button', { name, exact: true });
 
 async function step(name, fn) {
   const started = Date.now();
@@ -178,29 +135,16 @@ let exitCode = 0;
 try {
   await step('submit', async () => {
     await page.goto(base + '/requests/new', { waitUntil: 'load' });
-    await page.waitForTimeout(4000);
-    await enableSemantics();
-    await waitForText(/New request/, MIN, 'the New request form');
-    // The known-workspace dropdown is inserted above the path field once
-    // GET /workspaces answers; filling before that layout shift can lose
-    // the typed path (seen once, 2026-09-25). Wait for it to render.
-    await waitForText(/Known workspace/, MIN, 'the known-workspace list');
-    await page.waitForTimeout(500);
-
-    await page.getByRole('textbox', { name: 'Workspace path' }).fill(workspace);
-    await page.getByRole('textbox', { name: 'Request' }).fill(REQUEST_TEXT);
-
-    const draftOracles = await reveal(page.getByRole('checkbox', { name: /Draft oracles/ }), MIN);
-    await draftOracles.click();
-
-    const advanced = await reveal(page.getByText('Advanced', { exact: true }), MIN);
-    await advanced.click();
-    await page.waitForTimeout(500);
-    await (await reveal(page.getByRole('textbox', { name: 'Verify command' }), MIN)).fill(VERIFY_COMMAND);
-    await (await reveal(page.getByRole('textbox', { name: 'Preflight profile' }), MIN)).fill(PREFLIGHT_PROFILE);
+    await page.getByRole('heading', { name: 'New request' }).first().waitFor({ timeout: MIN });
+    await page.getByLabel('Workspace path').fill(workspace);
+    await page.getByLabel('Request', { exact: true }).fill(REQUEST_TEXT);
+    await page.getByLabel('Draft oracles').check();
+    await page.getByRole('button', { name: 'Advanced' }).click();
+    await page.getByLabel(/Verify command/).fill(VERIFY_COMMAND);
+    await page.getByLabel(/Preflight profile/).fill(PREFLIGHT_PROFILE);
 
     const before = page.url();
-    await (await reveal(page.getByRole('button', { name: 'Submit request', exact: true }), MIN)).click();
+    await page.getByRole('button', { name: 'Submit request', exact: true }).click();
     const end = Date.now() + MIN;
     for (;;) {
       const url = page.url();
@@ -211,39 +155,32 @@ try {
       if (Date.now() > end) throw new Error(`submit never landed on a request detail URL (still: ${url})`);
       await page.waitForTimeout(1000);
     }
-    await page.waitForTimeout(1000);
-    await enableSemantics();
     return `submitted ${requestId}`;
   });
 
   await step('board', async () => {
     await page.goto(base + '/', { waitUntil: 'load' });
-    await page.waitForTimeout(4000);
-    await enableSemantics();
     await waitForText(/Extend math_ops with two more operations/, MIN, 'the request row');
-    const text = await screenText();
-    if (/queue-run is not running/.test(text)) throw new Error('board says queue-run is not running while it is');
-    // The full raw title is still in the row's tooltip (semantics text), so
-    // assert the visible short title instead: stripped and ellipsized.
-    if (!/own unit tests \(use Python…/.test(text)) throw new Error('board row does not show the short title');
+    if (await page.getByText(/worker is not running/).count()) throw new Error('board says the worker is not running while it is');
+    // The full raw title is still in the row's tooltip, so assert the
+    // visible short title instead: stripped and ellipsized.
+    if (!(await page.getByText(/own unit tests \(use Python…/).count())) throw new Error('board row does not show the short title');
   });
 
   await step('spec-review', async () => {
-    await page.getByRole('button', { name: /Extend math_ops with two more operations/ }).first().click();
-    await page.waitForTimeout(2000);
-    await enableSemantics();
+    await page.getByRole('row', { name: /Extend math_ops with two more operations/ }).getByRole('link').first().click();
     await waitForState(['spec_review'], 10 * MIN);
     await waitForText(/Spec review/, 2 * MIN, 'spec review on the detail screen');
-    await (await button('Approve')).waitFor({ timeout: MIN });
-    if (await (await button('Approve')).isDisabled()) throw new Error('Approve disabled on loopback with no token');
+    await button('Approve').waitFor({ timeout: MIN });
+    if (await button('Approve').isDisabled()) throw new Error('Approve disabled on loopback with no token');
   });
 
   await step('reject-note', async () => {
     const before = (await req()).history.length;
-    await (await button('Request changes')).click();
-    await page.getByRole('textbox', { name: 'Reason' }).fill(NOTE);
+    await button('Request changes').click();
+    await dialog().getByLabel('Reason').fill(NOTE);
     await dialogButton('Request changes').click();
-    await page.waitForTimeout(2000);
+    await dialog().waitFor({ state: 'detached' });
     const r = await waitForState(['spec_review'], 10 * MIN);
     if (r.history.length < before + 2) throw new Error('no redraft recorded');
     await waitForText(/Spec review/, 2 * MIN, 'the redraft back in spec review');
@@ -263,32 +200,19 @@ try {
     lines.splice(last + 1, 0, `${n}. ${EDIT_LINE}`);
     const edited = lines.join('\n');
 
-    await (await button('Edit')).click();
-    await page.waitForTimeout(1000);
-    const box = page.getByRole('textbox').last();
-    await box.click();
-    await page.keyboard.press('ControlOrMeta+A');
-    await page.keyboard.type(edited.replace(/\n+$/, ''), { delay: 0 });
-    await page.waitForTimeout(500);
-    // Flutter drops off-screen nodes from its semantics tree, so scroll the
-    // page (from the left gutter, outside the editor) to reach each button.
-    const scrollPage = async (dy) => { await page.mouse.move(6, 500); await page.mouse.wheel(0, dy); await page.waitForTimeout(800); };
-    await scrollPage(-20000);
-    if (!(await (await button('Approve')).isDisabled())) throw new Error('Approve still enabled with unsaved edits');
-    await scrollPage(20000);
-    await (await button('Save')).click();
-    await page.waitForTimeout(2000);
+    await button('Edit').click();
+    await main().getByRole('textbox', { name: 'Edit spec.md' }).fill(edited.replace(/\n+$/, ''));
+    if (!(await button('Approve').isDisabled())) throw new Error('Approve still enabled with unsaved edits');
+    await button('Save').click();
+    await waitForText(new RegExp(`Acceptance criteria \\(${n}\\)`), MIN, 'the parsed criteria count');
     const after = (await req()).spec;
     if (!after.includes(EDIT_LINE)) throw new Error('saved spec does not contain the edited criterion');
-    await waitForText(new RegExp(`Acceptance criteria \\(${n}\\)`), MIN, 'the parsed criteria count');
-    await scrollPage(-20000);
     return `criterion ${n} saved`;
   });
 
   await step('approve-spec', async () => {
-    await (await button('Approve')).click();
-    await page.waitForTimeout(800);
-    const sheet = await screenText();
+    await button('Approve').click();
+    const sheet = await dialog().innerText();
     if (!/oracle_drafting|Drafting oracles/.test(sheet)) throw new Error('approve sheet does not name oracle drafting as the next state');
     await dialogButton('Approve').click();
     await waitForState(['oracle_drafting', 'oracle_review'], MIN);
@@ -298,24 +222,23 @@ try {
     await waitForState(['oracle_review'], 15 * MIN);
     await waitForText(/Oracle review/, 2 * MIN, 'oracle review on screen');
     const r = await req();
-    const approveAny = await reveal(page.getByRole('button', { name: /^Approve( \(skip oracle\))?$/ }), MIN);
-    if ((await approveAny.getAttribute('aria-label') ?? await approveAny.textContent() ?? '').includes('skip oracle')) {
+    const approveAny = main().getByRole('button', { name: /^Approve( \(skip oracle\))?$/ }).first();
+    await approveAny.waitFor({ timeout: MIN });
+    if ((await approveAny.innerText()).includes('skip oracle')) {
       await approveAny.click();
-      await page.waitForTimeout(800);
-      if (!/no request-level acceptance test/i.test(await screenText())) throw new Error('skip-oracle sheet does not state the consequence');
+      if (!/no request-level acceptance test/i.test(await dialog().innerText())) throw new Error('skip-oracle sheet does not state the consequence');
       await dialogButton('Approve').click();
       return `skipped (${r.oracle_draft?.status}; ${r.oracle_draft?.criteria?.length ?? 0} criterion verdicts)`;
     }
     const shown = await showOracleFiles(`/requests/${requestId}/oracle`);
     if (shown.problems.length) throw new Error(`oracle listing has problems that block approval: ${shown.problems.join('; ')}`);
-    const approve = await button('Approve');
+    const approve = button('Approve');
     const end = Date.now() + MIN;
     while (await approve.isDisabled()) {
       if (Date.now() > end) throw new Error(`oracle Approve never enabled after showing ${shown.names.length} file(s)`);
       await page.waitForTimeout(1000);
     }
     await approve.click();
-    await page.waitForTimeout(800);
     await dialogButton('Approve').click();
     return `approved ${shown.names.length} oracle file(s): ${shown.names.join(', ')}`;
   });
@@ -327,44 +250,40 @@ try {
     for (const t of r0.tickets ?? []) {
       await showOracleFiles(`/requests/${requestId}/tickets/${t.index}/oracle`).catch(() => {});
     }
-    const approve = await button('Approve');
+    const approve = button('Approve');
     const end = Date.now() + MIN;
     while (await approve.isDisabled()) {
       if (Date.now() > end) throw new Error('plan Approve never enabled');
       await page.waitForTimeout(1000);
     }
     await approve.click();
-    await page.waitForTimeout(800);
     await dialogButton('Approve').click();
     await waitForState(['building', 'pr_review', 'halted', 'done'], MIN);
   });
 
   let firstRun = '';
   await step('build', async () => {
-    const viewRun = await reveal(page.getByRole('button', { name: 'View run', exact: true }), 5 * MIN);
+    const viewRun = main().getByRole('link', { name: 'View run', exact: true }).first();
+    await viewRun.waitFor({ timeout: 5 * MIN });
     const r = await req();
     firstRun = r.tickets?.[0]?.run_id ?? '';
     await viewRun.click();
-    await page.waitForTimeout(3000);
-    await enableSemantics();
-    await reveal(page.getByRole('button', { name: 'Open request' }), MIN);
-    if (process.env.CONSOLE_WALK_TEMPORAL_UI && !(await page.getByRole('button', { name: /Open in Temporal UI/ }).count()) &&
-        !(await page.getByRole('link', { name: /Open in Temporal UI/ }).count())) {
-      await reveal(page.getByRole('button', { name: /Open in Temporal UI/ }), MIN)
+    await page.getByRole('link', { name: 'Open request' }).waitFor({ timeout: MIN });
+    if (process.env.CONSOLE_WALK_TEMPORAL_UI) {
+      await page.getByRole('link', { name: /Open in Temporal UI/ }).waitFor({ timeout: MIN })
         .catch(() => { throw new Error('no Open in Temporal UI link on a Temporal run'); });
     }
     const run = await api(`/runs/${firstRun}`);
     if (run.request_id !== requestId) throw new Error(`run.request_id ${run.request_id} != ${requestId}`);
     await waitForText(/Accepted|Quarantined/, 30 * MIN, 'the run to finish on screen');
-    // Each Timeline stage is its own accessibility node naming its status;
-    // the Build row (it holds the agent notes) once vanished from it.
-    await waitForText(/(Passed|Failed)\nBuild\n/, MIN, 'the Timeline Build row with its status');
-    await page.mouse.move(6, 500); await page.mouse.wheel(0, -20000); await page.waitForTimeout(600);
-    const openRequest = await reveal(page.getByRole('button', { name: 'Open request' }), MIN)
+    // Each Timeline stage is its own list item naming its status; the Build
+    // row (it holds the agent notes) once vanished from it.
+    await page.getByRole('list', { name: 'Timeline stages' }).getByRole('listitem')
+      .filter({ hasText: /Build/ }).filter({ hasText: /Passed|Failed/ }).first().waitFor({ timeout: MIN })
+      .catch(() => { throw new Error('timed out waiting for the Timeline Build row with its status'); });
+    await page.getByRole('link', { name: 'Open request' }).click()
       .catch(() => { throw new Error('run page has no Open request link'); });
-    await openRequest.click();
-    await page.waitForTimeout(3000);
-    await enableSemantics();
+    await page.waitForURL(/\/requests\/[^/]+$/);
     return firstRun;
   });
 
@@ -401,24 +320,22 @@ try {
   });
 
   await step('retry', async () => {
-    await (await reveal(page.getByRole('button', { name: 'Retry request (rebuilds)', exact: true }), MIN)).click();
-    await page.waitForTimeout(800);
-    await page.getByRole('textbox', { name: 'Reason' }).fill('console-walk: exercise console retry');
-    await dialogButton('Retry').click();
-    const end = Date.now() + 10 * MIN;
-    let newRun = '';
-    for (;;) {
-      const r = await req();
-      newRun = r.tickets?.[0]?.run_id ?? '';
-      if (newRun && newRun !== firstRun) break;
-      if (Date.now() > end) throw new Error('retry never produced a new run');
-      await page.waitForTimeout(3000);
-    }
-    const hist = (await req()).history.map((h) => `${h.from}->${h.to}:${h.by}`);
-    if (!hist.some((h) => h.endsWith(':console-walk') && h.includes('->building'))) throw new Error(`retry not attributed to the operator: ${hist.slice(-3).join(', ')}`);
-    await waitForState(['halted', 'done', 'quarantined'], 30 * MIN);
-    await waitForText(/Built and verified; no pull request was opened\./, 3 * MIN, 'the callout again after the retried build');
-    return `new run ${newRun}`;
+    // The run is accepted and only its pull request is missing, so Retry
+    // re-attempts opening the PR against the same run: nothing is rebuilt.
+    // The scratch clone has no remote, so the server refuses, and the
+    // console must show the server's reason in the dialog and leave the
+    // request as it was.
+    await main().getByRole('button', { name: /^Retry request/ }).click();
+    await dialog().getByLabel('Reason').fill('console-walk: exercise console retry');
+    await dialog().getByRole('button', { name: /^Retry/ }).click();
+    await dialog().getByRole('alert').getByText(/could not open a pull request/).waitFor({ timeout: 2 * MIN });
+    const r = await req();
+    if (r.state !== 'halted') throw new Error(`a refused retry moved the request to ${r.state}`);
+    const run = r.tickets?.[0]?.run_id ?? '';
+    if (run !== firstRun) throw new Error(`a PR-only retry started a new run: ${run}`);
+    await dialog().getByRole('button', { name: 'Cancel', exact: true }).click();
+    await main().getByText(/Built and verified; no pull request was opened\./).waitFor();
+    return 'refused with the server\'s reason shown; same run, no rebuild';
   });
 } catch {
   exitCode = 1;

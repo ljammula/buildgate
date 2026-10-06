@@ -8,7 +8,7 @@ build/verify loop to an accepted, mergeable state.
 - Nothing advances on the agent's own say-so: each stage is a factory-owned policy decision against durable evidence (test results, diff shape, hashes).
 - Humans review the spec and the plan (and, opt-in, the acceptance tests) in the console or CLI before code is written.
 - Merge and deploy are **permanently human**, by standing design: the factory records a decision and may open a PR, it never merges.
-- Go orchestration daemon (`factoryd`), Flutter web operator console embedded in `factoryd serve`, vendored build scripts under `agent/` (one set for every harness).
+- Go orchestration daemon (`factoryd`), React operator console embedded in `factoryd serve`, vendored build scripts under `agent/` (one set for every harness).
 
 Licensed under [Apache 2.0](LICENSE). Design and rationale:
 [`doc/designs/architecture-flows.md`](doc/designs/architecture-flows.md) and
@@ -155,7 +155,7 @@ The details of `make install`:
 make install
 ```
 
-Prerequisites: Go, Docker with the `buildx` plugin, `gh`, `python3` (Flutter
+Prerequisites: Go, Docker with the `buildx` plugin, `gh`, `python3` (Node 20+ and npm
 optional, for the console). With Homebrew's `docker` + `colima`, run
 `brew install docker-buildx` and link it:
 `mkdir -p ~/.docker/cli-plugins && ln -sf "$(brew --prefix)/lib/docker/cli-plugins/docker-buildx" ~/.docker/cli-plugins/docker-buildx`.
@@ -166,7 +166,7 @@ line to add to your shell profile. `make install`:
 
 - runs `go install ./cmd/factoryd`;
 - requires Docker, starts Temporal, and builds the sandbox, meter and registry-proxy images from source (`internal/sandbox/Dockerfile` and friends) and pulls OpenShell's three images by digest, recording buildgate's own via `factoryd configure-images` -- skipping the build of an image whose inputs haven't changed (it still pushes, so the recorded digest is unchanged) (`FORCE_IMAGE_BUILD=1 make install` always rebuilds). The refs go into the default session config; `FACTORYD_CONFIG="<config> <config>..."` re-points each listed config instead, so a second config (e.g. a Luna profile) does not keep pinning a superseded image;
-- bakes in the console if Flutter is on `PATH` (else serves a placeholder page; see [`console/README.md`](console/README.md));
+- bakes in the console if `npm` is on `PATH` (else serves a placeholder page; see [`console/README.md`](console/README.md));
 - leaves `git status` clean;
 - warns if an older `factoryd` earlier on `PATH` shadows the one just installed;
 - installs the `buildgate` agent skill into `~/.agents/skills` (Copilot, Codex), and refreshes `~/.claude/skills/buildgate` when it exists.
@@ -349,8 +349,8 @@ created.
 ```sh
 make verify              # fmt-check, vet, go test -race ./... (cmd/factoryd as 4 parallel shards; ~3-4 min)
 make verify-live         # DOCKER_SANDBOX_LIVE=1 + Temporal-live tests, no self-skip (needs Docker; minutes)
-make ci                  # fmt-check, vet, verify-live, the agent/pi Python suite, flutter test -- the local pre-merge gate
-make console-test        # cd console && flutter test
+make ci                  # fmt-check, vet, verify-live, the agent/pi Python suite, the console checks -- the local pre-merge gate
+make console-test        # cd console && npm ci && npm run check
 make install             # see Install
 make live-smoke          # real gateway/model/git end-to-end fixtures (AGENTS.md § Live validation)
 make live-compose        # one real todo-kafka-service ticket with Postgres/Kafka/Redis sidecars
@@ -403,7 +403,7 @@ Latest release tag: **`m6`**. By convention a tag is cut only after `make live-s
 |---|---|
 | `factoryd inbox [-json]` | Every request waiting on you (the four review gates, `halted`, `quarantined`) across all profiles, oldest first, each with the command to act on it and its console link |
 | `factoryd cancel [-reason "..."] <request-id>` | Drops a request you no longer want: `cancelled` is terminal, and a `quarantined` or `halted` request can be dismissed this way instead of retried. See [USAGE.md](USAGE.md) for the state graph |
-| `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]` | Removes what `make install` put on this machine: stops `worker`/`serve`/Temporal, removes the launchd services, the Temporal containers, the local registry container, the locally built images, the `buildgate` skill and the `factoryd` binary. Lists the plan and asks first (`-yes` skips; required off a terminal; `-dry-run` only prints). Keeps `~/.config/factoryd` and `~/buildgate` (requests, runs, evidence) unless `-purge`, which also deletes the Temporal volumes and the OpenShell gateway's state on the Docker VM, and asks you to type `purge`. Never touches Docker/colima, Go, Flutter, `gh`, Homebrew packages or git config |
+| `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]` | Removes what `make install` put on this machine: stops `worker`/`serve`/Temporal, removes the launchd services, the Temporal containers, the local registry container, the locally built images, the `buildgate` skill and the `factoryd` binary. Lists the plan and asks first (`-yes` skips; required off a terminal; `-dry-run` only prints). Keeps `~/.config/factoryd` and `~/buildgate` (requests, runs, evidence) unless `-purge`, which also deletes the Temporal volumes and the OpenShell gateway's state on the Docker VM, and asks you to type `purge`. Never touches Docker/colima, Go, Node, `gh`, Homebrew packages or git config |
 | `factoryd stop [-all] [-force]` | Stops the `worker` and `serve` that autostart, `quickstart` or `submit` started for this data dir (`-all`: every profile's, then Temporal). Refuses while a request is building unless `-force`: a forced stop cancels the build (the worker puts the request in `resume_review` at its next start, and `factoryd resume <id>` continues or rebuilds it); leaves launchd-supervised services to `uninstall-service` |
 | `factoryd logs [-list] [-f] <id\|queue-run\|serve>` | The log being written now for a request, run, the worker (`queue-run`) or `serve`; `-list` shows every log, `-f` follows |
 | `factoryd use [<name>]` | Lists the session-config profiles (`~/.config/factoryd/<name>.yml`) or switches the active one; every command and the `buildgate` skill then follows it. `FACTORYD_PROFILE` overrides per shell; `-config <name>` per command. `make install` re-points every profile at the new images |

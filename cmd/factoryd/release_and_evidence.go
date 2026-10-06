@@ -100,20 +100,17 @@ func relaySpendLine(totalCostMicroUSD, totalTokens int64, partial, subscriptionB
 // subscription-billed (or, for costSummary's Spec/Plan components, has
 // no credential-mode evidence to check at all). Those two render
 // subscriptionCostAggregateSuffix instead (an adversarial review of
-// PR #18's fix) -- see that constant's own doc comment and
-// console/lib/request_cost.dart's identically worded copies of both.
+// PR #18's fix) -- see that constant's own doc comment.
 const subscriptionCostSuffix = " (API-price est.; billed to your subscription)"
 
 // subscriptionCostAggregateSuffix is subscriptionCostSuffix's own
 // softer-worded counterpart for a figure that mixes runs -- see that
 // constant's own doc comment for which figures those are and why the
 // stronger wording is a claim that can be false there. Not rendered
-// anywhere in this Go binary today (both aggregate figures are rendered
-// by the Flutter console, console/lib/request_cost.dart, which carries
-// the identical text) -- defined here anyway, as the Go half of "the
-// same constant pair in Go and Dart," so the two can never drift the way
-// subscriptionCostSuffix's own wording could have if only one side were
-// ever updated.
+// anywhere in this Go binary today, and the console shows tokens rather
+// than a dollar figure (console/src/domain/cost.ts) -- defined here anyway
+// so the aggregate wording sits beside the single-run one it must not be
+// confused with.
 const subscriptionCostAggregateSuffix = " (includes subscription-billed runs; API-price est.)"
 
 // releasePolicyFromFlags builds an internal/release.MergePolicy from the

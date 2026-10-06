@@ -312,7 +312,7 @@ func uninstallRun(env *uninstallEnv, yes, dryRun, interactive bool, stdin io.Rea
 			fmt.Fprintf(env.out, "Keeping %s (pass -purge to delete).\n", strings.Join(kept, ", "))
 		}
 	}
-	fmt.Fprintln(env.out, "Not touched: Docker/colima, Go, Flutter, gh, Homebrew packages, git config, the repo checkout, and anything under ~/.docker.")
+	fmt.Fprintln(env.out, "Not touched: Docker/colima, Go, Node, gh, Homebrew packages, git config, the repo checkout, and anything under ~/.docker.")
 	if dryRun {
 		fmt.Fprintln(env.out, "Dry run: nothing changed.")
 		return nil

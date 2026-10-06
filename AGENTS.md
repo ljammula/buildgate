@@ -9,7 +9,7 @@ or similar) working in this repository.
 spec and drives a coding agent through a sandboxed build/verify loop to
 an accepted, mergeable state — with merge and deploy staying permanently
 human-gated by design, not a milestone still to reach. Go orchestration
-daemon (`factoryd`, `cmd/factoryd` + `internal/*`), a Flutter/Dart
+daemon (`factoryd`, `cmd/factoryd` + `internal/*`), a React + TypeScript
 operator console (`console/`), and vendored build scripts
 (`agent/pi/`).
 
@@ -75,7 +75,7 @@ security boundary, not a bug.
 | `cmd/factoryd/` | The daemon's CLI entry points and subcommands |
 | `internal/` | Go orchestration: run state machine, policy gates, sandbox launcher, Temporal workflows, evidence, release/kill-switch, request pipeline |
 | `agent/pi/` | Vendored build-loop scripts (Python) that `factoryd` shells out to, for every harness: each job passes its role's `--harness pi\|pifork\|codex\|copilot`, which selects the adapter in `scripts/harness_adapters.py`. Has its own `README.md` and test suite |
-| `console/` | Flutter Web operator console (Dart) |
+| `console/` | React + TypeScript operator console (Vite; Node 20+ and npm). Its own `README.md` is the module map and conventions |
 | `internal/operatorskill/buildgate/SKILL.md` | The `buildgate` agent skill operators install with `factoryd install-skill`: an allowlist of `factoryd` commands their Copilot/Claude Code/Codex may run. Embedded in the binary, so it must match the CLI of the same commit |
 | `doc/designs/` | Living design docs for shipped subsystems (e.g. the pifork harness) |
 | `data/` | **Runtime state, not source.** Queue entries, run records, workspaces, tickets. Mostly gitignored; don't treat files under here as things to "clean up" as code |
@@ -95,12 +95,12 @@ Three separate toolchains, not unified under one command:
 
 ```sh
 make verify        # Go: fmt-check, vet, go test -race ./...
-make console-test   # Dart: cd console && flutter test
+make console-test   # console: cd console && npm ci && npm run check
 python3 -m pytest agent/pi/tests/       # Python, agent/pi (every harness adapter)
 ```
 
 Run whichever toolchain(s) your change actually touches. `make verify`
-alone does not cover a Dart or Python change, and vice versa.
+alone does not cover a console or Python change, and vice versa.
 `.github/workflows/ci.yml` is manual-only (`workflow_dispatch`) by
 operator decision — it does not run automatically on push to `main` or on
 a PR push unless the optional, currently-unused self-hosted runner is

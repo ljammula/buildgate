@@ -7,7 +7,7 @@ import (
 )
 
 // TestFormatTokenCountMatchesTheConsoleGoldenVectors reads the file the
-// console's own tests read (console/test/request_cost_test.dart), so a
+// console's own tests read (console/src/domain/usage.test.ts and cost.test.ts), so a
 // token count reads the same in `factoryd status`, a round summary and the
 // console.
 func TestFormatTokenCountMatchesTheConsoleGoldenVectors(t *testing.T) {
