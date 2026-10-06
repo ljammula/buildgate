@@ -544,6 +544,22 @@ step("request-edit-spec", async () => {
     (await request("req-spec-review")).spec === validSpec,
     "the server's spec is not the text that was saved",
   );
+  // The save is on the request's own record: who edited which file, with the
+  // text it replaced kept as a revision, and the page's audit lists it.
+  // The name is the one this browser has stored, or the server's own
+  // principal when the session has not been asked for one yet.
+  const editor =
+    (await page.evaluate(() => window.localStorage.getItem("factoryOperatorName"))) || "api";
+  const edit = (await request("req-spec-review")).edits?.at(-1);
+  check(
+    edit?.path === "spec.md" && edit.by === editor && edit.diff !== "",
+    `the save was not recorded as an edit: ${JSON.stringify(edit)}`,
+  );
+  const replaced = (await api(`/requests/req-spec-review/revisions/${edit.revision}`)).body;
+  check(replaced.kind === "edit", "the edit's revision is not marked as an edit");
+  const audit = main().getByRole("region", { name: "Audit" });
+  await audit.getByRole("button", { name: /Edits in place \(1\)/ }).click();
+  await audit.getByText(`Edited by ${editor}`, { exact: false }).waitFor();
   check(
     await main().getByRole("button", { name: "Approve", exact: true }).isEnabled(),
     "Approve stayed disabled after the save",

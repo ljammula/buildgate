@@ -132,6 +132,7 @@ describe("a spec's criteria as a list", () => {
     expect(server.sent("PUT /requests/req-1/spec")[0]?.body).toEqual({
       content: shown,
       base_sha256: sha256Hex(SPEC),
+      by: "operator",
     });
     expect(shown).toBe(saved);
   });
@@ -262,6 +263,7 @@ describe("a ticket's header lines and covered criteria as fields", () => {
     expect(server.sent("PUT /requests/req-1/tickets/1")[0]?.body).toEqual({
       content: shown,
       base_sha256: sha256Hex(TICKET),
+      by: "operator",
     });
     expect(shown).toBe(TICKET.replace("go test ./...", "make verify"));
   });
@@ -310,6 +312,7 @@ describe("a ticket's header lines and covered criteria as fields", () => {
     expect(server.sent("PUT /requests/req-1/tickets/1")[0]?.body).toEqual({
       content: expected,
       base_sha256: sha256Hex(content),
+      by: "operator",
     });
   });
 

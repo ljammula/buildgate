@@ -2,18 +2,24 @@ import { stopText } from "@/domain/runStop";
 import type { RequestSummary } from "@/domain/request";
 import { EscapedText } from "@/shared/oracle/EscapedText";
 
+import { EditHistory } from "./EditHistory";
 import { Panel } from "./Panel";
 import { RejectionHistory } from "./RejectionHistory";
 import { approvedLine, terminalEntries, terminalEntryLine } from "./requestDetailLogic";
 
 /**
  * Who approved the request and when, every time it was cancelled, halted or
- * quarantined (who, when, why), and its rejection history. Hidden when there
- * is none of them.
+ * quarantined (who, when, why), its rejection history and the edits an
+ * operator saved in place. Hidden when there is none of them.
  */
 export function AuditSection({ request }: { readonly request: RequestSummary }) {
   const stops = terminalEntries(request);
-  if (request.approvedBy === "" && request.rejections.length === 0 && stops.length === 0) {
+  if (
+    request.approvedBy === "" &&
+    request.rejections.length === 0 &&
+    request.edits.length === 0 &&
+    stops.length === 0
+  ) {
     return null;
   }
   return (
@@ -40,6 +46,9 @@ export function AuditSection({ request }: { readonly request: RequestSummary }) 
       )}
       {request.rejections.length === 0 ? null : (
         <RejectionHistory rejections={request.rejections} />
+      )}
+      {request.edits.length === 0 ? null : (
+        <EditHistory edits={request.edits} rejections={request.rejections} />
       )}
     </Panel>
   );

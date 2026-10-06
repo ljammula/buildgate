@@ -432,6 +432,11 @@ type Request struct {
 	// before this field existed.
 	Rejections []Rejection `json:"rejections,omitempty"`
 
+	// Edits is every in-place edit an operator saved to a reviewed file
+	// (RecordEdit), oldest first. A later rejection of the same stage hands
+	// each one's Diff to the drafter (stageFeedback).
+	Edits []Edit `json:"edits,omitempty"`
+
 	// DraftOracles is `factoryd submit -draft-oracles`: opt this request into
 	// the staged oracle stage (spec_review -> oracle_drafting -> oracle_review
 	// -> planning). False (the zero value, omitted from JSON) keeps spec

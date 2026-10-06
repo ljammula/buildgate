@@ -1052,6 +1052,53 @@ func TestUpdateRequestSpecHandler(t *testing.T) {
 	}
 }
 
+// TestUpdateRequestSpecHandlerRecordsTheEdit: a saved edit is on the
+// request's edit history under the operator the client named, with the
+// replaced text kept as an edit revision; saving the same text again adds
+// nothing.
+func TestUpdateRequestSpecHandlerRecordsTheEdit(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	before, err := os.ReadFile(request.SpecPath(dataDir, "req-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(dataDir, WithOverrideToken("test-token"))
+	put := func() *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(updateRequestContentBody{Content: validSpecMD, By: "kanna"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/spec", "test-token", string(body)))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+		}
+		return recorder
+	}
+
+	put()
+	recorder := put()
+
+	var got struct {
+		Edits []request.Edit `json:"edits"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.Edits) != 1 || got.Edits[0].By != "kanna" || got.Edits[0].Path != "spec.md" || got.Edits[0].FromState != request.StateSpecReview || got.Edits[0].Revision != 1 || got.Edits[0].Diff == "" {
+		t.Fatalf("edits = %+v, want one edit of spec.md by kanna at revision 1", got.Edits)
+	}
+	rev, files, err := request.LoadRevision(dataDir, "req-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev.Kind != request.RevisionKindEdit || files["spec.md"] != string(before) {
+		t.Errorf("revision = %+v, want an edit revision holding the replaced spec", rev)
+	}
+}
+
 func TestUpdateRequestSpecHandlerWrongStateConflict(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StatePlanReview, false)

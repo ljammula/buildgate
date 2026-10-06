@@ -1,5 +1,6 @@
 import { useUpdateRequestSpec } from "@/api/requestQueries";
 import type { RequestSummary } from "@/domain/request";
+import { getOperatorName } from "@/platform/operatorIdentity";
 
 import { AcceptanceCriteriaList } from "./AcceptanceCriteriaList";
 import { FileContentSection } from "./FileContentSection";
@@ -38,7 +39,7 @@ export function SpecSection({
       onStartEdit={onStartEdit}
       onStopEdit={onStopEdit}
       onSave={async (content, baseSha256) => {
-        await update.mutateAsync({ content, baseSha256 });
+        await update.mutateAsync({ content, baseSha256, by: getOperatorName() });
       }}
       onFetchCurrent={onFetchCurrent}
       structure="spec"

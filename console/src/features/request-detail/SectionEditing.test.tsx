@@ -60,6 +60,7 @@ test("editing one section sends the whole file with every other byte unchanged, 
   expect(server.sent("PUT /requests/req-1/spec")[0]?.body).toEqual({
     content: expected,
     base_sha256: sha256Hex(SPEC),
+    by: "operator",
   });
 });
 

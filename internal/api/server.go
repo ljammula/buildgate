@@ -3894,6 +3894,11 @@ const maxRequestContentBytes = 1 << 20 // 1 MiB
 // JSON request body.
 type updateRequestContentBody struct {
 	Content string `json:"content"`
+	// By is the operator saving the edit, recorded on the request's edit
+	// history by the spec and ticket routes (the oracle route ignores it).
+	// Like approve's "by", it is the client's own claim: the token carries
+	// no identity.
+	By string `json:"by,omitempty"`
 	// BaseSHA256 is the hex sha256 of the content the client started
 	// editing from -- optional, back-compat (empty applies this write
 	// unconditionally, the CLI's own behavior and every caller's from
@@ -4012,7 +4017,7 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := writeFileAtomic(specPath, content); err != nil {
+	if err := s.saveOperatorEdit(loaded, body.By, specPath, content); err != nil {
 		writeError(w, http.StatusInternalServerError, "write spec")
 		return
 	}
@@ -4094,7 +4099,7 @@ func (s *Server) updateRequestTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := writeFileAtomic(ticketPath, content); err != nil {
+	if err := s.saveOperatorEdit(loaded, body.By, ticketPath, content); err != nil {
 		writeError(w, http.StatusInternalServerError, "write ticket")
 		return
 	}
@@ -4128,6 +4133,25 @@ func decodeRequestContentBody(w http.ResponseWriter, r *http.Request) (updateReq
 		return updateRequestContentBody{}, false
 	}
 	return body, true
+}
+
+// saveOperatorEdit writes an operator's validated edit of a reviewed file
+// and records it on the request (request.RecordEdit: a revision of the text
+// it replaced, and an entry in Request.Edits a later rejection hands to the
+// drafter). by is the operator the client named, requestAPIPrincipal when it
+// named none. The caller holds the request lock and loaded the request under
+// it. A file outside the request's own directory (a ticket whose recorded
+// spec_path points elsewhere) has no request-relative name to record under:
+// it is written as before, unrecorded.
+func (s *Server) saveOperatorEdit(loaded *request.Request, by, path, content string) error {
+	if by == "" {
+		by = requestAPIPrincipal
+	}
+	rel, err := filepath.Rel(request.Dir(s.dataDir, loaded.ID), path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return writeFileAtomic(path, content)
+	}
+	return request.RecordEdit(s.dataDir, loaded, by, filepath.ToSlash(rel), content, time.Now())
 }
 
 // writeFileAtomic writes content to path via a temp file in the same
@@ -4183,6 +4207,7 @@ type requestRevisionDetailView struct {
 	Reason    string            `json:"reason"`
 	FromState request.State     `json:"from_state"`
 	Files     map[string]string `json:"files"`
+	Kind      string            `json:"kind,omitempty"`
 }
 
 // getRequestRevision serves GET /requests/{id}/revisions/{n}: one
@@ -4222,6 +4247,7 @@ func (s *Server) getRequestRevision(w http.ResponseWriter, r *http.Request) {
 		Reason:    rev.Reason,
 		FromState: rev.FromState,
 		Files:     files,
+		Kind:      rev.Kind,
 	})
 }
 

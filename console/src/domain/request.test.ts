@@ -7,6 +7,7 @@ import {
   decodeRequestSummary,
   decodeRevisionDetail,
   decodeRevisionList,
+  editHandoff,
   rejectionStage,
   requestAwaitingPullRequest,
   requestAwaitingPullRequestLabel,
@@ -459,6 +460,7 @@ test("listRevisions/getRevision parse the revision routes", () => {
     fromState: "plan_review",
     files: ["spec.md", "tickets/001.spec.md", "tickets/002.spec.md"],
     feedbackSupplied: true,
+    kind: "",
   });
   // A revision recorded before the server kept the hand-off decodes as not supplied.
   expect(
@@ -566,4 +568,49 @@ test("a ticket's PR-review rounds are decoded; conformity rounds are left out", 
   ]);
   expect(r.tickets[0]?.activeRoundRunId).toBe("req-1-001-review3-x");
   expect(r.tickets[1]).toMatchObject({ reviewRounds: [], activeRoundRunId: "" });
+});
+
+test("a request's in-place edits decode, and an edit is handed over by the next rejection of its stage", () => {
+  const rejection = (at: string, fromState: string) => ({
+    by: "kanna",
+    at,
+    reason: "r",
+    from_state: fromState,
+  });
+  const r = request({
+    edits: [
+      {
+        by: "kanna",
+        at: "2026-09-28T01:00:00Z",
+        path: "spec.md",
+        from_state: "spec_review",
+        revision: 2,
+        diff: "- a\n+ b\n",
+      },
+      {
+        by: "kanna",
+        at: "2026-09-28T05:00:00Z",
+        path: "spec.md",
+        from_state: "spec_review",
+        revision: 4,
+      },
+    ],
+    rejections: [
+      rejection("2026-09-28T00:30:00Z", "spec_review"),
+      rejection("2026-09-28T02:00:00Z", "plan_review"),
+      rejection("2026-09-28T03:00:00Z", "spec_review"),
+    ],
+  });
+  expect(r.edits[0]).toEqual({
+    by: "kanna",
+    at: "2026-09-28T01:00:00Z",
+    path: "spec.md",
+    fromState: "spec_review",
+    revision: 2,
+    diff: "- a\n+ b\n",
+    diffTruncated: false,
+  });
+  expect(editHandoff(r.edits[0]!, r.rejections)?.at).toBe("2026-09-28T03:00:00Z");
+  expect(editHandoff(r.edits[1]!, r.rejections)).toBeNull();
+  expect(request().edits).toEqual([]);
 });

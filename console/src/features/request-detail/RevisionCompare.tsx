@@ -34,7 +34,9 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
   const [enabled, setEnabled] = useState(true);
   const [picked, setPicked] = useState<number | null>(null);
   const revisions = useRequestRevisions(request.id, enabled);
-  const list = revisions.data ?? [];
+  // An operator's own edit also leaves a revision (the text it replaced):
+  // this panel compares with what was rejected, so those are not offered.
+  const list = (revisions.data ?? []).filter((r) => r.kind !== "edit");
   const latest = list.reduce<number | null>(
     (best, r) => (best === null || r.index > best ? r.index : best),
     null,
