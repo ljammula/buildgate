@@ -251,6 +251,12 @@ type Healthcheck struct {
 type Rejection struct {
 	Service string
 	Reason  string
+	// AllowRegistry is set only when the service was rejected because its
+	// image is under no allow-listed registry: the registry/namespace
+	// prefix (RegistryNamespace) that would admit it. It is for an
+	// operator to add to compose_services_allowed_registries by their own
+	// decision; nothing in this package or a run ever adds it.
+	AllowRegistry string
 }
 
 func (r Rejection) String() string { return fmt.Sprintf("%s: %s", r.Service, r.Reason) }
@@ -380,7 +386,11 @@ func ParseFile(composeYAML []byte, opts Options) (services []ServiceSpec, reject
 
 		spec, reason := parseOneService(name, svc, tempDir, opts.AllowedImageRegistries, reserved, opts.RequireDigest, opts.MemoryCeiling)
 		if reason != "" {
-			rejected = append(rejected, Rejection{Service: name, Reason: reason})
+			rejection := Rejection{Service: name, Reason: reason}
+			if svc.Image != "" && !imageAllowed(svc.Image, opts.AllowedImageRegistries) {
+				rejection.AllowRegistry = RegistryNamespace(svc.Image)
+			}
+			rejected = append(rejected, rejection)
 			continue
 		}
 		services = append(services, spec)
@@ -713,8 +723,7 @@ func parseOneService(name string, svc types.ServiceConfig, workingDir string, al
 		return ServiceSpec{}, "missing required \"image\""
 	}
 	if !imageAllowed(spec.Image, allowedImageRegistries) {
-		canonical := canonicalizeImageRef(spec.Image)
-		return ServiceSpec{}, fmt.Sprintf("image %q is not under an allow-listed registry/namespace -- add %q to compose_services_allowed_registries, or use an image under one already listed", spec.Image, canonical[:strings.LastIndex(canonical, "/")+1])
+		return ServiceSpec{}, fmt.Sprintf("image %q is not under an allow-listed registry/namespace -- add %q to compose_services_allowed_registries, or use an image under one already listed", spec.Image, RegistryNamespace(spec.Image))
 	}
 	if requireDigest && !imageDigestPinned(spec.Image) {
 		return ServiceSpec{}, fmt.Sprintf("image %q is not pinned by digest (compose_services_require_digest is set) -- rewrite it as \"<image>@sha256:<digest>\", found via `docker pull <image>` or the registry's own manifest API", spec.Image)
@@ -847,6 +856,14 @@ func memLimitReason(memLimit int64, ceiling string) string {
 		return fmt.Sprintf("mem_limit %s is above the operator's compose_services_memory %s -- lower it, or raise compose_services_memory", units.BytesSize(float64(memLimit)), ceiling)
 	}
 	return ""
+}
+
+// RegistryNamespace is the narrowest compose_services_allowed_registries
+// entry that admits image: its canonical reference up to and including the
+// last "/" ("apache/kafka:3.8.0" gives "docker.io/apache/").
+func RegistryNamespace(image string) string {
+	canonical := canonicalizeImageRef(image)
+	return canonical[:strings.LastIndex(canonical, "/")+1]
 }
 
 func imageAllowed(image string, allowedImageRegistries []string) bool {

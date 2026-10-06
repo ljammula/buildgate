@@ -1194,7 +1194,7 @@ limits for API-started runs.
 | `compose_services_cpus` | `1` |
 | `compose_services_max_services` | `8` |
 | `compose_services_ready_timeout` | `3m` |
-| `compose_services_allowed_registries` | `[docker.io/library/]` |
+| `compose_services_allowed_registries` | `[docker.io/library/]` -- the registry/namespace prefixes a target repo's compose images may come from. Never widened by a run or by a compose file: `doctor -target-repo <repo> -fix` and `quickstart` offer the prefixes a repo's images need and write them only on a yes |
 | `compose_services_worker_env` | empty -- `KEY: VALUE` worker variables for application endpoints the published ports don't already cover (the worker's `localhost` reaches each published port), e.g. `PSQL_URL: postgres://database:5432/<db>`, `REDIS_URL: redis:6379`. Factory, sandbox, credential, cache, proxy and `SF_*` names are rejected. Values reach the worker by name only: never in the docker argv, `run.json` or Temporal history |
 | `compose_services_require_digest` | `false` |
 | `compose_services_concurrency` | `1` -- runs on this machine (any data dir or factoryd process) with compose sidecars at once; `0` disables the slot |

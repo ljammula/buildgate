@@ -432,7 +432,11 @@ no service alias), and at each port the compose file publishes (`"5433:5432"`) o
 own `localhost`, so tests that default to what `docker compose up` gives a
 developer need no configuration. A compose file with any service outside the allow-list halts the
 run before its build (`compose_services_rejected`, naming each service
-and the fix); `factoryd doctor -target-repo <path>` prints the same
+and the fix). The list (`compose_services_allowed_registries`) is yours:
+nothing adds to it because a repository's compose file names an image.
+`factoryd doctor -target-repo <path> -fix` and `factoryd quickstart` name
+each registry prefix the repo's images need and add them to the config
+only when you answer yes (`-fix -yes` for no prompt); `factoryd doctor -target-repo <path>` prints the same
 verdict (alongside what `submit` would refuse: no verify command, or the
 project-bootstrap preflight under the repo's `.factory.yml` profile), each service's `BG_SERVICE_*` variables, the `localhost` ports
 (failing when the sandbox image predates `bg-forward`), and a warning when

@@ -324,6 +324,9 @@ func doctorMain(dp *deps, args []string) error {
 		// canonical ref.
 		in = doctorApplyBuiltImageRefs(in, checks)
 		doctorApplyFixes(checks, *workspace, *dataDir, dataDirExplicit, *yes, os.Stdin, os.Stdout, *configPath)
+		// -target-repo's compose images under a registry the operator has
+		// not allowed: named, and added to the config only on a yes.
+		checks = doctorOfferComposeRegistries(checks, in, *configPath, *yes, os.Stdin, os.Stdout)
 		// Re-evaluate rather than trust the checks slice collected above:
 		// a fix doctorApplyFixes just applied (e.g. release_* defaults
 		// written to the config) can invalidate a check already collected,
