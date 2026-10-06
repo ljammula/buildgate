@@ -71,9 +71,13 @@ test("the Triage count is the number of rows Triage lists: every state that need
     expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(2);
   });
   for (const pill of screen.getAllByTestId("nav-needs-you-count")) {
-    expect(pill).toHaveTextContent("4");
+    expect(pill).toHaveTextContent("5");
   }
-  // The same function lists the rows: it returns exactly those four (the board counts quarantined as failed).
+  // The same function lists the rows: it returns exactly those five.
   const summaries = list.map((o) => decodeRequestSummary(requestJson(o), "test"));
-  expect(needsYouRequests(summaries).map((r) => r.id)).toHaveLength(4);
+  expect(
+    needsYouRequests(summaries)
+      .map((r) => r.id)
+      .sort(),
+  ).toEqual(["a", "b", "c", "d", "e"]);
 });

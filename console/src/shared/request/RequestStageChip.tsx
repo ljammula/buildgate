@@ -38,5 +38,8 @@ export function RequestStageChip({
       />
     );
   }
-  return <StatusChip status={needsYou ? "needsHuman" : statusForToken(state)} label={state} />;
+  // A failure that waits on the operator (quarantined) keeps its failure
+  // colour: the "Waiting on you" badge beside it says the rest.
+  const own = statusForToken(state);
+  return <StatusChip status={needsYou && own !== "failed" ? "needsHuman" : own} label={state} />;
 }
