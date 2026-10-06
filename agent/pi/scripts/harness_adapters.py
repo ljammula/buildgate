@@ -292,6 +292,9 @@ RELAY_PROVIDER_ID = "factoryd-relay"
 # provider. Not a credential: the relay strips whatever credential a worker
 # request carries and injects the real one itself.
 RELAY_API_KEY_PLACEHOLDER = "factoryd-relay-placeholder"
+# Runs a command behind a loopback proxy that fills an OpenAI Responses
+# stream's empty final output from the items the stream delivered.
+RESPONSES_OUTPUT_PROXY = Path(__file__).resolve().parent / "fill_responses_output.mjs"
 _RESERVED_MODEL_KEYS = ("id", "api", "baseUrl")
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
 _HEADER_NAME = re.compile(r"[A-Za-z0-9-]+")
@@ -873,19 +876,21 @@ class CopilotAdapter:
 	) -> list[str]:
 		model_id, base_url, api = _relay_route(self.name)
 		api_key = RELAY_API_KEY_PLACEHOLDER
+		provider_headers: list[str] = []
 		placeholders = credential_placeholders()
 		if placeholders is not None:
-			# The CLI sends its provider key as the bearer token; the key is
-			# the route's placeholder, which the supervisor swaps on the wire.
+			# The CLI sends its provider key as the bearer token and each
+			# further credential header as written; all are the route's
+			# placeholders, which the supervisor swaps on the wire.
 			key_env, headers = placeholders
-			if headers:
-				raise SystemExit(
-					f"harness copilot: this route needs the credential header(s) {', '.join(sorted(headers))}, "
-					"which the Copilot CLI cannot send; use the pi or codex harness on this route"
-				)
 			api_key = os.environ.get(key_env, "")
 			if not api_key:
 				raise SystemExit(f"harness copilot: {key_env} (named by FACTORY_MODEL_KEY_ENV) is not set")
+			for header, name in sorted(headers.items()):
+				value = os.environ.get(name, "")
+				if not value:
+					raise SystemExit(f"harness copilot: {name} (named by FACTORY_MODEL_HEADERS_JSON for {header}) is not set")
+				provider_headers.append(f"{header}: {value}")
 		session_dir = Path(session_dir)
 		session_dir.mkdir(parents=True, exist_ok=True)
 		if api == "anthropic-messages":
@@ -909,6 +914,17 @@ class CopilotAdapter:
 			f"COPILOT_MODEL={model_id}",
 			"COPILOT_OFFLINE=true",
 			"COPILOT_AUTO_UPDATE=false",
+		]
+		if provider_headers:
+			# Only a chatgpt-codex route has a further credential header, and
+			# its backend leaves the final response event's output empty,
+			# which is where the CLI reads a turn from: run the CLI behind
+			# the proxy that fills it in (see RESPONSES_OUTPUT_PROXY).
+			args += [
+				"COPILOT_PROVIDER_HEADERS=" + "\n".join(provider_headers),
+				"node", str(RESPONSES_OUTPUT_PROXY), base_url, "COPILOT_PROVIDER_BASE_URL", "--",
+			]
+		args += [
 			self.binary,
 			"--allow-all-tools", "--no-auto-update", "--output-format", "json",
 			"--resume" if resuming else "--session-id", session_id,

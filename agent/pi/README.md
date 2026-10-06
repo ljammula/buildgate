@@ -117,8 +117,13 @@ Each adapter builds its argv (`invocation`), reads the agent's stdout
 (`parse` into an `AgentOutput`) and labels live progress (`progress_note`).
 `codex` and `copilot` read the run's model route from `FACTORY_MODEL_*`, and
 `prepare()` exits with a message when it is missing (`codex` also off the
-Responses API; `copilot` also on a route that needs a credential header
-beyond the key). Copilot's stream carries no token counts, so its `usage` is
+Responses API). On a route with a credential header beyond the key (a
+`chatgpt-codex` route) `copilot` sends that header's placeholder in
+`COPILOT_PROVIDER_HEADERS` and runs under `node fill_responses_output.mjs`:
+a loopback proxy in the worker that forwards each request unchanged and
+fills the final Responses event's empty `output` from the items the stream
+delivered, because the CLI reads a turn's tool calls and text from that
+`output`. Copilot's stream carries no token counts, so its `usage` is
 `None`. Every agent subprocess gets `/dev/null` for stdin (Codex reads stdin
 whenever it is not a TTY). Skills mounted at `/inputs/skills/<name>/SKILL.md` reach every
 harness: `pi`/`pifork` get `--skill <dir>` per skill, plus the repo's own `.agents/skills`; `codex` and `copilot` get a fresh copy
