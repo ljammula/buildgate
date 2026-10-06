@@ -34,6 +34,8 @@ export interface FileContentSectionProps {
   readonly session?: EditorBinding;
   /** The structure rules the editor checks this file against while typing. */
   readonly structure: StructureKind;
+  /** For a ticket: the spec's numbered criteria, for the editor's covered-criteria boxes. */
+  readonly specCriteria?: readonly string[];
   /** Extra content under the text (the parsed acceptance criteria). */
   readonly children?: ReactNode;
   /**
@@ -78,6 +80,7 @@ export function FileContentSection({
   onFetchCurrent,
   session,
   structure,
+  specCriteria,
   children,
   foldedSummary,
 }: FileContentSectionProps) {
@@ -164,12 +167,14 @@ export function FileContentSection({
           onFetchCurrent={onFetchCurrent}
           onClose={onStopEdit}
           structure={structure}
+          {...(specCriteria === undefined ? {} : { specCriteria })}
           {...(session === undefined ? {} : { session })}
         />
       ) : (
         text
       )}
-      {children}
+      {/* The saved criteria under an open editor would sit beside the editor's own, unsaved list. */}
+      {editing ? null : children}
     </Panel>
   );
 }
