@@ -1198,9 +1198,9 @@ func TestAPIStartStarterAllowsAllowlistedSandboxImage(t *testing.T) {
 
 // TestAPIStartStarterAppliesDefaultSandboxImage proves a request that omits
 // sandbox_image entirely still resolves to the daemon's own configured
-// -api-default-sandbox-image: the Flutter console has no
-// UI to ever set sandbox_image itself (see console/lib/api_client.dart's
-// startRun), so without a default an allowlist alone could never let it
+// -api-default-sandbox-image: the console has no
+// UI to ever set sandbox_image itself (see startRun in
+// console/src/api/runs.ts), so without a default an allowlist alone could never let it
 // reach a sandboxed run at all. Uses the same
 // downstream-error trick as TestAPIStartStarterAllowsAllowlistedSandboxImage:
 // reaching RelayWorkerModelID's slash rejection proves the default image

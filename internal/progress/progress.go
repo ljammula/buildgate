@@ -450,10 +450,8 @@ const StallAfter = 5 * time.Minute
 // and for how long: measured from summary.LastAt when its progress feed has
 // at least one line, else from createdAt for a run that hasn't written its
 // first line yet. An unparseable timestamp reports not-stalled rather than
-// guessing. The single implementation of this rule -- previously
-// duplicated between cmd/factoryd's stallState and the console's
-// elapsed.dart, which could (and did) drift on how waiting_reason interacts
-// with stalled.
+// guessing. The single implementation of this rule: the console shows the
+// server's verdict (console/src/domain/elapsed.ts) rather than re-deriving it.
 func Stalled(summary RunSummary, createdAt string, now time.Time) (stalled bool, since time.Duration) {
 	ts, layout := summary.LastAt, "2006-01-02T15:04:05.000Z07:00"
 	if ts == "" {

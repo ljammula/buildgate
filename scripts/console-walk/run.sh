@@ -52,22 +52,31 @@ for v in FACTORYD_API_START_TOKEN FACTORYD_API_OVERRIDE_TOKEN FACTORYD_API_READ_
 done
 [ -f "$CONSOLE_WALK_CONFIG" ] || { echo "console-walk: no session config at $CONSOLE_WALK_CONFIG" >&2; exit 2; }
 
-mkdir -p "$SCRATCH/xdg/factoryd" "$SCRATCH/data" "$SCRATCH/shots" "$(dirname "$CONSOLE_WALK_RESULTS_FILE")"
-grep -vE '^(data_dir|open_pull_request|workspaces):' "$CONSOLE_WALK_CONFIG" > "$SCRATCH/xdg/factoryd/config.yml"
+mkdir -p "$SCRATCH/data" "$SCRATCH/shots" "$(dirname "$CONSOLE_WALK_RESULTS_FILE")"
+# Drop the three keys this script sets, each with its whole value: a list
+# value (workspaces:) continues on indented lines, which must go with it.
+awk '
+	/^(data_dir|open_pull_request|workspaces):/ { skipping = 1; next }
+	skipping && /^([ \t]|$)/ { next }
+	{ skipping = 0; print }
+' "$CONSOLE_WALK_CONFIG" > "$SCRATCH/config.yml"
 # workspaces: makes $SCRATCH/repo an allowed POST /requests target (see
 # internal/api's workspaceAllowed doc comment) -- without it, walk.mjs's
 # own "submit" step would get a 403 the first time it tries to submit a
 # request against this scratch clone, since nothing has been submitted
 # against it before.
 printf 'data_dir: %s\nopen_pull_request: false\nworkspaces:\n  - %s\n' \
-	"$SCRATCH/data" "$SCRATCH/repo" >> "$SCRATCH/xdg/factoryd/config.yml"
+	"$SCRATCH/data" "$SCRATCH/repo" >> "$SCRATCH/config.yml"
 # The same backfill quickstart does for a reused config: an operator config
 # with no release_* keys otherwise denies every PR.
 for kv in 'release_max_files_changed: 25' 'release_max_insertions: 1000' 'release_rollback_plan: git revert the merge commit on main'; do
-	grep -q "^${kv%%:*}:" "$SCRATCH/xdg/factoryd/config.yml" || printf '%s\n' "$kv" >> "$SCRATCH/xdg/factoryd/config.yml"
+	grep -q "^${kv%%:*}:" "$SCRATCH/config.yml" || printf '%s\n' "$kv" >> "$SCRATCH/config.yml"
 done
 "$REPO_ROOT/scripts/fixture-repo.sh" "$CONSOLE_WALK_REPO" "$SCRATCH/repo"
-export XDG_CONFIG_HOME="$SCRATCH/xdg"
+# The scratch config is passed with -config. Pointing XDG_CONFIG_HOME at the
+# scratch dir instead would also hide what lives beside the operator's own
+# config and the run needs: the OpenShell gateway's client bundle.
+CONFIG="$SCRATCH/config.yml"
 
 pids=""
 cleanup() {
@@ -75,9 +84,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"$FACTORYD_BIN" serve -addr "127.0.0.1:$CONSOLE_WALK_PORT" -temporal-ui-url "$CONSOLE_WALK_TEMPORAL_UI" > "$SCRATCH/serve.log" 2>&1 &
+"$FACTORYD_BIN" serve -config "$CONFIG" -addr "127.0.0.1:$CONSOLE_WALK_PORT" -temporal-ui-url "$CONSOLE_WALK_TEMPORAL_UI" > "$SCRATCH/serve.log" 2>&1 &
 pids="$pids $!"
-"$FACTORYD_BIN" worker -temporal-address "$CONSOLE_WALK_TEMPORAL" > "$SCRATCH/worker.log" 2>&1 &
+"$FACTORYD_BIN" worker -config "$CONFIG" -temporal-address "$CONSOLE_WALK_TEMPORAL" > "$SCRATCH/worker.log" 2>&1 &
 pids="$pids $!"
 
 base="http://127.0.0.1:$CONSOLE_WALK_PORT"

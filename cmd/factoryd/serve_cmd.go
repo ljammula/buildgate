@@ -230,7 +230,7 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	f.configPath = flags.String("config", "", "session config path; empty searches the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists (the same search `factoryd worker`/`quickstart` use). Resolves -data-dir, baseSettings (relay/sandbox/release-policy defaults for every API-started run and the override endpoint) and the stable start-token file location")
 	f.dataDir = flags.String("data-dir", "data", "directory containing durable run records")
 	f.addr = flags.String("addr", defaultServeAddr, "HTTP listen address. Loopback-only by default: this Server's read routes (GET /runs, GET /runs/{id}, GET /runs/{id}/events, GET /runs/{id}/diff, GET /projects) carry no auth boundary unless FACTORYD_API_READ_TOKEN is set, and getRunDiff in particular serves every run's complete unified source diff plus absolute host paths and provider/model identity -- binding a wider address (e.g. \":8090\") without also setting that token exposes all of it to any caller that can reach the port (found via the 2026-09-05 Opus review, S3)")
-	f.corsAllowOrigin = flags.String("cors-allow-origin", "", "exact browser origin (scheme://host[:port], e.g. http://localhost:8091) to allow reading this Server's responses cross-origin -- needed for the Flutter console (USAGE.md §9), which is served by its own dev server on its own port. Empty (default) keeps CORS off, matching every prior release. Never accepts \"*\": this only changes what a browser page may read from a port it can already reach -- it grants no new network reachability, and the read/start/override token gates above still run first")
+	f.corsAllowOrigin = flags.String("cors-allow-origin", "", "exact browser origin (scheme://host[:port], e.g. http://localhost:8091) to allow reading this Server's responses cross-origin -- needed for the console (USAGE.md §9) when it is served by its own Vite dev server on its own port. Empty (default) keeps CORS off, matching every prior release. Never accepts \"*\": this only changes what a browser page may read from a port it can already reach -- it grants no new network reachability, and the read/start/override token gates above still run first")
 	f.daemonTemporalAddress = flags.String("daemon-temporal-address", "", "Temporal server address for serve-managed daemon supervisors; empty disables daemon lifecycle routes")
 	f.daemonBuildAppInterpreter = flags.String("daemon-build-app-interpreter", "python3", "daemon supervisor's build_app.py interpreter")
 	f.daemonBuildAppScript = flags.String("daemon-build-app-script", "", "daemon supervisor's build_app.py path (default: this version's embedded harness copy)")
@@ -292,8 +292,8 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// apiDefaultSandboxImage closes the gap the allowlist above leaves
 	// open by itself: an allowlist only says which images a request is
 	// *permitted* to name, it does not give a caller with no UI for the
-	// field anything to name in the first place. The Flutter console is
-	// exactly that caller -- see console/lib/api_client.dart's startRun.
+	// field anything to name in the first place. The console is
+	// exactly that caller -- see startRun in console/src/api/runs.ts.
 	// The default must itself be a member of the allowlist, checked once at
 	// startup, not merely at request time.
 	f.apiDefaultSandboxImage = flags.String("api-default-sandbox-image", "", "sandbox_image POST /runs uses when the request itself leaves that field empty. Unset (default) falls back to this daemon's own session-config sandbox_image, if any -- an empty request sandbox_image resolves to whichever of the two apiSandboxPolicy.imageAllowed's own implicit default names, or is rejected outright if neither is configured. Must itself be allowlisted by -api-allowed-sandbox-images (or, like an unconfigured allowlist, be the value that implicit default names) -- checked at daemon startup so a bad configuration is never discovered one rejected request at a time. An explicit request sandbox_image always wins over this default")
@@ -490,7 +490,7 @@ func (sv *serveRun) resolveTokens() error {
 	// POST /runs, the daemon lifecycle routes, GET /projects/{project}/
 	// release and /stats) stayed gated behind FACTORYD_API_START_TOKEN --
 	// an env var the console has no way to learn, since its tokens are
-	// build-time dart-defines (console/lib/main.dart), not something a
+	// build-time VITE_ variables (console/src/app/config.ts), not something a
 	// server can hand it at request time. On a default install (no
 	// operator-set token) that left New run/release/stats/ops screens
 	// 403ing unconditionally, forever, with no way for the console to
@@ -588,10 +588,10 @@ func (sv *serveRun) resolveTokens() error {
 		// server (RFC 3986 §3.5 -- the browser strips it before issuing
 		// the HTTP request) and never appears in this process's own
 		// access logging for that reason, whereas a query param would
-		// land in both. console/lib/main.dart's captureStartTokenFromLocation
+		// land in both. console/src/platform/startToken.ts
 		// reads it client-side on first load, stores it in this browser's
-		// own localStorage (origin-scoped, never sent anywhere by Dart
-		// either except as this server's own Authorization: Bearer
+		// own localStorage (origin-scoped, never sent anywhere by the
+		// console either except as this server's own Authorization: Bearer
 		// header), and strips it from the address bar immediately after
 		// -- so the token's only three homes are this log line (local,
 		// operator-owned stdout), the one-time fragment, and that

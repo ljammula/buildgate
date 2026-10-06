@@ -9,7 +9,7 @@ import (
 
 // TestCostGoldenVectorsUseTheAPICostSummaryShape decodes every cost_summary
 // the console's usage-line vectors are rendered from
-// (console/test/request_cost_test.dart) into CostSummary with unknown
+// (console/src/domain/usage.test.ts) into CostSummary with unknown
 // fields refused: a vector cannot exercise a field the API does not send.
 func TestCostGoldenVectorsUseTheAPICostSummaryShape(t *testing.T) {
 	raw, err := os.ReadFile("../../console/test/fixtures/vectors/cost.json")

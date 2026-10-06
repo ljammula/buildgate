@@ -18,14 +18,12 @@ data/scratch/
 __pycache__/
 *.py[cod]
 internal/workflow/runs/
-# The real Flutter Web console build (make console-build) -- committing it
-# would put megabytes of generated JS in git, and every rebuild (even of
-# unchanged sources) rewrites index.html, so tracking it directly dirtied
-# `make install` on any machine with Flutter on PATH. .gitkeep stays
-# tracked purely so `//go:embed all:dist` in internal/consoleweb has
-# something to embed in a checkout that has never run `make console-build`
-# -- see internal/consoleweb/consoleweb.go, which serves its placeholder
-# page from a Go string constant instead, independent of this directory.
+# The console build embedded by `make console-build` -- committing it would
+# put megabytes of generated JS in git. .gitkeep stays tracked purely so
+# `//go:embed all:dist` in internal/consoleweb has something to embed in a
+# checkout that has never run `make console-build` -- see
+# internal/consoleweb/consoleweb.go, which serves its placeholder page from
+# a Go string constant instead, independent of this directory.
 /internal/consoleweb/dist/*
 !/internal/consoleweb/dist/.gitkeep
 

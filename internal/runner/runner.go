@@ -809,8 +809,8 @@ func GitStatusPaths(dir string) ([]string, error) {
 // screen) that needs to actually display what changed, not just count it.
 // `--no-color` keeps the output plain text regardless of the invoking
 // process's own git config (a color.diff=always in the workspace's own
-// config would otherwise embed ANSI escapes in evidence meant for an HTML/
-// Flutter viewer). `--no-ext-diff --no-textconv` refuse the workspace's own
+// config would otherwise embed ANSI escapes in evidence meant for an HTML
+// viewer). `--no-ext-diff --no-textconv` refuse the workspace's own
 // `.gitattributes`/`.git/config`-declared external diff driver and textconv
 // filters — found via review: without these, a workspace can name an
 // arbitrary command as its diff/textconv driver and have this function
