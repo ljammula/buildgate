@@ -107,6 +107,11 @@ export interface ReviewRound {
   readonly error: string;
   /** An accepted round's commit reached the pull request's branch. */
   readonly pushed: boolean;
+  /**
+   * Runs of the round's earlier attempts, oldest first: each was quarantined
+   * by the review gate and followed by a fix attempt. `runId` is the last.
+   */
+  readonly priorRunIds: readonly string[];
 }
 
 function decodeReviewRound(o: JsonObject, at: string): ReviewRound {
@@ -117,6 +122,7 @@ function decodeReviewRound(o: JsonObject, at: string): ReviewRound {
     at: optString(o, "at", at),
     error: optString(o, "error", at),
     pushed: optBoolean(o, "pushed", at),
+    priorRunIds: stringList(o, "prior_run_ids", at),
   };
 }
 

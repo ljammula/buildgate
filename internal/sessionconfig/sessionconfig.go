@@ -181,7 +181,9 @@ type Config struct {
 	// -review-corrective-rounds flag: the most
 	// automatic corrective builds a ticket gets when its run quarantines
 	// with its failed gates a subset of {spec_conformity, code_review},
-	// before the request quarantines as it does today. Like
+	// before the request quarantines as it does today, and the most fix
+	// attempts a PR-review corrective round gets when the same two gates
+	// alone quarantine it. Like
 	// MaxReviewRounds, this is a per-invocation Tier-1 value
 	// (applySessionConfig fills the flag directly from this field), not a
 	// daemon-wide Tier-2 setting. 0 disables the corrective round

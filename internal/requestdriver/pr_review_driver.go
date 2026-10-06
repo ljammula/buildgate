@@ -844,16 +844,6 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
 	}
 
-	// What the review gate flagged in the round before this one, when that
-	// round was quarantined: its commits are the tip this round builds on
-	// (priorRoundGateFindings), so its builder is told why they were
-	// refused, beside the reviewer's comments.
-	flaggedVerdicts, findings := priorRoundGateFindings(dataDir, r, ticket)
-	addendumPath, err := WriteRoundAddendum(dataDir, r.ID, ticket, newThreads, flaggedVerdicts, findings, roundIndex)
-	if err != nil {
-		return fmt.Errorf("request %s: ticket %d: round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
-	}
-
 	roundRunID := fmt.Sprintf("%s-%03d-review%d", r.ID, ticket.Index, roundIndex)
 
 	// The ticket's original run's own BaseSHA -- the PR's real starting
@@ -876,32 +866,6 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	if branch == "" {
 		branch = "factoryd/" + ticket.RunID
 	}
-
-	// -open-pull-request is always forced off for a corrective round,
-	// regardless of cfg.openPullRequest: this run's branch already has an
-	// open PR (opened when the ticket was first built), so a second
-	// -open-pull-request would either fail (branch already has a PR) or,
-	// worse, attempt one against the wrong base.
-	roundCfg := cfg
-	roundCfg.OpenPullRequest = false
-	// The same QueueEntry builder as the ticket's first build and its
-	// automatic review round (ticketQueueEntry), so a PR-review round gets
-	// what they get: the approved oracle (without its factory-authored
-	// records the always-protected .buildgate/ directory would quarantine
-	// every otherwise-successful round), the request's full-suite command
-	// and its source, harness, model and preflight profile, and the
-	// ticket's acceptance-criteria file, so the round's review judges spec
-	// conformity as well as the code. SpecPath is addendumPath: the
-	// ticket's own spec plus this round's appended sections.
-	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, roundRunID, addendumPath)
-	if err != nil {
-		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
-	}
-	// A round opens no PR of its own (roundCfg.OpenPullRequest above), so
-	// it has no draft PR body for -pr-closes-issue to land in and no base
-	// to stack on.
-	entry.IssueRef = ""
-	entry.PRBase = ""
 	// ticketRun.DiffBaseSHA, when set, is itself an EARLIER round's own
 	// -diff-base override -- the ticket's true original base, threaded
 	// forward across rounds -- not ticketRun.BaseSHA, which for a run that
@@ -918,7 +882,6 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	if diffBase == "" {
 		diffBase = ticketRun.BaseSHA
 	}
-	args := append(BuildTicketRunArgs(dataDir, entry, roundCfg), "-on-branch", branch, "-diff-base", diffBase)
 
 	threadIDs := make([]string, len(newThreads))
 	for i, t := range newThreads {
@@ -933,13 +896,127 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// (forge.ThreadSeenKey), so a reviewer replying "still not fixed" on
 	// an already-addressed thread counts as new.
 
-	// startedRunID is this round's own actual run id, captured the moment
+	// What the review gate flagged in the round before this one, when that
+	// round was quarantined: its commits are the tip this round builds on
+	// (priorRoundGateFindings), so its builder is told why they were
+	// refused, beside the reviewer's comments.
+	flaggedVerdicts, findings := priorRoundGateFindings(dataDir, r, ticket)
+	// One round is one build plus, when the review gate alone quarantines
+	// it for something a builder can act on (ReviewOnlyFlagged), up to
+	// review_corrective_rounds fix attempts on the same branch, each given
+	// what the gate flagged in the attempt before it -- the allowance the
+	// ticket's first build has (TryReviewCorrectiveRound). Only the last
+	// attempt decides the round, and the round counts once against
+	// max_review_rounds however many attempts it took.
+	var attempt roundAttempt
+	var priorRunIDs []string
+	for fix := 0; ; fix++ {
+		addendumPath, err := WriteRoundAddendum(dataDir, r.ID, ticket, newThreads, flaggedVerdicts, findings, roundIndex, fix)
+		if err != nil {
+			return fmt.Errorf("request %s: ticket %d: round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
+		}
+		attemptID := roundRunID
+		if fix > 0 {
+			attemptID = fmt.Sprintf("%s-fix%d", roundRunID, fix)
+		}
+		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase)
+		if err != nil {
+			return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
+		}
+		if attempt.errText != "" {
+			log.Printf("request %s: ticket %d: round %d: %s: %s", r.ID, ticket.Index, roundIndex, attempt.outcome, attempt.errText)
+		}
+		// A cancel that landed while the attempt built must not be undone
+		// by the saves below, nor answered with another paid build.
+		if ok, err := stillInState(dataDir, r.ID, request.StatePRReview); err != nil {
+			return err
+		} else if !ok {
+			log.Printf("request %s: ticket %d: round %d finished but the request left pr_review while it ran (e.g. cancelled) -- discarding the result", r.ID, ticket.Index, roundIndex)
+			return nil
+		}
+		var again bool
+		flaggedVerdicts, findings, again = roundFixFindings(ctx, dataDir, r, cfg, attempt, fix, now)
+		if !again {
+			break
+		}
+		log.Printf("request %s: ticket %d: round %d: review flagged %d spec-conformity criterion/criteria and %d code-review finding(s); fix attempt %d/%d", r.ID, ticket.Index, roundIndex, len(flaggedVerdicts), len(findings), fix+1, cfg.ReviewCorrectiveRounds)
+		priorRunIDs = append(priorRunIDs, attempt.runID)
+	}
+	loadID, outcome, errText := attempt.runID, attempt.outcome, attempt.errText
+
+	ticket.Rounds = append(ticket.Rounds, request.Round{
+		Index:        roundIndex,
+		ThreadIDs:    threadIDs,
+		RunID:        loadID,
+		PriorRunIDs:  priorRunIDs,
+		Outcome:      outcome,
+		StartFailure: attempt.startFailure,
+		At:           now.UTC().Format(time.RFC3339Nano),
+		Error:        errText,
+	})
+
+	if outcome != request.RoundAccepted {
+		// Quarantined or halted: never push, request stays in pr_review,
+		// one notification dispatched -- see this file's own doc comment.
+		notifyRoundOutcome(dataDir, r, ticket, roundIndex, outcome, errText, now)
+		return r.Save(dataDir)
+	}
+
+	// len(ticket.Rounds)-1, not roundIndex: Round.Index is the 1-based
+	// sequence number used for naming (roundIndex above), but the slice
+	// position of the entry just appended is what pushAcceptedRoundAndReply
+	// needs to mark Pushed on the correct element.
+	return pushAcceptedRoundAndReply(dp, ctx, dataDir, r, ticket, len(ticket.Rounds)-1, loadID, branch, newThreads, now)
+}
+
+// roundAttempt is how one build of a PR-review round ended: the run that
+// holds its record, and correctiveRoundOutcome's reading of it.
+type roundAttempt struct {
+	runID        string
+	outcome      request.RoundOutcome
+	errText      string
+	startFailure bool
+}
+
+// runRoundAttempt runs one build of a PR-review round on the pull request's
+// branch, with specPath (the round's addendum) as its ticket, and reports
+// how it ended. ticketID is the -ticket value; the run's own id comes from
+// onReady.
+func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase string) (roundAttempt, error) {
+	// -open-pull-request is always forced off for a corrective round,
+	// regardless of cfg.openPullRequest: this run's branch already has an
+	// open PR (opened when the ticket was first built), so a second
+	// -open-pull-request would either fail (branch already has a PR) or,
+	// worse, attempt one against the wrong base.
+	roundCfg := cfg
+	roundCfg.OpenPullRequest = false
+	// The same QueueEntry builder as the ticket's first build and its
+	// automatic review round (ticketQueueEntry), so a PR-review round gets
+	// what they get: the approved oracle (without its factory-authored
+	// records the always-protected .buildgate/ directory would quarantine
+	// every otherwise-successful round), the request's full-suite command
+	// and its source, harness, model and preflight profile, and the
+	// ticket's acceptance-criteria file, so the round's review judges spec
+	// conformity as well as the code. SpecPath is the round's addendum: the
+	// ticket's own spec plus this round's appended sections.
+	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath)
+	if err != nil {
+		return roundAttempt{}, err
+	}
+	// A round opens no PR of its own (roundCfg.OpenPullRequest above), so
+	// it has no draft PR body for -pr-closes-issue to land in and no base
+	// to stack on.
+	entry.IssueRef = ""
+	entry.PRBase = ""
+	args := append(BuildTicketRunArgs(dataDir, entry, roundCfg), "-on-branch", branch, "-diff-base", diffBase)
+
+	// startedRunID is this attempt's own actual run id, captured the moment
 	// the run itself exists (same onReady pattern advanceBuild uses for a
 	// ticket's first build, request_driver.go's own ticket.RunID =
-	// started.ID) -- not roundRunID above, which is only the -ticket
-	// value this round's argv requests. run_ticket.go's id assignment
+	// started.ID) -- not ticketID, which is only the -ticket value this
+	// attempt's argv requests. run_ticket.go's id assignment
 	// (`id := *runID; if id == "" { id = ticket-timestamp-pid }`) means
-	// the run's real durable directory is never named exactly roundRunID
+	// the run's real durable directory is never named exactly ticketID
 	// unless -run-id is also passed, which this call never does: found
 	// live (real worker, real corrective round) -- every round's own
 	// correctiveRoundOutcome call below was resolving run.Load(dataDir,
@@ -959,45 +1036,43 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
 		}
 	})
-	// loadID falls back to roundRunID only when the run never got far
+	// loadID falls back to ticketID only when the run never got far
 	// enough to reach onReady (startedRunID still "") -- run.Load then
 	// fails not-found, same as it always did for that case, and
 	// correctiveRoundOutcome's own loadErr-with-runErr branch reports it
 	// as a genuine start failure using runErr's text.
 	loadID := startedRunID
 	if loadID == "" {
-		loadID = roundRunID
+		loadID = ticketID
 	}
 	outcome, errText, startFailure, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
 	if loadErr != nil {
-		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, loadErr)
+		return roundAttempt{}, loadErr
 	}
-	if errText != "" {
-		log.Printf("request %s: ticket %d: round %d: %s: %s", r.ID, ticket.Index, roundIndex, outcome, errText)
+	return roundAttempt{runID: loadID, outcome: outcome, errText: errText, startFailure: startFailure}, nil
+}
+
+// roundFixFindings decides whether a PR-review round gets another fix
+// attempt after attempt (its fix-th, counted from 0), and returns what that
+// attempt's builder is to be told. It does when the review gate alone
+// quarantined attempt for something actionable (ReviewOnlyFlagged, the first
+// build's own test), fewer than review_corrective_rounds fix attempts have
+// run, the worker is not stopping, and the request and monthly budgets
+// still allow a launch. Otherwise the round ends with attempt's outcome: a
+// budget that is reached quarantines the request when the next round starts
+// (RunCorrectiveRound's own check), not here.
+func roundFixFindings(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, attempt roundAttempt, fix int, now time.Time) ([]run.ReviewVerdict, []run.CodeReviewFinding, bool) {
+	if attempt.outcome != request.RoundQuarantined || fix >= cfg.ReviewCorrectiveRounds || ctx.Err() != nil {
+		return nil, nil, false
 	}
-
-	ticket.Rounds = append(ticket.Rounds, request.Round{
-		Index:        roundIndex,
-		ThreadIDs:    threadIDs,
-		RunID:        loadID,
-		Outcome:      outcome,
-		StartFailure: startFailure,
-		At:           now.UTC().Format(time.RFC3339Nano),
-		Error:        errText,
-	})
-
-	if outcome != request.RoundAccepted {
-		// Quarantined or halted: never push, request stays in pr_review,
-		// one notification dispatched -- see this file's own doc comment.
-		notifyRoundOutcome(dataDir, r, ticket, roundIndex, outcome, errText, now)
-		return r.Save(dataDir)
+	loaded, err := run.Load(dataDir, attempt.runID)
+	if err != nil || !ReviewOnlyFlagged(loaded) {
+		return nil, nil, false
 	}
-
-	// len(ticket.Rounds)-1, not roundIndex: Round.Index is the 1-based
-	// sequence number used for naming (roundIndex above), but the slice
-	// position of the entry just appended is what pushAcceptedRoundAndReply
-	// needs to mark Pushed on the correct element.
-	return pushAcceptedRoundAndReply(dp, ctx, dataDir, r, ticket, len(ticket.Rounds)-1, loadID, branch, newThreads, now)
+	if check, _, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil || check != "" {
+		return nil, nil, false
+	}
+	return flaggedConformityVerdicts(loaded), blockingCodeReviewFindings(loaded), true
 }
 
 // correctiveRoundOutcome resolves a just-finished corrective run's real
@@ -1235,16 +1310,18 @@ Fix every finding below as well as the reviewer comments; keep or rework
 the earlier attempt's changes as needed.
 `
 
-// WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md:
+// WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md
+// (<ticket>-<round>-fix<n> for the round's n-th fix attempt):
 // the ticket's own build spec (TicketBuildSpecContent -- its spec plus
 // the approved-spec acceptance criteria it covers, verbatim), plus a
 // "## Reviewer comments to address" section listing each of threads with
-// its path, line, author, and body verbatim, plus, when the round before
-// this one was quarantined by the review gate (flaggedVerdicts/findings,
-// from priorRoundGateFindings), the gate's own sections as
+// its path, line, author, and body verbatim, plus, when the build before
+// this one (the round before, priorRoundGateFindings, or this round's
+// previous attempt, roundFixFindings) was quarantined by the review gate
+// (flaggedVerdicts/findings), the gate's own sections as
 // reviewFindingsSection renders them -- becomes the corrective round's own
 // -spec.
-func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex int) (string, error) {
+func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex, fix int) (string, error) {
 	// buildSpec, not the raw ticket spec: this round's own -spec must
 	// carry the same acceptance-criteria text the ticket's first build
 	// received, not just the "### Acceptance criteria covered" numbers --
@@ -1282,7 +1359,11 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 		b.WriteString(section)
 	}
 
-	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-%d", ticket.Index, roundIndex))
+	name := fmt.Sprintf("%03d-%d", ticket.Index, roundIndex)
+	if fix > 0 {
+		name = fmt.Sprintf("%s-fix%d", name, fix)
+	}
+	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", name)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("create round dir %s: %w", dir, err)
 	}

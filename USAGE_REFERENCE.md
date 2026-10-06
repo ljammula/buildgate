@@ -183,15 +183,23 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
 - A round passes every gate the ticket's first build passes, judged on the
   whole pull request diff: verify, the full suite, the diff-shape gates,
   spec conformity against the ticket's acceptance criteria, and code review.
-- A quarantined round's commits stay on the local branch, unpushed, and the
-  next round builds on them. Its ticket is the ticket's own spec plus:
+- A round the review gate alone quarantines (only `spec_conformity` and/or
+  `code_review` failed, with a flagged criterion or a `high` finding) gets up
+  to `review_corrective_rounds` fix attempts (default `1`, `0` disables) on
+  the same branch before it ends, each told what the gate flagged in the
+  attempt before it. The last attempt decides the round, and the round uses
+  one slot of `max_review_rounds` however many attempts it took. The request
+  page links each earlier attempt's run under the round.
+- A quarantined attempt's commits stay on the local branch, unpushed, and
+  the next attempt or round builds on them. Each one's ticket is the
+  ticket's own spec plus:
 
   | Section | Content |
   |---|---|
   | `## Reviewer comments to address` | Each open trusted thread: path, line, author, body |
-  | `## Why the previous attempt was not pushed` | Only after a round the review gate quarantined: that the earlier attempt is on the branch and was refused |
-  | `## Spec conformity review to address` | That round's flagged acceptance criteria, with the reviewer's detail |
-  | `## Code review findings to address` | That round's blocking (`high`) findings: location, summary, failure scenario |
+  | `## Why the previous attempt was not pushed` | Only after an attempt the review gate quarantined: that the earlier attempt is on the branch and was refused |
+  | `## Spec conformity review to address` | That attempt's flagged acceptance criteria, with the reviewer's detail |
+  | `## Code review findings to address` | That attempt's blocking (`high`) findings: location, summary, failure scenario |
 - No new threads, still a draft, checks passing, no unresolved thread
   from any non-bot/non-self author (trusted or not — an untrusted human's
   open comment still blocks readiness, it just can't trigger a round),
