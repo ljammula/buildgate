@@ -80,12 +80,21 @@ function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
  * warning; another project (a new key in the screen) starts from nothing, so
  * project B's error can never sit next to project A's "Engaged" chip.
  */
-export function ProjectReleasePanel({ project }: { readonly project: string }) {
+export function ProjectReleasePanel({
+  project,
+  withForm = true,
+}: {
+  readonly project: string;
+  /** False inside a project's own row, where there is no other project to load. */
+  readonly withForm?: boolean;
+}) {
   const query = useProjectRelease(project);
   const load = useLoadProject(project, projectReleasePath, () => void query.refetch());
   return (
     <>
-      <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
+      {withForm ? (
+        <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
+      ) : null}
       {query.isFetching ? <Spinner label="Loading release" /> : null}
       {query.data === undefined ? (
         query.error === null ? null : (

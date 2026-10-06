@@ -1,8 +1,9 @@
-import { Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router";
 
 import { useProjects } from "@/api/runQueries";
-import { newRunPath, projectReleasePath, projectStatsPath } from "@/routes/paths";
+import { newRunPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -18,6 +19,8 @@ import {
 } from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
 
+import { ProjectRowDetails } from "./ProjectRowDetails";
+
 /**
  * Every project already run against (derived from run history), so another
  * run does not mean retyping its paths. A row opens the new-run form
@@ -26,6 +29,8 @@ import { LocalTimeText } from "@/ui/Time";
  */
 export function ProjectListScreen() {
   const projects = useProjects();
+  const [expandedProject, setExpandedProject] = useState<string | null>(null);
+
   return (
     <>
       <PageHeader
@@ -58,7 +63,7 @@ export function ProjectListScreen() {
                   <TableHeaderCell className="w-24">Runs</TableHeaderCell>
                   <TableHeaderCell className="w-44">Last run</TableHeaderCell>
                   <TableHeaderCell className="w-32">
-                    <span className="sr-only">Stats and release</span>
+                    <span className="sr-only">Details</span>
                   </TableHeaderCell>
                 </TableRow>
               </TableHead>
@@ -69,42 +74,49 @@ export function ProjectListScreen() {
                     spec: project.specPath,
                     repository: project.repository,
                   });
+                  const isExpanded = expandedProject === project.project;
+
                   return (
-                    <TableRow key={project.projectPath}>
-                      <TableCell className="font-mono text-xs">
-                        <Link
-                          title={project.projectPath}
-                          to={`${newRunPath()}?${quickFill.toString()}`}
-                          className="block truncate text-accent hover:underline"
-                        >
-                          {project.projectPath}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="truncate font-mono text-xs" title={project.project}>
-                        {project.project}
-                      </TableCell>
-                      <TableCell>
-                        {project.runCount} run{project.runCount === 1 ? "" : "s"}
-                      </TableCell>
-                      <TableCell className="text-xs whitespace-nowrap tabular-nums">
-                        <LocalTimeText value={project.lastRunAt} />
-                      </TableCell>
-                      <TableCell className="text-right text-xs whitespace-nowrap">
-                        <Link
-                          to={projectStatsPath(project.project)}
-                          className="text-accent hover:underline"
-                        >
-                          Stats
-                        </Link>
-                        {" · "}
-                        <Link
-                          to={projectReleasePath(project.project)}
-                          className="text-accent hover:underline"
-                        >
-                          Release
-                        </Link>
-                      </TableCell>
-                    </TableRow>
+                    <Fragment key={project.projectPath}>
+                      <TableRow>
+                        <TableCell className="font-mono text-xs">
+                          <Link
+                            title={project.projectPath}
+                            to={`${newRunPath()}?${quickFill.toString()}`}
+                            className="block truncate text-accent hover:underline"
+                          >
+                            {project.projectPath}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="truncate font-mono text-xs" title={project.project}>
+                          {project.project}
+                        </TableCell>
+                        <TableCell>
+                          {project.runCount} run{project.runCount === 1 ? "" : "s"}
+                        </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap tabular-nums">
+                          <LocalTimeText value={project.lastRunAt} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? "Hide" : "Show"} details for ${project.projectPath}`}
+                            onClick={() => {
+                              setExpandedProject(isExpanded ? null : project.project);
+                            }}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown aria-hidden="true" />
+                            ) : (
+                              <ChevronRight aria-hidden="true" />
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded ? <ProjectRowDetails project={project.project} /> : null}
+                    </Fragment>
                   );
                 })}
               </TableBody>
