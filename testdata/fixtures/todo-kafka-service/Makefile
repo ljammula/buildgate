@@ -27,24 +27,27 @@ verify: test
 # ComposeServicesLifecycle instead launches this repo's own
 # docker-compose.yml services as sidecars on a private network before the
 # worker starts, then hands in BG_SERVICE_POSTGRES / BG_SERVICE_KAFKA /
-# BG_SERVICE_REDIS -- aliases reachable on the ports below (postgres:5432,
-# redis:6379, kafka:19092 -- see
-# docker-compose.yml's own "x-bg-service-port" on the kafka service for
-# why 19092, not the 9092 its ports: mapping declares), not the
-# host-published ports docker-compose.yml maps those to for local dev
-# (5433, 6380, 9094).
+# BG_SERVICE_REDIS -- each service's address on the run's private network
+# (the worker is given addresses and resolves no service name) -- and
+# forwards the ports docker-compose.yml publishes (5433, 9094, 6380) from
+# the worker's own localhost.
 #
-# Resolution order per address (PG_ADDR/KAFKA_BROKERS/REDIS_ADDR):
-#   1. PG_ADDR / KAFKA_BROKERS / REDIS_ADDR, if the caller set it
-#      explicitly -- wins even when BG_SERVICE_* is also set.
-#   2. BG_SERVICE_POSTGRES / BG_SERVICE_KAFKA / BG_SERVICE_REDIS, if set --
-#      the sandboxed alias, paired with its BG_SERVICE_*_PORT when factoryd
-#      set one (it always does for kafka, via x-bg-service-port; postgres
-#      and redis have no override and so get their ports:-derived 5432 /
-#      6379), else this target's own hardcoded default.
-#   3. localhost:5433 / localhost:9094 / localhost:6380 -- this repo's
-#      docker-compose.yml host-published ports, for plain local dev
-#      against a manually started compose stack.
+# Resolution order for PG_ADDR and REDIS_ADDR:
+#   1. PG_ADDR / REDIS_ADDR, if the caller set it explicitly -- wins even
+#      when BG_SERVICE_* is also set.
+#   2. BG_SERVICE_POSTGRES / BG_SERVICE_REDIS, if set, paired with its
+#      BG_SERVICE_*_PORT when factoryd set one, else 5432 / 6379.
+#   3. localhost:5433 / localhost:6380 -- docker-compose.yml's published
+#      ports, for local dev against a manually started compose stack.
+#
+# Kafka is KAFKA_BROKERS if set, else localhost:9094 everywhere, never
+# BG_SERVICE_KAFKA: a Kafka client connects twice, first to the address it
+# was given and then to the address the broker advertises for that
+# listener. The listener behind BG_SERVICE_KAFKA advertises the name
+# "kafka", which a sandboxed worker cannot resolve, so the second
+# connection fails. The published listener advertises localhost:9094,
+# which is the forwarded port in the sandbox and the mapped port on a
+# developer's machine.
 #
 # The integration test binary itself (see integration_test.go) dials
 # all three addresses with a short timeout before running anything, so an
@@ -63,9 +66,6 @@ verify-integration:
 		pg_addr="$$BG_SERVICE_POSTGRES:$${BG_SERVICE_POSTGRES_PORT:-5432}"; \
 	fi; \
 	kafka_brokers="$${KAFKA_BROKERS:-localhost:9094}"; \
-	if [ -n "$$BG_SERVICE_KAFKA" ] && [ -z "$$KAFKA_BROKERS" ]; then \
-		kafka_brokers="$$BG_SERVICE_KAFKA:$${BG_SERVICE_KAFKA_PORT:-9092}"; \
-	fi; \
 	redis_addr="$${REDIS_ADDR:-localhost:6380}"; \
 	if [ -n "$$BG_SERVICE_REDIS" ] && [ -z "$$REDIS_ADDR" ]; then \
 		redis_addr="$$BG_SERVICE_REDIS:$${BG_SERVICE_REDIS_PORT:-6379}"; \

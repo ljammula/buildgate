@@ -817,6 +817,13 @@ What changes for a build:
 - The worker has no network interface on any step. A model-backed step
   reaches exactly its route's upstream; the registry proxy and compose
   services are reached by address.
+- The worker resolves no service name. A service whose clients reconnect
+  to an address the server advertises (a Kafka broker, a Redis cluster, a
+  MongoDB replica set) must be reached through a port the compose file
+  publishes, on a listener that advertises `localhost:<published port>`:
+  the worker's `localhost` forwards every published port. Reached at its
+  `BG_SERVICE_<NAME>` address instead, the first connection succeeds and
+  the one to the advertised name fails (`connect: permission denied`).
 - The route's credential is pushed to the gateway before each launch; the
   worker holds a placeholder. A token that expires before the step's time
   budget ends refuses the launch.
