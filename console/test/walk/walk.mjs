@@ -282,6 +282,20 @@ step("run-quarantined", async () => {
 step("projects", async () => {
   await visit("/app/projects");
   await page.getByText("app", { exact: true }).first().waitFor();
+  // A row opens in place: its figures and its kill switch are two tabs.
+  await main()
+    .getByRole("button", { name: /^Show details for / })
+    .first()
+    .click();
+  const stats = (await api("/projects/app/stats", startHeaders)).body;
+  await main().getByRole("tab", { name: "Stats", exact: true }).waitFor();
+  await main()
+    .getByRole("tabpanel")
+    .getByText(String(stats.total_runs), { exact: true })
+    .first()
+    .waitFor();
+  await main().getByRole("tab", { name: "Release", exact: true }).click();
+  await main().getByRole("tabpanel").getByText("incident 42").first().waitFor();
 });
 
 step("project-stats", async () => {
