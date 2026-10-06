@@ -180,6 +180,18 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   replies on each thread. Quarantined/halted: pushes nothing, stays in
   `pr_review`, one notification. Capped at `-max-review-rounds` (default
   `3`; key `max_review_rounds`), then halts naming the ticket.
+- A round passes every gate the ticket's first build passes, judged on the
+  whole pull request diff: verify, the full suite, the diff-shape gates,
+  spec conformity against the ticket's acceptance criteria, and code review.
+- A quarantined round's commits stay on the local branch, unpushed, and the
+  next round builds on them. Its ticket is the ticket's own spec plus:
+
+  | Section | Content |
+  |---|---|
+  | `## Reviewer comments to address` | Each open trusted thread: path, line, author, body |
+  | `## Why the previous attempt was not pushed` | Only after a round the review gate quarantined: that the earlier attempt is on the branch and was refused |
+  | `## Spec conformity review to address` | That round's flagged acceptance criteria, with the reviewer's detail |
+  | `## Code review findings to address` | That round's blocking (`high`) findings: location, summary, failure scenario |
 - No new threads, still a draft, checks passing, no unresolved thread
   from any non-bot/non-self author (trusted or not — an untrusted human's
   open comment still blocks readiness, it just can't trigger a round),
