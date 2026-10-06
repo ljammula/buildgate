@@ -171,28 +171,68 @@ export function statusIcon(status: Status): StatusIcon {
   }
 }
 
+/** What an operator can do to a request, each action named once for every screen. */
+export const REQUEST_VERBS = {
+  approve: "Approve",
+  requestChanges: "Request changes",
+  retry: "Retry request",
+  sendBack: "Send back",
+  resume: "Resume",
+  rebuild: "Rebuild from scratch",
+  rerun: "Rerun step",
+  cancel: "Cancel request",
+} as const;
+
+export type RequestVerb = keyof typeof REQUEST_VERBS;
+
+interface RequestStateRow {
+  /** The operator's word for the state, in Title case. */
+  readonly label: string;
+  /**
+   * The actions a screen may offer in the state. The server still decides
+   * each one (a send-back needs `can_send_back`, a resume its own options):
+   * a verb listed here is never offered where the server would refuse it.
+   */
+  readonly verbs: readonly RequestVerb[];
+}
+
+const REVIEW: readonly RequestVerb[] = ["approve", "requestChanges"];
+const RECOVERY: readonly RequestVerb[] = ["retry", "sendBack", "cancel"];
+
+/** One row per request state: its label and the operator's verbs there. */
+const REQUEST_STATES: Readonly<Record<string, RequestStateRow>> = {
+  submitted: { label: "Submitted", verbs: [] },
+  spec_drafting: { label: "Drafting spec", verbs: [] },
+  spec_review: { label: "Spec review", verbs: REVIEW },
+  oracle_drafting: { label: "Drafting oracles", verbs: [] },
+  oracle_review: { label: "Oracle review", verbs: REVIEW },
+  planning: { label: "Planning", verbs: [] },
+  plan_review: { label: "Plan review", verbs: REVIEW },
+  building: { label: "Building", verbs: [] },
+  pr_review: { label: "PR review", verbs: [] },
+  done: { label: "Done", verbs: [] },
+  halted: { label: "Halted", verbs: RECOVERY },
+  resume_review: { label: "Needs resume", verbs: ["resume", "rebuild", "rerun", "cancel"] },
+  quarantined: { label: "Quarantined", verbs: RECOVERY },
+  cancelled: { label: "Cancelled", verbs: [] },
+};
+
+/** The actions a screen may offer on a request in `state`; none for a state not listed. */
+export function requestVerbs(state: string): readonly RequestVerb[] {
+  return Object.hasOwn(REQUEST_STATES, state) ? (REQUEST_STATES[state]?.verbs ?? []) : [];
+}
+
+/** A request that is accepted with only its pull request missing: a composed label, not a state. */
+export const AWAITING_PR_LABEL = "Accepted · awaiting PR";
+
 /**
- * Operator-facing words for the request/run state tokens (chips used to show
- * `spec_review`/`slice_running` verbatim). Purely a display mapping: callers
- * keep passing the raw token, and the raw token stays one hover away. Anything
- * not listed, such as a composed label like "accepted · awaiting PR" or a
- * token this console has never seen, renders unchanged.
+ * Operator-facing words for the run state tokens the request table does not
+ * name. With REQUEST_STATES this is purely a display mapping: callers keep
+ * passing the raw token, and the raw token stays one hover away. Anything not
+ * listed (a composed label, a token this console has never seen) renders
+ * unchanged.
  */
-const STATE_LABELS: Readonly<Record<string, string>> = {
-  submitted: "Submitted",
-  spec_drafting: "Drafting spec",
-  spec_review: "Spec review",
-  oracle_drafting: "Drafting oracles",
-  oracle_review: "Oracle review",
-  planning: "Planning",
-  plan_review: "Plan review",
-  building: "Building",
-  pr_review: "PR review",
-  done: "Done",
-  halted: "Halted",
-  resume_review: "Resume?",
-  quarantined: "Quarantined",
-  cancelled: "Cancelled",
+const RUN_STATE_LABELS: Readonly<Record<string, string>> = {
   ready: "Ready",
   slice_running: "Building",
   verifying: "Verifying",
@@ -202,7 +242,8 @@ const STATE_LABELS: Readonly<Record<string, string>> = {
 
 /** The display word for `token`; `token` itself when unmapped. */
 export function stateLabel(token: string): string {
-  return Object.hasOwn(STATE_LABELS, token) ? (STATE_LABELS[token] ?? token) : token;
+  if (Object.hasOwn(REQUEST_STATES, token)) return REQUEST_STATES[token]?.label ?? token;
+  return Object.hasOwn(RUN_STATE_LABELS, token) ? (RUN_STATE_LABELS[token] ?? token) : token;
 }
 
 /** What the kill switch's own three-state chip shows. */

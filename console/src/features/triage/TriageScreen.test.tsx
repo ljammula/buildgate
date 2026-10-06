@@ -163,7 +163,7 @@ test("r opens the request-changes dialog for the focused request", async () => {
     server: triage([{ id: "req-a", state: "spec_review", title: "First" }], [detail]),
   });
   await waitFor(() => {
-    expect(screen.getByRole("button", { name: "Reject (r)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Request changes (r)" })).toBeEnabled();
   });
   await userEvent.keyboard("r");
   expect(await screen.findByRole("dialog", { name: "Request changes" })).toBeInTheDocument();
@@ -175,7 +175,7 @@ test("keys typed in a field are not shortcuts", async () => {
     server: triage([{ id: "req-a", state: "spec_review", title: "First" }], [detail]),
   });
   await waitFor(() => {
-    expect(screen.getByRole("button", { name: "Reject (r)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Request changes (r)" })).toBeEnabled();
   });
   await userEvent.keyboard("r");
   const reason = await screen.findByRole("textbox");
@@ -226,7 +226,7 @@ test("approve/reject actions are absent when no override token is configured", a
   });
   await screen.findByTestId("triage-row-req-a");
   expect(screen.queryByRole("button", { name: "Approve (a)" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Reject (r)" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Request changes (r)" })).not.toBeInTheDocument();
 
   // The 'a' shortcut must also be a no-op, not merely the button hidden.
   await userEvent.keyboard("a");
@@ -312,7 +312,7 @@ test("the decision bar is a sticky footer that holds Approve, Reject and the key
   const bar = await screen.findByTestId("triage-decision-bar");
   expect(bar).toHaveClass("sticky", "bottom-0");
   expect(within(bar).getByRole("button", { name: "Approve (a)" })).toBeInTheDocument();
-  expect(within(bar).getByRole("button", { name: "Reject (r)" })).toBeInTheDocument();
+  expect(within(bar).getByRole("button", { name: "Request changes (r)" })).toBeInTheDocument();
   expect(within(bar).getByText(/j\/k move/)).toBeInTheDocument();
 });
 

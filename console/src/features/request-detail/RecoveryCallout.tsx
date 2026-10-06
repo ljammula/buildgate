@@ -12,6 +12,7 @@ import { Callout } from "@/ui/Feedback";
 import { CompactId } from "@/ui/CompactId";
 import { CopyableCommand } from "@/ui/CopyableCommand";
 import { Disclosure } from "@/ui/Disclosure";
+import { REQUEST_VERBS } from "@/domain/status";
 
 import { quarantinedTicket, recoveryPlan } from "./requestDetailLogic";
 
@@ -125,7 +126,7 @@ export function RecoveryCallout({
           </Button>
           <Button disabled={disabled} onClick={onCancel}>
             <Ban aria-hidden="true" />
-            Cancel request
+            {REQUEST_VERBS.cancel}
           </Button>
           {plan.sendBackIsPrimary ? null : sendBack}
         </div>

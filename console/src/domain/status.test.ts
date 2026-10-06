@@ -1,5 +1,7 @@
 import {
+  REQUEST_VERBS,
   killSwitchDisplay,
+  requestVerbs,
   stateLabel,
   statusForReleaseDecision,
   statusForPRState,
@@ -118,7 +120,30 @@ test(
 
 test("stateLabel passes composed or unknown labels through unchanged", () => {
   expect(stateLabel("slice_running")).toBe("Building");
-  expect(stateLabel("accepted · awaiting PR")).toBe("accepted · awaiting PR");
+  expect(stateLabel("Accepted · awaiting PR")).toBe("Accepted · awaiting PR");
   expect(stateLabel("never_seen")).toBe("never_seen");
   expect(stateLabel("spec_review")).toBe("Spec review");
+});
+
+test("each request state has one label and the verbs an operator has there", () => {
+  expect(stateLabel("resume_review")).toBe("Needs resume");
+  expect(stateLabel("slice_running")).toBe("Building");
+  expect(requestVerbs("spec_review").map((v) => REQUEST_VERBS[v])).toEqual([
+    "Approve",
+    "Request changes",
+  ]);
+  expect(requestVerbs("plan_review")).toEqual(requestVerbs("oracle_review"));
+  expect(requestVerbs("quarantined").map((v) => REQUEST_VERBS[v])).toEqual([
+    "Retry request",
+    "Send back",
+    "Cancel request",
+  ]);
+  expect(requestVerbs("resume_review").map((v) => REQUEST_VERBS[v])).toEqual([
+    "Resume",
+    "Rebuild from scratch",
+    "Rerun step",
+    "Cancel request",
+  ]);
+  expect(requestVerbs("building")).toEqual([]);
+  expect(requestVerbs("a_state_from_a_newer_server")).toEqual([]);
 });

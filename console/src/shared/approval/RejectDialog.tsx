@@ -4,6 +4,7 @@ import { useApi } from "@/api/ApiProvider";
 import { useRejectRequest } from "@/api/requestQueries";
 import type { RejectionAnchor, RequestSummary } from "@/domain/request";
 import { anchorTargets } from "@/domain/reviewAnchors";
+import { REQUEST_VERBS } from "@/domain/status";
 
 import { AnchoredNotes } from "./AnchoredNotes";
 import type { FlowProps } from "./flowTypes";
@@ -45,8 +46,8 @@ function RejectBody({ request, by, onOpenChange, onDone }: BodyProps) {
   const [notes, setNotes] = useState<readonly RejectionAnchor[]>([]);
   return (
     <ReasonFlow
-      title="Request changes"
-      confirmLabel="Request changes"
+      title={REQUEST_VERBS.requestChanges}
+      confirmLabel={REQUEST_VERBS.requestChanges}
       reasonOptional={notes.length > 0}
       pending={reject.isPending}
       error={reject.error}
