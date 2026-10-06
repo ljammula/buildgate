@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import { useDaemons, useQueueRunStatus } from "@/api/runQueries";
+import { useQueueRunStatus } from "@/api/runQueries";
 import { workerLiveness } from "@/domain/ops";
 import { Badge } from "@/ui/Badge";
 import { Card, CardBody, CardHeader, CardTitle } from "@/ui/Card";
@@ -10,17 +10,15 @@ import { Spinner } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
 
 /**
- * Whether a worker is draining this data directory, from GET /queue-run (the
- * read route that answers however the worker was started), and the
- * supervisors `factoryd serve` manages itself when GET /daemons lists any.
- * That second route answers 403 or 404 on a server that manages none: then
- * nothing is shown for it. Observability only.
+ * Whether a worker is draining this data directory, from GET /queue-run: the
+ * read route that answers however the worker was started. The supervisors
+ * `factoryd serve` can manage itself are not listed: their route answers 404
+ * on the usual server, which manages none, and a page that asks anyway fails
+ * a request on every visit. Observability only.
  */
 export function DaemonStatusCard() {
   const titleId = useId();
   const queueRun = useQueueRunStatus();
-  const daemons = useDaemons();
-  const managed = daemons.data ?? [];
 
   let worker;
   if (queueRun.data !== undefined) {
@@ -54,24 +52,7 @@ export function DaemonStatusCard() {
           Daemons
         </CardTitle>
       </CardHeader>
-      <CardBody className="flex flex-col gap-3">
-        {worker}
-        {managed.length === 0 ? null : (
-          <ul aria-label="Started by serve" className="flex flex-col gap-1 text-sm">
-            {managed.map((daemon) => (
-              <li key={daemon.repository} className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs break-all">{daemon.repository}</span>
-                <span className="text-fg-muted text-xs">{daemon.state}</span>
-                {daemon.startedAt === "" ? null : (
-                  <span className="text-fg-muted text-xs">
-                    started <RelativeTime value={daemon.startedAt} />
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardBody>
+      <CardBody className="flex flex-col gap-3">{worker}</CardBody>
     </Card>
   );
 }
