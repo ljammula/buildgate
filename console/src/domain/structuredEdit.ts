@@ -21,6 +21,11 @@ export interface CriterionItem {
   readonly body: string;
 }
 
+/** One ticket plan list item, without its marker; continuation lines stay as written. */
+export interface ListItem {
+  readonly body: string;
+}
+
 interface Span {
   readonly first: number;
   readonly last: number;
@@ -37,15 +42,26 @@ interface CriteriaLayout {
   readonly eol: string;
 }
 
+interface ListLayout {
+  readonly lines: string[];
+  readonly start: number;
+  readonly end: number;
+  readonly spans: readonly Span[];
+  readonly eol: string;
+}
+
 const PREFIX = /^([0-9]+)([.)])([\t\n\f\r ]+)/;
 
 function stripEol(line: string): string {
   return line.endsWith("\r") ? line.slice(0, -1) : line;
 }
 
-function layout(text: string): CriteriaLayout | null {
+function layout(
+  text: string,
+  range: { readonly start: number; readonly end: number } | null,
+  itemPattern: RegExp,
+): ListLayout | null {
   const lines = text.split("\n");
-  const range = criteriaSectionRange(lines);
   if (range === null) return null;
   const spans: Span[] = [];
   let current: { first: number; last: number } | null = null;
@@ -53,7 +69,7 @@ function layout(text: string): CriteriaLayout | null {
     const raw = lines[i] ?? "";
     const trimmed = trimSpace(raw);
     if (trimmed === "") continue;
-    if (!isIndented(raw) && CRITERION_ITEM.test(trimmed)) {
+    if (!isIndented(raw) && itemPattern.test(trimmed)) {
       if (current !== null) spans.push(current);
       current = { first: i, last: i };
     } else if (current !== null) {
@@ -65,22 +81,26 @@ function layout(text: string): CriteriaLayout | null {
   return { lines, ...range, spans, eol };
 }
 
-function bodyOf(lines: readonly string[], span: Span): string {
+function criteriaLayout(text: string): CriteriaLayout | null {
+  return layout(text, criteriaSectionRange(text.split("\n")), CRITERION_ITEM);
+}
+
+function bodyOf(lines: readonly string[], span: Span, pattern = PREFIX): string {
   const own = lines.slice(span.first, span.last + 1).map(stripEol);
-  own[0] = (own[0] ?? "").replace(PREFIX, "");
+  own[0] = (own[0] ?? "").replace(pattern, "");
   return own.join("\n");
 }
 
 /** The spec's numbered criteria, in order; null when it has no "## Acceptance criteria" heading. */
 export function criteriaItems(text: string): CriterionItem[] | null {
-  const doc = layout(text);
+  const doc = criteriaLayout(text);
   if (doc === null) return null;
   return doc.spans.map((span) => ({ body: bodyOf(doc.lines, span) }));
 }
 
 /** The first line's own prefix ("3) "), or a fresh one in the list's style. */
-function prefixFor(doc: CriteriaLayout, span: Span | null, number: number): string {
-  const model = PREFIX.exec(doc.lines[(span ?? doc.spans[0])?.first ?? -1] ?? "");
+function prefixFor(doc: ListLayout, span: Span | null, number: number, pattern = PREFIX): string {
+  const model = pattern.exec(doc.lines[(span ?? doc.spans[0])?.first ?? -1] ?? "");
   const delimiter = model?.[2] ?? ".";
   if (span === null) return `${number}${delimiter} `;
   return `${model?.[1] ?? String(number)}${delimiter}${stripEol(model?.[3] ?? " ")}`;
@@ -91,17 +111,26 @@ function prefixFor(doc: CriteriaLayout, span: Span | null, number: number): stri
  * read as a new criterion (unindented "2. ...") is indented so it stays a
  * continuation of this one.
  */
-function itemLines(prefix: string, body: string, eol: string): string[] {
-  return body.split("\n").map((line, i) => {
+function itemLines(
+  prefix: string,
+  body: string,
+  eol: string,
+  itemPattern = CRITERION_ITEM,
+): string[] {
+  // Blank lines after an item's last text belong to the list's spacing, not
+  // to the item: written here they would stay behind on the next edit.
+  const own = body.split("\n");
+  while (own.length > 1 && trimSpace(own[own.length - 1] ?? "") === "") own.pop();
+  return own.map((line, i) => {
     if (i === 0) return prefix + line + eol;
-    const opens = !isIndented(line) && CRITERION_ITEM.test(trimSpace(line));
+    const opens = !isIndented(line) && itemPattern.test(trimSpace(line));
     return (opens ? "   " : "") + line + eol;
   });
 }
 
 /** Rewrites each criterion's leading number to its position, keeping its delimiter and spacing. */
 function renumber(text: string): string {
-  const doc = layout(text);
+  const doc = criteriaLayout(text);
   if (doc === null) return text;
   doc.spans.forEach((span, i) => {
     const line = doc.lines[span.first] ?? "";
@@ -112,7 +141,7 @@ function renumber(text: string): string {
 
 /** Replaces criterion `index`'s text. Other lines, and its own number, are untouched. */
 export function setCriterionBody(text: string, index: number, body: string): string {
-  const doc = layout(text);
+  const doc = criteriaLayout(text);
   const span = doc?.spans[index];
   if (doc === null || span === undefined) return text;
   if (body === bodyOf(doc.lines, span)) return text;
@@ -123,7 +152,7 @@ export function setCriterionBody(text: string, index: number, body: string): str
 
 /** Appends a criterion after the last one, spaced as the list already is, and renumbers. */
 export function addCriterion(text: string, body: string): string {
-  const doc = layout(text);
+  const doc = criteriaLayout(text);
   if (doc === null) return text;
   const { lines, spans, eol } = doc;
   const added = itemLines(prefixFor(doc, null, spans.length + 1), body, eol);
@@ -150,7 +179,7 @@ export function addCriterion(text: string, body: string): string {
 
 /** Removes criterion `index` with the blank lines that set it off, and renumbers. */
 export function removeCriterion(text: string, index: number): string {
-  const doc = layout(text);
+  const doc = criteriaLayout(text);
   const span = doc?.spans[index];
   if (doc === null || span === undefined) return text;
   const next = doc.spans[index + 1];
@@ -163,7 +192,7 @@ export function removeCriterion(text: string, index: number): string {
 
 /** Swaps criterion `index` with its neighbour `offset` away (-1 up, 1 down), and renumbers. */
 export function moveCriterion(text: string, index: number, offset: -1 | 1): string {
-  const doc = layout(text);
+  const doc = criteriaLayout(text);
   const upper = doc?.spans[Math.min(index, index + offset)];
   const lower = doc?.spans[Math.max(index, index + offset)];
   if (doc === null || upper === undefined || lower === undefined || upper === lower) return text;
@@ -182,6 +211,158 @@ export function moveCriterion(text: string, index: number, offset: -1 | 1): stri
   }
   lines.splice(upper.first, lower.last - upper.first + 1, ...swapped);
   return renumber(lines.join("\n"));
+}
+
+const BULLET_PREFIX = /^([-*])([\t\n\f\r ]+)/;
+/** A trimmed line that opens a bullet item. */
+const BULLET_ITEM = /^[-*][\t\n\f\r ]+[^\t\n\f\r ]/;
+type SectionListHeading = "### Steps" | "### Files to touch";
+
+function sectionListLayout(text: string, heading: SectionListHeading): ListLayout | null {
+  const lines = text.split("\n");
+  const positions = headingPositions(lines, requiredTicketHeadings);
+  const at = requiredTicketHeadings.indexOf(heading);
+  const headingPosition = positions[at];
+  if (headingPosition === undefined || headingPosition === -1) return null;
+  const next = positions.slice(at + 1).find((position) => position !== -1);
+  const range = { start: headingPosition + 1, end: next ?? lines.length };
+  return layout(text, range, heading === "### Steps" ? CRITERION_ITEM : BULLET_ITEM);
+}
+
+function sectionPrefix(
+  doc: ListLayout,
+  heading: SectionListHeading,
+  span: Span | null,
+  number: number,
+): string {
+  if (heading === "### Files to touch") {
+    const model = BULLET_PREFIX.exec(doc.lines[(span ?? doc.spans[0])?.first ?? -1] ?? "");
+    return `${model?.[1] ?? "-"}${stripEol(model?.[2] ?? " ")}`;
+  }
+  return prefixFor(doc, span, number, PREFIX);
+}
+
+function renumberSection(text: string, heading: SectionListHeading): string {
+  if (heading !== "### Steps") return text;
+  const doc = sectionListLayout(text, heading);
+  if (doc === null) return text;
+  doc.spans.forEach((span, i) => {
+    const line = doc.lines[span.first] ?? "";
+    doc.lines[span.first] = line.replace(/^[0-9]+/, String(i + 1));
+  });
+  return doc.lines.join("\n");
+}
+
+/** The items in one ticket plan section; null when its heading is absent. */
+export function sectionListItems(text: string, heading: SectionListHeading): ListItem[] | null {
+  const doc = sectionListLayout(text, heading);
+  if (doc === null) return null;
+  const pattern = heading === "### Steps" ? PREFIX : BULLET_PREFIX;
+  return doc.spans.map((span) => ({ body: bodyOf(doc.lines, span, pattern) }));
+}
+
+/** Replaces one ticket plan list item, preserving its marker and surrounding document bytes. */
+export function setSectionListItem(
+  text: string,
+  heading: SectionListHeading,
+  index: number,
+  body: string,
+): string {
+  const doc = sectionListLayout(text, heading);
+  const span = doc?.spans[index];
+  if (doc === null || span === undefined) return text;
+  const pattern = heading === "### Steps" ? PREFIX : BULLET_PREFIX;
+  if (body === bodyOf(doc.lines, span, pattern)) return text;
+  const replacement = itemLines(
+    sectionPrefix(doc, heading, span, index + 1),
+    body,
+    doc.eol,
+    heading === "### Steps" ? CRITERION_ITEM : BULLET_ITEM,
+  );
+  doc.lines.splice(span.first, span.last - span.first + 1, ...replacement);
+  return doc.lines.join("\n");
+}
+
+/** Appends one item to a ticket plan section, preserving its list style. */
+export function addSectionListItem(
+  text: string,
+  heading: SectionListHeading,
+  body: string,
+): string {
+  const doc = sectionListLayout(text, heading);
+  if (doc === null) return text;
+  const itemPattern = heading === "### Steps" ? CRITERION_ITEM : BULLET_ITEM;
+  const added = itemLines(
+    sectionPrefix(doc, heading, null, doc.spans.length + 1),
+    body,
+    doc.eol,
+    itemPattern,
+  );
+  const last = doc.spans.at(-1);
+  if (last === undefined) {
+    let at = doc.end;
+    while (at > doc.start && trimSpace(doc.lines[at - 1] ?? "") === "") at--;
+    const before = trimSpace(doc.lines[at - 1] ?? "") === "" ? [] : [doc.eol];
+    const after = at < doc.lines.length && trimSpace(doc.lines[at] ?? "") !== "" ? [doc.eol] : [];
+    doc.lines.splice(at, 0, ...before, ...added, ...after);
+    return doc.lines.join("\n");
+  }
+  const first = doc.spans[0];
+  const second = doc.spans[1];
+  const gap =
+    first !== undefined && second !== undefined
+      ? doc.lines.slice(first.last + 1, second.first)
+      : [];
+  if (last.last === doc.lines.length - 1) {
+    doc.lines[last.last] = stripEol(doc.lines[last.last] ?? "") + doc.eol;
+  }
+  const tail = last.last === doc.lines.length - 1 ? added.map(stripEol) : added;
+  doc.lines.splice(last.last + 1, 0, ...gap, ...tail);
+  return renumberSection(doc.lines.join("\n"), heading);
+}
+
+/** Removes one ticket plan list item and renumbers numbered steps. */
+export function removeSectionListItem(
+  text: string,
+  heading: SectionListHeading,
+  index: number,
+): string {
+  const doc = sectionListLayout(text, heading);
+  const span = doc?.spans[index];
+  if (doc === null || span === undefined) return text;
+  const next = doc.spans[index + 1];
+  const previous = doc.spans[index - 1];
+  const from = next === undefined && previous !== undefined ? previous.last + 1 : span.first;
+  const to = next === undefined ? span.last + 1 : next.first;
+  doc.lines.splice(from, to - from);
+  return renumberSection(doc.lines.join("\n"), heading);
+}
+
+/** Swaps neighbouring ticket plan list items and renumbers numbered steps. */
+export function moveSectionListItem(
+  text: string,
+  heading: SectionListHeading,
+  index: number,
+  offset: -1 | 1,
+): string {
+  const doc = sectionListLayout(text, heading);
+  const upper = doc?.spans[Math.min(index, index + offset)];
+  const lower = doc?.spans[Math.max(index, index + offset)];
+  if (doc === null || upper === undefined || lower === undefined || upper === lower) return text;
+  const { lines } = doc;
+  const swapped = [
+    ...lines.slice(lower.first, lower.last + 1),
+    ...lines.slice(upper.last + 1, lower.first),
+    ...lines.slice(upper.first, upper.last + 1),
+  ];
+  if (lower.last === lines.length - 1 && doc.eol !== "") {
+    const end = swapped.length - 1;
+    const moved = lower.last - lower.first;
+    swapped[moved] = stripEol(swapped[moved] ?? "") + doc.eol;
+    swapped[end] = stripEol(swapped[end] ?? "");
+  }
+  lines.splice(upper.first, lower.last - upper.first + 1, ...swapped);
+  return renumberSection(lines.join("\n"), heading);
 }
 
 function headerLine(lines: readonly string[], key: string): number {
