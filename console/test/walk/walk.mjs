@@ -303,6 +303,17 @@ step("project-release", async () => {
 step("ops", async () => {
   await visit("/ops");
   await page.getByText("app", { exact: true }).first().waitFor();
+  // The walk starts no worker, and the card says what the server's own route says.
+  const worker = (await api("/queue-run")).body;
+  await page
+    .getByRole("region", { name: "Daemons" })
+    .getByText(
+      worker.state === "alive" ? "Running" : worker.state === "stale" ? "Stale" : "Not running",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
   const refreshed = page.waitForResponse((r) => new URL(r.url()).pathname === "/projects");
   await button("Refresh").click();
   await refreshed;
