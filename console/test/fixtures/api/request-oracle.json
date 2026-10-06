@@ -1,0 +1,39 @@
+{
+  "files": [
+    {
+      "name": "RUN_COMMAND.txt",
+      "size": 22,
+      "sha256": "0e2df58c76e6bce05db5cd535c182f7b4c09dc25dc1aa6b18d55a386529b20e6"
+    },
+    {
+      "name": "idempotency_test.go",
+      "size": 15,
+      "sha256": "eb06238620bab6c0a14810ad6af6e5f2d34ed7d404a8d5025fe5001aeee2a5f2"
+    }
+  ],
+  "problems": [
+    "no MANIFEST.json -- add MANIFEST.json mapping each oracle file to a spec criterion (criterion, oracle_file, criterion_index), so each ticket can be given the oracles for the criteria it owns"
+  ],
+  "oracle_draft": {
+    "status": "drafted",
+    "detail": "one criterion is covered",
+    "proposed_command": "go test ./.oracle/...",
+    "files": [
+      "idempotency_test.go"
+    ],
+    "criteria": [
+      {
+        "number": 1,
+        "eligible": true
+      },
+      {
+        "number": 2,
+        "eligible": false,
+        "reason": "needs a second account"
+      }
+    ],
+    "model": "gpt-5.6-luna",
+    "thinking": "high"
+  },
+  "state": "oracle_review"
+}

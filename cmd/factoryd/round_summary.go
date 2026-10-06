@@ -141,12 +141,19 @@ func roundTokens(rd run.AgentEvidenceRound) (in, out int64) {
 
 // formatTokenCount renders n as "823", "12.3k", or "1.2M" -- compact
 // enough that a multi-round summary stays well under roundSummaryMaxLen.
+// The tenth is rounded half up in integer arithmetic, not by a float
+// format: "%.1f" rounds an exact tie (1250 -> 1.25) to even and the
+// console's formatter rounded it up, so the same run read "1.2k" here and
+// "1.3k" there. console/test/fixtures/vectors/cost.json holds the cases
+// both sides are tested against.
 func formatTokenCount(n int64) string {
 	switch {
 	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+		tenths := (n + 50_000) / 100_000
+		return fmt.Sprintf("%d.%dM", tenths/10, tenths%10)
 	case n >= 1_000:
-		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+		tenths := (n + 50) / 100
+		return fmt.Sprintf("%d.%dk", tenths/10, tenths%10)
 	default:
 		return fmt.Sprintf("%d", n)
 	}

@@ -1,0 +1,533 @@
+[
+  {
+    "id": "run-running",
+    "ticket": "ticket-run-running",
+    "project_path": "/repos/app",
+    "project": "app",
+    "repository_root": "/repos/app",
+    "workspace_path": "/repos/app",
+    "spec_path": "/data/requests/req-building/tickets/001.spec.md",
+    "branch": "factory/run-running",
+    "spec_sha256": "abababababababababababababababababababababababababababababababab",
+    "state": "slice_running",
+    "base_sha": "1111111111111111111111111111111111111111",
+    "halt_confirmed": false,
+    "committed_by_factoryd": false,
+    "changed_files": null,
+    "dependency_lockfiles_touched": null,
+    "dependency_changes": null,
+    "attempts": null,
+    "gate_results": null,
+    "notifications": null,
+    "overrides": null,
+    "rescues": null,
+    "request_id": "req-building",
+    "created_at": "2026-09-10T09:45:00Z",
+    "updated_at": "2026-09-10T09:46:00Z",
+    "last_progress_at": "2026-09-10T09:46:00Z",
+    "current_stage": "build",
+    "tokens_complete": false
+  },
+  {
+    "id": "run-quarantined",
+    "ticket": "ticket-run-quarantined",
+    "project_path": "/repos/app",
+    "project": "app",
+    "repository_root": "/repos/app",
+    "workspace_path": "/repos/app",
+    "spec_path": "/data/requests/req-building/tickets/001.spec.md",
+    "branch": "factory/run-quarantined",
+    "spec_sha256": "abababababababababababababababababababababababababababababababab",
+    "state": "quarantined",
+    "base_sha": "1111111111111111111111111111111111111111",
+    "halt_confirmed": false,
+    "halt_error": "verify failed after 3 rounds",
+    "halt_reason_code": "verify_failed",
+    "committed_by_factoryd": false,
+    "changed_files": null,
+    "dependency_lockfiles_touched": null,
+    "dependency_changes": null,
+    "attempts": null,
+    "gate_results": null,
+    "notifications": null,
+    "overrides": null,
+    "rescues": null,
+    "request_id": "req-building",
+    "triage": "The verify command failed on TestKeyScopedToAccount in every round.",
+    "created_at": "2026-09-10T09:31:00Z",
+    "updated_at": "2026-09-10T09:40:00Z",
+    "tokens_complete": false
+  },
+  {
+    "id": "run-accepted",
+    "ticket": "ticket-run-accepted",
+    "project_path": "/repos/app",
+    "project": "app",
+    "repository_root": "/repos/app",
+    "workspace_path": "/repos/app",
+    "spec_path": "/data/requests/req-building/tickets/001.spec.md",
+    "branch": "factory/run-accepted",
+    "pull_request_url": "https://github.com/acme/app/pull/7",
+    "temporal_workflow_id": "run-run-accepted",
+    "temporal_run_id": "0199-contract",
+    "spec_sha256": "abababababababababababababababababababababababababababababababab",
+    "state": "accepted",
+    "base_sha": "1111111111111111111111111111111111111111",
+    "result_sha": "2222222222222222222222222222222222222222",
+    "halt_confirmed": true,
+    "committed_by_factoryd": true,
+    "changed_files": [
+      "checkout/idempotency.go",
+      "checkout/idempotency_test.go"
+    ],
+    "dependency_lockfiles_touched": null,
+    "dependency_changes": null,
+    "diff_stat": {
+      "files_changed": 2,
+      "insertions": 48,
+      "deletions": 3
+    },
+    "diff_available": true,
+    "agent_evidence": {
+      "schema_version": 1,
+      "generated": "2026-09-10T09:25:00Z",
+      "review_policy": "required",
+      "provider": "chatgpt-codex",
+      "model": "gpt-5.6-luna",
+      "succeeded": true,
+      "stopped_reason": "accepted",
+      "rounds": [
+        {
+          "index": 1,
+          "agent": "pi",
+          "agent_returncode": 0,
+          "agent_timed_out": false,
+          "usage": {
+            "input": 478250,
+            "output": 50,
+            "totalTokens": 478300
+          },
+          "reviewer_outcome": "pass",
+          "reviewer_detail": "",
+          "verify_passed": true,
+          "verify_timed_out": false,
+          "duration_s": 840,
+          "fast_check_ran": true,
+          "fast_check_passed": true
+        }
+      ],
+      "agents_md_used": false,
+      "review_verdicts": [
+        {
+          "criterion": "1",
+          "verdict": "met"
+        },
+        {
+          "criterion": "2",
+          "verdict": "met",
+          "detail": "covered by TestKeyScopedToAccount"
+        }
+      ]
+    },
+    "attempts": [
+      {
+        "kind": "build",
+        "command": [
+          "build_app.py",
+          "--harness",
+          "pi"
+        ],
+        "started_at": "2026-09-10T09:10:00Z",
+        "finished_at": "2026-09-10T09:25:00Z",
+        "exit_code": 0,
+        "log_path": "/data/runs/run-accepted/001-build_app.log",
+        "relay_credential_mode": "chatgpt",
+        "relay_route": "chatgpt-codex",
+        "relay_worker_model_id": "gpt-5.6-luna",
+        "relay_consumed_input_tokens": 470000,
+        "relay_consumed_output_tokens": 8300,
+        "relay_consumed_cost_micro_usd": 1500000,
+        "role": "execution",
+        "harness": "pi",
+        "thinking": "high"
+      }
+    ],
+    "gate_results": [
+      {
+        "check": "verify",
+        "command": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "duration_ms": 4200,
+        "log_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+      },
+      {
+        "check": "lint",
+        "command": [
+          "go",
+          "vet",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "duration_ms": 900,
+        "log_sha256": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+      }
+    ],
+    "notifications": [],
+    "overrides": [],
+    "rescues": [],
+    "request_id": "req-building",
+    "created_at": "2026-09-10T09:10:00Z",
+    "updated_at": "2026-09-10T09:30:00Z",
+    "by_model": [
+      {
+        "role": "execution",
+        "model": "gpt-5.6-luna",
+        "tokens": 478300,
+        "cost_micro_usd": 1500000
+      }
+    ],
+    "tokens_complete": true
+  },
+  {
+    "id": "run-every-field",
+    "ticket": "every-field ticket",
+    "project_path": "/repos/app",
+    "project": "app",
+    "repository_root": "/repos/app",
+    "workspace_path": "/repos/app",
+    "spec_path": "every-field spec_path",
+    "branch": "every-field branch",
+    "pull_request_url": "every-field pull_request_url",
+    "pr_open_error": "every-field pr_open_error",
+    "open_pull_request": true,
+    "pr_closes": "every-field pr_closes",
+    "pr_base": "every-field pr_base",
+    "repository": "every-field repository",
+    "temporal_workflow_id": "every-field temporal_workflow_id",
+    "temporal_run_id": "every-field temporal_run_id",
+    "temporal_task_queue": "every-field temporal_task_queue",
+    "temporal_address": "every-field temporal_address",
+    "spec_sha256": "every-field spec_sha256",
+    "product_spec_sha256": "every-field product_spec_sha256",
+    "contract_sha256": "every-field contract_sha256",
+    "skip_project_check": true,
+    "spec_ticket_scope_mismatch_fields": [
+      "every-field spec_ticket_scope_mismatch_fields"
+    ],
+    "spec_drift_detected_by_run_id": "every-field spec_drift_detected_by_run_id",
+    "spec_drift_detected_at": "2026-09-10T09:00:00Z",
+    "spec_drift_reason": "every-field spec_drift_reason",
+    "state": "accepted",
+    "base_sha": "every-field base_sha",
+    "diff_base_sha": "every-field diff_base_sha",
+    "result_sha": "every-field result_sha",
+    "halt_confirmed": true,
+    "kept_for_resume": true,
+    "on_branch": "every-field on_branch",
+    "resume_spend_carried": {
+      "tokens": 3,
+      "cost_micro_usd": 3
+    },
+    "halt_error": "every-field halt_error",
+    "halt_reason_code": "every-field halt_reason_code",
+    "committed_by_factoryd": true,
+    "changed_files": [
+      "every-field changed_files"
+    ],
+    "oracles": {
+      "authored": [
+        {
+          "path": "every-field path",
+          "sha256": "every-field sha256"
+        }
+      ],
+      "deleted": [
+        "every-field deleted"
+      ],
+      "base_index_paths": [
+        "every-field base_index_paths"
+      ],
+      "base_index_sha256": {
+        "every-field key": "every-field base_index_sha256"
+      },
+      "result_sha256": {
+        "every-field key": "every-field result_sha256"
+      },
+      "base_sha256": {
+        "every-field key": "every-field base_sha256"
+      }
+    },
+    "dependency_lockfiles_touched": [
+      "every-field dependency_lockfiles_touched"
+    ],
+    "dependency_changes": [
+      {
+        "name": "every-field name",
+        "base": "every-field base",
+        "result": "every-field result",
+        "base_scope": "every-field base_scope",
+        "result_scope": "every-field result_scope",
+        "base_source_reference": "every-field base_source_reference",
+        "result_source_reference": "every-field result_source_reference",
+        "base_dist_reference": "every-field base_dist_reference",
+        "result_dist_reference": "every-field result_dist_reference",
+        "base_dist_url": "every-field base_dist_url",
+        "result_dist_url": "every-field result_dist_url",
+        "base_dist_shasum": "every-field base_dist_shasum",
+        "result_dist_shasum": "every-field result_dist_shasum",
+        "base_dist_type": "every-field base_dist_type",
+        "result_dist_type": "every-field result_dist_type",
+        "base_source_url": "every-field base_source_url",
+        "result_source_url": "every-field result_source_url",
+        "base_source_type": "every-field base_source_type",
+        "result_source_type": "every-field result_source_type",
+        "base_alias": "every-field base_alias",
+        "result_alias": "every-field result_alias",
+        "base_alias_normalized": "every-field base_alias_normalized",
+        "result_alias_normalized": "every-field result_alias_normalized"
+      }
+    ],
+    "compose_files_changed": [
+      "every-field compose_files_changed"
+    ],
+    "compose_services": [
+      "every-field compose_services"
+    ],
+    "diff_stat": {
+      "files_changed": 3,
+      "insertions": 3,
+      "deletions": 3
+    },
+    "diff_available": true,
+    "diff_truncated": true,
+    "agent_evidence": {
+      "schema_version": 3,
+      "generated": "2026-09-10T09:00:00Z",
+      "review_policy": "every-field review_policy",
+      "provider": "every-field provider",
+      "model": "every-field model",
+      "succeeded": true,
+      "stopped_reason": "every-field stopped_reason",
+      "rounds": [
+        {
+          "index": 3,
+          "agent": "every-field agent",
+          "agent_returncode": 3,
+          "agent_timed_out": true,
+          "usage": {
+            "input": 100,
+            "output": 50,
+            "totalTokens": 150
+          },
+          "reviewer_outcome": "every-field reviewer_outcome",
+          "reviewer_detail": "every-field reviewer_detail",
+          "verify_passed": true,
+          "verify_timed_out": true,
+          "duration_s": 1.5,
+          "fast_check_ran": true,
+          "fast_check_passed": true
+        }
+      ],
+      "agents_md_used": true,
+      "agents_md_git_blob": "every-field agents_md_git_blob",
+      "review_verdicts": [
+        {
+          "criterion": "every-field criterion",
+          "verdict": "every-field verdict",
+          "detail": "every-field detail"
+        }
+      ]
+    },
+    "attempts": [
+      {
+        "kind": "build",
+        "command": [
+          "every-field command"
+        ],
+        "started_at": "2026-09-10T09:01:00Z",
+        "finished_at": "2026-09-10T09:03:00Z",
+        "exit_code": 3,
+        "log_path": "/data/runs/run-every-field/001-build_app.log",
+        "resumed_from_checkpoint": "every-field resumed_from_checkpoint",
+        "image_digest": "every-field image_digest",
+        "relay_image_digest": "every-field relay_image_digest",
+        "relay_network": "every-field relay_network",
+        "relay_container_name": "every-field relay_container_name",
+        "relay_upstream": "every-field relay_upstream",
+        "relay_credential_mode": "every-field relay_credential_mode",
+        "relay_route": "every-field relay_route",
+        "relay_billing": "every-field relay_billing",
+        "relay_route_skipped": [
+          {
+            "route": "every-field route",
+            "reason": "every-field reason"
+          }
+        ],
+        "relay_worker_model_id": "every-field relay_worker_model_id",
+        "relay_reasoning_effort": "every-field relay_reasoning_effort",
+        "relay_reasoning_effort_anomaly": true,
+        "relay_consumed_input_tokens": 3,
+        "relay_consumed_output_tokens": 3,
+        "relay_consumed_cost_micro_usd": 3,
+        "relay_ceiling_exceeded": true,
+        "relay_spend_partial": true,
+        "reference_oracle_sha256": "every-field reference_oracle_sha256",
+        "role": "every-field role",
+        "harness": "every-field harness",
+        "thinking": "every-field thinking",
+        "expected_effort": "every-field expected_effort",
+        "harness_scripts_sha256": "every-field harness_scripts_sha256",
+        "skills": [
+          "every-field skills"
+        ],
+        "skills_sha256": "every-field skills_sha256",
+        "repo_skills": [
+          "every-field repo_skills"
+        ]
+      }
+    ],
+    "gate_results": [
+      {
+        "check": "every-field check",
+        "command": [
+          "every-field command"
+        ],
+        "passed": true,
+        "exit_code": 3,
+        "duration_ms": 3,
+        "log_sha256": "every-field log_sha256",
+        "reference_oracle_sha256": "every-field reference_oracle_sha256"
+      }
+    ],
+    "notifications": [
+      {
+        "run_id": "every-field run_id",
+        "ticket": "every-field ticket",
+        "request_id": "every-field request_id",
+        "reason": "every-field reason",
+        "state": "accepted",
+        "sent_at": "2026-09-10T09:00:00Z",
+        "run_dir": "every-field run_dir",
+        "delivered": true,
+        "delivery_error": "every-field delivery_error",
+        "next": "every-field next",
+        "link": "every-field link"
+      }
+    ],
+    "overrides": [
+      {
+        "by": "every-field by",
+        "reason": "every-field reason",
+        "at": "2026-09-10T09:00:00Z",
+        "prior_state": "quarantined",
+        "new_state": "accepted"
+      }
+    ],
+    "rescues": [
+      {
+        "by": "every-field by",
+        "reason": "every-field reason",
+        "at": "2026-09-10T09:00:00Z",
+        "action": "every-field action",
+        "prior_state": "quarantined",
+        "new_state": "accepted"
+      }
+    ],
+    "prior_run_id": "every-field prior_run_id",
+    "request_id": "req-done",
+    "tests_required_opt_out": "every-field tests_required_opt_out",
+    "invalidated_by_run_id": "every-field invalidated_by_run_id",
+    "invalidated_at": "2026-09-10T09:00:00Z",
+    "invalidated_reason": "every-field invalidated_reason",
+    "full_suite_configured": true,
+    "full_suite_cadence": 3,
+    "full_suite_slice": 3,
+    "full_suite_scheduled": true,
+    "full_suite_source": "every-field full_suite_source",
+    "spec_conformity_configured": true,
+    "spec_conformity_verdicts": [
+      {
+        "criterion": "every-field criterion",
+        "verdict": "every-field verdict",
+        "detail": "every-field detail"
+      }
+    ],
+    "code_review": {
+      "policy": "every-field policy",
+      "available": true,
+      "findings": [
+        {
+          "severity": "every-field severity",
+          "file": "every-field file",
+          "line": 3,
+          "summary": "every-field summary",
+          "failure_scenario": "every-field failure_scenario"
+        }
+      ]
+    },
+    "reference_oracle_dir": "every-field reference_oracle_dir",
+    "oracles_not_committed_by_request": true,
+    "oracle_covered_criteria": [
+      "every-field oracle_covered_criteria"
+    ],
+    "oracle_canary": {
+      "verdict": "every-field verdict",
+      "ecosystem": "every-field ecosystem",
+      "real_exit_code": 3,
+      "canary_exit_code": 3,
+      "message": "every-field message"
+    },
+    "triage": "every-field triage",
+    "harness_eval": {
+      "harness": "every-field harness",
+      "model_id": "every-field model_id",
+      "outcome": "every-field outcome",
+      "duration_ms": 3,
+      "input_tokens": 3,
+      "output_tokens": 3,
+      "cost_micro_usd": 3,
+      "rounds": 3,
+      "roles": [
+        {
+          "role": "every-field role",
+          "thinking": "every-field thinking",
+          "model_id": "every-field model_id",
+          "relay_reasoning_effort": "every-field relay_reasoning_effort"
+        }
+      ]
+    },
+    "created_at": "2026-09-10T09:01:00Z",
+    "updated_at": "2026-09-10T09:04:00Z",
+    "release_policy": {
+      "protected_paths": [
+        "every-field protected_paths"
+      ],
+      "max_files_changed": 3,
+      "max_insertions": 3,
+      "rollback_plan": "every-field rollback_plan",
+      "allow_overrides": true,
+      "allow_dependency_lockfile_changes": true,
+      "allow_unsandboxed": true,
+      "required_gates": [
+        "every-field required_gates"
+      ],
+      "allow_skipped_project_check": true
+    },
+    "factoryd_version": "every-field factoryd_version",
+    "by_model": [
+      {
+        "role": "every-field role",
+        "model": "every-field relay_worker_model_id",
+        "tokens": 6,
+        "cost_micro_usd": 3
+      }
+    ],
+    "tokens_complete": false
+  }
+]

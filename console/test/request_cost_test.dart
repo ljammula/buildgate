@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:console/models.dart';
 import 'package:console/request_cost.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -386,5 +389,54 @@ void main() {
       42,
     );
     expect(const Usage(fields: {'note': 'none'}).totalTokens, isNull);
+  });
+
+  // The same file cmd/factoryd's and internal/api's golden-vector tests
+  // read: the console and the CLI format one token count the same way, and
+  // every usage line here is rendered from a cost_summary in the API's own
+  // shape.
+  group('golden vectors (test/fixtures/vectors/cost.json)', () {
+    final vectors =
+        jsonDecode(File('test/fixtures/vectors/cost.json').readAsStringSync())
+            as Map<String, dynamic>;
+    List<Map<String, dynamic>> section(String name) =>
+        (vectors[name] as List).cast<Map<String, dynamic>>();
+
+    test('formatTokenCount', () {
+      for (final v in section('format_token_count')) {
+        expect(formatTokenCount(v['n'] as int), v['want'], reason: '${v['n']}');
+      }
+    });
+
+    test('formatRequestTokenTotal', () {
+      for (final v in section('format_request_token_total')) {
+        expect(
+          formatRequestTokenTotal(v['tokens'] as int?),
+          v['want'],
+          reason: '${v['tokens']}',
+        );
+      }
+    });
+
+    test('formatMedianAcceptedTokens', () {
+      for (final v in section('format_median_accepted_tokens')) {
+        expect(
+          formatMedianAcceptedTokens(v['tokens'] as int?),
+          v['want'],
+          reason: '${v['tokens']}',
+        );
+      }
+    });
+
+    for (final v in section('usage')) {
+      test('usage: ${v['name']}', () {
+        final summary = CostSummary.fromJson(
+          v['cost_summary'] as Map<String, dynamic>,
+        );
+        expect(formatUsageSummary(summary), v['summary']);
+        expect(formatUsageLines(summary), v['lines']);
+        expect(formatCostPerAcceptedTicket(summary), v['per_accepted_ticket']);
+      });
+    }
   });
 }

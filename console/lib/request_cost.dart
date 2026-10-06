@@ -46,10 +46,19 @@ String formatRequestTokenTotal(int? tokens) {
 /// Shared token-count formatter ("823", "12.3k", "1.2M") -- moved here from
 /// run_detail_screen.dart (as `_formatTokenCount`) so every usage renderer
 /// in this file and the run detail screen format token counts identically.
-/// Mirrors cmd/factoryd's own formatTokenCount (round_summary.go).
+/// Mirrors cmd/factoryd's own formatTokenCount (round_summary.go): the tenth
+/// is rounded half up in integer arithmetic, because a float format rounds
+/// an exact tie (1250 -> 1.25) differently in Go and in Dart.
+/// test/fixtures/vectors/cost.json holds the cases both are tested against.
 String formatTokenCount(int n) {
-  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-  if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+  if (n >= 1000000) {
+    final tenths = (n + 50000) ~/ 100000;
+    return '${tenths ~/ 10}.${tenths % 10}M';
+  }
+  if (n >= 1000) {
+    final tenths = (n + 50) ~/ 100;
+    return '${tenths ~/ 10}.${tenths % 10}k';
+  }
   return '$n';
 }
 

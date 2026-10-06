@@ -1,0 +1,166 @@
+{
+  "digests": [
+    {
+      "name": "empty",
+      "text": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "ascii",
+      "text": "hello",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "name": "trailing newline",
+      "text": "# Spec\n",
+      "sha256": "603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b"
+    },
+    {
+      "name": "crlf line endings",
+      "text": "# Spec\r\n\r\nbody\r\n",
+      "sha256": "ba1bb32b947fb9bc3169c788645a1765868ac511d5325d012fd1e1e035b851eb"
+    },
+    {
+      "name": "multi-byte utf-8",
+      "text": "Résumé — naïve café ✓ 日本語 🚀\n",
+      "sha256": "71dde352bd2ef02d56c9af865b06b74cc281b1e10995c40d6e3df53d1bbd16d6"
+    },
+    {
+      "name": "well-formed ticket",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "sha256": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+    },
+    {
+      "name": "non-utf-8 bytes",
+      "base64": "//4A",
+      "sha256": "ba778c0261008c8f71ae4061ad0162ffcbe63b52c91f89f236738131d1217ec7"
+    },
+    {
+      "name": "lone continuation byte",
+      "base64": "b2sggCBvawo=",
+      "sha256": "5a5314950b93718c2e6a870319cb09380f33b1aaa391fb6bb52a2277d8b8286b"
+    },
+    {
+      "name": "utf-8 bom then text",
+      "base64": "77u/Z28gdGVzdCAuLy4uLgo=",
+      "sha256": "1baa27ad332d9c8cd0b48680cdd67bb7a12f7ad861d93ccc4d57b2f5b929dfdc"
+    }
+  ],
+  "approvals": [
+    {
+      "name": "spec_review binds spec.md",
+      "state": "spec_review",
+      "spec": "# Spec\n",
+      "tickets": [],
+      "want": {
+        "spec.md": "603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b"
+      }
+    },
+    {
+      "name": "spec_review hashes the UTF-8 bytes of non-ASCII and CRLF text",
+      "state": "spec_review",
+      "spec": "# Spec\r\n\r\nRésumé upload — ✓\r\n",
+      "tickets": [],
+      "want": {
+        "spec.md": "5fe81a9bb3bd7649fe46704d69f03072b64e46decff4934764ea8e84ea8fe604"
+      }
+    },
+    {
+      "name": "plan_review binds each ticket by tickets/NNN.spec.md, from an absolute spec_path",
+      "state": "plan_review",
+      "spec": "# Spec\n",
+      "tickets": [
+        {
+          "index": 1,
+          "spec_path": "/data/requests/req-1/tickets/001.spec.md",
+          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        },
+        {
+          "index": 2,
+          "spec_path": "/data/requests/req-1/tickets/002.spec.md",
+          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\nRésumé upload — naïve café ✓\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        }
+      ],
+      "want": {
+        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a",
+        "tickets/002.spec.md": "a617e740aaffdc954c2060bc96da13fb0b599f7b6cbfd45897ac84ce12cd7642"
+      }
+    },
+    {
+      "name": "plan_review uses the last /tickets/ segment of a data dir that itself contains a tickets directory",
+      "state": "plan_review",
+      "spec": "# Spec\n",
+      "tickets": [
+        {
+          "index": 1,
+          "spec_path": "/srv/tickets/factory-data/requests/req-1/tickets/001.spec.md",
+          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        }
+      ],
+      "want": {
+        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+      }
+    },
+    {
+      "name": "plan_review accepts a spec_path that is already relative",
+      "state": "plan_review",
+      "spec": "# Spec\n",
+      "tickets": [
+        {
+          "index": 1,
+          "spec_path": "tickets/001.spec.md",
+          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        }
+      ],
+      "want": {
+        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+      }
+    },
+    {
+      "name": "plan_review normalizes backslash separators",
+      "state": "plan_review",
+      "spec": "# Spec\n",
+      "tickets": [
+        {
+          "index": 1,
+          "spec_path": "C:\\data\\requests\\req-1\\tickets\\001.spec.md",
+          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        }
+      ],
+      "want": {
+        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+      }
+    },
+    {
+      "name": "a state with no review gate binds nothing",
+      "state": "building",
+      "spec": "# Spec\n",
+      "tickets": [
+        {
+          "index": 1,
+          "spec_path": "/data/requests/req-1/tickets/001.spec.md",
+          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        }
+      ],
+      "want": {}
+    }
+  ],
+  "oracle_approvals": [
+    {
+      "name": "each shown file is keyed oracle/NAME",
+      "shown": {
+        "RUN_COMMAND.txt": "c0a49acb4301c97efaaeec70d48193978e42875bda42f75c6f2df90c864e12e7",
+        "a_test.go": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438"
+      },
+      "want": {
+        "oracle/RUN_COMMAND.txt": "c0a49acb4301c97efaaeec70d48193978e42875bda42f75c6f2df90c864e12e7",
+        "oracle/a_test.go": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438"
+      }
+    },
+    {
+      "name": "nothing shown binds nothing",
+      "shown": {},
+      "want": {}
+    }
+  ]
+}

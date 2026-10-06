@@ -1,0 +1,4 @@
+{
+  "diff": "diff --git a/checkout/idempotency.go b/checkout/idempotency.go\n--- a/checkout/idempotency.go\n+++ b/checkout/idempotency.go\n@@ -1,2 +1,3 @@\n package checkout\n+// Key scopes a retry to one account.\n",
+  "truncated": false
+}

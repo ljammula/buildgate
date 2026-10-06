@@ -1,0 +1,367 @@
+{
+  "format_token_count": [
+    {
+      "n": 0,
+      "want": "0"
+    },
+    {
+      "n": 823,
+      "want": "823"
+    },
+    {
+      "n": 999,
+      "want": "999"
+    },
+    {
+      "n": 1000,
+      "want": "1.0k"
+    },
+    {
+      "n": 1049,
+      "want": "1.0k"
+    },
+    {
+      "n": 1050,
+      "want": "1.1k"
+    },
+    {
+      "n": 1150,
+      "want": "1.2k"
+    },
+    {
+      "n": 1250,
+      "want": "1.3k"
+    },
+    {
+      "n": 12345,
+      "want": "12.3k"
+    },
+    {
+      "n": 12350,
+      "want": "12.4k"
+    },
+    {
+      "n": 478300,
+      "want": "478.3k"
+    },
+    {
+      "n": 999949,
+      "want": "999.9k"
+    },
+    {
+      "n": 999950,
+      "want": "1000.0k"
+    },
+    {
+      "n": 1000000,
+      "want": "1.0M"
+    },
+    {
+      "n": 1234567,
+      "want": "1.2M"
+    },
+    {
+      "n": 1250000,
+      "want": "1.3M"
+    },
+    {
+      "n": 1950000,
+      "want": "2.0M"
+    }
+  ],
+  "format_request_token_total": [
+    {
+      "tokens": null,
+      "want": "—"
+    },
+    {
+      "tokens": 0,
+      "want": "0 tok"
+    },
+    {
+      "tokens": 999,
+      "want": "999 tok"
+    },
+    {
+      "tokens": 1000,
+      "want": "1.0k tok"
+    },
+    {
+      "tokens": 1200,
+      "want": "1.2k tok"
+    },
+    {
+      "tokens": 9999,
+      "want": "10.0k tok"
+    },
+    {
+      "tokens": 10000,
+      "want": "10k tok"
+    },
+    {
+      "tokens": 478300,
+      "want": "478k tok"
+    }
+  ],
+  "format_median_accepted_tokens": [
+    {
+      "tokens": null,
+      "want": "—"
+    },
+    {
+      "tokens": 478300,
+      "want": "478.3k tokens"
+    }
+  ],
+  "usage": [
+    {
+      "name": "a server that reports no token total",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true
+      },
+      "summary": "—",
+      "lines": [
+        "—"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "a token total with no model recorded",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 12345,
+        "tokens_complete": true
+      },
+      "summary": "12.3k tokens",
+      "lines": [
+        "12.3k tokens"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "an incomplete token total is a lower bound",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": false,
+        "tokens": 12345,
+        "tokens_complete": false
+      },
+      "summary": "≥ 12.3k tokens",
+      "lines": [
+        "≥ 12.3k tokens"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "a confirmed zero is shown as zero",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 0,
+        "tokens_complete": true
+      },
+      "summary": "0 tokens",
+      "lines": [
+        "0 tokens"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "one model, with role and cost",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 1.5,
+        "total": 1.5,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 478300,
+        "tokens_complete": true,
+        "by_model": [
+          {
+            "role": "execution",
+            "model": "gpt-5.6-luna",
+            "tokens": 478300,
+            "cost_micro_usd": 1500000
+          }
+        ]
+      },
+      "summary": "gpt-5.6-luna · 478.3k tokens",
+      "lines": [
+        "execution · gpt-5.6-luna · 478.3k tokens · $1.50"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "several models, incomplete, one with no model id",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 600200,
+        "tokens_complete": false,
+        "subscription_billed": true,
+        "by_model": [
+          {
+            "role": "execution",
+            "model": "gpt-5.6-luna",
+            "tokens": 478300,
+            "cost_micro_usd": 1500000
+          },
+          {
+            "role": "planning",
+            "model": "qwen3.6-27b",
+            "tokens": 121000
+          },
+          {
+            "role": "review",
+            "model": "",
+            "tokens": 900,
+            "cost_micro_usd": 1234567
+          }
+        ]
+      },
+      "summary": "gpt-5.6-luna +2 more · ≥ 600.2k tokens",
+      "lines": [
+        "execution · gpt-5.6-luna · ≥ 478.3k tokens · $1.50",
+        "planning · qwen3.6-27b · ≥ 121.0k tokens",
+        "review · unknown model · ≥ 900 tokens · $1.23"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "several models with no total sums the models",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens_complete": true,
+        "by_model": [
+          {
+            "role": "execution",
+            "model": "gpt-5.6-luna",
+            "tokens": 478300,
+            "cost_micro_usd": 1500000
+          },
+          {
+            "role": "planning",
+            "model": "qwen3.6-27b",
+            "tokens": 121000
+          },
+          {
+            "role": "review",
+            "model": "",
+            "tokens": 900,
+            "cost_micro_usd": 1234567
+          }
+        ]
+      },
+      "summary": "gpt-5.6-luna +2 more · 600.2k tokens",
+      "lines": [
+        "execution · gpt-5.6-luna · 478.3k tokens · $1.50",
+        "planning · qwen3.6-27b · 121.0k tokens",
+        "review · unknown model · 900 tokens · $1.23"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "a model with neither role nor cost",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 823,
+        "tokens_complete": true,
+        "by_model": [
+          {
+            "model": "",
+            "tokens": 823
+          }
+        ]
+      },
+      "summary": "unknown model · 823 tokens",
+      "lines": [
+        "unknown model · 823 tokens"
+      ],
+      "per_accepted_ticket": null
+    },
+    {
+      "name": "one accepted ticket",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 478300,
+        "tokens_complete": true,
+        "oracle": 0.25,
+        "by_model": [
+          {
+            "role": "execution",
+            "model": "gpt-5.6-luna",
+            "tokens": 478300,
+            "cost_micro_usd": 1500000
+          }
+        ],
+        "accepted_tickets": 1,
+        "cost_per_accepted_ticket_micro_usd": 750000
+      },
+      "summary": "gpt-5.6-luna · 478.3k tokens",
+      "lines": [
+        "execution · gpt-5.6-luna · 478.3k tokens · $1.50",
+        "$0.75 / accepted ticket (1 accepted ticket)"
+      ],
+      "per_accepted_ticket": "$0.75 / accepted ticket (1 accepted ticket)"
+    },
+    {
+      "name": "several accepted tickets",
+      "cost_summary": {
+        "spec": 0,
+        "plan": 0,
+        "runs": 0,
+        "total": 0,
+        "currency": "usd",
+        "complete": true,
+        "tokens": 12345,
+        "tokens_complete": true,
+        "accepted_tickets": 3,
+        "cost_per_accepted_ticket_micro_usd": 1234567
+      },
+      "summary": "12.3k tokens",
+      "lines": [
+        "12.3k tokens",
+        "$1.23 / accepted ticket (3 accepted tickets)"
+      ],
+      "per_accepted_ticket": "$1.23 / accepted ticket (3 accepted tickets)"
+    }
+  ]
+}

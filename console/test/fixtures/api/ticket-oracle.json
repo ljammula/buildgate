@@ -1,0 +1,13 @@
+{
+  "files": [
+    {
+      "name": "RUN_COMMAND.txt",
+      "size": 22,
+      "sha256": "0e2df58c76e6bce05db5cd535c182f7b4c09dc25dc1aa6b18d55a386529b20e6"
+    }
+  ],
+  "problems": [
+    "the runtime canary cannot be built for this oracle directory: oracle directory \"/data/requests/req-plan-review/tickets/001.oracle\" contains no test files (supported: MANIFEST.json, RUN_COMMAND.txt, and test files named *_test.go (each declaring a func TestOracle*), test_oracle_*.py or *_oracle_test.py, *.oracle.test.{ts,tsx,js,jsx,mjs,cjs}, or *_test.dart; one ecosystem per directory, no other files)"
+  ],
+  "state": "plan_review"
+}

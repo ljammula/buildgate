@@ -1,0 +1,5 @@
+{
+  "temporal_ui_url": "http://localhost:8233",
+  "writes_enabled": false,
+  "release_policy_warning": "release policy denies every PR unconditionally (release_max_files_changed/release_max_insertions is 0 or release_rollback_plan is empty) -- add release_max_files_changed, release_max_insertions, and release_rollback_plan to your session config (factoryd init-config's own scaffold now includes them)"
+}
