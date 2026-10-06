@@ -200,6 +200,9 @@ request waits on:
 | `approved` | Merge it; the factory never merges |
 | `stacked` | Merge the earlier ticket's pull request first |
 | `draft` | Nothing yet: the factory marks it ready once checks pass and no thread is open |
+| `ready`, last corrective round not accepted | That the round pushed nothing and why; the open thread starts another round on the next poll, up to `max_review_rounds` |
+
+The request page lists each ticket's corrective rounds (the one under way, then each that ended, with its outcome, cause and run); `GET /requests/{id}` names a round under way as the ticket's `active_round_run_id`.
 
 The same two verbs are on HTTP: `POST
 /requests/{id}/approve`, `POST /requests/{id}/reject`, gated by

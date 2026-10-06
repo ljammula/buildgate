@@ -1312,12 +1312,17 @@ func (r *Request) NextAction() string {
 // pull request yet.
 func (r *Request) prReviewNextAction() string {
 	byState := map[string][]string{}
-	for _, t := range r.Tickets {
-		if t.PRURL != "" {
-			byState[t.PRState] = append(byState[t.PRState], t.PRURL)
-		}
-	}
 	var parts []string
+	for _, t := range r.Tickets {
+		if t.PRURL == "" {
+			continue
+		}
+		if failed := t.lastFailedReviewRound(); failed != nil && t.PRState == "ready" {
+			parts = append(parts, failed.nextAction(t.PRURL))
+			continue
+		}
+		byState[t.PRState] = append(byState[t.PRState], t.PRURL)
+	}
 	add := func(state, format string) {
 		if urls := byState[state]; len(urls) > 0 {
 			parts = append(parts, fmt.Sprintf(format, strings.Join(urls, ", ")))
@@ -1331,6 +1336,37 @@ func (r *Request) prReviewNextAction() string {
 		return ""
 	}
 	return strings.Join(parts, "; ") + ". The request is done when every pull request is merged"
+}
+
+// lastFailedReviewRound returns t's most recent PR-review round when that
+// round did not end accepted, else nil: a later accepted round answers an
+// earlier failure.
+func (t Ticket) lastFailedReviewRound() *Round {
+	for i := len(t.Rounds) - 1; i >= 0; i-- {
+		if t.Rounds[i].Kind != "" {
+			continue
+		}
+		if t.Rounds[i].Outcome == RoundAccepted {
+			return nil
+		}
+		return &t.Rounds[i]
+	}
+	return nil
+}
+
+// nextAction says what a corrective round that did not end accepted leaves
+// the operator with. Nothing was pushed and the review thread is untouched,
+// so the worker's next poll starts another round on it (pr_review_driver.go
+// marks a thread seen only after an accepted round is pushed), up to
+// max_review_rounds; without this sentence the request page read "ready for
+// review" over a round that had just failed (found on a real corrective
+// round, 2026-10-06).
+func (round *Round) nextAction(prURL string) string {
+	why := ""
+	if round.Error != "" {
+		why = " (" + round.Error + ")"
+	}
+	return fmt.Sprintf("corrective round %d on %s was %s and pushed nothing%s: open its run for the cause. The review thread is still open, so the next poll starts another round, up to `max_review_rounds`; resolve the thread on the pull request to stop that, or push a fix to the branch yourself", round.Index, prURL, round.Outcome, why)
 }
 
 // quarantinedNextAction is NextAction's own StateQuarantined branch. A

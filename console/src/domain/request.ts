@@ -86,10 +86,51 @@ export interface RequestTicket {
    * predating this field.
    */
   readonly fullPath: string;
+  /** The PR-review corrective rounds that have ended on this ticket, oldest first. */
+  readonly reviewRounds: readonly ReviewRound[];
+  /** The run of a corrective round under way now; "" when none is. Sent by GET /requests/{id} only. */
+  readonly activeRoundRunId: string;
+}
+
+/**
+ * One finished PR-review corrective round (Go's request.Round with an empty
+ * kind): a build on the pull request's own branch, started by a trusted
+ * reviewer's open thread.
+ */
+export interface ReviewRound {
+  readonly index: number;
+  readonly runId: string;
+  /** "accepted", "quarantined" or "halted"; server-owned, so a string. */
+  readonly outcome: string;
+  readonly at: string;
+  /** Why a round that did not end accepted failed; "" otherwise. */
+  readonly error: string;
+  /** An accepted round's commit reached the pull request's branch. */
+  readonly pushed: boolean;
+}
+
+function decodeReviewRound(o: JsonObject, at: string): ReviewRound {
+  return {
+    index: numberOr(o, "index", at, 0),
+    runId: optString(o, "run_id", at),
+    outcome: optString(o, "outcome", at),
+    at: optString(o, "at", at),
+    error: optString(o, "error", at),
+    pushed: optBoolean(o, "pushed", at),
+  };
 }
 
 export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
   return {
+    // A round with a kind is a spec-conformity round before any pull request
+    // exists; it is the build's business, not the review's.
+    reviewRounds: objectList(o, "rounds", at, (round, roundAt) => ({
+      kind: optString(round, "kind", roundAt),
+      round: decodeReviewRound(round, roundAt),
+    }))
+      .filter((entry) => entry.kind === "")
+      .map((entry) => entry.round),
+    activeRoundRunId: optString(o, "active_round_run_id", at),
     index: reqNumber(o, "index", at),
     specPath: optString(o, "spec_path", at),
     runId: optString(o, "run_id", at),
