@@ -69,3 +69,27 @@ func TestHarnessPromptTemplatesAreStaged(t *testing.T) {
 		t.Fatal("no *.prompt.md found beside the harness scripts")
 	}
 }
+
+// TestHarnessNodeScriptsAreStaged: every agent/pi/scripts/*.mjs must be in
+// HarnessSiblingModules, or the adapter that runs it under node finds no
+// file inside the sandbox, where only staged files exist.
+func TestHarnessNodeScriptsAreStaged(t *testing.T) {
+	dir := filepath.Join("..", "..", "agent", "pi", "scripts")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".mjs") {
+			continue
+		}
+		found++
+		if !HarnessSiblingModules[e.Name()] {
+			t.Errorf("node script %s is not in HarnessSiblingModules", e.Name())
+		}
+	}
+	if found == 0 {
+		t.Fatal("no *.mjs found beside the harness scripts")
+	}
+}

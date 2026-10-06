@@ -6,5 +6,5 @@ package pi
 
 import "embed"
 
-//go:embed scripts/*.py scripts/*.prompt.md
+//go:embed scripts/*.py scripts/*.mjs scripts/*.prompt.md
 var Scripts embed.FS

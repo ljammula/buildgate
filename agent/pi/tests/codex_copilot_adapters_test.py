@@ -450,10 +450,41 @@ class CopilotPlaceholderEnvTests(unittest.TestCase):
 			args = self._invocation(tmp)
 		self.assertIn(f"COPILOT_PROVIDER_API_KEY={harness_adapters.RELAY_API_KEY_PLACEHOLDER}", args)
 
-	def test_refuses_a_route_that_needs_extra_credential_headers(self):
-		env = {"FACTORY_MODEL_KEY_ENV": "BG_CHATGPT_TOKEN", "FACTORY_MODEL_HEADERS_JSON": '{"chatgpt-account-id": "BG_CHATGPT_ACCOUNT"}'}
+	CHATGPT_ROUTE = {
+		"FACTORY_MODEL_KEY_ENV": "BG_CHATGPT_TOKEN",
+		"FACTORY_MODEL_HEADERS_JSON": '{"chatgpt-account-id": "BG_CHATGPT_ACCOUNT"}',
+		"BG_CHATGPT_TOKEN": "openshell:token",
+		"BG_CHATGPT_ACCOUNT": "openshell:account",
+	}
+
+	def test_credential_headers_are_the_routes_placeholders(self):
+		with tempfile.TemporaryDirectory() as tmp, route("openai-responses", **self.CHATGPT_ROUTE):
+			args = self._invocation(tmp)
+		self.assertIn("COPILOT_PROVIDER_API_KEY=openshell:token", args)
+		self.assertIn("COPILOT_PROVIDER_HEADERS=chatgpt-account-id: openshell:account", args)
+
+	def test_route_with_credential_headers_runs_behind_the_output_proxy(self):
+		with tempfile.TemporaryDirectory() as tmp, route("openai-responses", **self.CHATGPT_ROUTE):
+			args = self._invocation(tmp)
+		proxy = SCRIPTS / "fill_responses_output.mjs"
+		self.assertTrue(proxy.is_file())
+		start = args.index("node")
+		self.assertEqual(args[start:start + 6], ["node", str(proxy), RELAY_URL, "COPILOT_PROVIDER_BASE_URL", "--", "copilot"])
+		# Everything before the proxy is `env` and its assignments.
+		self.assertEqual(args[0], "env")
+		self.assertTrue(all("=" in a for a in args[1:start]))
+
+	def test_route_without_credential_headers_runs_the_cli_directly(self):
+		with tempfile.TemporaryDirectory() as tmp, route("openai-responses", FACTORY_MODEL_KEY_ENV="BG_MODEL_KEY", BG_MODEL_KEY="openshell:placeholder"):
+			args = self._invocation(tmp)
+		self.assertNotIn("node", args)
+		self.assertFalse([a for a in args if a.startswith("COPILOT_PROVIDER_HEADERS=")])
+
+	def test_refuses_a_header_name_with_no_value(self):
+		env = dict(self.CHATGPT_ROUTE)
+		del env["BG_CHATGPT_ACCOUNT"]
 		with tempfile.TemporaryDirectory() as tmp, route("openai-responses", **env):
-			with self.assertRaisesRegex(SystemExit, "chatgpt-account-id.*cannot send"):
+			with self.assertRaisesRegex(SystemExit, "BG_CHATGPT_ACCOUNT .*chatgpt-account-id.* is not set"):
 				self._invocation(tmp)
 
 	def test_refuses_a_key_name_with_no_value(self):

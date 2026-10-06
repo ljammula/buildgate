@@ -1975,6 +1975,10 @@ var HarnessSiblingModules = map[string]bool{
 	"code_review.py":       true, // imported by combined_review.py
 	"prompt_templates.py":  true, // loads the *.prompt.md templates below
 
+	// Run by harness_adapters.py's CopilotAdapter under node, around the
+	// Copilot CLI on a chatgpt-codex route.
+	"fill_responses_output.mjs": true,
+
 	// Prompt templates, read at import by the script they are named after.
 	"build_corrective.closing.prompt.md":                 true,
 	"build_corrective.excerpt.prompt.md":                 true,
