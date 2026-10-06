@@ -1,4 +1,6 @@
 import {
+  requiredSpecHeadings,
+  requiredTicketHeadings,
   requiredTicketHeaderKeys,
   specAcceptanceCriteria,
   validateTicketPlan,
@@ -11,7 +13,10 @@ import {
   headerList,
   moveCriterion,
   removeCriterion,
+  sectionBodyProblem,
+  sections,
   setCoveredCriteria,
+  setSectionBody,
   setCriterionBody,
   setTicketHeaderValue,
   ticketHeaderValue,
@@ -283,5 +288,94 @@ describe("setCoveredCriteria", () => {
 
   test("does nothing to a ticket without the plan headings", () => {
     expect(setCoveredCriteria("## Goal\n- 1\n", [1])).toBe("## Goal\n- 1\n");
+  });
+});
+
+describe("sections", () => {
+  const H = ["# Spec", "## Problem", "## Scope"];
+  const doc = "# Spec\n\n## Problem\n\n  p one  \n\np two\n\n## Scope\ns\n";
+
+  test("a body is the lines after its heading, without the blank lines before the next heading", () => {
+    expect(sections(doc, H)).toEqual([
+      { heading: "# Spec", body: "", present: true },
+      { heading: "## Problem", body: "\n  p one  \n\np two", present: true },
+      { heading: "## Scope", body: "s", present: true },
+    ]);
+  });
+
+  test("a missing heading is absent with an empty body", () => {
+    expect(sections("# Spec\n\n## Scope\nx", H)[1]).toEqual({
+      heading: "## Problem",
+      body: "",
+      present: false,
+    });
+  });
+
+  test("a ticket's Plan body ends at its first sub-heading", () => {
+    const t = "hdr: 1\n\n## Goal\ng\n\n## Plan\nintro\n\n### Files to touch\n- a\n";
+    const plan = sections(t, requiredTicketHeadings)[1];
+    expect(plan).toEqual({ heading: "## Plan", body: "intro", present: true });
+    expect(sections(t, requiredTicketHeadings)[2]?.body).toBe("- a");
+  });
+
+  test("setSectionBody replaces exactly one body and keeps the blank lines around it", () => {
+    expect(setSectionBody(doc, H, "## Problem", "new\nlines")).toBe(
+      "# Spec\n\n## Problem\nnew\nlines\n\n## Scope\ns\n",
+    );
+    expect(setSectionBody(doc, H, "## Scope", "S2")).toBe(doc.replace("\ns\n", "\nS2\n"));
+    expect(setSectionBody(doc, H, "## Problem", "")).toBe("# Spec\n\n## Problem\n\n## Scope\ns\n");
+  });
+
+  test("an empty section takes a body and keeps the blank line before the next heading", () => {
+    expect(setSectionBody("# Spec\n\n## Problem\n\n## Scope\n", H, "## Problem", "x")).toBe(
+      "# Spec\n\n## Problem\nx\n\n## Scope\n",
+    );
+  });
+
+  test("CRLF text keeps its line endings, old lines and new", () => {
+    const crlf = "# Spec\r\n\r\n## Problem\r\np\r\n\r\n## Scope\r\ns\r\n";
+    expect(setSectionBody(crlf, H, "## Problem", "a\nb")).toBe(
+      "# Spec\r\n\r\n## Problem\r\na\r\nb\r\n\r\n## Scope\r\ns\r\n",
+    );
+    expect(setSectionBody(crlf, H, "## Problem", "p")).toBe(crlf);
+  });
+
+  test("a file without a final newline stays without one", () => {
+    expect(setSectionBody("# Spec\n## Problem\np\n## Scope\ns", H, "## Scope", "t")).toBe(
+      "# Spec\n## Problem\np\n## Scope\nt",
+    );
+  });
+
+  test("an absent heading returns the text unchanged", () => {
+    const t = "# Spec\n\n## Scope\nx\n";
+    expect(setSectionBody(t, H, "## Problem", "z")).toBe(t);
+    expect(setSectionBody(t, H, "## Nope", "z")).toBe(t);
+  });
+
+  test("round trip: writing back a section's own body returns the identical text", () => {
+    const fixtures = [
+      doc,
+      "# Spec\r\n\r\n## Problem\r\np\r\n\r\n## Scope\r\ns\r\n",
+      "# Spec\n## Problem\np\n## Scope\ns",
+      "# Spec\n\n## Scope\nx\n",
+      "# Spec\n\n## Problem\n\n\n## Scope\n\n\n",
+      "pre\n# Spec\n## Problem  \n a \t\n\n\nb\n\n## Scope\n",
+      requiredSpecHeadings.join("\n\nx\n\n") + "\n",
+      "",
+    ];
+    for (const text of fixtures) {
+      for (const slice of sections(text, requiredSpecHeadings)) {
+        expect(setSectionBody(text, requiredSpecHeadings, slice.heading, slice.body)).toBe(text);
+      }
+      for (const slice of sections(text, H)) {
+        expect(setSectionBody(text, H, slice.heading, slice.body)).toBe(text);
+      }
+    }
+  });
+
+  test("sectionBodyProblem refuses a line equal to any required heading, trimmed", () => {
+    expect(sectionBodyProblem(H, "fine\n### Not required")).toBeNull();
+    expect(sectionBodyProblem(H, "a\n  ## Scope \nb")).toMatch(/## Scope/);
+    expect(sectionBodyProblem(H, "# Spec")).not.toBeNull();
   });
 });

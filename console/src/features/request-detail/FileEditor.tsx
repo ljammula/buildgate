@@ -11,6 +11,7 @@ import { describeError } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 
 import { CriteriaListEditor } from "./CriteriaListEditor";
+import { SectionEditor } from "./SectionEditor";
 import { StructureChecklist, type StructureKind } from "./StructureChecklist";
 import { TicketFieldsEditor } from "./TicketFieldsEditor";
 import type { EditorBinding } from "./useEditSession";
@@ -66,6 +67,8 @@ export function FileEditor({
   const [opened] = useState(initialContent);
   const [text, setText] = useState(initialContent);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  // A section field open with text not applied: Save would leave it behind.
+  const [sectionPending, setSectionPending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const dirty = text !== opened;
   const blockedReason = session?.blockedReason ?? null;
@@ -108,7 +111,7 @@ export function FileEditor({
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      if (!saving && blockedReason === null) void save();
+      if (!saving && blockedReason === null && !sectionPending) void save();
     } else if (event.key === "Escape") {
       event.preventDefault();
       requestClose();
@@ -168,6 +171,13 @@ export function FileEditor({
               disabled={blockedReason !== null}
             />
           )}
+          <SectionEditor
+            kind={structure}
+            text={text}
+            onChange={setText}
+            onPendingChange={setSectionPending}
+            disabled={blockedReason !== null}
+          />
           <p className="text-fg-subtle text-xs">
             These fields rewrite the text below, which is exactly what Save sends.
           </p>
@@ -251,6 +261,11 @@ export function FileEditor({
           {`Could not save: ${describeError(saveError).raw}`}
         </p>
       )}
+      {!sectionPending ? null : (
+        <p data-testid="edit-section-pending" className="text-fg-muted text-right text-sm">
+          A section is open: Apply or Cancel it before saving.
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         {blockedReason === null ? null : <CopyButton text={text} label="Copy my text" />}
         <Button variant="ghost" disabled={saving} onClick={requestClose}>
@@ -258,7 +273,7 @@ export function FileEditor({
         </Button>
         <Button
           variant="primary"
-          disabled={saving || blockedReason !== null}
+          disabled={saving || blockedReason !== null || sectionPending}
           onClick={() => void save()}
         >
           {saving ? "Saving..." : "Save"}
