@@ -130,7 +130,8 @@ test("oracle_draft parses tolerantly: a non-object or wrong-typed field reads as
 
 test("a rejection's stage is its send-back stage, else the state it was rejected in", () => {
   const r = detail("request-plan-review");
-  expect(rejectionStage(r.rejections[0]!)).toBe("planning");
+  expect(rejectionStage(r.rejections[0]!)).toBe("plan_review");
+  expect(rejectionStage({ ...r.rejections[0]!, forStage: "spec_review" })).toBe("spec_review");
   expect(
     rejectionStage({
       by: "a",
@@ -247,11 +248,18 @@ test("request-plan-review decodes", () => {
     {
       by: "alice",
       at: "2026-09-10T09:08:00Z",
-      reason: "split the migration out",
+      reason: "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
       fromState: "plan_review",
-      forStage: "planning",
-      anchors: [],
-      note: "",
+      forStage: null,
+      anchors: [
+        {
+          path: "tickets/001.spec.md",
+          section: "### Steps",
+          item: 0,
+          note: "split the migration out",
+        },
+      ],
+      note: "Otherwise fine.",
     },
   ]);
 });
@@ -447,15 +455,26 @@ test("listRevisions/getRevision parse the revision routes", () => {
     index: 1,
     at: "2026-09-10T09:08:00Z",
     by: "alice",
-    reason: "split the migration out",
+    reason: "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
     fromState: "plan_review",
     files: ["spec.md", "tickets/001.spec.md", "tickets/002.spec.md"],
+    feedbackSupplied: true,
   });
+  // A revision recorded before the server kept the hand-off decodes as not supplied.
+  expect(
+    decodeRevisionList(
+      [{ index: 1, at: "t", by: "a", reason: "r", from_state: "spec_review", files: [] }],
+      "GET /requests/{id}/revisions",
+    )[0]!.feedbackSupplied,
+  ).toBe(false);
   const route2 = "GET /requests/{id}/revisions/{n}";
   const detailJson = asObject(readFixtureJson("api/request-revision.json"), route2);
   const d = decodeRevisionDetail(detailJson, route2);
   expect(d.index).toBe(1);
-  expect(d.reason).toBe("split the migration out");
+  expect(d.reason).toBe(
+    "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
+  );
+  expect(d.files["tickets/001.spec.md"]).toContain("1. migrate and switch over in one step\n");
   expect(Object.keys(d.files)).toEqual(["spec.md", "tickets/001.spec.md", "tickets/002.spec.md"]);
   expect(d.files["spec.md"]!.startsWith("# Idempotency keys for checkout")).toBe(true);
 

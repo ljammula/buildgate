@@ -77,6 +77,26 @@ export function headingPositions(lines: readonly string[], headings: readonly st
   return positions;
 }
 
+/**
+ * The [start, end) lines of the section `heading` opens, its own line
+ * included, up to the next of `headings` found after it; null when the
+ * heading is not one of `headings` or is not in the text. Sections are cut at
+ * the required headings only, the way the structure checks read the file.
+ */
+export function sectionRange(
+  lines: readonly string[],
+  headings: readonly string[],
+  heading: string,
+): { readonly start: number; readonly end: number } | null {
+  const at = headings.indexOf(heading);
+  if (at === -1) return null;
+  const positions = headingPositions(lines, headings);
+  const start = positions[at] ?? -1;
+  if (start === -1) return null;
+  const next = positions.slice(at + 1).find((position) => position !== -1);
+  return { start, end: next ?? lines.length };
+}
+
 function anyNonBlank(lines: readonly string[]): boolean {
   return lines.some((line) => trimSpace(line) !== "");
 }

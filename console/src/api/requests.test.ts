@@ -124,7 +124,9 @@ describe("reads", () => {
     const detail = await getRevision(http, "req-plan-review", 1);
     expect(calls[1]!.url).toBe("/requests/req-plan-review/revisions/1");
     expect(calls[1]!.init.headers).toEqual(READ);
-    expect(detail.reason).toBe("split the migration out");
+    expect(detail.reason).toBe(
+      "- tickets/001.spec.md, ### Steps: split the migration out\n\nOtherwise fine.",
+    );
     expect(detail.files["spec.md"]).toContain("# Idempotency keys for checkout");
   });
 });

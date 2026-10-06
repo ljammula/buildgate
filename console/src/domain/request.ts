@@ -248,6 +248,12 @@ export interface RevisionSummary {
   readonly reason: string;
   readonly fromState: string;
   readonly files: readonly string[];
+  /**
+   * Whether the note was handed to the redraft that followed (Go's
+   * Revision.FeedbackSupplied). False for a revision recorded before the
+   * server kept this, which is also a redraft that never saw the note.
+   */
+  readonly feedbackSupplied: boolean;
 }
 
 function decodeRevisionSummary(o: JsonObject, at: string): RevisionSummary {
@@ -258,6 +264,7 @@ function decodeRevisionSummary(o: JsonObject, at: string): RevisionSummary {
     reason: reqString(o, "reason", at),
     fromState: reqString(o, "from_state", at),
     files: stringList(o, "files", at),
+    feedbackSupplied: optBoolean(o, "feedback_supplied", at),
   };
 }
 

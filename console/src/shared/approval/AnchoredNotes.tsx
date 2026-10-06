@@ -2,7 +2,7 @@ import { Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import type { RejectionAnchor } from "@/domain/request";
-import type { AnchorTarget } from "@/domain/reviewAnchors";
+import { type AnchorTarget, anchorPlace } from "@/domain/reviewAnchors";
 import { Button } from "@/ui/Button";
 import { Field, Input, Select } from "@/ui/Input";
 
@@ -12,13 +12,6 @@ export interface AnchoredNotesProps {
   readonly notes: readonly RejectionAnchor[];
   readonly onChange: (notes: readonly RejectionAnchor[]) => void;
   readonly disabled?: boolean;
-}
-
-function place(note: RejectionAnchor): string {
-  const section = note.section.replace(/^#+\s*/, "");
-  return [note.path, section, note.item > 0 ? `number ${note.item}` : ""]
-    .filter((part) => part !== "")
-    .join(" · ");
 }
 
 /**
@@ -46,7 +39,7 @@ export function AnchoredNotes({ targets, notes, onChange, disabled = false }: An
           {notes.map((note, i) => (
             <li key={i} className="flex items-start gap-2 text-sm">
               <span className="min-w-0 flex-1 break-words">
-                <span className="text-fg-muted font-mono text-xs">{place(note)}</span>
+                <span className="text-fg-muted font-mono text-xs">{anchorPlace(note)}</span>
                 {`: ${note.note}`}
               </span>
               <Button

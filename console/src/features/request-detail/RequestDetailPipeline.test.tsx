@@ -349,9 +349,89 @@ describe("compare with a rejected revision", () => {
     ).toBeVisible();
 
     const diff = await screen.findByTestId("revision-diff");
-    expect(screen.getByRole("heading", { name: "Changes since you rejected" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Changes since you rejected" })).toBeVisible();
+    // A revision with no hand-off recorded: the operator is told the redraft did not see the note.
+    expect(screen.getByTestId("revision-feedback")).toHaveTextContent(
+      "The drafter was not given this note",
+    );
     expect(within(diff).getAllByText(/Old detail\./).length).toBeGreaterThan(0);
     expect(within(diff).getAllByText(/New detail\./).length).toBeGreaterThan(0);
+  });
+
+  test("each anchored note is shown against its criterion or section, then and now", async () => {
+    const OLD =
+      "# Spec\n\n## Problem\n\np\n\n## Acceptance criteria\n\n1. It adds.\n2. A key is scoped.\n\n## Risks\n\nr\n";
+    const NEW =
+      "# Spec\n\n## Problem\n\np\n\n## Acceptance criteria\n\n1. It adds.\n2. A key is scoped to one account.\n\n## Risks\n\nr\n";
+    const reason =
+      "- spec.md, ## Acceptance criteria, number 2: which account?\n- spec.md, ## Risks: name one\n\nOtherwise fine.";
+    const meta = {
+      index: 1,
+      at: "2026-09-10T09:00:00Z",
+      by: "jane",
+      reason,
+      fromState: "spec_review",
+    };
+    openRequest(
+      requestWire({
+        state: "spec_review",
+        title: "Rejected once",
+        spec: NEW,
+        rejections: [
+          rejectionWire({
+            by: "jane",
+            at: "2026-09-10T09:00:00Z",
+            reason,
+            fromState: "spec_review",
+            note: "Otherwise fine.",
+            anchors: [
+              {
+                path: "spec.md",
+                section: "## Acceptance criteria",
+                item: 2,
+                note: "which account?",
+              },
+              { path: "spec.md", section: "## Risks", note: "name one" },
+            ],
+          }),
+        ],
+      }),
+      {
+        extra: [
+          {
+            on: "GET /requests/req-1/revisions",
+            reply: json([revisionWire({ ...meta, files: ["spec.md"], feedbackSupplied: true })]),
+          },
+          {
+            on: "GET /requests/req-1/revisions/1",
+            reply: json(revisionWire({ ...meta, files: { "spec.md": OLD } })),
+          },
+        ],
+      },
+    );
+    await screen.findByRole("heading", { level: 1, name: "Rejected once" });
+    await screen.findByTestId("revision-diff");
+    // The free note alone is quoted: the anchored ones are listed against their places.
+    const note = screen.getByTestId("revision-note");
+    expect(note).toHaveTextContent("Otherwise fine.");
+    expect(note).not.toHaveTextContent("which account?");
+    expect(screen.getByTestId("revision-feedback")).toHaveTextContent(
+      "The drafter was given this note for the redraft.",
+    );
+    const items = within(
+      screen.getByRole("list", { name: "Your notes on specific places" }),
+    ).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("spec.md · Acceptance criteria · number 2");
+    expect(items[0]).toHaveTextContent("which account?");
+    expect(items[0]).toHaveTextContent("- 2. A key is scoped.");
+    expect(items[0]).toHaveTextContent("+ 2. A key is scoped to one account.");
+    expect(items[1]).toHaveTextContent("spec.md · Risks");
+    expect(items[1]).toHaveTextContent("Unchanged since you rejected");
+    // The approval is bound to the whole current text, which stays open below.
+    expect(
+      within(screen.getByTestId("markdown-raw-content")).getByText(/scoped to one account/),
+    ).toBeVisible();
   });
 
   test("matches a ticket by its absolute spec_path against the revision's relative key", async () => {
@@ -517,7 +597,9 @@ describe("compare with a rejected revision", () => {
     );
     await screen.findByRole("heading", { level: 1, name: "Rejected at spec" });
     await waitFor(() => {
-      expect(screen.queryByRole("region", { name: "Revisions" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "Changes since you rejected" }),
+      ).not.toBeInTheDocument();
     });
   });
 });
