@@ -9,7 +9,8 @@ the fixture's review comments on it as a second GitHub account, and then
 watches the pull request itself until every comment is answered or the
 request stops.
 
-A comment is RESOLVED when its thread holds the factory's "Addressed in
+A run that stops before its pull request posts no comment and adds none to
+the share; it is still recorded, as a fail. A comment is RESOLVED when its thread holds the factory's "Addressed in
 <sha>." reply and <sha> is a commit of the pull request. The run PASSES
 when every comment is resolved, which the factory can only do within
 max_review_rounds. Each run appends one line to the results file, and
@@ -250,7 +251,7 @@ class Round:
 			if not value:
 				raise SystemExit(f"live-round: {name} is required (see this script's doc comment)")
 		record = {"date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "fixture": self.name,
-			"factoryd_version": (sh([self.bin, "version"], check=False).splitlines() or ["unknown"])[0], "comments": len(self.fixture["comments"]),
+			"factoryd_version": (sh([self.bin, "version"], check=False).splitlines() or ["unknown"])[0], "comments": 0,
 			"resolved": 0, "rounds_not_pushed": 0, "outcome": "fail"}
 		started = time.time()
 		try:
@@ -258,8 +259,11 @@ class Round:
 			self.to_pull_request()
 			record["pull_request"] = self.pr
 			slug, number, roots = self.comment()
+			# Counted only once posted: a run that stopped before its pull
+			# request put no comment in front of the factory.
+			record["comments"] = len(roots)
 			record["resolved"], record["rounds_not_pushed"], record["request_state"] = self.watch(slug, number, roots)
-			if record["resolved"] == record["comments"]:
+			if roots and record["resolved"] == len(roots):
 				record["outcome"] = "pass"
 		except RuntimeError as err:
 			record["error"] = str(err)
@@ -272,7 +276,7 @@ class Round:
 			path.parent.mkdir(parents=True, exist_ok=True)
 			with path.open("a") as f:
 				f.write(json.dumps(record) + "\n")
-		print(f"{'PASS' if record['outcome'] == 'pass' else 'FAIL'}  {self.name}: {record['resolved']}/{record['comments']} reviewer comments resolved, {record['rounds_not_pushed']} round(s) not pushed first")
+		print(f"{'PASS' if record['outcome'] == 'pass' else 'FAIL'}  {self.name}: {record['resolved']}/{record['comments']} posted reviewer comments resolved, {record['rounds_not_pushed']} round(s) not pushed first")
 		return 0 if record["outcome"] == "pass" else 1
 
 
