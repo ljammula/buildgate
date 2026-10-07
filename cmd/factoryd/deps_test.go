@@ -5,6 +5,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"context"
+	"crypto/x509"
 	"errors"
 	"io"
 	"os/exec"
@@ -113,9 +114,11 @@ type fakeHost struct {
 	runUpgradeCommandFn  func(c upgradeCmd) ([]byte, error)
 	serveHealthzOKFn     func(addr string) bool
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
+	shippedRootsPEMFn    func(ctx context.Context) ([]byte, error)
 	sleepFn              func(d time.Duration)
 	spawnServeFn         func(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	spawnWorkerFn        func(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
+	tlsRootFn            func(ctx context.Context, host string) (*x509.Certificate, error)
 }
 
 func (f *fakeHost) browserCommand(target string) *exec.Cmd         { return f.browserCommandFn(target) }
@@ -132,7 +135,13 @@ func (f *fakeHost) serveHealthzOK(addr string) bool                { return f.se
 func (f *fakeHost) serveVerifiedOurs(dataDir string, addr string) (int, bool) {
 	return f.serveVerifiedOursFn(dataDir, addr)
 }
+func (f *fakeHost) shippedRootsPEM(ctx context.Context) ([]byte, error) {
+	return f.shippedRootsPEMFn(ctx)
+}
 func (f *fakeHost) sleep(d time.Duration) { f.sleepFn(d) }
+func (f *fakeHost) tlsRoot(ctx context.Context, host string) (*x509.Certificate, error) {
+	return f.tlsRootFn(ctx, host)
+}
 func (f *fakeHost) spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error {
 	return f.spawnServeFn(w, binaryPath, configPath, dataDir, addr)
 }
@@ -251,9 +260,17 @@ func newTestDeps(t testing.TB) *deps {
 		runUpgradeCommandFn:  realHost.runUpgradeCommand,
 		serveHealthzOKFn:     realHost.serveHealthzOK,
 		serveVerifiedOursFn:  realHost.serveVerifiedOurs,
-		sleepFn:              realHost.sleep,
-		spawnServeFn:         realHost.spawnServe,
-		spawnWorkerFn:        realHost.spawnWorker,
+		// No test reaches a public host or the machine's keychain: the
+		// TLS-interception check is skipped unless a test sets these.
+		shippedRootsPEMFn: func(context.Context) ([]byte, error) {
+			return nil, errors.New("test host: no shipped roots")
+		},
+		tlsRootFn: func(context.Context, string) (*x509.Certificate, error) {
+			return nil, errors.New("test host: no public TLS probe")
+		},
+		sleepFn:       realHost.sleep,
+		spawnServeFn:  realHost.spawnServe,
+		spawnWorkerFn: realHost.spawnWorker,
 	}
 	realSandbox := realSandboxRuntime{dp: dp}
 	dp.sandbox = &fakeSandboxRuntime{

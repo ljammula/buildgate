@@ -12,7 +12,15 @@ GO_COVERPKG = $(shell echo $(GO_PACKAGES) | tr ' ' ',')
 # Optional PEM bundle for a host TLS-interception proxy. It is passed to
 # Docker only as a BuildKit secret for host-side dependency downloads.
 # pip (project images) reads it in place of its own roots, so it must hold every CA pip needs.
-BUILD_CA_BUNDLE ?=
+# The console's npm reads it as NODE_EXTRA_CA_CERTS, beside Node's own roots.
+# Not given, it is found on first use: the hidden `factoryd build-ca-bundle`
+# subcommand prints the bundle it wrote when this network intercepts TLS,
+# nothing otherwise. The result is exported, so a sub-make does not ask again.
+BUILD_CA_BUNDLE ?= $(eval export BUILD_CA_BUNDLE := $(shell go run ./cmd/factoryd build-ca-bundle))$(BUILD_CA_BUNDLE)
+# Without the proxy's CA, npm cannot verify the registry; under some Node
+# versions it then dies with "Exit handler never called!" instead of naming
+# the certificate.
+CONSOLE_NPM_CA = $(if $(BUILD_CA_BUNDLE),NODE_EXTRA_CA_CERTS="$(abspath $(BUILD_CA_BUNDLE))")
 
 # go test -race over GO_PACKAGES, with cmd/factoryd (~9 minutes serially
 # under -race) split into parallel processes: see scripts/test-sharded.sh.
@@ -82,7 +90,7 @@ coverage:
 # The console's checks (typecheck, lint, format, Vitest). Node and npm are a
 # separate toolchain and intentionally not part of verify.
 console-test:
-	cd console && npm ci && npm run check
+	cd console && $(CONSOLE_NPM_CA) npm ci && npm run check
 
 # Builds the React console (console/dist) and embeds it into
 # internal/consoleweb/dist so `factoryd serve` serves it directly, same
@@ -91,20 +99,26 @@ console-test:
 # relative URL, which is exactly right once the same origin serves both.
 # npm runs no install scripts (console/.npmrc).
 console-build:
-	cd console && npm ci && npm run build
+	cd console && $(CONSOLE_NPM_CA) npm ci && npm run build
 	rm -rf internal/consoleweb/dist
 	mkdir -p internal/consoleweb/dist
 	cp -R console/dist/. internal/consoleweb/dist/
 	touch internal/consoleweb/dist/.gitkeep
 
-# Best-effort console-build: skipped (the binary then serves
-# internal/consoleweb's built-in placeholder page) when npm isn't on PATH,
-# so `make install` keeps working on a machine that never installed it.
+# Best-effort console-build: the binary serves internal/consoleweb's built-in
+# placeholder page when npm isn't on PATH or the build fails (an npm that
+# crashes under the machine's Node, a registry it cannot reach), so
+# `make install` still installs factoryd on a machine with no working Node
+# toolchain. A failed build empties internal/consoleweb/dist first: a bundle
+# left by an earlier build would otherwise be embedded in the new binary.
 console-build-optional:
-	@if command -v npm >/dev/null 2>&1; then \
-		$(MAKE) console-build; \
-	else \
+	@if ! command -v npm >/dev/null 2>&1; then \
 		echo "npm not installed -- factoryd will serve the console placeholder page (see console/README.md for make console-build)"; \
+	elif ! $(MAKE) console-build; then \
+		rm -rf internal/consoleweb/dist; \
+		mkdir -p internal/consoleweb/dist; \
+		touch internal/consoleweb/dist/.gitkeep; \
+		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console; 'factoryd doctor' says whether this network intercepts TLS." >&2; \
 	fi
 
 # agent/pi/'s own Python toolchain, same reasoning as console-test above --
@@ -283,6 +297,7 @@ temporal-up:
 # each is re-pointed, so no config is left pinning a superseded image
 # (paths must not contain spaces).
 local-images: docker-buildx-check
+	@: one lookup for the image builds below and the console build after them: $(BUILD_CA_BUNDLE)
 	@if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then \
 		echo "Docker is required to build the sandbox/meter/registry-proxy images (every image factoryd launches is built from source, never published) -- install/start Docker and re-run 'make install'." >&2; exit 1; \
 	fi

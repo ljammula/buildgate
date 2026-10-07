@@ -155,11 +155,39 @@ make install
 `PATH` silently shadows a fresh one — `which -a factoryd` after `make
 install` to confirm which one resolves.
 
-For a host behind TLS interception, use
-`BUILD_CA_BUNDLE=/path/to/ca.pem make install`. BuildKit mounts that PEM only
-for the image-build dependency downloads and never stores it in an image. pip
-uses it in place of its own roots, so include any public roots the proxy does
-not cover.
+On a network that intercepts TLS (a corporate proxy that re-signs HTTPS),
+`make install` needs the proxy's CA: for the image builds' downloads, and for
+the console's `npm ci`, which without it cannot verify the registry and, under
+some Node versions, fails with `Exit handler never called!` instead of a
+certificate error. `make install` finds it:
+
+```text
+make install
+  |
+  BUILD_CA_BUNDLE given? -- yes --> use that file
+  | no
+  registry.npmjs.org signed by a root macOS ships? -- yes --> no bundle
+  | no
+  that root in the keychain? -- no --> warning: pass BUILD_CA_BUNDLE yourself
+  | yes
+  write it and macOS's roots to ~/.config/factoryd/build-ca.pem, use that
+```
+
+| Consumer | How it reads the bundle |
+|---|---|
+| Image builds | A BuildKit secret, mounted only for the dependency downloads and never stored in an image |
+| pip (project images) | In place of its own roots, so a bundle you pass yourself must include any public roots the proxy does not cover |
+| Console `npm ci` | `NODE_EXTRA_CA_CERTS`, beside Node's own roots |
+
+`factoryd doctor` has the same lookup as its `build CA bundle` row:
+
+| Row | Meaning |
+|---|---|
+| `ok ... (not intercepted, none needed)` | No bundle is used |
+| `ok ... (intercepted by <CA>; make install uses this bundle)` with `use: BUILD_CA_BUNDLE=...` | The bundle is written |
+| `warn ... signed by "<CA>"` | Intercepted, bundle not written yet: `make install` or `doctor -fix` writes it |
+| `warn ... a CA this machine does not trust` | The proxy's CA is not in the keychain: get it as a PEM file and run `BUILD_CA_BUNDLE=/path/to/ca.pem make install` |
+| no row | The registry is unreachable, or the machine is not a Mac |
 
 **Upgrade.** `factoryd upgrade [-to <tag|ref>] [-source <checkout>] [-yes]
 [-wait]` takes this machine to the newest release tag (or `-to`) in one

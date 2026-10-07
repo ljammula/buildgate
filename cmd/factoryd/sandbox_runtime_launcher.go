@@ -7,3 +7,7 @@ package main
 // gateway, and there is no flag, config key or environment variable that
 // selects anything else.
 const launchThroughGateway = true
+
+// probePublicTLS lets doctor ask a public registry for its certificate
+// (doctorCheckTLSInterception).
+const probePublicTLS = true

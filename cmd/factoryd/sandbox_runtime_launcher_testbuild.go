@@ -9,3 +9,7 @@ package main
 // that script, which is the tests' stand-in for a sandbox. No installed
 // binary is built with this tag.
 const launchThroughGateway = false
+
+// probePublicTLS is false in the same binary: an integration test's doctor
+// run never reaches a public host.
+const probePublicTLS = false

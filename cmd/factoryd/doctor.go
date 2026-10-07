@@ -513,6 +513,9 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	if selfPath, selfErr := os.Executable(); selfErr == nil {
 		checks = append(checks, doctorCheckPathShadowing(selfPath, os.Getenv("PATH"), fix))
 	}
+	if c, ok := doctorCheckTLSInterception(ctx, dp, fix); ok {
+		checks = append(checks, c)
+	}
 	return checks, nil
 }
 

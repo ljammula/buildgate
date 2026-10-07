@@ -78,11 +78,11 @@ Prerequisites: Go, Docker with the `buildx` plugin, `gh`, `python3`; Node
 | Binary | `go install ./cmd/factoryd` into `$(go env GOPATH)/bin` (usually `~/go/bin`); prints the `export PATH=...` line if that is not on `PATH`, and warns if an older `factoryd` earlier on `PATH` shadows it |
 | Images | Requires Docker, starts Temporal, builds the sandbox, meter and registry-proxy images from source (`internal/sandbox/Dockerfile` and friends), pulls OpenShell's three by digest. An image whose inputs haven't changed is not rebuilt (it is still pushed, so the recorded digest is unchanged); `FORCE_IMAGE_BUILD=1` always rebuilds |
 | Config | Records buildgate's image refs in the default session config via `factoryd configure-images`. `FACTORYD_CONFIG="<config> <config>..."` re-points each listed config instead, so a second profile does not keep pinning a superseded image |
-| Console | Baked in if `npm` is on `PATH`, else a placeholder page ([`console/README.md`](console/README.md)) |
+| Console | Baked in if `npm` is on `PATH` and its build succeeds, else a placeholder page and, for a failed build, a warning naming the Node and npm versions ([`console/README.md`](console/README.md)) |
 | Agent skill | Installs the `buildgate` skill into `~/.agents/skills` (Copilot, Codex); refreshes `~/.claude/skills/buildgate` when it exists |
 | Tree | Leaves `git status` clean |
 
-- **TLS interception:** `BUILD_CA_BUNDLE=/path/to/ca.pem make install` ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
+- **TLS interception:** `make install` detects a proxy that re-signs HTTPS and builds with its CA from the keychain; `BUILD_CA_BUNDLE=/path/to/ca.pem make install` overrides it ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
 - **Model prices** live in `internal/prices/prices.yml`; edit it and run `make install` when a provider changes prices. A model with no entry costs $0 ([USAGE_REFERENCE.md § Model prices](USAGE_REFERENCE.md#model-prices)).
 
 ### Drive it from a coding agent
