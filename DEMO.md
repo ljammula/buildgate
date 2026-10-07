@@ -86,7 +86,7 @@ Ticket (one sentence, well specified so the spec drafts cleanly):
 
 | # | Do | Say |
 |---|---|---|
-| 1 | `factoryd quickstart ~/demo/mathops "Add an exported function Multiply(a, b int) int to package mathops in mathops.go, returning a*b, with a table-driven test"` | "One command: doctor checks, session config, starts the queue daemon and the console, submits the request, and stops at the first human gate." Answer the route/model prompts the first time. Flags go **before** `<repo-path>`. |
+| 1 | `factoryd quickstart ~/demo/mathops "Add an exported function Multiply(a, b int) int to package mathops in mathops.go, returning a*b, with a table-driven test"` | "One command: doctor checks, session config, starts Temporal, the gateway and meter, the worker and the console, submits the request, and stops at the first human gate." Answer the route/model prompts the first time. Flags go **before** `<repo-path>`. |
 | 2 | Note the `-data-dir` in the `factoryd watch -data-dir ...` line it prints and run `DATA=<that path>` in each terminal you'll use. | "The factory is drafting a spec from the request and the repo's own docs." |
 | 3 | The console opens in your browser on the request (lost the tab? `factoryd console -open`). | "This is the operator console. Waiting-on-you items sort first. The Pipeline stepper shows where it is and who did what." |
 | 4 | Read the spec and its acceptance criteria. Optionally click Edit, change a word, Save. | "This is the human gate. Nothing is built from a spec nobody approved: approval records who and the SHA-256 of the file, and a later edit is refused." |

@@ -176,7 +176,7 @@ func doctorTestSettingsForRoute(api string) sessionconfig.Settings {
 // TestDoctorChecksForRelayWorkerAPI's own former "responses requires a
 // worker model" subtest is gone: a models: entry with API: openai-
 // responses and no id is now refused before doctorRouteChecks' own
-// per-route "relay worker API (openai-responses)" check could ever run
+// per-route "worker model API (openai-responses)" check could ever run
 // -- sandbox.RoutePolicy.Validate itself requires a non-empty worker
 // model id whenever worker API is openai-responses, and
 // modelrole.SelectRoute builds/validates that same policy before ever
@@ -191,7 +191,7 @@ func TestDoctorChecksForRelayWorkerAPI(t *testing.T) {
 			settings:      settings,
 		})
 		for _, check := range checks {
-			if strings.Contains(check.Name, "relay worker API (openai-completions)") {
+			if strings.Contains(check.Name, "worker model API (openai-completions)") {
 				if check.Err != nil {
 					t.Fatalf("Chat Completions API doctor check failed: %v", check.Err)
 				}

@@ -1059,7 +1059,7 @@ func doctorRouteCheckName(label, name string) string {
 func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doctorRoute, runCredentialChecks, runUpstreamProbes bool) []doctorCheck {
 	var checks []doctorCheck
 	if r.workerAPI != "" {
-		check := doctorCheck{Name: doctorRouteCheckName(r.label, fmt.Sprintf("relay worker API (%s)", r.workerAPI))}
+		check := doctorCheck{Name: doctorRouteCheckName(r.label, fmt.Sprintf("worker model API (%s)", r.workerAPI))}
 		switch r.workerAPI {
 		case meter.RequestFormatOpenAICompletions:
 		case meter.RequestFormatOpenAIResponses:
@@ -1068,7 +1068,7 @@ func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doc
 				check.Fix = fmt.Sprintf("set %s to the entitled upstream model id", r.keys.workerModelID)
 			}
 		default:
-			check.Err = fmt.Errorf("unsupported relay worker API %q", r.workerAPI)
+			check.Err = fmt.Errorf("unsupported worker model API %q", r.workerAPI)
 			check.Fix = "use openai-completions or openai-responses"
 		}
 		checks = append(checks, check)
@@ -1878,7 +1878,7 @@ func doctorFixAbsentImages(dp *deps, in doctorInputs, repoRootFlag string) ([]do
 }
 
 func doctorCheckRelayUpstreamPathComposition(relayUpstream, relayWorkerModelID string, keys doctorRouteKeys) doctorCheck {
-	name := "relay upstream path composition"
+	name := "route upstream path composition"
 	if relayWorkerModelID == "" {
 		return doctorCheck{Name: name}
 	}
@@ -1910,7 +1910,7 @@ func doctorCheckRelayUpstreamPathComposition(relayUpstream, relayWorkerModelID s
 // a route's own upstream's host is already a literal IP address, since there is
 // nothing to resolve.
 func doctorCheckRelayUpstreamHostResolvesInSandbox(ctx context.Context, dockerBinary, image, relayUpstream string, keys doctorRouteKeys) doctorCheck {
-	const name = "relay upstream host resolves from inside the sandbox"
+	const name = "route upstream host resolves from inside the sandbox"
 	parsed, err := url.Parse(relayUpstream)
 	if err != nil {
 		return doctorCheck{Name: name, Err: fmt.Errorf("parse %s: %w", keys.upstream, err)}
@@ -1969,7 +1969,7 @@ func doctorCheckRelayUpstreamHostResolvesInSandbox(ctx context.Context, dockerBi
 // failure (refused, timed out, no route, unresolvable host) does, since
 // those are exactly what "model route unreachable" collapses onto today.
 func doctorCheckRelayUpstreamReachableFromSandbox(ctx context.Context, dockerBinary, image, relayUpstream, workerBasePath, workerModelID, caBundlePath string, keys doctorRouteKeys) doctorCheck {
-	name := fmt.Sprintf("relay upstream reachable from inside the sandbox (%s)", relayUpstream)
+	name := fmt.Sprintf("route upstream reachable from inside the sandbox (%s)", relayUpstream)
 	// With a worker model id, the probe asks the question the worker will
 	// actually ask -- GET <upstream><base-path>/models -- and requires the
 	// id to be listed, instead of accepting any HTTP response at all.
@@ -1988,7 +1988,7 @@ func doctorCheckRelayUpstreamReachableFromSandbox(ctx context.Context, dockerBin
 	if workerModelID != "" {
 		probeURL = strings.TrimRight(relayUpstream, "/") + "/" + strings.Trim(workerBasePath, "/") + "/models"
 		expectModel = workerModelID
-		name = fmt.Sprintf("relay upstream lists the worker model from inside the sandbox (%s, %s)", probeURL, workerModelID)
+		name = fmt.Sprintf("route upstream lists the worker model from inside the sandbox (%s, %s)", probeURL, workerModelID)
 	}
 	containerCABundlePath := ""
 	if caBundlePath != "" {

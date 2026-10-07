@@ -374,10 +374,10 @@ func TestDoctorRoutesModeDedupesUpstreamProbes(t *testing.T) {
 	}
 	names := checkNames(doctorChecksFor(context.Background(), in))
 
-	if n := countOccurrences(names, "route r1, model m1: relay upstream host resolves from inside the sandbox (shared.example.invalid)"); n != 1 {
+	if n := countOccurrences(names, "route r1, model m1: route upstream host resolves from inside the sandbox (shared.example.invalid)"); n != 1 {
 		t.Errorf("checks = %v, want exactly one host-resolves probe for the first pair on this upstream", names)
 	}
-	if n := countOccurrences(names, "route r2, model m2: relay upstream host resolves from inside the sandbox (shared.example.invalid)"); n != 0 {
+	if n := countOccurrences(names, "route r2, model m2: route upstream host resolves from inside the sandbox (shared.example.invalid)"); n != 0 {
 		t.Errorf("checks = %v, want no host-resolves probe for the second pair sharing the same upstream", names)
 	}
 	// Pair-specific checks still run for both, regardless of the shared
@@ -428,7 +428,7 @@ func TestDoctorRoutesModeFixTextKeepsUserValues(t *testing.T) {
 		settings:      settings,
 	}
 	checks := doctorChecksFor(context.Background(), in)
-	c := findCheck(checks, "route local, model m: relay upstream host resolves from inside the sandbox (internal-relay-upstream.example.com)")
+	c := findCheck(checks, "route local, model m: route upstream host resolves from inside the sandbox (internal-relay-upstream.example.com)")
 	if c == nil {
 		t.Fatalf("checks = %v, want the host-resolves check", checkNames(checks))
 	}

@@ -231,7 +231,7 @@
 </ul>
 <p>Buildgate's answer is four rules, enforced in code rather than asked of the agent in a prompt:</p>
 <div class="facts">
-  <div class="fact"><strong>Contain the agent</strong><span>Docker sandbox, no direct network; the model is reached only through a relay that holds credentials and budgets</span></div>
+  <div class="fact"><strong>Contain the agent</strong><span>A sandbox with no network interface; the model is reached only through a supervisor that holds the credential and a meter that enforces budgets</span></div>
   <div class="fact"><strong>Trust evidence, not claims</strong><span>Every stage advances on checks the factory runs itself, recorded with exit codes and hashes</span></div>
   <div class="fact"><strong>Humans decide</strong><span>People approve the spec and plan before code is written, and merge the result</span></div>
   <div class="fact"><strong>Never merges</strong><span>The factory opens a PR at most. Merge and deploy are permanently human, by design</span></div>
@@ -283,23 +283,28 @@
 <pre><code>submit / quickstart / console      record the request; start whatever is missing
         |
         v
-queue-run   one per data dir (drain lock + heartbeat); started for you
+worker      one per data dir (heartbeat); started for you
   loop: advance each request one step
         drafting -&gt; wait at review gates -&gt; build tickets, one at a time
         |
         +-- Temporal                  each ticket is a RunWorkflow; build, verify
-                                      and gates run as Activities
+        |                             and gates run as Activities
+        +-- OpenShell gateway         creates every sandbox, holds each route's
+        |                             credential (127.0.0.1:17670)
+        +-- meter                     counts every model call, refuses one past
+                                      a ceiling (127.0.0.1:17672)
 serve       the console and its API, over the same data dir</code></pre>
 <ul>
-  <li><strong>queue-run</strong> refuses to stop mid-build unless forced; a forced stop, crash or reboot halts the run and the next <code>queue-run</code> rebuilds the ticket. A laptop sleep needs nothing: on wake the interrupted step is retried in the same run, and a build keeps its work. A shared local model host and compose sidecars are locked host-wide, so jobs queue rather than collide.</li>
-  <li><strong>Temporal:</strong> every build runs on it, and factoryd starts it with Docker when it is down (with <code>FACTORYD_AUTOSTART=0</code> an address must be given). After a sleep or a lost worker the request waits in <code>resume_review</code> and a build keeps its work (fresh agent session plus a short handoff once you resume). It adds workflow history in its Web UI (<code>localhost:8233</code>), and <code>-repository</code> serializes all runs on one repo.</li>
+  <li><strong>worker</strong> refuses to stop mid-build unless forced. A forced stop, crash, reboot or laptop sleep halts the run and nothing reruns the lost step on its own: the request waits in <code>resume_review</code> with the build's worktree kept, until you run <code>factoryd resume &lt;id&gt;</code>, <code>resume -from scratch</code> or <code>cancel</code>. A shared local model host and compose sidecars are locked host-wide, so jobs queue rather than collide.</li>
+  <li><strong>Temporal:</strong> every build runs on it, and factoryd starts it with Docker when it is down (with <code>FACTORYD_AUTOSTART=0</code> an address must be given). A resumed build continues in its kept worktree with a fresh agent session and a short handoff. It adds workflow history in its Web UI (<code>localhost:8233</code>), and <code>-repository</code> serializes all runs on one repo.</li>
+  <li><strong>OpenShell gateway and meter:</strong> two containers in the Docker VM, started with the worker (or by <code>factoryd doctor -fix</code>). The gateway is the only thing that creates a worker container; each sandbox gets its own supervisor, the worker's one route out. Both listen on the VM's loopback only, and the gateway accepts only factoryd's client certificate.</li>
 </ul>
 <h3 id="console">The console</h3>
 <p>Opened from the link <code>submit</code> prints, or <code>factoryd console</code>. Served by <code>factoryd serve</code>.</p>
 <div class="table-wrap"><table>
   <thead><tr><th>Screen</th><th>Shows</th></tr></thead>
   <tbody>
-    <tr><td>Request board</td><td>Every request with its cost, waiting-on-you first; a banner when no <code>queue-run</code> is alive or the release policy can never open a PR</td></tr>
+    <tr><td>Request board</td><td>Every request with its cost, waiting-on-you first; a banner when no <code>worker</code> is alive or the release policy can never open a PR</td></tr>
     <tr><td>Request detail</td><td>Pipeline stepper (each step timestamped and attributed); spec, acceptance tests and plan with Edit, Approve, Request changes</td></tr>
     <tr><td>Triage</td><td>Keyboard queue of pending spec and plan reviews (<code>j</code>/<code>k</code>, <code>a</code>/<code>r</code>); no approve-all</td></tr>
     <tr><td>New request</td><td>The same form as <code>submit</code>, limited to allow-listed workspaces</td></tr>
@@ -311,7 +316,7 @@ serve       the console and its API, over the same data dir</code></pre>
 <h3 id="build">Inside the build</h3>
 <p>Everything the agent can touch is inside the sandbox. Everything that decides whether it passed runs outside it.</p>
 <div class="diagram">
-<svg viewBox="0 0 980 430" role="img" aria-label="Build architecture: the coding agent (Pi, Codex, Copilot or pifork) works in a network-denied Docker sandbox with read-only acceptance tests and skills, optional compose sidecars, and reaches the model only through the relay; its commits go through factory-run verify and gates before a PR opens for human merge.">
+<svg viewBox="0 0 980 430" role="img" aria-label="Build architecture: the coding agent (Pi, Codex, Copilot or pifork) works in a sandbox with no network interface, created by the OpenShell gateway, with read-only acceptance tests and skills and optional compose sidecars, and reaches the model only through its supervisor and the meter; its commits go through factory-run verify and gates before a PR opens for human merge.">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
     <marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
@@ -319,12 +324,12 @@ serve       the console and its API, over the same data dir</code></pre>
 
   <!-- Host zone -->
   <rect class="zone" x="10" y="10" width="960" height="410" rx="12"/>
-  <text class="small" x="26" y="32">Your machine: factoryd (queue-run) drives everything below</text>
+  <text class="small" x="26" y="32">Your machine: factoryd (worker) drives everything below</text>
 
   <!-- Sandbox zone -->
   <rect class="zone" x="30" y="48" width="330" height="250" rx="10"/>
-  <text class="label" x="46" y="72">Docker sandbox</text>
-  <text class="small" x="46" y="90">read-only root · non-root · no direct network</text>
+  <text class="label" x="46" y="72">Sandbox (OpenShell gateway)</text>
+  <text class="small" x="46" y="90">non-root · filesystem policy · no network</text>
 
   <rect class="box accent" x="50" y="104" width="290" height="70" rx="8"/>
   <text class="label" x="66" y="130">Coding agent (worker)</text>
@@ -336,11 +341,11 @@ serve       the console and its API, over the same data dir</code></pre>
   <text class="small" x="66" y="242">approved acceptance tests at .oracle</text>
   <text class="small" x="66" y="258">chosen skills at /inputs/skills</text>
 
-  <!-- Relay and model -->
+  <!-- Supervisor, meter and model -->
   <rect class="box" x="420" y="104" width="200" height="70" rx="8"/>
-  <text class="label" x="436" y="130">Inference relay</text>
-  <text class="small" x="436" y="150">injects credentials, enforces</text>
-  <text class="small" x="436" y="166">token and cost budgets</text>
+  <text class="label" x="436" y="130">Supervisor + meter</text>
+  <text class="small" x="436" y="150">substitute the credential,</text>
+  <text class="small" x="436" y="166">enforce token, cost ceilings</text>
 
   <rect class="box" x="720" y="104" width="230" height="70" rx="8"/>
   <text class="label" x="736" y="130">Model provider</text>
@@ -416,20 +421,20 @@ serve       the console and its API, over the same data dir</code></pre>
 <div class="cards">
   <div class="card ok"><h3>Accepted</h3><p>All gates passed. The branch carries <code>BUILD_REPORT.md</code> and <code>BUILD_EVIDENCE.json</code>; a draft PR opens and is marked ready once checks pass.</p></div>
   <div class="card bad"><h3>Quarantined</h3><p>A gate failed, or the corrective rounds ran out. The triage note names the gate and likely cause. Nothing reaches a PR.</p></div>
-  <div class="card halt"><h3>Halted</h3><p>A crash, timeout or environment fault. <code>factoryd retry &lt;id&gt;</code> once fixed. A worker lost once (sleep, crash, stop) does not halt: the step is retried in the same run.</p></div>
+  <div class="card halt"><h3>Halted</h3><p>A crash, timeout or environment fault. <code>factoryd retry &lt;id&gt;</code> once fixed. A worker lost mid-build (sleep, crash, stop) leaves the request in <code>resume_review</code> with its work kept: <code>factoryd resume &lt;id&gt;</code>.</p></div>
 </div>
 <p><code>factoryd inbox</code> lists everything waiting on you, with the command to act on each.</p>
 
 <h3 id="trust">What the agent can't do</h3>
 <ul class="guarantees">
-  <li>Reach the internet: its only route is the relay, and packages come through a registry proxy</li>
-  <li>See model credentials: the relay injects them on the way out</li>
-  <li>Spend past the budget: the relay enforces token and cost ceilings</li>
+  <li>Reach the internet: it has no network interface. Its only route out is its sandbox's supervisor, which admits one model upstream; packages come through a registry proxy</li>
+  <li>See model credentials: it holds a placeholder, and the supervisor substitutes the real one on the way out</li>
+  <li>Spend past the budget: every model call passes the meter, which refuses one past the token or cost ceiling</li>
   <li>Edit the approved spec or acceptance tests: hash-pinned, tests mounted read-only</li>
   <li>Choose its reviewer or declare itself done: only factory-run gates accept</li>
   <li>Merge or deploy: a human does that, outside Buildgate</li>
 </ul>
-<p class="note">Threat model and invariants SC-001 to SC-016: <code>safety-contract.md</code> and <code>containment-matrix.md</code>, both enforced by tests.</p>
+<p class="note">Threat model and invariants SC-001 to SC-017: <code>safety-contract.md</code> and <code>containment-matrix.md</code>, both enforced by tests.</p>
 
 <h2 id="extend">Extend it</h2>
 <p>Most extensions are configuration. The ones that need code have a fixed, small footprint, so a new agent or gate can't quietly widen the trust boundary.</p>
@@ -442,15 +447,15 @@ serve       the console and its API, over the same data dir</code></pre>
     <tr><td>Add a check for one repo</td><td>Set <code>lint_command</code>, <code>security_command</code>, <code>unit_test_command</code> or <code>integration_test_command</code> in the repo's <code>.factory.yml</code>; each becomes a named gate with its own evidence</td><td>No</td></tr>
     <tr><td>Give the build real services</td><td>Declare Postgres, Kafka or Redis in the repo's <code>docker-compose.yml</code> (allow-listed images); they run as sidecars for every phase. Check with <code>factoryd doctor -target-repo &lt;repo&gt;</code></td><td>No</td></tr>
     <tr><td>Add a new kind of gate for all repos</td><td>One <code>CommandGate</code> entry in <code>internal/policy/gates.go</code> plus one <code>.factory.yml</code> field</td><td>Yes, small</td></tr>
-    <tr><td>Add a coding-agent harness</td><td>One adapter class in <code>agent/pi/scripts/harness_adapters.py</code>, one entry in <code>internal/harness/registry.go</code>, one image stage in the sandbox Dockerfile, recorded fixtures, one <code>containment-matrix.md</code> row. No change to job launch, the relay or the config schema; Codex and Copilot CLI were added this way</td><td>Yes, five files</td></tr>
+    <tr><td>Add a coding-agent harness</td><td>One adapter class in <code>agent/pi/scripts/harness_adapters.py</code>, one entry in <code>internal/harness/registry.go</code>, one image stage in the sandbox Dockerfile, recorded fixtures, one <code>containment-matrix.md</code> row. No change to job launch, the sandbox runtime or the config schema; Codex and Copilot CLI were added this way</td><td>Yes, five files</td></tr>
   </tbody>
 </table></div>
 
 <h2 id="evidence">Evidence</h2>
 <ul>
   <li><strong>Tested like it tests agents:</strong> Go tests under the race detector, a Python suite covering every harness adapter, and console tests. <code>CLAIMS.md</code> maps every safety claim to the test that enforces it; a claim citing a missing test fails the build.</li>
-  <li><strong>Live runs gate pipeline changes:</strong> <code>make live-smoke</code> runs real tickets through the real sandbox and relay before merge. The worst bugs found so far were invisible to unit tests and review.</li>
-  <li><strong>Proven live on:</strong> a fixed corpus of accept and must-quarantine tickets on both execution paths, with no false accepts; real GitHub issues; a service with Postgres, Kafka and Redis; real bugs in three repos, merged by a human; and resuming a build after a simulated laptop sleep and after a <code>kill -9</code> of <code>queue-run</code> mid-build (both accepted in the same run, the earlier work kept).</li>
+  <li><strong>Live runs gate pipeline changes:</strong> <code>make live-smoke</code> runs real tickets through the real gateway, sandbox and meter before merge. The worst bugs found so far were invisible to unit tests and review.</li>
+  <li><strong>Proven live on:</strong> a fixed corpus of accept and must-quarantine tickets, with no false accepts; real GitHub issues; a service with Postgres, Kafka and Redis; real bugs in three repos, merged by a human; and resuming a build with <code>factoryd resume</code> after a laptop sleep and after a <code>kill -9</code> of the worker mid-build (the earlier work kept).</li>
 </ul>
 
 <h3 id="cost">Cost: Codex alone vs Buildgate</h3>
@@ -475,18 +480,18 @@ serve       the console and its API, over the same data dir</code></pre>
 <h3>Not yet proven</h3>
 <ul>
   <li><strong>Our repos:</strong> fixtures are personal repos. Multi-module <code>go.work</code>, cgo, private modules and generated code are untested.</li>
-  <li><strong>Routes:</strong> live runs so far use the ChatGPT Codex route; Copilot (route and CLI harness) hasn't completed a live build.</li>
+  <li><strong>Routes:</strong> live runs mostly use the ChatGPT Codex route; the Copilot route and CLI harness have each taken one small ticket to accepted, on an individual free plan.</li>
   <li><strong>Acceptance-test drafting:</strong> opt-in; drafted tests still need a careful human read.</li>
   <li><strong>A lost build step</strong> is never retried automatically: the request waits in <code>resume_review</code> for your decision, and the build keeps its worktree.</li>
 </ul>
 
 <h2 id="try">Try it</h2>
-<p>Needs Docker, <code>go</code>, <code>gh</code>, <code>python3</code> and a model route. Use a throwaway repo first.</p>
+<p><code>make install</code> installs the tools the Mac lacks, starts Docker and asks which model to use. Keep the repo under your home directory, and use a throwaway one first.</p>
 <pre><code>git clone https://github.com/ljammula/buildgate.git &amp;&amp; cd buildgate
-make install                       # factoryd + every image, built from source
-factoryd doctor                    # Docker, images, model route, Temporal
+make install                       # tools, factoryd, every image; asks for the model
+factoryd doctor                    # Docker, images, model route, Temporal, gateway, meter
 
-# Config, Temporal, queue daemon, console, submit; stops at the first human gate
+# Config, Temporal, gateway and meter, worker, console, submit; stops at the first human gate
 factoryd quickstart ~/code/your-repo "Add X to Y"
 
 factoryd inbox                     # what's waiting on you
@@ -504,7 +509,7 @@ factoryd stop                      # stop what quickstart started</code></pre>
   var STAGES = [
     {
       id: "submitted", title: "Submit the ticket", who: "you",
-      what: "One command checks the machine, writes the session config, records the request and starts whatever is missing: Temporal, the queue daemon and the console. It prints the console link. Nothing is built yet.",
+      what: "One command checks the machine, writes the session config, records the request and starts whatever is missing: Temporal, the OpenShell gateway and meter, the worker and the console. It prints the console link. Nothing is built yet.",
       see: '<pre><code>factoryd quickstart ~/demo/mathops \\\n  "Add an exported function Multiply(a, b int) int to package\n   mathops in mathops.go, returning a*b, with a table-driven test"</code></pre>',
       why: "A precise ticket (package, function name, signature) gives the spec drafter less to guess."
     },
@@ -546,9 +551,9 @@ factoryd stop                      # stop what quickstart started</code></pre>
     },
     {
       id: "building", title: "Building", who: "factory",
-      what: "The execution role's coding agent works in a Docker sandbox with no direct network, reaching the model only through the relay. If the repo's docker-compose.yml declares Postgres, Kafka or Redis, they run as sidecars the agent and the gates can reach. The agent self-checks with focused tests; the factory then reruns the full verify command and the gates itself. A failure with rounds left goes back to the agent, with the failure attached.",
+      what: "The execution role's coding agent works in a sandbox with no network interface, reaching the model only through its supervisor and the meter. If the repo's docker-compose.yml declares Postgres, Kafka or Redis, they run as sidecars the agent and the gates can reach. The agent self-checks with focused tests; the factory then reruns the full verify command and the gates itself. A failure with rounds left goes back to the agent, with the failure attached.",
       see: '<pre><code>$ factoryd watch &lt;request-id&gt;\nbuilding   round 1  agent committed 2 files\nverify     go test ./...            pass\ngates      diff_scope               pass\n           tests_added              pass\n           full_suite_verify        pass\n           spec_conformity          pass\n           code_review              pass\n           reference_oracle         pass\nresult     accepted</code></pre>',
-      why: 'If the Mac sleeps, factoryd crashes or you run <code>factoryd stop</code> mid-build, the build resumes in the same run and keeps its code. See <a href="#build">Inside the build</a> for the full picture. <code>factoryd logs -f &lt;request-id&gt;</code> follows the raw log. A shared local model host is serialized automatically; a waiting job shows "queued behind &lt;run&gt;".'
+      why: 'If the Mac sleeps, factoryd crashes or you force a stop mid-build, the request waits in <code>resume_review</code> and the build keeps its code: <code>factoryd resume &lt;request-id&gt;</code> continues it. See <a href="#build">Inside the build</a> for the full picture. <code>factoryd logs -f &lt;request-id&gt;</code> follows the raw log. A shared local model host is serialized automatically; a waiting job shows "queued behind &lt;run&gt;".'
     },
     {
       id: "pr_review", title: "Pull request", who: "factory",
