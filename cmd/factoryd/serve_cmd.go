@@ -762,6 +762,17 @@ func (sv *serveRun) listenAndServe() error {
 		// name it.
 		api.WithListenAddr(*sv.addr),
 	}
+	// POST /mcp is on only while the token file `factoryd mcp` creates
+	// exists beside this serve's session config; with no config there is
+	// nowhere for that file to be, so the endpoint stays off.
+	if configPath, ok := resolveEffectiveConfigPath(*sv.sf.configPath); ok {
+		tokenPath := mcpTokenPathFor(configPath)
+		source := mcpTokenSource(tokenPath)
+		serverOptions = append(serverOptions, api.WithMCPToken(source))
+		if source() != "" {
+			log.Printf("MCP endpoint enabled at /mcp (token file %s; `factoryd mcp -disable` turns it off)", tokenPath)
+		}
+	}
 	if *sv.temporalUIURL != "" {
 		serverOptions = append(serverOptions, api.WithTemporalUIURL(*sv.temporalUIURL))
 	}
