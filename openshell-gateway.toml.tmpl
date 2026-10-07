@@ -1,12 +1,13 @@
 # OpenShell 0.1.2 gateway configuration (Docker compute driver, mTLS for
 # clients, JWT for sandboxes), rendered by factoryd into the gateway's compose
-# stack. The only field is the meter's gRPC endpoint.
+# stack. The fields are the gateway's two listen addresses and the meter's
+# gRPC endpoint.
 [openshell]
 version = 2
 
 [openshell.gateway]
-bind_address        = "127.0.0.1:8080"
-health_bind_address = "127.0.0.1:8081"
+bind_address        = "{{.GatewayAddr}}"
+health_bind_address = "{{.GatewayHealthAddr}}"
 log_level           = "info"
 compute_driver      = "docker"
 disable_tls         = false
@@ -38,7 +39,7 @@ supervisor_image      = "ghcr.io/nvidia/openshell/supervisor@sha256:d7b5264bb6bc
 image_pull_policy     = "if_not_present"
 sandbox_label         = "openshell"
 # The supervisor is host-networked and reaches the gateway on the VM's loopback.
-grpc_endpoint         = "https://127.0.0.1:8080"
+grpc_endpoint         = "https://{{.GatewayAddr}}"
 app_armor_profile     = "RuntimeDefault"
 # Bind mounts carry the worktree into a sandbox; OpenShell requires its
 # resource admission off for them.

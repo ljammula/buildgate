@@ -13,7 +13,7 @@ in [`USAGE.md`](../../USAGE.md#the-sandbox-runtime-openshell-gateway-and-meter).
 ```text
   Mac (host)                         Docker VM (colima)
   +-------------------+   mTLS    +-------------------------------+
-  | factoryd          |---------->| gateway   127.0.0.1:8080      |
+  | factoryd          |---------->| gateway   127.0.0.1:17670     |
   |  internal/sandbox |           |  Docker socket, credential    |
   |  internal/openshell           |  store, /var/lib/openshell    |
   +---------+---------+           +---------------+---------------+
@@ -27,7 +27,7 @@ in [`USAGE.md`](../../USAGE.md#the-sandbox-runtime-openshell-gateway-and-meter).
   | worker output     |    host binds                                  |
   +-------------------+                               each model call  v
                                    +---------------------+      +-----------+
-                                   | meter 127.0.0.1:50051|<-----| upstream  |
+                                   | meter 127.0.0.1:17672|<-----| upstream  |
                                    | ceilings, ledger     |      | model API |
                                    +---------------------+      +-----------+
 ```

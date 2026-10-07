@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -380,7 +381,10 @@ func TestOpenShellRenderedGatewayConfig(t *testing.T) {
 		`sandbox_runtime_image = "` + wantSandboxImage + `"`,
 		`supervisor_image      = "` + wantSupervisorImage + `"`,
 		`name                     = "factoryd-meter"`,
-		`grpc_endpoint            = "http://127.0.0.1:50051"`,
+		`bind_address        = "127.0.0.1:17670"`,
+		`health_bind_address = "127.0.0.1:17671"`,
+		`grpc_endpoint         = "https://127.0.0.1:17670"`,
+		`grpc_endpoint            = "http://127.0.0.1:17672"`,
 		`sandbox_pids_limit    = 1024`,
 	} {
 		if !strings.Contains(config, want) {
@@ -438,7 +442,12 @@ func TestOpenShellComposeIsLoopbackOnlyAndNeverRestarts(t *testing.T) {
 	if gateway.NetworkMode != "host" || len(gateway.Ports) != 0 {
 		t.Errorf("gateway network_mode = %q, ports = %q; want host and none", gateway.NetworkMode, gateway.Ports)
 	}
-	if want := []string{"--bind-address", "127.0.0.1", "--port", "8080"}; !reflect.DeepEqual(gateway.Command, want) {
+	// The compose file repeats the ports of hostcontrol's addresses.
+	_, gatewayPort, _ := net.SplitHostPort(hostcontrol.OpenShellGatewayAddr)
+	if want := []string{hostcontrol.OpenShellMeterAddr + ":50051"}; !reflect.DeepEqual(doc.Services["meter"].Ports, want) {
+		t.Errorf("meter ports = %q, want %q", doc.Services["meter"].Ports, want)
+	}
+	if want := []string{"--bind-address", "127.0.0.1", "--port", gatewayPort}; !reflect.DeepEqual(gateway.Command, want) {
 		t.Errorf("gateway command = %q, want %q", gateway.Command, want)
 	}
 	if got := doc.Services["gateway"].Image; got != wantGatewayImage {

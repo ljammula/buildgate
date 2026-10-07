@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sanitize"
@@ -42,8 +43,13 @@ func meterLedgerRoot() string {
 	return filepath.Join(sessionconfig.DataRoot(), "meter-ledgers")
 }
 
-// startStack is the real sandboxRuntimeBoundary start.
+// startStack is the real sandboxRuntimeBoundary start. It refuses, naming the
+// container, while one outside the stack publishes a port of the stack: the
+// start would wait out its timeout on a service that cannot bind.
 func (impl realSandboxRuntime) startStack(ctx context.Context, w io.Writer, meterImage string) error {
+	if holders := impl.portHolders(ctx, hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellGatewayHealthAddr, hostcontrol.OpenShellMeterAddr); len(holders) > 0 {
+		return fmt.Errorf("%s; stop that container or publish it on another host port", strings.Join(holders, "; "))
+	}
 	stack, err := openShellStack(meterImage)
 	if err != nil {
 		return err

@@ -828,9 +828,9 @@ pinned by digest), not by `docker run`.
 
 | Part | What it is | Where |
 |---|---|---|
-| Gateway | Creates and deletes sandboxes, holds each route's credential | Container `buildgate-openshell-gateway-1`, `127.0.0.1:8080` on the Docker VM |
+| Gateway | Creates and deletes sandboxes, holds each route's credential | Container `buildgate-openshell-gateway-1`, `127.0.0.1:17670` on the Docker VM (health on `:17671`) |
 | Supervisor | One per sandbox; the worker's only route out; admits the route's upstream, path and model executables | Started by the gateway with each worker |
-| Meter | buildgate's own service; counts each run's tokens and cost and refuses a request past a ceiling | Container `buildgate-openshell-meter-1`, `127.0.0.1:50051`; ledgers in `~/buildgate/meter-ledgers/` |
+| Meter | buildgate's own service; counts each run's tokens and cost and refuses a request past a ceiling | Container `buildgate-openshell-meter-1`, `127.0.0.1:17672`; ledgers in `~/buildgate/meter-ledgers/` |
 | Stack files | Compose file, gateway config, client certificate | `~/.config/factoryd/openshell/` |
 
 | Task | Command |
@@ -898,6 +898,7 @@ What changes for a build:
 | Containers left behind after killing a run | The process died before cleanup | `docker ps`, then `docker rm -f` only the `factoryd-*` containers |
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
 | A build fails: "sandbox runtime: ... run `factoryd doctor -fix`" | The OpenShell gateway or the meter is not running (a reboot, a colima restart, `stop -all`) | `factoryd doctor -fix` starts both; `worker` and a single-ticket run start them too unless `FACTORYD_AUTOSTART=0` |
+| `doctor`, `doctor -fix`, `worker` or a run reports `port N is published by container ...` | Another container in the Docker VM publishes one of the stack's ports (`17670`, `17671`, `17672`); the gateway shares the VM's network, so it cannot bind | Stop that container or publish it on another host port, then `factoryd doctor -fix` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
 | A build is refused: `compose_services_worker_env ... names the service ... as a host` | The worker joins no network and resolves no service name | Read `BG_SERVICE_<NAME>` (an address) in the target repo instead |

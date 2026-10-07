@@ -35,12 +35,12 @@ func liveRuntime(t *testing.T) (*Runtime, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := Connect("127.0.0.1:8080", hostcontrol.OpenShellMTLSDir(stack))
+	client, err := Connect(hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellMTLSDir(stack))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	readiness, err := ConnectReadiness("127.0.0.1:8080", hostcontrol.OpenShellMTLSDir(stack))
+	readiness, err := ConnectReadiness(hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellMTLSDir(stack))
 	if err != nil {
 		t.Fatal(err)
 	}

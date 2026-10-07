@@ -39,7 +39,7 @@ host).
   HOST (factoryd)               SANDBOX VM (colima)
   +--------------+   mTLS      +--------------------+
   | factoryd     |------------>| OpenShell gateway  |
-  | -data-dir    |  sandbox    | VM loopback :8080  |
+  | -data-dir    |  sandbox    | VM loopback :17670 |
   | (durable     |  request,   | Docker socket,     |
   |  run records)|  credential | credential store   |
   +--------------+  push       +---------+----------+
@@ -59,7 +59,7 @@ host).
                                 | sandbox): admits a    |      +-------------+
                                 | destination + binary  |----->| meter       |
                                 | + path, substitutes   | each | VM loopback |
-                                | the credential        | call | :50051      |
+                                | the credential        | call | :17672      |
                                 +-----------+-----------+      | ceilings,   |
                                             |                  | ledger      |
                                             v                  +-------------+

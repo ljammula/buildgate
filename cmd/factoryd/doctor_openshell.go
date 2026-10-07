@@ -64,17 +64,27 @@ func doctorCheckOpenShellImages(ctx context.Context, dockerBinary string) doctor
 func doctorCheckOpenShellGateway(dp *deps, ctx context.Context) doctorCheck {
 	name := "OpenShell gateway healthy"
 	if err := dp.sandbox.gatewayHealthy(ctx); err != nil {
-		return doctorCheck{Name: name, Err: err, Advisory: true,
-			Fix: "run `factoryd doctor -fix` to start it (needs Docker); its stack is `~/.config/factoryd/openshell/docker-compose.yml`"}
+		return openShellDownCheck(dp, ctx, name, err, hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellGatewayHealthAddr)
 	}
 	return doctorCheck{Name: name}
+}
+
+// openShellDownCheck is the row of a stack service that does not answer on
+// addrs. A container outside the stack that publishes one of those ports is
+// why it cannot start, so the row names it instead of asking for a start.
+func openShellDownCheck(dp *deps, ctx context.Context, name string, err error, addrs ...string) doctorCheck {
+	if holders := dp.sandbox.portHolders(ctx, addrs...); len(holders) > 0 {
+		return doctorCheck{Name: name, Err: fmt.Errorf("%v; %s", err, strings.Join(holders, "; ")), Advisory: true,
+			Fix: "stop that container or publish it on another host port, then run `factoryd doctor -fix`"}
+	}
+	return doctorCheck{Name: name, Err: err, Advisory: true,
+		Fix: "run `factoryd doctor -fix` to start it (needs Docker); its stack is `~/.config/factoryd/openshell/docker-compose.yml`"}
 }
 
 func doctorCheckMeter(dp *deps, ctx context.Context) doctorCheck {
 	name := "meter healthy"
 	if err := dp.sandbox.meterHealthy(ctx); err != nil {
-		return doctorCheck{Name: name, Err: err, Advisory: true,
-			Fix: "run `factoryd doctor -fix` to start it (needs Docker); its stack is `~/.config/factoryd/openshell/docker-compose.yml`"}
+		return openShellDownCheck(dp, ctx, name, err, hostcontrol.OpenShellMeterAddr)
 	}
 	return doctorCheck{Name: name}
 }

@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"buildgate/internal/hostcontrol"
@@ -16,13 +19,7 @@ import (
 	"buildgate/internal/sandbox"
 )
 
-// The OpenShell gateway and the meter publish on the Docker VM's loopback,
-// which Colima forwards to the host's.
-const (
-	openShellGatewayAddr = "127.0.0.1:8080"
-	openShellMeterAddr   = "127.0.0.1:50051"
-	openShellDialTimeout = 3 * time.Second
-)
+const openShellDialTimeout = 3 * time.Second
 
 // realSandboxRuntime is the real sandboxRuntimeBoundary.
 type realSandboxRuntime struct{ dp *deps }
@@ -36,7 +33,7 @@ func (impl realSandboxRuntime) gatewayHealthy(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, openShellDialTimeout)
 	defer cancel()
-	conn, err := (&tls.Dialer{Config: cfg}).DialContext(ctx, "tcp", openShellGatewayAddr)
+	conn, err := (&tls.Dialer{Config: cfg}).DialContext(ctx, "tcp", hostcontrol.OpenShellGatewayAddr)
 	if err != nil {
 		return err
 	}
@@ -69,11 +66,69 @@ func openShellClientTLS() (*tls.Config, error) {
 func (impl realSandboxRuntime) meterHealthy(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, openShellDialTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", openShellMeterAddr)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostcontrol.OpenShellMeterAddr)
 	if err != nil {
 		return err
 	}
 	return conn.Close()
+}
+
+// portHolders asks Docker which running containers publish a port of addrs,
+// leaving out the stack's own.
+func (impl realSandboxRuntime) portHolders(ctx context.Context, addrs ...string) []string {
+	ctx, cancel := context.WithTimeout(ctx, openShellDialTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, impl.dp.docker.dockerBinary(), "ps", "--format", "{{.Names}}\t{{.Ports}}").Output()
+	if err != nil {
+		return nil
+	}
+	return publishedPortHolders(string(out), addrs)
+}
+
+// publishedPortHolders reads `docker ps` lines of "name<TAB>ports" and
+// returns one "port N is published by container `name`" for each port of
+// addrs a container outside the OpenShell stack publishes.
+func publishedPortHolders(ps string, addrs []string) []string {
+	var holders []string
+	for _, line := range strings.Split(ps, "\n") {
+		name, ports, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok || strings.HasPrefix(name, hostcontrol.OpenShellProject+"-") {
+			continue
+		}
+		for _, addr := range addrs {
+			_, port, err := net.SplitHostPort(addr)
+			if err == nil && publishesPort(ports, port) {
+				holders = append(holders, fmt.Sprintf("port %s is published by container `%s`", port, name))
+			}
+		}
+	}
+	return holders
+}
+
+// publishesPort reports whether a `docker ps` ports column
+// ("0.0.0.0:8081->8080/tcp, 127.0.0.1:9000-9002->9000-9002/tcp") publishes
+// port on the host side, alone or inside a range.
+func publishesPort(column, port string) bool {
+	want, err := strconv.Atoi(port)
+	if err != nil {
+		return false
+	}
+	for _, mapping := range strings.Split(column, ",") {
+		host, _, published := strings.Cut(strings.TrimSpace(mapping), "->")
+		if !published {
+			continue
+		}
+		lo, hi, isRange := strings.Cut(host[strings.LastIndex(host, ":")+1:], "-")
+		if !isRange {
+			hi = lo
+		}
+		first, errLo := strconv.Atoi(lo)
+		last, errHi := strconv.Atoi(hi)
+		if errLo == nil && errHi == nil && first <= want && want <= last {
+			return true
+		}
+	}
+	return false
 }
 
 // runtime is the gateway runtime every worker is launched through. It is nil
@@ -95,7 +150,7 @@ func (impl realSandboxRuntime) sandboxNames(ctx context.Context) ([]string, erro
 // stack that is down fails with what to run, not with a dial error.
 func newGatewayRuntime(dp *deps) *openshell.Lazy {
 	return &openshell.Lazy{
-		Address: openShellGatewayAddr,
+		Address: hostcontrol.OpenShellGatewayAddr,
 		BundleDir: func() (string, error) {
 			stack, err := hostcontrol.OpenShellStackPath()
 			if err != nil {
