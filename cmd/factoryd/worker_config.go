@@ -278,6 +278,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	if registryProxyDeliberate && *registryProxy && *sandboxImage == "" {
 		return requestdriver.WorkerConfig{}, "", fmt.Errorf("-registry-proxy requires -sandbox-image")
 	}
+	defaultEgressCABundle(egressCABundle)
 	if *egressCABundle != "" {
 		if err := sandbox.ValidateEgressCABundle(*egressCABundle); err != nil {
 			return requestdriver.WorkerConfig{}, "", fmt.Errorf("-egress-ca-bundle: %w", err)

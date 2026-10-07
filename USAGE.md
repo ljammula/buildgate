@@ -882,14 +882,14 @@ pinned by digest), not by `docker run`.
 | Part | What it is | Where |
 |---|---|---|
 | Gateway | Creates and deletes sandboxes, holds each route's credential | Container `buildgate-openshell-gateway-1`, `127.0.0.1:17670` on the Docker VM (health on `:17671`) |
-| Supervisor | One per sandbox; the worker's only route out; admits the route's upstream, path and model executables | Started by the gateway with each worker |
+| Supervisor | One per sandbox; the worker's only route out; admits the route's upstream, path and model executables; opens the TLS connection of every model call | Started by the gateway with each worker, from the pinned image, or on a network that re-signs TLS from `buildgate-openshell-supervisor:ca-<hash>`, built from it with that network's CA |
 | Meter | buildgate's own service; counts each run's tokens and cost and refuses a request past a ceiling | Container `buildgate-openshell-meter-1`, `127.0.0.1:17672`; ledgers in `~/buildgate/meter-ledgers/` |
 | Stack files | Compose file, gateway config, client certificate | `~/.config/factoryd/openshell/` |
 
 | Task | Command |
 |---|---|
 | Start both | `factoryd doctor -fix` (needs `meter_image`, which `make install` writes); `worker` and a single-ticket run start them when they do not answer, unless `FACTORYD_AUTOSTART=0` |
-| Check | `factoryd doctor`: images present, gateway healthy, gateway config has TLS and mTLS on, meter healthy |
+| Check | `factoryd doctor`: images present, gateway healthy, gateway config has TLS and mTLS on, meter healthy; on a network that re-signs TLS, also that the supervisor trusts its CA |
 | Stop | `factoryd stop -all`; refused while a request or sandbox is active, because a gateway restart starts every sandbox's command again |
 | Pull the pinned OpenShell images | `make openshell-images` (part of `make install`) |
 | Apply changed stack files after an upgrade | `factoryd stop -all`, then `factoryd doctor -fix`: a gateway that already answers is not recreated |
@@ -952,6 +952,7 @@ What changes for a build:
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
 | A build fails: "sandbox runtime: ... run `factoryd doctor -fix`" | The OpenShell gateway or the meter is not running (a reboot, a colima restart, `stop -all`) | `factoryd doctor -fix` starts both; `worker` and a single-ticket run start them too unless `FACTORYD_AUTOSTART=0` |
 | `doctor`, `doctor -fix`, `worker` or a run reports `port N is published by container ...` | Another container in the Docker VM publishes one of the stack's ports (`17670`, `17671`, `17672`); the gateway shares the VM's network, so it cannot bind | Stop that container or publish it on another host port, then `factoryd doctor -fix` |
+| A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
 | A build is refused: `compose_services_worker_env ... names the service ... as a host` | The worker joins no network and resolves no service name | Read `BG_SERVICE_<NAME>` (an address) in the target repo instead |

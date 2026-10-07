@@ -717,6 +717,7 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	if err := validateSandboxResourceLimitFlags("-sandbox", *tr.sandboxMemory, *tr.sandboxCPUs, *tr.sandboxTmpfsSize); err != nil {
 		return err
 	}
+	defaultEgressCABundle(tr.egressCABundle)
 	if *tr.egressCABundle != "" {
 		if err := sandbox.ValidateEgressCABundle(*tr.egressCABundle); err != nil {
 			return fmt.Errorf("-egress-ca-bundle: %w", err)

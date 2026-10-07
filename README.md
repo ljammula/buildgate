@@ -120,6 +120,7 @@ approves, rejects or merges.
 | Any command fails `parse .../config.yml: relay_image: deleted with the inference relay` | A `config.yml` written for the retired inference relay still has `relay_image` or `relay_upstream_timeout` | Delete that line; the error names the retired key it found |
 | `quickstart` fails `the repository ... is outside your home directory`, or `mount visibility (repository reachable inside a container)` | The gateway sees only your home directory, and the Docker VM must also share the repository's path (`/tmp` is neither) | Clone or move the repo under `$HOME`; if it still fails, add it to your VM's mounts (USAGE.md, "Data directory and colima") |
 | A request halts "the meter does not answer" / "sandbox runtime ... run `factoryd doctor -fix`" | The OpenShell gateway/meter is down (reboot, colima restart) or the config lost `meter_image` | `factoryd doctor -fix`; `worker` starts them too unless `FACTORYD_AUTOSTART=0` |
+| A request halts `model route error: Connection error.` on a network that re-signs TLS | The gateway was started before the proxy's CA was recorded, so the sandbox's supervisor refuses the model upstream | `factoryd doctor -fix`, then `factoryd retry <id>` (USAGE.md, Troubleshooting) |
 | Stop what is running / drop a request | | `factoryd stop`; `factoryd cancel <request-id>` |
 
 ### Uninstall

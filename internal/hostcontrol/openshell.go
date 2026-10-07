@@ -3,6 +3,8 @@ package hostcontrol
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +21,8 @@ import (
 
 // The OpenShell images buildgate pins by digest. They are pulled, never built:
 // the same references appear in docker-compose.openshell.yml (gateway) and
-// openshell-gateway.toml.tmpl (sandbox and supervisor).
+// openshell-gateway.toml.tmpl (sandbox). The supervisor's is rendered into the
+// gateway configuration, as it is or as the base of SupervisorImageFor's.
 const (
 	OpenShellGatewayImage    = "ghcr.io/nvidia/openshell/gateway@sha256:2fe4dad9118e14ab80a8258b545ea6e6cd74c3469e24ad4e6610f964d98913a2"
 	OpenShellSandboxImage    = "ghcr.io/nvidia/openshell/sandbox@sha256:bf4797b6c511f2d8ba02955dbba4bf76c1f0dd6d83531420c5408d5f1fb9d72f"
@@ -71,6 +74,11 @@ type OpenShellStack struct {
 	MeterImage     string
 	MeterLedgerDir string
 	HomeDir        string
+	// InterceptingCA is a PEM file of the roots a network that re-signs TLS
+	// (a corporate proxy) presents, or "" on a network that does not. The
+	// supervisor opens every model call's TLS connection, so it has to
+	// trust them.
+	InterceptingCA string
 	Timeouts       OpenShellTimeouts
 }
 
@@ -102,14 +110,71 @@ func OpenShellStackDir() (string, error) {
 	return dir, nil
 }
 
-// RenderGatewayConfig renders the gateway configuration the stack runs.
-func RenderGatewayConfig() (string, error) {
+// supervisorCAFile is the trust file the supervisor reads for upstream TLS.
+const supervisorCAFile = "/etc/ssl/certs/ca-certificates.crt"
+
+// SupervisorImageFor names the supervisor image of a stack whose network
+// re-signs TLS with the roots in caPEM: a local image, named after the pinned
+// supervisor and the PEM, so another CA or another pin is another image. With
+// no PEM it is the pinned supervisor itself.
+func SupervisorImageFor(caPEM []byte) string {
+	if len(bytes.TrimSpace(caPEM)) == 0 {
+		return OpenShellSupervisorImage
+	}
+	sum := sha256.Sum256(append([]byte(OpenShellSupervisorImage+"\n"), caPEM...))
+	return fmt.Sprintf("buildgate-openshell-supervisor:ca-%x", sum[:8])
+}
+
+// EnsureSupervisorImage returns the supervisor image for the stack, building
+// SupervisorImageFor's from the pinned supervisor when caPath is set and the
+// image is not there yet: OpenShell's Docker driver takes no CA for the
+// supervisor, which trusts its built-in public roots and the file this
+// replaces. The pinned image is not changed and stays the one a network
+// without interception runs.
+func EnsureSupervisorImage(dp Deps, ctx context.Context, caPath string, t OpenShellTimeouts) (string, error) {
+	if caPath == "" {
+		return OpenShellSupervisorImage, nil
+	}
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		return "", fmt.Errorf("read the intercepting CA: %w", err)
+	}
+	if !x509.NewCertPool().AppendCertsFromPEM(caPEM) {
+		return "", fmt.Errorf("%s holds no certificate", caPath)
+	}
+	image := SupervisorImageFor(caPEM)
+	buildCtx, cancel := context.WithTimeout(ctx, t.ComposeUp)
+	defer cancel()
+	if exec.CommandContext(buildCtx, dp.DockerBinary(), "image", "inspect", image).Run() == nil {
+		return image, nil
+	}
+	dir, err := os.MkdirTemp("", "buildgate-supervisor-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	dockerfile := fmt.Sprintf("FROM %s\nCOPY ca-certificates.crt %s\n", OpenShellSupervisorImage, supervisorCAFile)
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ca-certificates.crt"), caPEM, 0o644); err != nil {
+		return "", err
+	}
+	if out, err := exec.CommandContext(buildCtx, dp.DockerBinary(), "build", "-t", image, dir).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("build the supervisor image that trusts %s: %v: %s", caPath, err, sanitize.Line(LastLine(string(out))))
+	}
+	return image, nil
+}
+
+// RenderGatewayConfig renders the gateway configuration the stack runs, with
+// supervisorImage as the image every sandbox's supervisor starts from.
+func RenderGatewayConfig(supervisorImage string) (string, error) {
 	tmpl, err := template.New("gateway").Option("missingkey=error").Parse(buildgate.OpenShellGatewayTemplate)
 	if err != nil {
 		return "", fmt.Errorf("parse gateway config template: %w", err)
 	}
 	var out bytes.Buffer
-	fields := struct{ GatewayAddr, GatewayHealthAddr, MeterEndpoint string }{OpenShellGatewayAddr, OpenShellGatewayHealthAddr, openShellMeterEndpoint}
+	fields := struct{ GatewayAddr, GatewayHealthAddr, SupervisorImage, MeterEndpoint string }{OpenShellGatewayAddr, OpenShellGatewayHealthAddr, supervisorImage, openShellMeterEndpoint}
 	if err := tmpl.Execute(&out, fields); err != nil {
 		return "", fmt.Errorf("render gateway config: %w", err)
 	}
@@ -159,7 +224,11 @@ func StartOpenShell(dp Deps, ctx context.Context, w io.Writer, st OpenShellStack
 	if err := EnsureOpenShellCerts(dp, ctx, dir, st.Timeouts); err != nil {
 		return err
 	}
-	gatewayConfig, err := RenderGatewayConfig()
+	supervisorImage, err := EnsureSupervisorImage(dp, ctx, st.InterceptingCA, st.Timeouts)
+	if err != nil {
+		return err
+	}
+	gatewayConfig, err := RenderGatewayConfig(supervisorImage)
 	if err != nil {
 		return err
 	}

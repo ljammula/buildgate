@@ -57,6 +57,27 @@ func (impl realSandboxRuntime) startStack(ctx context.Context, w io.Writer, mete
 	return hostcontrol.StartOpenShell(impl.dp, ctx, w, stack)
 }
 
+// interceptingCAPath is the bundle `make install` and `doctor -fix` write on a
+// network that re-signs TLS (buildCABundlePath), or "" when there is none.
+// It is the machine's, like the stack: one gateway serves every profile.
+func interceptingCAPath() string {
+	path := buildCABundlePath()
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
+// defaultEgressCABundle fills an -egress-ca-bundle neither the command line nor
+// the session config set with interceptingCAPath, so that on a network that
+// re-signs TLS the registry proxy and the host-side model calls trust the
+// same CA the supervisors do, with nothing for the operator to configure.
+func defaultEgressCABundle(bundle *string) {
+	if *bundle == "" {
+		*bundle = interceptingCAPath()
+	}
+}
+
 // openShellStack is the stack this machine runs: one gateway and one meter
 // for every profile, the gateway seeing the home directory read-only so it
 // can check a sandbox's bind sources (the data root, and each repository's
@@ -75,6 +96,7 @@ func openShellStack(meterImage string) (hostcontrol.OpenShellStack, error) {
 		MeterImage:     meterImage,
 		MeterLedgerDir: ledgers,
 		HomeDir:        home,
+		InterceptingCA: interceptingCAPath(),
 		Timeouts:       hostcontrol.DefaultOpenShellTimeouts(),
 	}, nil
 }

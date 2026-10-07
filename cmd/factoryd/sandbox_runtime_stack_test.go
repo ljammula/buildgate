@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -59,5 +61,28 @@ func TestEnsureSandboxRuntimeStartsTheStackOnlyWhenItMay(t *testing.T) {
 				t.Errorf("output = %q, want %q", out.String(), tc.wantOutput)
 			}
 		})
+	}
+}
+
+// On a network that re-signs TLS the recorded bundle is every command's
+// egress CA unless the operator named another; elsewhere nothing is set.
+func TestDefaultEgressCABundleIsTheRecordedInterceptingCA(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	unset := ""
+	if defaultEgressCABundle(&unset); unset != "" {
+		t.Fatalf("with no recorded bundle the egress CA = %q, want none", unset)
+	}
+	if err := os.MkdirAll(filepath.Dir(buildCABundlePath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(buildCABundlePath(), []byte("pem"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if defaultEgressCABundle(&unset); unset != buildCABundlePath() {
+		t.Errorf("unset egress CA = %q, want the recorded bundle %q", unset, buildCABundlePath())
+	}
+	named := "/operator/ca.pem"
+	if defaultEgressCABundle(&named); named != "/operator/ca.pem" {
+		t.Errorf("an egress CA the operator named became %q", named)
 	}
 }

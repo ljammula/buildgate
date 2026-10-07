@@ -140,6 +140,7 @@ func (d *daemonRun) loadConfig() error {
 	if err := flags.Parse(d.args); err != nil {
 		return err
 	}
+	defaultEgressCABundle(d.egressCABundle)
 	if *d.egressCABundle != "" {
 		if err := sandbox.ValidateEgressCABundle(*d.egressCABundle); err != nil {
 			return fmt.Errorf("-egress-ca-bundle: %w", err)
