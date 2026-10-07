@@ -159,7 +159,9 @@ For a host behind TLS interception, use
 `BUILD_CA_BUNDLE=/path/to/ca.pem make install`. BuildKit mounts that PEM only
 for the image-build dependency downloads and never stores it in an image. pip
 uses it in place of its own roots, so include any public roots the proxy does
-not cover.
+not cover. The console's `npm ci` reads it too, beside Node's own roots; without
+it npm cannot verify the registry and, under some Node versions, fails with
+`Exit handler never called!` instead of a certificate error.
 
 **Upgrade.** `factoryd upgrade [-to <tag|ref>] [-source <checkout>] [-yes]
 [-wait]` takes this machine to the newest release tag (or `-to`) in one

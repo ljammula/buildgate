@@ -12,7 +12,12 @@ GO_COVERPKG = $(shell echo $(GO_PACKAGES) | tr ' ' ',')
 # Optional PEM bundle for a host TLS-interception proxy. It is passed to
 # Docker only as a BuildKit secret for host-side dependency downloads.
 # pip (project images) reads it in place of its own roots, so it must hold every CA pip needs.
+# The console's npm reads it as NODE_EXTRA_CA_CERTS, beside Node's own roots.
 BUILD_CA_BUNDLE ?=
+# Without the proxy's CA, npm cannot verify the registry; under some Node
+# versions it then dies with "Exit handler never called!" instead of naming
+# the certificate.
+CONSOLE_NPM_CA = $(if $(BUILD_CA_BUNDLE),NODE_EXTRA_CA_CERTS="$(abspath $(BUILD_CA_BUNDLE))")
 
 # go test -race over GO_PACKAGES, with cmd/factoryd (~9 minutes serially
 # under -race) split into parallel processes: see scripts/test-sharded.sh.
@@ -82,7 +87,7 @@ coverage:
 # The console's checks (typecheck, lint, format, Vitest). Node and npm are a
 # separate toolchain and intentionally not part of verify.
 console-test:
-	cd console && npm ci && npm run check
+	cd console && $(CONSOLE_NPM_CA) npm ci && npm run check
 
 # Builds the React console (console/dist) and embeds it into
 # internal/consoleweb/dist so `factoryd serve` serves it directly, same
@@ -91,7 +96,7 @@ console-test:
 # relative URL, which is exactly right once the same origin serves both.
 # npm runs no install scripts (console/.npmrc).
 console-build:
-	cd console && npm ci && npm run build
+	cd console && $(CONSOLE_NPM_CA) npm ci && npm run build
 	rm -rf internal/consoleweb/dist
 	mkdir -p internal/consoleweb/dist
 	cp -R console/dist/. internal/consoleweb/dist/
@@ -110,7 +115,7 @@ console-build-optional:
 		rm -rf internal/consoleweb/dist; \
 		mkdir -p internal/consoleweb/dist; \
 		touch internal/consoleweb/dist/.gitkeep; \
-		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console." >&2; \
+		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console; behind a TLS-intercepting proxy, pass BUILD_CA_BUNDLE=/path/to/ca.pem." >&2; \
 	fi
 
 # agent/pi/'s own Python toolchain, same reasoning as console-test above --

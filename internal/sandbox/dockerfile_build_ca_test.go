@@ -50,6 +50,9 @@ func TestHostSideImageDownloadsSupportBuildCABundle(t *testing.T) {
 		"BUILD_CA_BUNDLE ?=",
 		`--secret "id=build-ca,src=$$ca_bundle"`,
 		`ca_bundle="$(BUILD_CA_BUNDLE)"`,
+		`CONSOLE_NPM_CA = $(if $(BUILD_CA_BUNDLE),NODE_EXTRA_CA_CERTS="$(abspath $(BUILD_CA_BUNDLE))")`,
+		"cd console && $(CONSOLE_NPM_CA) npm ci && npm run build",
+		"cd console && $(CONSOLE_NPM_CA) npm ci && npm run check",
 	} {
 		if !strings.Contains(makeText, want) {
 			t.Errorf("Makefile missing %q", want)
