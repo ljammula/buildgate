@@ -97,14 +97,20 @@ console-build:
 	cp -R console/dist/. internal/consoleweb/dist/
 	touch internal/consoleweb/dist/.gitkeep
 
-# Best-effort console-build: skipped (the binary then serves
-# internal/consoleweb's built-in placeholder page) when npm isn't on PATH,
-# so `make install` keeps working on a machine that never installed it.
+# Best-effort console-build: the binary serves internal/consoleweb's built-in
+# placeholder page when npm isn't on PATH or the build fails (an npm that
+# crashes under the machine's Node, a registry it cannot reach), so
+# `make install` still installs factoryd on a machine with no working Node
+# toolchain. A failed build empties internal/consoleweb/dist first: a bundle
+# left by an earlier build would otherwise be embedded in the new binary.
 console-build-optional:
-	@if command -v npm >/dev/null 2>&1; then \
-		$(MAKE) console-build; \
-	else \
+	@if ! command -v npm >/dev/null 2>&1; then \
 		echo "npm not installed -- factoryd will serve the console placeholder page (see console/README.md for make console-build)"; \
+	elif ! $(MAKE) console-build; then \
+		rm -rf internal/consoleweb/dist; \
+		mkdir -p internal/consoleweb/dist; \
+		touch internal/consoleweb/dist/.gitkeep; \
+		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console." >&2; \
 	fi
 
 # agent/pi/'s own Python toolchain, same reasoning as console-test above --
