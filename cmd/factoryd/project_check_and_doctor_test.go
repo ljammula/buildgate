@@ -1839,7 +1839,7 @@ func TestIntegrationDoctorReportsFailuresAndFixesWithNonzeroExit(t *testing.T) {
 		t.Fatalf("expected a nonzero exit with real check failures, got success: %s", out)
 	}
 	output := string(out)
-	for _, want := range []string{"FAIL", "fix:", "docker daemon reachable", "relay upstream path composition", "sandbox tmpfs size", "checks passed"} {
+	for _, want := range []string{"FAIL", "fix:", "docker daemon reachable", "route upstream path composition", "sandbox tmpfs size", "checks passed"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("output does not contain %q:\n%s", want, output)
 		}
@@ -1935,8 +1935,8 @@ func TestIntegrationDoctorAppliesRelayUpstreamFromSessionConfig(t *testing.T) {
 	cmd := factorydCommand(t, "doctor")
 	cmd.Env = env
 	out, _ := cmd.CombinedOutput()
-	if !strings.Contains(string(out), "relay upstream path composition") {
-		t.Errorf("bare doctor output lacks the relay upstream path composition check despite relay_upstream/relay_worker_model_id configured in session config:\n%s", out)
+	if !strings.Contains(string(out), "route upstream path composition") {
+		t.Errorf("bare doctor output lacks the route upstream path composition check despite relay_upstream/relay_worker_model_id configured in session config:\n%s", out)
 	}
 }
 

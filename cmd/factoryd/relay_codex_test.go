@@ -244,7 +244,7 @@ func TestResolveRequestJobRelaySpecCarriesResponsesWorkerAPI(t *testing.T) {
 		t.Fatalf("resolveRequestJobRelaySpec = %v, want a valid chatgpt-codex drafting relay", err)
 	}
 	if spec.WorkerModelAPI != meter.RequestFormatOpenAIResponses {
-		t.Fatalf("drafting relay worker API = %q, want %q", spec.WorkerModelAPI, meter.RequestFormatOpenAIResponses)
+		t.Fatalf("drafting worker model API = %q, want %q", spec.WorkerModelAPI, meter.RequestFormatOpenAIResponses)
 	}
 }
 

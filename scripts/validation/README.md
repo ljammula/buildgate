@@ -13,7 +13,7 @@ approved-oracle fixtures. For a first look at buildgate, start with
 
 ## Phase runners
 
-Real Docker, real relay, real Temporal (Phase 2); nothing mocked. Run in
+Real Docker, real OpenShell gateway and meter, real Temporal (Phase 2); nothing mocked. Run in
 order: each assumes the previous phase passed. They take no flags; edit
 the constants at the top.
 
