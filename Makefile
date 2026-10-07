@@ -115,7 +115,7 @@ console-build-optional:
 		rm -rf internal/consoleweb/dist; \
 		mkdir -p internal/consoleweb/dist; \
 		touch internal/consoleweb/dist/.gitkeep; \
-		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console; behind a TLS-intercepting proxy, pass BUILD_CA_BUNDLE=/path/to/ca.pem." >&2; \
+		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console; behind a TLS-intercepting proxy, pass BUILD_CA_BUNDLE=/path/to/ca.pem ('factoryd doctor -fix' writes one and prints the command)." >&2; \
 	fi
 
 # agent/pi/'s own Python toolchain, same reasoning as console-test above --

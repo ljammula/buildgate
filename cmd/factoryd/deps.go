@@ -6,6 +6,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"context"
+	"crypto/x509"
 	"io"
 	"os/exec"
 	"time"
@@ -102,9 +103,11 @@ type hostBoundary interface {
 	runUpgradeCommand(c upgradeCmd) ([]byte, error)
 	serveHealthzOK(addr string) bool
 	serveVerifiedOurs(dataDir string, addr string) (int, bool)
+	shippedRootsPEM(ctx context.Context) ([]byte, error)
 	sleep(d time.Duration)
 	spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	spawnWorker(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
+	tlsRoot(ctx context.Context, host string) (*x509.Certificate, error)
 }
 
 // realHost is the real hostBoundary; its methods are beside the code that uses them.

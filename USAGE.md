@@ -163,6 +163,17 @@ not cover. The console's `npm ci` reads it too, beside Node's own roots; without
 it npm cannot verify the registry and, under some Node versions, fails with
 `Exit handler never called!` instead of a certificate error.
 
+`factoryd doctor` (before a first install: `go run ./cmd/factoryd doctor`)
+says whether the network intercepts TLS and what to pass:
+
+| `build CA bundle` row | Meaning | Do |
+|---|---|---|
+| `ok ... (not intercepted, none needed)` | The registry's certificate chains to a root macOS ships | Nothing |
+| `warn ... this network intercepts TLS: ... signed by "<CA>"` | The proxy's CA is in the keychain, and no bundle holds it | `doctor -fix` writes that CA and the system's roots to `~/.config/factoryd/build-ca.pem` |
+| `ok ... (intercepted by <CA>)` with `use: BUILD_CA_BUNDLE=... make install` | The bundle is written | Run the printed command |
+| `warn ... a CA this machine does not trust` | The proxy's CA is not in the keychain | Get it as a PEM file and pass it as `BUILD_CA_BUNDLE` |
+| no row | The registry is unreachable, or the machine is not a Mac | |
+
 **Upgrade.** `factoryd upgrade [-to <tag|ref>] [-source <checkout>] [-yes]
 [-wait]` takes this machine to the newest release tag (or `-to`) in one
 command. It builds from a clean checkout: `-source`, else the active

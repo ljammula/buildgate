@@ -82,7 +82,7 @@ Prerequisites: Go, Docker with the `buildx` plugin, `gh`, `python3`; Node
 | Agent skill | Installs the `buildgate` skill into `~/.agents/skills` (Copilot, Codex); refreshes `~/.claude/skills/buildgate` when it exists |
 | Tree | Leaves `git status` clean |
 
-- **TLS interception:** `BUILD_CA_BUNDLE=/path/to/ca.pem make install` ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
+- **TLS interception:** `BUILD_CA_BUNDLE=/path/to/ca.pem make install`; `go run ./cmd/factoryd doctor -fix` detects it, writes the bundle and prints that command ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
 - **Model prices** live in `internal/prices/prices.yml`; edit it and run `make install` when a provider changes prices. A model with no entry costs $0 ([USAGE_REFERENCE.md § Model prices](USAGE_REFERENCE.md#model-prices)).
 
 ### Drive it from a coding agent
