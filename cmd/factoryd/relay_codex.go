@@ -16,8 +16,10 @@ import (
 // The direct and in-process Temporal paths resolve it once per run, and a
 // default run can take longer than 2h (-max-rounds 3 x -timeout-minutes 45
 // of build alone, plus verify and review; found in review 2026-09-23), so
-// 6h. Costs nothing in practice: access tokens live ~10 days and the host
-// codex CLI refreshes its own well before expiry.
+// 6h. Access tokens live ~10 days. The host codex CLI does not refresh one
+// inside this margin (seen 2026-10-07, codex-cli 0.157.1: a `codex exec`
+// with 1.3h left kept the token), so for those hours the route needs a
+// `codex login`.
 const codexTokenExpiryMargin = 6 * time.Hour
 
 // chatGPTCodexDefaultModelID and chatGPTCodexDefaultContextWindow are
@@ -77,14 +79,14 @@ func resolveChatGPTCodexCredential(path string) (accessToken, accountID string, 
 		return "", "", fmt.Errorf("codex auth file %q has auth_mode %q, want \"chatgpt\": credential_mode: chatgpt-codex requires a ChatGPT OAuth login (run `codex login` on the host)", resolved, auth.AuthMode)
 	}
 	if auth.Tokens.AccessToken == "" || auth.Tokens.AccountID == "" {
-		return "", "", fmt.Errorf("codex auth file %q is missing tokens.access_token or tokens.account_id; run any `codex` command on the host to refresh its login", resolved)
+		return "", "", fmt.Errorf("codex auth file %q is missing tokens.access_token or tokens.account_id; run `codex login` on the host", resolved)
 	}
 	expiresAt, err := jwtExpiry(auth.Tokens.AccessToken)
 	if err != nil {
 		return "", "", fmt.Errorf("codex auth file %q: parse access token expiry: %w", resolved, err)
 	}
 	if time.Until(expiresAt) < codexTokenExpiryMargin {
-		return "", "", fmt.Errorf("codex access token in %q expires at %s, within the required %s margin; run any `codex` command on the host to refresh its login", resolved, expiresAt.UTC().Format(time.RFC3339), codexTokenExpiryMargin)
+		return "", "", fmt.Errorf("codex access token in %q expires at %s, within the required %s margin; run `codex login` on the host for a new token (other codex commands leave a token this close to expiry as it is)", resolved, expiresAt.UTC().Format(time.RFC3339), codexTokenExpiryMargin)
 	}
 	return auth.Tokens.AccessToken, auth.Tokens.AccountID, nil
 }

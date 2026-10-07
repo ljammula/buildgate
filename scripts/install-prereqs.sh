@@ -31,11 +31,24 @@ missing=""
 want() { missing="$missing $1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Homebrew installs the buildx plugin outside Docker's plugin directory;
+# link it there when Docker does not find it.
+link_buildx() {
+	have docker && have brew || return 0
+	docker buildx version >/dev/null 2>&1 && return 0
+	plugin="$(brew --prefix)/lib/docker/cli-plugins/docker-buildx"
+	[ -x "$plugin" ] || return 0
+	mkdir -p "$HOME/.docker/cli-plugins"
+	ln -sf "$plugin" "$HOME/.docker/cli-plugins/docker-buildx"
+	echo "Linked docker buildx: ~/.docker/cli-plugins/docker-buildx"
+}
+
 have go || want go
 have python3 || want python
 have gh || want gh
 have git || want git
 have npm || want node
+link_buildx # a formula already installed needs only its link
 if ! have docker; then
 	want docker
 	want docker-buildx
@@ -60,15 +73,7 @@ if [ -n "$missing" ]; then
 	brew install $missing
 fi
 
-# Homebrew installs the buildx plugin outside Docker's plugin directory.
-if have docker && ! docker buildx version >/dev/null 2>&1 && have brew; then
-	plugin="$(brew --prefix)/lib/docker/cli-plugins/docker-buildx"
-	if [ -x "$plugin" ]; then
-		mkdir -p "$HOME/.docker/cli-plugins"
-		ln -sf "$plugin" "$HOME/.docker/cli-plugins/docker-buildx"
-		echo "Linked docker buildx: ~/.docker/cli-plugins/docker-buildx"
-	fi
-fi
+link_buildx
 
 if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
 	if [ -e "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ]; then

@@ -709,7 +709,8 @@ roles:
   `codex`).
 - Fails closed if `auth_mode` is not `"chatgpt"`, a token field is missing,
   or the access token expires within 6h or before the step's own time
-  budget ends. Fix: run any `codex` command on the host.
+  budget ends. Fix: `codex login` on the host; other `codex` commands leave a
+  token inside that margin as it is.
 - Forces `Authorization` and `chatgpt-account-id` on every request and
   strips both from upstream error responses.
 - Pinned to `https://chatgpt.com/backend-api/codex/responses`: a leftover

@@ -1166,6 +1166,30 @@ func doctorRouteCredentialProbe(_ string, r sessionconfig.Route) error {
 	return err
 }
 
+// doctorRouteCredentialFix names, for a role no route could serve, why each
+// configured route's credential does not resolve. modelrole's own skip
+// reasons are fixed text by design (they reach run records); this goes to
+// the operator's terminal only, like the per-route credential checks a
+// selected route gets, and without it the failure names no cause at all.
+// Empty when selectErr is another failure or every credential resolves.
+func doctorRouteCredentialFix(settings sessionconfig.Settings, selectErr error) string {
+	if !errors.Is(selectErr, modelrole.ErrNoRouteAvailable) {
+		return ""
+	}
+	names := make([]string, 0, len(settings.Routes))
+	for name := range settings.Routes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var reasons []string
+	for _, name := range names {
+		if err := doctorRouteCredentialProbe(name, settings.Routes[name]); err != nil {
+			reasons = append(reasons, fmt.Sprintf("route %s: %v", name, err))
+		}
+	}
+	return strings.Join(reasons, "; ")
+}
+
 // doctorRoleSpecs is the fixed (role name, modelrole.Role) list
 // doctorRoutesModeChecks resolves a real selection for -- planning,
 // execution, review, the only three roles: entries a routes: mode
@@ -1341,6 +1365,7 @@ func doctorRoutesModeChecks(ctx context.Context, in doctorInputs, image string) 
 				checks = append(checks, doctorCheck{
 					Name: fmt.Sprintf("roles.%s: route selection", spec.name),
 					Err:  err,
+					Fix:  doctorRouteCredentialFix(settings, err),
 				})
 				continue
 			}
@@ -2250,7 +2275,7 @@ func effectiveCopilotUpstream(relayUpstream string) string {
 // check's own output.
 func doctorCheckChatGPTCodexCredential(authFile string, keys doctorRouteKeys) doctorCheck {
 	name := "chatgpt codex credential"
-	fix := fmt.Sprintf("run any `codex` command on the host to log in / refresh its ChatGPT OAuth login, or set %s", keys.codexAuthFile)
+	fix := fmt.Sprintf("run `codex login` on the host for a new ChatGPT OAuth login, or set %s", keys.codexAuthFile)
 	if _, _, err := resolveChatGPTCodexCredential(authFile); err != nil {
 		return doctorCheck{Name: name, Err: err, Fix: fix}
 	}
