@@ -52,7 +52,7 @@ class InstallFinishTest(unittest.TestCase):
         first = self.run_script()
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertIn(line, (self.home / ".zshrc").read_text())
-        self.assertIn("open a new terminal", first.stdout)
+        self.assertIn("Open a new terminal", first.stdout.split("Left for you:")[1])
         self.run_script()
         self.assertEqual((self.home / ".zshrc").read_text().count(line), 1)
 
@@ -82,14 +82,14 @@ class InstallFinishTest(unittest.TestCase):
 
     def test_an_unknown_shell_gets_the_line_printed(self):
         result = self.run_script(SHELL="/usr/bin/fish")
-        self.assertIn(f'export PATH="$PATH:{self.gobin}"', result.stdout)
+        self.assertIn(f'export PATH="$PATH:{self.gobin}"', result.stdout.split("Left for you:")[1])
         self.assertEqual(list(self.home.iterdir()), [])
 
     def test_runs_doctor_fix_and_a_failing_doctor_does_not_fail_the_install(self):
         result = self.run_script(DOCTOR_EXIT="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("factoryd doctor -fix", self.calls())
-        self.assertIn("doctor reported", result.stdout)
+        self.assertIn("marks FAIL", result.stdout.split("Left for you:")[1])
 
     def test_asks_for_the_model_before_the_check(self):
         result = self.run_script()
@@ -100,7 +100,7 @@ class InstallFinishTest(unittest.TestCase):
     def test_a_setup_that_could_not_pick_a_model_is_named_and_not_fatal(self):
         result = self.run_script(SETUP_EXIT="1")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("factoryd setup", result.stdout)
+        self.assertIn("Choose a model: factoryd setup", result.stdout.split("Left for you:")[1])
         self.assertIn("factoryd doctor -fix", self.calls())
 
     def test_refuses_a_path_that_is_not_the_installed_binary(self):
@@ -118,7 +118,23 @@ class InstallFinishTest(unittest.TestCase):
         result = self.run_script(GH_STATUS="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("gh auth login", self.calls())
-        self.assertIn("gh auth login", result.stdout)
+        self.assertIn("Log in to GitHub: gh auth login", result.stdout.split("Left for you:")[1])
+
+    def test_the_last_lines_are_a_numbered_list_of_what_is_left(self):
+        result = self.run_script(GH_STATUS="1", SETUP_EXIT="1", DOCTOR_EXIT="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tail = result.stdout.split("buildgate is installed.\n")[1].splitlines()
+        self.assertEqual(tail[0], "Left for you:")
+        self.assertEqual([line[:5] for line in tail[1:5]], ["  1. ", "  2. ", "  3. ", "  4. "])
+        self.assertTrue(tail[1].startswith("  1. Open a new terminal"))
+        self.assertTrue(tail[5].startswith("Then run your first request: factoryd quickstart"))
+        self.assertEqual(len(tail), 6)
+
+    def test_with_nothing_left_it_says_so(self):
+        result = self.run_script(path=f"{self.bin}:{self.gobin}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Left for you:", result.stdout)
+        self.assertTrue(result.stdout.rstrip().endswith('Nothing is left to do. Run your first request: factoryd quickstart <repo> "<request>"'))
 
 
 if __name__ == "__main__":
