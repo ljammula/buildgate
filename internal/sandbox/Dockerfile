@@ -81,7 +81,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN --mount=type=secret,id=build-ca,required=false \
     if [ -f /run/secrets/build-ca ]; then export SSL_CERT_FILE=/run/secrets/build-ca; fi \
     && cd /tmp \
-    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://ftp.gnu.org/gnu/make/make-${MAKE_VERSION}.tar.gz', 'make.tar.gz')" \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://mirrors.kernel.org/gnu/make/make-${MAKE_VERSION}.tar.gz', 'make.tar.gz')" \
     && echo "${MAKE_SHA256}  make.tar.gz" | sha256sum -c - \
     && tar xzf make.tar.gz && cd make-${MAKE_VERSION} \
     && ./configure --disable-posix-spawn --without-guile --disable-dependency-tracking \
