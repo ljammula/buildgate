@@ -6,8 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"buildgate/internal/hostcontrol"
 )
 
 // fakeImageDocker is a `docker` whose `image inspect` succeeds or fails.
@@ -67,6 +70,20 @@ func TestDoctorOpenShellGatewayAndMeterHealth(t *testing.T) {
 	}
 	if c := doctorCheckMeter(dp, ctx); c.Err == nil || !c.Advisory {
 		t.Errorf("unhealthy meter: %+v, want an advisory failure", c)
+	}
+	// A container outside the stack on one of its ports is named, with what to
+	// do about it instead of a start that cannot succeed.
+	var asked []string
+	fakeSandboxOf(dp).portHoldersFn = func(_ context.Context, addrs ...string) []string {
+		asked = append(asked, addrs...)
+		return []string{"port 17671 is published by container `kafka-ui`"}
+	}
+	c := doctorCheckOpenShellGateway(dp, ctx)
+	if c.Err == nil || !c.Advisory || !strings.Contains(c.Err.Error(), "published by container `kafka-ui`") || !strings.Contains(c.Fix, "stop that container") {
+		t.Errorf("gateway with its port held: %+v, want the holder named", c)
+	}
+	if want := []string{hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellGatewayHealthAddr}; !reflect.DeepEqual(asked, want) {
+		t.Errorf("gateway check asked about %q, want %q", asked, want)
 	}
 	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
 	fakeSandboxOf(dp).meterHealthyFn = func(context.Context) error { return nil }
@@ -180,5 +197,21 @@ func TestDoctorFixStartsTheOpenShellStackOnlyWhenItDoesNotAnswer(t *testing.T) {
 				t.Errorf("started with %q, output %q", started[0], out.String())
 			}
 		})
+	}
+}
+
+func TestPublishedPortHoldersNamesContainersOutsideTheStack(t *testing.T) {
+	ps := strings.Join([]string{
+		"kafka-ui\t0.0.0.0:17671->8080/tcp, [::]:17671->8080/tcp",
+		"buildgate-openshell-meter-1\t127.0.0.1:17672->50051/tcp",
+		"buildgate-openshell-gateway-1\t",
+		"range\t127.0.0.1:17600-17670->9000-9070/tcp",
+		"exposed-only\t17670/tcp, 17672/tcp",
+		"elsewhere\t0.0.0.0:8081->17670/tcp",
+	}, "\n")
+	got := publishedPortHolders(ps, []string{hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellGatewayHealthAddr, hostcontrol.OpenShellMeterAddr})
+	want := []string{"port 17671 is published by container `kafka-ui`", "port 17670 is published by container `range`"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("holders = %q, want %q", got, want)
 	}
 }

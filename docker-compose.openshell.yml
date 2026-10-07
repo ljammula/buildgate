@@ -22,7 +22,7 @@ services:
       - -ledger-root
       - ${FACTORYD_METER_LEDGER_DIR:?}
     ports:
-      - "127.0.0.1:50051:50051"
+      - "127.0.0.1:17672:50051"
     volumes:
       - type: bind
         source: ${FACTORYD_METER_LEDGER_DIR:?}
@@ -32,14 +32,14 @@ services:
     image: ghcr.io/nvidia/openshell/gateway@sha256:2fe4dad9118e14ab80a8258b545ea6e6cd74c3469e24ad4e6610f964d98913a2
     restart: "no"
     # Host-networked and bound to loopback: the gateway and every sandbox's
-    # supervisor (host-networked too) reach the meter at 127.0.0.1:50051, and
+    # supervisor (host-networked too) reach the meter at 127.0.0.1:17672, and
     # no container on a Docker network can reach the gateway or the meter.
     network_mode: host
     command:
       - --bind-address
       - 127.0.0.1
       - --port
-      - "8080"
+      - "17670"
     user: "0"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

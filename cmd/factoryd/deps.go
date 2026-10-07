@@ -118,6 +118,9 @@ type realHost struct{ dp *deps }
 type sandboxRuntimeBoundary interface {
 	gatewayHealthy(ctx context.Context) error
 	meterHealthy(ctx context.Context) error
+	// portHolders names each running container outside the stack that
+	// publishes one of addrs' ports; nil when Docker cannot be asked.
+	portHolders(ctx context.Context, addrs ...string) []string
 	// runtime is what workers are launched through: the gateway runtime,
 	// nil only in the integration tests' own build.
 	runtime() sandbox.Runtime

@@ -35,7 +35,18 @@ const (
 	OpenShellGatewayConfigFile = "gateway.toml"
 	// openShellMeterEndpoint is where the gateway's supervisors reach the
 	// meter: the VM's loopback, on the port the meter publishes.
-	openShellMeterEndpoint = "http://127.0.0.1:50051"
+	openShellMeterEndpoint = "http://" + OpenShellMeterAddr
+)
+
+// The stack's listeners on the Docker VM's loopback, which Colima forwards to
+// the host's. The gateway is host-networked in the VM, so a container that
+// publishes one of its ports stops it starting: the ports are kept off the
+// ones development services commonly publish (8080, 8081, 50051). The same
+// ports appear in docker-compose.openshell.yml.
+const (
+	OpenShellGatewayAddr       = "127.0.0.1:17670"
+	OpenShellGatewayHealthAddr = "127.0.0.1:17671"
+	OpenShellMeterAddr         = "127.0.0.1:17672"
 )
 
 // OpenShellTimeouts bounds each wait of starting and stopping the stack.
@@ -98,7 +109,8 @@ func RenderGatewayConfig() (string, error) {
 		return "", fmt.Errorf("parse gateway config template: %w", err)
 	}
 	var out bytes.Buffer
-	if err := tmpl.Execute(&out, struct{ MeterEndpoint string }{openShellMeterEndpoint}); err != nil {
+	fields := struct{ GatewayAddr, GatewayHealthAddr, MeterEndpoint string }{OpenShellGatewayAddr, OpenShellGatewayHealthAddr, openShellMeterEndpoint}
+	if err := tmpl.Execute(&out, fields); err != nil {
 		return "", fmt.Errorf("render gateway config: %w", err)
 	}
 	return out.String(), nil

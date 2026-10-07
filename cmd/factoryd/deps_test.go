@@ -157,6 +157,7 @@ func fakeHostOf(dp *deps) *fakeHost { return dp.host.(*fakeHost) }
 type fakeSandboxRuntime struct {
 	gatewayHealthyFn func(ctx context.Context) error
 	meterHealthyFn   func(ctx context.Context) error
+	portHoldersFn    func(ctx context.Context, addrs ...string) []string
 	runtimeFn        func() sandbox.Runtime
 	sandboxNamesFn   func(ctx context.Context) ([]string, error)
 	startStackFn     func(ctx context.Context, w io.Writer, meterImage string) error
@@ -166,7 +167,10 @@ func (f *fakeSandboxRuntime) gatewayHealthy(ctx context.Context) error {
 	return f.gatewayHealthyFn(ctx)
 }
 func (f *fakeSandboxRuntime) meterHealthy(ctx context.Context) error { return f.meterHealthyFn(ctx) }
-func (f *fakeSandboxRuntime) runtime() sandbox.Runtime               { return f.runtimeFn() }
+func (f *fakeSandboxRuntime) portHolders(ctx context.Context, addrs ...string) []string {
+	return f.portHoldersFn(ctx, addrs...)
+}
+func (f *fakeSandboxRuntime) runtime() sandbox.Runtime { return f.runtimeFn() }
 func (f *fakeSandboxRuntime) sandboxNames(ctx context.Context) ([]string, error) {
 	return f.sandboxNamesFn(ctx)
 }
@@ -276,6 +280,7 @@ func newTestDeps(t testing.TB) *deps {
 	dp.sandbox = &fakeSandboxRuntime{
 		gatewayHealthyFn: realSandbox.gatewayHealthy,
 		meterHealthyFn:   realSandbox.meterHealthy,
+		portHoldersFn:    func(context.Context, ...string) []string { return nil },
 		runtimeFn:        realSandbox.runtime,
 		sandboxNamesFn:   realSandbox.sandboxNames,
 		startStackFn:     realSandbox.startStack,
