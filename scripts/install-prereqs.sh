@@ -1,7 +1,8 @@
 #!/bin/sh
 # install-prereqs.sh: `make install`'s first step. Installs, with Homebrew,
-# the tools the rest of the install needs and this machine lacks, and links
-# Docker's buildx plugin, so a new Mac needs no `brew install` line first.
+# the tools the rest of the install needs and this machine lacks, links
+# Docker's buildx plugin and starts Docker, so a new Mac needs no
+# `brew install` or `colima start` line first.
 #
 #   Tool                    Formula          Missing when
 #   go, python3, gh, git    go python gh git the command is not on PATH
@@ -12,8 +13,14 @@
 #
 # A machine that already has a docker CLI keeps its own daemon (Docker
 # Desktop, colima, another VM): colima is installed only beside a docker CLI
-# this script installs. Nothing is started, upgraded or removed, and a tool
-# already on PATH is left as it is, whatever installed it.
+# this script installs. Nothing is upgraded or removed, and a tool already on
+# PATH is left as it is, whatever installed it.
+#
+# Docker not answering is started only through colima, when colima is on
+# PATH: `colima start` for a VM that already exists (its own settings), else
+# `colima start --memory 4`. FACTORYD_AUTOSTART=0 turns the start off, as it
+# does for factoryd's own. Any other Docker is the operator's to start;
+# `make install` stops at the image build and says so.
 #
 # Without Homebrew it installs nothing: it names what is missing and fails,
 # unless only npm is, which costs the console alone (`make install` then
@@ -63,6 +70,12 @@ if have docker && ! docker buildx version >/dev/null 2>&1 && have brew; then
 	fi
 fi
 
-case " $missing " in
-*" colima "*) echo "colima is installed but not started -- start Docker with: colima start --memory 4" ;;
-esac
+if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
+	if [ -e "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ]; then
+		echo "Starting Docker: colima start"
+		colima start
+	else
+		echo "Starting Docker: colima start --memory 4"
+		colima start --memory 4
+	fi
+fi

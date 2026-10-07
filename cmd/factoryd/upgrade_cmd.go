@@ -190,7 +190,9 @@ func upgradeRun(dp *deps, args []string, in io.Reader, w io.Writer, interactive,
 	}
 	state.checkedOut = true
 	fmt.Fprintf(w, "installing %s: make -C %s install\n", target, source)
-	if out, err := dp.host.runUpgradeCommand(upgradeCmd{Name: "make", Args: []string{"-C", source, "install"}, Env: []string{"FACTORYD_CONFIG="}, Stream: w}); err != nil {
+	// INSTALL_FINISH=0: a first install's last step (PATH, gh login, doctor
+	// -fix) is not an upgrade's; the restart and checks below are.
+	if out, err := dp.host.runUpgradeCommand(upgradeCmd{Name: "make", Args: []string{"-C", source, "install", "INSTALL_FINISH=0"}, Env: []string{"FACTORYD_CONFIG="}, Stream: w}); err != nil {
 		return upgradeFailure(w, state, fmt.Errorf("make install failed: %w", err), string(out))
 	}
 	if got := upgradeProbeVersion(dp, source, binary); got != targetSHA {

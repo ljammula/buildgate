@@ -132,7 +132,7 @@ trailing request text `factoryd submit` takes; each must precede
 `<repo-path>` on the command line.
 
 **Prerequisites**: with Homebrew, `make install` installs the tools below
-that are missing; it starts nothing. Go, Docker (colima: `colima
+that are missing, starts colima and runs `gh auth login`. Go, Docker (colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
@@ -151,8 +151,9 @@ cd buildgate
 make install
 ```
 
-`make install` -> `$(go env GOPATH)/bin/factoryd`;
-`export PATH="$PATH:$(go env GOPATH)/bin"`. A stale build earlier on
+`make install` -> `$(go env GOPATH)/bin/factoryd`, and that directory onto
+`PATH` in your shell profile when a new shell would not find `factoryd`
+(open a new terminal). A stale build earlier on
 `PATH` silently shadows a fresh one — `which -a factoryd` after `make
 install` to confirm which one resolves.
 

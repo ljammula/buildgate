@@ -203,17 +203,17 @@ live-round-test:
 	python3 -m unittest scripts/tests/test_live_round.py -v
 
 # install-prereqs is `make install`'s first step: Homebrew installs the
-# tools the later steps need and this machine lacks, and Docker's buildx
-# plugin is linked (scripts/install-prereqs.sh's header has the table). It
-# starts nothing: a Mac that had no Docker gets colima installed, and
-# local-images below then stops with the command that starts it.
+# tools the later steps need and this machine lacks, Docker's buildx plugin
+# is linked, and a Docker that does not answer is started through colima
+# (scripts/install-prereqs.sh's header has the table).
 install-prereqs:
 	@scripts/install-prereqs.sh
 
-# install-prereqs-test: offline test for scripts/install-prereqs.sh against a
-# stand-in brew. Installs nothing.
+# install-prereqs-test: offline tests for scripts/install-prereqs.sh and
+# scripts/install-finish.sh against stand-in brew, docker, colima, gh and
+# factoryd. Installs and starts nothing.
 install-prereqs-test:
-	python3 -m unittest scripts/tests/test_install_prereqs.py -v
+	python3 -m unittest scripts/tests/test_install_prereqs.py scripts/tests/test_install_finish.py -v
 
 # with-spinner-test: offline test for scripts/with-spinner.sh, the wrapper
 # `make install` runs its long builds through (exit-status passthrough, the
@@ -340,7 +340,12 @@ docker-buildx-check:
 	fi
 
 # Installs to $(go env GOBIN), else the first $(go env GOPATH) entry's bin
-# (usually ~/go/bin) -- make sure that's on PATH; warns if another factoryd wins.
+# (usually ~/go/bin); warns if another factoryd wins. The one command a
+# machine needs: install-prereqs before it installs missing tools and starts
+# Docker, and scripts/install-finish.sh after it puts that directory on PATH,
+# logs gh in and runs `factoryd doctor -fix`. INSTALL_FINISH=0 leaves the
+# last step out, for `factoryd upgrade`, which restarts and checks the
+# machine itself.
 #
 # The version is stamped from THIS checkout's HEAD: Go's own vcs.revision
 # stamping treats only a .git directory as a repository root, so in a git
@@ -360,14 +365,11 @@ install: install-prereqs docker-buildx-check temporal-up local-images openshell-
 	if [ -n "$$resolved" ] && [ "$$resolved" != "$$installed" ]; then \
 		echo "warning: just installed $$installed, but 'factoryd' on your PATH resolves to $$resolved instead -- that earlier PATH entry will keep winning. Remove/rename $$resolved, or move $$installed earlier on PATH, then re-run 'factoryd doctor' to confirm (see its PATH shadowing check)." >&2; \
 	fi; \
-	if [ -z "$$resolved" ]; then \
-		echo "note: 'factoryd' is not on your PATH yet. Add it (and to your shell profile, e.g. ~/.zshrc):" >&2; \
-		echo "  export PATH=\"\$$PATH:$$bindir\"" >&2; \
-	fi; \
 	"$$installed" install-skill || echo "warning: buildgate skill not installed; run 'factoryd install-skill'" >&2; \
 	if [ -d "$$HOME/.claude/skills/buildgate" ]; then \
 		"$$installed" install-skill -dir "$$HOME/.claude/skills" || echo "warning: buildgate skill not refreshed in ~/.claude/skills" >&2; \
-	fi
+	fi; \
+	if [ "$(INSTALL_FINISH)" != 0 ]; then scripts/install-finish.sh "$$installed"; fi
 
 # A local, ephemeral Docker registry these targets push through to get a
 # real, addressable digest for a local build -- mirrors ci.yml's own

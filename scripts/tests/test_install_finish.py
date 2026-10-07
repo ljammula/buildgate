@@ -1,0 +1,113 @@
+"""Offline tests for scripts/install-finish.sh, `make install`'s last step.
+
+Each test runs the script with PATH holding only a temp directory with the
+utilities it needs and stand-in `gh` and `factoryd`; HOME is a temp directory
+too, so the shell profile it edits is the test's own.
+"""
+
+import os
+import shutil
+import stat
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+SCRIPT = Path(__file__).resolve().parents[1] / "install-finish.sh"
+UTILITIES = ["sh", "dirname", "grep"]
+
+
+class InstallFinishTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.bin = self.tmp / "bin"
+        self.home = self.tmp / "home"
+        self.gobin = self.tmp / "go" / "bin"
+        for d in (self.bin, self.home, self.gobin):
+            d.mkdir(parents=True)
+        for name in UTILITIES:
+            os.symlink(shutil.which(name), self.bin / name)
+        self.log = self.tmp / "calls.log"
+        self.installed = self.gobin / "factoryd"
+        self.stub(self.installed, 'echo "factoryd $*" >> "$LOG"; exit ${DOCTOR_EXIT:-0}')
+        self.stub(self.bin / "gh", 'echo "gh $*" >> "$LOG"; [ "$1 $2" = "auth status" ] && exit ${GH_STATUS:-0}; exit 0')
+
+    def stub(self, path, body):
+        path.write_text("#!/bin/sh\n" + body + "\n")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def run_script(self, path=None, **extra):
+        env = {"PATH": path or str(self.bin), "HOME": str(self.home), "SHELL": "/bin/zsh", "LOG": str(self.log), **extra}
+        return subprocess.run(
+            [str(self.bin / "sh"), str(SCRIPT), str(self.installed)],
+            env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        )
+
+    def calls(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_adds_the_bin_directory_to_the_shell_profile_once(self):
+        line = f'export PATH="$PATH:{self.gobin}"'
+        first = self.run_script()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn(line, (self.home / ".zshrc").read_text())
+        self.assertIn("open a new terminal", first.stdout)
+        self.run_script()
+        self.assertEqual((self.home / ".zshrc").read_text().count(line), 1)
+
+    def test_keeps_what_the_profile_already_holds(self):
+        (self.home / ".zshrc").write_text("alias k=kubectl\n")
+        self.run_script()
+        self.assertTrue((self.home / ".zshrc").read_text().startswith("alias k=kubectl\n"))
+
+    @unittest.skipUnless(os.access("/bin/zsh", os.X_OK), "needs zsh")
+    def test_a_profile_that_spells_the_directory_another_way_is_left_alone(self):
+        (self.home / "go").symlink_to(self.tmp / "go")
+        profile = 'export PATH="$PATH:$HOME/go/bin"\n'
+        (self.home / ".zshrc").write_text(profile)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.home / ".zshrc").read_text(), profile)
+
+    def test_bash_uses_bash_profile(self):
+        self.run_script(SHELL="/bin/bash")
+        self.assertIn(str(self.gobin), (self.home / ".bash_profile").read_text())
+        self.assertFalse((self.home / ".zshrc").exists())
+
+    def test_leaves_the_profile_alone_when_factoryd_is_on_path(self):
+        result = self.run_script(path=f"{self.bin}:{self.gobin}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.home / ".zshrc").exists())
+
+    def test_an_unknown_shell_gets_the_line_printed(self):
+        result = self.run_script(SHELL="/usr/bin/fish")
+        self.assertIn(f'export PATH="$PATH:{self.gobin}"', result.stdout)
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_runs_doctor_fix_and_a_failing_doctor_does_not_fail_the_install(self):
+        result = self.run_script(DOCTOR_EXIT="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("factoryd doctor -fix", self.calls())
+        self.assertIn("factoryd quickstart", result.stdout)
+
+    def test_refuses_a_path_that_is_not_the_installed_binary(self):
+        self.installed = self.gobin / "missing"
+        result = self.run_script()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.home / ".zshrc").exists())
+
+    def test_logged_in_gh_is_not_asked_again(self):
+        self.run_script()
+        self.assertEqual([c for c in self.calls() if c.startswith("gh")], ["gh auth status"])
+
+    def test_without_a_terminal_a_logged_out_gh_gets_a_note_not_a_prompt(self):
+        result = self.run_script(GH_STATUS="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("gh auth login", self.calls())
+        self.assertIn("gh auth login", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

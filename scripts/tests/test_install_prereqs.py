@@ -31,6 +31,7 @@ for formula in "$@"; do
       printf '#!/bin/sh\\n' > "$BREW_PREFIX/lib/docker/cli-plugins/docker-buildx"
       chmod +x "$BREW_PREFIX/lib/docker/cli-plugins/docker-buildx" ;;
     docker) cat "$DOCKER_STUB" > "$BIN/docker"; chmod +x "$BIN/docker" ;;
+    colima) cat "$COLIMA_STUB" > "$BIN/colima"; chmod +x "$BIN/colima" ;;
     python) printf '#!/bin/sh\\n' > "$BIN/python3"; chmod +x "$BIN/python3" ;;
     node) printf '#!/bin/sh\\n' > "$BIN/npm"; chmod +x "$BIN/npm" ;;
     *) printf '#!/bin/sh\\n' > "$BIN/$formula"; chmod +x "$BIN/$formula" ;;
@@ -38,10 +39,18 @@ for formula in "$@"; do
 done
 """
 
-# `docker buildx version` works only once the plugin is linked where Docker looks.
+# `docker buildx version` works only once the plugin is linked where Docker
+# looks; `docker info` only once the daemon marker exists.
 DOCKER = """#!/bin/sh
 if [ "$1" = buildx ]; then [ -e "$HOME/.docker/cli-plugins/docker-buildx" ]; exit $?; fi
+if [ "$1" = info ]; then [ -e "$HOME/docker-up" ]; exit $?; fi
 exit 0
+"""
+
+# `colima start` records its arguments and brings the daemon up.
+COLIMA = """#!/bin/sh
+echo "$*" >> "$HOME/colima.log"
+touch "$HOME/docker-up"
 """
 
 
@@ -57,6 +66,8 @@ class InstallPrereqsTest(unittest.TestCase):
         self.log = self.tmp / "brew.log"
         self.docker_stub = self.tmp / "docker-stub"
         self.docker_stub.write_text(DOCKER)
+        self.colima_stub = self.tmp / "colima-stub"
+        self.colima_stub.write_text(COLIMA)
         for name in UTILITIES:
             os.symlink(shutil.which(name), self.bin / name)
 
@@ -65,9 +76,12 @@ class InstallPrereqsTest(unittest.TestCase):
         path.write_text(body)
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
-    def have(self, *tools, brew=True, buildx=True):
+    def have(self, *tools, brew=True, buildx=True, docker_up=True):
+        bodies = {"docker": DOCKER, "colima": COLIMA}
         for tool in tools:
-            self.install(tool, DOCKER if tool == "docker" else "#!/bin/sh\n")
+            self.install(tool, bodies.get(tool, "#!/bin/sh\n"))
+        if docker_up:
+            (self.home / "docker-up").write_text("")
         if brew:
             self.install("brew", BREW)
         if buildx:
@@ -75,7 +89,11 @@ class InstallPrereqsTest(unittest.TestCase):
             plugins.mkdir(parents=True)
             (plugins / "docker-buildx").write_text("")
 
-    def run_script(self):
+    def colima_calls(self):
+        log = self.home / "colima.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def run_script(self, **extra):
         env = {
             "PATH": str(self.bin),
             "HOME": str(self.home),
@@ -83,6 +101,8 @@ class InstallPrereqsTest(unittest.TestCase):
             "BREW_LOG": str(self.log),
             "BREW_PREFIX": str(self.prefix),
             "DOCKER_STUB": str(self.docker_stub),
+            "COLIMA_STUB": str(self.colima_stub),
+            **extra,
         }
         return subprocess.run([str(self.bin / "sh"), str(SCRIPT)], env=env, capture_output=True, text=True)
 
@@ -94,6 +114,7 @@ class InstallPrereqsTest(unittest.TestCase):
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.brew_calls(), [])
+        self.assertEqual(self.colima_calls(), [])
         self.assertEqual(result.stdout, "")
 
     def test_installs_only_what_is_missing(self):
@@ -103,14 +124,14 @@ class InstallPrereqsTest(unittest.TestCase):
         self.assertEqual(self.brew_calls(), ["install go gh node"])
         self.assertIn("brew install go gh node", result.stdout)
 
-    def test_new_mac_gets_every_tool_and_the_buildx_link(self):
-        self.have(buildx=False)
+    def test_new_mac_gets_every_tool_the_buildx_link_and_a_started_docker(self):
+        self.have(buildx=False, docker_up=False)
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.brew_calls()[0], "install go python gh git node docker docker-buildx colima")
         link = self.home / ".docker" / "cli-plugins" / "docker-buildx"
         self.assertEqual(os.readlink(link), str(self.prefix / "lib/docker/cli-plugins/docker-buildx"))
-        self.assertIn("colima start --memory 4", result.stdout)
+        self.assertEqual(self.colima_calls(), ["start --memory 4"])
 
     def test_existing_docker_without_buildx_gets_the_plugin_and_no_colima(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
@@ -119,6 +140,27 @@ class InstallPrereqsTest(unittest.TestCase):
         self.assertEqual(self.brew_calls()[0], "install docker-buildx")
         self.assertTrue((self.home / ".docker" / "cli-plugins" / "docker-buildx").is_symlink())
         self.assertNotIn("colima", result.stdout)
+
+    def test_a_stopped_colima_vm_is_started_with_its_own_settings(self):
+        self.have(*EVERYTHING, docker_up=False)
+        vm = self.home / ".colima" / "default"
+        vm.mkdir(parents=True)
+        (vm / "colima.yaml").write_text("memory: 8\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), ["start"])
+
+    def test_docker_down_without_colima_is_left_to_the_operator(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker", docker_up=False)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_autostart_off_starts_nothing(self):
+        self.have(*EVERYTHING, docker_up=False)
+        result = self.run_script(FACTORYD_AUTOSTART="0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), [])
 
     def test_without_homebrew_names_what_is_missing_and_fails(self):
         self.have("python3", "git", "npm", "docker", brew=False)

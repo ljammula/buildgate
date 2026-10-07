@@ -193,7 +193,7 @@ func TestUpgradeCleanPath(t *testing.T) {
 		t.Error("worker and serve were not stopped")
 	}
 	// Order: fetch, checkout, make, verify, then skills.
-	order := []string{"git -C " + h.source + " fetch --tags origin", "git -C " + h.source + " checkout --detach " + upgradeTargetSHA, "make -C " + h.source + " install", h.binary + " version", h.binary + " install-skill -dir " + agents}
+	order := []string{"git -C " + h.source + " fetch --tags origin", "git -C " + h.source + " checkout --detach " + upgradeTargetSHA, "make -C " + h.source + " install INSTALL_FINISH=0", h.binary + " version", h.binary + " install-skill -dir " + agents}
 	last := -1
 	for _, want := range order {
 		idx := -1
@@ -355,7 +355,7 @@ func TestUpgradeWaitWaitsThenProceeds(t *testing.T) {
 	if !strings.Contains(out, "waiting for req-42") {
 		t.Errorf("no waiting line:\n%s", out)
 	}
-	if !h.called("make -C " + h.source + " install") {
+	if !h.called("make -C " + h.source + " install INSTALL_FINISH=0") {
 		t.Error("the install did not run after the wait")
 	}
 }
