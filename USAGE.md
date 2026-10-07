@@ -377,6 +377,58 @@ use`/`stop`/`upgrade`, session-config edits, and committing `.factory.yml`.
 The skill is the boundary: `factoryd` accepts any command from your user,
 so the agent holds to the skill's command list even when told otherwise.
 
+
+## Drive Buildgate from an MCP client
+
+`factoryd serve` has an MCP endpoint, `POST /mcp` (Streamable HTTP), for
+any MCP client: Claude Code, Hermes, your own agent. It is off until you
+turn it on.
+
+```sh
+factoryd console        # a running serve, if there is none
+factoryd mcp            # create the token, print the endpoint and how to add it
+factoryd mcp -rotate    # new token; the old one stops working at once
+factoryd mcp -disable   # endpoint off
+```
+
+| Tool | Does | Changes anything |
+|---|---|---|
+| `list_requests` | Every request: state, what it waits on, cost | No |
+| `get_request` | One request: spec, tickets, each ticket's runs, next action | No |
+| `get_run` | One ticket build: attempts, gate results, halt reason | No |
+| `get_run_diff` | The run's diff, cut at 256 KiB | No |
+| `list_workspaces` | The repositories `submit_request` accepts | No |
+| `submit_request` | Starts a request (`workspace`, `text`, optional `draft_oracles`); it stops at `spec_review` | Yes: spends model budget |
+
+```text
+you (chat) -> MCP client -> POST /mcp (bearer token) -> factoryd serve
+                 submit, follow                            |
+you -> console or `factoryd approve` / `reject` ---------> gates
+you -> GitHub -------------------------------------------> merge
+```
+
+| Limit | Detail |
+|---|---|
+| No gate tools | No tool approves, rejects, retries, resumes, cancels, edits or overrides. Approve in the console or with the CLI; the client can tell you what is waiting |
+| Workspaces | `submit_request` takes only a repository on the session config's `workspaces:` list, or one an existing request already uses |
+| Spend | At most 5 submissions an hour over MCP (per `serve` process); each is bounded by the same ceilings and budgets as any request. Anyone who can message your agent can ask it to submit: restrict who that is in the client |
+| Results are data | Spec, ticket and diff text is model-written. A client should not treat it as instructions |
+| Token | In `<config name>.mcp-token` beside the session config (`config.mcp-token` for `config.yml`), one per profile, readable only by you. The endpoint ignores a token file that is a symlink or readable by others |
+
+From another machine, keep `serve` on loopback and put a tunnel in front
+of it. With Tailscale:
+
+```sh
+tailscale serve --bg 8090                                  # HTTPS on the tailnet -> 127.0.0.1:8090
+factoryd stop
+factoryd serve -allowed-host <machine>.<tailnet>.ts.net    # accept that Host header
+```
+
+`factoryd stop` also stops the worker; the next `submit` or `factoryd
+worker` starts it again. The client then uses
+`https://<machine>.<tailnet>.ts.net/mcp` with the same token. `-allowed-host` also opens the console's read routes to that
+name, so limit who can reach the node with a tailnet ACL.
+
 ## `.factory.yml` — commit per-repo defaults once
 
 A repo owner commits `.factory.yml` at the repo's git top level so every
@@ -650,9 +702,10 @@ every request verb takes `-config`):
 | Cap a request's (or a month's) total spend | Session-config `request_token_budget`/`request_cost_budget_micro_usd` (one request's drafting + every ticket run + corrective/PR-review round) and `monthly_token_budget`/`monthly_cost_budget_micro_usd` (all requests in the data dir, current UTC calendar month) — 0/absent means unlimited. Unlike `meter_token_ceiling`/`meter_cost_ceiling_micro_usd` (a per-job ceiling the relay itself enforces mid-job), these are checked host-side before a job is launched at all; reaching one quarantines the request (`budget_exhausted:request`/`budget_exhausted:monthly`) naming the key, the spend, and the limit. `factoryd cost` prints the configured budgets and month-to-date spend once any are set |
 | Fail closed all future releases for a project | `factoryd kill-switch -project <p> -state engaged -by <you> -reason "..."` — CLI-only, works without `serve` |
 | Notification when a request waits with no `worker` alive | `factoryd status` and `factoryd serve` both check the heartbeat file each poll; the console board shows the same banner. Nothing notifies if neither is running |
-| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values (reads only; writes still need `-override-token`) |
+| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values (reads only; writes still need `-override-token`, except that an enabled MCP endpoint can submit a request there with its own token) |
 | Console link printed by `submit` / `factoryd console` | Built from `<data-dir>/console-address`, which a live `factoryd serve` writes for its data dir. `submit` and `factoryd console` start that `serve` when it is missing; with `FACTORYD_AUTOSTART=0` (or a `serve` that cannot start) `submit` prints how to get a link instead (or set `-console-base-url` / `FACTORYD_CONSOLE_URL`) |
 | Drive Buildgate from Copilot / Claude Code / Codex | `factoryd install-skill`, then ask in plain words: see "Drive Buildgate from a coding agent" above. `factoryd upgrade` refreshes the skill |
+| Drive Buildgate from an MCP client (Claude Code, Hermes, any other) | `factoryd mcp`, then add the printed endpoint and token to the client: see "Drive Buildgate from an MCP client" above |
 | Local model host serialization | Automatic (`internal/modelhost`, keyed by the selected route's own `upstream` host) — no manual "one job at a time" discipline needed. Waiting shows as a `model_host_lock` event / `waiting` chip |
 | Compose sidecar serialization | Automatic: at most `compose_services_concurrency` (default 1) runs on this machine have compose sidecars, across every data dir and factoryd process. A run takes its slot before its first phase and holds it to the end, so the wait never counts against its timeout; the wait itself is bounded by one run's timeout, after which the run halts naming the holder. The daemon's recovery of a crashed submission takes the slot too, deferring to its next scan while it is busy. Waiting shows as a `compose_services_lock` event / `waiting` chip |
 

@@ -627,7 +627,8 @@ func runMain(dp *deps, args []string) error {
 
 // installSubcommand runs the subcommands `make install` calls: the hidden
 // ones only the Makefile uses (through `go run ./cmd/factoryd`) and `setup`,
-// which an operator runs too. handled is false for any other argument list.
+// which an operator runs too. `mcp` is dispatched here as well, so realMain
+// does not grow. handled is false for any other argument list.
 func installSubcommand(dp *deps, args []string) (handled bool, err error) {
 	if len(args) == 0 {
 		return false, nil
@@ -641,6 +642,8 @@ func installSubcommand(dp *deps, args []string) (handled bool, err error) {
 		return true, imageReuseMain(args[1:])
 	case "setup":
 		return true, setupMain(dp, args[1:])
+	case "mcp":
+		return true, mcpMain(dp, os.Stdout, args[1:])
 	}
 	return false, nil
 }

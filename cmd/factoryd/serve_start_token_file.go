@@ -181,7 +181,7 @@ func (impl realForge) insideGitWorkTree(dir string) bool {
 func generateServeStartTokenFile(dp *deps, path string) (string, error) {
 	dir := filepath.Dir(path)
 	if dp.forge.insideGitWorkTree(dir) {
-		return "", fmt.Errorf("refusing to write the start token file inside a git working tree (%s) -- point -config at a session config outside any git repo", dir)
+		return "", fmt.Errorf("refusing to write a token file inside a git working tree (%s) -- point -config at a session config outside any git repo", dir)
 	}
 	token, err := generateStartToken()
 	if err != nil {

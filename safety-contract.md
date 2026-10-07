@@ -41,6 +41,7 @@ The trust boundaries are:
 | Forge / PR review | Factory release policy and an operator-configured reviewer trust list | Branch pushes, draft-PR open, the `gh pr ready` flip, `gh pr edit --base` retargets, and reviewer comments | Each push, draft-PR open, and ready flip requires `release.Decision.Allowed`, re-checked immediately before the side effect — including a `factoryd retry` of a PR-open-only failure, which re-runs the decision against the run's frozen policy, verifies `refs/heads/<branch>` still equals the accepted `ResultSHA`, and pushes an explicit `<ResultSHA>:refs/heads/<branch>` refspec (the normal open path pins the same way). A reviewer comment triggers a corrective build only when its author is on the explicit `-pr-trusted-authors` allow-list; an ignore-list is not sufficient. A multi-ticket request's ticket N (N>1) draft PR may open stacked on ticket N-1's own still-open branch (`-pr-base`) rather than the default branch; `advancePRReadyOrApproved` refuses the ready flip while its base is another ticket's branch, and once ticket N-1 merges, `gh pr edit --base` retargets ticket N's PR onto ticket N-1's own base only after the ready flip's checks (a fresh `release.Decision.Allowed` and a PR head equal to that run's `ResultSHA`); a failed or refused retarget leaves the PR draft, is retried on the next poll, and never halts the request. |
 | Console loopback writes | `factoryd serve`'s bind address and the operator's own local processes | Any page loaded in the operator's browser | On loopback with no override token, request-write routes accept same-origin JSON without a token; `POST /runs/{id}/override` and start-class routes always need a token. See [Console loopback writes](#console-loopback-writes) below. |
 | Console-originated request creation | The operator's `workspaces:` session-config list and the factory's data directory | `POST /requests` | Takes the request-write gate, never `authorizeStart`; `workspace` is never accepted as an arbitrary host path. See [Console-originated request creation](#console-originated-request-creation) below. |
+| MCP endpoint | The operator's `<config name>.mcp-token` file (created by `factoryd mcp`, mode 0600, beside the session config, one per profile) | `POST /mcp` and the model driving the MCP client | Off until the token file exists; every call needs the token, with no loopback relaxation. Its tools are reads and `POST /requests` only: no tool approves, rejects, retries, resumes, cancels, edits or overrides. See [MCP endpoint](#mcp-endpoint) below. |
 | Untrusted worker output | `internal/sanitize` | Agent-authored log/report text reaching triage, halt reasons, notifications, `status`, or the console | Text is stripped (ANSI/OSC, control and Unicode format characters, invalid UTF-8) and secret-redacted (`sanitize.Text`/`sanitize.Line`; Python mirror `build_app.redact`/`single_line`) before display, and shown as a quoted log excerpt, never as a factory verdict or claimed provenance — the log-writing process shares the worker's container and uid, so the factory cannot attest who wrote a given line. |
 | Model-listing credentials | Factory route-validation code, reused | `doctor -list-models`, `doctorCheckCopilotModelListed`, the Copilot token-exchange client | These host-side calls send only what a launch's route would admit: validated via `sandbox.RoutePolicy.ValidateUpstreamScheme` + `sandbox.CredentialSafeForUpstream` (the same check `RouteSpec.Validate` applies), redirects refused (`meter.NoRedirectCheckRedirect`), no credential over plaintext and none when `routes.<name>.allow_no_credential` is set. |
 | Model routes | Session-config `routes:` and the host-side resolver in the process launching that route's worker | Request model choice; Temporal Workflow input | A route's credential is resolved host-side only for that route's own launch; Workflow input names a route, never a credential source, and the Worker refuses any policy that differs from its own route and role model in any field except a tightened ceiling, then resolves that route's credential itself. The meter policy a sandbox is created with is derived from that same checked policy (`RoutePolicy.MeterConfig`). The route's network policy admits the harnesses' model executables (`harness.ModelBinaries`, the union across harnesses), not one harness's. |
@@ -108,6 +109,8 @@ create; `internal/api.Server.authorizeRequestWrite`):
   extra `Host` values for reads only, e.g. through an ssh tunnel, reverse
   proxy, or `tailscale serve`. The write relaxation still consults only
   `hostMatchesLoopback`, so a write through an allowed host needs the token.
+  `POST /mcp` is reachable through an allowed host and can submit a request
+  there, behind its own token ([MCP endpoint](#mcp-endpoint)).
 
 Start-class routes (`POST /runs`, daemon lifecycle, and the `GET` release
 and stats routes; `authorizeStart`) get no relaxation. A missing or wrong
@@ -175,6 +178,69 @@ bearer token is always a 403. The token is handled as follows:
   the allow-list plus each workspace's verify-command hint. That is nothing
   `GET /requests` and the caller's own filesystem access don't already
   reveal.
+
+### MCP endpoint
+
+Threat scope: the caller is a model, steered by whatever it reads (a chat
+message, a spec, a diff). The endpoint gives it the means to start work and
+follow it, and no means to pass a gate.
+
+- **Protocol.** JSON-RPC, version negotiation, the Streamable HTTP
+  transport (stateless, JSON responses) and argument validation against
+  each tool's schema are the official Go SDK's
+  (`github.com/modelcontextprotocol/go-sdk`). `serveMCP` checks the token
+  before the SDK sees a request. The SDK's own localhost `Host` check is
+  off, because it would refuse every tunnelled request; `Server.ServeHTTP`'s
+  check, which knows `-allowed-host`, has already run.
+- **Off by default.** `POST /mcp` (`internal/api.Server.serveMCP`) answers
+  404 until the operator's `<config name>.mcp-token` file exists
+  (`config.mcp-token` for `config.yml`). The config's name is in the file
+  name, so turning the endpoint on for one profile's `serve` leaves
+  another's off. `serve` reads the file on every call (`mcpTokenSource`),
+  so `factoryd mcp -rotate` and `-disable` take effect at once; a rotation
+  that cannot write the new token leaves the old one working. A file that
+  is a symlink, not owned by the operator or readable beyond its owner
+  counts as absent. `factoryd mcp` prints the token only beside the
+  address this data directory's own `serve` recorded.
+- **Token on every call.** The bearer token is compared in constant time.
+  `loopbackSameOriginWrite` is never consulted, and the start, read and
+  override tokens do not open the endpoint.
+- **Fixed tool table.** `mcpTools` is the whole surface:
+
+  | Tool | Route replayed |
+  |---|---|
+  | `list_requests` | `GET /requests` |
+  | `get_request` | `GET /requests/{id}` |
+  | `get_run` | `GET /runs/{id}` |
+  | `get_run_diff` | `GET /runs/{id}/diff` |
+  | `list_workspaces` | `GET /workspaces` |
+  | `submit_request` | `POST /requests` |
+
+- **One route per tool.** Each tool is pinned to the mux pattern of its
+  route, and `mcpReplay` refuses a call the mux would hand to any other.
+  An id is caller text: `events` as a request id would otherwise reach
+  `GET /requests/events`, a stream that never ends.
+- **No gate decision.** A tool call is replayed through the server's own
+  mux carrying an in-process mark (`mcpCaller`). Only `authorizeRead` and
+  `createRequest` honour the mark; `authorizeRequestWrite`,
+  `authorizeOverride` and `authorizeStart` do not, so the mark opens no
+  approve, reject, retry, resume, cancel, editor, override, start or
+  release route even if a tool were added that named one.
+- **Submit keeps its guards.** `submit_request` passes through
+  `workspaceAllowed` and `requestsubmit.Submit` unchanged, so a model can
+  submit only against a workspace the operator listed, and the session's
+  token, cost and budget ceilings bound what a submission can spend.
+- **Submission limit.** At most 5 `submit_request` calls an hour create a
+  request (`mcpSubmitAllowed`), counted per `serve` process: text a model
+  reads can tell it to submit again and again, and each request has its
+  own ceiling. The session's monthly budgets are the durable bound.
+- **Reads.** The MCP token grants the reads above even when a read token
+  is configured. Spec, ticket and diff text in a result is model-written;
+  results are capped at 256 KiB (a request list keeps its newest rows).
+- **Reach.** The endpoint is a route of `serve`, so the bind address and
+  the `Host` check apply: from another machine it needs `-allowed-host`
+  (a tunnel or `tailscale serve`) or a wider `-addr`. `serve` speaks plain
+  HTTP; the tunnel carries the token.
 
 ## Threat model
 

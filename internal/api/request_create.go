@@ -65,14 +65,16 @@ type createRequestBody struct {
 // class of operator write POST /requests/{id}/approve already is, not a
 // stronger one: unlike POST /runs/{id}/override, it can only ever create
 // a new request in StateSubmitted, never move an existing run past a
-// safety gate.
+// safety gate. POST /mcp's submit_request tool (mcpCaller) is the one other
+// way in, behind the MCP token; the workspace allowlist below applies to it
+// unchanged.
 //
 // Every field of internal/requestsubmit.Params this handler doesn't
 // expose (Model, ConfigPath) is left at its zero value, exactly
 // as an operator who never passes the corresponding `factoryd submit`
 // flag gets today -- there is no console UI for either yet.
 func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeRequestWrite(r) {
+	if !mcpCaller(r) && !s.authorizeRequestWrite(r) {
 		writeError(w, http.StatusForbidden, "requests endpoint is not authorized")
 		return
 	}

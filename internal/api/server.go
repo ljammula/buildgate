@@ -558,10 +558,19 @@ type Server struct {
 	pollInterval time.Duration
 	// console serves the embedded console bundle (internal/consoleweb),
 	// built once here and shared by the GET / mount and the deep-link path.
-	console              http.Handler
-	overrideToken        string
-	startToken           string
-	readToken            string
+	console       http.Handler
+	overrideToken string
+	startToken    string
+	readToken     string
+	// mcpToken supplies POST /mcp's bearer token (see WithMCPToken); nil or
+	// "" leaves the endpoint off.
+	mcpToken func() string
+	// mcpHandler is the MCP SDK's transport, behind serveMCP's token check.
+	mcpHandler http.Handler
+	// mcpSubmits are the times of the submit_request calls that created a
+	// request within mcpSubmitWindow (see mcpSubmitAllowed).
+	mcpSubmitMu          sync.Mutex
+	mcpSubmits           []time.Time
 	runStarter           RunStarter
 	projectChecker       ProjectChecker
 	projectStatsProvider ProjectStatsProvider
@@ -702,6 +711,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /requests/{id}/revisions", s.listRequestRevisions)
 	s.mux.HandleFunc("GET /requests/{id}/revisions/{n}", s.getRequestRevision)
 	s.mux.HandleFunc("GET /console-config.json", s.consoleConfig)
+	s.registerMCP()
 	// Registered last, and unauthenticated like every other static asset a
 	// browser needs before it can even attempt a request: net/http's
 	// ServeMux dispatches by pattern specificity, not registration order,
@@ -4411,8 +4421,12 @@ func (s *Server) authorizeStart(r *http.Request) bool {
 // this read route stays open, not disabled -- see WithReadToken's doc
 // comment for why. Once a read token is configured, it behaves exactly like
 // authorize() against any other token: a missing/wrong bearer credential is
-// rejected.
+// rejected. A tool call POST /mcp replayed (mcpCaller) already presented the
+// MCP token, which grants every read its tool table names.
 func (s *Server) authorizeRead(r *http.Request) bool {
+	if mcpCaller(r) {
+		return true
+	}
 	if s.readToken == "" {
 		return true
 	}

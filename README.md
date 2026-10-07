@@ -101,6 +101,12 @@ brownfield), follows it, and hands you the console and Temporal links;
 every approval and the merge stay yours. `factoryd upgrade` refreshes the
 skill. [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgate-from-a-coding-agent).
 
+Any MCP client (Claude Code, Hermes, your own agent) can do the same over
+`serve`'s MCP endpoint: `factoryd mcp` turns it on and prints the endpoint
+and token. Its tools read requests and runs and submit a request; none
+approves, rejects or merges.
+[USAGE.md § Drive Buildgate from an MCP client](USAGE.md#drive-buildgate-from-an-mcp-client).
+
 ### Troubleshooting a fresh Mac
 
 | Symptom | Cause | Fix |
