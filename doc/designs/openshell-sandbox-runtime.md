@@ -121,6 +121,7 @@ attempt's start.
 | The filesystem policy denies every unnamed path | `/usr`, `/etc`, `/opt`, `/proc`, `/dev` are listed read-only |
 | The runtime sets `HOME` to the image's `WORKDIR` | The wrapper exports `HOME=/home/worker` |
 | A middleware must be reachable from the host-networked gateway | The gateway is host-networked and bound to loopback |
+| The Docker driver gives the supervisor no extra CA (`proxy_ca_bundle` is the VM, Podman and Kubernetes drivers'): it trusts its built-in public roots and its image's `/etc/ssl/certs/ca-certificates.crt` | On a network that re-signs TLS the stack start builds `buildgate-openshell-supervisor:ca-<hash>` from the pinned supervisor with `~/.config/factoryd/build-ca.pem` as that file, and renders it as `supervisor_image` |
 | The supervisor installs a provider's credential a second time at its first settings poll, 10 s after it starts, and rebuilds its proxy to do it | A step on a credentialed route starts its command about 10 s after its sandbox, once the gateway reports the provider ready. A step with no credential that reaches the network (the registry proxy, a compose service, a route with no credential) has no provider to ask about and starts 12 s after its sandbox is ready. A step with no network starts at once |
 
 ## Verifying a change here
@@ -133,4 +134,8 @@ make live-compose      # when compose services or the registry proxy change
 ```
 
 An OpenShell upgrade repeats the live tests with `OPENSHELL_LIVE_RESTART=1`
-and `OPENSHELL_LIVE_CHATGPT_MODEL=<model>`.
+and `OPENSHELL_LIVE_CHATGPT_MODEL=<model>`, and
+`TestLiveSupervisorTrustsTheInterceptingCA` with
+`OPENSHELL_LIVE_INTERCEPTED_UPSTREAM=https://<host>:<port>`: an
+OpenAI-compatible endpoint whose certificate only the CA in
+`~/.config/factoryd/build-ca.pem` signs.

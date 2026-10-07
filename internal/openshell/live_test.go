@@ -431,6 +431,83 @@ func TestLiveModelRouteThroughTheMeter(t *testing.T) {
 	}
 }
 
+const liveInterceptedScript = `import json, os, time, urllib.request, urllib.error
+url = os.environ["FACTORY_MODEL_BASE_URL"] + "/chat/completions"
+body = json.dumps({"model": os.environ["FACTORY_MODEL_ID"], "messages": [{"role": "user", "content": "Reply OK."}]}).encode()
+for attempt in range(6):
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}), timeout=30)
+        print("call HTTP", r.status)
+        break
+    except urllib.error.HTTPError as e:
+        print("call HTTP", e.code, e.read()[:200].decode("utf-8", "replace").replace("\n", " "))
+    except Exception as e:
+        print("call ERR", type(e).__name__, str(e)[:200])
+    time.sleep(5)
+`
+
+// TestLiveSupervisorTrustsTheInterceptingCA is the proof for a network that
+// re-signs TLS: OPENSHELL_LIVE_INTERCEPTED_UPSTREAM is the bare root
+// (https://host:port) of an OpenAI-compatible endpoint whose certificate only the stack's intercepting CA
+// signs (hostcontrol.OpenShellStack.InterceptingCA), standing in for a
+// corporate proxy. A worker's call reaches it only when the supervisor the
+// gateway starts trusts that CA; against the pinned supervisor every attempt
+// is a connection error.
+func TestLiveSupervisorTrustsTheInterceptingCA(t *testing.T) {
+	rt, image := liveRuntime(t)
+	upstream := os.Getenv("OPENSHELL_LIVE_INTERCEPTED_UPSTREAM")
+	if upstream == "" {
+		t.Skip("set OPENSHELL_LIVE_INTERCEPTED_UPSTREAM to the bare root of an HTTPS endpoint signed by the stack's intercepting CA")
+	}
+	spec, launch := liveLaunch(t, image, `python3 /inputs/call.py`)
+	if err := os.WriteFile(filepath.Join(spec.InputDir, "call.py"), []byte(liveInterceptedScript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policy := sandbox.RoutePolicy{
+		Route: "intercepted", Upstream: upstream, AllowedPathPrefix: "/v1", WorkerBasePath: "v1", AllowUnauthenticatedUpstream: true,
+		UsageFormat: meter.UsageFormatOpenAI, WorkerModelID: "proof", WorkerModelAPI: meter.RequestFormatOpenAICompletions,
+		MaxRequestBytes: 1 << 18, RequestsPerMinute: 30,
+		TokenBudget: 200000, TokenBudgetWindow: time.Minute, CostBudgetMicroUSD: 5000000, CostBudgetWindow: time.Minute,
+		TokenCeiling: 200000, CostCeilingMicroUSD: 5000000,
+		InputMicroUSDPerMTok: 1000000, CachedInputMicroUSDPerMTok: 100000, CacheWriteMicroUSDPerMTok: 1000000, OutputMicroUSDPerMTok: 8000000,
+	}
+	access, err := policy.RouteAccess(spec.DataDir, []string{"/usr/local/bin/python3*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	t.Cleanup(func() {
+		if err := rt.Delete(context.Background(), launch.Name); err != nil {
+			t.Errorf("cleanup delete: %v", err)
+		}
+	})
+	spec.Environment = access.Environment
+	req, err := spec.SandboxRequest(launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Route = &access
+	if req.MeterConfig, err = policy.MeterConfig(spec.DataDir, spec.RunID, launch.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Create(ctx, req); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(launch.GuardDir, sandbox.WorkerGuardGoFile), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exit, err := rt.Wait(ctx, launch.Name)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	logged, _ := os.ReadFile(filepath.Join(launch.OutputDir, sandbox.WorkerOutputFile))
+	t.Logf("exit %+v, output:\n%s", exit, logged)
+	if !strings.Contains(string(logged), "call HTTP 200") {
+		t.Errorf("the worker's call did not reach the upstream the intercepting CA signs")
+	}
+}
+
 // TestLiveRunThroughRuntime runs the whole launch sequence the factory uses
 // (sandbox.RunThroughRuntime) against the real gateway.
 func TestLiveRunThroughRuntime(t *testing.T) {

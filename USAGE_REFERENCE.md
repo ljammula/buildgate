@@ -409,13 +409,25 @@ egress_ca_bundle: /path/to/corp-ca.pem
 
 Trusted by the registry proxy for its outbound HTTPS (package
 registries) and by factoryd's own host-side model-listing and Copilot
-token-exchange calls. The sandboxed worker has
-no network and needs nothing. Also a flag (`-egress-ca-bundle`) on
+token-exchange calls. Also a flag (`-egress-ca-bundle`) on
 `factoryd <run>`, `worker`, `doctor`, `daemon`, `serve` and
 `quickstart`. `doctor`/`worker` fail at startup if the file is not a
 readable PEM. `quickstart -egress-ca-bundle` resolves it to an absolute
 path and loads it before writing it to config (it also uses it for its own
 Copilot model listing).
+
+A model call from a sandbox is not covered by this key. Its TLS connection
+is opened by the sandbox's supervisor, which takes the CA from the machine,
+not from a profile:
+
+| On a network that | The supervisor runs from | It trusts |
+|---|---|---|
+| does not re-sign TLS | OpenShell's pinned image | Its built-in public roots |
+| re-signs TLS | `buildgate-openshell-supervisor:ca-<hash>`, built by the stack start from the pinned image | Also `~/.config/factoryd/build-ca.pem`, which `make install` and `doctor -fix` write from the keychain |
+
+A proxy whose CA is not in the keychain: write that CA (PEM, with any
+public roots the proxy does not replace) to `~/.config/factoryd/build-ca.pem`,
+then `factoryd doctor -fix`.
 
 ## `.factory.yml` reference
 

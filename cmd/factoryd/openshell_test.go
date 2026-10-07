@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -37,7 +38,8 @@ type openShellFixture struct {
 	stack0 hostcontrol.OpenShellStack
 }
 
-// The fake docker answers `info`, `compose`, `run`, `create`, `cp` and `rm`.
+// The fake docker answers `info`, `compose`, `run`, `create`, `cp`, `rm`, and
+// `image inspect` and `build` of the supervisor image that carries a CA.
 // Copying a file out of the VM (`cp <id>:<path> -`, a tar stream) fails until
 // certificates were generated or the `preexisting` marker exists;
 // `gateway-fails` makes `up -d gateway` fail.
@@ -45,6 +47,11 @@ const openShellFakeDocker = `#!/bin/sh
 echo "$@" >> LOG
 case "$*" in
 *generate-certs*) touch STATE/generated; exit 0;;
+"image inspect buildgate-openshell-supervisor:"*) [ -f STATE/supervisor-built ] || exit 1; exit 0;;
+"build -t buildgate-openshell-supervisor:"*)
+	for last; do :; done
+	cp "$last/Dockerfile" STATE/supervisor-Dockerfile; cp "$last/ca-certificates.crt" STATE/supervisor-ca
+	touch STATE/supervisor-built; exit 0;;
 "create "*) echo "probe-container"; exit 0;;
 "rm -f probe-container") exit 0;;
 "cp probe-container:"*)
@@ -373,7 +380,7 @@ func TestOpenShellStopStopsGatewayThenMeter(t *testing.T) {
 }
 
 func TestOpenShellRenderedGatewayConfig(t *testing.T) {
-	config, err := hostcontrol.RenderGatewayConfig()
+	config, err := hostcontrol.RenderGatewayConfig(hostcontrol.OpenShellSupervisorImage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,10 +475,8 @@ func TestOpenShellPinnedImagesMatchTheEmbeddedFiles(t *testing.T) {
 	if !bytes.Contains(buildgate.OpenShellCompose, []byte(hostcontrol.OpenShellGatewayImage)) {
 		t.Error("the compose file does not pin hostcontrol.OpenShellGatewayImage")
 	}
-	for _, image := range []string{hostcontrol.OpenShellSandboxImage, hostcontrol.OpenShellSupervisorImage} {
-		if !strings.Contains(buildgate.OpenShellGatewayTemplate, image) {
-			t.Errorf("the gateway template does not pin %s", image)
-		}
+	if !strings.Contains(buildgate.OpenShellGatewayTemplate, hostcontrol.OpenShellSandboxImage) {
+		t.Errorf("the gateway template does not pin %s", hostcontrol.OpenShellSandboxImage)
 	}
 	makefile, err := os.ReadFile("../../Makefile")
 	if err != nil {
@@ -546,5 +551,145 @@ func TestStopAllLeavesOpenShellRunningWhileASandboxExists(t *testing.T) {
 	}
 	if argv, _ := os.ReadFile(argvFile); strings.Contains(string(argv), "buildgate-openshell") {
 		t.Errorf("openshell was stopped despite a sandbox: %q", argv)
+	}
+}
+
+func TestOpenShellStartBuildsTheSupervisorImageThatTrustsAnInterceptingCA(t *testing.T) {
+	f := newOpenShellFixture(t)
+	f.healthyOnceUp()
+	_, caPEM := testRootCA(t, "Corp Intercepting Root")
+	caPath := filepath.Join(t.TempDir(), "build-ca.pem")
+	if err := os.WriteFile(caPath, caPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stack := f.stack0
+	stack.InterceptingCA = caPath
+	image := hostcontrol.SupervisorImageFor(caPEM)
+	if image == hostcontrol.OpenShellSupervisorImage || !strings.HasPrefix(image, "buildgate-openshell-supervisor:ca-") {
+		t.Fatalf("SupervisorImageFor = %q, want a local image named after the CA", image)
+	}
+	for start := 1; start <= 2; start++ {
+		if err := hostcontrol.StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, stack); err != nil {
+			t.Fatalf("StartOpenShell %d: %v", start, err)
+		}
+	}
+	lines := f.logLines()
+	inspect, build, up := indexOfLine(lines, "image inspect "+image), indexOfLine(lines, "build -t "+image), indexOfLine(lines, "up -d gateway")
+	if inspect < 0 || build < inspect || up < build {
+		t.Fatalf("want inspect, build, then the gateway's start; got %d, %d, %d in:\n%s", inspect, build, up, strings.Join(lines, "\n"))
+	}
+	if n := strings.Count(strings.Join(lines, "\n"), "build -t "+image); n != 1 {
+		t.Errorf("the image was built %d times over two starts, want once", n)
+	}
+	dockerfile, _ := os.ReadFile(filepath.Join(f.state, "supervisor-Dockerfile"))
+	if want := "FROM " + hostcontrol.OpenShellSupervisorImage + "\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\n"; string(dockerfile) != want {
+		t.Errorf("Dockerfile = %q, want %q", dockerfile, want)
+	}
+	if built, _ := os.ReadFile(filepath.Join(f.state, "supervisor-ca")); !bytes.Equal(built, caPEM) {
+		t.Errorf("the image's trust file is not the CA bundle")
+	}
+	config, _ := os.ReadFile(filepath.Join(f.stack, "gateway.toml"))
+	if want := `supervisor_image      = "` + image + `"`; !strings.Contains(string(config), want) {
+		t.Errorf("gateway.toml lacks %q", want)
+	}
+}
+
+func TestOpenShellStartKeepsThePinnedSupervisorWithoutAnInterceptingCA(t *testing.T) {
+	f := newOpenShellFixture(t)
+	f.healthyOnceUp()
+	if err := hostcontrol.StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, f.stack0); err != nil {
+		t.Fatalf("StartOpenShell: %v", err)
+	}
+	if lines := f.logLines(); indexOfLine(lines, "build ") >= 0 || indexOfLine(lines, "image inspect") >= 0 {
+		t.Errorf("a stack with no intercepting CA built or looked for a supervisor image:\n%s", strings.Join(lines, "\n"))
+	}
+	config, _ := os.ReadFile(filepath.Join(f.stack, "gateway.toml"))
+	if want := `supervisor_image      = "` + wantSupervisorImage + `"`; !strings.Contains(string(config), want) {
+		t.Errorf("gateway.toml lacks %q", want)
+	}
+}
+
+func TestOpenShellStartRefusesAnInterceptingCAFileWithNoCertificate(t *testing.T) {
+	f := newOpenShellFixture(t)
+	f.healthyOnceUp()
+	caPath := filepath.Join(t.TempDir(), "build-ca.pem")
+	if err := os.WriteFile(caPath, []byte("not a certificate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stack := f.stack0
+	stack.InterceptingCA = caPath
+	err := hostcontrol.StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, stack)
+	if err == nil || !strings.Contains(err.Error(), "holds no certificate") {
+		t.Fatalf("StartOpenShell = %v, want a refusal naming the file", err)
+	}
+	if lines := f.logLines(); indexOfLine(lines, "up -d gateway") >= 0 {
+		t.Errorf("the gateway started without the supervisor image:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// A stack started before this network's CA was on record runs supervisors
+// that refuse every model upstream: doctor names it, and with -fix stops the
+// stack so the start after it renders the image that trusts the CA.
+func TestDoctorRestartsAStackWhoseSupervisorsLackTheInterceptingCA(t *testing.T) {
+	f := newOpenShellFixture(t)
+	in := doctorInputs{meterImage: f.stack0.MeterImage, sandboxDocker: fakeImageDocker(t, true)}
+	row := func(checks []doctorCheck) *doctorCheck {
+		for i := range checks {
+			if checks[i].Name == "OpenShell supervisor trusts this network's CA" {
+				return &checks[i]
+			}
+		}
+		return nil
+	}
+	if c := row(doctorOpenShellChecks(f.dp, context.Background(), in, false, io.Discard)); c != nil {
+		t.Fatalf("a network with no intercepting CA has the row: %+v", c)
+	}
+	_, caPEM := testRootCA(t, "Corp Intercepting Root")
+	if err := os.MkdirAll(filepath.Dir(buildCABundlePath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(buildCABundlePath(), caPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c := row(doctorOpenShellChecks(f.dp, context.Background(), in, false, io.Discard)); c != nil {
+		t.Fatalf("a stack never started has the row: %+v", c)
+	}
+	pinned, err := hostcontrol.RenderGatewayConfig(hostcontrol.OpenShellSupervisorImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(f.stack, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gatewayTOML := filepath.Join(f.stack, hostcontrol.OpenShellGatewayConfigFile)
+	if err := os.WriteFile(gatewayTOML, []byte(pinned), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := row(doctorOpenShellChecks(f.dp, context.Background(), in, false, io.Discard))
+	if c == nil || c.Err == nil || !c.Advisory || !strings.Contains(c.Fix, "factoryd stop -all") {
+		t.Fatalf("stale stack without -fix: %+v, want an advisory row naming the restart", c)
+	}
+	if lines := f.logLines(); indexOfLine(lines, "stop gateway") >= 0 {
+		t.Fatalf("doctor without -fix stopped the stack:\n%s", strings.Join(lines, "\n"))
+	}
+
+	fakeSandboxOf(f.dp).sandboxNamesFn = func(context.Context) ([]string, error) { return nil, nil }
+	fakeSandboxOf(f.dp).startStackFn = func(context.Context, io.Writer, string) error {
+		f.note("start-stack")
+		trusting, err := hostcontrol.RenderGatewayConfig(hostcontrol.SupervisorImageFor(caPEM))
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(gatewayTOML, []byte(trusting), 0o644)
+	}
+	var out bytes.Buffer
+	c = row(doctorOpenShellChecks(f.dp, context.Background(), in, true, &out))
+	lines := f.logLines()
+	stop, start := indexOfLine(lines, "stop gateway"), indexOfLine(lines, "start-stack")
+	if stop < 0 || start < stop {
+		t.Fatalf("want the stack stopped, then started; got %d, %d in:\n%s\n%s", stop, start, strings.Join(lines, "\n"), out.String())
+	}
+	if c == nil || c.Err != nil {
+		t.Errorf("after the restart: %+v, want the row ok", c)
 	}
 }
