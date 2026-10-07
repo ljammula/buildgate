@@ -86,9 +86,8 @@ func TestDoctorTLSInterceptionWarnsAndNamesWhatToPass(t *testing.T) {
 	if !strings.Contains(check.Err.Error(), "Corp Proxy CA") {
 		t.Errorf("warning does not name the signer: %v", check.Err)
 	}
-	want := "BUILD_CA_BUNDLE=" + buildCABundlePath() + " make install"
-	if !strings.Contains(check.Fix, "-fix") || !strings.Contains(check.Fix, want) {
-		t.Errorf("fix = %q, want -fix and %q", check.Fix, want)
+	if !strings.Contains(check.Fix, "-fix") || !strings.Contains(check.Fix, "make install writes") || !strings.Contains(check.Fix, buildCABundlePath()) {
+		t.Errorf("fix = %q, want make install, -fix and %q", check.Fix, buildCABundlePath())
 	}
 	if _, err := os.Stat(buildCABundlePath()); !os.IsNotExist(err) {
 		t.Errorf("a bundle was written without -fix (stat err %v)", err)
@@ -201,4 +200,55 @@ func TestRealTLSRootReportsASignerThisMachineDoesNotTrust(t *testing.T) {
 	if !errors.As(err, &untrusted) {
 		t.Fatalf("tlsRoot error = %v (%T), want an x509.UnknownAuthorityError", err, err)
 	}
+}
+
+// TestBuildCABundleCommandPrintsOnlyABundleToUse covers what the Makefile
+// reads from `factoryd build-ca-bundle`: stdout is the bundle path on an
+// intercepted network and empty in every other case, and the command never
+// fails.
+func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
+	public, publicPEM := testRootCA(t, "Public Root")
+	proxy, _ := testRootCA(t, "Corp Proxy CA")
+	run := func(t *testing.T, dp *deps) (stdout, stderr string) {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		if err := buildCABundleMain(dp, &out, &errOut); err != nil {
+			t.Fatalf("build-ca-bundle failed: %v", err)
+		}
+		return out.String(), errOut.String()
+	}
+	t.Run("intercepted", func(t *testing.T) {
+		dp := tlsInterceptionDeps(t, proxy, publicPEM)
+		stdout, stderr := run(t, dp)
+		if stdout != buildCABundlePath()+"\n" {
+			t.Errorf("stdout = %q, want the bundle path alone", stdout)
+		}
+		if !strings.Contains(stderr, "Corp Proxy CA") || !strings.Contains(stderr, "BUILD_CA_BUNDLE="+buildCABundlePath()) {
+			t.Errorf("stderr does not say what was found and used: %q", stderr)
+		}
+		bundle, err := os.ReadFile(buildCABundlePath())
+		if err != nil || !pemHoldsKeyOf(bundle, proxy) || !pemHoldsKeyOf(bundle, public) {
+			t.Errorf("bundle must hold the proxy's root and the shipped roots (read err %v)", err)
+		}
+	})
+	t.Run("not intercepted", func(t *testing.T) {
+		if stdout, stderr := run(t, tlsInterceptionDeps(t, public, publicPEM)); stdout != "" || stderr != "" {
+			t.Errorf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+		}
+	})
+	t.Run("nothing to check against", func(t *testing.T) {
+		if stdout, stderr := run(t, newTestDeps(t)); stdout != "" || stderr != "" {
+			t.Errorf("stdout = %q, stderr = %q; want silence", stdout, stderr)
+		}
+	})
+	t.Run("untrusted proxy", func(t *testing.T) {
+		dp := tlsInterceptionDeps(t, proxy, publicPEM)
+		fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
+			return nil, x509.UnknownAuthorityError{Cert: proxy}
+		}
+		stdout, stderr := run(t, dp)
+		if stdout != "" || !strings.Contains(stderr, "BUILD_CA_BUNDLE=/path/to/ca.pem make install") {
+			t.Errorf("stdout = %q, stderr = %q; want no path and the manual step", stdout, stderr)
+		}
+	})
 }

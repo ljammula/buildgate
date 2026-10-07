@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,7 +25,8 @@ const buildCAProbeHost = "registry.npmjs.org"
 
 // buildCABundlePath is where `doctor -fix` writes the PEM that
 // `BUILD_CA_BUNDLE=<path> make install` takes on a network that intercepts
-// TLS. Nothing reads it unless the operator passes it.
+// TLS. The Makefile takes it from `factoryd build-ca-bundle` when
+// BUILD_CA_BUNDLE is not given.
 func buildCABundlePath() string {
 	return filepath.Join(sessionconfig.ConfigDir(), "build-ca.pem")
 }
@@ -34,64 +36,133 @@ func buildCAUse(path string) string {
 	return fmt.Sprintf("BUILD_CA_BUNDLE=%s make install", path)
 }
 
-// doctorCheckTLSInterception reports whether this network re-signs TLS (a
-// corporate proxy) and names what `make install` must then be given. Without
-// that CA the image builds cannot download, and the console's npm cannot
-// verify its registry: under some Node versions it dies with "Exit handler
-// never called!" and never names the certificate.
-//
-// Intercepted means the root that signs buildCAProbeHost's certificate is
-// trusted by this machine but is not one the operating system ships. The
-// check is advisory, since an installed factoryd runs without the bundle; it
-// is skipped (ok false) when the host cannot be reached or the system's
-// shipped roots cannot be listed (any platform but macOS). With fix, the
-// shipped roots and the proxy's root are written to buildCABundlePath: pip
-// reads the bundle in place of its own roots, so it holds both.
-func doctorCheckTLSInterception(ctx context.Context, dp *deps, fix bool) (check doctorCheck, ok bool) {
-	name := fmt.Sprintf("build CA bundle (TLS to %s)", buildCAProbeHost)
+// buildCAFinding is what this machine can tell about TLS interception on
+// its network.
+type buildCAFinding struct {
+	// known is false when there was nothing to check against: the probe
+	// host is unreachable, or the system's shipped roots cannot be listed
+	// (any platform but macOS).
+	known bool
+	// intercepted: the root that signs buildCAProbeHost's certificate is
+	// not one the operating system ships (a corporate proxy re-signs TLS).
+	intercepted bool
+	// signer names the intercepting CA; empty when the machine does not
+	// trust it, in which case untrusted holds the verification error and
+	// no bundle can be built from the keychain.
+	signer    string
+	untrusted error
+	// bundle is buildCABundlePath when that file holds the signer's root,
+	// already or because write was set. writeErr says why writing failed.
+	bundle   string
+	writeErr error
+}
+
+// findBuildCA probes buildCAProbeHost. With write, an intercepting CA the
+// machine trusts is written, with the system's shipped roots, to
+// buildCABundlePath: pip reads the bundle in place of its own roots, so it
+// holds both.
+func findBuildCA(ctx context.Context, dp *deps, write bool) buildCAFinding {
 	root, err := dp.host.tlsRoot(ctx, buildCAProbeHost)
 	var untrusted x509.UnknownAuthorityError
 	if errors.As(err, &untrusted) {
-		return doctorCheck{
-			Name:     name,
-			Advisory: true,
-			Err:      fmt.Errorf("this network intercepts TLS with a CA this machine does not trust: %v", err),
-			Fix:      "get the proxy's CA as a PEM file (with any public roots the proxy does not replace) and pass it: " + buildCAUse("/path/to/ca.pem"),
-		}, true
+		return buildCAFinding{known: true, intercepted: true, untrusted: err}
 	}
 	if err != nil {
-		return doctorCheck{}, false
+		return buildCAFinding{}
 	}
 	shipped, err := dp.host.shippedRootsPEM(ctx)
 	if err != nil {
-		return doctorCheck{}, false
+		return buildCAFinding{}
 	}
 	if pemHoldsKeyOf(shipped, root) {
-		return doctorCheck{Name: name, Detail: "not intercepted, none needed"}, true
+		return buildCAFinding{known: true}
+	}
+	finding := buildCAFinding{known: true, intercepted: true, signer: root.Subject.CommonName}
+	if finding.signer == "" {
+		finding.signer = root.Subject.String()
 	}
 	path := buildCABundlePath()
-	signer := root.Subject.CommonName
-	if signer == "" {
-		signer = root.Subject.String()
-	}
 	if existing, readErr := os.ReadFile(path); readErr == nil && pemHoldsKeyOf(existing, root) {
-		return doctorCheck{Name: name, Detail: "intercepted by " + signer, Use: buildCAUse(path)}, true
+		finding.bundle = path
+		return finding
 	}
-	intercepted := fmt.Errorf("this network intercepts TLS: %s is signed by %q, not a root the system ships; make install needs that CA", buildCAProbeHost, signer)
-	if !fix {
-		return doctorCheck{
-			Name:     name,
-			Advisory: true,
-			Err:      intercepted,
-			Fix:      fmt.Sprintf("rerun with -fix to write that CA and the system's roots to %s, then pass it: %s", path, buildCAUse(path)),
-		}, true
+	if !write {
+		return finding
 	}
 	bundle := append(bytes.TrimRight(shipped, "\n"), '\n')
 	bundle = append(bundle, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: root.Raw})...)
-	if err := writeBuildCABundle(path, bundle); err != nil {
-		return doctorCheck{Name: name, Advisory: true, Err: fmt.Errorf("%v; could not write %s: %v", intercepted, path, err)}, true
+	if finding.writeErr = writeBuildCABundle(path, bundle); finding.writeErr == nil {
+		finding.bundle = path
 	}
-	return doctorCheck{Name: name, Detail: "intercepted by " + signer + "; wrote " + path, Use: buildCAUse(path)}, true
+	return finding
+}
+
+// doctorCheckTLSInterception reports whether this network re-signs TLS (a
+// corporate proxy) and what `make install` uses for it. Without that CA the
+// image builds cannot download, and the console's npm cannot verify its
+// registry: under some Node versions it dies with "Exit handler never
+// called!" and never names the certificate. `make install` finds and writes
+// the bundle itself (buildCABundleMain); this row says what it will find.
+//
+// The check is advisory, since an installed factoryd runs without the
+// bundle, and skipped (ok false) when findBuildCA had nothing to check
+// against. With fix it writes the bundle.
+func doctorCheckTLSInterception(ctx context.Context, dp *deps, fix bool) (check doctorCheck, ok bool) {
+	name := fmt.Sprintf("build CA bundle (TLS to %s)", buildCAProbeHost)
+	finding := findBuildCA(ctx, dp, fix)
+	path := buildCABundlePath()
+	switch {
+	case !finding.known:
+		return doctorCheck{}, false
+	case !finding.intercepted:
+		return doctorCheck{Name: name, Detail: "not intercepted, none needed"}, true
+	case finding.untrusted != nil:
+		return doctorCheck{
+			Name:     name,
+			Advisory: true,
+			Err:      fmt.Errorf("this network intercepts TLS with a CA this machine does not trust: %v", finding.untrusted),
+			Fix:      buildCAManualStep,
+		}, true
+	case finding.bundle != "":
+		return doctorCheck{Name: name, Detail: "intercepted by " + finding.signer + "; make install uses this bundle", Use: buildCAUse(path)}, true
+	}
+	intercepted := fmt.Errorf("this network intercepts TLS: %s is signed by %q, not a root the system ships; make install needs that CA", buildCAProbeHost, finding.signer)
+	if finding.writeErr != nil {
+		return doctorCheck{Name: name, Advisory: true, Err: fmt.Errorf("%v; could not write %s: %v", intercepted, path, finding.writeErr)}, true
+	}
+	return doctorCheck{
+		Name:     name,
+		Advisory: true,
+		Err:      intercepted,
+		Fix:      fmt.Sprintf("make install writes that CA and the system's roots to %s and uses it; doctor -fix writes it now", path),
+	}, true
+}
+
+// buildCAManualStep is the one case nothing can figure out: the proxy's CA
+// is not in the keychain, so the operator has to supply it.
+var buildCAManualStep = "get the proxy's CA as a PEM file (with any public roots the proxy does not replace) and pass it: " + buildCAUse("/path/to/ca.pem")
+
+// buildCABundleMain is the hidden `factoryd build-ca-bundle` subcommand the
+// Makefile runs when BUILD_CA_BUNDLE is not given: on a network that
+// intercepts TLS it writes the bundle and prints its path on stdout, the
+// value the Makefile then uses; otherwise it prints nothing. What it found
+// goes to stderr. It always succeeds: a machine it cannot read (offline, not
+// a Mac) builds as it did without it.
+func buildCABundleMain(dp *deps, stdout, stderr io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	finding := findBuildCA(ctx, dp, true)
+	switch {
+	case !finding.known || !finding.intercepted:
+	case finding.untrusted != nil:
+		fmt.Fprintf(stderr, "warning: this network intercepts TLS with a CA this machine does not trust (%v) -- %s\n", finding.untrusted, buildCAManualStep)
+	case finding.bundle == "":
+		fmt.Fprintf(stderr, "warning: this network intercepts TLS (signed by %q) and %s could not be written: %v\n", finding.signer, buildCABundlePath(), finding.writeErr)
+	default:
+		fmt.Fprintf(stderr, "note: this network intercepts TLS (signed by %q) -- building with BUILD_CA_BUNDLE=%s\n", finding.signer, finding.bundle)
+		fmt.Fprintln(stdout, finding.bundle)
+	}
+	return nil
 }
 
 // writeBuildCABundle replaces path with bundle in one rename.

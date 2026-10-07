@@ -601,11 +601,8 @@ func realMain(dp *deps) error {
 	if len(os.Args) > 1 && os.Args[1] == "configure-images" {
 		return configureImagesMain(os.Args[2:])
 	}
-	if len(os.Args) > 1 && os.Args[1] == "image-inputs-hash" {
-		return imageInputsHashMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "image-reuse" {
-		return imageReuseMain(os.Args[2:])
+	if handled, err := makefileSubcommand(dp, os.Args[1:]); handled {
+		return err
 	}
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		return versionMain()
@@ -626,4 +623,22 @@ func runMain(dp *deps, args []string) error {
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	return runMainWithReady(dp, signalCtx, args, nil)
+}
+
+// makefileSubcommand runs the hidden subcommands only the Makefile calls
+// (through `go run ./cmd/factoryd`); handled is false for any other
+// argument list.
+func makefileSubcommand(dp *deps, args []string) (handled bool, err error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	switch args[0] {
+	case "build-ca-bundle":
+		return true, buildCABundleMain(dp, os.Stdout, os.Stderr)
+	case "image-inputs-hash":
+		return true, imageInputsHashMain(args[1:])
+	case "image-reuse":
+		return true, imageReuseMain(args[1:])
+	}
+	return false, nil
 }

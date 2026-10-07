@@ -13,7 +13,10 @@ GO_COVERPKG = $(shell echo $(GO_PACKAGES) | tr ' ' ',')
 # Docker only as a BuildKit secret for host-side dependency downloads.
 # pip (project images) reads it in place of its own roots, so it must hold every CA pip needs.
 # The console's npm reads it as NODE_EXTRA_CA_CERTS, beside Node's own roots.
-BUILD_CA_BUNDLE ?=
+# Not given, it is found on first use: the hidden `factoryd build-ca-bundle`
+# subcommand prints the bundle it wrote when this network intercepts TLS,
+# nothing otherwise. The result is exported, so a sub-make does not ask again.
+BUILD_CA_BUNDLE ?= $(eval export BUILD_CA_BUNDLE := $(shell go run ./cmd/factoryd build-ca-bundle))$(BUILD_CA_BUNDLE)
 # Without the proxy's CA, npm cannot verify the registry; under some Node
 # versions it then dies with "Exit handler never called!" instead of naming
 # the certificate.
@@ -115,7 +118,7 @@ console-build-optional:
 		rm -rf internal/consoleweb/dist; \
 		mkdir -p internal/consoleweb/dist; \
 		touch internal/consoleweb/dist/.gitkeep; \
-		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console; behind a TLS-intercepting proxy, pass BUILD_CA_BUNDLE=/path/to/ca.pem ('factoryd doctor -fix' writes one and prints the command)." >&2; \
+		echo "warning: console build failed (node $$(node --version 2>/dev/null || echo not found), npm $$(npm --version 2>/dev/null || echo unknown); it needs Node 20+) -- factoryd will serve the console placeholder page. Fix the error above and re-run 'make install' for the console; 'factoryd doctor' says whether this network intercepts TLS." >&2; \
 	fi
 
 # agent/pi/'s own Python toolchain, same reasoning as console-test above --
@@ -294,6 +297,7 @@ temporal-up:
 # each is re-pointed, so no config is left pinning a superseded image
 # (paths must not contain spaces).
 local-images: docker-buildx-check
+	@: one lookup for the image builds below and the console build after them: $(BUILD_CA_BUNDLE)
 	@if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then \
 		echo "Docker is required to build the sandbox/meter/registry-proxy images (every image factoryd launches is built from source, never published) -- install/start Docker and re-run 'make install'." >&2; exit 1; \
 	fi

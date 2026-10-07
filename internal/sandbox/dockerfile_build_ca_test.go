@@ -47,7 +47,7 @@ func TestHostSideImageDownloadsSupportBuildCABundle(t *testing.T) {
 	}
 	makeText := string(makefile)
 	for _, want := range []string{
-		"BUILD_CA_BUNDLE ?=",
+		"BUILD_CA_BUNDLE ?= $(eval export BUILD_CA_BUNDLE := $(shell go run ./cmd/factoryd build-ca-bundle))$(BUILD_CA_BUNDLE)",
 		`--secret "id=build-ca,src=$$ca_bundle"`,
 		`ca_bundle="$(BUILD_CA_BUNDLE)"`,
 		`CONSOLE_NPM_CA = $(if $(BUILD_CA_BUNDLE),NODE_EXTRA_CA_CERTS="$(abspath $(BUILD_CA_BUNDLE))")`,
