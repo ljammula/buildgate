@@ -6,11 +6,14 @@
 #   PATH     appends `export PATH="$PATH:<bin dir>"` to the     `factoryd` already resolves on PATH,
 #            shell profile (~/.zshrc, ~/.bash_profile)          in a new shell, or the profile names that directory
 #   GitHub   `gh auth login`                                    gh is logged in, or there is no terminal
+#   Model    `factoryd setup`: which model, and which coding    the config already names a model;
+#            agent where the route can run more than one        asks nothing with no terminal
 #   Check    `factoryd doctor -fix`                             never
 #
-# It never fails the install: factoryd is installed by the time it runs, and
-# on a machine with no model route yet doctor is expected to report one
-# failure, which `factoryd quickstart` closes.
+# It never fails the install: factoryd is installed by the time it runs. A
+# machine setup could not pick a model for (no terminal and no single
+# detected login) is told to run `factoryd setup`, and doctor then reports
+# that one failure.
 set -u
 
 installed="${1:-}"
@@ -51,8 +54,12 @@ if have gh && ! gh auth status >/dev/null 2>&1; then
 	fi
 fi
 
+if ! "$installed" setup; then
+	echo "note: no model is configured yet -- run 'factoryd setup' in a terminal (or with -route) before your first request"
+fi
+
 echo "Checking the install: factoryd doctor -fix"
 if ! "$installed" doctor -fix; then
-	echo "note: doctor reported the problems above. With no model route configured yet, 'factoryd quickstart <repo> \"<request>\"' writes one."
+	echo "note: doctor reported the problems above; fix them and re-run 'factoryd doctor'."
 fi
 exit 0

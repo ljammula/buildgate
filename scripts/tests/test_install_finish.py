@@ -30,7 +30,7 @@ class InstallFinishTest(unittest.TestCase):
             os.symlink(shutil.which(name), self.bin / name)
         self.log = self.tmp / "calls.log"
         self.installed = self.gobin / "factoryd"
-        self.stub(self.installed, 'echo "factoryd $*" >> "$LOG"; exit ${DOCTOR_EXIT:-0}')
+        self.stub(self.installed, 'echo "factoryd $*" >> "$LOG"; [ "$1" = setup ] && exit ${SETUP_EXIT:-0}; exit ${DOCTOR_EXIT:-0}')
         self.stub(self.bin / "gh", 'echo "gh $*" >> "$LOG"; [ "$1 $2" = "auth status" ] && exit ${GH_STATUS:-0}; exit 0')
 
     def stub(self, path, body):
@@ -89,7 +89,19 @@ class InstallFinishTest(unittest.TestCase):
         result = self.run_script(DOCTOR_EXIT="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("factoryd doctor -fix", self.calls())
-        self.assertIn("factoryd quickstart", result.stdout)
+        self.assertIn("doctor reported", result.stdout)
+
+    def test_asks_for_the_model_before_the_check(self):
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [c for c in self.calls() if c.startswith("factoryd")]
+        self.assertEqual(calls, ["factoryd setup", "factoryd doctor -fix"])
+
+    def test_a_setup_that_could_not_pick_a_model_is_named_and_not_fatal(self):
+        result = self.run_script(SETUP_EXIT="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("factoryd setup", result.stdout)
+        self.assertIn("factoryd doctor -fix", self.calls())
 
     def test_refuses_a_path_that_is_not_the_installed_binary(self):
         self.installed = self.gobin / "missing"

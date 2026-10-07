@@ -259,6 +259,9 @@ type quickstartOptions struct {
 	// -harness pifork.
 	Harness      string
 	SandboxImage string
+	// HarnessExplicit is whether -harness was given: when it was not, an
+	// interactive run asks on a route that can run more than one harness.
+	HarnessExplicit bool
 
 	// builtImageRefs is populated by quickstartEnsureImages when -fix built
 	// one or more absent images, keyed by the flag name doctorCheck.Use
@@ -400,6 +403,7 @@ func quickstartMain(dp *deps, args []string) error {
 		NoServe:                  *noServe,
 		NoOpen:                   *noOpen,
 		Harness:                  *harnessName,
+		HarnessExplicit:          explicit["harness"],
 		SandboxImage:             *sandboxImage,
 	}
 	if err := quickstartValidateHarness(opts); err != nil {
@@ -1703,6 +1707,53 @@ const (
 	anthropicOpenAICompatDefaultContextWindow = 200000
 )
 
+// applyHarness settles the harness (askHarness) and writes it, and the
+// worker image that goes with it, into the config being built.
+func (b *quickstartConfigBuild) applyHarness(route string) error {
+	if err := b.askHarness(route); err != nil {
+		return err
+	}
+	roles := []*sessionconfig.RoleConfig{b.cfg.Roles.Planning, b.cfg.Roles.Execution, b.cfg.Roles.Review}
+	if b.opts.Harness == harness.Pifork || b.opts.Harness == harness.Codex {
+		for _, rc := range roles {
+			if rc != nil {
+				rc.Harness = b.opts.Harness
+			}
+		}
+	}
+	if b.opts.Harness == harness.Pifork {
+		image := b.opts.SandboxImage
+		b.cfg.SandboxImage = &image
+	} else if ref, ok := b.opts.builtImageRefs["-sandbox-image"]; ok {
+		b.cfg.SandboxImage = &ref
+	}
+	return nil
+}
+
+// askHarness asks which coding agent runs the work, only where the answer
+// is open: an interactive run, no -harness given, and a route that can run
+// more than one (chatgpt-codex: Pi or the Codex CLI, which needs its
+// Responses API). Every other route runs Pi and is not asked.
+func (b *quickstartConfigBuild) askHarness(route string) error {
+	if b.opts.NonInteractive || b.opts.HarnessExplicit || route != "chatgpt-codex" {
+		return nil
+	}
+	if b.opts.Harness != "" && b.opts.Harness != harness.Pi {
+		return nil
+	}
+	choice, err := b.p.choose(b.w, "Which coding agent should do the work?", []string{
+		"pi (the default harness)",
+		"codex (the Codex CLI)",
+	})
+	if err != nil {
+		return err
+	}
+	if choice == 1 {
+		b.opts.Harness = harness.Codex
+	}
+	return nil
+}
+
 // quickstartSingleModelRoles builds the roles: block every quickstart
 // route writes once it has resolved a single models: entry named model:
 // planning/execution/review all name that one model (quickstart never
@@ -1845,25 +1896,8 @@ func quickstartBuildConfig(dp *deps, opts *quickstartOptions, p *quickstartPromp
 	codeReviewPolicy := codereview.PolicyRequired
 	b.cfg.CodeReviewPolicy = &codeReviewPolicy
 
-	if b.opts.Harness == harness.Pifork {
-		image := b.opts.SandboxImage
-		for _, rc := range []*sessionconfig.RoleConfig{b.cfg.Roles.Planning, b.cfg.Roles.Execution, b.cfg.Roles.Review} {
-			if rc != nil {
-				rc.Harness = harness.Pifork
-			}
-		}
-		b.cfg.SandboxImage = &image
-	} else {
-		if b.opts.Harness == harness.Codex {
-			for _, rc := range []*sessionconfig.RoleConfig{b.cfg.Roles.Planning, b.cfg.Roles.Execution, b.cfg.Roles.Review} {
-				if rc != nil {
-					rc.Harness = harness.Codex
-				}
-			}
-		}
-		if ref, ok := b.opts.builtImageRefs["-sandbox-image"]; ok {
-			b.cfg.SandboxImage = &ref
-		}
+	if err := b.applyHarness(route); err != nil {
+		return nil, nil, err
 	}
 	if ref, ok := b.opts.builtImageRefs["-registry-proxy-image"]; ok {
 		b.cfg.RegistryProxyImage = &ref
