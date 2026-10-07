@@ -10,10 +10,9 @@
 #            agent where the route can run more than one        asks nothing with no terminal
 #   Check    `factoryd doctor -fix`                             never
 #
-# It never fails the install: factoryd is installed by the time it runs. A
-# machine setup could not pick a model for (no terminal and no single
-# detected login) is told to run `factoryd setup`, and doctor then reports
-# that one failure.
+# It never fails the install: factoryd is installed by the time it runs.
+# Whatever a step could not finish goes into one numbered "Left for you"
+# list printed last, after doctor's output, with the next command under it.
 set -u
 
 installed="${1:-}"
@@ -27,6 +26,12 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ($HOME/go/bin, $(go env GOPATH)/bin), which only a new shell can tell.
 in_new_shell() { [ -x "${SHELL:-}" ] && "$SHELL" -ic 'command -v factoryd' </dev/null >/dev/null 2>&1; }
 
+# What is left for the operator, one line each, printed as a numbered list
+# after everything else so it is the last thing on the screen.
+todo=""
+left() { todo="$todo$1
+"; }
+
 if ! have factoryd && ! in_new_shell; then
 	line="export PATH=\"\$PATH:$bindir\""
 	case "${SHELL##*/}" in
@@ -35,31 +40,42 @@ if ! have factoryd && ! in_new_shell; then
 	*) profile="" ;;
 	esac
 	if [ -z "$profile" ]; then
-		echo "note: 'factoryd' is not on your PATH yet. Add this to your shell profile: $line"
+		left "Add this line to your shell profile, then open a new terminal: $line"
 	elif [ -f "$profile" ] && grep -qF "$bindir" "$profile"; then
-		echo "note: $profile already puts $bindir on PATH -- open a new terminal to use 'factoryd'"
+		left "Open a new terminal, so 'factoryd' is on your PATH."
 	elif printf '\n# factoryd (buildgate make install)\n%s\n' "$line" >>"$profile"; then
-		echo "Added $bindir to PATH in $profile -- open a new terminal, or run: $line"
+		echo "Added $bindir to PATH in $profile"
+		left "Open a new terminal, so 'factoryd' is on your PATH ($profile now adds it)."
 	else
-		echo "warning: could not write $profile. Add this to your shell profile: $line" >&2
+		left "Add this line to your shell profile (it could not be written to $profile), then open a new terminal: $line"
 	fi
 fi
 
 if have gh && ! gh auth status >/dev/null 2>&1; then
 	if [ -t 0 ] && [ -t 1 ]; then
 		echo "GitHub: gh is not logged in -- running gh auth login"
-		gh auth login || echo "warning: gh auth login did not finish; run it before your first request" >&2
+		gh auth login || left "Log in to GitHub: gh auth login (it did not finish just now)."
 	else
-		echo "note: gh is not logged in and this is not a terminal -- run 'gh auth login' before your first request"
+		left "Log in to GitHub: gh auth login"
 	fi
 fi
 
-if ! "$installed" setup; then
-	echo "note: no model is configured yet -- run 'factoryd setup' in a terminal (or with -route) before your first request"
-fi
+"$installed" setup || left "Choose a model: factoryd setup"
 
 echo "Checking the install: factoryd doctor -fix"
-if ! "$installed" doctor -fix; then
-	echo "note: doctor reported the problems above; fix them and re-run 'factoryd doctor'."
+"$installed" doctor -fix || left "Fix what the check above marks FAIL (each has a 'fix:' line), then run: factoryd doctor"
+
+echo
+echo "buildgate is installed."
+if [ -n "$todo" ]; then
+	echo "Left for you:"
+	n=0
+	printf '%s' "$todo" | while IFS= read -r item; do
+		n=$((n + 1))
+		echo "  $n. $item"
+	done
+	echo "Then run your first request: factoryd quickstart <repo> \"<request>\""
+else
+	echo "Nothing is left to do. Run your first request: factoryd quickstart <repo> \"<request>\""
 fi
 exit 0
