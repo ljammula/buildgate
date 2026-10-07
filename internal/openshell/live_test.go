@@ -536,6 +536,63 @@ PY`, sidecarIP, otherIP)
 	}
 }
 
+// TestLiveSidecarDownloadStartedWithTheCommandIsNotCut has the command
+// begin, as its first act, a download from a sidecar that takes twenty
+// seconds. The supervisor closes every connection through its proxy at its
+// first settings poll, ten seconds after it starts, so the download
+// completes only because Create held the command until that poll was over
+// (waitFirstSettingsPoll): with the hold removed the read ends after ten
+// bytes.
+func TestLiveSidecarDownloadStartedWithTheCommandIsNotCut(t *testing.T) {
+	rt, image := liveRuntime(t)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	network, sidecar := "bg-live-net-"+suffix, "bg-live-slow-"+suffix
+	docker := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	docker("network", "create", "--internal", network)
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", sidecar).Run()
+		_ = exec.Command("docker", "network", "rm", network).Run()
+	})
+	serve := `import http.server, socketserver, time
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.send_header("Content-Length", "20"); self.end_headers()
+        for _ in range(20):
+            self.wfile.write(b"x"); self.wfile.flush(); time.sleep(1)
+    def log_message(self, *a): pass
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+socketserver.ThreadingTCPServer(("0.0.0.0", 8092), H).serve_forever()`
+	docker("run", "-d", "--name", sidecar, "--network", network, "--entrypoint", "python3", image, "-c", serve)
+	sidecarIP := docker("inspect", "-f", `{{(index .NetworkSettings.Networks "`+network+`").IPAddress}}`, sidecar)
+
+	script := fmt.Sprintf(`python3 - <<'PY'
+import urllib.request
+try:
+    print("slow-download", len(urllib.request.urlopen("http://%s:8092/slow", timeout=30).read()), "bytes")
+except Exception as e:
+    print("slow-download CUT", type(e).__name__, e)
+PY`, sidecarIP)
+	spec, _ := liveLaunch(t, image, script)
+	spec.Sidecars = []sandbox.SidecarEndpoint{{Name: "sidecar", IP: sidecarIP, Ports: []int{8092}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	if _, _, err := sandbox.RunThroughRuntime(ctx, rt, spec, sandbox.RuntimeLaunch{Nonce: "attempt-1"}); err != nil {
+		t.Fatalf("RunThroughRuntime: %v", err)
+	}
+	logged, _ := os.ReadFile(spec.LogPath)
+	t.Logf("output:\n%s", logged)
+	if !strings.Contains(string(logged), "slow-download 20 bytes") {
+		t.Errorf("the download the command started with was cut")
+	}
+}
+
 // TestLiveWorkerFetchesPackagesThroughTheRegistryProxy starts the real
 // registry proxy for a run and launches a worker that is given it by
 // address. The worker must download a Go module through it; npm and pip are

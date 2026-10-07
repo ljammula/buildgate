@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -235,7 +236,9 @@ func newTestRuntime() (*Runtime, clientWithProfiles, *fakeContainers) {
 	_, notFound := base.Providers().Get(context.Background(), DefaultWorkspace, "no-such-provider")
 	client := clientWithProfiles{Client: base, profiles: &fakeProfiles{notFound: notFound, imported: map[string]v1.ProviderProfile{}}}
 	containers := &fakeContainers{startedAt: map[string]string{}}
-	return &Runtime{Client: client, Containers: containers, PollEvery: time.Millisecond}, client, containers
+	rt := &Runtime{Client: client, Containers: containers, PollEvery: time.Millisecond}
+	rt.Sleep = func(context.Context, time.Duration) error { return nil }
+	return rt, client, containers
 }
 
 func TestCreateStoresTheSandboxWithItsRunLabels(t *testing.T) {
@@ -647,6 +650,58 @@ func TestCreateAsksNothingForASandboxWithNoRouteCredential(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// The supervisor closes every connection through its proxy at its first
+// settings poll, so a sandbox that reaches the network is handed back only
+// after it: by the provider's readiness when there is one, by time when
+// there is none.
+func TestCreateHoldsANetworkedSandboxWithNoCredentialUntilTheFirstSettingsPoll(t *testing.T) {
+	sidecar := []sandbox.SidecarEndpoint{{Name: "registry-proxy", IP: "172.29.0.5", Ports: []int{8092}}}
+	for name, tc := range map[string]struct {
+		route    *sandbox.RouteAccess
+		sidecars []sandbox.SidecarEndpoint
+		want     []time.Duration
+	}{
+		"no network":                 {},
+		"a sidecar":                  {sidecars: sidecar, want: []time.Duration{firstSettingsPollWait}},
+		"a route with no credential": {route: &sandbox.RouteAccess{Endpoint: testRoute().Endpoint}, want: []time.Duration{firstSettingsPollWait}},
+		"a credentialed route":       {route: testRoute(), sidecars: sidecar},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt, _, _ := newTestRuntime()
+			rt.Readiness = &fakeReadiness{answers: []bool{true}}
+			var slept []time.Duration
+			rt.Sleep = func(_ context.Context, d time.Duration) error {
+				slept = append(slept, d)
+				return nil
+			}
+			req := testRequest()
+			req.Sidecars = tc.sidecars
+			if req.Route = tc.route; tc.route != nil {
+				req.MeterConfig = map[string]any{"route": "r"}
+			}
+			if _, err := rt.Create(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(slept, tc.want) {
+				t.Errorf("slept = %v, want %v", slept, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateFailsWhenTheHoldForTheFirstSettingsPollIsCancelled(t *testing.T) {
+	rt, _, _ := newTestRuntime()
+	rt.Sleep = nil
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	req := testRequest()
+	req.Sidecars = []sandbox.SidecarEndpoint{{Name: "registry-proxy", IP: "172.29.0.5", Ports: []int{8092}}}
+	_, err := rt.Create(ctx, req)
+	if err == nil || !strings.Contains(err.Error(), "first settings poll") {
+		t.Fatalf("Create = %v, want an error naming the first settings poll", err)
 	}
 }
 

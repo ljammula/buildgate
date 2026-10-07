@@ -50,7 +50,7 @@ in [`USAGE.md`](../../USAGE.md#the-sandbox-runtime-openshell-gateway-and-meter).
 | 2 | Build the meter policy from the checked route policy, with the ceilings the run has left (`RoutePolicy.MeterConfig`) | Each sandbox's meter counts from zero |
 | 3 | Append the sandbox name to `<run dir>/sandboxes.jsonl` | A crash after this point leaves a name to reconcile |
 | 4 | Push the credential to the gateway (`Runtime.PushCredential`); refuse one that expires within the step's budget | A pushed credential reaches only sandboxes created after it |
-| 5 | Create a per-launch workload template (image, environment, mounts, CPU, memory) and the sandbox from it; delete the template. For a route with a credential, wait until the gateway reports the provider `READY` in the sandbox (`Runtime.waitRouteReady`, at most a minute) | The Docker driver takes resource limits only from a template. The supervisor rebuilds its proxy once, at its first settings poll; a worker released before that loses the model request it has in flight |
+| 5 | Create a per-launch workload template (image, environment, mounts, CPU, memory) and the sandbox from it; delete the template. For a route with a credential, wait until the gateway reports the provider `READY` in the sandbox (`Runtime.waitRouteReady`, at most a minute); for a sandbox that reaches a sidecar or a route with no credential, wait 12 s (`Runtime.waitFirstSettingsPoll`) | The Docker driver takes resource limits only from a template. The supervisor rebuilds its proxy once, at its first settings poll; a command released before that loses every connection it has open through the proxy: a model request, or a module download through the registry proxy |
 | 6 | Record the sandbox id, the worker container's Docker `StartedAt` and the ledger file | The restart guard compares against this start time |
 | 7 | Write the guard's `go` file; the worker's wrapper starts the command | Nothing runs before factoryd has recorded the launch |
 | 8 | When the command's output file appears, write the guard's `started` file; relay the output to the step's log | A second start of the command exits at `started` |
@@ -121,7 +121,7 @@ attempt's start.
 | The filesystem policy denies every unnamed path | `/usr`, `/etc`, `/opt`, `/proc`, `/dev` are listed read-only |
 | The runtime sets `HOME` to the image's `WORKDIR` | The wrapper exports `HOME=/home/worker` |
 | A middleware must be reachable from the host-networked gateway | The gateway is host-networked and bound to loopback |
-| The supervisor installs a provider's credential a second time at its first settings poll, 10 s after it starts, and rebuilds its proxy to do it | A step on a credentialed route starts its command about 10 s after its sandbox. A route with no credential has no provider to ask about: a request in flight at that moment is cut, retried by the harness and charged its estimate |
+| The supervisor installs a provider's credential a second time at its first settings poll, 10 s after it starts, and rebuilds its proxy to do it | A step on a credentialed route starts its command about 10 s after its sandbox, once the gateway reports the provider ready. A step with no credential that reaches the network (the registry proxy, a compose service, a route with no credential) has no provider to ask about and starts 12 s after its sandbox is ready. A step with no network starts at once |
 
 ## Verifying a change here
 
