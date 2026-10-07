@@ -565,6 +565,8 @@ type Server struct {
 	// mcpToken supplies POST /mcp's bearer token (see WithMCPToken); nil or
 	// "" leaves the endpoint off.
 	mcpToken func() string
+	// mcpHandler is the MCP SDK's transport, behind serveMCP's token check.
+	mcpHandler http.Handler
 	// mcpSubmits are the times of the submit_request calls that created a
 	// request within mcpSubmitWindow (see mcpSubmitAllowed).
 	mcpSubmitMu          sync.Mutex

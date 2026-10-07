@@ -185,6 +185,13 @@ Threat scope: the caller is a model, steered by whatever it reads (a chat
 message, a spec, a diff). The endpoint gives it the means to start work and
 follow it, and no means to pass a gate.
 
+- **Protocol.** JSON-RPC, version negotiation, the Streamable HTTP
+  transport (stateless, JSON responses) and argument validation against
+  each tool's schema are the official Go SDK's
+  (`github.com/modelcontextprotocol/go-sdk`). `serveMCP` checks the token
+  before the SDK sees a request. The SDK's own localhost `Host` check is
+  off, because it would refuse every tunnelled request; `Server.ServeHTTP`'s
+  check, which knows `-allowed-host`, has already run.
 - **Off by default.** `POST /mcp` (`internal/api.Server.serveMCP`) answers
   404 until the operator's `<config name>.mcp-token` file exists
   (`config.mcp-token` for `config.yml`). The config's name is in the file

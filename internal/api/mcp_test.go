@@ -13,6 +13,8 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const mcpTestToken = "mcp-test-token"
@@ -21,56 +23,61 @@ func mcpTestServer(dataDir string, opts ...Option) *Server {
 	return NewServer(dataDir, append([]Option{WithMCPToken(func() string { return mcpTestToken })}, opts...)...)
 }
 
-// mcpPost sends one JSON-RPC message to POST /mcp with token as its bearer.
+// mcpPost sends one raw JSON-RPC message to POST /mcp with token as its
+// bearer, for the tests of what happens before the SDK sees a request.
 func mcpPost(t *testing.T, server *Server, token, message string) *httptest.ResponseRecorder {
 	t.Helper()
+	request := requestActionFor(t, http.MethodPost, "/mcp", token, message)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
 	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/mcp", token, message))
+	server.ServeHTTP(recorder, request)
 	return recorder
 }
 
-type mcpTestResult struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-	IsError bool `json:"isError"`
+type mcpBearer string
+
+func (b mcpBearer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+string(b))
+	return http.DefaultTransport.RoundTrip(r)
 }
 
-type mcpTestResponse struct {
-	ID     json.RawMessage `json:"id"`
-	Result json.RawMessage `json:"result"`
-	Error  *mcpError       `json:"error"`
-}
-
-func mcpDecode(t *testing.T, recorder *httptest.ResponseRecorder) mcpTestResponse {
+// mcpConnect connects the SDK's own client to server over HTTP, so the
+// tests below see what a real MCP client sees.
+func mcpConnect(t *testing.T, server *Server) *mcpsdk.ClientSession {
 	t.Helper()
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	listener := httptest.NewServer(server)
+	t.Cleanup(listener.Close)
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "0"}, nil)
+	session, err := client.Connect(context.Background(), &mcpsdk.StreamableClientTransport{
+		Endpoint:             listener.URL + "/mcp",
+		HTTPClient:           &http.Client{Transport: mcpBearer(mcpTestToken)},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect the MCP client: %v", err)
 	}
-	var response mcpTestResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v: %s", err, recorder.Body.String())
-	}
-	return response
+	t.Cleanup(func() { _ = session.Close() })
+	return session
 }
 
-// mcpCall calls one tool and returns its text and isError.
+// mcpCall calls one tool through the SDK client and returns its text and
+// IsError.
 func mcpCall(t *testing.T, server *Server, name, arguments string) (string, bool) {
 	t.Helper()
-	message := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":` + jsonString(name) + `,"arguments":` + arguments + `}}`
-	response := mcpDecode(t, mcpPost(t, server, mcpTestToken, message))
-	if response.Error != nil {
-		t.Fatalf("tools/call %s: protocol error %+v", name, response.Error)
+	result, err := mcpConnect(t, server).CallTool(context.Background(), &mcpsdk.CallToolParams{Name: name, Arguments: json.RawMessage(arguments)})
+	if err != nil {
+		t.Fatalf("tools/call %s: %v", name, err)
 	}
-	var result mcpTestResult
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatalf("decode tool result: %v", err)
-	}
-	if len(result.Content) != 1 || result.Content[0].Type != "text" {
+	if len(result.Content) != 1 {
 		t.Fatalf("tool result content = %+v, want one text item", result.Content)
 	}
-	return result.Content[0].Text, result.IsError
+	text, ok := result.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("tool result content is %T, want text", result.Content[0])
+	}
+	return text.Text, result.IsError
 }
 
 func TestMCPIsOffWithoutAToken(t *testing.T) {
@@ -122,58 +129,23 @@ func TestMCPTokenIsReadPerCall(t *testing.T) {
 	}
 }
 
-func TestMCPInitializeNegotiatesTheProtocolVersion(t *testing.T) {
-	server := mcpTestServer(t.TempDir())
-	for asked, want := range map[string]string{
-		"2025-03-26": "2025-03-26",
-		"2025-11-25": "2025-11-25",
-		"1999-01-01": mcpProtocolVersions[0],
+// TestMCPRefusesWhatItDoesNotOffer: a tool that is not in the table, an
+// argument a tool does not take and a missing required argument are refused
+// before any route runs, and there is no stream to GET.
+func TestMCPRefusesWhatItDoesNotOffer(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	server := mcpTestServer(dataDir)
+	session := mcpConnect(t, server)
+	for name, arguments := range map[string]string{
+		"approve_request": `{"id":"req-1"}`,
+		"get_request":     `{"id":"req-1","approve":true}`,
+		"get_run":         `{}`,
+		"submit_request":  `{"text":"no workspace"}`,
 	} {
-		message := `{"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":"` + asked + `","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
-		response := mcpDecode(t, mcpPost(t, server, mcpTestToken, message))
-		var result struct {
-			ProtocolVersion string `json:"protocolVersion"`
-			Capabilities    struct {
-				Tools *struct{} `json:"tools"`
-			} `json:"capabilities"`
-		}
-		if err := json.Unmarshal(response.Result, &result); err != nil {
-			t.Fatalf("decode initialize result: %v", err)
-		}
-		if result.ProtocolVersion != want {
-			t.Errorf("asked %s: protocolVersion = %q, want %q", asked, result.ProtocolVersion, want)
-		}
-		if result.Capabilities.Tools == nil {
-			t.Errorf("asked %s: capabilities has no tools entry", asked)
-		}
-		if string(response.ID) != `"a"` {
-			t.Errorf("response id = %s, want the request's", response.ID)
-		}
-	}
-}
-
-func TestMCPProtocolEdges(t *testing.T) {
-	server := mcpTestServer(t.TempDir())
-
-	if recorder := mcpPost(t, server, mcpTestToken, `{"jsonrpc":"2.0","method":"notifications/initialized"}`); recorder.Code != http.StatusAccepted || recorder.Body.Len() != 0 {
-		t.Errorf("notification: status = %d body = %q, want 202 and no body", recorder.Code, recorder.Body.String())
-	}
-	if response := mcpDecode(t, mcpPost(t, server, mcpTestToken, `{"jsonrpc":"2.0","id":1,"method":"ping"}`)); string(response.Result) != "{}" {
-		t.Errorf("ping result = %s, want {}", response.Result)
-	}
-	for message, wantCode := range map[string]int{
-		`{"jsonrpc":"2.0","id":1,"method":"resources/list"}`:                                             mcpErrMethodNotFound,
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"approve_request"}}`:             mcpErrInvalidParams,
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_run","arguments":{"x":1}}}`: mcpErrInvalidParams,
-	} {
-		response := mcpDecode(t, mcpPost(t, server, mcpTestToken, message))
-		if response.Error == nil || response.Error.Code != wantCode {
-			t.Errorf("%s: error = %+v, want code %d", message, response.Error, wantCode)
-		}
-	}
-	for _, body := range []string{`not json`, `[{"jsonrpc":"2.0","id":1,"method":"ping"}]`, `{"id":1,"method":"ping"}`} {
-		if recorder := mcpPost(t, server, mcpTestToken, body); recorder.Code != http.StatusBadRequest {
-			t.Errorf("body %q: status = %d, want 400", body, recorder.Code)
+		result, err := session.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: name, Arguments: json.RawMessage(arguments)})
+		if err == nil && !result.IsError {
+			t.Errorf("%s %s: want it refused, got %+v", name, arguments, result.Content)
 		}
 	}
 	recorder := httptest.NewRecorder()
@@ -188,29 +160,15 @@ func TestMCPProtocolEdges(t *testing.T) {
 // route a read or POST /requests.
 func TestMCPToolsAreTheContractSet(t *testing.T) {
 	server := mcpTestServer(t.TempDir())
-	response := mcpDecode(t, mcpPost(t, server, mcpTestToken, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
-	var listed struct {
-		Tools []struct {
-			Name        string `json:"name"`
-			Annotations struct {
-				ReadOnlyHint bool `json:"readOnlyHint"`
-			} `json:"annotations"`
-			InputSchema struct {
-				Type string `json:"type"`
-			} `json:"inputSchema"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(response.Result, &listed); err != nil {
-		t.Fatalf("decode tools/list: %v", err)
+	listed, err := mcpConnect(t, server).ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("tools/list: %v", err)
 	}
 	var names, writers []string
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
-		if !tool.Annotations.ReadOnlyHint {
+		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
 			writers = append(writers, tool.Name)
-		}
-		if tool.InputSchema.Type != "object" {
-			t.Errorf("%s: inputSchema.type = %q, want object", tool.Name, tool.InputSchema.Type)
 		}
 	}
 	sort.Strings(names)
@@ -226,19 +184,31 @@ func TestMCPToolsAreTheContractSet(t *testing.T) {
 		"GET /requests": true, "GET /requests/{id}": true, "GET /runs/{id}": true, "GET /runs/{id}/diff": true,
 		"GET /workspaces": true, "POST /requests": true,
 	}
+	inputs := map[string]mcpInput{
+		"list_requests":   mcpRequestsArgs{},
+		"get_request":     mcpRequestArgs{ID: "x"},
+		"get_run":         mcpRunArgs{ID: "x"},
+		"get_run_diff":    mcpRunDiffArgs{ID: "x"},
+		"list_workspaces": mcpWorkspacesArgs{},
+		"submit_request":  mcpSubmitArgs{Workspace: "/w", Text: "t"},
+	}
 	for _, tool := range mcpTools {
-		method, path, _, err := tool.route(mcpArgs{ID: "x", Workspace: "/w", Text: "t"})
+		input, ok := inputs[tool.name]
+		if !ok {
+			t.Fatalf("%s: this test has no sample arguments for it", tool.name)
+		}
+		route, err := input.route()
 		if err != nil {
 			t.Fatalf("%s: route: %v", tool.name, err)
 		}
 		if !allowed[tool.pattern] {
 			t.Errorf("%s is pinned to %q, which the contract does not list", tool.name, tool.pattern)
 		}
-		if _, matched := server.mux.Handler(httptest.NewRequest(method, path, nil)); matched != tool.pattern {
-			t.Errorf("%s: %s %s reaches %q, want its own pattern %q", tool.name, method, path, matched, tool.pattern)
+		if _, matched := server.mux.Handler(httptest.NewRequest(route.method, route.path, nil)); matched != tool.pattern {
+			t.Errorf("%s: %s %s reaches %q, want its own pattern %q", tool.name, route.method, route.path, matched, tool.pattern)
 		}
-		if tool.readOnly != (method == http.MethodGet) {
-			t.Errorf("%s: readOnly = %v but it replays a %s", tool.name, tool.readOnly, method)
+		if tool.readOnly != (route.method == http.MethodGet) {
+			t.Errorf("%s: readOnly = %v but it replays a %s", tool.name, tool.readOnly, route.method)
 		}
 	}
 }
