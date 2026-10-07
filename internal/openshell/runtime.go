@@ -40,6 +40,9 @@ type Runtime struct {
 	// two seconds.
 	Workspace string
 	PollEvery time.Duration
+	// Sleep waits out the supervisor's first settings poll
+	// (waitFirstSettingsPoll); nil is a timer.
+	Sleep func(ctx context.Context, d time.Duration) error
 }
 
 var _ sandbox.Runtime = (*Runtime)(nil)
@@ -51,10 +54,12 @@ func (r *Runtime) workspace() string {
 	return r.Workspace
 }
 
-// Create asks the gateway for the sandbox and waits until it is ready and,
-// when its route has a credential, until that credential is installed
-// (waitRouteReady). A failure can leave a sandbox behind: the caller deletes
-// by the name it recorded.
+// Create asks the gateway for the sandbox and waits until it is ready and
+// its supervisor has rebuilt its proxy: when its route has a credential,
+// until that credential is installed (waitRouteReady); when it reaches the
+// network with no credential, for the first settings poll
+// (waitFirstSettingsPoll). A failure can leave a sandbox behind: the caller
+// deletes by the name it recorded.
 func (r *Runtime) Create(ctx context.Context, req sandbox.SandboxRequest) (sandbox.SandboxRef, error) {
 	spec, err := sandboxSpec(req)
 	if err != nil {
@@ -85,8 +90,13 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.SandboxRequest) (sandb
 	if err != nil {
 		return sandbox.SandboxRef{}, fmt.Errorf("openshell: sandbox %s did not become ready: %w%s", req.Name, err, r.conditions(ctx, created.Name))
 	}
-	if req.Route != nil && req.Route.Provider != "" {
+	switch {
+	case req.Route != nil && req.Route.Provider != "":
 		if err := r.waitRouteReady(ctx, created.Name, req.Route.Provider); err != nil {
+			return sandbox.SandboxRef{}, err
+		}
+	case req.Route != nil || len(req.Sidecars) > 0:
+		if err := r.waitFirstSettingsPoll(ctx, created.Name); err != nil {
 			return sandbox.SandboxRef{}, err
 		}
 	}

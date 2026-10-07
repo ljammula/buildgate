@@ -31,7 +31,41 @@ const (
 	// after its first settings poll, ten seconds after it starts.
 	routeReadyPollEvery = 500 * time.Millisecond
 	routeReadyTimeout   = time.Minute
+	// firstSettingsPollWait is that first poll's ten seconds plus two for
+	// the rebuild, counted from the moment the gateway reports the sandbox
+	// ready, which is after its supervisor started.
+	firstSettingsPollWait = 12 * time.Second
 )
+
+// waitFirstSettingsPoll returns once the supervisor's first settings poll
+// is over, for a sandbox that reaches the network (a sidecar such as the
+// registry proxy, or a route with no credential) and has no provider whose
+// readiness the gateway could report. The supervisor rebuilds its proxy at
+// that poll whether or not a provider is attached and closes every
+// connection through it: a verify step whose `go test` was still
+// downloading modules through the registry proxy then failed with
+// "unexpected EOF". Nothing reports the poll, so this waits it out.
+func (r *Runtime) waitFirstSettingsPoll(ctx context.Context, sandboxName string) error {
+	sleep := r.Sleep
+	if sleep == nil {
+		sleep = sleepFor
+	}
+	if err := sleep(ctx, firstSettingsPollWait); err != nil {
+		return fmt.Errorf("openshell: sandbox %s was not held until its supervisor's first settings poll: %w", sandboxName, err)
+	}
+	return nil
+}
+
+func sleepFor(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
 // waitRouteReady returns once the gateway reports the route's provider
 // installed in the sandbox. The supervisor of OpenShell 0.1.2 installs a
