@@ -131,7 +131,8 @@ request text from that GitHub issue, `gh` must be logged in) and
 trailing request text `factoryd submit` takes; each must precede
 `<repo-path>` on the command line.
 
-**Prerequisites**: Go, Docker (colima: `brew install colima docker && colima
+**Prerequisites**: with Homebrew, `make install` installs the tools below
+that are missing; it starts nothing. Go, Docker (colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
