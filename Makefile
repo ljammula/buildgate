@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci live-smoke live-compose live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -134,7 +134,7 @@ agent-pi-test:
 # installed, the console's own test suite. Not a Makefile alias for `verify`:
 # it needs Docker and (ideally) Temporal, same prerequisites as verify-live,
 # and takes minutes rather than verify's seconds.
-ci: fmt-check vet verify-live agent-pi-test with-spinner-test
+ci: fmt-check vet verify-live agent-pi-test with-spinner-test install-prereqs-test
 	@if command -v npm >/dev/null 2>&1; then \
 		$(MAKE) console-test; \
 	else \
@@ -201,6 +201,19 @@ live-round-results:
 # live-round-test: offline unit tests for live_round.py's own logic.
 live-round-test:
 	python3 -m unittest scripts/tests/test_live_round.py -v
+
+# install-prereqs is `make install`'s first step: Homebrew installs the
+# tools the later steps need and this machine lacks, Docker's buildx plugin
+# is linked, and a Docker that does not answer is started through colima
+# (scripts/install-prereqs.sh's header has the table).
+install-prereqs:
+	@scripts/install-prereqs.sh
+
+# install-prereqs-test: offline tests for scripts/install-prereqs.sh and
+# scripts/install-finish.sh against stand-in brew, docker, colima, gh and
+# factoryd. Installs and starts nothing.
+install-prereqs-test:
+	python3 -m unittest scripts/tests/test_install_prereqs.py scripts/tests/test_install_finish.py -v
 
 # with-spinner-test: offline test for scripts/with-spinner.sh, the wrapper
 # `make install` runs its long builds through (exit-status passthrough, the
@@ -299,7 +312,7 @@ temporal-up:
 local-images: docker-buildx-check
 	@: one lookup for the image builds below and the console build after them: $(BUILD_CA_BUNDLE)
 	@if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then \
-		echo "Docker is required to build the sandbox/meter/registry-proxy images (every image factoryd launches is built from source, never published) -- install/start Docker and re-run 'make install'." >&2; exit 1; \
+		echo "Docker is required to build the sandbox/meter/registry-proxy images (every image factoryd launches is built from source, never published) -- start Docker (colima: 'colima start --memory 4') and re-run 'make install'." >&2; exit 1; \
 	fi
 	@echo "Building sandbox/meter/registry-proxy images locally (several minutes)..."; \
 	sandbox_ref="$$($(MAKE) sandbox-image | grep -oE 'localhost:5050/buildgate-worker@sha256:[0-9a-f]+' | tail -1)"; \
@@ -327,7 +340,12 @@ docker-buildx-check:
 	fi
 
 # Installs to $(go env GOBIN), else the first $(go env GOPATH) entry's bin
-# (usually ~/go/bin) -- make sure that's on PATH; warns if another factoryd wins.
+# (usually ~/go/bin); warns if another factoryd wins. The one command a
+# machine needs: install-prereqs before it installs missing tools and starts
+# Docker, and scripts/install-finish.sh after it puts that directory on PATH,
+# logs gh in and runs `factoryd doctor -fix`. INSTALL_FINISH=0 leaves the
+# last step out, for `factoryd upgrade`, which restarts and checks the
+# machine itself.
 #
 # The version is stamped from THIS checkout's HEAD: Go's own vcs.revision
 # stamping treats only a .git directory as a repository root, so in a git
@@ -335,7 +353,7 @@ docker-buildx-check:
 # checkout's HEAD instead. The check after install fails the target if the
 # installed binary reports anything else.
 FACTORYD_VERSION = $(shell git rev-parse --short=12 HEAD)$(shell test -z "$$(git status --porcelain --untracked-files=no)" || echo -dirty)
-install: docker-buildx-check temporal-up local-images openshell-images console-build-optional
+install: install-prereqs docker-buildx-check temporal-up local-images openshell-images console-build-optional
 	scripts/with-spinner.sh "installing factoryd" go install -ldflags "-X main.version=$(FACTORYD_VERSION)" ./cmd/factoryd
 	@bindir="$$(go env GOBIN)"; [ -n "$$bindir" ] || bindir="$$(go env GOPATH | cut -d: -f1)/bin"; \
 	installed="$$bindir/factoryd"; \
@@ -347,14 +365,11 @@ install: docker-buildx-check temporal-up local-images openshell-images console-b
 	if [ -n "$$resolved" ] && [ "$$resolved" != "$$installed" ]; then \
 		echo "warning: just installed $$installed, but 'factoryd' on your PATH resolves to $$resolved instead -- that earlier PATH entry will keep winning. Remove/rename $$resolved, or move $$installed earlier on PATH, then re-run 'factoryd doctor' to confirm (see its PATH shadowing check)." >&2; \
 	fi; \
-	if [ -z "$$resolved" ]; then \
-		echo "note: 'factoryd' is not on your PATH yet. Add it (and to your shell profile, e.g. ~/.zshrc):" >&2; \
-		echo "  export PATH=\"\$$PATH:$$bindir\"" >&2; \
-	fi; \
 	"$$installed" install-skill || echo "warning: buildgate skill not installed; run 'factoryd install-skill'" >&2; \
 	if [ -d "$$HOME/.claude/skills/buildgate" ]; then \
 		"$$installed" install-skill -dir "$$HOME/.claude/skills" || echo "warning: buildgate skill not refreshed in ~/.claude/skills" >&2; \
-	fi
+	fi; \
+	if [ "$(INSTALL_FINISH)" != 0 ]; then scripts/install-finish.sh "$$installed"; fi
 
 # A local, ephemeral Docker registry these targets push through to get a
 # real, addressable digest for a local build -- mirrors ci.yml's own

@@ -38,19 +38,13 @@ supervisor) are pulled by pinned digest (`make openshell-images`).
 About ten minutes from a Mac with only Homebrew, most of it image builds.
 
 ```sh
-# 1. Prerequisites (skip what you have). Docker needs the buildx plugin.
-brew install go python gh git colima docker docker-buildx
-mkdir -p ~/.docker/cli-plugins && ln -sf "$(brew --prefix)/lib/docker/cli-plugins/docker-buildx" ~/.docker/cli-plugins/docker-buildx
-colima start --memory 4
-gh auth login
-
-# 2. Install (clone, build the images, install factoryd)
+# 1. Install: the one command. It installs the tools this Mac lacks, starts
+#    Docker, builds the images, installs factoryd, puts it on PATH, logs gh
+#    in and checks the result.
 git clone https://github.com/ljammula/buildgate.git && cd buildgate
 make install
-export PATH="$PATH:$(go env GOPATH)/bin"   # also add this to ~/.zshrc
 
-# 3. Check, then run your first request (any git checkout under $HOME)
-factoryd doctor -fix
+# 2. In a new terminal, run your first request (any git checkout under $HOME)
 factoryd quickstart ~/code/your-repo "Add X to Y"
 ```
 
@@ -69,17 +63,21 @@ oracles, plus a failure case): [`DEMO.md`](DEMO.md).
 
 ### What `make install` does
 
-Prerequisites: Go, Docker with the `buildx` plugin, `gh`, `python3`; Node
-20+ and npm are optional, for the console. `make install` checks for
-`buildx` first and `factoryd doctor` warns when it is missing.
+Needs Homebrew, or the tools below already installed. Without Homebrew it
+names what is missing and stops; a missing `npm` alone only costs the console.
 
 | Step | Detail |
 |---|---|
+| Tools | `brew install` for what is not on `PATH`: `go`, `python`, `gh`, `git`, `node` (the console), `docker`; `docker-buildx` when `docker buildx` does not work, linked into `~/.docker/cli-plugins`; `colima` only on a machine with no `docker` at all. A tool already on `PATH` is left alone |
+| Docker | When Docker does not answer and `colima` is on `PATH`: `colima start` for an existing VM, else `colima start --memory 4`. Any other Docker is yours to start. `FACTORYD_AUTOSTART=0` turns it off |
 | Binary | `go install ./cmd/factoryd` into `$(go env GOPATH)/bin` (usually `~/go/bin`); prints the `export PATH=...` line if that is not on `PATH`, and warns if an older `factoryd` earlier on `PATH` shadows it |
 | Images | Requires Docker, starts Temporal, builds the sandbox, meter and registry-proxy images from source (`internal/sandbox/Dockerfile` and friends), pulls OpenShell's three by digest. An image whose inputs haven't changed is not rebuilt (it is still pushed, so the recorded digest is unchanged); `FORCE_IMAGE_BUILD=1` always rebuilds |
 | Config | Records buildgate's image refs in the default session config via `factoryd configure-images`. `FACTORYD_CONFIG="<config> <config>..."` re-points each listed config instead, so a second profile does not keep pinning a superseded image |
 | Console | Baked in if `npm` is on `PATH` and its build succeeds, else a placeholder page and, for a failed build, a warning naming the Node and npm versions ([`console/README.md`](console/README.md)) |
 | Agent skill | Installs the `buildgate` skill into `~/.agents/skills` (Copilot, Codex); refreshes `~/.claude/skills/buildgate` when it exists |
+| `PATH` | When `factoryd` does not resolve: appends the `export PATH=...` line to `~/.zshrc` (`~/.bash_profile` for bash), once; a new terminal picks it up |
+| GitHub | `gh auth login` when `gh` is not logged in and this is a terminal |
+| Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter. Its failures do not fail the install: with no model route yet it reports one, which `quickstart` closes |
 | Tree | Leaves `git status` clean |
 
 - **TLS interception:** `make install` detects a proxy that re-signs HTTPS and builds with its CA from the keychain; `BUILD_CA_BUNDLE=/path/to/ca.pem make install` overrides it ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
@@ -105,8 +103,10 @@ skill. [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgat
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `make install`: `the --mount option requires BuildKit` or `docker buildx` missing | Homebrew CLI-only Docker has no `buildx` plugin | Step 1 above; `factoryd doctor` warns about it |
-| `factoryd: command not found` after install | `$(go env GOPATH)/bin` is not on `PATH` | `export PATH="$PATH:$(go env GOPATH)/bin"`, and add it to your shell profile |
+| `make install`: `Docker is required to build the ... images` | No Docker daemon is running and it is not colima's to start (Docker Desktop, another VM), or `FACTORYD_AUTOSTART=0` | Start your Docker, then `make install` again |
+| `make install`: `needs these, and found no Homebrew` | Tools are missing and there is no `brew` to install them with | Install Homebrew or the named tools, then `make install` again |
+| `make install`: `the --mount option requires BuildKit` or `docker buildx` missing | The `buildx` plugin is missing and Homebrew is not there to install it | Install your platform's buildx plugin; `factoryd doctor` warns about it |
+| `factoryd: command not found` after install | The terminal predates the install, or the shell is neither zsh nor bash | Open a new terminal; otherwise add the `export PATH=...` line `make install` printed to your shell profile |
 | `doctor` warns the Docker VM shares all of `$HOME` | colima's default mounts | USAGE.md, "Data directory and colima" |
 | `doctor` fails `roles.execution is not configured` | No model route yet | `factoryd quickstart` writes one (`-route chatgpt-codex` for a Codex login) |
 | Any command fails `parse .../config.yml: relay_image: deleted with the inference relay` | A `config.yml` written for the retired inference relay still has `relay_image` or `relay_upstream_timeout` | Delete that line; the error names the retired key it found |
@@ -119,7 +119,7 @@ skill. [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgat
 | Command | Removes | Keeps |
 |---|---|---|
 | `factoryd uninstall -dry-run` | Nothing; prints the plan | Everything |
-| `factoryd uninstall` | What `make install` put on the machine | `~/.config/factoryd`, `~/buildgate` |
+| `factoryd uninstall` | What `make install` put on the machine | `~/.config/factoryd`, `~/buildgate`, the `PATH` line in your shell profile, tools Homebrew installed |
 | `factoryd uninstall -purge` | Also both of those, the Temporal volumes and the OpenShell gateway's state on the Docker VM (database, keys, stored credentials); you type `purge` to confirm | Docker/colima, Go, Node, `gh`, Homebrew packages, git config |
 
 Back up `~/.config/factoryd` and `~/buildgate` first if you want your
