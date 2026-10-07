@@ -601,7 +601,7 @@ func realMain(dp *deps) error {
 	if len(os.Args) > 1 && os.Args[1] == "configure-images" {
 		return configureImagesMain(os.Args[2:])
 	}
-	if handled, err := makefileSubcommand(dp, os.Args[1:]); handled {
+	if handled, err := installSubcommand(dp, os.Args[1:]); handled {
 		return err
 	}
 	if len(os.Args) > 1 && os.Args[1] == "version" {
@@ -625,10 +625,10 @@ func runMain(dp *deps, args []string) error {
 	return runMainWithReady(dp, signalCtx, args, nil)
 }
 
-// makefileSubcommand runs the hidden subcommands only the Makefile calls
-// (through `go run ./cmd/factoryd`); handled is false for any other
-// argument list.
-func makefileSubcommand(dp *deps, args []string) (handled bool, err error) {
+// installSubcommand runs the subcommands `make install` calls: the hidden
+// ones only the Makefile uses (through `go run ./cmd/factoryd`) and `setup`,
+// which an operator runs too. handled is false for any other argument list.
+func installSubcommand(dp *deps, args []string) (handled bool, err error) {
 	if len(args) == 0 {
 		return false, nil
 	}
@@ -639,6 +639,8 @@ func makefileSubcommand(dp *deps, args []string) (handled bool, err error) {
 		return true, imageInputsHashMain(args[1:])
 	case "image-reuse":
 		return true, imageReuseMain(args[1:])
+	case "setup":
+		return true, setupMain(dp, args[1:])
 	}
 	return false, nil
 }

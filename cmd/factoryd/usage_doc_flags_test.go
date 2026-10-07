@@ -65,6 +65,7 @@ var docTrackedCommands = map[string]commandFlagSet{
 	"logs":              func() *flag.FlagSet { fs, _, _, _, _, _ := newLogsFlags(); return fs },
 	"worker":            func() *flag.FlagSet { fs, _ := newWorkerFlags(); return fs },
 	"quickstart":        func() *flag.FlagSet { fs, _ := newQuickstartFlags(); return fs },
+	"setup":             func() *flag.FlagSet { fs, _ := newSetupFlags(); return fs },
 	"reconcile":         func() *flag.FlagSet { fs, _, _, _, _ := newReconcileFlags(); return fs },
 	"resume":            func() *flag.FlagSet { fs, _, _, _ := newResumeFlags(); return fs },
 	"retry":             func() *flag.FlagSet { fs, _, _, _ := newRetryFlags(); return fs },

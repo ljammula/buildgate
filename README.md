@@ -40,7 +40,7 @@ About ten minutes from a Mac with only Homebrew, most of it image builds.
 ```sh
 # 1. Install: the one command. It installs the tools this Mac lacks, starts
 #    Docker, builds the images, installs factoryd, puts it on PATH, logs gh
-#    in and checks the result.
+#    in, asks which model and coding agent to use, and checks the result.
 git clone https://github.com/ljammula/buildgate.git && cd buildgate
 make install
 
@@ -77,7 +77,8 @@ names what is missing and stops; a missing `npm` alone only costs the console.
 | Agent skill | Installs the `buildgate` skill into `~/.agents/skills` (Copilot, Codex); refreshes `~/.claude/skills/buildgate` when it exists |
 | `PATH` | When `factoryd` does not resolve: appends the `export PATH=...` line to `~/.zshrc` (`~/.bash_profile` for bash), once; a new terminal picks it up |
 | GitHub | `gh auth login` when `gh` is not logged in and this is a terminal |
-| Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter. Its failures do not fail the install: with no model route yet it reports one, which `quickstart` closes |
+| Model | `factoryd setup`: asks which model (detected ChatGPT/Codex and Copilot logins first) and, on a route that can run more than one, which coding agent; everything else is defaulted. Asks nothing when the config already names a model, or with no terminal (a single detected login is then used) |
+| Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter. Its failures do not fail the install |
 | Tree | Leaves `git status` clean |
 
 - **TLS interception:** `make install` detects a proxy that re-signs HTTPS and builds with its CA from the keychain; `BUILD_CA_BUNDLE=/path/to/ca.pem make install` overrides it ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
@@ -108,7 +109,7 @@ skill. [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgat
 | `make install`: `the --mount option requires BuildKit` or `docker buildx` missing | The `buildx` plugin is missing and Homebrew is not there to install it | Install your platform's buildx plugin; `factoryd doctor` warns about it |
 | `factoryd: command not found` after install | The terminal predates the install, or the shell is neither zsh nor bash | Open a new terminal; otherwise add the `export PATH=...` line `make install` printed to your shell profile |
 | `doctor` warns the Docker VM shares all of `$HOME` | colima's default mounts | USAGE.md, "Data directory and colima" |
-| `doctor` fails `roles.execution is not configured` | No model route yet | `factoryd quickstart` writes one (`-route chatgpt-codex` for a Codex login) |
+| `doctor` fails `roles.execution is not configured` | No model was chosen: the install had no terminal and found no single login | `factoryd setup` (`-route chatgpt-codex` for a Codex login) |
 | Any command fails `parse .../config.yml: relay_image: deleted with the inference relay` | A `config.yml` written for the retired inference relay still has `relay_image` or `relay_upstream_timeout` | Delete that line; the error names the retired key it found |
 | `quickstart` fails `the repository ... is outside your home directory`, or `mount visibility (repository reachable inside a container)` | The gateway sees only your home directory, and the Docker VM must also share the repository's path (`/tmp` is neither) | Clone or move the repo under `$HOME`; if it still fails, add it to your VM's mounts (USAGE.md, "Data directory and colima") |
 | A request halts "the meter does not answer" / "sandbox runtime ... run `factoryd doctor -fix`" | The OpenShell gateway/meter is down (reboot, colima restart) or the config lost `meter_image` | `factoryd doctor -fix`; `worker` starts them too unless `FACTORYD_AUTOSTART=0` |

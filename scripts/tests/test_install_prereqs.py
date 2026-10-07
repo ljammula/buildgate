@@ -128,7 +128,7 @@ class InstallPrereqsTest(unittest.TestCase):
         self.have(buildx=False, docker_up=False)
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.brew_calls()[0], "install go python gh git node docker docker-buildx colima")
+        self.assertIn("install go python gh git node docker docker-buildx colima", self.brew_calls())
         link = self.home / ".docker" / "cli-plugins" / "docker-buildx"
         self.assertEqual(os.readlink(link), str(self.prefix / "lib/docker/cli-plugins/docker-buildx"))
         self.assertEqual(self.colima_calls(), ["start --memory 4"])
@@ -137,9 +137,20 @@ class InstallPrereqsTest(unittest.TestCase):
         self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.brew_calls()[0], "install docker-buildx")
+        self.assertIn("install docker-buildx", self.brew_calls())
         self.assertTrue((self.home / ".docker" / "cli-plugins" / "docker-buildx").is_symlink())
         self.assertNotIn("colima", result.stdout)
+
+    def test_an_installed_buildx_formula_is_linked_without_brew_install(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
+        plugin = self.prefix / "lib/docker/cli-plugins/docker-buildx"
+        plugin.parent.mkdir(parents=True)
+        plugin.write_text("#!/bin/sh\n")
+        plugin.chmod(0o755)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.brew_calls(), ["--prefix"])
+        self.assertEqual(os.readlink(self.home / ".docker" / "cli-plugins" / "docker-buildx"), str(plugin))
 
     def test_a_stopped_colima_vm_is_started_with_its_own_settings(self):
         self.have(*EVERYTHING, docker_up=False)

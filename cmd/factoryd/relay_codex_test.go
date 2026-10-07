@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,5 +245,31 @@ func TestResolveRequestJobRelaySpecCarriesResponsesWorkerAPI(t *testing.T) {
 	}
 	if spec.WorkerModelAPI != meter.RequestFormatOpenAIResponses {
 		t.Fatalf("drafting relay worker API = %q, want %q", spec.WorkerModelAPI, meter.RequestFormatOpenAIResponses)
+	}
+}
+
+// TestDoctorRouteCredentialFixNamesWhyNoRouteIsUsable: a role whose only
+// route's credential does not resolve used to fail doctor with modelrole's
+// fixed "credential did not resolve" and nothing to act on (from-nothing
+// install walk, 2026-10-07: a Codex token inside the expiry margin).
+func TestDoctorRouteCredentialFixNamesWhyNoRouteIsUsable(t *testing.T) {
+	authFile := writeCodexAuthFile(t, t.TempDir(), map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]any{
+			"access_token": fakeCodexJWT(t, time.Now().Add(time.Hour)),
+			"account_id":   "acct-123",
+		},
+	})
+	settings := sessionconfig.Settings{Routes: map[string]sessionconfig.Route{
+		"codex": {CredentialMode: "chatgpt-codex", CodexAuthFile: authFile},
+	}}
+	fix := doctorRouteCredentialFix(settings, fmt.Errorf("roles.execution: %w", modelrole.ErrNoRouteAvailable))
+	for _, want := range []string{"route codex:", "expires at", "codex login"} {
+		if !strings.Contains(fix, want) {
+			t.Errorf("fix = %q, want it to contain %q", fix, want)
+		}
+	}
+	if got := doctorRouteCredentialFix(settings, errors.New("another failure")); got != "" {
+		t.Errorf("fix for an unrelated error = %q, want none", got)
 	}
 }

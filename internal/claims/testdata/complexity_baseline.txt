@@ -22,7 +22,7 @@
 26 cmd/factoryd/project_check.go resolvePiTicketPath
 30 cmd/factoryd/project_check_and_doctor_test.go TestDoctorCheckMonorepoModuleRoot
 41 cmd/factoryd/quickstart.go (*quickstartConfigBuild).copilotRoute
-32 cmd/factoryd/quickstart.go quickstartBuildConfig
+26 cmd/factoryd/quickstart.go quickstartBuildConfig
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 28 cmd/factoryd/reclaim_dead_owner.go reclaimDeadOwnerRuns

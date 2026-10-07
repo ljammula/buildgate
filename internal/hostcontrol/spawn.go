@@ -692,7 +692,7 @@ func quickstartSpawnDrainer(dp Deps, w io.Writer, what string, args []string, bi
 
 	var readyErr error
 	withSpinner(w, "starting "+what, func() {
-		readyErr = quickstartWaitForWorkerReady(dp, cmd.Process, what, dataDir, errPath, quickstartWorkerReadyTimeout)
+		readyErr = quickstartWaitForWorkerReady(dp, cmd.Process, what, dataDir, outPath, errPath, quickstartWorkerReadyTimeout)
 	})
 	if readyErr != nil {
 		return readyErr
@@ -706,18 +706,19 @@ func quickstartSpawnDrainer(dp Deps, w io.Writer, what string, args []string, bi
 // flock probe -- see its own doc comment for why a plain os.Stat on the
 // lock file is not enough) or the process dying during startup (its own
 // preflight refusing to run), whichever happens first, up to timeout. On
-// a startup death it surfaces the child's own stderr tail verbatim,
-// rather than hanging or reporting success. If neither happens within
+// a startup death it surfaces the child's own stderr tail verbatim, after
+// the failed preflight checks and their fixes from its stdout (the "fixes
+// above" its refusal points at), rather than hanging or reporting success. If neither happens within
 // timeout, it proceeds optimistically rather than failing -- a
 // slow-starting doctor preflight inside worker itself (network pulls,
 // sandbox checks) can legitimately take longer than a short bounded wait,
 // and the child staying alive this long is itself a reasonable signal it
 // did not refuse outright.
-func quickstartWaitForWorkerReady(dp Deps, proc *os.Process, what, dataDir, errLogPath string, timeout time.Duration) error {
+func quickstartWaitForWorkerReady(dp Deps, proc *os.Process, what, dataDir, outLogPath, errLogPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		if !quickstartProcessAlive(proc) {
-			return fmt.Errorf("%s exited during startup; last output:\n%s", what, quickstartTailFile(errLogPath, 4096))
+			return fmt.Errorf("%s exited during startup; last output:\n%s%s", what, failedChecksIn(quickstartTailFile(outLogPath, 16384)), quickstartTailFile(errLogPath, 4096))
 		}
 		held, err := QuickstartWorkerLockHeld(dataDir)
 		if err != nil {
@@ -785,6 +786,26 @@ func quickstartProcessAlive(proc *os.Process) bool {
 // content, or an explanatory placeholder if it can't be read at all) --
 // used to surface a failed child's own diagnostic output without risking
 // printing an unbounded log.
+// failedChecksIn keeps, from a worker's stdout, each failed preflight check
+// line and the fix lines printed under it.
+func failedChecksIn(output string) string {
+	var kept strings.Builder
+	inFailure := false
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.HasPrefix(line, "FAIL  "):
+			inFailure = true
+		case inFailure && strings.HasPrefix(line, "      "):
+		default:
+			inFailure = false
+		}
+		if inFailure {
+			kept.WriteString(line + "\n")
+		}
+	}
+	return kept.String()
+}
+
 func quickstartTailFile(path string, n int64) string {
 	f, err := os.Open(path)
 	if err != nil {
