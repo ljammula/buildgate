@@ -649,6 +649,7 @@ func (sv *serveRun) resolveSandboxPolicy() error {
 	if *sv.apiAllowedSandboxImages != "" {
 		allowedSandboxImages = strings.Split(*sv.apiAllowedSandboxImages, ",")
 	}
+	defaultEgressCABundle(sv.egressCABundle)
 	sv.sandboxPolicy = apiSandboxPolicy{
 		allowedImages:  allowedSandboxImages,
 		defaultImage:   *sv.apiDefaultSandboxImage,

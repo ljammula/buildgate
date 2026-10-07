@@ -416,9 +416,13 @@ readable PEM. `quickstart -egress-ca-bundle` resolves it to an absolute
 path and loads it before writing it to config (it also uses it for its own
 Copilot model listing).
 
-A model call from a sandbox is not covered by this key. Its TLS connection
-is opened by the sandbox's supervisor, which takes the CA from the machine,
-not from a profile:
+Unset, on a network that re-signs TLS, it is `~/.config/factoryd/build-ca.pem`:
+the bundle `make install` and `doctor -fix` write from the keychain. Set the
+key only to trust a different file.
+
+A model call from a sandbox does not use this key. Its TLS connection is
+opened by the sandbox's supervisor, which always takes the machine's bundle
+(one gateway serves every profile):
 
 | On a network that | The supervisor runs from | It trusts |
 |---|---|---|

@@ -241,6 +241,7 @@ func doctorMain(dp *deps, args []string) error {
 		}
 	}
 
+	defaultEgressCABundle(egressCABundle)
 	in := doctorInputs{
 		sandboxDocker:          settings.SandboxDocker,
 		sandboxImage:           *sandboxImage,

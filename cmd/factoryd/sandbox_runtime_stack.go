@@ -68,6 +68,16 @@ func interceptingCAPath() string {
 	return path
 }
 
+// defaultEgressCABundle fills an -egress-ca-bundle neither the command line nor
+// the session config set with interceptingCAPath, so that on a network that
+// re-signs TLS the registry proxy and the host-side model calls trust the
+// same CA the supervisors do, with nothing for the operator to configure.
+func defaultEgressCABundle(bundle *string) {
+	if *bundle == "" {
+		*bundle = interceptingCAPath()
+	}
+}
+
 // openShellStack is the stack this machine runs: one gateway and one meter
 // for every profile, the gateway seeing the home directory read-only so it
 // can check a sandbox's bind sources (the data root, and each repository's
