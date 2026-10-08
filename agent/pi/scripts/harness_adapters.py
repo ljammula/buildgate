@@ -383,7 +383,8 @@ def mounted_skills(root: Path | None = None) -> list[Path]:
 
 # The target repo's own skills that pi and pifork load explicitly: pi treats
 # the project as untrusted in print mode and skips its project skills, while
-# codex reads this same folder natively. Repo content, so no more trusted
+# codex and copilot read this same folder natively, in every role: an
+# invocation's load_repo_skills cannot switch that off for them. Repo content, so no more trusted
 # than any other file the agent reads; factoryd refuses a launch when one
 # shares an operator skill's name.
 REPO_SKILLS_DIR = Path(".agents") / "skills"
@@ -451,6 +452,7 @@ class PiAdapter:
 		session_dir: Path,
 		continue_session: bool,
 		thinking: str | None,
+		load_repo_skills: bool = False,
 	) -> list[str]:
 		args = [
 			self.binary, "--print", "--mode", "json",
@@ -470,7 +472,13 @@ class PiAdapter:
 			args += ["--thinking", thinking]
 		if continue_session:
 			args += ["--continue"]
-		for skill in mounted_skills() + repo_skills(workspace):
+		# The target repo's skills become system-prompt text, and the worker
+		# can add one mid-run, so only the build turn asks for them: a build
+		# must not hand its own reviewer, or a later planner, instructions.
+		skills = mounted_skills()
+		if load_repo_skills:
+			skills += repo_skills(workspace)
+		for skill in skills:
 			args += ["--skill", str(skill)]
 		args += [prompt]
 		return args
@@ -708,6 +716,7 @@ class CodexAdapter:
 		session_dir: Path,
 		continue_session: bool,
 		thinking: str | None,
+		load_repo_skills: bool = False,
 	) -> list[str]:
 		model_id, base_url, _ = _relay_route(self.name)
 		codex_home = Path(session_dir) / "codex-home"
@@ -873,6 +882,7 @@ class CopilotAdapter:
 		session_dir: Path,
 		continue_session: bool,
 		thinking: str | None,
+		load_repo_skills: bool = False,
 	) -> list[str]:
 		model_id, base_url, api = _relay_route(self.name)
 		api_key = RELAY_API_KEY_PLACEHOLDER
