@@ -57,6 +57,9 @@ func reconcileMain(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := resolveDataDirFromSessionConfig(flags, dataDir, ""); err != nil {
+		return err
+	}
 	if *workspace == "" {
 		flags.Usage()
 		return fmt.Errorf("-workspace is required")

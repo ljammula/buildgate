@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"buildgate/internal/consolelink"
@@ -23,29 +22,14 @@ type profileInfo struct {
 	LoadErr error
 }
 
-// DataDir is the profile's data_dir (made absolute), or "data", the same
-// default every command falls back to.
+// DataDir is the profile's data dir (sessionconfig.Config.EffectiveDataDir):
+// its data_dir, or the default for a profile that sets none. "" for a
+// profile that did not load.
 func (p profileInfo) DataDir() string {
-	dir := "data"
-	if p.Config != nil && p.Config.DataDir != nil && *p.Config.DataDir != "" {
-		dir = *p.Config.DataDir
+	if p.Config == nil {
+		return ""
 	}
-	if abs, err := filepath.Abs(dir); err == nil {
-		return abs
-	}
-	return dir
-}
-
-// HasDataDir reports whether the profile sets data_dir. Without it every
-// command falls back to ./data in whatever directory it runs from, so the
-// profile names no fixed queue.
-func (p profileInfo) HasDataDir() bool {
-	return p.Config != nil && p.Config.DataDir != nil && *p.Config.DataDir != ""
-}
-
-// noDataDirHint is the fix for a profile without data_dir.
-func noDataDirHint(p profileInfo) string {
-	return fmt.Sprintf("it sets no data_dir, so commands use ./data in whatever directory they run from; add `data_dir: <absolute path>` to %s", p.Path)
+	return p.Config.EffectiveDataDir()
 }
 
 // loadProfiles loads every profile under sessionconfig.ConfigDir.
@@ -78,7 +62,7 @@ func activeProfileName() string {
 func distinctDataDirs(profiles []profileInfo) (dirs []string, owners map[string][]string) {
 	owners = map[string][]string{}
 	for _, p := range profiles {
-		if p.Config == nil || !p.HasDataDir() {
+		if p.Config == nil {
 			continue
 		}
 		d := p.DataDir()
@@ -154,10 +138,6 @@ func useList(dp *deps, w io.Writer) error {
 			fmt.Fprintf(w, "%s %-14s does not load: %s\n", mark, p.Name, sanitize.Line(p.LoadErr.Error()))
 			continue
 		}
-		if !p.HasDataDir() {
-			fmt.Fprintf(w, "%s %-14s ./data (no data_dir set)  %s\n", mark, p.Name, profileRouteSummary(p.Config))
-			continue
-		}
 		dir := p.DataDir()
 		queue := "worker stopped"
 		if workerAlive(dp, dir, now) {
@@ -189,9 +169,6 @@ func useSwitch(name string, w io.Writer) error {
 	}
 	info := profileInfo{Name: name, Path: path, Config: cfg}
 	fmt.Fprintf(w, "active profile: %s (%s)\ndata dir: %s\n", name, path, info.DataDir())
-	if !info.HasDataDir() {
-		fmt.Fprintf(w, "warning: profile %s: %s\n", name, noDataDirHint(info))
-	}
 	if env := os.Getenv(sessionconfig.ProfileEnv); env != "" && env != name {
 		fmt.Fprintf(w, "note: $%s=%s overrides the active profile in this shell\n", sessionconfig.ProfileEnv, env)
 	}

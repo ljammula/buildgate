@@ -2720,8 +2720,8 @@ func resolveConfiguredDataDir(explicit bool, dataDir, configPath string) string 
 	if explicit {
 		return dataDir
 	}
-	if cfg, _, found, err := loadConfigForPath(configPath); err == nil && found && cfg.DataDir != nil {
-		return *cfg.DataDir
+	if cfg, _, found, err := loadConfigForPath(configPath); err == nil && found {
+		return cfg.EffectiveDataDir()
 	}
 	return dataDir
 }

@@ -92,11 +92,8 @@ func stopRunWith(dp *deps, args []string, w io.Writer, opts stopOptions) error {
 		return err
 	}
 	for _, p := range profiles {
-		switch {
-		case p.LoadErr != nil:
+		if p.LoadErr != nil {
 			fmt.Fprintf(w, "profile %s: skipped, its config does not load: %s\n", p.Name, sanitize.Line(p.LoadErr.Error()))
-		case !p.HasDataDir():
-			fmt.Fprintf(w, "profile %s: skipped, %s\n", p.Name, noDataDirHint(p))
 		}
 	}
 	dirs, _ := distinctDataDirs(profiles)

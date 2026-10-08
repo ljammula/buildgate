@@ -40,6 +40,9 @@ func overrideMain(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := resolveDataDirFromSessionConfig(flags, dataDir, ""); err != nil {
+		return err
+	}
 	if *runID == "" || *by == "" || *reason == "" || *state == "" {
 		flags.Usage()
 		return fmt.Errorf("-run, -by, -reason, and -state are required")
@@ -140,6 +143,9 @@ func newOverrideRateFlags() (flags *flag.FlagSet, dataDir *string) {
 func overrideRateMain(args []string) error {
 	flags, dataDir := newOverrideRateFlags()
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if err := resolveDataDirFromSessionConfig(flags, dataDir, ""); err != nil {
 		return err
 	}
 

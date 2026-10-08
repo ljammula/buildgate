@@ -40,10 +40,19 @@ and [`USAGE.md`](USAGE.md). When this page and
 when an installed plist points at a `factoryd` binary that no longer exists
 (fix: `factoryd install-service -force`).
 
-**`-data-dir` resolution.** `submit`, `watch`, `status`, `cost`, `approve`,
-`reject`, `retry`, `cancel`, `amend-scope`, `worker`, `serve` and
-`doctor`: explicit `-data-dir` > session config `data_dir` > literal
-`data`.
+**`-data-dir` resolution.** The same on every command that takes the flag,
+so a command means the same records from any directory:
+
+| Order | Source |
+|---|---|
+| 1 | An explicit `-data-dir` |
+| 2 | The session config's `data_dir`. `~/` is the home directory; a relative value is relative to the config file, not to the current directory |
+| 3 | A session config that sets none: `~/buildgate/data` for a profile, `<config's directory>/data` for a config outside `~/.config/factoryd` |
+| 4 | No session config at all: `data` in the current directory, with a warning |
+
+A command that reads or writes records prints `data dir: ... (source: ...)`
+first, and a `note:` when `data` in the current directory holds records it is
+not using. `supervise` resolves it once and passes it to each daemon.
 
 **`-config` resolution.** Same rule on every command that takes it
 (`worker`, `submit`, `watch`, `status`, `cost`, `approve`, `reject`,
@@ -1229,8 +1238,8 @@ limits for API-started runs.
 | `build_app_max_attempts` | `2` |
 | `verify_max_attempts` | `2` |
 
-Other keys that are not in the table: `data_dir` (default data dir for the
-commands above), `routes`/`models` (see Routes and models above --
+Other keys that are not in the table: `data_dir` (the data dir of every
+command; see `-data-dir` resolution above for a config that sets none), `routes`/`models` (see Routes and models above --
 `github_token_file`/`github_token_key`/`codex_auth_file` are per-route
 fields there, not top-level keys), `roles` (per-kind-of-work model/
 thinking picks over `models:` -- see above), `workspaces`,

@@ -102,11 +102,8 @@ func collectInbox(warn io.Writer, now time.Time) ([]inboxEntry, error) {
 		return nil, err
 	}
 	for _, p := range profiles {
-		switch {
-		case p.LoadErr != nil:
+		if p.LoadErr != nil {
 			fmt.Fprintf(warn, "profile %s: skipped, its config does not load: %s\n", p.Name, sanitize.Line(p.LoadErr.Error()))
-		case !p.HasDataDir():
-			fmt.Fprintf(warn, "profile %s: skipped, %s\n", p.Name, noDataDirHint(p))
 		}
 	}
 	dirs, owners := distinctDataDirs(profiles)

@@ -198,10 +198,9 @@ func resolveServiceConfigPath(explicit string) (string, error) {
 }
 
 // resolveServiceDataDir returns explicit, made absolute, if given;
-// otherwise the data_dir key of the session config at configPath. Errors
-// naming both when neither is set -- a relative data dir would resolve
-// against whatever working directory launchd happens to start the
-// service with, so this always returns an absolute path.
+// otherwise the data dir of the session config at configPath
+// (Config.EffectiveDataDir). Always absolute: a relative one would resolve
+// against whatever working directory launchd starts the service with.
 func resolveServiceDataDir(explicit, configPath string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
@@ -210,10 +209,7 @@ func resolveServiceDataDir(explicit, configPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("load session config %s: %w", configPath, err)
 	}
-	if cfg.DataDir == nil || *cfg.DataDir == "" {
-		return "", fmt.Errorf("no -data-dir given and session config %s has no data_dir key; pass -data-dir explicitly or add data_dir to the config", configPath)
-	}
-	return filepath.Abs(*cfg.DataDir)
+	return cfg.EffectiveDataDir(), nil
 }
 
 // installServiceMain implements `factoryd install-service`.
@@ -224,7 +220,7 @@ func resolveServiceDataDir(explicit, configPath string) (string, error) {
 func newInstallServiceFlags() (flags *flag.FlagSet, configPath, dataDir *string, force, print, noServe *bool) {
 	flags = flag.NewFlagSet("install-service", flag.ContinueOnError)
 	configPath = flags.String("config", "", "session config the worker should read; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists")
-	dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the data_dir key of the resolved session config")
+	dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the resolved session config's data dir (its data_dir, or ~/buildgate/data when it sets none)")
 	force = flags.Bool("force", false, "overwrite an already-installed plist")
 	print = flags.Bool("print", false, "write the generated worker plist to stdout instead of installing anything (the serve LaunchAgent below is also skipped in this mode)")
 	noServe = flags.Bool("no-serve", false, "install only the worker LaunchAgent; skip installing dev.factoryd.serve alongside it")

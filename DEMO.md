@@ -115,8 +115,8 @@ factoryd submit -data-dir "$DATA" -draft-oracles -verify-command "go test ./..."
 factoryd status -data-dir "$DATA"
 ```
 
-Always pass `-data-dir "$DATA"`: the CLI defaults to `./data`, but the
-daemon only drains `$DATA`. Flags go before `<workspace>`. Add `-watch` to
+Always pass `-data-dir "$DATA"`: without it the CLI uses the session
+config's data dir, but the daemon only drains `$DATA`. Flags go before `<workspace>`. Add `-watch` to
 stay attached.
 
 | # | Do | Say |

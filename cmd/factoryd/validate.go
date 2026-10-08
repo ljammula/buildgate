@@ -205,31 +205,21 @@ func dataDirInsideWorkspace(workspace, dataDir string) (inside bool, workspaceAb
 	return requestsubmit.DataDirInsideWorkspace(workspace, dataDir)
 }
 
-// resolveDataDirFromSessionConfig sets *dataDir from the session config's
-// data_dir key when -data-dir was not given explicitly on the command line,
-// and logs the resolved directory and its source ("-data-dir", "session
-// config <path>", or "default") -- the same session-config precedence level
-// `factoryd serve`/`factoryd worker` already give -data-dir (via
-// applySessionConfigDataDir/applySessionConfig respectively). Shared by
-// `factoryd serve`, `factoryd status`, `factoryd watch`, `factoryd submit`
-// and `factoryd retry` -- the last two previously ignored the session
-// config's data_dir key entirely and only ever reported "-data-dir" or
-// "default", so they worked only when the operator's cwd happened to match
-// a configured data_dir.
+// resolveDataDirFromSessionConfig sets *dataDir for every command that takes
+// -data-dir, and logs it with its source:
 //
-// A missing config file or one with no data_dir key is not an error here:
-// none of these commands have execution flags that depend on the file
-// existing at all (unlike worker's own applySessionConfig, which refuses
-// to run with neither a config nor explicit sandbox/relay flags), and the
-// "data" default already works standalone.
+//	an explicit -data-dir                          as given
+//	a session config                               its Config.EffectiveDataDir: data_dir, or the
+//	                                               default for a config that sets none
+//	no session config                              the flag's default ("data" in the working
+//	                                               directory), with a warning
 //
-// configPath, when non-empty, is loaded directly (loadConfigForPath) in
-// place of the default-path search: `serve`'s own -config flag
-// previously had no effect here at all, so an API-started run resolved
-// -data-dir from whichever config the default search happened to find,
-// not the one actually named on the command line. Callers with no -config
-// flag of their own (retry/status/watch today) still pass "" and keep the
-// prior default-search-only behavior.
+// So one config means one data dir from any working directory, and a worker
+// and the commands that look for it agree. `worker` applies the same rule in
+// applySessionConfig, `doctor` in resolveConfiguredDataDir.
+//
+// configPath, when non-empty, is the config to load (a -config value); ""
+// searches the default paths, which is all a command without -config can do.
 func resolveDataDirFromSessionConfig(flags *flag.FlagSet, dataDir *string, configPath string) error {
 	explicit := false
 	flags.Visit(func(f *flag.Flag) {
@@ -245,13 +235,41 @@ func resolveDataDirFromSessionConfig(flags *flag.FlagSet, dataDir *string, confi
 	if err != nil {
 		return fmt.Errorf("session config: %w", err)
 	}
-	if !found || cfg.DataDir == nil {
+	if !found {
 		log.Printf("data dir: %q (source: default)", *dataDir)
+		if !filepath.IsAbs(*dataDir) {
+			abs, _ := filepath.Abs(*dataDir)
+			log.Printf("warning: there is no session config, so the data dir is %s: it follows the directory a command runs in. `factoryd setup` writes a config", abs)
+		}
 		return nil
 	}
-	*dataDir = *cfg.DataDir
-	log.Printf("data dir: %q (source: session config %s)", *dataDir, path)
+	*dataDir = cfg.EffectiveDataDir()
+	log.Printf("data dir: %q (source: %s)", *dataDir, dataDirSource(cfg, path))
+	if cfg.DataDirIsDefault() {
+		noticeUnusedCwdRecords(*dataDir, path)
+	}
 	return nil
+}
+
+// noticeUnusedCwdRecords says so when ./data of the working directory holds
+// factoryd records and dataDir, the default for a config that sets no
+// data_dir, is another directory: without the key a command once used
+// ./data, so those may be the requests the operator is looking for.
+func noticeUnusedCwdRecords(dataDir, configPath string) {
+	local, err := filepath.Abs("data")
+	if err != nil || local == dataDir || !quickstartDataDirHasRecords(local) {
+		return
+	}
+	log.Printf("note: %s holds factoryd records this command does not use. To keep using them, set `data_dir: %s` in %s, then `factoryd restart`", local, local, configPath)
+}
+
+// parseWithDataDir parses args and resolves -data-dir as every command does
+// (resolveDataDirFromSessionConfig).
+func parseWithDataDir(flags *flag.FlagSet, args []string, dataDir *string, configPath string) error {
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	return resolveDataDirFromSessionConfig(flags, dataDir, configPath)
 }
 
 // applyProjectConfigDefaults fills in flags the caller left unset from

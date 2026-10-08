@@ -30,7 +30,7 @@ func newConsoleFlags() (flags *flag.FlagSet, open *bool, configPath, dataDir *st
 	// (<data-dir>/console-address): the token is attached only to that
 	// serve. Must match serve's own -data-dir when that differs from the
 	// config's data_dir (install-service -data-dir, say).
-	dataDir = flags.String("data-dir", "", "data directory the running `factoryd serve` uses, to find the console address it recorded; default: the session config's data_dir, else ./data")
+	dataDir = flags.String("data-dir", "", "data directory the running `factoryd serve` uses, to find the console address it recorded; default: the session config's data dir; with no session config, ./data")
 	plainFlagUsage(flags)
 	return
 }
