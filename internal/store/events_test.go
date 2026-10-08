@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -173,5 +175,74 @@ func TestOpenPreservesExistingFilePermissions(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o640 {
 		t.Errorf("event db mode = %o, want unchanged 0640", perm)
+	}
+}
+
+// Two builds that start in the same second each open the store, append one
+// event and close it, from separate processes (separate connections here). An
+// open that loses the race for a lock must wait for it rather than fail: a
+// failed open drops the event, since callers treat this store as supplementary.
+// "new" starts with no database, where the openers race to switch it to WAL;
+// "existing" starts from one already in WAL mode, where an open meets the
+// recovery and close-time checkpoint of the others.
+func TestConcurrentOpenAppendCloseLosesNoEvent(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		name := "new"
+		if existing {
+			name = "existing"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "events.db")
+			if existing {
+				s, err := Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const writers, perWriter = 16, 5
+			errs := make(chan error, 3*writers*perWriter)
+			var wg sync.WaitGroup
+			for w := 0; w < writers; w++ {
+				wg.Add(1)
+				go func(w int) {
+					defer wg.Done()
+					for i := 0; i < perWriter; i++ {
+						s, err := Open(path)
+						if err != nil {
+							errs <- err
+							continue
+						}
+						if _, err := s.Append(context.Background(), fmt.Sprintf("run-%d", w), "state", map[string]int{"i": i}); err != nil {
+							errs <- err
+						}
+						if err := s.Close(); err != nil {
+							errs <- err
+						}
+					}
+				}(w)
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				t.Errorf("concurrent writer: %v", err)
+			}
+			s, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			for w := 0; w < writers; w++ {
+				events, err := s.List(context.Background(), fmt.Sprintf("run-%d", w))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(events) != perWriter {
+					t.Errorf("run-%d has %d events, want %d", w, len(events), perWriter)
+				}
+			}
+		})
 	}
 }
