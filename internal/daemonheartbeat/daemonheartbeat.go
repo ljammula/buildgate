@@ -79,6 +79,12 @@ type Heartbeat struct {
 	PID        int    `json:"pid"`
 	StartedAt  string `json:"started_at"`
 	UpdatedAt  string `json:"updated_at"`
+	// Version is the factoryd version of the process that writes this file.
+	// A worker runs every build in its own process, so one started before an
+	// install keeps building with the code it started with; `doctor` and
+	// `factoryd restart` compare this with the installed binary's. Empty
+	// from a process older than the field.
+	Version string `json:"version,omitempty"`
 	// SandboxDocker is the daemon's own -sandbox-docker flag value, always
 	// through ResolveSandboxDocker first (round 9) rather than the raw
 	// flag string — see that function's own doc comment for why. Found

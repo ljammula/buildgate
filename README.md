@@ -294,6 +294,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 | Follow a run, read its log | `factoryd watch <id>`, `factoryd logs [-f] <id\|queue-run\|serve>` |
 | Drop a request | `factoryd cancel <request-id>` |
 | Stop what factoryd started | `factoryd stop [-all] [-force]` |
+| Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; refused while a request is building) |
 | Switch session-config profile | `factoryd use [<name>]` |
 | Upgrade to the newest release tag | `factoryd upgrade` |
 | Keep the worker and console alive across reboots (macOS) | `factoryd install-service` |

@@ -63,7 +63,9 @@ or rebuilds them); it is the
 operator's command too.
 `factoryd upgrade` is operator-only as well: it stops the operator's processes
 and rebuilds the install, so give the command (`factoryd upgrade`, with `-wait`
-if a request is building) and never run it.
+if a request is building) and never run it. So is `factoryd restart`, which
+stops and starts the operator's worker and console with the installed binary:
+when `factoryd doctor` warns `worker runs this factoryd`, relay its fix line.
 
 ## Gates belong to the operator
 

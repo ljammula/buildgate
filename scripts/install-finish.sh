@@ -10,6 +10,8 @@
 #   GitHub   `gh auth login`                                    gh is logged in, or there is no terminal
 #   Model    `factoryd setup`: which model, and which coding    the config already names a model;
 #            agent where the route can run more than one        asks nothing with no terminal
+#   Restart  `factoryd restart`: the worker and console that    nothing is running; left for you while a
+#            were running, started again with this binary       request is building
 #   Check    `factoryd doctor -fix`                             never
 #
 # It never fails the install: factoryd is installed by the time it runs.
@@ -82,6 +84,10 @@ if have gh && ! gh auth status >/dev/null 2>&1; then
 fi
 
 "$installed" setup || left "Choose a model: factoryd setup"
+
+# A worker builds with the code it started with: the one already running is
+# the binary this install replaced until it is started again.
+"$installed" restart || left "Restart the worker and console with this install, once no request is building: factoryd restart"
 
 echo "Checking the install: factoryd doctor -fix"
 "$installed" doctor -fix || left "Fix what the check above marks FAIL (each has a 'fix:' line), then run: factoryd doctor"
