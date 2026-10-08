@@ -819,6 +819,7 @@ func (sv *serveRun) listenAndServe() error {
 	// whichever run happened to be in flight.
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	server.Handler = endReadsOnShutdown(server.Handler, signalCtx)
 
 	// The "a request is waiting but no worker is live" desktop
 	// notification (notifyWorkerStale) used to fire only from `factoryd
@@ -882,6 +883,30 @@ func (sv *serveRun) listenAndServe() error {
 			return nil
 		}, &sv.inFlightRuns)
 	}
+}
+
+// endReadsOnShutdown cancels the context of every GET or HEAD still in flight
+// once shutdown is done, so the server's graceful shutdown does not wait on a
+// stream nobody will close: a console tab's event stream, a log follow. Every
+// long-lived handler here is a GET that returns when its request context ends
+// (a mux GET pattern also serves HEAD). Other methods are writes; they keep
+// their context and drain as before.
+//
+// Found live 2026-10-08: serve took its whole 30 s shutdown deadline to exit,
+// `make install`'s restart gave up on it after 15 s, and the worker it had
+// already stopped stayed down. Reproduced with one `GET /requests/events`
+// held open.
+func endReadsOnShutdown(next http.Handler, shutdown context.Context) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		defer context.AfterFunc(shutdown, cancel)()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func drainServeComponents(ctx context.Context, shutdownHTTP func(context.Context) error, stopDaemons func(context.Context) error, inFlight *sync.WaitGroup) error {

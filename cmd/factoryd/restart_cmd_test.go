@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"strings"
 	"testing"
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
+	"os/exec"
 )
 
 // restartHarness is the upgrade harness with this binary's path fixed.
@@ -97,5 +99,47 @@ func TestDoctorWarnsOfAWorkerOlderThanThisBinary(t *testing.T) {
 	write(version)
 	if check, ok := doctorCheckWorkerBinary(dp, dir, time.Now()); !ok || check.Err != nil {
 		t.Errorf("a worker of this version: %+v, want ok", check)
+	}
+}
+
+// A console that will not exit (it ignores SIGTERM here) must not leave the
+// worker down: restart has already stopped the worker by the time it finds
+// out, so it starts the worker again, and only the worker, before reporting
+// the console. A second console would lose the port to the first after
+// overwriting its pid file.
+func TestRestartStartsTheWorkerAgainWhenTheConsoleWillNotStop(t *testing.T) {
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	dir := h.profiles.roots["default"]
+	queue := standIn(t)
+	stubborn := exec.Command("sh", "-c", `trap "" TERM; echo ready; while :; do sleep 1; done`)
+	ready, err := stubborn.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stubborn.Start(); err != nil {
+		t.Fatalf("start stand-in: %v", err)
+	}
+	t.Cleanup(func() { _ = stubborn.Process.Kill(); _, _ = stubborn.Process.Wait() })
+	// The trap is in place only once the shell says so: a SIGTERM before
+	// that would simply end it.
+	if line, err := bufio.NewReader(ready).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("stand-in did not come up: %q, %v", line, err)
+	}
+	writePIDFile(t, dir, "quickstart-queue-run.pid", queue.Process.Pid)
+	writeConsoleRecord(t, dir, stubborn.Process.Pid)
+	writeFreshWorkerHeartbeat(t, dir, queue.Process.Pid, "localhost:7233", 3)
+
+	var out bytes.Buffer
+	err = restartRun(dp, nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "serve ("+dir+")") {
+		t.Fatalf("want an error naming the console that is still running, got %v\n%s", err, out.String())
+	}
+	if alive(queue.Process.Pid) || !alive(stubborn.Process.Pid) {
+		t.Errorf("worker alive %v (want stopped), console alive %v (want still running)", alive(queue.Process.Pid), alive(stubborn.Process.Pid))
+	}
+	want := "worker /installed/factoryd config.yml " + dir + " localhost:7233"
+	if len(h.spawned) != 1 || h.spawned[0] != want {
+		t.Errorf("spawned %v, want only the worker: %q", h.spawned, want)
 	}
 }

@@ -57,22 +57,48 @@ func restartRun(dp *deps, args []string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("find this binary: %w", err)
 	}
+	var notStopped []string
 	for _, dir := range dirs {
 		out := hostcontrol.StopDataDir(dp, w, dir, false, now)
 		if out.Refused {
 			return fmt.Errorf("a request started building in %s while stopping; run `factoryd restart` again once it reaches a gate", dir)
 		}
 		if out.Failed {
-			return fmt.Errorf("could not stop the processes of %s", dir)
+			// What did stop is started again before this is reported: a
+			// console that will not exit must not leave the worker,
+			// already stopped above, down. The process still running is
+			// left out, since a second one would only lose the port or
+			// the queue lock after overwriting the first one's pid file.
+			running, notStopped = withoutStillRunning(running, notStopped, dir, out)
 		}
 	}
 	restarted := upgradeRestart(dp, w, binary, running)
+	if len(notStopped) > 0 {
+		fmt.Fprintf(w, "restarted: %s\n", strings.Join(restarted, "; "))
+		return fmt.Errorf("still running with the binary it started with: %s; stop it (the line above has its pid), then `factoryd restart`", strings.Join(notStopped, "; "))
+	}
 	if len(restarted) < len(running) {
 		fmt.Fprintf(w, "restarted: %s\n", strings.Join(restarted, "; "))
 		return errors.New("not everything that was running came back; the lines above say what to start")
 	}
 	fmt.Fprintf(w, "restarted with factoryd %s: %s\n", version, strings.Join(restarted, "; "))
 	return nil
+}
+
+// withoutStillRunning drops from running the processes of dir that out says
+// did not stop, and adds each to notStopped as "<kind> (<dir>)". A launchd
+// service stays: stop leaves it alone and upgradeRestart kickstarts it.
+func withoutStillRunning(running []upgradeProcess, notStopped []string, dir string, out hostcontrol.StopOutcome) ([]upgradeProcess, []string) {
+	var kept []upgradeProcess
+	for _, p := range running {
+		left := (p.Kind == "worker" && out.QueueLive) || (p.Kind == "serve" && out.ServeLive)
+		if p.DataDir != dir || p.Launchd || !left {
+			kept = append(kept, p)
+			continue
+		}
+		notStopped = append(notStopped, fmt.Sprintf("%s (%s)", p.Kind, dir))
+	}
+	return kept, notStopped
 }
 
 // doctorWorkerBinaryChecks is doctorCheckWorkerBinary's row, when it has one.
