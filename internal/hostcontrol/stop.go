@@ -39,6 +39,7 @@ type StopOutcome struct {
 	Refused   bool // a request is building and -force was not given
 	Failed    bool // a process could not be signalled or did not exit
 	QueueLive bool // a worker is still running afterwards
+	ServeLive bool // a console that was signalled is still running afterwards
 }
 
 func StopResult(o StopOutcome) error {
@@ -155,6 +156,8 @@ func stopProcess(dp Deps, w io.Writer, what, dir string, out *StopOutcome, sourc
 		out.Failed = true
 		if what != "serve" {
 			out.QueueLive = true
+		} else {
+			out.ServeLive = true
 		}
 		return
 	}
@@ -169,6 +172,8 @@ func stopProcess(dp Deps, w io.Writer, what, dir string, out *StopOutcome, sourc
 		out.Failed = true
 		if what != "serve" {
 			out.QueueLive = true
+		} else {
+			out.ServeLive = true
 		}
 		return
 	}
