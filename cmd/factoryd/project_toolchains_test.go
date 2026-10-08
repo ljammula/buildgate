@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/toolchain"
 )
@@ -118,6 +119,7 @@ func TestProjectImageArgsPrintsOneBuildArgumentPerLine(t *testing.T) {
 }
 
 func TestDoctorProjectToolchainRows(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "0")
 	repo := toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n", "pyproject.toml": "[project]\nrequires-python = \">=3.11\"\n", ".nvmrc": "20\n"})
 	in := doctorInputs{targetRepo: repo, sandboxImage: "worker@sha256:aaaa", sandboxDocker: toolchainDocker(t, workerImageToolchains), imageSourceRoot: "/src/buildgate"}
 	checks := doctorCheckProjectToolchains(context.Background(), in)
@@ -138,9 +140,15 @@ func TestDoctorProjectToolchainRows(t *testing.T) {
 	if got := doctorCheckProjectToolchains(context.Background(), doctorInputs{targetRepo: toolchainRepo(t, nil), sandboxImage: "worker@sha256:aaaa", sandboxDocker: in.sandboxDocker}); got != nil {
 		t.Errorf("a repo that declares nothing has rows: %+v", got)
 	}
+	// With autostart a build derives the image, so the Go row is not a failure.
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	if derived := doctorCheckProjectToolchains(context.Background(), in)[0]; derived.Err != nil || !strings.Contains(derived.Detail, "a build derives an image") {
+		t.Errorf("Go row with autostart = %+v, want ok with what a build does", derived)
+	}
 }
 
 func TestSubmitWarnsOfAToolchainTheSandboxImageLacks(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "0")
 	dp := newTestDeps(t)
 	settings := sessionconfig.Settings{SandboxImage: "worker@sha256:aaaa", SandboxDocker: "docker"}
 	repo := toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n"})
@@ -162,5 +170,11 @@ func TestSubmitWarnsOfAToolchainTheSandboxImageLacks(t *testing.T) {
 	out.Reset()
 	if warnProjectToolchains(dp, context.Background(), &out, toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.26\n"}), settings); out.Len() != 0 {
 		t.Errorf("a satisfied declaration printed %q", out.String())
+	}
+	// With autostart a build derives the Go image: only Node is worth a line.
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	warnProjectToolchains(dp, context.Background(), &out, toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n", ".nvmrc": "20\n"}), settings)
+	if strings.Contains(out.String(), "go.mod") || !strings.Contains(out.String(), ".nvmrc") {
+		t.Errorf("with autostart the warnings are %q, want Node's only", out.String())
 	}
 }

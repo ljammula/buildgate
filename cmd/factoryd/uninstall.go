@@ -295,7 +295,16 @@ func (e *uninstallEnv) plan() []uninstallStep {
 		steps = append(steps, e.gatewayStatePurgeSteps()...)
 	}
 	if dockerUp {
-		for _, ref := range uninstallImages {
+		// The images builds derived for a repository's toolchains carry a
+		// tag per set of versions, so they are listed, not named.
+		derived, _ := e.dockOut("images", "--format", "{{.Repository}}:{{.Tag}}", toolchainImageRepo)
+		refs := append([]string(nil), uninstallImages...)
+		for _, ref := range strings.Fields(derived) {
+			if strings.HasPrefix(ref, toolchainImageRepo+":") {
+				refs = append(refs, ref)
+			}
+		}
+		for _, ref := range refs {
 			if !e.imagePresent(ref) {
 				continue
 			}

@@ -1299,7 +1299,10 @@ func (tr *ticketRun) checkProject() error {
 		return err
 	}
 	ensureSandboxRuntime(tr.dp, tr.lifecycleCtx, os.Stderr, tr.settings.MeterImage)
-	return nil
+	// Last, once the run is known to start: the image this repository's
+	// declared toolchains need, which may be built here on first use.
+	*tr.sandboxImage, err = toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
+	return err
 }
 
 // lockRepository takes the repository lock for an isolated run and checks the pull-request flags.

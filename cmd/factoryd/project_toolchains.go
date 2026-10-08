@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/toolchain"
 )
@@ -28,9 +29,11 @@ func (impl realDocker) imageToolchains(ctx context.Context, dockerBinary, image 
 }
 
 // warnProjectToolchains prints, as a request is submitted, each toolchain
-// version the repository declares that the session's sandbox image does not
-// satisfy: the build would otherwise find out at its verify command. It never
-// refuses the request, and says nothing when the image cannot be asked.
+// version the repository declares that its builds will not have: a Node
+// mismatch always, and a Go or Python one only under FACTORYD_AUTOSTART=0,
+// since otherwise a build derives the image that has it (toolchainImageFor).
+// It never refuses the request, and says nothing when the image cannot be
+// asked.
 func warnProjectToolchains(dp *deps, ctx context.Context, w io.Writer, repo string, settings sessionconfig.Settings) {
 	if settings.SandboxImage == "" {
 		return
@@ -44,7 +47,7 @@ func warnProjectToolchains(dp *deps, ctx context.Context, w io.Writer, repo stri
 		return
 	}
 	for _, f := range toolchain.Check(reqs, installed) {
-		if f.OK {
+		if f.OK || (f.Tool != toolchain.Node && hostcontrol.AutostartEnabled()) {
 			continue
 		}
 		outcome := "its verify command cannot pass there"
@@ -186,9 +189,12 @@ func projectImageArgsMain(dp *deps, args []string, stdout, stderr io.Writer) err
 }
 
 // doctorCheckProjectToolchains holds the toolchain versions repo declares
-// against the sandbox image a build of it would run in: one row per
-// declaration. A Go or Python the image cannot satisfy fails, since the
-// verify command cannot pass; a Node mismatch warns.
+// against the sandbox image a build of it would start from: one row per
+// declaration. A Go or Python the image lacks is what a build derives an
+// image for (toolchainImageFor), and the row says so; under
+// FACTORYD_AUTOSTART=0 nothing is derived, the verify command cannot pass,
+// and the row fails with the command that builds the image. A Node mismatch
+// warns.
 func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctorCheck {
 	prefix := "toolchains for " + in.targetRepo
 	reqs, err := toolchain.Detect(in.targetRepo)
@@ -211,6 +217,8 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 		case f.Tool == toolchain.Node:
 			checks = append(checks, doctorCheck{Name: name, Advisory: true, Err: errors.New(imageHas(f)),
 				Fix: "the image's Node also runs the coding agents and is not replaced per project; build on it, or supply your own worker image"})
+		case hostcontrol.AutostartEnabled():
+			checks = append(checks, doctorCheck{Name: name, Detail: imageHas(f) + "; a build derives an image from it with the declared version, on first use"})
 		default:
 			checks = append(checks, doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)})
 		}
