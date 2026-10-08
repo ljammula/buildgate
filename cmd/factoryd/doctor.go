@@ -308,6 +308,7 @@ func doctorMain(dp *deps, args []string) error {
 		checks = append(checks, doctorCheckTemporal(dp, context.Background(), false, os.Stdout))
 	}
 	checks = append(checks, doctorOpenShellChecks(dp, context.Background(), in, *fix, os.Stdout)...)
+	checks = append(checks, doctorWorkerBinaryChecks(dp, in.dataDir, time.Now())...)
 	// -fix also offers to fix the first-run blockers doctorFixAbsentImages
 	// (inside doctorRunChecks above) doesn't cover -- see doctorApplyFixes'
 	// own doc comment. Runs after checks are collected (so it can see, e.g.,

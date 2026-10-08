@@ -121,6 +121,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			PID:                 os.Getpid(),
 			StartedAt:           startedAt,
 			UpdatedAt:           time.Now().Format(time.RFC3339Nano),
+			Version:             version,
 			RouteCredentialMode: credentialMode,
 			RouteWorkerModel:    workerModel,
 			ActiveRequests:      currentActiveRequests(),
