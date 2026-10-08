@@ -71,6 +71,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import harness_adapters  # noqa: E402
 import prompt_templates  # noqa: E402
+import round_feedback  # noqa: E402
 
 DEFAULT_ADAPTER = harness_adapters.get("pi")
 PI_ROOT = Path(__file__).resolve().parents[1]
@@ -483,6 +484,16 @@ class Round:
 	oracle_command: str | None = None
 	oracle_passed: bool | None = None
 	oracle_output_tail: str = ""
+	# What the next round is told about this one (round_feedback.py): why it
+	# did not earn completion, the files its agent turn changed, an id for
+	# "this failure" so a repeat is recognised, where the failing command's
+	# complete output was saved, and what happened to the agent process when
+	# the failure was not a failing command.
+	blockers: list[str] = field(default_factory=list)
+	changed_files: list[str] = field(default_factory=list)
+	failure_signature: str = ""
+	failure_log: str = ""
+	agent_notes: str = ""
 
 
 @dataclass
@@ -786,8 +797,36 @@ def workspace_fingerprint(workspace: Path) -> tuple | None:
 	)
 
 
+# The most of a failing command's output kept in its log file.
+FAILURE_LOG_LIMIT = 2_000_000
+
+
+def failure_output(raw: str, log_path: Path | None) -> str:
+	"""A failing command's output as a corrective prompt shows it: the block
+	around its first reported failure plus its end (round_feedback's
+	failure_excerpt), not just its last few thousand characters. With
+	log_path, the complete redacted output is also saved there for the agent
+	to read; a write failure only loses that copy."""
+	full = redact(raw, FAILURE_LOG_LIMIT)
+	if log_path is not None:
+		try:
+			log_path.parent.mkdir(parents=True, exist_ok=True)
+			log_path.write_text(full + "\n", encoding="utf-8")
+		except OSError:
+			pass
+	return round_feedback.failure_excerpt(full)
+
+
+def _feedback_log(log_dir: Path | None, name: str) -> Path | None:
+	return log_dir / name if log_dir is not None else None
+
+
+FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG = "fast-check.log", "verify.log", "oracle.log"
+
+
 def run_verification(
-	workspace: Path, *, verify_command_override: str | None = None, fast_check_command: str | None = None
+	workspace: Path, *, verify_command_override: str | None = None, fast_check_command: str | None = None,
+	log_dir: Path | None = None,
 ) -> tuple[str | None, bool | None, bool, str, bool, bool | None]:
 	# verify_command_override, when set, is a factoryd-resolved ticket's own
 	# declared Verify-Command: -- see --verify-command's own doc comment in
@@ -823,7 +862,7 @@ def run_verification(
 		try:
 			completed = sh(["bash", "-o", "pipefail", "-lc", fast_check_command], cwd=workspace, timeout=20 * 60)
 			if completed.returncode != 0:
-				output = redact(f"{completed.stdout}\n{completed.stderr}")
+				output = failure_output(f"{completed.stdout}\n{completed.stderr}", _feedback_log(log_dir, FAST_CHECK_LOG))
 				tail = f"[FAST CHECK] `{fast_check_command}` failed; the full verify command was not run this round.\n\n{output}"
 				return None, None, False, tail, True, False
 		except subprocess.TimeoutExpired as exc:
@@ -831,7 +870,7 @@ def run_verification(
 				f"[FAST CHECK] `{fast_check_command}` timed out after 20 minutes; the full verify command was not run this round.\n"
 				f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
 			)
-			return None, None, False, redact(output), True, False
+			return None, None, False, failure_output(output, _feedback_log(log_dir, FAST_CHECK_LOG)), True, False
 
 	command = verify_command_override if verify_command_override else resolve_verify_command(workspace)
 	fast_check_passed = True if fast_check_command else None
@@ -839,16 +878,15 @@ def run_verification(
 		return None, None, False, "", bool(fast_check_command), fast_check_passed
 	try:
 		completed = sh(["bash", "-o", "pipefail", "-lc", command], cwd=workspace, timeout=20 * 60)
-		return (
-			command, completed.returncode == 0, False, redact(f"{completed.stdout}\n{completed.stderr}"),
-			bool(fast_check_command), fast_check_passed,
-		)
+		combined = f"{completed.stdout}\n{completed.stderr}"
+		output = redact(combined) if completed.returncode == 0 else failure_output(combined, _feedback_log(log_dir, VERIFY_LOG))
+		return command, completed.returncode == 0, False, output, bool(fast_check_command), fast_check_passed
 	except subprocess.TimeoutExpired as exc:
 		output = (
 			f"verification command timed out after 20 minutes: {command}\n"
 			f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
 		)
-		return command, False, True, redact(output), bool(fast_check_command), fast_check_passed
+		return command, False, True, failure_output(output, _feedback_log(log_dir, VERIFY_LOG)), bool(fast_check_command), fast_check_passed
 
 
 def changed_go_files(workspace: Path, base_sha: str | None) -> list[str]:
@@ -908,7 +946,7 @@ def gofmt_changed_files(workspace: Path, base_sha: str | None) -> list[str]:
 	return drifted if fixed.returncode == 0 else []
 
 
-def run_reference_oracle(workspace: Path, *, oracle_command: str) -> tuple[bool, str]:
+def run_reference_oracle(workspace: Path, *, oracle_command: str, log_dir: Path | None = None) -> tuple[bool, str]:
 	"""Runs oracle_command (an operator-authored check against a host
 	directory already bind-mounted read-only into this container by the
 	Go launcher -- see internal/sandbox.LaunchSpec.ReferenceOracleDir's
@@ -927,17 +965,20 @@ def run_reference_oracle(workspace: Path, *, oracle_command: str) -> tuple[bool,
 	verify_tail already is."""
 	try:
 		completed = sh(["bash", "-o", "pipefail", "-lc", oracle_command], cwd=workspace, timeout=20 * 60)
-		return completed.returncode == 0, redact(f"{completed.stdout}\n{completed.stderr}")
+		combined = f"{completed.stdout}\n{completed.stderr}"
+		if completed.returncode == 0:
+			return True, redact(combined)
+		return False, failure_output(combined, _feedback_log(log_dir, ORACLE_LOG))
 	except subprocess.TimeoutExpired as exc:
 		output = (
 			f"reference-oracle command timed out after 20 minutes: {oracle_command}\n"
 			f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
 		)
-		return False, redact(output)
+		return False, failure_output(output, _feedback_log(log_dir, ORACLE_LOG))
 
 
 def maybe_run_reference_oracle(
-	workspace: Path, *, oracle_command: str | None, verify_passed: bool | None,
+	workspace: Path, *, oracle_command: str | None, verify_passed: bool | None, log_dir: Path | None = None,
 ) -> tuple[str | None, bool | None, str]:
 	"""Shared gating for run_reference_oracle's two call sites (the local
 	round loop and the Sonnet-fallback escalation pass): only run once
@@ -956,7 +997,8 @@ def maybe_run_reference_oracle(
 	in two places is exactly the kind of duplicated gating-condition
 	logic this function itself exists to avoid (found via review)."""
 	if oracle_command and verify_passed is True:
-		passed, tail = run_reference_oracle(workspace, oracle_command=oracle_command)
+		extra = {"log_dir": log_dir} if log_dir is not None else {}
+		passed, tail = run_reference_oracle(workspace, oracle_command=oracle_command, **extra)
 		return oracle_command, passed, tail
 	return None, None, ""
 
@@ -966,6 +1008,10 @@ CORRECTIVE_EXCERPT = prompt_templates.load("build_corrective.excerpt", ("verify_
 CORRECTIVE_ORACLE = prompt_templates.load("build_corrective.oracle", ("oracle_command", "oracle_tail"))
 CORRECTIVE_REVIEWER = prompt_templates.load("build_corrective.reviewer", ("detail",))
 CORRECTIVE_CLOSING = prompt_templates.load_text("build_corrective.closing")
+CORRECTIVE_HISTORY = prompt_templates.load("build_corrective.history", ("history",))
+CORRECTIVE_LOG = prompt_templates.load("build_corrective.log", ("failure_log", "failing"))
+CORRECTIVE_AGENT = prompt_templates.load("build_corrective.agent", ("agent_notes",))
+CORRECTIVE_STUCK = prompt_templates.load("build_corrective.stuck", ("streak",))
 ROUND_CHECKLIST = prompt_templates.load("build_round_checklist", ("verify",))
 ESCALATION_PROMPT = prompt_templates.load("build_escalation", ("spec_text", "corrective"))
 
@@ -981,8 +1027,17 @@ def corrective_prompt(
 	review_policy: str,
 	oracle_command: str | None = None,
 	oracle_tail: str = "",
+	history: str = "",
+	failure_log: str = "",
+	failing: list[str] | None = None,
+	agent_notes: str = "",
+	streak: int = 0,
 ) -> str:
 	parts = [CORRECTIVE_INTRO.format(round_index=round_index, max_rounds=max_rounds, blockers=", ".join(blockers))]
+	if history:
+		parts.append(CORRECTIVE_HISTORY.format(history=history))
+	if agent_notes:
+		parts.append(CORRECTIVE_AGENT.format(agent_notes=agent_notes))
 	if verify_command and verify_tail:
 		parts.append(CORRECTIVE_VERIFY.format(verify_command=verify_command, verify_tail=verify_tail))
 	elif verify_tail:
@@ -998,8 +1053,12 @@ def corrective_prompt(
 	# output" ambiguity to disambiguate with a command label.
 	if oracle_command and oracle_tail:
 		parts.append(CORRECTIVE_ORACLE.format(oracle_command=oracle_command, oracle_tail=oracle_tail))
+	if failure_log:
+		parts.append(CORRECTIVE_LOG.format(failure_log=failure_log, failing=", ".join(failing or []) or "none recognised"))
 	if review_policy != "advisory" and reviewer.outcome == "flagged" and reviewer.detail:
 		parts.append(CORRECTIVE_REVIEWER.format(detail=reviewer.detail))
+	if streak >= 2:
+		parts.append(CORRECTIVE_STUCK.format(streak=streak))
 	parts.append(CORRECTIVE_CLOSING)
 	return "\n\n".join(part.removesuffix("\n") for part in parts)
 
@@ -1556,7 +1615,21 @@ def round_from_state(item: dict, position: int) -> Round:
 		oracle_command=_typed(item, "oracle_command", (str, type(None)), None, cap=text),
 		oracle_passed=_typed(item, "oracle_passed", (bool, type(None)), None),
 		oracle_output_tail=_typed(item, "oracle_output_tail", (str,), "", cap=text),
+		blockers=_typed_strings(item, "blockers"),
+		changed_files=_typed_strings(item, "changed_files"),
+		failure_signature=_typed(item, "failure_signature", (str,), "", cap=64),
+		failure_log=_typed(item, "failure_log", (str,), "", cap=400),
+		agent_notes=_typed(item, "agent_notes", (str,), "", cap=text),
 	)
+
+
+def _typed_strings(item: dict, key: str, *, max_items: int = 200, cap: int = 400) -> list[str]:
+	"""A round-record field that is a list of strings, or [] when absent.
+	Anything else refuses the whole file, as _typed does."""
+	value = _typed(item, key, (list,), [])
+	if any(not isinstance(entry, str) for entry in value):
+		raise ValueError(f"{key} is not a list of strings")
+	return [entry[:cap] for entry in value[:max_items]]
 
 
 def load_round_state(path: Path, max_rounds: int) -> dict:
@@ -1592,6 +1665,68 @@ def load_round_state(path: Path, max_rounds: int) -> dict:
 
 def build_escalation_prompt(spec_text: str, corrective: str) -> str:
 	return ESCALATION_PROMPT.format(spec_text=spec_text, corrective=corrective).removesuffix("\n")
+
+
+# A third round in a row with the same failure signature ends the loop: a
+# fourth would spend its budget on a change that has already not worked
+# twice since the diagnose-first prompt.
+STUCK_STOP_STREAK = 3
+_FEEDBACK_HASH_MAX_BYTES = 5_000_000
+
+
+def changed_file_hashes(workspace: Path, base_sha: str | None) -> dict[str, str]:
+	"""A content hash per file that differs from base_sha (HEAD when
+	unknown) or is untracked, harness artifacts excluded. Two of these, taken
+	before and after an agent turn, say which files that turn changed
+	(round_changed_files): the "what was already tried" half of what the next
+	round is told. Best effort: a git failure gives {}."""
+	names: set[str] = set()
+	for args in (
+		["git", "diff", "--name-only", "-z", base_sha or "HEAD", "--", *_HARNESS_ARTIFACT_PATHSPECS],
+		["git", "ls-files", "--others", "--exclude-standard", "-z", "--", *_HARNESS_ARTIFACT_PATHSPECS],
+	):
+		try:
+			done = sh(args, cwd=workspace, timeout=60)
+		except (subprocess.TimeoutExpired, OSError):
+			continue
+		if done.returncode == 0:
+			names.update(name for name in done.stdout.split("\0") if name)
+	hashes: dict[str, str] = {}
+	for name in names:
+		path = workspace / name
+		try:
+			if path.is_symlink():
+				hashes[name] = "link:" + os.readlink(path)
+			elif not path.is_file():
+				hashes[name] = "absent"
+			elif path.stat().st_size > _FEEDBACK_HASH_MAX_BYTES:
+				hashes[name] = f"size:{path.stat().st_size}"
+			else:
+				hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+		except OSError:
+			hashes[name] = "unreadable"
+	return hashes
+
+
+def round_changed_files(before: dict[str, str], after: dict[str, str]) -> list[str]:
+	"""The files whose state differs between two changed_file_hashes."""
+	return sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
+
+
+def round_failure_log(log_dir: Path, workspace: Path) -> str:
+	"""The workspace-relative path of the log this round's failing command
+	left in log_dir, in the order the checks run, or "" when none did."""
+	for name in (FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG):
+		if (log_dir / name).is_file():
+			return (log_dir / name).relative_to(workspace).as_posix()
+	return ""
+
+
+def round_history(rounds: list[Round]) -> str:
+	return round_feedback.history_lines([
+		{"index": r.index, "changed_files": r.changed_files, "blockers": r.blockers, "signature": r.failure_signature}
+		for r in rounds
+	])
 
 
 def run_build(
@@ -1702,6 +1837,8 @@ def run_build(
 		# workspace_fingerprint's own docstring for why comparing against
 		# the ticket boundary instead was wrong.
 		fingerprint_before = workspace_fingerprint(workspace)
+		hashes_before = changed_file_hashes(workspace, review_base_sha)
+		feedback_dir = session_dir / "feedback" / f"round-{round_index}"
 		started = time.monotonic()
 		completed, timed_out = run_agent_streaming(
 			command, cwd=workspace, timeout=timeout_minutes * 60, env=env,
@@ -1715,19 +1852,21 @@ def run_build(
 		# round changed something" even when the agent itself touched
 		# nothing.
 		fingerprint_after = workspace_fingerprint(workspace)
+		changed_files = round_changed_files(hashes_before, changed_file_hashes(workspace, review_base_sha))
 		# Taken here, before verification and gofmt below leave their own untracked
 		# artifacts, so only the agent's (or an interrupted attempt's) work counts.
 		differs_from_base = bool(handoff is not None and round_index == 1 and review_base_sha and workspace_differs_from_base(workspace, review_base_sha))
 
 		verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed = run_verification(
 			workspace, verify_command_override=verify_command_override, fast_check_command=fast_check_command,
+			log_dir=feedback_dir,
 		)
 		if verify_passed is True:
 			reformatted = gofmt_changed_files(workspace, review_base_sha)
 			if reformatted:
 				print(f"gofmt reformatted {len(reformatted)} changed file(s): {', '.join(reformatted)}", file=sys.stderr)
 		recorded_oracle_command, oracle_passed, oracle_tail = maybe_run_reference_oracle(
-			workspace, oracle_command=oracle_command, verify_passed=verify_passed,
+			workspace, oracle_command=oracle_command, verify_passed=verify_passed, log_dir=feedback_dir,
 		)
 
 		agent_returncode = completed.returncode if completed else -1
@@ -1803,8 +1942,21 @@ def run_build(
 			oracle_command=recorded_oracle_command,
 			oracle_passed=oracle_passed,
 			oracle_output_tail=oracle_tail,
+			blockers=list(blockers),
+			changed_files=changed_files,
+			failure_signature=round_feedback.failure_signature(
+				blockers, "\n".join(part for part in (verify_tail if verify_passed is not True else "", oracle_tail if oracle_passed is False else "") if part),
+			),
+			failure_log=round_failure_log(feedback_dir, workspace) if blockers else "",
+			agent_notes=round_feedback.agent_notes(
+				no_changes=no_changes, timed_out=timed_out, timeout_minutes=timeout_minutes,
+				returncode=agent_returncode, stderr_tail=redact(parsed.last_turn_error, 1500),
+				final_text=redact(parsed.final_text, 1500), route_errors=[redact(e, 400) for e in parsed.route_errors],
+				stalled="stall-timeout" in blockers,
+			) if blockers else "",
 		)
 		result.rounds.append(rnd)
+		streak = round_feedback.same_failure_streak([r.failure_signature for r in result.rounds])
 
 		errored, total = turn_errors
 		if total and errored == total:
@@ -1860,6 +2012,11 @@ def run_build(
 			review_policy=review_policy,
 			oracle_command=oracle_command,
 			oracle_tail=oracle_tail,
+			history=round_history(result.rounds),
+			failure_log=rnd.failure_log,
+			failing=round_feedback.failing_names("\n".join((verify_tail, oracle_tail))) if rnd.failure_log else None,
+			agent_notes=rnd.agent_notes,
+			streak=streak,
 		)
 		escalation_prompt = build_escalation_prompt(spec_text, prompt)
 		state_prompt = prompt
@@ -1869,6 +2026,9 @@ def run_build(
 			break
 		if round_index == max_rounds:
 			result.stopped_reason = f"local round budget ({max_rounds}) exhausted; escalation required: {', '.join(blockers)}"
+			break
+		if streak >= STUCK_STOP_STREAK:
+			result.stopped_reason = f"no progress: the same failure {streak} rounds in a row; escalation required: {', '.join(blockers)}"
 			break
 
 	# Deliberately does not also require resolve_verify_command(workspace)
