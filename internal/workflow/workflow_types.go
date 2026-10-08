@@ -179,6 +179,10 @@ type RunWorkflowInput struct {
 	// every Worker in a replay-safe deployment visits gates in the same
 	// order. A gate ID absent from the map, or present with an empty
 	// value, skips that gate entirely, matching cmd/factoryd.
+	//
+	// It also carries the gates the target repository defines for itself
+	// (.factory.yml `gates:`), under policy.RepoGateCheck(id): RunWorkflow
+	// runs those after the registry's, by name (gateChecksToRun).
 	GateCommands map[string]string `json:"gate_commands,omitempty"`
 	// ReferenceOracleDir/ReferenceOracleMountPath provide the read-only oracle mount (and the content hash it makes
 	// possible) to the Temporal/-repository path -- the parity follow-up

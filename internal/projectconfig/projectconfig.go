@@ -102,6 +102,71 @@ type Config struct {
 	// only selects among guides the operator provides; it never supplies
 	// a path or the text.
 	DesignGuide string `yaml:"design_guide"`
+	// Gates are command gates this repository defines for itself, beyond
+	// the five named ones above: each runs in the sandbox after canonical
+	// verification passes, like lint_command, and is its own
+	// "repo-<id>" pass/fail line in the release decision. Same trust as
+	// verify_command: read from the committed .factory.yml, run nowhere
+	// but the sandbox. A gate can only add a denial.
+	Gates []RepoGate `yaml:"gates"`
+}
+
+// RepoGate is one entry of Config.Gates.
+type RepoGate struct {
+	// ID names the gate: lower-case letters, digits and underscores. The
+	// run records it as "repo-<id>".
+	ID string `yaml:"id"`
+	// Command is the shell command, run from the workspace root.
+	Command string `yaml:"command"`
+}
+
+// MaxRepoGates bounds Config.Gates: each one is a sandbox launch per run.
+const MaxRepoGates = 16
+
+var repoGateIDRE = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
+// RepoGateReservedSuffix mirrors internal/workflow's post-oracle-commit
+// attempt-kind suffix (TestRepoGateReservedSuffixMatchesTheRerunKind).
+const RepoGateReservedSuffix = "_after_oracle_commit"
+
+// RepoGateCommands returns Config.Gates keyed by policy.RepoGateCheck(id),
+// the form a run's gate commands take.
+func (c Config) RepoGateCommands() map[string]string {
+	if len(c.Gates) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(c.Gates))
+	for _, g := range c.Gates {
+		out[policy.RepoGateCheck(g.ID)] = g.Command
+	}
+	return out
+}
+
+// validateGates checks Config.Gates.
+func (c *Config) validateGates() error {
+	if len(c.Gates) > MaxRepoGates {
+		return fmt.Errorf("gates has %d entries, at most %d are allowed", len(c.Gates), MaxRepoGates)
+	}
+	seen := make(map[string]bool, len(c.Gates))
+	for i, g := range c.Gates {
+		if !repoGateIDRE.MatchString(g.ID) {
+			return fmt.Errorf("gates[%d].id %q must match %s", i, g.ID, repoGateIDRE)
+		}
+		// "<check>_after_oracle_commit" is the attempt kind and log name of
+		// a gate's rerun on the committed tree: an id ending in it would
+		// share them with another gate's rerun.
+		if strings.HasSuffix(g.ID, RepoGateReservedSuffix) {
+			return fmt.Errorf("gates[%d].id %q must not end in %q", i, g.ID, RepoGateReservedSuffix)
+		}
+		if seen[g.ID] {
+			return fmt.Errorf("gates[%d].id %q is listed twice", i, g.ID)
+		}
+		seen[g.ID] = true
+		if strings.TrimSpace(g.Command) == "" {
+			return fmt.Errorf("gates[%d] (%s) has no command", i, g.ID)
+		}
+	}
+	return nil
 }
 
 // GateCommands returns this config's operator-configured command-gate
@@ -164,7 +229,7 @@ func (c *Config) Validate() error {
 			return errors.New("test_patterns must not contain an empty entry")
 		}
 	}
-	return nil
+	return c.validateGates()
 }
 
 // Load looks for .factory.yml at workspaceDir's git top level (or

@@ -60,6 +60,11 @@ func postOracleCommitGates(input RunWorkflowInput) []postOracleCommitGate {
 			out = append(out, postOracleCommitGate{Check: g.ID, Command: command})
 		}
 	}
+	// A repository's own gates check the tree, as lint does, so they run
+	// again against the committed one.
+	for _, check := range policy.RepoGateChecks(input.GateCommands) {
+		out = append(out, postOracleCommitGate{Check: check, Command: input.GateCommands[check]})
+	}
 	return out
 }
 
@@ -113,7 +118,7 @@ func isPostOracleCommitAttemptKind(kind string) bool {
 			return true
 		}
 	}
-	return false
+	return policy.IsRepoGate(check)
 }
 
 // attemptKindFitsJournal is the journal validity rule shared by the loader and

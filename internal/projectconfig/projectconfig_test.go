@@ -2,6 +2,7 @@ package projectconfig
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -455,5 +456,52 @@ func TestLoadRepoWithNoCommitsFallsBackToWorktreeFile(t *testing.T) {
 	}
 	if cfg.VerifyCommand != "make verify" {
 		t.Errorf("VerifyCommand = %q", cfg.VerifyCommand)
+	}
+}
+
+func TestLoadRepoDefinedGates(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	commitFile(t, root, ".factory.yml", "gates:\n  - id: no_todo\n    command: \"! grep -rn TODO src\"\n  - id: licenses\n    command: scripts/check-licenses.sh\n")
+	cfg, found, err := Load(root)
+	if err != nil || !found {
+		t.Fatalf("Load: found=%v err=%v", found, err)
+	}
+	got := cfg.RepoGateCommands()
+	if len(got) != 2 || got["repo-no_todo"] != "! grep -rn TODO src" || got["repo-licenses"] != "scripts/check-licenses.sh" {
+		t.Errorf("RepoGateCommands = %v", got)
+	}
+	if (Config{}).RepoGateCommands() != nil {
+		t.Error("a config without gates must give none")
+	}
+}
+
+func TestLoadRejectsBadRepoDefinedGates(t *testing.T) {
+	many := "gates:\n"
+	for i := 0; i <= MaxRepoGates; i++ {
+		many += fmt.Sprintf("  - id: g%d\n    command: \"true\"\n", i)
+	}
+	cases := map[string]string{
+		"an id with a slash":               "gates:\n  - id: a/b\n    command: \"true\"\n",
+		"an id with a capital":             "gates:\n  - id: NoTodo\n    command: \"true\"\n",
+		"an id with a dash":                "gates:\n  - id: no-todo\n    command: \"true\"\n",
+		"an empty id":                      "gates:\n  - command: \"true\"\n",
+		"an id over 32 characters":         "gates:\n  - id: " + strings.Repeat("a", 33) + "\n    command: \"true\"\n",
+		"an id ending in the rerun suffix": "gates:\n  - id: lint_after_oracle_commit\n    command: \"true\"\n",
+		"a duplicate id":                   "gates:\n  - id: a\n    command: \"true\"\n  - id: a\n    command: \"false\"\n",
+		"a gate with no command":           "gates:\n  - id: a\n",
+		"a blank command":                  "gates:\n  - id: a\n    command: \"  \"\n",
+		"an unknown key in a gate":         "gates:\n  - id: a\n    command: \"true\"\n    image: alpine\n",
+		"more gates than the bound":        many,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			initGitRepo(t, root)
+			commitFile(t, root, ".factory.yml", content)
+			if _, _, err := Load(root); err == nil {
+				t.Errorf("Load accepted %s:\n%s", name, content)
+			}
+		})
 	}
 }
