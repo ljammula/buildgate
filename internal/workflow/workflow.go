@@ -340,8 +340,12 @@ const repoDefinedGatesChange = "repo-defined-gates"
 
 // gateChecksToRun lists the command gates of input that have a command, in
 // the order RunWorkflow runs them: policy.CommandGates' order, then the
-// repository's own gates by name.
-func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) []string {
+// repository's own gates by name. It also returns the gate commands every
+// later step must use: input's own, or, when this history predates
+// repo-defined-gates, a copy without the repository's gates, so the
+// post-oracle-commit rerun cannot run (and then lose the failure of) a gate
+// the main pass never ran.
+func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) ([]string, map[string]string) {
 	var checks []string
 	for _, g := range policy.CommandGates {
 		if input.GateCommands[g.ID] != "" {
@@ -349,10 +353,19 @@ func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) []str
 		}
 	}
 	repo := policy.RepoGateChecks(input.GateCommands)
-	if len(repo) > 0 && temporalworkflow.GetVersion(ctx, repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1) == 1 {
-		checks = append(checks, repo...)
+	if len(repo) == 0 {
+		return checks, input.GateCommands
 	}
-	return checks
+	if temporalworkflow.GetVersion(ctx, repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1) == 1 {
+		return append(checks, repo...), input.GateCommands
+	}
+	registryOnly := make(map[string]string, len(input.GateCommands))
+	for check, command := range input.GateCommands {
+		if !policy.IsRepoGate(check) {
+			registryOnly[check] = command
+		}
+	}
+	return checks, registryOnly
 }
 
 // requireIsolatedWorkspaceChange is the GetVersion change ID under which
@@ -879,7 +892,12 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	// gate ran AND passed: the pin CommitOraclesActivity verifies against.
 	var passedReferenceOracleSHA256 string
 	if result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 {
-		for _, check := range gateChecksToRun(ctx, input) {
+		gateChecks, gateCommands := gateChecksToRun(ctx, input)
+		// The commands the gates below ran with are the ones the
+		// post-oracle-commit rerun gets: a repository's own gates are
+		// rerun only when they ran here.
+		input.GateCommands = gateCommands
+		for _, check := range gateChecks {
 			command := input.GateCommands[check]
 			var gateResult VerifyActivityResult
 			current.Stage, current.StartedAt = check, temporalworkflow.Now(ctx)

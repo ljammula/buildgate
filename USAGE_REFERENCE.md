@@ -486,10 +486,12 @@ size budget). No buildgate change or release is needed to add one.
 |---|---|
 | Entry | `id` (`[a-z0-9_]`, at most 32 characters, unique) and `command` (a shell command run from the workspace root). At most 16 entries; any other key is refused |
 | Name | `repo-<id>`, in the run record, the evidence and the draft PR body |
-| When | After canonical verify passes and after the five named gates, in name order; and again after an oracle commit, against the committed tree |
+| When | After canonical verify (and the full suite, when it runs) passes and after the five named gates, in name order, whether or not an earlier gate failed; and again after an oracle commit, against the committed tree |
 | Result | Passing adds a `pass` line. Failing quarantines the run naming the gate. A gate can only add a denial: it cannot pass another gate or be made a required gate of the release policy |
 | Where it runs | The sandbox only, with no network, like `verify_command` |
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is judged by |
+| Cost | One sandbox launch per gate per run, two with an oracle commit; with Compose services, each launch brings the services up and down. `doctor` does not check a repo gate's executable against the image, as it does for the five named gates |
+| A gate that did not run | An accepted run with no result for one of the repository's gates is quarantined naming it (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 
 **Named gates.** `lint_command`/`security_command`/`unit_test_command`/
 `integration_test_command`/`reference_oracle_command` (flags:

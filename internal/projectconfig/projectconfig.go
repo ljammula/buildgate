@@ -125,6 +125,10 @@ const MaxRepoGates = 16
 
 var repoGateIDRE = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
+// RepoGateReservedSuffix mirrors internal/workflow's post-oracle-commit
+// attempt-kind suffix (TestRepoGateReservedSuffixMatchesTheRerunKind).
+const RepoGateReservedSuffix = "_after_oracle_commit"
+
 // RepoGateCommands returns Config.Gates keyed by policy.RepoGateCheck(id),
 // the form a run's gate commands take.
 func (c Config) RepoGateCommands() map[string]string {
@@ -147,6 +151,12 @@ func (c *Config) validateGates() error {
 	for i, g := range c.Gates {
 		if !repoGateIDRE.MatchString(g.ID) {
 			return fmt.Errorf("gates[%d].id %q must match %s", i, g.ID, repoGateIDRE)
+		}
+		// "<check>_after_oracle_commit" is the attempt kind and log name of
+		// a gate's rerun on the committed tree: an id ending in it would
+		// share them with another gate's rerun.
+		if strings.HasSuffix(g.ID, RepoGateReservedSuffix) {
+			return fmt.Errorf("gates[%d].id %q must not end in %q", i, g.ID, RepoGateReservedSuffix)
 		}
 		if seen[g.ID] {
 			return fmt.Errorf("gates[%d].id %q is listed twice", i, g.ID)

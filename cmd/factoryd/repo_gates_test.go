@@ -6,6 +6,7 @@ import (
 
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
+	"buildgate/internal/workflow"
 )
 
 // A repository's own gates have no flag: they come from its committed
@@ -58,5 +59,32 @@ func TestEvidenceListsRepoDefinedGates(t *testing.T) {
 	})
 	if got, want := b.String(), "- `repo-licenses`: pass\n- `repo-no_todo`: FAIL\n"; got != want {
 		t.Errorf("repo gate lines = %q, want %q", got, want)
+	}
+}
+
+// An accepted result with no result for a repo-defined gate was judged by
+// workflow code that predates them: it is quarantined, naming the gate.
+func TestAcceptedResultMissingARepoGateIsQuarantined(t *testing.T) {
+	commands := map[string]string{"lint": "golangci-lint run", "repo-licenses": "scripts/check-licenses.sh", "repo-no_todo": "! grep -rn TODO src"}
+	complete := workflow.RunWorkflowResult{State: run.StateAccepted, GateResults: []run.GateResult{
+		{Check: "lint", Passed: true}, {Check: "repo-licenses", Passed: true}, {Check: "repo-no_todo", Passed: true},
+	}}
+	if got := requireRepoGateResults(commands, complete); got.State != run.StateAccepted || len(got.GateResults) != 3 {
+		t.Errorf("a result with every repo gate changed: state %s, %d gate results", got.State, len(got.GateResults))
+	}
+	missing := workflow.RunWorkflowResult{State: run.StateAccepted, GateResults: []run.GateResult{
+		{Check: "lint", Passed: true}, {Check: "repo-licenses", Passed: true},
+	}}
+	got := requireRepoGateResults(commands, missing)
+	if got.State != run.StateQuarantined {
+		t.Fatalf("state = %s, want quarantined", got.State)
+	}
+	last := got.GateResults[len(got.GateResults)-1]
+	if len(got.GateResults) != 3 || last.Check != "repo-no_todo" || last.Passed {
+		t.Errorf("gate results = %+v, want a failed repo-no_todo added", got.GateResults)
+	}
+	quarantined := workflow.RunWorkflowResult{State: run.StateQuarantined}
+	if got := requireRepoGateResults(commands, quarantined); len(got.GateResults) != 0 {
+		t.Errorf("a result that is not accepted gained gate results: %+v", got.GateResults)
 	}
 }

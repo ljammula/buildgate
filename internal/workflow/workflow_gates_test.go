@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"buildgate/internal/policy"
+	"buildgate/internal/projectconfig"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"context"
@@ -420,5 +421,84 @@ func TestPostOracleCommitGatesIncludeRepoDefinedGates(t *testing.T) {
 	}
 	if !isPostOracleCommitAttemptKind("repo-alpha"+postOracleCommitGateSuffix) || isPostOracleCommitAttemptKind("reference_oracle"+postOracleCommitGateSuffix) {
 		t.Error("a repo gate's post-oracle-commit attempt kind must be recognised, and reference_oracle's must not")
+	}
+}
+
+// A repo-defined gate that exits non-zero quarantines the run and is named
+// in its gate results, like a registry gate.
+func TestRunWorkflowQuarantinesOnAFailingRepoDefinedGate(t *testing.T) {
+	input := fixtureInput()
+	setGateCommand(&input, "repo-alpha", "true")
+	setGateCommand(&input, "repo-zeta", "false")
+	env := newWorkflowEnvironment(t,
+		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
+			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
+		},
+		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
+			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: 0}}, nil
+		},
+		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
+			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
+		},
+	)
+	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+		exit := 0
+		if in.Check == "repo-zeta" {
+			exit = 1
+		}
+		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: exit}}, nil
+	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
+	env.ExecuteWorkflow(RunWorkflow, input)
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow error: %v", err)
+	}
+	var result RunWorkflowResult
+	if err := env.GetWorkflowResult(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.State != run.StateQuarantined {
+		t.Fatalf("state = %q, want %q", result.State, run.StateQuarantined)
+	}
+	passed := map[string]bool{}
+	for _, g := range result.GateResults {
+		if policy.IsRepoGate(g.Check) {
+			passed[g.Check] = g.Passed
+		}
+	}
+	if len(passed) != 2 || !passed["repo-alpha"] || passed["repo-zeta"] {
+		t.Errorf("repo gate results = %v, want repo-alpha passed and repo-zeta failed", passed)
+	}
+}
+
+// A history recorded before repo-defined-gates hands the post-oracle-commit
+// rerun no repo gate either: one that never ran in the main pass has no
+// result for a failed rerun to replace.
+func TestGateCommandsLoseRepoGatesWhenTheChangeIsOff(t *testing.T) {
+	input := fixtureInput()
+	setGateCommand(&input, "lint", "golangci-lint run")
+	setGateCommand(&input, "repo-alpha", "a")
+	var s testsuite.WorkflowTestSuite
+	for version, wantRepo := range map[temporalworkflow.Version]bool{temporalworkflow.DefaultVersion: false, 1: true} {
+		env := s.NewTestWorkflowEnvironment()
+		env.OnGetVersion(repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1).Return(version)
+		var checks []string
+		var commands map[string]string
+		env.ExecuteWorkflow(func(ctx temporalworkflow.Context) error {
+			checks, commands = gateChecksToRun(ctx, input)
+			return nil
+		})
+		if err := env.GetWorkflowError(); err != nil {
+			t.Fatal(err)
+		}
+		_, hasRepo := commands["repo-alpha"]
+		if hasRepo != wantRepo || slices.Contains(checks, "repo-alpha") != wantRepo || commands["lint"] == "" {
+			t.Errorf("version %d: checks %v, commands %v; want repo gate present = %v and lint kept", version, checks, commands, wantRepo)
+		}
+		if got := postOracleCommitGates(RunWorkflowInput{GateCommands: commands}); (len(got) == 2) != wantRepo {
+			t.Errorf("version %d: post-oracle-commit gates = %v", version, got)
+		}
+	}
+	if projectconfig.RepoGateReservedSuffix != postOracleCommitGateSuffix {
+		t.Errorf("projectconfig.RepoGateReservedSuffix = %q, want the rerun kind suffix %q", projectconfig.RepoGateReservedSuffix, postOracleCommitGateSuffix)
 	}
 }
