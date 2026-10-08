@@ -817,6 +817,14 @@ def failure_output(raw: str, log_path: Path | None) -> str:
 	return round_feedback.failure_excerpt(full)
 
 
+def timeout_output(header: str, exc: subprocess.TimeoutExpired, log_path: Path | None) -> str:
+	"""failure_output for a command that timed out: header, which says so
+	and names the command, stays the first line whatever the excerpt of the
+	captured output keeps."""
+	captured = (exc.stdout or b"").decode(errors="ignore") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+	return f"{header}\n{failure_output(captured, log_path)}".rstrip()
+
+
 def _feedback_log(log_dir: Path | None, name: str) -> Path | None:
 	return log_dir / name if log_dir is not None else None
 
@@ -866,11 +874,8 @@ def run_verification(
 				tail = f"[FAST CHECK] `{fast_check_command}` failed; the full verify command was not run this round.\n\n{output}"
 				return None, None, False, tail, True, False
 		except subprocess.TimeoutExpired as exc:
-			output = (
-				f"[FAST CHECK] `{fast_check_command}` timed out after 20 minutes; the full verify command was not run this round.\n"
-				f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
-			)
-			return None, None, False, failure_output(output, _feedback_log(log_dir, FAST_CHECK_LOG)), True, False
+			header = f"[FAST CHECK] `{fast_check_command}` timed out after 20 minutes; the full verify command was not run this round."
+			return None, None, False, timeout_output(header, exc, _feedback_log(log_dir, FAST_CHECK_LOG)), True, False
 
 	command = verify_command_override if verify_command_override else resolve_verify_command(workspace)
 	fast_check_passed = True if fast_check_command else None
@@ -882,11 +887,8 @@ def run_verification(
 		output = redact(combined) if completed.returncode == 0 else failure_output(combined, _feedback_log(log_dir, VERIFY_LOG))
 		return command, completed.returncode == 0, False, output, bool(fast_check_command), fast_check_passed
 	except subprocess.TimeoutExpired as exc:
-		output = (
-			f"verification command timed out after 20 minutes: {command}\n"
-			f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
-		)
-		return command, False, True, failure_output(output, _feedback_log(log_dir, VERIFY_LOG)), bool(fast_check_command), fast_check_passed
+		header = f"verification command timed out after 20 minutes: {command}"
+		return command, False, True, timeout_output(header, exc, _feedback_log(log_dir, VERIFY_LOG)), bool(fast_check_command), fast_check_passed
 
 
 def changed_go_files(workspace: Path, base_sha: str | None) -> list[str]:
@@ -970,11 +972,8 @@ def run_reference_oracle(workspace: Path, *, oracle_command: str, log_dir: Path 
 			return True, redact(combined)
 		return False, failure_output(combined, _feedback_log(log_dir, ORACLE_LOG))
 	except subprocess.TimeoutExpired as exc:
-		output = (
-			f"reference-oracle command timed out after 20 minutes: {oracle_command}\n"
-			f"{(exc.stdout or b'').decode(errors='ignore') if isinstance(exc.stdout, bytes) else (exc.stdout or '')}"
-		)
-		return False, failure_output(output, _feedback_log(log_dir, ORACLE_LOG))
+		header = f"reference-oracle command timed out after 20 minutes: {oracle_command}"
+		return False, timeout_output(header, exc, _feedback_log(log_dir, ORACLE_LOG))
 
 
 def maybe_run_reference_oracle(
@@ -1687,7 +1686,8 @@ def changed_file_hashes(workspace: Path, base_sha: str | None) -> dict[str, str]
 	):
 		try:
 			done = sh(args, cwd=workspace, timeout=60)
-		except (subprocess.TimeoutExpired, OSError):
+		except (subprocess.TimeoutExpired, OSError, ValueError):
+			# ValueError: a file name git printed that is not valid UTF-8.
 			continue
 		if done.returncode == 0:
 			names.update(name for name in done.stdout.split("\0") if name)
@@ -1720,6 +1720,17 @@ def round_failure_log(log_dir: Path, workspace: Path) -> str:
 		if (log_dir / name).is_file():
 			return (log_dir / name).relative_to(workspace).as_posix()
 	return ""
+
+
+def missing_log_note(workspace: Path, rounds: list[Round]) -> str:
+	"""What to add to a recorded corrective prompt when the log file it
+	names is gone: a resumed build starts without the earlier attempt's
+	session folder, which held it. "" when the file is there or none was
+	named."""
+	log = rounds[-1].failure_log if rounds else ""
+	if not log or (workspace / log).is_file():
+		return ""
+	return f"\n\nThe saved output `{log}` named above no longer exists (this build was resumed). Rerun the failing command to see its output."
 
 
 def round_history(rounds: list[Round]) -> str:
@@ -1803,6 +1814,7 @@ def run_build(
 			# that already held the spec; the fresh session needs the task
 			# first. The escalation prompt is rebuilt, never read from the file.
 			escalation_prompt = build_escalation_prompt(spec_text, prompt)
+			prompt = prompt + missing_log_note(workspace, result.rounds)
 			prompt = "\n\n".join([
 				base_prompt,
 				"---",
@@ -1839,6 +1851,9 @@ def run_build(
 		fingerprint_before = workspace_fingerprint(workspace)
 		hashes_before = changed_file_hashes(workspace, review_base_sha)
 		feedback_dir = session_dir / "feedback" / f"round-{round_index}"
+		# An earlier invocation's log for this round number must not be
+		# reported as this round's.
+		shutil.rmtree(feedback_dir, ignore_errors=True)
 		started = time.monotonic()
 		completed, timed_out = run_agent_streaming(
 			command, cwd=workspace, timeout=timeout_minutes * 60, env=env,
@@ -1946,6 +1961,7 @@ def run_build(
 			changed_files=changed_files,
 			failure_signature=round_feedback.failure_signature(
 				blockers, "\n".join(part for part in (verify_tail if verify_passed is not True else "", oracle_tail if oracle_passed is False else "") if part),
+				reviewer.detail if reviewer.outcome == "flagged" else "",
 			),
 			failure_log=round_failure_log(feedback_dir, workspace) if blockers else "",
 			agent_notes=round_feedback.agent_notes(

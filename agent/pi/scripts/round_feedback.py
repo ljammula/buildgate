@@ -36,7 +36,11 @@ _FAILING_NAME_PATTERNS = (
 	re.compile(r"^make(?:\[\d+\])?: \*\*\* \[(?:\S+:\d+: )?(\S+?)\]"),  # make target
 )
 
-EXCERPT_LIMIT = 6000
+EXCERPT_LIMIT = 8000
+# The end of the output is never given less than this: it is what a plain
+# tail showed before, so an excerpt that starts at an early, irrelevant
+# "error" line still holds everything the old one did.
+MIN_TAIL = 3000
 MAX_FAILING_NAMES = 20
 _CONTEXT_LINES_BEFORE = 5
 
@@ -54,12 +58,16 @@ def failure_excerpt(output: str, limit: int = EXCERPT_LIMIT) -> str:
 	first = next((i for i, line in enumerate(lines) if FAILURE_MARKERS.search(line)), None)
 	if first is None:
 		return "[... earlier output omitted ...]\n" + text[-(limit - 40):]
+	# A first failure line that is already inside the tail: the tail alone
+	# has it, and more of the end than a head-plus-tail split would.
+	if len(text) - len("\n".join(lines[first:])) >= len(text) - (limit - 40):
+		return "[... earlier output omitted ...]\n" + text[-(limit - 40):]
 	start = max(0, first - _CONTEXT_LINES_BEFORE)
 	from_first = "\n".join(lines[start:])
 	omitted = f"[... {start} earlier line(s) omitted ...]\n" if start else ""
 	if len(from_first) + len(omitted) <= limit:
 		return omitted + from_first
-	tail_budget = limit // 3
+	tail_budget = min(max(MIN_TAIL, limit * 3 // 8), limit // 2)
 	head_budget = limit - tail_budget - len(omitted) - 80
 	return (
 		omitted + from_first[:head_budget].rstrip()
@@ -83,19 +91,39 @@ def failing_names(output: str) -> list[str]:
 	return seen
 
 
-_VOLATILE = re.compile(r"0x[0-9a-fA-F]+|\b\d+(?:\.\d+)?(?:ns|µs|us|ms|s|m|h)?\b")
+# What changes between two runs of the same failing command without the
+# failure being a different one: durations, addresses, temporary paths,
+# timestamps and UUIDs. Plain numbers stay: "got 3, want 9" and "got 8, want
+# 9" are different failures.
+_VOLATILE = re.compile(
+	r"0x[0-9a-fA-F]+"
+	r"|\b\d+(?:\.\d+)?\s?(?:ns|µs|us|ms|s|m|h)\b"
+	r"|\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*"
+	r"|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+	r"|(?:/private)?(?:/tmp|/var/folders|/var/tmp)/\S+"
+)
+_SIGNATURE_MAX_LINES = 200
+_SIGNATURE_FALLBACK_LINES = 20
 
 
-def failure_signature(blockers: list[str], output: str = "") -> str:
-	"""A short id for "this failure": the blockers plus the lines of the
-	output that report a failure, with timings, counts and addresses
-	blanked. Two rounds with the same signature failed the same way. Empty
-	when there is nothing to identify (no blockers)."""
+def failure_signature(blockers: list[str], output: str = "", detail: str = "") -> str:
+	"""A short id for "this failure": the blockers, the lines of the failing
+	command's output that report a failure (durations, addresses, temporary
+	paths and timestamps blanked), and detail (the reviewer's findings). Two
+	rounds with the same signature failed the same way.
+
+	Output with no recognisable failure line is identified by its last lines
+	instead, so two different failures of a tool this module does not know
+	are not taken for one. With no output and no detail the blockers alone
+	are the failure: a round that again changed nothing, or again timed out,
+	did fail the same way. Empty when there are no blockers."""
 	if not blockers:
 		return ""
-	lines = [line.strip() for line in output.splitlines() if FAILURE_MARKERS.search(line)][:12]
-	normalised = [_VOLATILE.sub("N", line) for line in lines]
-	blob = "\n".join(sorted(blockers) + normalised)
+	lines = [line.strip() for line in output.splitlines() if line.strip()]
+	reporting = [line for line in lines if FAILURE_MARKERS.search(line)][:_SIGNATURE_MAX_LINES]
+	chosen = reporting or lines[-_SIGNATURE_FALLBACK_LINES:]
+	normalised = [_VOLATILE.sub("N", line) for line in chosen]
+	blob = "\n".join(sorted(blockers) + normalised + [_VOLATILE.sub("N", detail.strip())])
 	return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()[:16]
 
 

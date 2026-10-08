@@ -39,9 +39,19 @@ class ExcerptTests(unittest.TestCase):
 		excerpt = round_feedback.failure_excerpt(output)
 		self.assertLessEqual(len(excerpt), round_feedback.EXCERPT_LIMIT)
 		self.assertIn("--- FAIL: TestParseEmpty", excerpt)
+		# Never less of the end than the plain tail it replaces.
+		self.assertIn(output[-round_feedback.MIN_TAIL:], excerpt)
 		self.assertIn('Parse("") = -1, want 0', excerpt)
 		self.assertIn("make: *** [test] Error 1", excerpt)
 		self.assertIn("earlier line(s) omitted", excerpt)
+
+	def test_an_early_irrelevant_error_line_does_not_cost_the_end_of_the_output(self):
+		noise = ["npm warn deprecated left-pad: expected to be removed"] + [f"installing dependency {i}" for i in range(600)]
+		real = ["--- FAIL: TestRoundTrip (0.01s)", "    rt_test.go:9: got 3, want 9", "FAIL"]
+		output = "\n".join(noise + [f"ok pkg/{i}" for i in range(300)] + real)
+		excerpt = round_feedback.failure_excerpt(output)
+		self.assertIn("rt_test.go:9: got 3, want 9", excerpt)
+		self.assertIn(output[-round_feedback.MIN_TAIL:], excerpt)
 
 	def test_output_with_no_failure_line_falls_back_to_its_end(self):
 		output = "\n".join(f"line {i}" for i in range(5000))
@@ -76,6 +86,31 @@ class SignatureTests(unittest.TestCase):
 		self.assertNotEqual(round_feedback.failure_signature(blockers, first), round_feedback.failure_signature(blockers, other))
 		self.assertNotEqual(round_feedback.failure_signature(blockers, first), round_feedback.failure_signature(["fast check failed"], first))
 		self.assertEqual(round_feedback.failure_signature([], first), "")
+
+	def test_different_failures_do_not_share_a_signature(self):
+		blockers = ["canonical verification failed"]
+		sig = round_feedback.failure_signature
+		# Numbers are part of the failure.
+		self.assertNotEqual(sig(blockers, "rt_test.go:9: got 3, want 9"), sig(blockers, "rt_test.go:9: got 8, want 9"))
+		# A tool whose output has no recognised failure line.
+		self.assertNotEqual(sig(blockers, "a.py:1:80: E501 line too long"), sig(blockers, "a.py:3:1: F401 unused import"))
+		# The reviewer flagging something else.
+		flagged = ["reviewer flagged the current diff"]
+		self.assertNotEqual(sig(flagged, "", "missing nil check in Parse"), sig(flagged, "", "race in Close"))
+		self.assertEqual(sig(flagged, "", "race in Close"), sig(flagged, "", "race in Close"))
+		# A failure beyond the first dozen lines being fixed.
+		many = "\n".join(f"--- FAIL: Test{i} (0.00s)" for i in range(30))
+		fewer = "\n".join(f"--- FAIL: Test{i} (0.00s)" for i in range(29))
+		self.assertNotEqual(sig(blockers, many), sig(blockers, fewer))
+
+	def test_the_same_failure_in_another_temp_dir_at_another_time_is_the_same(self):
+		blockers = ["canonical verification failed"]
+		first = "2026-10-08T10:00:01Z FAIL open /tmp/TestA123/001/x.db: no such file (id 6f9619ff-8b86-d011-b42d-00c04fc964ff) 12ms"
+		again = "2026-10-08T10:05:44Z FAIL open /tmp/TestA987/002/x.db: no such file (id 0f1e2d3c-4b5a-6978-8695-a4b3c2d1e0f9) 480ms"
+		self.assertEqual(round_feedback.failure_signature(blockers, first), round_feedback.failure_signature(blockers, again))
+		# With no output at all the blockers are the failure.
+		idle = ["no changes made to the workspace"]
+		self.assertEqual(round_feedback.failure_signature(idle), round_feedback.failure_signature(idle))
 
 	def test_streak_counts_only_the_trailing_repeat(self):
 		self.assertEqual(round_feedback.same_failure_streak([]), 0)
@@ -197,6 +232,82 @@ class BuildLoopFeedbackTests(unittest.TestCase):
 			self.assertIn("- Round 1: changed no files; no changes made to the workspace", second)
 			self.assertIn("Your previous turn ended without changing any file", second)
 			self.assertIn("Your final message was:\n\ndone", second)
+
+	def test_a_changing_failure_is_not_taken_for_a_repeat(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory) / "ws"
+			root.mkdir()
+			subprocess.run(["git", "init", "-q", str(root)], check=True)
+			subprocess.run(["git", "-C", str(root), "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+			spec = Path(directory) / "spec.md"
+			spec.write_text("Fix the parser")
+			prompts = []
+
+			def stream(command, *, cwd=None, timeout=None, env=None, on_event=None):
+				prompts.append(str(command[-1]))
+				(root / "parse.go").write_text(f"package parse // attempt {len(prompts)}\n")
+				return subprocess.CompletedProcess(command, 0, agent_stdout(), ""), False
+
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=4, timeout_minutes=1, review_policy="off",
+					# A different test fails each round.
+					verify_command_override='echo "--- FAIL: Test$(cat parse.go | tr -dc 0-9)"; exit 1',
+				)
+			self.assertEqual(len(result.rounds), 4)
+			self.assertEqual(len({r.failure_signature for r in result.rounds}), 4)
+			self.assertTrue(all("rounds in a row" not in p for p in prompts))
+			self.assertIn("local round budget (4) exhausted", result.stopped_reason)
+
+	def test_fast_check_and_timeout_failures_keep_their_first_line_and_their_log(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			logs = root / ".pi-build-session" / "feedback" / "round-1"
+			_, _, _, tail, ran, passed = build_app.run_verification(
+				root, verify_command_override="true", fast_check_command="echo 'x.go:3: undefined: Foo'; exit 2", log_dir=logs,
+			)
+			self.assertTrue(ran)
+			self.assertFalse(passed)
+			self.assertTrue(tail.startswith("[FAST CHECK] `echo 'x.go:3: undefined: Foo'; exit 2` failed"))
+			self.assertEqual((logs / build_app.FAST_CHECK_LOG).read_text().strip(), "x.go:3: undefined: Foo")
+			self.assertEqual(build_app.round_failure_log(logs, root), ".pi-build-session/feedback/round-1/fast-check.log")
+
+			noisy = "\n".join(f"line {i}" for i in range(4000))
+			expired = subprocess.TimeoutExpired(cmd="make test", timeout=1200, output=noisy)
+			text = build_app.timeout_output("verification command timed out after 20 minutes: make test", expired, logs / build_app.VERIFY_LOG)
+			self.assertTrue(text.startswith("verification command timed out after 20 minutes: make test\n"))
+			self.assertTrue(text.endswith("line 3999"))
+			self.assertLess(len(text), len(noisy))
+
+			passed_oracle, oracle_tail = build_app.run_reference_oracle(root, oracle_command="echo 'FAIL: want 12'; exit 1", log_dir=logs)
+			self.assertFalse(passed_oracle)
+			self.assertEqual(oracle_tail, "FAIL: want 12")
+			self.assertTrue((logs / build_app.ORACLE_LOG).is_file())
+
+	def test_a_resumed_build_is_told_the_named_log_is_gone(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory) / "ws"
+			root.mkdir()
+			result, _ = self.run_failing_build(root, rounds=1, max_rounds=1)
+			log = result.rounds[0].failure_log
+			self.assertEqual(build_app.missing_log_note(root, result.rounds), "")
+			(root / log).unlink()
+			self.assertIn(f"`{log}` named above no longer exists", build_app.missing_log_note(root, result.rounds))
+			self.assertEqual(build_app.missing_log_note(root, []), "")
+
+	def test_a_round_does_not_report_an_earlier_invocations_log(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory) / "ws"
+			root.mkdir()
+			stale = root / ".pi-build-session" / "feedback" / "round-1"
+			stale.mkdir(parents=True)
+			(stale / build_app.ORACLE_LOG).write_text("from an earlier invocation\n")
+			result, _ = self.run_failing_build(root, rounds=1, max_rounds=1)
+			self.assertFalse((stale / build_app.ORACLE_LOG).exists())
+			self.assertEqual(result.rounds[0].failure_log, ".pi-build-session/feedback/round-1/verify.log")
 
 	def test_round_records_survive_a_resume(self):
 		with tempfile.TemporaryDirectory() as directory:

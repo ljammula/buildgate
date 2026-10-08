@@ -200,16 +200,21 @@ No round ends in failure without the next one being told what failed and why.
 
 | Failure | What the next round's prompt holds |
 |---|---|
-| Fast check, verify or reference oracle failed | The block around the first reported failure plus the end of the output (6,000 characters, `round_feedback.failure_excerpt`), the failing tests or targets it names, and the path of the whole output: `.pi-build-session/feedback/round-<n>/{fast-check,verify,oracle}.log` |
+| Fast check, verify or reference oracle failed | The block around the first reported failure plus the end of the output (8,000 characters, never less than the last 3,000; `round_feedback.failure_excerpt`); a timeout keeps the line that says so first; the failing tests or targets it names, and the path of the whole output: `.pi-build-session/feedback/round-<n>/{fast-check,verify,oracle}.log` |
 | The agent changed nothing | That it changed nothing, and its own final message |
 | The agent timed out, stalled, or its CLI exited non-zero | How it ended and the CLI's last error |
 | The model route returned errors | The route's messages |
 | The reviewer flagged the diff | Its findings |
 | Any of the above | One line per round so far: the files that round changed and how it ended |
-| The same failure as the round before (`failure_signature`: the blockers and the failure lines, timings blanked) | The line is marked as a repeat, and the prompt adds diagnose-first steps |
-| The same failure three rounds in a row | The loop stops with `no progress: the same failure 3 rounds in a row` instead of spending another round |
+| The same failure as the round before (`failure_signature`: the blockers, the lines that report a failure and the reviewer's findings, with durations, addresses, temporary paths and timestamps blanked; numbers are kept) | The line is marked as a repeat, and the prompt adds diagnose-first steps |
+| The same failure three rounds in a row | The loop stops with `no progress: the same failure 3 rounds in a row` instead of spending another round. Only with `--max-rounds` above the default 3, where the budget ends the loop first. The escalation pass, when enabled, follows either stop |
 
 The log folder is under the session folder, which every exclude list covers:
-it is never committed and never counts as the agent's change. Failure text is
-redacted and is data in the prompt, not instructions. Checks that fail after
-the build (the full suite, gates, the reviews) are not part of this loop.
+it is never committed and never counts as the agent's change, and each round
+clears its own folder first. A resumed build has no earlier session folder;
+its first prompt says the named log is gone. Failure text is redacted before
+it is saved or shown. It is output from the repository's own commands and
+the agent's own last message: the prompt quotes it, and nothing stops it
+from reading as an instruction, as was already true of the tail it replaces.
+Checks that fail after the build (the full suite, gates, the reviews) are
+not part of this loop.
