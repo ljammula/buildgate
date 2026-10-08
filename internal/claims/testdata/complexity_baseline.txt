@@ -31,7 +31,7 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 34 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-52 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
+51 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 41 cmd/factoryd/status.go statusMain
@@ -80,4 +80,4 @@
 46 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
 56 internal/workflow/repository_owner_workflow.go RepositoryOwnerWorkflow
 27 internal/workflow/resume.go (*Activities).adoptLocked
-96 internal/workflow/workflow.go RunWorkflow
+95 internal/workflow/workflow.go RunWorkflow

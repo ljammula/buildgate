@@ -305,6 +305,24 @@ func effectivePreflightProfile(explicit string, cfg *projectconfig.Config) (stri
 	return "", nil
 }
 
+// addRepoGates puts the gates cfg defines for its own repository (`gates:`)
+// into gateCommands under their "repo-<id>" names, and returns those names
+// for the "applied" line. They have no flag, so nothing can be explicit
+// over them: the committed .factory.yml is their only source.
+func addRepoGates(gateCommands map[string]*string, cfg *projectconfig.Config) []string {
+	if gateCommands == nil {
+		return nil
+	}
+	var names []string
+	for _, g := range cfg.Gates {
+		command := g.Command
+		check := policy.RepoGateCheck(g.ID)
+		gateCommands[check] = &command
+		names = append(names, "gate "+check)
+	}
+	return names
+}
+
 // ApplyProjectConfigDefaults is the exported form of cmd/factoryd's own
 // applyProjectConfigDefaults (validate.go), which now delegates to this
 // function -- see that copy's doc comment for the full "explicit flag
@@ -351,6 +369,7 @@ func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, v
 			applied = append(applied, g.Flag)
 		}
 	}
+	applied = append(applied, addRepoGates(gateCommands, cfg)...)
 	if len(cfg.TestPatterns) > 0 {
 		*testPatterns = cfg.TestPatterns
 		applied = append(applied, "test-patterns")

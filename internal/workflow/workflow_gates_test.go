@@ -11,6 +11,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
+	temporalworkflow "go.temporal.io/sdk/workflow"
 )
 
 // registerFullSuiteWorkflowEnvironment is newWorkflowEnvironment plus a
@@ -342,5 +343,82 @@ func TestRunWorkflowRunsFullSuiteVerifyBeforeCollectingEvidence(t *testing.T) {
 	}
 	if !slices.Equal(order, []string{RunFullSuiteVerifyActivityName, CollectEvidenceActivityName}) {
 		t.Fatalf("Activity call order = %v, want [%s, %s]", order, RunFullSuiteVerifyActivityName, CollectEvidenceActivityName)
+	}
+}
+
+// repoGateFixture runs RunWorkflow with one registry gate and two gates the
+// repository defines for itself, and returns the checks the gate Activity
+// was asked to run, in order.
+func repoGateFixture(t *testing.T, pin func(*testsuite.TestWorkflowEnvironment)) []string {
+	t.Helper()
+	input := fixtureInput()
+	setGateCommand(&input, "lint", "true")
+	setGateCommand(&input, "repo-zeta", "true")
+	setGateCommand(&input, "repo-alpha", "true")
+	var calls []string
+	env := newWorkflowEnvironment(t,
+		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
+			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
+		},
+		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
+			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: 0}}, nil
+		},
+		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
+			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
+		},
+	)
+	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+		calls = append(calls, in.Check)
+		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: 0}}, nil
+	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
+	if pin != nil {
+		pin(env)
+	}
+	env.ExecuteWorkflow(RunWorkflow, input)
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow error: %v", err)
+	}
+	return calls
+}
+
+// A repository's own gates (.factory.yml `gates:`) run after the registry's,
+// by name, through the same gate Activity.
+func TestRunWorkflowRunsRepoDefinedGatesAfterTheRegistrys(t *testing.T) {
+	calls := repoGateFixture(t, nil)
+	if want := []string{"lint", "repo-alpha", "repo-zeta"}; !slices.Equal(calls, want) {
+		t.Fatalf("named gate Activity calls = %v, want %v", calls, want)
+	}
+}
+
+// TestHistoryRecordedBeforeRepoDefinedGatesReplaysWithoutThem pins the change
+// to DefaultVersion, what a history recorded before repo-defined-gates replays
+// as: it schedules the registry's gates and nothing else, so the activities it
+// recorded still line up.
+func TestHistoryRecordedBeforeRepoDefinedGatesReplaysWithoutThem(t *testing.T) {
+	calls := repoGateFixture(t, func(env *testsuite.TestWorkflowEnvironment) {
+		env.OnGetVersion(repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	})
+	if want := []string{"lint"}; !slices.Equal(calls, want) {
+		t.Fatalf("named gate Activity calls = %v, want %v", calls, want)
+	}
+}
+
+// After an oracle commit a repository's own gates run again against the
+// committed tree, as lint does.
+func TestPostOracleCommitGatesIncludeRepoDefinedGates(t *testing.T) {
+	input := fixtureInput()
+	setGateCommand(&input, "lint", "golangci-lint run")
+	setGateCommand(&input, policy.ReferenceOracleGateID, "python3 oracle.py")
+	setGateCommand(&input, "repo-zeta", "z")
+	setGateCommand(&input, "repo-alpha", "a")
+	var got []string
+	for _, g := range postOracleCommitGates(input) {
+		got = append(got, g.Check+"="+g.Command)
+	}
+	if want := []string{"lint=golangci-lint run", "repo-alpha=a", "repo-zeta=z"}; !slices.Equal(got, want) {
+		t.Errorf("post-oracle-commit gates = %v, want %v", got, want)
+	}
+	if !isPostOracleCommitAttemptKind("repo-alpha"+postOracleCommitGateSuffix) || isPostOracleCommitAttemptKind("reference_oracle"+postOracleCommitGateSuffix) {
+		t.Error("a repo gate's post-oracle-commit attempt kind must be recognised, and reference_oracle's must not")
 	}
 }

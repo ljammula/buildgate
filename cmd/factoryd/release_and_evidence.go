@@ -781,6 +781,22 @@ func recordAcceptedRunSideEffects(dataDir string, r *run.Run, prURL string, n no
 	}
 }
 
+// writeRepoGateLines lists the repository's own gates (.factory.yml
+// `gates:`) among results, in the order they ran. One that is not listed did
+// not run: there is no fixed set to report "not configured" against.
+func writeRepoGateLines(b *strings.Builder, results []run.GateResult) {
+	for _, g := range results {
+		if !gatepolicy.IsRepoGate(g.Check) {
+			continue
+		}
+		status := "pass"
+		if !g.Passed {
+			status = "FAIL"
+		}
+		fmt.Fprintf(b, "- `%s`: %s\n", sanitizeMarkdownField(g.Check), status)
+	}
+}
+
 // renderEvidenceMarkdown renders r's own already-durable evidence as the
 // body of the draft PR -open-pull-request opens -- the exact
 // differentiator that sets this project apart from its peers: every peer
@@ -936,6 +952,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 			fmt.Fprintf(&b, "  - reference-oracle content: `sha256:%s`\n", gateResult.ReferenceOracleSHA256)
 		}
 	}
+	writeRepoGateLines(&b, r.GateResults)
 	b.WriteString("\n")
 	if len(r.ChangedFiles) > 0 {
 		fmt.Fprintf(&b, "## Changed files (%d)\n\n", len(r.ChangedFiles))

@@ -682,10 +682,7 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	// Temporal/-repository positional args, the evidence render) now
 	// takes, in registry order, instead of five individually-named
 	// commands.
-	tr.gateCommands = make(map[string]string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		tr.gateCommands[g.ID] = *tr.rf.gateCommands[g.ID]
-	}
+	tr.gateCommands = resolvedGateCommands(tr.rf.gateCommands)
 	// routes:/models: mode: execSelection/reviewSelection's own
 	// RoutePolicy.TokenCeiling/CostCeilingMicroUSD were computed by
 	// modelrole.SelectRoute BEFORE applyProjectConfigDefaults just above
@@ -2303,4 +2300,21 @@ func (tr *ticketRun) dispatch() error {
 		log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 	}
 	return fmt.Errorf("Temporal at %s is unreachable: %w; builds run only on Temporal (factoryd doctor -fix starts it)", *tr.temporalAddress, dialErr)
+}
+
+// resolvedGateCommands is the run's gate commands by check: every
+// policy.CommandGates entry (empty when unset), plus the gates the target
+// repository's .factory.yml defines for itself, which
+// applyProjectConfigDefaults added under their "repo-<id>" names.
+func resolvedGateCommands(flags map[string]*string) map[string]string {
+	out := make(map[string]string, len(flags))
+	for _, g := range policy.CommandGates {
+		out[g.ID] = *flags[g.ID]
+	}
+	for check, command := range flags {
+		if policy.IsRepoGate(check) && command != nil {
+			out[check] = *command
+		}
+	}
+	return out
 }

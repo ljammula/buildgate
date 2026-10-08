@@ -332,6 +332,29 @@ func hostGitActivityOptions() temporalworkflow.ActivityOptions {
 	}
 }
 
+// repoDefinedGatesChange is the GetVersion change ID under which RunWorkflow
+// runs a target repository's own gates (policy.RepoGateChecks) after the
+// registry's. Only a run whose input carries one asks for the version, so
+// a run without them records no marker.
+const repoDefinedGatesChange = "repo-defined-gates"
+
+// gateChecksToRun lists the command gates of input that have a command, in
+// the order RunWorkflow runs them: policy.CommandGates' order, then the
+// repository's own gates by name.
+func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) []string {
+	var checks []string
+	for _, g := range policy.CommandGates {
+		if input.GateCommands[g.ID] != "" {
+			checks = append(checks, g.ID)
+		}
+	}
+	repo := policy.RepoGateChecks(input.GateCommands)
+	if len(repo) > 0 && temporalworkflow.GetVersion(ctx, repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1) == 1 {
+		checks = append(checks, repo...)
+	}
+	return checks
+}
+
 // requireIsolatedWorkspaceChange is the GetVersion change ID under which
 // RunWorkflow refuses an input with IsolateWorkspace false. A history
 // recorded before it replays as DefaultVersion and keeps the non-isolated
@@ -856,11 +879,8 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	// gate ran AND passed: the pin CommitOraclesActivity verifies against.
 	var passedReferenceOracleSHA256 string
 	if result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 {
-		for _, g := range policy.CommandGates {
-			check, command := g.ID, input.GateCommands[g.ID]
-			if command == "" {
-				continue
-			}
+		for _, check := range gateChecksToRun(ctx, input) {
+			command := input.GateCommands[check]
 			var gateResult VerifyActivityResult
 			current.Stage, current.StartedAt = check, temporalworkflow.Now(ctx)
 			gateCtx := buildVerifyCtx
