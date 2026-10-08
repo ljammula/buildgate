@@ -19,7 +19,7 @@ import (
 // doctorRegisterTargetRepoFlag registers -target-repo directly on flags,
 // like doctorRegisterListModelsFlag.
 func doctorRegisterTargetRepoFlag(flags *flag.FlagSet) *string {
-	return flags.String("target-repo", "", "a target repo checkout to check as a run and a submit would: its compose file at HEAD (one line per service with its verdict and BG_SERVICE_* variables, and a warning when the worker plus its sidecars exceed Docker's memory), its verify command, and the project-bootstrap preflight submit refuses on; empty skips these checks")
+	return flags.String("target-repo", "", "a target repo checkout to check as a run and a submit would: its compose file at HEAD (one line per service with its verdict and BG_SERVICE_* variables, and a warning when the worker plus its sidecars exceed Docker's memory), its verify command, the project-bootstrap preflight submit refuses on, and the Go, Python and Node versions it declares against the sandbox image's; empty skips these checks")
 }
 
 // composeServicesSpecAtCommit loads the compose spec a run against dir at

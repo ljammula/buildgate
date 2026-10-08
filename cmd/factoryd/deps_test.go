@@ -4,6 +4,7 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/toolchain"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -20,6 +21,7 @@ import (
 type fakeDocker struct {
 	colimaBinaryFn func() string
 	dockerBinaryFn func() string
+	imageToolsFn   func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
 	initChecksFn   func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImageFn    func(repoRoot string, target string, vars ...string) (string, error)
 	workerChecksFn func(ctx context.Context, in doctorInputs) []doctorCheck
@@ -27,6 +29,9 @@ type fakeDocker struct {
 
 func (f *fakeDocker) colimaBinary() string { return f.colimaBinaryFn() }
 func (f *fakeDocker) dockerBinary() string { return f.dockerBinaryFn() }
+func (f *fakeDocker) imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error) {
+	return f.imageToolsFn(ctx, dockerBinary, image)
+}
 func (f *fakeDocker) initChecks(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck {
 	return f.initChecksFn(ctx, dockerBinary, image, dir)
 }
@@ -228,6 +233,9 @@ func newTestDeps(t testing.TB) *deps {
 	dp.docker = &fakeDocker{
 		colimaBinaryFn: realDocker.colimaBinary,
 		dockerBinaryFn: realDocker.dockerBinary,
+		imageToolsFn: func(context.Context, string, string) (toolchain.Installed, string, error) {
+			return nil, "", errors.New("test docker: no image is run")
+		},
 		initChecksFn:   realDocker.initChecks,
 		makeImageFn:    realDocker.makeImage,
 		workerChecksFn: realDocker.workerChecks,

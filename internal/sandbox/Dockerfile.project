@@ -63,8 +63,65 @@
 # ever runs. GOMODCACHE needs no such override -- the base Dockerfile
 # already bakes it outside $HOME, at /usr/local/gomodcache, for exactly
 # this reason, and this file inherits that setting unchanged.
+#
+# Toolchains. A build has no network and GOTOOLCHAIN=local, so the image's
+# own Go and Python are the only ones a verify command can use. When the
+# project declares a version the base image does not satisfy (go.mod's `go`
+# line, .python-version, pyproject.toml's requires-python), `make
+# project-sandbox-image` passes GO_MODE/PYTHON_MODE=replace with the official
+# image to copy that toolchain from (`factoryd project-image-args`,
+# internal/toolchain). With neither, the stages below are the base image
+# unchanged and the two toolchain images are never pulled.
+#
+# Node is not replaced: the Pi, Codex and Copilot CLIs run on the image's
+# Node, and it is the executable the sandbox's network policy admits.
 ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
+ARG GO_MODE=keep
+ARG GO_IMAGE=${BASE_IMAGE}
+ARG PYTHON_MODE=keep
+ARG PYTHON_IMAGE=${BASE_IMAGE}
+
+FROM ${GO_IMAGE} AS project-go
+FROM ${PYTHON_IMAGE} AS project-python
+
+FROM ${BASE_IMAGE} AS go-keep
+FROM ${BASE_IMAGE} AS go-replace
+USER root
+# Removed first: a copy over the older tree would leave its files beside the
+# newer ones.
+RUN rm -rf /usr/local/go
+COPY --from=project-go /usr/local/go /usr/local/go
+RUN go version
+
+FROM go-${GO_MODE} AS python-keep
+FROM go-${GO_MODE} AS python-replace
+ARG PYTHON_VERSION
+USER root
+# The project's interpreter, beside the base image's: python3, python and pip
+# become its names. PYTHON_IMAGE is built on the base image's distribution, so
+# the interpreter finds the C library it was linked against.
+COPY --from=project-python /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/pip${PYTHON_VERSION} /usr/local/bin/
+COPY --from=project-python /usr/local/lib/python${PYTHON_VERSION} /usr/local/lib/python${PYTHON_VERSION}
+COPY --from=project-python /usr/local/lib/libpython${PYTHON_VERSION}.so.1.0 /usr/local/lib/
+COPY --from=project-python /usr/local/include/python${PYTHON_VERSION} /usr/local/include/python${PYTHON_VERSION}
+RUN set -e; cd /usr/local/bin; \
+    ln -sf python${PYTHON_VERSION} python3; ln -sf python3 python; \
+    ln -sf pip${PYTHON_VERSION} pip3; ln -sf pip3 pip; \
+    ldconfig; python3 --version; pip --version
+# buildgate's own build scripts run on the worker's python3, which is now the
+# project's. Their test suite is run on it here, so an interpreter they do
+# not work on fails this build and never a ticket.
+COPY .buildgate-agent /tmp/buildgate-agent
+RUN cd /tmp/buildgate-agent/agent/pi; \
+    if ! HOME=/tmp python3 -m unittest discover -s tests -p '*_test.py' >/tmp/buildgate-agent-tests.log 2>&1; then \
+        grep -E '^(ERROR|FAIL):|^Ran |^FAILED' /tmp/buildgate-agent-tests.log | head -40; \
+        echo "buildgate's build scripts fail their own tests on Python ${PYTHON_VERSION}; this project's interpreter cannot run a build" >&2; \
+        exit 1; \
+    fi; \
+    grep -E '^Ran ' /tmp/buildgate-agent-tests.log; \
+    rm -rf /tmp/buildgate-agent /tmp/buildgate-agent-tests.log
+
+FROM python-${PYTHON_MODE}
 USER root
 
 ENV npm_config_cache=/usr/local/npm-cache
@@ -94,7 +151,7 @@ RUN --mount=type=secret,id=build-ca,required=false \
         pip install --no-cache-dir -r requirements.txt; \
     fi; \
     cd /; \
-    rm -rf /tmp/project-src; \
+    rm -rf /tmp/project-src /tmp/buildgate-agent; \
     chmod -R a+rX /usr/local/npm-cache /usr/local/gomodcache
 
 USER 65532:65532

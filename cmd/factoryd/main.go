@@ -638,6 +638,8 @@ func installSubcommand(dp *deps, args []string) (handled bool, err error) {
 		return true, buildCABundleMain(dp, os.Stdout, os.Stderr)
 	case "image-inputs-hash":
 		return true, imageInputsHashMain(args[1:])
+	case "project-image-args":
+		return true, projectImageArgsMain(dp, args[1:], os.Stdout, os.Stderr)
 	case "image-reuse":
 		return true, imageReuseMain(args[1:])
 	case "setup":
