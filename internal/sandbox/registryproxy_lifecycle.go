@@ -176,6 +176,7 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 			forbidden["GOMODCACHE"] = true
 			forbidden["GOCACHE"] = true
 			forbidden["GOFLAGS"] = true
+			forbidden["GONOPROXY"] = true
 			// GOMODCACHE must move off the image's baked, read-only
 			// /usr/local/gomodcache for GOPROXY to mean anything: a
 			// module the image lacks has to land somewhere writable, and
@@ -223,6 +224,12 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 				// silently disabling checksum verification entirely rather
 				// than actually proxying it.
 				"GOSUMDB=sum.golang.org",
+				// Every module through the proxy, a private one included:
+				// a Makefile that exports GOPRIVATE would otherwise send
+				// the go command straight to the module's host, which a
+				// worker cannot reach and has no credential for. GOPRIVATE
+				// still keeps such a module out of the checksum database.
+				"GONOPROXY=none",
 			)
 		case goSumDBRoutePrefix:
 			// No env var of its own: this route exists purely so the

@@ -100,6 +100,9 @@ type realForge struct{ dp *deps }
 type hostBoundary interface {
 	browserCommand(target string) *exec.Cmd
 	executable() (string, error)
+	// goCommand runs the operator's go command in dir with env added to the
+	// process environment, and returns its standard output.
+	goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	launchctl(args ...string) ([]byte, error)
 	launchctlBinary() string
 	launchdServicePID(domain string) (int, bool)

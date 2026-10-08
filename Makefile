@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -160,6 +160,13 @@ live-smoke:
 # live-smoke, which stays fast.
 live-compose:
 	scripts/live-compose.sh
+
+# live-private-module runs one real ticket on a repository whose dependency is
+# a module only this machine can fetch (see scripts/live-private-module.sh's
+# header). Before merging a change to the Go module fetch, the registry
+# proxy's Go route, or the worker's Go environment.
+live-private-module:
+	scripts/live-private-module.sh
 
 # console-walk is the console's live browser walk: a real factoryd serving a
 # seeded data directory, headless Chrome through every screen and action,

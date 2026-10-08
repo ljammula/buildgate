@@ -485,6 +485,22 @@ func GitShowFile(dir, sha, path string) (content string, existed bool, err error
 	return string(out), true, nil
 }
 
+// GitTreeFilesNamed lists the paths in commit sha of dir's repository whose
+// last element is name, in git's order.
+func GitTreeFilesNamed(dir, sha, name string) ([]string, error) {
+	out, err := exec.Command("git", "-C", dir, "ls-tree", "-r", "--name-only", "-z", sha).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-tree %s: %w", sha, err)
+	}
+	var paths []string
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path == name || strings.HasSuffix(path, "/"+name) {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
 // ReadRegularFile reads path's content, refusing to follow a symlink.
 // Found live (review): a required file's content was read via a plain
 // os.ReadFile, which follows symlinks — a run that replaced a required

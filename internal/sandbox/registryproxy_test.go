@@ -425,6 +425,10 @@ func TestRegistryProxyLifecyclePrepareWorkerSetsNetworkAndEnv(t *testing.T) {
 	if !strings.Contains(joined, "GOSUMDB=sum.golang.org") {
 		t.Errorf("environment missing GOSUMDB=sum.golang.org, got %v", worker.Environment)
 	}
+	// Every module goes through the proxy, whatever GOPRIVATE a Makefile sets.
+	if !strings.Contains(joined, "GONOPROXY=none") {
+		t.Errorf("environment missing GONOPROXY=none, got %v", worker.Environment)
+	}
 	if !strings.Contains(joined, "PATH=/usr/bin") {
 		t.Errorf("unrelated environment entry dropped, got %v", worker.Environment)
 	}
@@ -632,5 +636,58 @@ func TestEnsureScratchDirIsPerLaunch(t *testing.T) {
 		if _, err := EnsureScratchDir(dataDir, "run-1", launch, ""); err == nil {
 			t.Errorf("EnsureScratchDir(launch %q) = nil error, want a rejection", launch)
 		}
+	}
+}
+
+// A spec with a Go module directory mounts it read-only into the proxy and
+// tells the proxy to answer the Go route from it; a spec without one does
+// neither, and a directory that is not one is refused before Docker runs.
+func TestLaunchRegistryProxyServesTheGoModuleDirWhenSet(t *testing.T) {
+	runCallOf := func(spec RegistryProxySpec) string {
+		t.Helper()
+		logPath := filepath.Join(t.TempDir(), "docker-calls")
+		docker := fakeRegistryProxyDocker(t, logPath, false)
+		handle, err := LaunchRegistryProxy(context.Background(), docker, spec)
+		if err != nil {
+			t.Fatalf("LaunchRegistryProxy: %v", err)
+		}
+		defer handle.Cleanup(context.Background())
+		// The proxy's own run, not the usage probe before it.
+		for _, call := range readRelayCalls(t, logPath) {
+			if joined := strings.Join(call, " "); relayCallOperation(call) == "run" && strings.Contains(joined, "-cache-dir") {
+				return joined
+			}
+		}
+		t.Fatal("no docker run call for the proxy")
+		return ""
+	}
+	modules := t.TempDir()
+	spec := validRegistryProxySpec()
+	spec.GoModuleDir = modules
+	with := runCallOf(spec)
+	for _, want := range []string{"--volume " + modules + ":" + GoModuleContainerDir + ":ro", "-local-dir " + goProxyRoutePrefix + "=" + GoModuleContainerDir} {
+		if !strings.Contains(with, want) {
+			t.Errorf("run call lacks %q:\n%s", want, with)
+		}
+	}
+	if without := runCallOf(validRegistryProxySpec()); strings.Contains(without, "-local-dir") || strings.Contains(without, GoModuleContainerDir) {
+		t.Errorf("a spec with no module directory mounted or named one:\n%s", without)
+	}
+	for name, dir := range map[string]string{"a relative path": "modules", "a missing directory": filepath.Join(modules, "absent"), "a path with a colon": modules + ":/etc"} {
+		bad := validRegistryProxySpec()
+		bad.GoModuleDir = dir
+		if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "Go module directory") {
+			t.Errorf("%s: Validate = %v, want a refusal", name, err)
+		}
+	}
+}
+
+func TestRegistryProxyOlderThanFactorydIsReadFromItsLog(t *testing.T) {
+	err := registryProxyOlderThanFactoryd("flag provided but not defined: -local-dir\nUsage of registry-proxy:\n  -addr string\n")
+	if err == nil || !strings.Contains(err.Error(), "older than this factoryd") || !strings.Contains(err.Error(), "-local-dir") || !strings.Contains(err.Error(), "make install") {
+		t.Errorf("error = %v, want the option and the fix named", err)
+	}
+	if err := registryProxyOlderThanFactoryd("registry proxy listening on :8092\n"); err != nil {
+		t.Errorf("a proxy that started: %v", err)
 	}
 }

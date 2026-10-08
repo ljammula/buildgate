@@ -253,6 +253,12 @@ type RunWorkflowInput struct {
 	// credential-bearing counterpart: every field is safe to persist in
 	// Event History as-is (see sandbox.RegistryProxyPolicy).
 	RegistryProxyPolicy *sandbox.RegistryProxyPolicy `json:"registry_proxy_policy,omitempty"`
+	// GoModuleDir is the directory of this run's private Go modules, fetched
+	// on the host before the run started, which each step's registry proxy
+	// serves (sandbox.RegistryProxySpec.GoModuleDir); "" when there is none.
+	// It is in the input, not a field of one Worker, so that the Worker that
+	// takes over a run after its first one is lost serves the same modules.
+	GoModuleDir string `json:"go_module_dir,omitempty"`
 	// ComposeServicesEnabled mirrors cmd/factoryd's -compose-services:
 	// when true, every sandboxed phase of this run launches this run's own
 	// docker-compose-declared dependency services (see
