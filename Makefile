@@ -362,7 +362,7 @@ install: install-prereqs docker-buildx-check temporal-up local-images openshell-
 		echo "error: $$installed reports '$$got', want 'factoryd version $(FACTORYD_VERSION)'" >&2; exit 1; \
 	fi; \
 	resolved="$$(command -v factoryd 2>/dev/null || true)"; \
-	if [ -n "$$resolved" ] && [ "$$resolved" != "$$installed" ]; then \
+	if [ -n "$$resolved" ] && ! [ "$$resolved" -ef "$$installed" ]; then \
 		echo "warning: just installed $$installed, but 'factoryd' on your PATH resolves to $$resolved instead -- that earlier PATH entry will keep winning. Remove/rename $$resolved, or move $$installed earlier on PATH, then re-run 'factoryd doctor' to confirm (see its PATH shadowing check)." >&2; \
 	fi; \
 	"$$installed" install-skill || echo "warning: buildgate skill not installed; run 'factoryd install-skill'" >&2; \
