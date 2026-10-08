@@ -5,13 +5,29 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
+
+// journalModeWait bounds how long Open retries the switch to WAL while
+// another opener holds the lock; journalModeRetry is the pause between tries.
+const (
+	journalModeWait  = 5 * time.Second
+	journalModeRetry = 5 * time.Millisecond
+)
+
+// isBusy reports whether err is SQLite's "database is locked" in any of its
+// extended forms (the primary result code is the low byte).
+func isBusy(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code()&0xff == sqlite3.SQLITE_BUSY
+}
 
 type Event struct {
 	ID        int64
@@ -64,10 +80,34 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open event store: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	var journalMode string
-	if err := db.QueryRow(`PRAGMA journal_mode=WAL`).Scan(&journalMode); err != nil {
+	// Writers open, append one event and close, from separate processes, so
+	// an open regularly meets another writer's lock (found live 2026-10-08:
+	// two builds started in the same second on a new data dir and three run
+	// events were dropped with "database is locked", because the caller
+	// treats this store as supplementary). Two different waits cover it:
+	//   - busy_timeout, set first, covers a database already in WAL mode:
+	//     the recovery an open runs and the checkpoint a writer runs as it
+	//     closes (SQLITE_BUSY_RECOVERY without it).
+	//   - the loop below covers a database not yet in WAL mode. The switch
+	//     takes a read lock and then upgrades it, and SQLite never calls the
+	//     busy handler for a connection that already holds a lock, so the
+	//     loser of two first opens gets SQLITE_BUSY at once whatever
+	//     busy_timeout says. Once any opener has switched the file, the
+	//     statement is a read and the retry succeeds.
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000`); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("configure event store journal: %w", err)
+		return nil, fmt.Errorf("configure event store lock wait: %w", err)
+	}
+	var journalMode string
+	for deadline := time.Now().Add(journalModeWait); ; time.Sleep(journalModeRetry) {
+		err := db.QueryRow(`PRAGMA journal_mode=WAL`).Scan(&journalMode)
+		if err == nil {
+			break
+		}
+		if !isBusy(err) || time.Now().After(deadline) {
+			db.Close()
+			return nil, fmt.Errorf("configure event store journal: %w", err)
+		}
 	}
 	if !strings.EqualFold(journalMode, "wal") {
 		db.Close()
@@ -85,7 +125,7 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("restrict event store %s permissions: %w", suffix, err)
 		}
 	}
-	if _, err := db.Exec(`PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, kind TEXT NOT NULL, payload BLOB NOT NULL, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS events_run_id_id ON events(run_id, id);`); err != nil {
+	if _, err := db.Exec(`PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, kind TEXT NOT NULL, payload BLOB NOT NULL, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS events_run_id_id ON events(run_id, id);`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialize event store: %w", err)
 	}
