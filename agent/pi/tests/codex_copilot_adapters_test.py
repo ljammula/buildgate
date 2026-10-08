@@ -636,11 +636,18 @@ class MountedSkillsTests(unittest.TestCase):
 		for name in ("pi", "pifork"):
 			with route("openai-completions"):
 				got = harness_adapters.get(name).invocation(
+					workspace, prompt="p", session_dir=self.session, continue_session=False, thinking=None,
+					load_repo_skills=True)
+				without = harness_adapters.get(name).invocation(
 					workspace, prompt="p", session_dir=self.session, continue_session=False, thinking=None)
 			want = ["--skill", str(self.mount / "op"),
 				"--skill", str(workspace / ".agents" / "skills" / "repo-a"),
 				"--skill", str(workspace / ".agents" / "skills" / "repo-b"), "p"]
 			self.assertEqual(got[-7:], want)
+			# Only a caller that asks gets them: a review or planning turn
+			# takes the operator's skills alone.
+			self.assertEqual(without[-3:], ["--skill", str(self.mount / "op"), "p"])
+			self.assertNotIn(str(workspace / ".agents" / "skills" / "repo-a"), without)
 
 	def test_repo_skills_are_capped(self):
 		workspace = self.tmp / "many"

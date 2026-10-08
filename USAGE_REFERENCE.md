@@ -1090,11 +1090,18 @@ launch of a model-backed job (build, review, spec/plan/oracle drafting)
 Target-repo skills are a second, separate layer: the repo's own committed
 skills, which the harness finds in `/workspace` itself.
 
-| Harness | Repo skills it loads |
-|---|---|
-| pi, pifork | `.agents/skills` (passed as `--skill`, at most 64; pi skips project skills on its own in non-interactive mode) |
-| codex | `.agents/skills` |
-| copilot | `.agents/skills`, `.github/skills`, `.claude/skills` |
+| Harness | Repo skills it loads | In which jobs |
+|---|---|---|
+| pi, pifork | `.agents/skills` (passed as `--skill`, at most 64; pi skips project skills on its own in non-interactive mode) | The build only. Review, spec drafting, planning and oracle drafting take the operator's skills alone |
+| codex | `.agents/skills` | Every job: the CLI reads the folder itself |
+| copilot | `.agents/skills`, `.github/skills`, `.claude/skills` | Every job: the CLI reads the folders itself |
+
+A repo skill is instruction text, and a build can write one. On codex and
+copilot a review therefore reads whatever the build left in those folders,
+and on every harness it reads the working tree's `AGENTS.md`-style files;
+the review's verdict is never enough to accept a run on its own (SC-006).
+The pi row holds at pi's default project trust: an image whose pi settings
+trust every project lets pi find the repo's skills itself, in every job.
 
 Put a repo skill meant for every harness in `.agents/skills`.
 

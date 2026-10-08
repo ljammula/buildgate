@@ -1693,6 +1693,7 @@ def run_build(
 			workspace, prompt=prompt, session_dir=session_dir,
 			continue_session=continue_session,
 			thinking=thinking,
+			load_repo_skills=True,
 		)
 		print_progress({"stage": "round", "event": "start", "round": round_index, "max_rounds": max_rounds})
 		# Captured immediately before the round's own agent invocation --
