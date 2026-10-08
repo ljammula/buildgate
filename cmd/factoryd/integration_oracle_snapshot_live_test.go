@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,53 +78,44 @@ func TestLiveDockerBuildPhaseMountsTheOracleSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gitDir := ws
-	hostDone := make(chan error, 1)
-	go func() {
-		deadline := time.Now().Add(4 * time.Minute)
-		for time.Now().Before(deadline) {
-			if _, err := os.Stat(filepath.Join(gitDir, ".live-ready")); err == nil {
-				if err := os.WriteFile(oracleFile, []byte(edited), 0o644); err != nil {
-					hostDone <- err
-					return
-				}
-				hostDone <- os.WriteFile(filepath.Join(gitDir, ".live-go"), nil, 0o666)
-				return
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		hostDone <- os.ErrDeadlineExceeded
-	}()
+	hostDone := make(chan probeAnswer, 1)
+	go func() { hostDone <- answerOracleProbe(dataDir, oracleFile, edited) }()
 
+	// No image is configured for this run's throwaway session config, and a
+	// run without one is refused, so name one the way
+	// TestWorkerUIDSeparationLiveDocker does (and, like it, with the real
+	// HOME, or the docker CLI loses colima's context).
+	t.Setenv("HOME", realHomeForLiveDocker)
+	workerImage := os.Getenv("DOCKER_SANDBOX_IMAGE")
+	if workerImage == "" {
+		workerImage = testfixture.ResolveImageDigest(t, "docker", "python:3.13-slim-bookworm")
+	}
 	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "", "6m", xdgOnlySandboxDockerOverride(t, "docker"), []string{
-		"-sandbox-image", "",
+		"-sandbox-image", workerImage,
 		"-build-app-script", script,
 		"-reference-oracle-dir", oracleDir,
 		"-reference-oracle-mount-path", ".oracle",
 		"-reference-oracle-command", "true",
 		"-reference-oracle-in-loop-retry",
 	}, dataDir)
+	var answer probeAnswer
 	select {
-	case err := <-hostDone:
-		if err != nil {
-			t.Fatalf("host-side edit of the source oracle: %v", err)
+	case answer = <-hostDone:
+		if answer.err != nil {
+			t.Fatalf("host side of the probe (state=%s): %v", r.State, answer.err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("the build container never signalled readiness, so the mid-build edit never happened")
+		t.Fatalf("the build container never signalled readiness, so the mid-build edit never happened (state=%s)", r.State)
 	}
 
 	if got, _ := os.ReadFile(oracleFile); string(got) != edited {
 		t.Fatalf("non-vacuity: the source oracle was not edited mid-build (got %q)", got)
 	}
-	seen, err := os.ReadFile(filepath.Join(gitDir, ".live-seen"))
-	if err != nil {
-		t.Fatalf("the probe reported nothing (state=%s): %v", r.State, err)
+	if answer.seen != original {
+		t.Errorf("the build container saw %q, want the ORIGINAL snapshot content %q: it is mounting the live source directory", answer.seen, original)
 	}
-	if string(seen) != original {
-		t.Errorf("the build container saw %q, want the ORIGINAL snapshot content %q: it is mounting the live source directory", seen, original)
-	}
-	if got, _ := os.ReadFile(filepath.Join(gitDir, ".live-write")); strings.TrimSpace(string(got)) != "blocked" {
-		t.Errorf("a write into the oracle mount was not refused (probe reported %q)", got)
+	if strings.TrimSpace(answer.write) != "blocked" {
+		t.Errorf("a write into the oracle mount was not refused (probe reported %q)", answer.write)
 	}
 	var build *run.Attempt
 	for i := range r.Attempts {
@@ -141,4 +133,49 @@ func TestLiveDockerBuildPhaseMountsTheOracleSnapshot(t *testing.T) {
 	if editedHash, err := evidence.SHA256Tree(oracleDir); err == nil && build.ReferenceOracleSHA256 == editedHash {
 		t.Errorf("the recorded build hash equals the EDITED source tree's hash: the live directory was hashed")
 	}
+}
+
+// probeAnswer is what the build-phase probe reported: the oracle content it
+// saw after the host's edit, and whether its write into the mount was refused.
+type probeAnswer struct {
+	seen, write string
+	err         error
+}
+
+// answerOracleProbe is the host side of live_oracle_snapshot_build_app.sh. The
+// build runs in the run's own worktree under dataDir, which is removed when the
+// run ends, so it finds the probe there, edits the SOURCE oracle, signals the
+// probe on, reads its two answers and only then acks, which lets the probe exit.
+func answerOracleProbe(dataDir, oracleFile, edited string) probeAnswer {
+	wait := func(pattern string) (string, error) {
+		for deadline := time.Now().Add(4 * time.Minute); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+			if found, _ := filepath.Glob(pattern); len(found) > 0 {
+				return found[0], nil
+			}
+		}
+		return "", fmt.Errorf("no %s: %w", pattern, os.ErrDeadlineExceeded)
+	}
+	ready, err := wait(filepath.Join(dataDir, "workspaces", "*", ".live-ready"))
+	if err != nil {
+		return probeAnswer{err: err}
+	}
+	worktree := filepath.Dir(ready)
+	if err := os.WriteFile(oracleFile, []byte(edited), 0o644); err != nil {
+		return probeAnswer{err: err}
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".live-go"), nil, 0o666); err != nil {
+		return probeAnswer{err: err}
+	}
+	if _, err := wait(filepath.Join(worktree, ".live-write")); err != nil {
+		return probeAnswer{err: err}
+	}
+	seen, err := os.ReadFile(filepath.Join(worktree, ".live-seen"))
+	if err != nil {
+		return probeAnswer{err: err}
+	}
+	write, err := os.ReadFile(filepath.Join(worktree, ".live-write"))
+	if err != nil {
+		return probeAnswer{err: err}
+	}
+	return probeAnswer{seen: string(seen), write: string(write), err: os.WriteFile(filepath.Join(worktree, ".live-ack"), nil, 0o666)}
 }
