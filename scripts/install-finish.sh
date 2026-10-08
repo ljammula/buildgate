@@ -3,8 +3,10 @@
 # new machine otherwise needs three more commands for.
 #
 #   Step     Does                                              Skipped when
-#   PATH     appends `export PATH="$PATH:<bin dir>"` to the     `factoryd` already resolves on PATH,
-#            shell profile (~/.zshrc, ~/.bash_profile)          in a new shell, or the profile names that directory
+#   Link     symlinks ~/.local/bin/factoryd to the installed    the directory cannot be made or written,
+#            binary, so every shell with that on PATH finds it  or another factoryd already sits there
+#   PATH     appends `export PATH="$PATH:<bin dir>"` to the     `factoryd` already resolves on PATH (the link
+#            shell profile (~/.zshrc, ~/.bash_profile)          does that), in a new shell, or the profile names that directory
 #   GitHub   `gh auth login`                                    gh is logged in, or there is no terminal
 #   Model    `factoryd setup`: which model, and which coding    the config already names a model;
 #            agent where the route can run more than one        asks nothing with no terminal
@@ -31,6 +33,25 @@ in_new_shell() { [ -x "${SHELL:-}" ] && "$SHELL" -ic 'command -v factoryd' </dev
 todo=""
 left() { todo="$todo$1
 "; }
+
+# A profile line reaches interactive shells only. An agent, a script or an ssh
+# command runs factoryd from a shell that never reads the profile; ~/.local/bin
+# is the user's own bin directory and is on PATH for those wherever the user's
+# other tools live there. A factoryd there that is not this link (a
+# hand-placed build) is not ours to replace.
+link_into_user_bin() {
+	linkdir="$HOME/.local/bin"
+	[ "$linkdir" != "$bindir" ] || return 0
+	mkdir -p "$linkdir" 2>/dev/null || return 1
+	[ -w "$linkdir" ] || return 1
+	link="$linkdir/factoryd"
+	[ "$link" -ef "$installed" ] && return 0
+	# -e follows the link: a dangling one (its binary was uninstalled) is replaced.
+	[ ! -e "$link" ] || return 1
+	ln -sfn "$installed" "$link" || return 1
+	echo "Linked $link -> $installed"
+}
+link_into_user_bin || true
 
 if ! have factoryd && ! in_new_shell; then
 	line="export PATH=\"\$PATH:$bindir\""

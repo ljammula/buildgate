@@ -75,7 +75,7 @@ names what is missing and stops; a missing `npm` alone only costs the console.
 | Config | Records buildgate's image refs in the default session config via `factoryd configure-images`. `FACTORYD_CONFIG="<config> <config>..."` re-points each listed config instead, so a second profile does not keep pinning a superseded image |
 | Console | Baked in if `npm` is on `PATH` and its build succeeds, else a placeholder page and, for a failed build, a warning naming the Node and npm versions ([`console/README.md`](console/README.md)) |
 | Agent skill | Installs the `buildgate` skill into `~/.agents/skills` (Copilot, Codex); refreshes `~/.claude/skills/buildgate` when it exists |
-| `PATH` | When `factoryd` does not resolve: appends the `export PATH=...` line to `~/.zshrc` (`~/.bash_profile` for bash), once; a new terminal picks it up |
+| `PATH` | Links `~/.local/bin/factoryd` to the installed binary, so shells that never read a profile (an agent, a script, an ssh command) find it wherever `~/.local/bin` is on `PATH`; a `factoryd` already there that is not this link is left alone. When `factoryd` still does not resolve: appends the `export PATH=...` line to `~/.zshrc` (`~/.bash_profile` for bash), once; a new terminal picks it up |
 | GitHub | `gh auth login` when `gh` is not logged in and this is a terminal |
 | Model | `factoryd setup`: asks which model (detected ChatGPT/Codex and Copilot logins first) and, on a route that can run more than one, which coding agent; everything else is defaulted. Asks nothing when the config already names a model, or with no terminal (a single detected login is then used) |
 | Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter. Its failures do not fail the install |
@@ -115,6 +115,7 @@ approves, rejects or merges.
 | `make install`: `needs these, and found no Homebrew` | Tools are missing and there is no `brew` to install them with | Install Homebrew or the named tools, then `make install` again |
 | `make install`: `the --mount option requires BuildKit` or `docker buildx` missing | The `buildx` plugin is missing and Homebrew is not there to install it | Install your platform's buildx plugin; `factoryd doctor` warns about it |
 | `factoryd: command not found` after install | The terminal predates the install, or the shell is neither zsh nor bash | Open a new terminal; otherwise add the `export PATH=...` line `make install` printed to your shell profile |
+| An agent or script cannot find `factoryd`, a terminal can | Its shell reads no profile and `~/.local/bin` is not on its `PATH` | Put `~/.local/bin` on `PATH` where every shell reads it (`~/.zshenv` for zsh), or call `~/.local/bin/factoryd` by path |
 | `doctor` warns the Docker VM shares all of `$HOME` | colima's default mounts | USAGE.md, "Data directory and colima" |
 | `doctor` fails `roles.execution is not configured` | No model was chosen: the install had no terminal and found no single login | `factoryd setup` (`-route chatgpt-codex` for a Codex login) |
 | Any command fails `parse .../config.yml: relay_image: deleted with the inference relay` | A `config.yml` written for the retired inference relay still has `relay_image` or `relay_upstream_timeout` | Delete that line; the error names the retired key it found |
@@ -128,7 +129,7 @@ approves, rejects or merges.
 | Command | Removes | Keeps |
 |---|---|---|
 | `factoryd uninstall -dry-run` | Nothing; prints the plan | Everything |
-| `factoryd uninstall` | What `make install` put on the machine | `~/.config/factoryd`, `~/buildgate`, the `PATH` line in your shell profile, tools Homebrew installed |
+| `factoryd uninstall` | What `make install` put on the machine, the `~/.local/bin/factoryd` link included | `~/.config/factoryd`, `~/buildgate`, the `PATH` line in your shell profile, tools Homebrew installed |
 | `factoryd uninstall -purge` | Also both of those, the Temporal volumes and the OpenShell gateway's state on the Docker VM (database, keys, stored credentials); you type `purge` to confirm | Docker/colima, Go, Node, `gh`, Homebrew packages, git config |
 
 Back up `~/.config/factoryd` and `~/buildgate` first if you want your

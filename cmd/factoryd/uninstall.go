@@ -218,6 +218,29 @@ func (e *uninstallEnv) purgeTargets() []string {
 	return found
 }
 
+// binaryLinks are the `factoryd` symlinks on PATH that resolve to exePath:
+// the one `make install` puts in ~/.local/bin (scripts/install-finish.sh).
+// Left behind, each would dangle once the binary is removed.
+func (e *uninstallEnv) binaryLinks() []string {
+	var links []string
+	seen := map[string]bool{}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		link := filepath.Join(dir, "factoryd")
+		if dir == "" || seen[link] {
+			continue
+		}
+		seen[link] = true
+		info, err := os.Lstat(link)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(link); err == nil && resolved == e.exePath {
+			links = append(links, link)
+		}
+	}
+	return links
+}
+
 // binaryPresent reports whether exePath is a factoryd binary uninstall may
 // remove: named exactly "factoryd" and not a go-build temp binary.
 func (e *uninstallEnv) binaryPresent() bool {
@@ -294,6 +317,9 @@ func (e *uninstallEnv) plan() []uninstallStep {
 		}
 	}
 	if e.binaryPresent() {
+		for _, link := range e.binaryLinks() {
+			steps = append(steps, uninstallStep{desc: "remove the link " + link, run: func() error { return os.Remove(link) }})
+		}
 		exe := e.exePath
 		steps = append(steps, uninstallStep{desc: "remove the binary " + exe, run: func() error { return os.Remove(exe) }})
 	}

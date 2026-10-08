@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "install-finish.sh"
-UTILITIES = ["sh", "dirname", "grep"]
+UTILITIES = ["sh", "dirname", "grep", "mkdir", "ln"]
 
 
 class InstallFinishTest(unittest.TestCase):
@@ -24,6 +24,7 @@ class InstallFinishTest(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.home = self.tmp / "home"
         self.gobin = self.tmp / "go" / "bin"
+        self.userbin = self.home / ".local" / "bin"
         for d in (self.bin, self.home, self.gobin):
             d.mkdir(parents=True)
         for name in UTILITIES:
@@ -80,10 +81,61 @@ class InstallFinishTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.home / ".zshrc").exists())
 
+    def user_bin_on_path(self):
+        """PATH with ~/.local/bin on it, as a machine whose tools live there has."""
+        return f"{self.bin}:{self.userbin}"
+
+    def test_links_into_the_user_bin_and_leaves_the_profile_alone(self):
+        result = self.run_script(path=self.user_bin_on_path())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        link = self.userbin / "factoryd"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), self.installed.resolve())
+        self.assertFalse((self.home / ".zshrc").exists())
+        self.assertIn("Nothing is left to do", result.stdout)
+        again = self.run_script(path=self.user_bin_on_path())
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("Linked", again.stdout)
+
+    def test_links_even_when_factoryd_already_resolves(self):
+        self.run_script(path=f"{self.bin}:{self.gobin}")
+        self.assertTrue((self.userbin / "factoryd").is_symlink())
+
+    def test_a_user_bin_not_on_path_still_gets_the_profile_line(self):
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.userbin / "factoryd").is_symlink())
+        self.assertIn(str(self.gobin), (self.home / ".zshrc").read_text())
+
+    def test_another_factoryd_in_the_user_bin_is_left_alone(self):
+        self.userbin.mkdir(parents=True)
+        self.stub(self.userbin / "factoryd", "exit 0")
+        before = (self.userbin / "factoryd").read_text()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.userbin / "factoryd").is_symlink())
+        self.assertEqual((self.userbin / "factoryd").read_text(), before)
+        self.assertIn(str(self.gobin), (self.home / ".zshrc").read_text())
+
+    def test_a_dangling_link_is_replaced(self):
+        self.userbin.mkdir(parents=True)
+        os.symlink(self.tmp / "gone" / "factoryd", self.userbin / "factoryd")
+        self.run_script(path=self.user_bin_on_path())
+        self.assertEqual((self.userbin / "factoryd").resolve(), self.installed.resolve())
+
+    def test_a_user_bin_that_cannot_be_written_falls_back_to_the_profile(self):
+        self.userbin.mkdir(parents=True)
+        self.userbin.chmod(0o555)
+        self.addCleanup(self.userbin.chmod, 0o755)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.userbin / "factoryd").exists())
+        self.assertIn(str(self.gobin), (self.home / ".zshrc").read_text())
+
     def test_an_unknown_shell_gets_the_line_printed(self):
         result = self.run_script(SHELL="/usr/bin/fish")
         self.assertIn(f'export PATH="$PATH:{self.gobin}"', result.stdout.split("Left for you:")[1])
-        self.assertEqual(list(self.home.iterdir()), [])
+        self.assertEqual([p.name for p in self.home.iterdir()], [".local"])
 
     def test_runs_doctor_fix_and_a_failing_doctor_does_not_fail_the_install(self):
         result = self.run_script(DOCTOR_EXIT="1")

@@ -206,6 +206,57 @@ func TestUninstallOnlyRemovesABinaryNamedFactoryd(t *testing.T) {
 	}
 }
 
+// TestUninstallRemovesTheLinksToItsBinary: the symlink `make install` puts
+// on PATH goes with the binary; a factoryd that is some other file, or a
+// link to some other binary, stays.
+func TestUninstallRemovesTheLinksToItsBinary(t *testing.T) {
+	dp := newTestDeps(t)
+	f := newUninstallFixture(dp, t)
+	exe, err := filepath.EvalSymlinks(f.env.exePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.env.exePath = exe
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, foreign, other := filepath.Join(root, "brew"), filepath.Join(root, "foreign"), filepath.Join(root, "other")
+	for _, dir := range []string{linked, foreign, other} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(exe, filepath.Join(linked, "factoryd")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, "factoryd"), []byte("another build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "elsewhere"), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(other, "elsewhere"), filepath.Join(other, "factoryd")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", strings.Join([]string{linked, foreign, other, linked}, string(os.PathListSeparator)))
+
+	if err := uninstallRun(f.env, true, false, false, strings.NewReader("")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(linked, "factoryd")); !os.IsNotExist(err) {
+		t.Errorf("the link to the removed binary is still there (err %v)", err)
+	}
+	if _, err := os.Stat(exe); !os.IsNotExist(err) {
+		t.Errorf("the binary is still there (err %v)", err)
+	}
+	for _, kept := range []string{filepath.Join(foreign, "factoryd"), filepath.Join(other, "factoryd")} {
+		if _, err := os.Lstat(kept); err != nil {
+			t.Errorf("removed %s, which is not a link to the uninstalled binary", kept)
+		}
+	}
+}
+
 func TestUninstallStopFailureRemovesNothing(t *testing.T) {
 	dp := newTestDeps(t)
 	f := newUninstallFixture(dp, t)
