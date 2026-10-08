@@ -36,22 +36,44 @@ func DataRoot() string {
 	return filepath.Join(home, "buildgate")
 }
 
-// DefaultDataDir is the data dir quickstart and doctor -fix give a profile
-// (a config under ConfigDir) with no data_dir: DataRoot/data.
+// DefaultDataDir is the data dir of a profile (a config under ConfigDir)
+// with no data_dir: DataRoot/data.
 func DefaultDataDir() string {
 	return filepath.Join(DataRoot(), "data")
 }
 
-// DefaultDataDirFor is the data dir quickstart gives configPath when it has
-// no data_dir: DefaultDataDir for a profile under ConfigDir, and
+// DefaultDataDirFor is the data dir of the config at configPath when it sets
+// no data_dir (Config.EffectiveDataDir), absolute: DefaultDataDir for a
+// profile under ConfigDir or a config at one of DefaultPaths, and
 // <config's dir>/data for a config anywhere else, so a throwaway config
-// never writes into the profiles' shared data dir.
+// never writes into the profiles' shared data dir. The config's directory
+// is compared with symlinks resolved, so the answer does not depend on how
+// the path to the same file was spelled.
 func DefaultDataDirFor(configPath string) string {
-	dir, err := filepath.Abs(filepath.Dir(configPath))
-	if err == nil && dir == ConfigDir() {
+	abs, err := filepath.Abs(configPath)
+	if err != nil {
+		return filepath.Join(filepath.Dir(configPath), "data")
+	}
+	if sameFileDir(filepath.Dir(abs), ConfigDir()) {
 		return DefaultDataDir()
 	}
-	return filepath.Join(filepath.Dir(configPath), "data")
+	for _, standard := range DefaultPaths() {
+		if abs == standard {
+			return DefaultDataDir()
+		}
+	}
+	return filepath.Join(filepath.Dir(abs), "data")
+}
+
+// sameFileDir reports whether a and b are one directory, as written or once
+// symlinks are resolved.
+func sameFileDir(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 // ConfigDir is $XDG_CONFIG_HOME/factoryd (~/.config/factoryd when unset).

@@ -433,6 +433,9 @@ func (tr *ticketRun) parseFlags() error {
 	if err := tr.flags.Parse(tr.args); err != nil {
 		return err
 	}
+	if err := resolveDataDirFromSessionConfig(tr.flags, tr.rf.dataDir, *configPath); err != nil {
+		return err
+	}
 
 	// -config lets a bare `factoryd run` (or a script such as
 	// scripts/live-smoke.sh) point at a session config file explicitly,

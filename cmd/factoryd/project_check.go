@@ -686,7 +686,7 @@ func newCheckProjectFlags() (flags *flag.FlagSet, specPath, contractPath, archit
 
 func checkProjectMain(args []string) error {
 	flags, specPath, contractPath, architecturePath, architectureRequiredSections, ticketPath, ticketNumber, makefilePath, dataDir, project, preflightProfile := newCheckProjectFlags()
-	if err := flags.Parse(args); err != nil {
+	if err := parseWithDataDir(flags, args, dataDir, ""); err != nil {
 		return err
 	}
 	if *specPath == "" && *contractPath == "" && *architecturePath == "" && *ticketPath == "" && *makefilePath == "" {

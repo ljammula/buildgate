@@ -51,7 +51,7 @@ type mcpFlags struct {
 func newMCPFlags() (flags *flag.FlagSet, f mcpFlags) {
 	flags = flag.NewFlagSet("mcp", flag.ContinueOnError)
 	f.configPath = flags.String("config", "", "session config path, which locates the token file beside it; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists. Must be the config the running 'factoryd serve' uses")
-	f.dataDir = flags.String("data-dir", "", "data directory the running 'factoryd serve' uses, to find the address it listens on; default: the session config's data_dir, else ./data")
+	f.dataDir = flags.String("data-dir", "", "data directory the running 'factoryd serve' uses, to find the address it listens on; default: the session config's data dir; with no session config, ./data")
 	f.rotate = flags.Bool("rotate", false, "replace the token; the old one stops working at once")
 	f.disable = flags.Bool("disable", false, "remove the token file, which turns the endpoint off")
 	plainFlagUsage(flags)

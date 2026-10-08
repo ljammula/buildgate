@@ -321,7 +321,7 @@ func upgradeRunning(dp *deps, profiles []profileInfo, dirs []string, now time.Ti
 	for _, dir := range dirs {
 		configPath := ""
 		for _, p := range profiles {
-			if p.Config == nil || !p.HasDataDir() || p.DataDir() != dir {
+			if p.Config == nil || p.DataDir() != dir {
 				continue
 			}
 			if configPath == "" || p.Name == active {

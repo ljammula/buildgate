@@ -539,10 +539,12 @@ The default `build_app.py` is model-backed and needs a model route
 script is rejected up front. Model-route setup (which credential, which
 session-config keys): [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-routes).
 
-Running `factoryd` from inside the workspace itself (`-workspace .`)
-needs an explicit `-data-dir <path outside -workspace>` — the default
-(`data`, inside the workspace) would get mounted into the very worker
-containment is meant to isolate from. `factoryd doctor -workspace <dir>
+A data dir inside the workspace is refused: it would be mounted into the
+very worker containment is meant to isolate from. With a session config the
+data dir is the config's and never the working directory's; with none, a run
+from inside the workspace (`-workspace .`) needs an explicit `-data-dir <path
+outside -workspace>`, since the default is then `data` in the current
+directory. `factoryd doctor -workspace <dir>
 -data-dir <dir>` catches this before a real run fails closed on it.
 
 Useful add-ons: `-sandbox-image <name@sha256:...>` (own
@@ -744,10 +746,9 @@ is `default`); keep one per model subscription. Only `*.yml` files count, so a
 | One command on another profile | `-config <name>`: a value with no path separator and no `.yml` suffix is a profile name |
 | One shell or script | `FACTORYD_PROFILE=<name>`, which beats `active-profile` |
 
-Give every profile its own absolute `data_dir`. Without it a command falls
-back to `./data` in whatever directory it runs from, so the profile names no
-fixed queue: `use` marks it `no data_dir set`, `use <name>` warns, and
-`inbox`/`stop -all` skip it, naming the file to fix.
+A profile that sets no `data_dir` uses `~/buildgate/data`, so two such
+profiles share one queue. Give a profile its own absolute `data_dir` to keep
+its requests apart.
 
 Resolution order: `-config`, then `FACTORYD_PROFILE`, then `active-profile`,
 then `~/.config/factoryd/config.yml`, then `~/.factory/config.yml`. An active
@@ -959,6 +960,7 @@ What changes for a build:
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
 | A change you installed has no effect on a request's builds | The worker was started before the install: it runs every build in its own process, with the code it started with | `factoryd doctor` warns `worker runs this factoryd`; `factoryd restart` (`make install` runs it, unless a request was building) |
+| `no request "<id>" under ...` for a request you submitted | The request was recorded in another data dir. Every command that resolves one prints `data dir: ... (source: ...)` first, and a `note:` when `data` in the current directory holds records it is not using. Usual causes: the request was submitted before the config had a `data_dir` (commands then used `data` in the directory they ran in), or with an explicit `-data-dir` | Set `data_dir:` in the session config to the folder that holds the request (the `note:` line prints it), then `factoryd restart` |
 | A build is quarantined at `canonical_verify` with `go.mod requires go >= X (running go Y; GOTOOLCHAIN=local)`, or the wrong Python runs | The repository declares a toolchain version the sandbox image lacks and no image was derived for it: `FACTORYD_AUTOSTART=0` is set, or the image does not report its versions | Unset `FACTORYD_AUTOSTART`, or build the project's image yourself; `factoryd doctor -target-repo <repo>` says which applies ([USAGE_REFERENCE.md § Project toolchains](USAGE_REFERENCE.md#project-toolchains)); then `factoryd retry <id>` |
 | A run stops at start with `sandbox image: build the image with this repository's toolchains: ...` | The image for the repository's declared Go or Python could not be built: the toolchain image did not pull, the local registry is not running, or buildgate's build scripts do not work on that Python | The message ends with the reason. A pull or registry failure: fix it (`make install` starts the registry) and `factoryd retry <id>`. A Python the scripts fail on cannot run a build |
 | A build is refused: `compose_services_worker_env ... names the service ... as a host` | The worker joins no network and resolves no service name | Read `BG_SERVICE_<NAME>` (an address) in the target repo instead |

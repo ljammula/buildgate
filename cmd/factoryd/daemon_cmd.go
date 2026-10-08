@@ -140,6 +140,9 @@ func (d *daemonRun) loadConfig() error {
 	if err := flags.Parse(d.args); err != nil {
 		return err
 	}
+	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
+		return err
+	}
 	defaultEgressCABundle(d.egressCABundle)
 	if *d.egressCABundle != "" {
 		if err := sandbox.ValidateEgressCABundle(*d.egressCABundle); err != nil {

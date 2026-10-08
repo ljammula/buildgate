@@ -1303,8 +1303,8 @@ func quickstartEnsureConfig(dp *deps, opts *quickstartOptions, p *quickstartProm
 		dataDirFromConfig := false
 		switch {
 		case opts.DataDirExplicit:
-		case existing.DataDir != nil && *existing.DataDir != "":
-			resolvedDataDir = *existing.DataDir
+		case !existing.DataDirIsDefault():
+			resolvedDataDir = existing.EffectiveDataDir()
 			dataDirFromConfig = true
 		default:
 			resolvedDataDir = sessionconfig.DefaultDataDirFor(configPath)

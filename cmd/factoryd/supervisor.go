@@ -105,7 +105,7 @@ func newSuperviseFlags() (flags *flag.FlagSet, repositories *superviseRepositori
 
 func parseSuperviseArgs(args []string) (superviseConfig, error) {
 	flags, repositoriesPtr, config := newSuperviseFlags()
-	if err := flags.Parse(args); err != nil {
+	if err := parseWithDataDir(flags, args, &config.dataDir, config.configPath); err != nil {
 		return superviseConfig{}, err
 	}
 	repositories := *repositoriesPtr

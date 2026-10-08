@@ -169,6 +169,9 @@ func killSwitchMain(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := resolveDataDirFromSessionConfig(flags, dataDir, ""); err != nil {
+		return err
+	}
 	if *project == "" {
 		flags.Usage()
 		return fmt.Errorf("-project is required")

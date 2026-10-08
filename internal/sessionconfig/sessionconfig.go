@@ -28,6 +28,7 @@ import (
 
 	"buildgate/internal/modelhost"
 	"buildgate/internal/sandbox"
+	"strings"
 )
 
 // Config is the on-disk schema. Pointer fields distinguish "absent" from
@@ -297,6 +298,37 @@ type Config struct {
 	// than a per-key bool that could silently fall out of sync with a
 	// renamed or added field.
 	presentKeys map[string]bool
+
+	// loadedFrom is the file Load read, absolute: what a relative data_dir
+	// and the default data dir are resolved against (EffectiveDataDir).
+	loadedFrom string
+}
+
+// DataDirIsDefault reports whether the file sets no data_dir, so that
+// EffectiveDataDir is the default for where the file is.
+func (c *Config) DataDirIsDefault() bool { return c.DataDir == nil || *c.DataDir == "" }
+
+// EffectiveDataDir is the one data dir this config means, absolute, and the
+// same from every working directory: a command, the worker it looks for and
+// the command that submitted the request all have to mean the same records.
+// It is data_dir when the file sets it ("~/" is the home directory, and a
+// relative value is relative to the config file, never to the caller's
+// working directory), and DefaultDataDirFor the file otherwise. DataDir
+// itself stays what the file says, so writing the config back adds nothing.
+func (c *Config) EffectiveDataDir() string {
+	if c.DataDirIsDefault() {
+		return DefaultDataDirFor(c.loadedFrom)
+	}
+	dir := *c.DataDir
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		}
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(filepath.Dir(c.loadedFrom), dir)
+	}
+	return filepath.Clean(dir)
 }
 
 // RoleConfig is one role's model/thinking choice inside a roles: block --
@@ -840,7 +872,7 @@ roles:
 registry_proxy: true
 # egress_ca_bundle: /path/to/corp-ca.pem
 # open_pull_request: true
-# data_dir: data
+# data_dir: ~/buildgate/data
 # workspaces: absolute paths POST /requests (the console's "New request"
 # form) may submit against, in addition to any workspace an existing
 # request already names. Only consulted by that HTTP route, never by
@@ -911,6 +943,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	cfg.presentKeys = presentKeys
+	cfg.loadedFrom = path
+	if abs, err := filepath.Abs(path); err == nil {
+		cfg.loadedFrom = abs
+	}
 	return &cfg, nil
 }
 

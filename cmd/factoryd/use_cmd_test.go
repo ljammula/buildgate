@@ -352,9 +352,13 @@ func TestConfigureImagesConfigAcceptsProfileName(t *testing.T) {
 	}
 }
 
-func TestProfileWithoutDataDirIsFlaggedAndSkipped(t *testing.T) {
+// A profile that sets no data_dir has one all the same: the default for a
+// profile, so `use` lists it, and stop -all, inbox and restart find it.
+func TestProfileWithoutDataDirHasTheDefaultOne(t *testing.T) {
 	dp := newTestDeps(t)
-	xdg := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	xdg := filepath.Join(home, "xdg")
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	t.Setenv(sessionconfig.ProfileEnv, "")
 	cfgDir := filepath.Join(xdg, "factoryd")
@@ -364,28 +368,29 @@ func TestProfileWithoutDataDirIsFlaggedAndSkipped(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "loose.yml"), []byte("registry_proxy: false\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	want := sessionconfig.DefaultDataDir()
 
 	var list bytes.Buffer
 	if err := useList(dp, &list); err != nil {
 		t.Fatalf("use: %v", err)
 	}
-	if !strings.Contains(list.String(), "loose") || !strings.Contains(list.String(), "no data_dir set") {
-		t.Errorf("use should flag the profile without data_dir:\n%s", list.String())
+	if !strings.Contains(list.String(), "loose") || !strings.Contains(list.String(), want) {
+		t.Errorf("use should list the profile with its default data dir %s:\n%s", want, list.String())
 	}
 
 	var sw bytes.Buffer
 	if err := useSwitch("loose", &sw); err != nil {
 		t.Fatalf("use loose: %v", err)
 	}
-	if !strings.Contains(sw.String(), "warning: profile loose: it sets no data_dir") {
-		t.Errorf("use <name> should warn about the missing data_dir:\n%s", sw.String())
+	if !strings.Contains(sw.String(), "data dir: "+want) || strings.Contains(sw.String(), "warning") {
+		t.Errorf("use <name> should name the default data dir and warn of nothing:\n%s", sw.String())
 	}
 
 	profiles, err := loadProfiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dirs, _ := distinctDataDirs(profiles); len(dirs) != 0 {
-		t.Errorf("a profile without data_dir must not contribute a data dir, got %v", dirs)
+	if dirs, _ := distinctDataDirs(profiles); len(dirs) != 1 || dirs[0] != want {
+		t.Errorf("data dirs = %v, want the default %s", dirs, want)
 	}
 }

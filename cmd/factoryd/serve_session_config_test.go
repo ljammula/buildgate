@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"buildgate/internal/sessionconfig"
 )
 
 // newDataDirFlagSet builds the minimal flag.FlagSet resolveDataDirFromSessionConfig
@@ -83,11 +85,11 @@ func TestApplySessionConfigDataDirExplicitFlagWins(t *testing.T) {
 	}
 }
 
-// TestApplySessionConfigDataDirIgnoresConfigWithNoDataDirKey proves a
-// session config file that exists (e.g. written for worker's own
-// sandbox/relay settings) but never sets data_dir leaves serve's own
-// default untouched, rather than erroring or zeroing it out.
-func TestApplySessionConfigDataDirIgnoresConfigWithNoDataDirKey(t *testing.T) {
+// TestSessionConfigWithNoDataDirKeyMeansOneFixedDataDir: a session config
+// that never sets data_dir gives every command the same absolute data dir,
+// whatever directory the command runs in. The relative "data" default is
+// left for a machine with no session config at all.
+func TestSessionConfigWithNoDataDirKeyMeansOneFixedDataDir(t *testing.T) {
 	configPath := isolateSessionConfig(t)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
 		t.Fatalf("create config dir: %v", err)
@@ -95,15 +97,34 @@ func TestApplySessionConfigDataDirIgnoresConfigWithNoDataDirKey(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("sandbox_image: localhost:5050/worker@sha256:abc\n"), 0o600); err != nil {
 		t.Fatalf("write session config: %v", err)
 	}
-
-	flags, dataDir := newDataDirFlagSet()
-	if err := flags.Parse(nil); err != nil {
-		t.Fatalf("parse flags: %v", err)
+	resolve := func(args ...string) string {
+		t.Helper()
+		flags, dataDir := newDataDirFlagSet()
+		if err := flags.Parse(args); err != nil {
+			t.Fatalf("parse flags: %v", err)
+		}
+		if err := resolveDataDirFromSessionConfig(flags, dataDir, ""); err != nil {
+			t.Fatalf("resolveDataDirFromSessionConfig: %v", err)
+		}
+		return *dataDir
 	}
-	if err := resolveDataDirFromSessionConfig(flags, dataDir, ""); err != nil {
-		t.Fatalf("applySessionConfigDataDir: %v", err)
+	want := sessionconfig.DefaultDataDir()
+	if got := resolve(); got != want || !filepath.IsAbs(got) {
+		t.Fatalf("dataDir = %q, want the profile default %q", got, want)
 	}
-	if *dataDir != "data" {
-		t.Errorf("dataDir = %q, want default %q", *dataDir, "data")
+	// From another directory: the same records.
+	t.Chdir(t.TempDir())
+	if got := resolve(); got != want {
+		t.Errorf("from another directory dataDir = %q, want %q", got, want)
+	}
+	// An explicit flag still wins, and no config at all keeps the flag's default.
+	if got := resolve("-data-dir", "/elsewhere"); got != "/elsewhere" {
+		t.Errorf("explicit -data-dir = %q", got)
+	}
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolve(); got != "data" {
+		t.Errorf("with no session config dataDir = %q, want the flag default", got)
 	}
 }

@@ -1,6 +1,6 @@
 package main
 
-// TestIntegrationDefaultDataDirInsideWorkspaceFailsClosedWithClearMessage is
+// TestIntegrationRelativeDataDirInsideWorkspaceFailsClosedWithClearMessage is
 // the regression test for a real finding from a GitHub Codex App review of
 // PR #51: -data-dir's own default ("data", resolved relative to the
 // invoking process's working directory, not to -workspace) lands inside
@@ -32,7 +32,7 @@ import (
 	"testing"
 )
 
-func TestIntegrationDefaultDataDirInsideWorkspaceFailsClosedWithClearMessage(t *testing.T) {
+func TestIntegrationRelativeDataDirInsideWorkspaceFailsClosedWithClearMessage(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
@@ -47,6 +47,7 @@ func TestIntegrationDefaultDataDirInsideWorkspaceFailsClosedWithClearMessage(t *
 	cmd := factorydCommand(t,
 		"-ticket", "fixture-ticket",
 		"-workspace", ".",
+		"-data-dir", "data",
 		"-spec", specPath,
 		"-build-app-script", "/bin/true",
 	)
@@ -55,7 +56,7 @@ func TestIntegrationDefaultDataDirInsideWorkspaceFailsClosedWithClearMessage(t *
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, "sandbox_docker: "+fakeDocker+"\nsandbox_image: "+fakeSandboxImage+"\n")...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected a nonzero exit for a default -data-dir landing inside -workspace, got success: %s", out)
+		t.Fatalf("expected a nonzero exit for a relative -data-dir landing inside -workspace, got success: %s", out)
 	}
 	if !strings.Contains(string(out), "is inside -workspace") {
 		t.Fatalf("output = %q, want it to name the -data-dir/-workspace conflict", out)

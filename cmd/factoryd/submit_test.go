@@ -498,15 +498,16 @@ func TestSubmitMainRejectsWorkspaceThatIsAFile(t *testing.T) {
 }
 
 // TestSubmitMainRefusesDataDirInsideWorkspace pins issue #157 Problem 2:
-// submitting with cwd inside the workspace and no explicit -data-dir uses
-// the literal "data" default, which then resolves under the workspace
-// itself. A queue entry submitted there is unrecoverable the moment a
+// submitting with cwd inside the workspace, no session config and no explicit
+// -data-dir uses the literal "data" default, which then resolves under the
+// workspace itself (a session config always names a data dir outside it). A queue entry submitted there is unrecoverable the moment a
 // later worker refuses to drain it (run_ticket.go's dataDirInsideWorkspace
 // guard fires unconditionally on this condition), so submit must refuse
 // this up front instead, mirroring that same guard rather than a warning
 // easy to miss in submit's terse output.
 func TestSubmitMainRefusesDataDirInsideWorkspace(t *testing.T) {
 	dp := newTestDeps(t)
+	isolateSessionConfig(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make verify"
 `)

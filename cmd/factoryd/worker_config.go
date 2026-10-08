@@ -518,7 +518,7 @@ func applySessionConfig(flags *flag.FlagSet, configPath string) (sessionconfig.S
 		return flags.Set("pr-trusted-authors", strings.Join(cfg.PRTrustedAuthors, ","))
 	}
 	for name, err := range map[string]error{
-		"data-dir":                 strFlag("data-dir", cfg.DataDir),
+		"data-dir":                 applyDataDirFlag(flags, set, cfg),
 		"sandbox-image":            strFlag("sandbox-image", cfg.SandboxImage),
 		"registry-proxy-image":     strFlag("registry-proxy-image", cfg.RegistryProxyImage),
 		"egress-ca-bundle":         strFlag("egress-ca-bundle", cfg.EgressCABundle),
@@ -551,11 +551,7 @@ func applySessionConfig(flags *flag.FlagSet, configPath string) (sessionconfig.S
 	if dataDirFlag := flags.Lookup("data-dir"); dataDirFlag != nil {
 		source := "-data-dir"
 		if !set["data-dir"] {
-			if cfg.DataDir != nil {
-				source = fmt.Sprintf("session config %s", foundPath)
-			} else {
-				source = "default"
-			}
+			source = dataDirSource(cfg, foundPath)
 		}
 		log.Printf("data dir: %q (source: %s)", dataDirFlag.Value.String(), source)
 	}
@@ -730,4 +726,23 @@ var workerExecutionFlags = map[string]bool{
 	"registry-proxy":       true,
 	"registry-proxy-image": true,
 	"compose-services":     true,
+}
+
+// applyDataDirFlag sets -data-dir to the session config's data dir
+// (Config.EffectiveDataDir, which every config has) unless the command line
+// named one; a flag set without -data-dir takes nothing.
+func applyDataDirFlag(flags *flag.FlagSet, set map[string]bool, cfg *sessionconfig.Config) error {
+	if set["data-dir"] || flags.Lookup("data-dir") == nil {
+		return nil
+	}
+	return flags.Set("data-dir", cfg.EffectiveDataDir())
+}
+
+// dataDirSource says where a data dir taken from the session config at path
+// came from: its data_dir, or the default for a config that sets none.
+func dataDirSource(cfg *sessionconfig.Config, path string) string {
+	if cfg.DataDirIsDefault() {
+		return fmt.Sprintf("the default for session config %s, which sets no data_dir", path)
+	}
+	return fmt.Sprintf("session config %s", path)
 }
