@@ -761,7 +761,7 @@ project-sandbox-image: .local-registry
 	toolchain_build_args=""; \
 	for arg in $$toolchain_args; do toolchain_build_args="$$toolchain_build_args --build-arg $$arg"; done; \
 	case "$$toolchain_args" in *PYTHON_MODE=replace*) \
-	  scripts/stage-agent-tests.sh "$$stage/.buildgate-agent" ;; \
+	  go run ./cmd/factoryd stage-agent-tests "$$stage/.buildgate-agent" ;; \
 	esac; \
 	docker build $${ca_bundle:+--secret "id=build-ca,src=$$ca_bundle"} -f internal/sandbox/Dockerfile.project \
 	  --build-arg BASE_IMAGE=$(BASE_IMAGE) $$toolchain_build_args \

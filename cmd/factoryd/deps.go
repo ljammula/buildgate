@@ -67,6 +67,9 @@ type dockerBoundary interface {
 	imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
 	initChecks(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImage(repoRoot string, target string, vars ...string) (string, error)
+	// toolchainImage builds, or finds already built, the image that is base
+	// with the toolchains buildArgs name, and returns it by digest.
+	toolchainImage(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
 	workerChecks(ctx context.Context, in doctorInputs) []doctorCheck
 }
 

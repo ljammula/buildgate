@@ -121,7 +121,12 @@ RUN cd /tmp/buildgate-agent/agent/pi; \
     grep -E '^Ran ' /tmp/buildgate-agent-tests.log; \
     rm -rf /tmp/buildgate-agent /tmp/buildgate-agent-tests.log
 
-FROM python-${PYTHON_MODE}
+# The base image with the project's toolchains and nothing of the project
+# itself: what factoryd builds on its own for a build (--target toolchains).
+FROM python-${PYTHON_MODE} AS toolchains
+USER 65532:65532
+
+FROM toolchains
 USER root
 
 ENV npm_config_cache=/usr/local/npm-cache

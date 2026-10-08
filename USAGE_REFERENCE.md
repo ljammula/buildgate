@@ -1463,33 +1463,50 @@ values a run will use).
 ### Project toolchains
 
 A build has no network and downloads no toolchain (`GOTOOLCHAIN=local`), so it
-has the versions in its sandbox image and no others. A project that declares
-another version gets its own image.
+has the versions in its sandbox image and no others. When a repository
+declares a Go or Python version the configured image lacks, the build derives
+an image that has it and runs in that. Nothing is configured.
 
-| Tool | Read from, at the top of the repository | The image satisfies it when | `make project-sandbox-image` |
+| Tool | Read from, at the top of the repository | The image satisfies it when | When it does not |
 |---|---|---|---|
-| Go | `go.mod`: the `go` line, and the `toolchain` line when it is newer | Its Go is at least the `go` line | Installs that version from the official `golang` image |
-| Python | `.python-version`, else `requires-python` in `pyproject.toml` | Its Python matches the numbers `.python-version` states, or meets every `requires-python` clause | Installs that version from the official `python` image built on the base image's distribution; `python3`, `python` and `pip` become it |
-| Node | `.nvmrc`, else `.node-version` | Its Node matches the numbers stated | Not installed: the coding agents run on the image's Node. The build prints a warning |
+| Go | `go.mod`: the `go` line, and the `toolchain` line when it is newer | Its Go is at least the `go` line | That version is installed from the official `golang` image |
+| Python | `.python-version`, else `requires-python` in `pyproject.toml` | Its Python matches the numbers `.python-version` states, or meets every `requires-python` clause | That version is installed from the official `python` image built on the configured image's distribution; `python3`, `python` and `pip` become it |
+| Node | `.nvmrc`, else `.node-version` | Its Node matches the numbers stated | Nothing is installed: the coding agents run on the image's Node. The run and `submit` print a warning |
 
 ```text
-factoryd doctor -target-repo <repo>      one row per declaration; FAIL with the command below
+a build starts (worker, or a single-ticket run)
         |
         v
-make project-sandbox-image PROJECT_DIR=<repo> BASE_IMAGE=<worker ref>
-        |   installs the declared Go and Python, bakes the dependencies,
-        |   prints localhost:5050/project-worker@sha256:<digest>
+read the repository's declarations --- none, or the configured image has them ---> configured image
+        |
+        | a Go or Python it lacks
         v
-factoryd configure-images -sandbox-image <that ref>     (-config <profile> for one project's profile)
+already derived for this image and these versions? --- yes ---> that image
+        |
+        | no: build it (official toolchain image over the configured one),
+        |     push it to the local registry          [a minute or two, once]
+        v
+the build runs in localhost:5050/buildgate-toolchain@sha256:<digest>
 ```
 
 | Fact | Detail |
 |---|---|
-| Where a mismatch is named | `factoryd doctor -target-repo <repo>` (FAIL for Go and Python, a warning for Node) and a `warning:` line from `submit` and `quickstart`. Neither refuses a request |
-| One image per profile | `sandbox_image` is a session-config key, so a project with its own toolchain gets its own profile. `.factory.yml` cannot name an image |
-| Python and buildgate's own scripts | The build scripts run on the worker's `python3`. When the image build replaces it, it runs those scripts' test suite on the project's interpreter and fails if they do not pass, so an interpreter they cannot run on never reaches a build. Build the image again after upgrading buildgate |
-| A declaration with no version to install | An upper bound alone (`requires-python = "<3.12"`) fails the image build, naming it; add `.python-version` |
+| What you see | `sandbox image: installing Go 1.27: go.mod declares "go 1.27" and the sandbox image has go 1.26.8`, then the derived image's reference, in the run's log |
+| What goes into the derived image | The configured image and the official toolchain image. No file of the repository, and none of its code runs to build it. Its dependencies come through the registry proxy during the build, or from `make project-sandbox-image` below |
+| Python and buildgate's own scripts | The build scripts run on the worker's `python3`. Deriving an image with another Python runs those scripts' test suite on it first and refuses the run if they fail |
+| Checking ahead | `factoryd doctor -target-repo <repo>`: one row per declaration, saying what a build will do |
+| Turning it off | `FACTORYD_AUTOSTART=0`: the configured image is used as it is, `doctor -target-repo` fails the row and `submit` warns |
+| A declaration with no version to install | An upper bound alone (`requires-python = "<3.12"`) refuses the run, naming it; add `.python-version` |
 | An alias | `lts/*`, `system` and other names with no number are not compared |
+| Not covered | Acceptance-test drafting (`-draft-oracles`) runs in the configured image |
+| Removing them | `factoryd uninstall` removes every `localhost:5050/buildgate-toolchain` image |
+
+`make project-sandbox-image PROJECT_DIR=<repo> BASE_IMAGE=<worker ref>` builds
+the same toolchains into an image that also carries the project's
+dependencies (Go modules, npm packages, pip packages), for a build that must
+not fetch them. It prints a reference to set with `factoryd configure-images
+-sandbox-image <ref>`; `sandbox_image` is per profile, and `.factory.yml`
+cannot name an image.
 
 Single-ticket run example (the model route itself comes from session config's
 `routes:`/`models:`/`roles:`, not a flag -- see Model routes above):

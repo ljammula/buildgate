@@ -24,6 +24,7 @@ type fakeDocker struct {
 	imageToolsFn   func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
 	initChecksFn   func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImageFn    func(repoRoot string, target string, vars ...string) (string, error)
+	toolImageFn    func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
 	workerChecksFn func(ctx context.Context, in doctorInputs) []doctorCheck
 }
 
@@ -37,6 +38,9 @@ func (f *fakeDocker) initChecks(ctx context.Context, dockerBinary string, image 
 }
 func (f *fakeDocker) makeImage(repoRoot string, target string, vars ...string) (string, error) {
 	return f.makeImageFn(repoRoot, target, vars...)
+}
+func (f *fakeDocker) toolchainImage(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error) {
+	return f.toolImageFn(ctx, dockerBinary, base, buildArgs)
 }
 func (f *fakeDocker) workerChecks(ctx context.Context, in doctorInputs) []doctorCheck {
 	return f.workerChecksFn(ctx, in)
@@ -236,8 +240,11 @@ func newTestDeps(t testing.TB) *deps {
 		imageToolsFn: func(context.Context, string, string) (toolchain.Installed, string, error) {
 			return nil, "", errors.New("test docker: no image is run")
 		},
-		initChecksFn:   realDocker.initChecks,
-		makeImageFn:    realDocker.makeImage,
+		initChecksFn: realDocker.initChecks,
+		makeImageFn:  realDocker.makeImage,
+		toolImageFn: func(context.Context, string, string, []string) (string, error) {
+			return "", errors.New("test docker: no image is built")
+		},
 		workerChecksFn: realDocker.workerChecks,
 	}
 	realForge := realForge{dp: dp}
