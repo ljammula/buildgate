@@ -158,6 +158,7 @@ type submitResult struct {
 // implementation POST /requests (internal/api) also calls, so the two
 // entry points cannot drift apart on what counts as a legal submission.
 func submitRequest(dp *deps, ctx context.Context, p submitParams) (submitResult, error) {
+	warnProjectToolchains(dp, ctx, os.Stderr, p.workspaceArg, p.settings)
 	importedSpec, trailingText, err := resolveSubmitSpecFile(p)
 	if err != nil {
 		return submitResult{}, err

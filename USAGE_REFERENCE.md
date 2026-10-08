@@ -1457,7 +1457,39 @@ values a run will use).
 | Writing a ticket by hand | `factoryd ticket-template [-o <path>]` for a skeleton; `factoryd check-ticket <path>` to validate the header lines. Point `-spec` at it. `-ticket-file` is a separate from-scratch format; leave it unset. Both run paths refuse a malformed or near-miss header (`Verify-command:`, `Allowed_Files:`) (`TestPreflightRefusesNearMissTicketHeader`). |
 | Module root is a subdirectory | Point `PROJECT_DIR` (for `make project-sandbox-image`) and `-verify-command` at it. `doctor -workspace <repo>` warns when it finds the manifest one level down (`TestDoctorCheckMonorepoModuleRoot`). |
 | Need a worker image | `make sandbox-image` builds one locally (every image is built from source, never pulled); pass its printed ref as `BASE_IMAGE` to `make project-sandbox-image`. |
+| The project needs another Go or Python version | `make project-sandbox-image` installs it: see Project toolchains below. |
 | Model host only on Tailscale | Use the Tailscale IP or full `*.ts.net` FQDN for the route's own `upstream`; the container may not share the host's resolver. `doctor` resolves the host from inside a sandbox container and fails with `container DNS cannot resolve ...` (`TestDoctorCheckRelayUpstreamHostResolvesInSandbox`). |
+
+### Project toolchains
+
+A build has no network and downloads no toolchain (`GOTOOLCHAIN=local`), so it
+has the versions in its sandbox image and no others. A project that declares
+another version gets its own image.
+
+| Tool | Read from, at the top of the repository | The image satisfies it when | `make project-sandbox-image` |
+|---|---|---|---|
+| Go | `go.mod`: the `go` line, and the `toolchain` line when it is newer | Its Go is at least the `go` line | Installs that version from the official `golang` image |
+| Python | `.python-version`, else `requires-python` in `pyproject.toml` | Its Python matches the numbers `.python-version` states, or meets every `requires-python` clause | Installs that version from the official `python` image built on the base image's distribution; `python3`, `python` and `pip` become it |
+| Node | `.nvmrc`, else `.node-version` | Its Node matches the numbers stated | Not installed: the coding agents run on the image's Node. The build prints a warning |
+
+```text
+factoryd doctor -target-repo <repo>      one row per declaration; FAIL with the command below
+        |
+        v
+make project-sandbox-image PROJECT_DIR=<repo> BASE_IMAGE=<worker ref>
+        |   installs the declared Go and Python, bakes the dependencies,
+        |   prints localhost:5050/project-worker@sha256:<digest>
+        v
+factoryd configure-images -sandbox-image <that ref>     (-config <profile> for one project's profile)
+```
+
+| Fact | Detail |
+|---|---|
+| Where a mismatch is named | `factoryd doctor -target-repo <repo>` (FAIL for Go and Python, a warning for Node) and a `warning:` line from `submit` and `quickstart`. Neither refuses a request |
+| One image per profile | `sandbox_image` is a session-config key, so a project with its own toolchain gets its own profile. `.factory.yml` cannot name an image |
+| Python and buildgate's own scripts | The build scripts run on the worker's `python3`. When the image build replaces it, it runs those scripts' test suite on the project's interpreter and fails if they do not pass, so an interpreter they cannot run on never reaches a build. Build the image again after upgrading buildgate |
+| A declaration with no version to install | An upper bound alone (`requires-python = "<3.12"`) fails the image build, naming it; add `.python-version` |
+| An alias | `lts/*`, `system` and other names with no number are not compared |
 
 Single-ticket run example (the model route itself comes from session config's
 `routes:`/`models:`/`roles:`, not a flag -- see Model routes above):

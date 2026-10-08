@@ -5,6 +5,7 @@ import (
 	"buildgate/internal/openshell"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/toolchain"
 	"context"
 	"crypto/x509"
 	"io"
@@ -61,6 +62,9 @@ func newDeps() *deps {
 type dockerBoundary interface {
 	colimaBinary() string
 	dockerBinary() string
+	// imageToolchains runs image once and reads the versions of its Go,
+	// Python and Node, and its distribution codename.
+	imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
 	initChecks(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImage(repoRoot string, target string, vars ...string) (string, error)
 	workerChecks(ctx context.Context, in doctorInputs) []doctorCheck

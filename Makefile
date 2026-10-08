@@ -757,8 +757,14 @@ project-sandbox-image: .local-registry
 	fi; \
 	ca_bundle="$(BUILD_CA_BUNDLE)"; \
 	if [ -n "$$ca_bundle" ] && [ ! -f "$$ca_bundle" ]; then echo "$$ca_bundle is not a readable CA bundle" >&2; exit 1; fi; \
+	toolchain_args="$$(go run ./cmd/factoryd project-image-args -project-dir "$(PROJECT_DIR)" -base-image "$(BASE_IMAGE)")"; \
+	toolchain_build_args=""; \
+	for arg in $$toolchain_args; do toolchain_build_args="$$toolchain_build_args --build-arg $$arg"; done; \
+	case "$$toolchain_args" in *PYTHON_MODE=replace*) \
+	  scripts/stage-agent-tests.sh "$$stage/.buildgate-agent" ;; \
+	esac; \
 	docker build $${ca_bundle:+--secret "id=build-ca,src=$$ca_bundle"} -f internal/sandbox/Dockerfile.project \
-	  --build-arg BASE_IMAGE=$(BASE_IMAGE) \
+	  --build-arg BASE_IMAGE=$(BASE_IMAGE) $$toolchain_build_args \
 	  --label buildgate.image=project \
 	  -t localhost:5050/project-worker:local "$$stage"; \
 	push_output="$$(docker push localhost:5050/project-worker:local)"; \

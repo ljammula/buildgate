@@ -505,7 +505,9 @@ configure-images`) or a run is refused before any container launches. A
 target project needing a dependency the worker image doesn't bake (no
 package-registry network in the sandbox): `make project-sandbox-image
 PROJECT_DIR=<path> BASE_IMAGE=<worker ref>` (bakes a project-specific
-image) or `-registry-proxy` (a per-run caching proxy, default-on with the
+image, with the Go and Python versions the project declares:
+[USAGE_REFERENCE.md § Project toolchains](USAGE_REFERENCE.md#project-toolchains))
+or `-registry-proxy` (a per-run caching proxy, default-on with the
 default model-backed build). A `docker-compose.yml` service
 dependency (Postgres, Kafka): `-compose-services` (default-on) launches
 its services as sidecars the worker reaches via `BG_SERVICE_<NAME>` env
@@ -955,6 +957,7 @@ What changes for a build:
 | A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
+| A build is quarantined at `canonical_verify` with `go.mod requires go >= X (running go Y; GOTOOLCHAIN=local)`, or the wrong Python runs | The project declares a toolchain version the sandbox image does not have, and the sandbox downloads none | `factoryd doctor -target-repo <repo>` prints the `make project-sandbox-image` command that builds the project's image with that version; set it with `factoryd configure-images -sandbox-image <ref>`, then `factoryd retry <id>` |
 | A build is refused: `compose_services_worker_env ... names the service ... as a host` | The worker joins no network and resolves no service name | Read `BG_SERVICE_<NAME>` (an address) in the target repo instead |
 
 Per-command flags, session-config keys, model-route setup, `.factory.yml`
