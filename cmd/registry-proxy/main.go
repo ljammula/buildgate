@@ -85,6 +85,38 @@ func (f *routeFlag) Set(value string) error {
 	return nil
 }
 
+// localDirFlag accumulates repeated -local-dir flags, "prefix=directory":
+// the directory whose files answer the route with that prefix first
+// (registryproxy.Route.LocalDir).
+type localDirFlag map[string]string
+
+func (f localDirFlag) String() string { return "" }
+
+func (f localDirFlag) Set(value string) error {
+	prefix, dir, ok := strings.Cut(value, "=")
+	if !ok || prefix == "" || dir == "" {
+		return fmt.Errorf("local dir %q must be \"prefix=directory\"", value)
+	}
+	f[prefix] = dir
+	return nil
+}
+
+// apply sets each directory on its route; a prefix no route has is refused.
+func (f localDirFlag) apply(routes []registryproxy.Route) error {
+	for prefix, dir := range f {
+		found := false
+		for i := range routes {
+			if routes[i].Prefix == prefix {
+				routes[i].LocalDir, found = dir, true
+			}
+		}
+		if !found {
+			return fmt.Errorf("-local-dir %s=%s names a prefix no -route has", prefix, dir)
+		}
+	}
+	return nil
+}
+
 func realMain(args []string) error {
 	flags := flag.NewFlagSet("registry-proxy", flag.ContinueOnError)
 	addr := flags.String("addr", ":8092", "HTTP listen address")
@@ -95,7 +127,12 @@ func realMain(args []string) error {
 	upstreamTimeout := flags.Duration("upstream-timeout", 60*time.Second, "maximum duration of one upstream request")
 	var routes routeFlag
 	flags.Var(&routes, "route", `repeatable: "prefix=upstream[,allowed-host,...]", e.g. "/npm/=https://registry.npmjs.org"`)
+	localDirs := localDirFlag{}
+	flags.Var(&localDirs, "local-dir", `repeatable: "prefix=directory": files under directory answer that route's requests before its upstream is asked`)
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if err := localDirs.apply(routes.routes); err != nil {
 		return err
 	}
 	if len(routes.routes) == 0 {

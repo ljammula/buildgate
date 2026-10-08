@@ -2,9 +2,11 @@ package registryproxy
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -384,5 +386,79 @@ func TestNewServerRejectsBadConfig(t *testing.T) {
 		if _, err := NewServer(c.config); err == nil {
 			t.Errorf("%s: expected error, got nil", c.name)
 		}
+	}
+}
+
+// A route with a LocalDir answers from it for the files it holds, never
+// asking the upstream for those, and still proxies everything else.
+func TestLocalDirAnswersBeforeTheUpstream(t *testing.T) {
+	var upstreamPaths []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPaths = append(upstreamPaths, r.URL.Path)
+		if strings.Contains(r.URL.Path, "private") {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, "from upstream")
+	}))
+	defer upstream.Close()
+	local := t.TempDir()
+	module := filepath.Join(local, "example.com", "private", "mod", "@v")
+	if err := os.MkdirAll(module, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(module, "v1.2.3.mod"), []byte("module example.com/private/mod\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("outside the directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(module, "v9.9.9.mod")); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(Config{
+		Routes:                []Route{{Prefix: "/gomodproxy/", Upstream: mustURL(t, upstream.URL), LocalDir: local}},
+		CacheDir:              filepath.Join(t.TempDir(), "cache"),
+		MaxCacheBytes:         1 << 20,
+		MaxObjectBytes:        1 << 18,
+		MaxConcurrentUpstream: 4,
+		UpstreamTimeout:       5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	get := func(path string) (int, string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec.Code, rec.Body.String()
+	}
+	if code, body := get("/gomodproxy/example.com/private/mod/@v/v1.2.3.mod"); code != http.StatusOK || body != "module example.com/private/mod\n" {
+		t.Errorf("a file the directory holds: %d %q", code, body)
+	}
+	if len(upstreamPaths) != 0 {
+		t.Errorf("the upstream was asked for a file the directory holds: %v", upstreamPaths)
+	}
+	if code, body := get("/gomodproxy/example.com/public/mod/@v/v1.0.0.mod"); code != http.StatusOK || body != "from upstream" {
+		t.Errorf("a file the directory lacks: %d %q, want the upstream's", code, body)
+	}
+	// Nothing else about a module the directory holds is asked of the
+	// upstream: its version list, its latest version, a version the
+	// directory lacks, and a symlink out of the directory (never followed)
+	// are a 404 from here, so a private module's name stays here.
+	asked := len(upstreamPaths)
+	for _, path := range []string{
+		"/gomodproxy/example.com/private/mod/@v/list",
+		"/gomodproxy/example.com/private/mod/@latest",
+		"/gomodproxy/example.com/private/mod/@v/v2.0.0.zip",
+		"/gomodproxy/example.com/private/mod/@v/v9.9.9.mod",
+	} {
+		if code, body := get(path); code != http.StatusNotFound || strings.Contains(body, "outside") {
+			t.Errorf("%s: %d %q, want a 404 from the proxy itself", path, code, body)
+		}
+	}
+	if len(upstreamPaths) != asked {
+		t.Errorf("the upstream was asked about a module the directory holds: %v", upstreamPaths[asked:])
 	}
 }

@@ -307,6 +307,12 @@ func (a *Activities) registryProxySpecFor(input RunWorkflowInput) (*sandbox.Regi
 	}
 	spec := input.RegistryProxyPolicy.Spec(a.runIDFor(input), a.dataDirFor(input))
 	spec.CABundlePath = a.EgressCABundlePath
+	// A directory that is gone (the operator cleared the module cache
+	// mid-run) is left out: the build then fails on the module it needed,
+	// not on the proxy's configuration.
+	if info, err := os.Stat(input.GoModuleDir); input.GoModuleDir != "" && err == nil && info.IsDir() {
+		spec.GoModuleDir = input.GoModuleDir
+	}
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("registry proxy configuration: %w", err)
 	}

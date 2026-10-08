@@ -364,6 +364,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		SandboxUser:                      o.SandboxUser,
 		RoutePolicy:                      o.Relay.Policy,
 		RegistryProxyPolicy:              o.RegistryProxyPolicy,
+		GoModuleDir:                      o.GoModuleDir,
 		ComposeServicesEnabled:           o.ComposeServices.Enabled,
 		ComposeServicesMemory:            o.ComposeServices.Memory,
 		ComposeServicesCPUs:              o.ComposeServices.CPUs,

@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"buildgate/internal/run"
+	"os"
+	"path/filepath"
+
+	"buildgate/internal/sanitize"
 )
 
 // See internal/registryproxy's own package doc comment for the full design.
@@ -247,6 +251,29 @@ type RegistryProxySpec struct {
 	// own doc comment (this mirrors it exactly: a host-side, per-Worker
 	// fact, never carried on RegistryProxyPolicy or in Workflow input).
 	CABundlePath string
+	// GoModuleDir, when set, is a host directory holding the modules the
+	// run's repository lists in go.sum, laid out as the Go module proxy
+	// protocol's paths (a GOMODCACHE's cache/download). It is bind-mounted
+	// read-only into the proxy container, which answers the Go route from
+	// it before asking the public proxy: a module only the operator can
+	// fetch reaches a build this way, fetched on the host with the
+	// operator's own credentials, which enter no container. Like
+	// CABundlePath, a host-side fact of the Worker, never in Workflow input.
+	GoModuleDir string
+}
+
+// GoModuleContainerDir is where GoModuleDir is mounted in the proxy container.
+const GoModuleContainerDir = "/gomodules"
+
+// ServesGoModules reports whether the policy has the Go module route: only
+// then does a Go module directory have anything to answer.
+func (p RegistryProxyPolicy) ServesGoModules() bool {
+	for _, route := range p.Routes {
+		if route.Prefix == goProxyRoutePrefix {
+			return true
+		}
+	}
+	return false
 }
 
 // Spec assembles a launchable RegistryProxySpec, mirroring RoutePolicy.Spec.
@@ -285,6 +312,14 @@ func (s RegistryProxySpec) Validate() error {
 	if s.CABundlePath != "" {
 		if err := ValidateEgressCABundle(s.CABundlePath); err != nil {
 			return err
+		}
+	}
+	if s.GoModuleDir != "" {
+		if !filepath.IsAbs(s.GoModuleDir) || strings.ContainsAny(s.GoModuleDir, "\x00\r\n\t:") {
+			return errors.New("registry proxy Go module directory must be an absolute path with no colon or control character")
+		}
+		if info, err := os.Stat(s.GoModuleDir); err != nil || !info.IsDir() {
+			return fmt.Errorf("registry proxy Go module directory %s is not a directory", s.GoModuleDir)
 		}
 	}
 	return nil
@@ -355,6 +390,9 @@ func LaunchRegistryProxy(ctx context.Context, dockerBinary string, spec Registry
 	}
 	if dockerBinary == "" {
 		dockerBinary = "docker"
+	}
+	if err := registryProxyKnowsLocalDir(ctx, dockerBinary, spec); err != nil {
+		return nil, err
 	}
 	if err := ensureRegistryProxyEgressNetwork(ctx, dockerBinary); err != nil {
 		return nil, fmt.Errorf("ensure registry proxy egress network: %w", err)
@@ -446,6 +484,7 @@ func LaunchRegistryProxy(ctx context.Context, dockerBinary string, spec Registry
 	}
 	containerArgs = append(containerArgs, "--tmpfs", fmt.Sprintf("/cache:rw,noexec,nosuid,size=%dm", cacheMiB))
 	containerArgs = append(containerArgs, egressCABundleDockerArgs(caBundlePath)...)
+	containerArgs = append(containerArgs, goModuleVolumeArgs(spec)...)
 
 	containerArgs = append(containerArgs,
 		spec.Image,
@@ -463,6 +502,7 @@ func LaunchRegistryProxy(ctx context.Context, dockerBinary string, spec Registry
 			routeArg += "," + strings.Join(route.AllowedHosts, ",")
 		}
 		containerArgs = append(containerArgs, "-route", routeArg)
+		containerArgs = append(containerArgs, goModuleRouteArgs(spec, route)...)
 		if u, err := url.Parse(route.Upstream); err == nil {
 			hosts = append(hosts, u.Host)
 		}
@@ -488,10 +528,10 @@ func LaunchRegistryProxy(ctx context.Context, dockerBinary string, spec Registry
 	_, err = runRelayDocker(ctx, dockerBinary, "connect registry proxy network",
 		"network", "connect", "--alias", registryProxyWorkerHost, networkName, containerName)
 	if err != nil {
-		return nil, errors.Join(err, handle.cleanup(ctx))
+		return nil, errors.Join(registryProxyStartError(ctx, dockerBinary, containerName, err), handle.cleanup(ctx))
 	}
 	if err := confirmRelayRunning(ctx, dockerBinary, containerName); err != nil {
-		return nil, errors.Join(err, handle.cleanup(ctx))
+		return nil, errors.Join(registryProxyStartError(ctx, dockerBinary, containerName, err), handle.cleanup(ctx))
 	}
 	if err := waitRegistryProxyListening(ctx, dockerBinary, containerName); err != nil {
 		return nil, errors.Join(err, handle.cleanup(ctx))
@@ -620,6 +660,66 @@ func ensureRegistryProxyEgressNetwork(ctx context.Context, dockerBinary string) 
 // shell-free readiness signal.
 const registryProxyListeningLogLine = "serving registry proxy on"
 
+// goModuleVolumeArgs mounts spec's Go module directory, when it has one,
+// read-only into the proxy container.
+func goModuleVolumeArgs(spec RegistryProxySpec) []string {
+	if spec.GoModuleDir == "" {
+		return nil
+	}
+	return []string{"--volume", spec.GoModuleDir + ":" + GoModuleContainerDir + ":ro"}
+}
+
+// goModuleRouteArgs tells the proxy to answer the Go route from that mount.
+func goModuleRouteArgs(spec RegistryProxySpec, route RegistryProxyRoute) []string {
+	if spec.GoModuleDir == "" || route.Prefix != goProxyRoutePrefix {
+		return nil
+	}
+	return []string{"-local-dir", route.Prefix + "=" + GoModuleContainerDir}
+}
+
+// registryProxyKnowsLocalDir refuses a launch that needs the proxy's
+// -local-dir option with an image that lacks it: an image built from an older
+// checkout than this factoryd would exit on the option and be removed before
+// its log could say why. The image is asked for its own usage text; anything
+// but that text (a failed probe) leaves the launch to find out.
+func registryProxyKnowsLocalDir(ctx context.Context, dockerBinary string, spec RegistryProxySpec) error {
+	if spec.GoModuleDir == "" {
+		return nil
+	}
+	boundedCtx, cancel := context.WithTimeout(ctx, relayDockerCommandTimeout)
+	defer cancel()
+	out, _ := exec.CommandContext(boundedCtx, dockerBinary, "run", "--rm", "--network", "none", "--read-only", "--cap-drop=ALL", spec.Image, "-help").CombinedOutput()
+	usage := string(out)
+	if strings.Contains(usage, "-max-cache-bytes") && !strings.Contains(usage, "-local-dir") {
+		return errors.New("the registry proxy image is older than this factoryd (it cannot serve this repository's private Go modules): run `make install` from the buildgate checkout, which builds both")
+	}
+	return nil
+}
+
+// registryProxyOlderThanFactoryd reads a proxy container's log: the proxy
+// exits at once on an option it does not know, which is an image built from
+// an older checkout than this factoryd. nil for any other log.
+func registryProxyOlderThanFactoryd(log string) error {
+	_, rest, found := strings.Cut(log, "flag provided but not defined")
+	if !found {
+		return nil
+	}
+	flag := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(rest, ":"), "\n", 2)[0])
+	return fmt.Errorf("the registry proxy image is older than this factoryd (it does not know %s): run `make install` from the buildgate checkout, which builds both", sanitize.Line(flag))
+}
+
+// registryProxyStartError is cause, or the reason the proxy's own log gives
+// for a container that exited before it could be reached.
+func registryProxyStartError(ctx context.Context, dockerBinary, containerName string, cause error) error {
+	boundedCtx, cancel := context.WithTimeout(ctx, relayDockerCommandTimeout)
+	defer cancel()
+	out, _ := exec.CommandContext(boundedCtx, dockerBinary, "logs", containerName).CombinedOutput()
+	if older := registryProxyOlderThanFactoryd(string(out)); older != nil {
+		return older
+	}
+	return cause
+}
+
 func waitRegistryProxyListening(ctx context.Context, dockerBinary, containerName string) error {
 	deadline := time.Now().Add(relayReadinessTimeout)
 	for {
@@ -628,6 +728,9 @@ func waitRegistryProxyListening(ctx context.Context, dockerBinary, containerName
 		cancel()
 		if strings.Contains(string(out), registryProxyListeningLogLine) {
 			return nil
+		}
+		if older := registryProxyOlderThanFactoryd(string(out)); older != nil {
+			return older
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("registry proxy container did not report listening within %s", relayReadinessTimeout)

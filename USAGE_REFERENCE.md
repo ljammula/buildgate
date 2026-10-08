@@ -1518,6 +1518,48 @@ not fetch them. It prints a reference to set with `factoryd configure-images
 -sandbox-image <ref>`; `sandbox_image` is per profile, and `.factory.yml`
 cannot name an image.
 
+### Private Go modules
+
+A build has no credential and no route to a module's own host, so it cannot
+fetch a module the public proxy does not have. Such modules are fetched for
+it on the host, by your own `go` command. Nothing is configured in buildgate:
+what counts as private is what your Go settings say.
+
+```text
+a run is dispatched (with the registry proxy, the default for a model-backed build)
+        |
+        v
+read every go.sum of the commit the build starts from (not under vendor/ or testdata/)
+        |   module paths, versions and hashes only
+        v
+keep the ones your Go settings mark as private:
+        |   GOPRIVATE, GONOPROXY, GONOSUMDB; all of them when GOPROXY is your own
+        v
+your go command fetches those on the host
+        |   your credentials; an empty directory, so it reads no file of the repository
+        v
+~/buildgate/gomodules/views/<key>   this list's modules, each with the hash go.sum gives it
+        |   mounted read-only into the run's registry proxy
+        v
+the build's go asks the registry proxy, which answers these from that directory
+and asks the public proxy only about other modules
+```
+
+| Fact | Detail |
+|---|---|
+| What you see | `go modules: fetching N private module version(s) go.sum lists, with this machine's Go settings`, then how many are served and which were left out, in the run's log. Nothing is printed for a repository with no private module |
+| Which Go settings | `go env` on this machine: the environment of the process that runs the build, and what `go env -w` wrote. A worker under launchd does not have your shell's exports, so set `GOPRIVATE` with `go env -w GOPRIVATE=...` |
+| Nothing marked private | Nothing is fetched. A `GOPRIVATE` set only in the repository's Makefile is not a setting of this machine |
+| A module that cannot be fetched | Named in the log and left out of that run. Fix this machine's access (your own `go mod download` must work), then `factoryd retry <id>`: the next run fetches again |
+| Checksums | A fetched module is served only with the hash `go.sum` gives it, and the build's `go` verifies it against `go.sum` again |
+| `GOPRIVATE` in a Makefile | The build still uses the proxy for every module (`GONOPROXY=none` in its environment) |
+| Public proxy | Asked nothing about a module served this way, so its name does not leave the machine through the build |
+| A dependency the build adds | Not served: the list is the base commit's `go.sum`. A ticket that adds a private dependency needs it in `go.sum` first |
+| A repository that vendors its modules | Needs none of this unless its verify command resolves modules anyway (`go mod tidy`, `go mod vendor`, `-mod=mod`) |
+| Turning it off | `FACTORYD_AUTOSTART=0`, or a run without the registry proxy |
+| Disk | One shared download cache and one small view per list, under `~/buildgate/gomodules`; safe to delete when no build is running |
+| The registry proxy image | Must be the one built with this factoryd (`make install` builds both). An older one refuses the option, and the run stops saying so |
+
 Single-ticket run example (the model route itself comes from session config's
 `routes:`/`models:`/`roles:`, not a flag -- see Model routes above):
 

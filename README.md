@@ -284,7 +284,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 - **Your own worker image needs a `make` built without `posix_spawn`**; build it on the image `make install` produces (`make project-sandbox-image`). `su` and `sudo` fail in the sandbox too.
 - **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
 - **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
-- **Narrow live coverage.** Multi-module `go.work`, cgo, private modules and generated code are unproven.
+- **Narrow live coverage.** Multi-module `go.work`, cgo and generated code are unproven. Private Go modules are proven on one fixture (`make live-private-module`), with a file `GOPROXY` standing in for a company's.
 
 ## Operations
 

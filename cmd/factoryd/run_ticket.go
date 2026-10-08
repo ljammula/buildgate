@@ -1302,10 +1302,19 @@ func (tr *ticketRun) checkProject() error {
 		return err
 	}
 	ensureSandboxRuntime(tr.dp, tr.lifecycleCtx, os.Stderr, tr.settings.MeterImage)
-	// Last, once the run is known to start: the image this repository's
-	// declared toolchains need, which may be built here on first use.
-	*tr.sandboxImage, err = toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
-	return err
+	return tr.fitSandboxToRepository()
+}
+
+// fitSandboxToRepository is the last step before a run starts: the image the
+// repository's declared toolchains need, when the configured one lacks them,
+// which may be built here on first use.
+func (tr *ticketRun) fitSandboxToRepository() error {
+	image, err := toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
+	if err != nil {
+		return err
+	}
+	*tr.sandboxImage = image
+	return nil
 }
 
 // lockRepository takes the repository lock for an isolated run and checks the pull-request flags.
@@ -2264,6 +2273,7 @@ func (tr *ticketRun) dispatch() error {
 			ModelHostConcurrency:     tr.settings.ModelHostConcurrency,
 			Relay:                    relayOpts,
 			RegistryProxyPolicy:      tr.registryProxyPolicy,
+			GoModuleDir:              repositoryGoModuleDir(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, tr.baseSHA, tr.registryProxyPolicy),
 			ComposeServices:          composeServicesOpts,
 			AllowedFiles:             tr.allowedFiles,
 			RequiredChangedFiles:     tr.requiredChangedFiles,

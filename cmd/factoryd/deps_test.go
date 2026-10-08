@@ -113,6 +113,7 @@ func fakeForgeOf(dp *deps) *fakeForge { return dp.forge.(*fakeForge) }
 type fakeHost struct {
 	browserCommandFn     func(target string) *exec.Cmd
 	executableFn         func() (string, error)
+	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchctlBinaryFn    func() string
 	launchdServicePIDFn  func(domain string) (int, bool)
@@ -130,8 +131,11 @@ type fakeHost struct {
 	tlsRootFn            func(ctx context.Context, host string) (*x509.Certificate, error)
 }
 
-func (f *fakeHost) browserCommand(target string) *exec.Cmd         { return f.browserCommandFn(target) }
-func (f *fakeHost) executable() (string, error)                    { return f.executableFn() }
+func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
+func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
+func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	return f.goCommandFn(ctx, dir, env, args...)
+}
 func (f *fakeHost) launchctl(args ...string) ([]byte, error)       { return f.launchctlFn(args...) }
 func (f *fakeHost) launchctlBinary() string                        { return f.launchctlBinaryFn() }
 func (f *fakeHost) launchdServicePID(domain string) (int, bool)    { return f.launchdServicePIDFn(domain) }
@@ -267,8 +271,11 @@ func newTestDeps(t testing.TB) *deps {
 	}
 	realHost := realHost{dp: dp}
 	dp.host = &fakeHost{
-		browserCommandFn:     realHost.browserCommand,
-		executableFn:         realHost.executable,
+		browserCommandFn: realHost.browserCommand,
+		executableFn:     realHost.executable,
+		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
+			return nil, errors.New("test host: no go command is run")
+		},
 		launchctlFn:          realHost.launchctl,
 		launchctlBinaryFn:    realHost.launchctlBinary,
 		launchdServicePIDFn:  realHost.launchdServicePID,

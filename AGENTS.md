@@ -270,6 +270,13 @@ lifecycle, or the `BG_SERVICE_*` worker wiring) also runs `make
 live-compose`: one real todo-kafka-service ticket with its Postgres,
 Kafka and Redis sidecars, which `live-smoke` deliberately omits.
 
+A change to the Go module fetch (`cmd/factoryd/go_modules.go`), the registry
+proxy's Go route (`internal/registryproxy`, `internal/sandbox/registryproxy*.go`)
+or the worker's Go environment also runs `make live-private-module`: one real
+ticket on `testdata/fixtures/private-module-go`, whose dependency is a module
+only a file `GOPROXY` on the host has. It needs the registry proxy image built
+from the same checkout (`make registry-proxy-image`, or `make install`).
+
 A change to the PR-review pipeline (`internal/requestdriver/pr_review_driver.go`,
 `internal/forge`'s review state, the round's addendum or replies) also runs
 `make live-round`: one real pull request on `LIVE_ROUND_REPO`'s origin,

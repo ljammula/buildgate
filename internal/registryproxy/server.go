@@ -110,6 +110,16 @@ type Route struct {
 	// required to agree). Nil/empty disables rewriting for this route
 	// entirely -- the response body is passed through byte-for-byte.
 	RewriteHrefHosts map[string]string
+	// LocalDir, when set, is a read-only directory laid out like the Go
+	// module proxy's paths under this route (a GOMODCACHE's cache/download
+	// directory). A request for a file it holds is answered from it; any
+	// other request about a module it holds is a 404; neither reaches the
+	// upstream. Everything else goes to the upstream as before.
+	// internal/sandbox mounts a repository's private modules here, so a
+	// module only the operator can fetch is served without the worker, or
+	// this process, holding a credential, and without its name being sent
+	// to the public proxy (see serveLocal).
+	LocalDir string
 }
 
 // Config configures one Server.
@@ -289,6 +299,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if handled, localStatus := s.serveLocal(w, r, route, rest); handled {
+		status = localStatus
+		return
+	}
+
 	key := cacheKey(route.Prefix, rest)
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		if served, cachedStatus := s.serveFromCache(w, r, key); served {
@@ -311,6 +326,76 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status = s.fetchAndServe(w, r, route, rest, key)
+}
+
+// serveLocal answers a request from route.LocalDir and reports whether it
+// did, with the status it wrote. A regular file rest names is served. Any
+// other path of a module the directory holds (its version list, its latest
+// version, a version it lacks) is a 404 from here: a module that is served
+// locally is one whose name is not for the upstream, so nothing about it is
+// asked there. Everything else is left for the upstream. The directory is
+// opened as an os.Root, so no path and no symlink inside it reaches a file
+// outside it.
+func (s *Server) serveLocal(w http.ResponseWriter, r *http.Request, route Route, rest string) (handled bool, status int) {
+	if route.LocalDir == "" || rest == "" {
+		return false, 0
+	}
+	root, err := os.OpenRoot(route.LocalDir)
+	if err != nil {
+		return false, 0
+	}
+	defer root.Close()
+	if file, err := root.Open(filepath.FromSlash(rest)); err == nil {
+		defer file.Close()
+		if info, err := file.Stat(); err == nil && info.Mode().IsRegular() {
+			recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			recorder.Header().Set("Content-Type", localContentType(rest))
+			http.ServeContent(recorder, r, "", info.ModTime(), file)
+			return true, recorder.status
+		}
+	}
+	if module := localModulePath(rest); module != "" {
+		if info, err := root.Stat(filepath.FromSlash(module)); err == nil && info.IsDir() {
+			writeError(w, http.StatusNotFound, "not found")
+			return true, http.StatusNotFound
+		}
+	}
+	return false, 0
+}
+
+// localModulePath is the module a Go module proxy path asks about
+// ("<module>/@v/<file>" or "<module>/@latest"), "" for any other path.
+func localModulePath(rest string) string {
+	if module, _, found := strings.Cut(rest, "/@v/"); found {
+		return module
+	}
+	if module, found := strings.CutSuffix(rest, "/@latest"); found {
+		return module
+	}
+	return ""
+}
+
+// statusRecorder notes the status a handler writes.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// localContentType is the type the Go module proxy protocol gives each file.
+func localContentType(name string) string {
+	switch path.Ext(name) {
+	case ".zip":
+		return "application/zip"
+	case ".info":
+		return "application/json"
+	default:
+		return "text/plain; charset=utf-8"
+	}
 }
 
 // matchRoute finds the configured route whose prefix the cleaned request

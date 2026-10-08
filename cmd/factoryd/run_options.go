@@ -62,7 +62,11 @@ type runOptions struct {
 
 	Relay               modelRouteOptions
 	RegistryProxyPolicy *sandbox.RegistryProxyPolicy
-	ComposeServices     composeServicesOptions
+	// GoModuleDir is the host directory of the modules the repository's
+	// go.sum lists (repositoryGoModuleDir), which the registry proxy serves
+	// to the build; "" when there is none.
+	GoModuleDir     string
+	ComposeServices composeServicesOptions
 
 	AllowedFiles           []string
 	RequiredChangedFiles   []string
