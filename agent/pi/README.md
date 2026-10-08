@@ -126,7 +126,7 @@ delivered, because the CLI reads a turn's tool calls and text from that
 `output`. Copilot's stream carries no token counts, so its `usage` is
 `None`. Every agent subprocess gets `/dev/null` for stdin (Codex reads stdin
 whenever it is not a TTY). Skills mounted at `/inputs/skills/<name>/SKILL.md` reach every
-harness: `pi`/`pifork` get `--skill <dir>` per skill, plus the repo's own `.agents/skills`; `codex` and `copilot` get a fresh copy
+harness: `pi`/`pifork` get `--skill <dir>` per skill, plus the repo's own `.agents/skills` on the build turn only (`load_repo_skills`); `codex` and `copilot` get a fresh copy
 in `<home>/skills/<name>` each round (Codex's bundled skills are off). Parsers are pinned to real recorded output in
 `tests/fixtures/` (`tests/codex_copilot_adapters_test.py`).
 

@@ -2071,6 +2071,16 @@ class SpecConformityParsingTests(unittest.TestCase):
 		self.assertTrue(build_commands, "the build never invoked the agent")
 		self.assertIn(str(planted), build_commands[0])
 
+	def test_only_build_app_asks_for_the_target_repos_skills(self):
+		# Spec drafting, planning, oracle drafting and the pilot build their
+		# own invocation; none of them may opt in.
+		scripts = Path(build_app.__file__).resolve().parent
+		asking = sorted(
+			path.name for path in scripts.glob("*.py")
+			if "load_repo_skills=True" in path.read_text()
+		)
+		self.assertEqual(asking, ["build_app.py"])
+
 	def test_run_review_turn_error_is_empty_when_the_last_turn_succeeded(self):
 		output = json.dumps({"type": "message_end", "message": {"role": "assistant", "content": "ok"}})
 		completed = subprocess.CompletedProcess([], 0, output, "")

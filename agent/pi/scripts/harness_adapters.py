@@ -473,8 +473,9 @@ class PiAdapter:
 		if continue_session:
 			args += ["--continue"]
 		# The target repo's skills become system-prompt text, and the worker
-		# can add one mid-run, so only the build turn asks for them: a build
-		# must not hand its own reviewer, or a later planner, instructions.
+		# can add one mid-run, so only the build turn asks for them. This
+		# closes the skill path only: pi still loads the working tree's
+		# AGENTS.md-style context files on every turn.
 		skills = mounted_skills()
 		if load_repo_skills:
 			skills += repo_skills(workspace)
