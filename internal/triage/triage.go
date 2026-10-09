@@ -68,6 +68,13 @@ type GateFinding struct {
 	// Sentence is the same factory-authored sentence Run gives for the
 	// gate, "" when nothing can be said with confidence.
 	Sentence string
+	// LogTail is the end of the output of the command the gate ran, for a
+	// gate that is a command run on the result (canonical verification,
+	// the full suite, a named or repository gate). It is what that command
+	// printed, so it is data from the repository under build. Empty for
+	// every other gate, and always for the reference oracle, whose output
+	// is the oracle's own assertions.
+	LogTail string
 }
 
 // FailedGates returns one finding per failed gate of r, each check once, in
@@ -87,10 +94,38 @@ func FailedGates(r *run.Run, dataDir string) []GateFinding {
 		finding := GateFinding{Check: g.Check, ExitCode: g.ExitCode}
 		if g.Check != policy.ReferenceOracleGateID {
 			finding.Sentence = truncateTriage(gateSentence(r, dataDir, g, false))
+			finding.LogTail = commandGateLogTail(r, g.Check)
 		}
 		out = append(out, finding)
 	}
 	return out
+}
+
+// commandGateLogTail returns the end of the log of the command a failed
+// gate ran, "" for a gate that ran none. Canonical verification's is the
+// verify attempt's log only: when the build itself exited non-zero the log
+// that explains the gate is the build's, which is the agent's own
+// transcript, not a command's output.
+func commandGateLogTail(r *run.Run, check string) string {
+	kind := check
+	switch {
+	case check == "canonical_verify":
+		kind = "verify"
+	case check == "full_suite_verify" || policy.IsRepoGate(check):
+	default:
+		named := false
+		for _, id := range policy.CommandGateIDs() {
+			named = named || id == check
+		}
+		if !named {
+			return ""
+		}
+	}
+	attempt, found := lastAttempt(r, kind)
+	if !found {
+		return ""
+	}
+	return readLogTail(attempt.LogPath)
 }
 
 // gateSentence is the sentence for one failing gate. forOperator is Run's

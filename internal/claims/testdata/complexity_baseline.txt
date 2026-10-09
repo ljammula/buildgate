@@ -31,7 +31,7 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 34 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-51 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
+49 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 41 cmd/factoryd/status.go statusMain
@@ -59,7 +59,6 @@
 29 internal/request/retry.go Retry
 33 internal/requestdriver/request_driver.go AdvanceBuilding
 29 internal/requestdriver/request_driver.go AdvancePlanning
-31 internal/requestdriver/request_driver.go TryReviewCorrectiveRound
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch
@@ -70,7 +69,7 @@
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
 44 internal/sessionconfig/routing.go ValidateRouting
 30 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
-41 internal/workflow/activities_build.go (*Activities).RunBuildActivity
+40 internal/workflow/activities_build.go (*Activities).RunBuildActivity
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 45 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity

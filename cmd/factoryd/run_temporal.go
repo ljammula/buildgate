@@ -67,9 +67,12 @@ type temporalSliceOptions struct {
 	// own doc comment for the exact run IDs). Empty (the zero value, and
 	// every caller before this field existed) means no -diff-base override,
 	// unchanged.
-	DiffBase     string
-	TicketPath   string
-	TicketNumber int
+	DiffBase string
+	// EarlierAttempt carries -earlier-attempt (an absolute path) onto
+	// RunWorkflowInput.EarlierAttemptPath.
+	EarlierAttempt string
+	TicketPath     string
+	TicketNumber   int
 	// RequestTicket carries -request-ticket onto RunWorkflowInput.
 	// RequestTicket/PreflightInput.RequestTicket, so PreflightActivity
 	// validates TicketPath (here, the -spec ticketspec-format file, per
@@ -323,12 +326,13 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		PriorRunResultSHA:     priorRunResultSHA,
 		// Always true: every build runs in an isolated worktree. The field
 		// stays on RunWorkflowInput (workflow input is not changed here).
-		IsolateWorkspace:  true,
-		IsolatedRepoDir:   o.Slice.IsolatedRepoDir,
-		IsolatedParentDir: o.Slice.IsolatedParentDir,
-		OnBranch:          o.Slice.OnBranch,
-		DiffBaseSHA:       o.Slice.DiffBase,
-		ResumeFrom:        o.Slice.ResumeFrom,
+		IsolateWorkspace:   true,
+		IsolatedRepoDir:    o.Slice.IsolatedRepoDir,
+		IsolatedParentDir:  o.Slice.IsolatedParentDir,
+		OnBranch:           o.Slice.OnBranch,
+		DiffBaseSHA:        o.Slice.DiffBase,
+		EarlierAttemptPath: o.Slice.EarlierAttempt,
+		ResumeFrom:         o.Slice.ResumeFrom,
 		// Carried per-execution, not left to Activities' own Worker-static
 		// fields: see RunWorkflowInput.LogDir's doc comment — a no-op
 		// today on runViaTemporal's own run-unique task queue (it's

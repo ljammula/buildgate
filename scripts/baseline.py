@@ -37,8 +37,9 @@ How each number is counted:
   of two updated together, the one with a BUILD_REPORT.md beside it.
 - A run still in progress is left out and counted as "unfinished".
 - A ticket's first run is the one created first; a ticket is a name within
-  a project. The runs of a PR-review or conformity round
-  (`<request>-001-review2`, `<request>-001-conformity1`, either with `-fix1`)
+  a project. The runs of a PR-review, conformity or corrective round
+  (`<request>-001-review2`, `<request>-001-conformity1`,
+  `<request>-001-corrective1`, each possibly with `-fix1`)
   belong to the ticket they follow, so they are never a first run.
   A ticket whose first run is unfinished is not in the one-shot rate. A
   ticket submitted again gets a new name and counts as a new ticket.
@@ -321,7 +322,7 @@ def round_signatures(record: Dict[str, Any], report: str, progress: str) -> List
 
 # ---- measures ---------------------------------------------------------------
 
-_FOLLOW_UP_RUN = re.compile(r"(?<=-\d{3})-(?:review|conformity)\d+(?:-fix\d+)?$")
+_FOLLOW_UP_RUN = re.compile(r"(?<=-\d{3})-(?:review|conformity|corrective)\d+(?:-fix\d+)?$")
 
 
 def ticket_of(record: Dict[str, Any]) -> Tuple[str, str]:

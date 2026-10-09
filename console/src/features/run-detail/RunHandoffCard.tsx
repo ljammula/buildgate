@@ -1,8 +1,9 @@
 import { useRunHandoff } from "@/api/runQueries";
 import { ApiError } from "@/domain/apiError";
-import { handoffBinLabel, handoffNextSentence } from "@/domain/handoff";
+import { HANDOFF_NOT_JUDGED, handoffBinLabel, handoffNextSentence } from "@/domain/handoff";
 import type { Run } from "@/domain/run";
 import { EscapedText } from "@/shared/oracle/EscapedText";
+import { CodeBlock } from "@/ui/CodeBlock";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 import { Section } from "@/ui/PageLayout";
@@ -50,7 +51,9 @@ export function RunHandoffCard({ run }: RunHandoffCardProps) {
                       <span className="font-mono font-medium text-fg">
                         <EscapedText text={check.check} />
                       </span>
-                      <span className="text-xs text-fg-muted">{handoffBinLabel(check.bin)}</span>
+                      <span className="text-xs text-fg-muted">
+                        {check.notJudged ? HANDOFF_NOT_JUDGED : handoffBinLabel(check.bin)}
+                      </span>
                     </p>
                     <p className="text-xs break-words text-fg-muted">
                       {check.finding === "" ? (
@@ -59,6 +62,16 @@ export function RunHandoffCard({ run }: RunHandoffCardProps) {
                         <EscapedText text={check.finding} />
                       )}
                     </p>
+                    {check.output.length === 0 ? null : (
+                      <CodeBlock
+                        label={`Output of ${check.check}`}
+                        wrap
+                        maxHeight="max-h-40"
+                        className="text-[11px]"
+                      >
+                        {check.output.join("\n")}
+                      </CodeBlock>
+                    )}
                   </li>
                 ))}
               </ul>

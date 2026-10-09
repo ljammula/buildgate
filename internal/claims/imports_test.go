@@ -340,6 +340,7 @@ func TestPackageBoundaryRules(t *testing.T) {
 			"buildgate/internal/consolelink":   true,
 			"buildgate/internal/evidence":      true,
 			"buildgate/internal/forge":         true,
+			"buildgate/internal/handoff":       true,
 			"buildgate/internal/notify":        true,
 			"buildgate/internal/policy":        true,
 			"buildgate/internal/projectconfig": true,

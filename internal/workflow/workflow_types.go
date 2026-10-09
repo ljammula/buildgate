@@ -425,6 +425,14 @@ type RunWorkflowInput struct {
 	// temporalSliceOptions/RunWorkflowInput before this fix, was the
 	// reason -diff-base never reached the Temporal path at all.
 	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
+	// EarlierAttemptPath is -earlier-attempt: a host file holding the
+	// factory's record of an earlier attempt at this ticket that finished
+	// and failed its checks. RunBuildActivity stages it read-only beside
+	// the spec and names it to build_app.py as --earlier-attempt, which puts
+	// it in the build's first prompt. No other Activity reads it: it is
+	// never an input of a review, and never part of the spec a review is
+	// given.
+	EarlierAttemptPath string `json:"earlier_attempt_path,omitempty"`
 	// Thinking is roles.execution's resolved Pi reasoning-effort level
 	// (internal/modelrole.Resolve), passed to build_app.py's own
 	// --thinking by RunBuildActivity (buildActivityArgs). Resolved once

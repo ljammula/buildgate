@@ -19,6 +19,7 @@
   "compose_services_require_digest": true,
   "conformity_policy": "advisory",
   "data_dir": "<DATA_DIR>",
+  "earlier_attempt_path": "<INPUTS>/earlier-attempt.md",
   "fast_check_command": "echo fast",
   "full_suite_command": "echo full",
   "gate_commands": {

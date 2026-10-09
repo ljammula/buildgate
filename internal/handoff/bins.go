@@ -80,19 +80,25 @@ func BinOf(check string) Bin {
 }
 
 // Next is the bin of an attempt as a whole: the most restrictive of its
-// failed checks' bins, BinOperator for a halt. BinCorrective therefore
+// failed checks' bins, leaving out the ones not judged (Check.NotJudged),
+// BinOperator for a halt. BinCorrective therefore
 // means every failed check may be handed to a build.
 func Next(halted bool, checks []Check) Bin {
 	if halted {
 		return BinOperator
 	}
 	next := BinCorrective
+	judged := 0
 	for _, c := range checks {
+		if c.NotJudged {
+			continue
+		}
+		judged++
 		if rank(c.Bin) > rank(next) {
 			next = c.Bin
 		}
 	}
-	if len(checks) == 0 {
+	if judged == 0 {
 		// Quarantined with no failed check recorded: nothing to hand on.
 		return BinNever
 	}

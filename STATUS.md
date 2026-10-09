@@ -14,7 +14,7 @@ passes on that commit, and other machines upgrade by tag, not from `main`.
 | Area | | State |
 |---|---|---|
 | Request pipeline: spec review, plan review, sandboxed build, gates, PR | ✅ | Live-proven on several real repos and on the ChatGPT Codex route. Every build runs on Temporal, which starts automatically |
-| Safety contract, containment, evidence | ✅ | `safety-contract.md` SC-001–SC-017 enforced by `CLAIMS.md` tests; no host-execution path |
+| Safety contract, containment, evidence | ✅ | `safety-contract.md` SC-001–SC-018 enforced by `CLAIMS.md` tests; no host-execution path |
 | Sandbox runtime | ✅ | Every worker is launched by the OpenShell 0.1.2 gateway (images pinned by digest). Live-proven with `make live-smoke`, `make live-compose`, a two-ticket request from `submit` to its pull requests, and two builds with compose sidecars at once (their containers peak near 2.2 GB) |
 | Dependencies started for you | ✅ | `submit`, `worker`, `console`, `quickstart` start whichever of Temporal, the `worker` and `serve` is missing, with a spinner and a one-line reason on failure. `FACTORYD_AUTOSTART=0` opts out (a build then needs `-temporal-address`) |
 | `factoryd quickstart` onboarding | ✅ | From nothing configured to a request at its first review gate |

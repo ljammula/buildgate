@@ -324,7 +324,9 @@ var failureLine = regexp.MustCompile(`--- FAIL|\bFAIL(ED|URE|URES)?\b|\b[Ee]rror
 func Excerpt(text string) string {
 	// The lines are picked from the raw text and only those are cleaned:
 	// cleaning a whole log to keep a dozen lines is the costly part.
-	lines := strings.Split(strings.TrimSpace(text), "\n")
+	// Escape sequences go first: "\x1b[31merror" has no word boundary
+	// before "error".
+	lines := strings.Split(strings.TrimSpace(sanitize.StripANSI(text)), "\n")
 	var picked []string
 	// A failure line, then the indented lines right under it: the
 	// assertion a test runner prints below the test's name.

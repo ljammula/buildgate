@@ -207,20 +207,30 @@ type MergeReadiness struct {
 // doc comment for why the distinction exists.
 const ConformityRoundKind = "conformity"
 
+// CorrectiveRoundKind marks a Round as an automatic corrective build that
+// followed a run quarantined by checks a build can fix when told about
+// them (internal/handoff's "corrective" bin): it is given the factory's
+// record of that run. It shares review_corrective_rounds with
+// ConformityRoundKind rounds: one budget per ticket build, whatever the
+// kind.
+const CorrectiveRoundKind = "corrective"
+
 // Round is one corrective build run against a ticket's own branch, in
 // response either to a batch of newly-surfaced unresolved PR review
 // threads (Kind "") or to a quarantined run's own spec_conformity
 // gate flagging a criterion before any PR exists (Kind
-// ConformityRoundKind). Index is 1-based, counted per ticket PER KIND --
+// ConformityRoundKind). Index is 1-based, counted per ticket: PR-review
+// rounds on their own, the two pre-PR kinds together --
 // max_review_rounds counts only Kind "" rounds and
-// review_corrective_rounds counts only Kind ConformityRoundKind
-// rounds, so a request never burns one budget on the other's rounds.
+// review_corrective_rounds counts Kind ConformityRoundKind and
+// CorrectiveRoundKind rounds together, so a request never burns the
+// PR-review budget on a pre-PR round or the other way round.
 type Round struct {
 	Index int `json:"index"`
 	// Kind is "" (the zero value, so every round recorded before this
 	// field existed reads as a PR-review round, preserving their
-	// historical meaning) or ConformityRoundKind. See this type's own doc
-	// comment.
+	// historical meaning), ConformityRoundKind or CorrectiveRoundKind. See
+	// this type's own doc comment.
 	Kind      string   `json:"kind,omitempty"`
 	ThreadIDs []string `json:"thread_ids"`
 	RunID     string   `json:"run_id"`

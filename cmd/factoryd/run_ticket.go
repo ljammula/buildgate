@@ -61,6 +61,50 @@ var fullSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // intake bundle (ticket_runner.py/goal_pilot.py), but the factory never
 // passes it.
 
+// validateFollowUpRunInputs checks the two inputs only a run that follows
+// an earlier one is given: -diff-base and -earlier-attempt.
+func validateFollowUpRunInputs(diffBase, earlierAttempt string) error {
+	if diffBase != "" && !fullSHAPattern.MatchString(diffBase) {
+		return fmt.Errorf("-diff-base must be a full 40-character hex object ID, got %q", diffBase)
+	}
+	return validateEarlierAttemptFile(earlierAttempt)
+}
+
+// maxEarlierAttemptBytes bounds -earlier-attempt: the file goes into a
+// build's first prompt. A rendered handoff is at most 8 KiB.
+const maxEarlierAttemptBytes = 32 << 10
+
+// validateEarlierAttemptFile refuses an -earlier-attempt that is not a
+// regular file of at most maxEarlierAttemptBytes, before the run starts.
+func validateEarlierAttemptFile(path string) error {
+	if path == "" {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("-earlier-attempt: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("-earlier-attempt %q is not a regular file", path)
+	}
+	if info.Size() > maxEarlierAttemptBytes {
+		return fmt.Errorf("-earlier-attempt %q is %d bytes, over the %d byte limit", path, info.Size(), maxEarlierAttemptBytes)
+	}
+	return nil
+}
+
+// absolutePathOrEmpty makes a flag's file path independent of the working
+// directory of whichever process reads it later; "" stays "".
+func absolutePathOrEmpty(path string) string {
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
 // runMainWithReady calls onReady immediately after the initial ready record is
 // durable; execution continues in the caller's goroutine after that callback
 // returns.
@@ -147,6 +191,7 @@ type runFlags struct {
 	allowSpecTicketScopeMismatch *bool
 	onBranch                     *string
 	diffBase                     *string
+	earlierAttempt               *string
 	resumeWorktreeOf             *string
 	configPath                   *string
 }
@@ -221,6 +266,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.prBase = flags.String("pr-base", "", "internal: set by worker/the request driver (QueueEntry.PRBase) when this ticket's draft PR should stack on a prior ticket's still-open branch instead of the repo default branch -- must be a valid git branch name. Only used together with -open-pull-request; forge.PullRequestOpener falls back to the default branch if the named one no longer exists on origin by the time the PR actually opens")
 	f.allowSpecTicketScopeMismatch = flags.Bool("allow-spec-ticket-scope-mismatch", false, "explicit opt-out from factoryd's -spec/-ticket-file scope-mismatch check")
 	f.onBranch = flags.String("on-branch", "", "opt-in: check out this EXISTING branch into a fresh worktree instead of an ordinary run's default of a brand-new branch based at -workspace's HEAD -- the PR-review driver's own corrective-PR-review-round mechanism, which must land its commits on the same branch a ticket's already-open pull request already tracks. The branch must already exist in -workspace. Never created and, regardless of this run's own outcome, never deleted by this run -- unlike an ordinary isolated run's own disposable branch")
+	f.earlierAttempt = flags.String("earlier-attempt", "", "path to the factory's record of an earlier attempt at this ticket that finished and failed its checks (a handoff rendered as text). Given to the build's first prompt only, as a read-only input beside the spec: never to a review, and never part of the spec. The request driver sets it for a corrective build; at most 32 KiB")
 	f.diffBase = flags.String("diff-base", "", "opt-in: compute the changed-file list, diff stat, and required-content evidence fed to the diff-shape gates (diff_scope, required_files_changed, required_content, tests_added) and the PR-body evidence from <diff-base>..HEAD instead of from this run's own base_sha (the -on-branch checkout point). The PR-review driver's corrective-PR-review-round mechanism: a review round's own base_sha is the branch tip it started from, so without -diff-base those gates would judge only the round's own small delta rather than the cumulative diff the PR as a whole will merge. Must be a full 40-character hex object ID that is an ancestor of base_sha; build and canonical verification still run against the branch tip regardless")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts, continuing its build from the round state in it (Temporal only: refused with -repository, -on-branch and -prior-run). Refused unless the halted run was kept for a resume and the worktree is intact; every reason is printed")
 	f.configPath = flags.String("config", "", "session config path; empty searches the default paths")
@@ -283,6 +329,7 @@ type ticketRun struct {
 	allowSpecTicketScopeMismatch          *bool
 	onBranch                              *string
 	diffBase                              *string
+	earlierAttempt                        *string
 	resumeWorktreeOf                      *string
 	args                                  []string
 	settings                              sessionconfig.Settings
@@ -429,6 +476,7 @@ func (tr *ticketRun) parseFlags() error {
 	tr.skipProjectCheck, tr.architectureRequiredSections, tr.preflightProfile, tr.requestTicket, tr.ticketFile, tr.openPullRequest = tr.rf.skipProjectCheck, tr.rf.architectureRequiredSections, tr.rf.preflightProfile, tr.rf.requestTicket, tr.rf.ticketFile, tr.rf.openPullRequest
 	tr.prClosesIssue, tr.prBase, tr.allowSpecTicketScopeMismatch, tr.onBranch, tr.diffBase = tr.rf.prClosesIssue, tr.rf.prBase, tr.rf.allowSpecTicketScopeMismatch, tr.rf.onBranch, tr.rf.diffBase
 	configPath := tr.rf.configPath
+	tr.earlierAttempt = tr.rf.earlierAttempt
 	tr.resumeWorktreeOf = tr.rf.resumeWorktreeOf
 	if err := tr.flags.Parse(tr.args); err != nil {
 		return err
@@ -833,10 +881,7 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	if err := requestdriver.ValidateResumeWorktreeFlags(*tr.resumeWorktreeOf, *tr.onBranch, *tr.repository, *tr.priorRun); err != nil {
 		return err
 	}
-	if *tr.diffBase != "" && !fullSHAPattern.MatchString(*tr.diffBase) {
-		return fmt.Errorf("-diff-base must be a full 40-character hex object ID, got %q", *tr.diffBase)
-	}
-	return nil
+	return validateFollowUpRunInputs(*tr.diffBase, *tr.earlierAttempt)
 }
 
 // prepareSandbox places the data dir, reconciles orphaned containers and builds the model-route and registry-proxy policies, then checks the ticket's and project's names.
@@ -2190,6 +2235,7 @@ func (tr *ticketRun) dispatch() error {
 			IsolatedParentDir:          tr.isolatedParentDir,
 			OnBranch:                   *tr.onBranch,
 			DiffBase:                   tr.r.DiffBaseSHA,
+			EarlierAttempt:             absolutePathOrEmpty(*tr.earlierAttempt),
 			TicketPath:                 temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
 			TicketNumber:               tr.piTicketNumber,
 			RequestTicket:              *tr.requestTicket,

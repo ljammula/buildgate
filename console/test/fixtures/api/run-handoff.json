@@ -3,7 +3,7 @@
   "run_id": "run-quarantined",
   "ticket": "ticket-run-quarantined",
   "state": "quarantined",
-  "next": "never",
+  "next": "corrective",
   "base_sha": "1111111111111111111111111111111111111111",
   "rounds": [
     {
@@ -45,7 +45,8 @@
       "check": "tests_added",
       "bin": "never",
       "exit_code": 0,
-      "finding": "tests_added: no test file changed"
+      "finding": "tests_added: no test file changed",
+      "not_judged": true
     }
   ]
 }

@@ -1,4 +1,12 @@
-import { type JsonObject, objectList, optNumber, optString, reqString } from "@/domain/decode";
+import {
+  type JsonObject,
+  objectList,
+  optBoolean,
+  optNumber,
+  optString,
+  reqString,
+  stringList,
+} from "@/domain/decode";
 
 /**
  * One failed check of a stopped run: internal/handoff.Check. `finding` is the
@@ -10,6 +18,14 @@ export interface HandoffCheck {
   readonly bin: string;
   readonly exitCode: number | null;
   readonly finding: string;
+  /** The failing lines of a command gate's output; empty for other checks. */
+  readonly output: readonly string[];
+  /**
+   * True for a check on the attempt's diff that failed only because the
+   * attempt committed nothing: it says nothing about the work and is not
+   * counted in `next`.
+   */
+  readonly notJudged: boolean;
 }
 
 /**
@@ -31,6 +47,8 @@ function decodeCheck(o: JsonObject, at: string): HandoffCheck {
     bin: reqString(o, "bin", at),
     exitCode: optNumber(o, "exit_code", at),
     finding: optString(o, "finding", at),
+    output: stringList(o, "output", at),
+    notJudged: optBoolean(o, "not_judged", at),
   };
 }
 
@@ -57,6 +75,10 @@ const binLabels: Readonly<Record<string, string>> = {
 export function handoffBinLabel(bin: string): string {
   return binLabels[bin] ?? bin;
 }
+
+/** Said of a check that was not judged, in place of its bin. */
+export const HANDOFF_NOT_JUDGED =
+  "Not judged: the attempt committed nothing, so there was no diff to check";
 
 /**
  * What the failures allow, said of the run as a whole. It describes how the

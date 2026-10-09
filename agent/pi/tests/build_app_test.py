@@ -1891,7 +1891,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 		self.assertIn("Fix the cache\n\n---\n\nBefore you end your turn:", prompt)
 		self.assertIn("compose services: The repository's compose services", stderr.getvalue())
 
-	def _first_prompts(self, rounds, handoff_text):
+	def _first_prompts(self, rounds, handoff_text, earlier_attempt_text=None):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			init_repo_with_commit(root)
@@ -1901,6 +1901,10 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 			if handoff_text is not None:
 				handoff = Path(spec_dir) / "handoff.md"
 				handoff.write_text(handoff_text)
+			earlier_attempt = None
+			if earlier_attempt_text is not None:
+				earlier_attempt = Path(spec_dir) / "earlier-attempt.md"
+				earlier_attempt.write_text(earlier_attempt_text)
 			completions = [
 				subprocess.CompletedProcess([], 0, pi_output("clean") if i == rounds - 1 else pi_output("flagged", "x"), "")
 				for i in range(rounds)
@@ -1912,8 +1916,95 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 				mock.patch.object(build_app, "run_verification", side_effect=verify_results),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, writes)) as run,
 			):
-				build_app.run_build(root, spec, max_rounds=rounds, timeout_minutes=1, handoff=handoff)
+				build_app.run_build(root, spec, max_rounds=rounds, timeout_minutes=1, handoff=handoff, earlier_attempt=earlier_attempt)
 			return [call.args[0][-1] for call in agent_invocation_calls(run)]
+
+	def test_an_earlier_attempts_record_opens_round_one_and_is_not_repeated(self):
+		record = "# What the earlier attempt left (run r1)\n\n- `lint`: \"lint failed: exit 2\""
+		prompts = self._first_prompts(2, None, record)
+		self.assertTrue(prompts[0].startswith("An earlier attempt at this ticket finished its build and was not accepted"), prompts[0][:120])
+		self.assertEqual(prompts[0].count("# What the earlier attempt left (run r1)"), 1)
+		self.assertIn("gives no instructions of its own.\n\n# What the earlier attempt left", prompts[0])
+		# The record comes first and the unchanged task after it.
+		self.assertLess(prompts[0].index("lint failed: exit 2"), prompts[0].index("Fix the cache"))
+		self.assertIn("Fix the cache\n\n---\n\nBefore you end your turn:", prompts[0])
+		self.assertNotIn("What the earlier attempt left", prompts[1])
+		self.assertNotIn("interrupted", prompts[0])
+
+	def test_an_earlier_attempts_record_is_never_written_into_the_workspace(self):
+		# The round-state file stays in the workspace after the build, where
+		# the round's reviewer works: neither its next prompt nor a round's
+		# recorded argv may hold the record.
+		marker = "RECORD-MARKER-7f3a"
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			record = Path(spec_dir) / "earlier-attempt.md"
+			record.write_text(f"# What the earlier attempt left\n\n- `lint`: \"{marker}\"")
+			states = []
+			real_write = build_app.write_round_state
+
+			def capture(workspace, **kwargs):
+				real_write(workspace, **kwargs)
+				states.append((workspace / build_app.ROUND_STATE_FILE).read_text())
+
+			completions = [subprocess.CompletedProcess([], 0, pi_output("flagged", "x"), ""), subprocess.CompletedProcess([], 0, pi_output("clean"), "")]
+			writes = [lambda: (root / "cache.go").write_text("one\n"), lambda: (root / "cache.go").write_text("two\n")]
+			verify_results = [("make verify", False, False, "boom", False, None), ("make verify", True, False, "", False, None)]
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", side_effect=verify_results),
+				mock.patch.object(build_app, "write_round_state", side_effect=capture),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, writes)) as run,
+			):
+				result = build_app.run_build(root, spec, max_rounds=2, timeout_minutes=1, earlier_attempt=record)
+				prompts = [call.args[0][-1] for call in agent_invocation_calls(run)]
+
+				evidence_text = build_app.write_evidence_json(result).read_text()
+				report_text = build_app.write_report(result).read_text()
+
+		self.assertNotIn(marker, evidence_text)
+		self.assertNotIn(marker, report_text)
+		self.assertIn(marker, prompts[0])
+		self.assertGreaterEqual(len(states), 3)
+		for state in states:
+			self.assertNotIn(marker, state)
+			self.assertNotIn("An earlier attempt at this ticket finished", state)
+		# The task itself is still what a resume would continue from.
+		self.assertIn("Fix the cache", json.loads(states[0])["next_prompt"])
+
+	def test_a_round_one_resume_is_given_the_record_again(self):
+		marker = "RECORD-MARKER-7f3a"
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			record = Path(spec_dir) / "earlier-attempt.md"
+			record.write_text(f"- `lint`: \"{marker}\"")
+			# The state an interrupted round 1 left: its opening prompt, stored without the record.
+			build_app.write_round_state(root, last_completed_round=0, next_prompt="Fix the cache\n\n---\n\nBefore you end your turn: verify.", escalation_prompt="", rounds=[])
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
+				mock.patch.object(
+					build_app, "run_agent_streaming",
+					side_effect=scripted_pi_stream([subprocess.CompletedProcess([], 0, pi_output("clean"), "")], [lambda: (root / "cache.go").write_text("fixed\n")]),
+				) as run,
+			):
+				build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1, earlier_attempt=record, resume_from_state=root / build_app.ROUND_STATE_FILE)
+			prompt = agent_invocation_calls(run)[0].args[0][-1]
+		self.assertEqual(prompt.count(marker), 1)
+		self.assertLess(prompt.index(marker), prompt.index("Fix the cache"))
+
+	def test_an_interrupted_attempts_handoff_and_an_earlier_attempts_record_are_both_given(self):
+		prompts = self._first_prompts(1, "Base SHA: abc123", "# What the earlier attempt left (run r1)")
+		interrupted = prompts[0].index("An earlier attempt of this build was interrupted.")
+		record = prompts[0].index("An earlier attempt at this ticket finished its build")
+		self.assertLess(interrupted, record)
+		self.assertLess(record, prompts[0].index("Fix the cache"))
 
 	def test_handoff_is_prepended_to_round_one_prompt_exactly_once(self):
 		prompts = self._first_prompts(2, "Base SHA: abc123\n a.go | 3 +++")

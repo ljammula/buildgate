@@ -235,6 +235,9 @@ func TestExcerptPicksFailureLinesCleansAndCuts(t *testing.T) {
 	if !strings.HasPrefix(got, "--- FAIL: TestSum (0.00s)\n    sum_test.go:9: got 3, want 9\n") || !strings.HasSuffix(got, "FAIL\tpkg/b") {
 		t.Errorf("Excerpt = %q", got)
 	}
+	if got := Excerpt("ok\n\x1b[31merror: coloured\x1b[0m\nok\n"); got != "error: coloured" {
+		t.Errorf("a coloured failure line: %q, want it picked", got)
+	}
 	if got := Excerpt("line one\nline two\n"); got != "line one\nline two" {
 		t.Errorf("no failure line: %q, want the last lines", got)
 	}
