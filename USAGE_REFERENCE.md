@@ -206,7 +206,7 @@ under the same checks:
 
 | The unfinished build | What follows it | Its record |
 |---|---|---|
-| Lost, worktree kept (a corrective round included: its request waits in `resume_review` like any lost build) | `factoryd resume` in that worktree | `rounds/<ticket>-resume/earlier-attempt.md`; opens by saying the record is of the attempt before the interrupted build, and whether the interrupted build ran on that attempt's branch |
+| Lost, worktree kept (a retry's rebuild from the base; the worktree of a corrective round, which runs on an existing branch, is never kept) | `factoryd resume` in that worktree | `rounds/<ticket>-resume/earlier-attempt.md`; opens by saying the record is of the attempt before the interrupted build, and whether the interrupted build ran on that attempt's branch |
 | Lost or halted | `factoryd resume -from scratch` or `factoryd retry` | `rounds/<ticket>-retry/earlier-attempt.md`, as for any retry |
 
 **`-on-branch`/`-diff-base`.** Both travel in the workflow input

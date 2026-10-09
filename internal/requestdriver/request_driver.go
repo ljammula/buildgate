@@ -1494,9 +1494,6 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			log.Printf("request %s: ticket %d/%d: %s %d/%d accepted, PR %s", r.ID, ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, correctiveRun.PullRequestURL)
 			return true, acceptTicketRun(dataDir, r, ticket, correctiveRun, now)
 		}
-		if waits, err := lostRoundAwaitsResume(dataDir, r, loadID, outcome, now); waits {
-			return true, err
-		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by
 			// design -- see this function's own "never triggered when
@@ -1530,22 +1527,6 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		exhaustedCheck = quarantineCheckFor(current)
 	}
 	return true, quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d: %ss exhausted (%d/%d); last round: %s", ticket.Index, r.TicketCount, plan.label, countedRounds, cfg.ReviewCorrectiveRounds, StatusReason(current)), exhaustedCheck, now)
-}
-
-// lostRoundAwaitsResume puts the request in resume_review when a corrective
-// round's run halted with its worktree kept (its worker was lost while this
-// process stayed up): a human decides, as AdvanceBuilding does for a
-// ticket's first build. Quarantining instead would let `retry` delete the
-// kept worktree, and the round's work with it.
-func lostRoundAwaitsResume(dataDir string, r *request.Request, roundRunID string, outcome request.RoundOutcome, now time.Time) (bool, error) {
-	if outcome != request.RoundHalted {
-		return false, nil
-	}
-	roundRun, err := run.Load(dataDir, roundRunID)
-	if err != nil || !roundRun.KeptForResume {
-		return false, nil
-	}
-	return true, EnterResumeReview(dataDir, r, roundRun.ID, now)
 }
 
 // maxConformityCriterionBytes/maxConformityVerdictBytes cap the single-line,
