@@ -149,6 +149,7 @@ def run_plan(
 
 	session_dir = workspace / ".factory-plan-draft" / "session"
 	session_dir.mkdir(parents=True, exist_ok=True)
+	build_app.saved_prompts.save_prompt(session_dir, "draft-plan", prompt)
 	command = adapter.invocation(
 		workspace, prompt=prompt, session_dir=session_dir,
 		continue_session=False, thinking=thinking,

@@ -128,9 +128,10 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	beforeAttempt = a.leaseChecked(ctx, a.checkpointDirFor(input), beforeAttempt)
 	afterAttempt := func(attempt int, res runner.Result, _ error) error {
 		attempts = append(attempts, run.Attempt{
-			Kind:        v.kind,
-			Command:     res.Command,
-			SetupSHA256: run.SetupDigest(input.SetupCommands),
+			Kind:             v.kind,
+			Command:          res.Command,
+			SetupSHA256:      run.SetupDigest(input.SetupCommands),
+			FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -168,9 +169,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	}
 	if runErr != nil {
 		checkpoint.Error = v.label + " subprocess infrastructure failure: " + runErr.Error()
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			checkpoint.ErrorType = CleanupUnconfirmedFailureType
-		}
+		checkpoint.ErrorType = checkpointErrorType(runErr)
 	} else if err != nil {
 		checkpoint.Error = v.label + " evidence infrastructure failure: " + err.Error()
 	}
@@ -179,17 +178,11 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	// failure return below — see RunBuildActivity's matching comment for
 	// why.
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return verifyResult, temporal.NewApplicationErrorWithCause("save "+v.label+" Activity checkpoint", errType, saveErr, verifyResult.Attempts)
 	}
 	if runErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return verifyResult, temporal.NewApplicationErrorWithCause(v.label+" subprocess infrastructure failure", errType, runErr, verifyResult.Attempts)
 	}
 	if err != nil {
@@ -313,9 +306,10 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	beforeAttempt = a.leaseChecked(ctx, a.checkpointDirFor(input), beforeAttempt)
 	afterAttempt := func(attempt int, res runner.Result, _ error) error {
 		attempts = append(attempts, run.Attempt{
-			Kind:        "full_suite_verify",
-			Command:     res.Command,
-			SetupSHA256: run.SetupDigest(input.SetupCommands),
+			Kind:             "full_suite_verify",
+			Command:          res.Command,
+			SetupSHA256:      run.SetupDigest(input.SetupCommands),
+			FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -351,25 +345,17 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	}
 	if runErr != nil {
 		checkpoint.Error = "full-suite verify subprocess infrastructure failure: " + runErr.Error()
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			checkpoint.ErrorType = CleanupUnconfirmedFailureType
-		}
+		checkpoint.ErrorType = checkpointErrorType(runErr)
 	} else if err != nil {
 		checkpoint.Error = "full-suite verify evidence infrastructure failure: " + err.Error()
 	}
 	checkpoint.Result = fullSuiteResult
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("save full-suite verify Activity checkpoint", errType, saveErr, fullSuiteResult.Attempts)
 	}
 	if runErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("full-suite verify subprocess infrastructure failure", errType, runErr, fullSuiteResult.Attempts)
 	}
 	if err != nil {
@@ -561,9 +547,10 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	beforeAttempt = a.leaseChecked(ctx, a.checkpointDirFor(input.RunWorkflowInput), beforeAttempt)
 	afterAttempt := func(attempt int, res runner.Result, _ error) error {
 		attempts = append(attempts, run.Attempt{
-			Kind:                  input.Check,
-			Command:               res.Command,
-			SetupSHA256:           run.SetupDigest(input.SetupCommands),
+			Kind:             input.Check,
+			Command:          res.Command,
+			SetupSHA256:      run.SetupDigest(input.SetupCommands),
+			FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
 			StartedAt:             res.StartedAt.Format(time.RFC3339),
 			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
 			ExitCode:              res.ExitCode,
@@ -619,25 +606,17 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	}
 	if runErr != nil {
 		checkpoint.Error = input.Check + " gate subprocess infrastructure failure: " + runErr.Error()
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			checkpoint.ErrorType = CleanupUnconfirmedFailureType
-		}
+		checkpoint.ErrorType = checkpointErrorType(runErr)
 	} else if err != nil {
 		checkpoint.Error = input.Check + " gate evidence infrastructure failure: " + err.Error()
 	}
 	checkpoint.Result = gateResult
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return gateResult, temporal.NewApplicationErrorWithCause("save "+input.Check+" gate Activity checkpoint", errType, saveErr, gateResult.Attempts)
 	}
 	if runErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return gateResult, temporal.NewApplicationErrorWithCause(input.Check+" gate subprocess infrastructure failure", errType, runErr, gateResult.Attempts)
 	}
 	if err != nil {

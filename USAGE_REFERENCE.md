@@ -14,8 +14,9 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd watch <run-or-request-id>` | Follows a run's progress feed; for a request, follows each ticket's run in turn and prints the `approve`/`retry` hint when it waits on you. Recap on exit. | `-data-dir`, `-no-follow` (print what exists and exit), `-config` |
 | `factoryd worker` | The only request driver. Drives every request of the data dir through Temporal: one `RequestWorkflow` per request (workflow id `factoryd-request-<id>`), started or woken at worker start for every request not `done` or `cancelled`. Model jobs, builds and `pr_review` passes (which can run a corrective build) run on task queue `factoryd-jobs-<id>`, at most `max_parallel_jobs` at once across requests; workflows and light steps (loading state, reminders, halts) on uncapped `factoryd-light-<id>`. `<id>` is the random id in `<data-dir>/worker-queue-id`. Holds the drain lock: a second worker for one data dir refuses to start. A step lost mid-run (worker killed or stopped) puts its request in `resume_review` and waits for `factoryd resume`; a lost `pr_review` pass that only read the PR polls again. The next worker start halts the runs a lost step left (their workflows terminated, containers removed, a lost build's worktree kept) and puts the requests running them in `resume_review`; nothing is rerun on its own and Temporal never retries a lost Activity. While it is live, `submit`, the API's `POST /requests` and every decision (`approve`, `reject` (including send-back), `retry`, `resume`, `amend-scope`, `cancel`, on the CLI and the API) wake the request's workflow (signal-with-start, so a request submitted before the worker started is adopted); a wake that cannot reach Temporal prints one warning and the decision stays saved. Without a live worker nothing is woken: the next worker start reads `request.json` itself. A review wait also rechecks at `-hitl-reminder-interval`. `submit`, `quickstart` and `upgrade` start it. Requests on one repository build concurrently in their own worktrees; only a build that touches the shared checkout holds the repository alone, and stranded worktrees are cleaned when the repository is idle. Known limit: a build that needs the repository alone (a non-isolated build, a repository-owner run, a corrective round on an existing branch), the daemon reclaim and `factoryd reconcile` can wait indefinitely while isolated builds keep overlapping, since the lock has no writer preference; stranded worktrees are cleaned up only when no build holds the repository, and `factoryd reconcile` reports busy then. Writes a liveness heartbeat with its Temporal address, `max_parallel_jobs` as job slots and every request it is running a job for, so `status`, `stop`, `use`, `upgrade` and the console see it; with every slot busy, the other job-state requests show as waiting on the first running one. A build that needs the repository alone, while others hold it, waits for that lock (retrying every 30 s, without holding a job slot) instead of halting the request. Needs Temporal. | `-config`, `-data-dir`, `-skip-doctor`. Image: `-sandbox-image` (also a session-config key). The model route itself (upstream, credential, worker model id/API) is configured entirely through session config's `routes:`/`models:`/`roles:` block, not flags -- see "Model routes" above. `-registry-proxy`, `-registry-proxy-image`, `-egress-ca-bundle`, `-compose-services` (default on). Build: `-build-app-script`, `-build-app-max-attempts`, `-verify-max-attempts`, `-open-pull-request` (default **true** here), `-conformity-policy` (`required` default / `advisory`), `-temporal-address` (default: Temporal at `localhost:7233`, started with Docker if down; `none` is refused; an address is used as given). Request driver: `-draft-spec-script`, `-spec-draft-timeout-minutes` (10), `-plan-tickets-script`, `-plan-tickets-timeout-minutes` (15), `-draft-oracles-script`, `-draft-oracles-timeout-minutes` (15), `-hitl-reminder-interval` (15m, min 1m), `-advance-on` (`accepted` default / `pr_approved`). PR review loop: `-pr-poll-interval` (5m, min 1m), `-pr-trusted-authors` (empty = no comment triggers a round), `-pr-ignore-authors` (wins over trusted), `-max-review-rounds` (3, min 1) | |
 | `factoryd status` | Requests (state, project, age, `ticket i/n`, latest PR URL), then runs. | `-project`, `-state` (runs only), `-n` (default 20), `-json` (`{"requests": [...], "runs": [...]}`), `-data-dir` |
-| `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs). | `-n` (default 40), `-f`, `-list`, `-data-dir`, `-config` |
+| `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt, as saved by the build]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. | `-n` (default 40), `-f`, `-list`, `-prompt <name>`, `-data-dir`, `-config` |
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. Reuses the same rollup `GET /requests`'s `cost_summary` field is computed from (`api.Server.ComputeCostSummary`), never a separate calculation. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. | `-request <id>` (one request only), `-since YYYY-MM-DD` (requests submitted on/after; default: all), `-json`, `-data-dir`, `-config` |
+| `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by | `-project <name>`, `-since 30d\|YYYY-MM-DD` (tickets whose first run began on/after; default: all), `-bucket <days>` (default 7), `-all` (also count `live-smoke-` tickets), `-json`, `-data-dir`, `-config` |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. | `-config`, `-data-dir` |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. | `-reason` (required, before the id), `-to` (`plan`\|`spec`; quarantined/halted only), `-config`, `-data-dir` |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. | `-reason` (requests only), `-from attempt\|scratch` (default `attempt`; `scratch` rebuilds from the base commit; the API body's `"from"`), `-config`, `-data-dir` |
@@ -27,6 +28,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd console` | Prints the tokenized console link (`<addr>/#t=<token>`) from the stable token file, for the running `serve` of this data dir (the address it recorded); a plain link if no token or no such serve is found. | `-config`, `-data-dir` (when serve's differs from the config's), `-open`. Starts a `serve` for the data dir first when none is running (unless `FACTORYD_AUTOSTART=0`) |
 | `factoryd mcp` | Turns on `serve`'s MCP endpoint (`POST /mcp`): creates the token file `<config name>.mcp-token` beside the session config (`config.mcp-token` for `config.yml`, mode 0600, one per profile) if it is missing, then prints the endpoint, the token and the `claude mcp add` line. With no `serve` recorded for the data dir it prints neither, and says to start one. `serve` reads the file on every call, so nothing restarts. Tools and limits: [USAGE.md § Drive Buildgate from an MCP client](USAGE.md#drive-buildgate-from-an-mcp-client) | `-rotate` (new token; the old one stops at once), `-disable` (remove the file; endpoint off), `-config`, `-data-dir` (when serve's differs from the config's) |
 | `factoryd inbox` | Lists every request waiting on the operator (`spec_review`, `oracle_review`, `plan_review`, `pr_review`, `resume_review`, `halted`, `quarantined`) across the distinct data dirs of all profiles, oldest first (waiting since `WaitingSince`, else `EnteredAt`): age, profile, state, id, title, then the commands or PR URL or `reason:`/`next:`, then the console link. Empty: `Nothing is waiting on you.` | `-json` (the same entries as an array: `profile`, `data_dir`, `id`, `title`, `state`, `since`, `age_seconds`, `reason`, `next`, `approve`, `reject`, `pr_urls`, `console_url`) |
+| `factoryd memory <subcommand>` | Repository memory for one repository: `list` (the switch, the budget, the lines in force, the candidates; with memory on it first collects candidates from finished runs' notes), `show <id>`, `add "<text>"`, `drop <id>`, `propose [<id>...]` (opens one request that rewrites the fenced section of `AGENTS.md` and stops at `spec_review`), `on`, `off`. See "Repository memory" below. Every subcommand but `list` and `show` is refused while memory is off. | `-workspace <repository>` (required), `-config`, `-data-dir`, `-json` (`list`, `show`), `-reason` (`drop`, `off`), `-remove "<exact line>"` (`propose`, repeatable). Flags come before the arguments |
 | `factoryd stop` | Stops the `worker` and the `serve` of the data dir, one output line per process (`stopped (pid N)`, `not running`, or why it was skipped). Finds pids from `<data-dir>/quickstart-queue-run.pid` or the worker heartbeat, and from `<data-dir>/console-address` or `quickstart-serve.pid`, and signals a pid only while it still looks like factoryd. A running launchd service (`dev.factoryd.worker`/`dev.factoryd.serve`) for that data dir is left alone (`factoryd uninstall-service` removes it). Refuses when the heartbeat names any request being built or run (all are listed). With `-force`, the running builds halt at the next worker start and their requests wait in `resume_review` (`factoryd resume <id>` continues or rebuilds one). Exits non-zero on a refusal or a process that would not exit. | `-config` (path or profile name), `-data-dir`, `-all` (every profile's data dir, then, when `~/.config/factoryd/openshell` exists, `docker compose -p buildgate-openshell stop gateway meter` (refused while a request or sandbox is active), then `docker compose -f ~/.config/factoryd/temporal/docker-compose.yml stop`, then `colima stop` when colima is the Docker provider and no other container runs (`factoryd uninstall` leaves the VM running; `FACTORYD_AUTOSTART=0` leaves it too); refuses while a worker is still live; exclusive with `-config`/`-data-dir`), `-force` (stop despite a building request, cancelling its build, or, with `-all`, a live worker) |
 | `factoryd restart` | Stops every profile's running `worker` and `serve` and starts them again with this binary (a launchd service is kickstarted), one line saying what came back. A worker runs each build in its own process, so one started before an install keeps building with the code it started with; `make install` runs this itself. Refuses while a request is building, naming it, and stops nothing. If a process does not exit within 15 s of SIGTERM, restart starts the others again, leaves that one running, names it and exits non-zero: stop it by pid, then `factoryd restart`. `serve` ends open event and log streams when it is told to stop, so a console tab left open does not hold it. `factoryd doctor` warns (`worker runs this factoryd`) when the running worker is another version |
 | `factoryd setup` | Chooses the model and coding agent every run uses and writes them into the session config, keeping its recorded images. `make install` runs it. Asks which model route (detected ChatGPT/Codex and Copilot logins first) and, on a route that can run more than one (`chatgpt-codex`: `pi` or `codex`), which coding agent; the rest is defaulted. Asks nothing with no terminal (a single detected login is used, else it fails naming `-route`) or when the config already names a model. | `-route`, `-harness`, `-model-id`, `-model-host`, `-context-window`, `-credential`, `-sandbox-image`, `-egress-ca-bundle`, `-config`, `-data-dir`, `-non-interactive`, `-reconfigure` |
@@ -131,7 +133,11 @@ wording. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
-says why). The bare `-release-*`/session-config zero defaults deny
+says why). With pull requests on, a ticket whose release decision is not
+allowed halts the request before the next ticket is built (the next ticket
+is built on this one's commit and its pull request would carry the refused
+change); with pull requests off the tickets are built in order and each
+run's decision is on its record. The bare `-release-*`/session-config zero defaults deny
 everything, so a usable `-release-rollback-plan` and non-zero
 `-release-max-files-changed`/`-release-max-insertions` are required — see
 "Release policy" below. Per `-advance-on` (`accepted` default, or
@@ -201,6 +207,18 @@ The build agent's own notes for the next attempt (the last section of
 | Caps | Reply cut to 12,000 bytes of UTF-8 in the session; at most 16 KiB retained; at most 8 items per heading, each one line of at most 300 characters, cleaned like every value from a build; the notes section of the record at most 3000 bytes, last, and the first thing the size cut drops |
 | Stored | `.pi-build-session/handoff-notes.md` in the worktree, copied by the host to `agent-notes.md` in the run's directory before the session folder is removed, and parsed into `agent_notes` in `handoff.json` |
 | Readable by | The operator (`GET /runs/{id}/handoff`) and a later build of the same ticket (its first prompt). Not a review, a planner, a pull request, a notification, the progress feed, a build log, `run.json` or an MCP tool |
+
+**Saved prompts.** The text of each prompt a script hands to a coding agent,
+for the operator to read:
+
+| | |
+|---|---|
+| Saved by | `agent/pi/scripts/saved_prompts.py`'s `save_prompt(session_dir, name, text)`, at the one place each script hands a prompt to the harness. It never raises and never changes the turn; a failure is one progress note naming the exception class |
+| Names | `build-round-<n>`, `build-notes`, `build-sonnet-fallback` (the build); `review-conformity`, `review-code`, `review-combined`; `draft-spec`, `draft-spec-example-check`, `draft-plan`, `draft-oracle-c<nnn>`. A name saved twice in one session (a relaunch) gets `-2`, `-3`. Not covered: `goal_pilot.py`, which `factoryd intake` runs outside a run's or request's directory |
+| Caps | 2 MiB per prompt (cut, with a last line saying how many bytes), 50 per launch; the host enforces both again, takes only regular files named `[a-z0-9-]{1,64}.md`, and follows no link |
+| Stored | `<session folder>/prompts/<name>.md` in the worktree, copied by the host (through `sanitize.Text`: escapes, control characters and recognisable credentials removed) to `prompts/<launch>-<n>/<name>.md` in the run's directory (`<launch>` is `build`, `spec_conformity`, `code_review` or `review`; `<n>` the Temporal attempt), or in the request's directory (`spec-<n>`, `plan-<n>`, `oracle-<n>`) for a drafting job, then removed from the worktree before any later launch. A launch's prompts folder is also emptied before the launch (a folder left read-only is made removable first; a review or a build whose folder cannot be emptied fails as an infrastructure error and is not launched), so only files written during the launch are copied. No field of `run.json` names them |
+| What a saved prompt proves | A saved prompt is what the build's session folder held when the host copied it; a build can alter its own before that. The script and the coding agent run as one user in one sandbox, and the script has no way to report what it saved that the agent cannot also write (its output file is in a directory the sandbox writes). A review's prompt is saved by a launch that runs no build agent |
+| Readable by | The operator: `factoryd logs -list` / `-prompt`, `GET /runs/{id}/prompts` (name, attempt, bytes, time) and `GET /runs/{id}/prompts/{attempt}/{name}` (`text/plain`), gated like `GET /runs/{id}`, and the run page's **Prompts as saved by the build**. Not a model, a review, an MCP tool, a pull request, a notification, the progress feed or `run.json`. A prompt may quote repository files, failing output and the record of an earlier attempt |
 
 **A retry's rebuild.** `factoryd retry <id>` rebuilds the quarantined ticket
 as a fresh run with every gate again. Where it starts and what it is told:
@@ -592,7 +610,7 @@ sandbox; `autofix:` runs inside each build round only.
 | Shape | List of strings, one command per entry |
 | Limits | At most 8 entries per key, 2000 bytes per entry, one line each (no newline, carriage return or NUL byte), none blank |
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is read from |
-| Status | Both run, as below. Both are recorded on the run (`project_config_sha256`) |
+| Status | Both run, as below. Both are recorded on the run (`project_config_sha256`, and `project_config_commit_sha`: the commit the file was read from) |
 
 Where `setup:` runs, in the order listed, each command by `sh -c` in the
 workspace; the command of the step follows only when all passed:
@@ -618,6 +636,38 @@ workspace; the command of the step follows only when all passed:
 | Scope | It may change only files the ticket's build has changed so far (paths that differ from the commit the build started from, or are untracked and not ignored, before autofix ran). Any other path it changed is restored to that commit's content (a file it lacks is deleted) and listed; a submodule or directory entry is never rewritten. Its edits never count as the agent's work: a round where only autofix changed files is still "no changes". Each command runs in its own process group, which is stopped when the command returns or times out, so background work cannot write after the check; a process that detaches into its own session is not stopped and ends with the build's container |
 | Evidence | `autofix` on each round of the build evidence: per command `command` (first 200 characters), `exit_code`, `timed_out`, `duration_s`, and `reverted_count` with the first 20 `reverted` paths (only paths actually restored or deleted), `revert_failed_count` with the first 20 `revert_failed` paths, `scope_check_failed`, and `skipped` when it did not run. The output and any revert are in `autofix.log` in the round's feedback folder |
 | Limits | 8 entries, 2000 bytes and one line each, 5 minutes per command: up to 40 minutes a round, inside the build's own time limit |
+
+**The `.factory/` directory.** Scripts the commands above call
+(`lint_command: sh .factory/lint.sh`) go in `.factory/` at the repository
+root. Every sandbox that runs a repository command sees that directory as a
+trusted commit holds it, read-only, so a build cannot change the script a gate
+judges it with.
+
+| | |
+|---|---|
+| What it is | The directory `.factory/` at the repository root, committed. Regular files and subdirectories only: a symlink or a submodule in it, two names that differ only by letter case, more than 2,000 files, a file over 4 MiB or 16 MiB in all is refused |
+| Which commit | The commit `.factory.yml` was read from: `HEAD` of your checkout when the run was dispatched (`project_config_commit_sha` on the run), also for a repository with no `.factory.yml` |
+| Mounted read-only in | The baseline verify, the build, canonical verify, the full suite, each named and repo gate, the oracle canary and the reruns after an oracle commit, at `/workspace/.factory`. A new snapshot is taken from git objects before each launch |
+| Not mounted in | Review sandboxes; drafting and planning jobs (they run no repository command) |
+| The commit has no `.factory/` and the worktree does | An empty read-only directory is mounted over it |
+| What now fails | A command that writes into `.factory/`: a cache or report written there, `chmod +x .factory/*`. Commit the executable bit (`git update-index --chmod=+x`) and write output elsewhere (a gitignored directory, `/tmp`) |
+| A build that changes it | Its edit is not what the gates run, and the result is refused at release: `.factory/` is a protected path |
+| Evidence | `factory_dir_sha256` and `factory_dir_commit` on every attempt that had the mount. The hash is the same for every attempt that mounted the commit's directory. An attempt records none when nothing was mounted (a review attempt, or neither the commit nor the worktree had the directory at that launch) and the empty snapshot's hash when an empty directory was mounted over a `.factory/` only the worktree has, so a run whose build creates the directory has both |
+| Not covered | Files outside `.factory/` that a script there calls (`sh .factory/lint.sh` running `scripts/check.py`, or `verify_command: make test`): those run as the build left them |
+
+| Halts the run before the sandbox starts (`halt_reason_code` `factory_dir_failed`) | What to change |
+|---|---|
+| The commit has `.factory/` and the run's worktree has no such directory (the run builds on a branch or commit older than the one that added it, or a build deleted it) | Rebase the branch onto the commit that has `.factory/`, or start the request again from it |
+| `.factory` in the worktree is a file or a symlink, or the worktree root holds another spelling (`.Factory`) | Make it one real directory named `.factory` in the repository |
+| `.factory/` at the commit holds a symlink, a submodule, names that differ only by case, or exceeds a limit above | Replace the link with the file, move the submodule, keep one spelling, or move large files out |
+
+The halt is not retried and is not an infrastructure failure; a snapshot that
+could not be taken for another reason (git could not run, the worker was
+stopping, the run's directory could not be written) is one, and is retried
+like any other. `factoryd
+status` quotes the reason, which names the path; it is on the refused attempt
+as `factory_dir_error`. On the baseline verify, the first sandbox of a run,
+this stops the run before any model call.
 
 **Named gates.** `lint_command`/`security_command`/`unit_test_command`/
 `integration_test_command`/`reference_oracle_command` (flags:
@@ -1305,6 +1355,129 @@ path not on it is not covered. `make probe-instruction-paths` measures what
 the pinned `pi`, `codex` and `copilot` harnesses load from a workspace (no
 model call, no network) against that table.
 
+## Repository memory (`factoryd memory`)
+
+`factoryd memory <subcommand> -workspace <repository> [flags] [arguments]`.
+Flags come before the arguments. The walkthrough is in USAGE.md.
+
+| Subcommand | Does | Writes |
+|---|---|---|
+| `list` | Prints whether memory is on (and which switch has it off), the budget and its use, the lines in force (the fenced section of root `AGENTS.md` at the checkout's HEAD, read from git, never the worktree) and the candidates: `ID`, `SEEN`, `SOURCE`, `STATE`, `LINE`, most seen first, then newest, dropped last. With memory on it first collects candidates from the newest 200 finished runs of this repository (a run recorded against another checkout of the same name, or against none, is skipped) and reconciles the store with the section. A section line that holds a control or format character, or a file with no section that ends inside a code fence, is `unreadable section: fix AGENTS.md by hand`. An open memory request whose `AGENTS.md` at HEAD is neither the file it was rendered from nor the file it proposes is shown as `stale: propose again`. Every line is printed with escapes and control characters removed | The store, only with memory on |
+| `show <id>` | One candidate: its line, the runs that said it and when each ended, its history. An id may be shortened to a unique prefix | Nothing |
+| `add "<text>"` | Adds your own candidate under the text rule; the refusal names the rule broken. A dropped line added again is a candidate again | The store |
+| `drop [-reason <why>] <id>` | Moves a candidate or proposed line to `dropped`. A dropped line still counts the runs that say it and is never proposed | The store |
+| `propose [-remove "<line>"]... [<id>...]` | Opens one memory request: adds the named candidates (none named: the most seen that fit) and removes each `-remove` line. At most five changes. Refused when the section would be over its budget (pass `-remove`, or raise `budget_lines`/`budget_chars`), when the repository has no `verify_command`, while another memory request of the repository is neither `done` nor `cancelled`, or when the section at HEAD cannot be read (a line with a control character; a file with no section that ends inside a code fence, which you close by hand) | The proposal, the request, the store |
+| `off [-reason <why>]` / `on` | Writes / removes the project's stop marker. While it exists every changing subcommand is refused and the run of a memory request already in flight is not released (`repository memory is switched off (factoryd memory off)`). `on` does not list a repository under `memory.repositories`: that is your edit | The stop marker |
+
+| Flag | Meaning |
+|---|---|
+| `-workspace <path>` | The repository: its root or any directory inside it. Required |
+| `-config <file or profile>` | The session config whose `memory.repositories` is the switch and the budget |
+| `-data-dir <dir>` | Default: the session config's |
+| `-json` | `list` (the shape of `GET /projects/{project}/memory`) and `show` |
+| `-reason <text>` | `drop`, `off` |
+| `-remove "<exact line>"` | `propose`: a line as `memory list` prints it, `- ` included. Repeatable |
+
+The text rule a line passes (never repaired, for a build agent's note and for
+`add` alike):
+
+| A line | Rule |
+|---|---|
+| Length | One line, at most 120 characters |
+| Characters outside backticks | Letters, digits, space and `. , : ; ( ) ' " / = + -` |
+| A command | Inside one pair of backticks: letters, digits, space and `. _ / : = -`, not starting with `-`, and no absolute path: no `/` followed by a letter, `.` or `/` at the start of the command or after a space or `=`. A relative path (`./tools/gen.sh`, `tests/x.py`) is accepted |
+| Refused anywhere | `//` and `www.` (a URL in any form), an e-mail address, `/users/` and `/home/` in any case, an IPv4 or hex-colon address, `::`, an unbroken run of 20 or more of `A-Z a-z 0-9 + / _ -` that holds at least one letter and at least one digit (a hash, a key id, an encoded secret; a long word, a path or a variable name with no digit is accepted), anything secret redaction would change |
+| Refused outside backticks | An absolute path: `/` followed by a letter or `.`, unless a letter, digit, `.`, `_` or `/` comes right before it; a start of `-`, `+` or digits followed by `.` or `)` |
+
+Store layout, under `<data-dir>/memory/<key>/`, where `<key>` is the
+lower-cased project name, `-`, and the first 12 hex characters of the SHA-256
+of the repository's root path:
+
+| File | Holds |
+|---|---|
+| `state.json` | The candidates (`candidate`, `proposed`, `dropped`), each with its line, source, the runs that said it (at most 20) and its history; and the runs already collected. At most 200 lines and 1 MiB. A line in force is not stored: the file is the memory |
+| `off` | The stop marker `memory off` wrote |
+| `proposals/<request-id>.json` | The exact `AGENTS.md` a memory request must produce and its SHA-256, and the SHA-256 of the `AGENTS.md` it was rendered from (empty when there was none): what the release check compares against the run's result and against the run's base |
+| `proposals/<request-id>.changes.json` | The lines that request adds and removes and the run ids an added line came from, for the pull request body |
+
+What the release check enforces on the repository's root `AGENTS.md`, in any
+letter case of that name (`agents.md` is the same file on a case-insensitive
+checkout). It reads git objects, never the worktree, and a read that fails
+refuses the release:
+
+| Run | Released only when |
+|---|---|
+| Of a memory request | The result holds exactly one such name, spelled `AGENTS.md`, a regular file of mode `100644` whose bytes are the proposal's text, and no other file changed |
+| Any other, in a repository whose root `AGENTS.md` has a buildgate memory section (it holds the text `buildgate:memory`) | It did not change that file in any way (text outside the markers included, its mode, a move, a delete) and added no other letter case of its name. Only a memory request, or a person, changes the file: a ticket that edits it is refused at release |
+| Any other, in a repository with no memory section | It may edit or create `AGENTS.md`, but the result holds one letter case of the name only, a regular file where the run changed it, without the text `buildgate:memory` (written plainly or as HTML character references) |
+
+| Release reason | Meaning |
+|---|---|
+| `AGENTS.md of a repository with a memory section changed by a run that is not a memory change` | The second row above |
+| `a run that is not a memory change added memory markers to AGENTS.md` | The third row: the marker text |
+| `the result holds more than one root file named AGENTS.md in some letter case` | The third row: two spellings |
+| `a run that is not a memory change made AGENTS.md something other than a regular file` | The third row: a symlink, a submodule or a directory |
+| `memory change does not match the approved text` | The first row; it names up to three other changed files |
+| `memory section check could not be completed` | The check could not read the commits, the request or the proposal |
+
+`factoryd override -state accepted` runs the same check before it records the
+release decision. The console's and the API's override cannot read the
+repository: for a run that changed a root `AGENTS.md` name, or a memory
+request's run, it answers 409 and says to run `factoryd override` on the host.
+
+`GET /projects/{project}/memory` (read token, like the project's
+observations) returns the same view as `memory list -json` for the repository
+the project's requests are submitted against: `on`, `off_reason`,
+`budget_lines`, `budget_chars`, `used_lines`, `used_chars`, `in_force`,
+`section_error`, `candidates` (`id`, `line`, `source`, `state`, `seen`,
+`first_seen_at`, `last_seen_at`, `request_id`). It collects nothing and writes
+nothing; the console's Memory tab of a project reads it. There is no MCP tool
+for memory.
+
+
+## Is it getting better (`factoryd stats`)
+
+`factoryd stats` and `GET /projects/{project}/trend` (read token; query
+`since`, `until`, `bucket`, `all`, which mean what `-since`, `-bucket` and
+`-all` mean; `until` is exclusive) print one report built from the run records
+of the data dir. The console's **Trend** tab of a project reads the route. The
+route is `/trend` because `GET /projects/{project}/stats` is the release
+figures behind the **Stats** tab. Nothing is stored and no model is called.
+
+A **ticket attempt series** is the finished runs of one ticket in the order
+they were created: its own run, then any retry, corrective round, conformity
+round or PR-review round (a run named `<ticket>-corrective1`,
+`-conformity1`, `-review2`, each possibly with `-fix1`, belongs to
+`<ticket>`). A ticket whose first run is still in progress is not counted.
+A ticket belongs to the bucket its first run began in; buckets are UTC days,
+oldest first, empty ones kept, at most 26 (the newest).
+
+| Field | Definition | Against `scripts/baseline.py` |
+|---|---|---|
+| `tickets` | Series counted | Same |
+| `one_shot`, `one_shot_rate` | Series with one run only, accepted, no override or rescue, at most one recorded round | baseline counts a first run accepted with no override or rescue, whatever followed or however many rounds it took |
+| `accepted`, `accepted_rate` | Series whose last run is accepted | Not in baseline |
+| `rounds_to_green` | Over accepted series that recorded a round: rounds summed across all its runs; `median` (mean of the two middle values for an even count) and nearest-rank `p90` | baseline takes the rounds of each accepted run |
+| `failed_round_pairs` | Consecutive failed rounds within one run | Same |
+| `comparable_pairs`, `same_failure_pairs` | Failed-round pairs whose rounds both recorded a failure signature, and those with equal signatures | baseline also derives a signature from the build report for older records and reports recorded and derived apart; stats counts recorded only |
+| `no_change_pairs` | Failed-round pairs whose second round changed no file | Same |
+| `quarantined_by` | Quarantined runs per failed check, a run once per check; a run with none counts under its reason code in brackets; at most 10, largest first | baseline lists every check |
+| `halted_by` | Halted runs per reason code, else the first line of the triage sentence; at most 10 | baseline lists every reason |
+| `corrective_builds` | `ran`: runs after a series' first; `accepted`: how many of them ended accepted | Not in baseline |
+| `spend` | Relay tokens and micro-USD summed over the runs' attempts, `runs_with_spend`, and cost per accepted series. Not drafting: `factoryd cost` is the full account | Not in baseline |
+| `excluded_runs` | Runs whose ticket (or id) starts with `live-smoke-`; counted only without `-all` / `all=1` | baseline counts every record |
+| `unfinished` | Runs still in progress, left out | Same |
+
+| Flag | Meaning |
+|---|---|
+| `-project <name>` | One project's block, bucket table and lists; without it, one row per project and an overall row |
+| `-since 30d` or `-since 2026-09-01` | Tickets whose first run began on or after that moment |
+| `-bucket <days>` | Days per bucket (1 to 365; default 7) |
+| `-all` | Count `live-smoke-` tickets too |
+| `-json` | The report as JSON: with `-project` the route's body; without it `{"overall": ..., "projects": [...]}` |
+| `-data-dir`, `-config` | As for `factoryd cost` |
+
+
 ## Design guide (`design_guide`, `design_guide_dirs:`)
 
 A design guide is the team's own rules for what to decide before code is
@@ -1395,6 +1568,7 @@ limits for API-started runs.
 | `sandbox_tmpfs_size` | `1g` |
 | `model_host_concurrency` | `1`. Locks only a single-instance-looking route upstream (loopback, RFC1918, Tailscale, `.local`/`.lan`, non-HTTPS or unparseable). SaaS hosts (`chatgpt.com`, `api.githubcopilot.com`, `api.anthropic.com`) are never locked. `0` disables. |
 | `max_parallel_jobs` | `2`, at least `1` (two builds fit a 4 GiB Docker VM next to Temporal). How many model jobs and builds `factoryd worker` runs at once across all requests. Each build's sandbox takes up to `sandbox_memory`. |
+| `memory.repositories` | Unset: repository memory is off for every repository. A list of `{path, budget_lines, budget_chars}`: `path` is the repository's root, absolute or `~/` (listed once; matched by root path with symlinks resolved, never by directory name); `budget_lines` 5 to 80 (default 40) and `budget_chars` 500 to 6000 (default 3000) bound the section memory keeps in its `AGENTS.md`. A memory action also stops while the project's kill switch is engaged or its `off` marker exists (`<data-dir>/memory/<project>/off`) |
 | `meter_max_request_bytes` | `1048576` |
 | `meter_requests_per_minute` | `60` |
 | `meter_token_budget` | `1000000` |

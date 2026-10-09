@@ -569,12 +569,13 @@ type Server struct {
 	mcpHandler http.Handler
 	// mcpSubmits are the times of the submit_request calls that created a
 	// request within mcpSubmitWindow (see mcpSubmitAllowed).
-	mcpSubmitMu          sync.Mutex
-	mcpSubmits           []time.Time
-	runStarter           RunStarter
-	projectChecker       ProjectChecker
-	projectStatsProvider ProjectStatsProvider
-	daemonController     DaemonController
+	mcpSubmitMu           sync.Mutex
+	mcpSubmits            []time.Time
+	runStarter            RunStarter
+	projectChecker        ProjectChecker
+	projectStatsProvider  ProjectStatsProvider
+	projectMemoryProvider ProjectMemoryProvider
+	daemonController      DaemonController
 	// prOpener is request.Retry's own "accepted run, no PR yet" side
 	// effect (see WithPROpener) -- nil is safe (Retry's own documented
 	// fallback), so a Server built without this option still handles
@@ -689,9 +690,13 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs/{id}/diff", s.getRunDiff)
 	s.mux.HandleFunc("GET /runs/{id}/release", s.getRunRelease)
 	s.mux.HandleFunc("GET /runs/{id}/handoff", s.getRunHandoff)
+	s.mux.HandleFunc("GET /runs/{id}/prompts", s.getRunPrompts)
+	s.mux.HandleFunc("GET /runs/{id}/prompts/{attempt}/{name}", s.getRunPrompt)
 	s.mux.HandleFunc("GET /projects/{project}/release", s.getProjectRelease)
 	s.mux.HandleFunc("GET /projects/{project}/stats", s.getProjectStats)
 	s.mux.HandleFunc("GET /projects/{project}/observations", s.getProjectObservations)
+	s.mux.HandleFunc("GET /projects/{project}/trend", s.getProjectTrend)
+	s.mux.HandleFunc("GET /projects/{project}/memory", s.getProjectMemory)
 	s.mux.HandleFunc("POST /runs/{id}/override", s.overrideRun)
 	s.mux.HandleFunc("GET /requests", s.listRequests)
 	s.mux.HandleFunc("POST /requests", s.createRequest)
@@ -2276,6 +2281,13 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+		// Before anything is saved: the release decision below reads the
+		// run's recorded check of root AGENTS.md, and this server cannot
+		// compute a missing one (it has no git access).
+		if why := memoryEvidenceMissing(s.dataDir, loaded); why != "" {
+			writeError(w, http.StatusConflict, why)
+			return nil
+		}
 		// Matches cmd/factoryd's own save() helper: notify.PrepareHalt/
 		// DispatchDiscord give an override-to-halted through this HTTP
 		// route the same halt alert save() already gives every CLI- or
@@ -2391,6 +2403,31 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		// above.
 		writeError(w, http.StatusInternalServerError, "acquire override lock")
 	}
+}
+
+// memoryEvidenceMissing is why an override to accepted (r is the run with the
+// override applied) cannot be decided by this server, or "": the run has no
+// recorded check of root AGENTS.md
+// (run.MemoryEdit, which the host computes from git objects when a run is
+// accepted, so a quarantined run has none) and it needs one, because it
+// changed a root instruction name or its request is a memory change. The
+// CLI's override computes the check; with one recorded, the release decision
+// reads it as it does for any accepted run.
+func memoryEvidenceMissing(dataDir string, r *run.Run) string {
+	if r.State != run.StateAccepted || r.MemoryEdit != nil {
+		return ""
+	}
+	governed := len(run.ChangedRootInstructionNames(r.ChangedFiles)) > 0
+	if !governed && r.RequestID != "" {
+		// A request record that exists and cannot be read may be a memory
+		// request's.
+		req, err := request.Load(dataDir, r.RequestID)
+		governed = (err != nil && !errors.Is(err, os.ErrNotExist)) || (err == nil && req.Source.Kind == request.SourceMemory)
+	}
+	if !governed {
+		return ""
+	}
+	return "this run changed the repository's root AGENTS.md, or is a memory change, and has no recorded check of that file; the check reads the repository, so run `factoryd override` on the host instead"
 }
 
 // approveRequestBody is POST /requests/{id}/approve's JSON request body.

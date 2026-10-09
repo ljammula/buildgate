@@ -45,7 +45,7 @@ This repo enforces its own safety properties on itself. Two files are
 **normative**, not descriptive, and are checked mechanically:
 
 - [`safety-contract.md`](safety-contract.md) — trust boundaries, threat
-  model, invariants SC-001–SC-019, the full run state graph. A change
+  model, invariants SC-001–SC-020, the full run state graph. A change
   that weakens an invariant needs a new contract review, not a quiet
   code edit.
 - [`CLAIMS.md`](CLAIMS.md) — every normative claim mapped to the test
@@ -313,7 +313,9 @@ that are real tickets: read the per-project rows or pass `--project`. It makes
 no model call and gates nothing; run it before and after a change meant to
 move one of those numbers, and compare like with like (its doc comment says
 which same-failure figure is recorded by the build and which is rebuilt from
-older records).
+older records). `factoryd stats` shows the same numbers per repository, and
+per week, for the current data dir (live-smoke tickets left out unless `-all`);
+`make baseline` stays for several data dirs and older record shapes.
 
 `make bar` (`scripts/bar.sh`) is the separate, standing measurement of the
 `-draft-oracles` default-on bar: `BAR_ROUNDS` (default 2) rounds of

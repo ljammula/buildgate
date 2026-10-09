@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,37 @@ func TestTicketRunCarriesSetupAndAutofixFromTheCommittedFile(t *testing.T) {
 	if tr.projectConfigSHA256 != hex.EncodeToString(sum[:]) {
 		t.Errorf("projectConfigSHA256 = %q, want the hash of the committed bytes", tr.projectConfigSHA256)
 	}
+	if head := headOf(t, workspace); tr.projectConfigCommitSHA != head {
+		t.Errorf("projectConfigCommitSHA = %q, want HEAD %q", tr.projectConfigCommitSHA, head)
+	}
+}
+
+func headOf(t *testing.T, workspace string) string {
+	t.Helper()
+	out, err := runGit(t, workspace, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(out)
+}
+
+// The commit is the one HEAD named before the first read of the file: a
+// checkout whose HEAD moved while its .factory.yml was being read is refused
+// rather than given a commit the commands may not have come from.
+func TestTicketRunRefusesAHeadThatMovedWhileTheConfigWasRead(t *testing.T) {
+	workspace := newFixtureRepo(t)
+	commitFactoryYML(t, workspace, goldenFactoryYML)
+	before := headOf(t, workspace)
+	commitFactoryYML(t, workspace, "setup:\n  - make other\n")
+	full := ""
+	tr := &ticketRun{workspace: &workspace, fullSuiteCommand: &full, headBeforeProjectConfig: before}
+	err := tr.applyCommittedProjectConfig(false)
+	if err == nil || !strings.Contains(err.Error(), "HEAD moved") {
+		t.Fatalf("error = %v, want a refusal naming the moved HEAD", err)
+	}
+	if tr.projectConfigCommitSHA != "" {
+		t.Errorf("projectConfigCommitSHA = %q, want none after a refusal", tr.projectConfigCommitSHA)
+	}
 }
 
 // A repository with no .factory.yml leaves the lists and the hash empty.
@@ -49,6 +81,11 @@ func TestTicketRunWithoutProjectConfigHasNoSetupOrHash(t *testing.T) {
 	}
 	if len(tr.setup) != 0 || len(tr.autofix) != 0 || tr.projectConfigSHA256 != "" {
 		t.Errorf("got setup %q autofix %q hash %q, want all empty", tr.setup, tr.autofix, tr.projectConfigSHA256)
+	}
+	// The commit is recorded all the same: the run's sandboxes see that
+	// commit's .factory/ whatever names the commands.
+	if head := headOf(t, workspace); tr.projectConfigCommitSHA != head {
+		t.Errorf("projectConfigCommitSHA = %q, want HEAD %q", tr.projectConfigCommitSHA, head)
 	}
 }
 
@@ -74,6 +111,9 @@ func TestRunRecordHasProjectConfigSHA256(t *testing.T) {
 	sum := sha256.Sum256([]byte(goldenFactoryYML))
 	if want := hex.EncodeToString(sum[:]); rec.ProjectConfigSHA256 != want {
 		t.Errorf("project_config_sha256 = %q, want %q", rec.ProjectConfigSHA256, want)
+	}
+	if head := headOf(t, workspace); rec.ProjectConfigCommitSHA != head {
+		t.Errorf("project_config_commit_sha = %q, want HEAD %q", rec.ProjectConfigCommitSHA, head)
 	}
 	input := startedRunWorkflowInput(t, address, runID)
 	if got := fmt.Sprint(input["setup_commands"]); got != "[npm ci make generate]" {

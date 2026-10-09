@@ -263,8 +263,9 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 	// This runs only after the repository owner has granted the request its
 	// serialized turn, so cleanup cannot erase another in-flight run's
 	// BUILD_EVIDENCE.json while that run is still collecting evidence.
-	if err := os.Remove(filepath.Join(input.WorkspacePath, "BUILD_EVIDENCE.json")); err != nil && !os.IsNotExist(err) {
-		return BuildActivityResult{}, temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+	// A prompt in the build's session folders was not saved by this launch.
+	if err := clearBeforeBuild(input.WorkspacePath); err != nil {
+		return BuildActivityResult{}, err
 	}
 	// Host-side info/exclude installed before the build (as in cmd/factoryd's runMainWithReady): without it the driver
 	// falls back to appending its bookkeeping names to the tracked
@@ -360,15 +361,16 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 			ResumedFromCheckpoint: resumed.SnapshotSHA,
 			Command:               res.Command,
 			SetupSHA256:           run.SetupDigest(input.SetupCommands),
-			StartedAt:             res.StartedAt.Format(time.RFC3339),
-			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
-			ExitCode:              res.ExitCode,
-			LogPath:               logPath(attempt),
-			ImageDigest:           res.ImageDigest,
-			HarnessScriptsSHA256:  res.ScriptsSHA256,
-			Skills:                res.Skills,
-			SkillsSHA256:          res.SkillsSHA256,
-			RepoSkills:            res.RepoSkills,
+			FactoryDirSHA256:      res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
+			StartedAt:            res.StartedAt.Format(time.RFC3339),
+			FinishedAt:           res.FinishedAt.Format(time.RFC3339),
+			ExitCode:             res.ExitCode,
+			LogPath:              logPath(attempt),
+			ImageDigest:          res.ImageDigest,
+			HarnessScriptsSHA256: res.ScriptsSHA256,
+			Skills:               res.Skills,
+			SkillsSHA256:         res.SkillsSHA256,
+			RepoSkills:           res.RepoSkills,
 			// Role/Thinking: roles.execution's own resolved values,
 			// threaded through RunWorkflowInput.Thinking (see its own doc
 			// comment) -- every build round, corrective retries included,
@@ -481,10 +483,8 @@ func buildActivityErrorType(runErr error) string {
 		return RelayCeilingExceededFailureType
 	case errors.Is(runErr, sandbox.ErrComposeServicesRejected):
 		return ComposeServicesRejectedFailureType
-	case errors.Is(runErr, sandbox.ErrCleanupUnconfirmed):
-		return CleanupUnconfirmedFailureType
 	default:
-		return InfrastructureFailureType
+		return launchErrorType(runErr)
 	}
 }
 

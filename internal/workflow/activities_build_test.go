@@ -640,6 +640,7 @@ func TestRunBuildActivityRejectsDaemonHeartbeatDivergenceBetweenRetries(t *testi
 	}
 	input := fixtureInput()
 	input.WorkspacePath = t.TempDir()
+	input.ProjectConfigCommitSHA = trustedCommit(t, input.WorkspacePath)
 	input.SpecPath = ""
 	input.BuildAppInterpreter = "/bin/sh"
 	input.BuildAppScript = buildScript

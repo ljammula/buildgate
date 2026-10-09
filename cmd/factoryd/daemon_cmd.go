@@ -690,7 +690,7 @@ func (d *daemonRun) serviceRepository() error {
 			go func(id string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if _, err := reconcileReclaimedRun(d.signalCtx, d.temporalClient, d.ownerID, id, d.absDataDir); err != nil {
+				if _, err := reconcileReclaimedRun(d.dp, d.signalCtx, d.temporalClient, d.ownerID, id, d.absDataDir); err != nil {
 					log.Printf("daemon: warning: could not reconcile reclaimed run %s against repository owner %s: %v", id, d.ownerID, err)
 				}
 			}(id)

@@ -430,13 +430,10 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 				// far enough to exit a process: the zero value would persist
 				// as a successful exit at 0001-01-01 in this attempt's
 				// durable evidence.
-				now := time.Now()
-				last = runner.Result{ExitCode: -1, Command: command, StartedAt: now, FinishedAt: now}
 				lastErr = fmt.Errorf("start registry proxy: %w", proxyErr)
-				if afterAttempt != nil {
-					if hookErr := afterAttempt(attempt, last, lastErr); hookErr != nil {
-						return last, fmt.Errorf("after attempt %d hook: %w", attempt, hookErr)
-					}
+				var hookErr error
+				if last, hookErr = unlaunchedAttempt(afterAttempt, attempt, command, lastErr); hookErr != nil {
+					return last, hookErr
 				}
 				if ctx.Err() != nil || errors.Is(lastErr, sandbox.ErrCleanupUnconfirmed) {
 					return last, lastErr
@@ -452,13 +449,10 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			// folded into margin above), and computing the timeout first
 			// would let that time silently eat into margin instead.
 			if composeErr := compose.EnsureForAttempt(ctx, attempt); composeErr != nil {
-				now := time.Now()
-				last = runner.Result{ExitCode: -1, Command: command, StartedAt: now, FinishedAt: now}
 				lastErr = fmt.Errorf("start compose services: %w", composeErr)
-				if afterAttempt != nil {
-					if hookErr := afterAttempt(attempt, last, lastErr); hookErr != nil {
-						return last, fmt.Errorf("after attempt %d hook: %w", attempt, hookErr)
-					}
+				var hookErr error
+				if last, hookErr = unlaunchedAttempt(afterAttempt, attempt, command, lastErr); hookErr != nil {
+					return last, hookErr
 				}
 				if ctx.Err() != nil || errors.Is(lastErr, sandbox.ErrCleanupUnconfirmed) {
 					return last, lastErr
@@ -494,18 +488,26 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// RepositoryOwnerRunWorkflowID(ownerID, RequestID), a derived,
 		// owner-namespaced string, not the durable run id
 		// ReconcileOrphans' run.Load(dataDir, id) actually looks up.
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: workspaceMasksFrom(ctx)}
+		// The run's `.factory/` as the commit .factory.yml was read from holds
+		// it, checked and staged again for this launch: an earlier launch's
+		// sandbox had the worktree and could have replaced the directory. A
+		// refusal ends the loop; it is never retried.
+		factoryDir, factoryDirErr := prepareFactoryDir(ctx, input, workspace, filepath.Dir(logPath(attempt)))
+		if factoryDirErr != nil {
+			return refusedFactoryDirAttempt(afterAttempt, attempt, command, factoryDirErr)
+		}
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...)}
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.
 			prepared, prepareErr := registryProxy.PrepareWorker(s)
 			if prepareErr != nil {
-				return last, prepareErr
+				return last, joinCleanup(prepareErr, factoryDir.Remove())
 			}
 			s = prepared
 		}
 		s, err := sandbox.PrepareWorkerScratch(s)
 		if err != nil {
-			return last, err
+			return last, joinCleanup(err, factoryDir.Remove())
 		}
 		// compose.ApplyToWorkerLaunch, not a PrepareWorker call: compose
 		// services add ComposeNetwork (which sandbox.Run makes the primary
@@ -517,6 +519,8 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		res, runErr := sandbox.LaunchWorker(ctx, a.Sandboxes, a.sandboxDockerFor(input), s, sandbox.RuntimeWorker{
 			Relay: relaySpec, ModelBinaries: harness.ModelBinaries(), MeterLedgerRoot: a.MeterLedgerRoot,
 		})
+		// The snapshot lives for one launch; the next takes its own.
+		runErr = joinCleanup(runErr, factoryDir.Remove())
 		if compose != nil {
 			// Runs every attempt, not just the terminal one (unlike
 			// registryProxy Cleanup below): TeardownAttempt is what captures
@@ -551,7 +555,8 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 		}
 		last = runner.Result{Command: res.Command, ExitCode: res.ExitCode, StartedAt: res.StartedAt, FinishedAt: res.FinishedAt, LogPath: res.LogPath, ImageDigest: res.ImageDigest,
-			ScriptsSHA256: scriptsSHA256,
+			ScriptsSHA256:    scriptsSHA256,
+			FactoryDirSHA256: factoryDir.SHA256, FactoryDirCommit: factoryDir.Commit,
 			// RepoSkills is scanned host-side from the worktree: for a review
 			// attempt that is the build's view, and the instruction paths the
 			// review saw as the base commit holds them are in
@@ -589,6 +594,19 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		}
 	}
 	return last, fmt.Errorf("sandbox attempts exhausted: %w", lastErr)
+}
+
+// unlaunchedAttempt records an attempt that never got far enough to start a
+// process: exit code -1 and real timestamps, as runner.Result documents.
+func unlaunchedAttempt(afterAttempt func(int, runner.Result, error) error, attempt int, command []string, cause error) (runner.Result, error) {
+	now := time.Now()
+	last := runner.Result{ExitCode: -1, Command: command, StartedAt: now, FinishedAt: now}
+	if afterAttempt != nil {
+		if hookErr := afterAttempt(attempt, last, cause); hookErr != nil {
+			return last, fmt.Errorf("after attempt %d hook: %w", attempt, hookErr)
+		}
+	}
+	return last, nil
 }
 
 // hasFakeRunner reports whether a test has injected a fake unsandboxed

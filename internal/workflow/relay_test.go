@@ -44,6 +44,7 @@ func relayFixtureInput(t *testing.T, dockerBinary, dataDir string) RunWorkflowIn
 	t.Helper()
 	input := fixtureInput()
 	input.WorkspacePath = testfixture.NewGitRepo(t)
+	input.ProjectConfigCommitSHA = trustedCommit(t, input.WorkspacePath)
 	input.SpecPath = ""
 	input.RunID = "relay-run"
 	input.DataDir = dataDir

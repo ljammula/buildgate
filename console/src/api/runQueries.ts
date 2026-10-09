@@ -16,8 +16,10 @@ import { getQueueRunStatus, listWorkspaces } from "@/api/ops";
 import {
   type CheckProjectInput,
   checkProject,
+  getProjectMemory,
   getProjectObservations,
   getProjectStats,
+  getProjectTrend,
   listProjects,
 } from "@/api/projects";
 import { queryKeys } from "@/api/queryKeys";
@@ -28,6 +30,8 @@ import {
   getRun,
   getRunDiff,
   getRunHandoff,
+  getRunPromptText,
+  getRunPrompts,
   listRuns,
   overrideRun,
   startRun,
@@ -35,7 +39,10 @@ import {
 } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
 import type { Handoff } from "@/domain/handoff";
+import type { SavedPrompt } from "@/domain/savedPrompt";
 import { compareTimestamps } from "@/domain/elapsed";
+import type { ProjectMemory } from "@/domain/memory";
+import type { ProjectTrend } from "@/domain/trend";
 import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
@@ -149,6 +156,32 @@ export function useRunHandoff(id: string, sha256: string): UseQueryResult<Handof
   });
 }
 
+/** The prompts a run's launches saved; empty for a run that kept none. */
+export function useRunPrompts(id: string): UseQueryResult<SavedPrompt[]> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.runs.prompts(id),
+    queryFn: ({ signal }) => getRunPrompts(http, id, signal),
+  });
+}
+
+/** One prompt's text, read when the operator opens it; it never changes. */
+export function useRunPromptText(
+  id: string,
+  attempt: string,
+  name: string,
+  enabled: boolean,
+): UseQueryResult<string> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.runs.promptText(id, attempt, name),
+    queryFn: ({ signal }) => getRunPromptText(http, id, attempt, name, signal),
+    enabled,
+    retry: false,
+    staleTime: Infinity,
+  });
+}
+
 export function useRunRelease(id: string, enabled = true): UseQueryResult<ReleaseView> {
   const { http } = useApi();
   return useQuery({
@@ -214,6 +247,22 @@ export function useProjectObservations(project: string): UseQueryResult<Observat
   return useQuery({
     queryKey: queryKeys.projects.observations(project),
     queryFn: ({ signal }) => getProjectObservations(http, project, signal),
+  });
+}
+
+export function useProjectMemory(project: string): UseQueryResult<ProjectMemory> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.projects.memory(project),
+    queryFn: ({ signal }) => getProjectMemory(http, project, signal),
+  });
+}
+
+export function useProjectTrend(project: string): UseQueryResult<ProjectTrend> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.projects.trend(project),
+    queryFn: ({ signal }) => getProjectTrend(http, project, signal),
   });
 }
 

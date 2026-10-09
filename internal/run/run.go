@@ -100,6 +100,13 @@ const HaltReasonComposeServicesRejected = "compose_services_rejected"
 // attempt's ReviewInstructionsError, for the operator only.
 const HaltReasonReviewInstructionsFailed = "review_instructions_failed"
 
+// HaltReasonFactoryDirFailed is Run.HaltReasonCode's value when a launch was
+// refused because `.factory/` could not be mounted read-only as the commit
+// .factory.yml was read from holds it: the directory at that commit, or the
+// worktree's entry of that name, has a shape the mount cannot carry. The
+// reason is in the refused attempt's FactoryDirError.
+const HaltReasonFactoryDirFailed = "factory_dir_failed"
+
 // RouteSkip is one route modelrole.SelectRoute passed over on its way to
 // Attempt.RelayRoute -- a durable, evidence-only copy of modelrole.
 // RouteSkip (this package cannot import internal/modelrole: modelrole
@@ -125,6 +132,21 @@ type Attempt struct {
 	// The step says it ran them, so a reader never infers it from Command,
 	// whose shape depends on the sandbox runtime.
 	SetupSHA256 string `json:"setup_sha256,omitempty"`
+	// FactoryDirSHA256 is the hash of the read-only `.factory/` snapshot this
+	// attempt's sandbox had mounted over the worktree's, and FactoryDirCommit
+	// the commit it was taken from (Run.ProjectConfigCommitSHA). The hash is
+	// the same for every attempt that mounted the commit's directory. Both
+	// are empty when nothing was mounted: a review attempt, or neither the
+	// commit nor the worktree had the directory at that launch. A commit
+	// without it and a worktree with it record the hash of the empty
+	// directory that was mounted, so the attempts of one run can differ: ""
+	// before a build created the directory, the empty snapshot's hash after.
+	FactoryDirSHA256 string `json:"factory_dir_sha256,omitempty"`
+	FactoryDirCommit string `json:"factory_dir_commit,omitempty"`
+	// FactoryDirError is the cleaned reason a launch was refused because
+	// `.factory/` could not be mounted as that commit holds it; the run
+	// halts with HaltReasonFactoryDirFailed.
+	FactoryDirError string `json:"factory_dir_error,omitempty"`
 	// ResumedFromCheckpoint is the sha of the snapshot commit
 	// (refs/buildgate/checkpoints/<run>/attempt-<n>) holding the work an
 	// interrupted earlier Temporal attempt of this build left in the
@@ -1171,6 +1193,12 @@ type Run struct {
 	// ProjectConfigSHA256 is the SHA-256 of the committed .factory.yml this
 	// run read its commands from, "" when the repository has none.
 	ProjectConfigSHA256 string `json:"project_config_sha256,omitempty"`
+	// ProjectConfigCommitSHA is the commit of the operator's checkout that
+	// .factory.yml was read from at dispatch (its HEAD then), set whether or
+	// not the repository has the file. Every sandbox of the run that executes
+	// a repository command sees `.factory/` as this commit holds it
+	// (Attempt.FactoryDirSHA256).
+	ProjectConfigCommitSHA string `json:"project_config_commit_sha,omitempty"`
 	// ProductSpecSHA256/ContractSHA256 are the hashes of the *project's*
 	// root spec/spec.md and spec/contract.md content at the moment this
 	// run's mandatory project-bootstrap preflight read them — distinct
@@ -1313,7 +1341,8 @@ type Run struct {
 	// pattern-match prose for -- a distinct machine-readable quarantine
 	// reason so an operator can tell "hit the ceiling" apart from "the
 	// code is wrong". Values: HaltReasonRelayCeilingExceeded,
-	// HaltReasonComposeServicesRejected, HaltReasonReviewInstructionsFailed.
+	// HaltReasonComposeServicesRejected, HaltReasonReviewInstructionsFailed,
+	// HaltReasonFactoryDirFailed, HaltReasonBaselineVerifyFailed.
 	// Empty for every halt cause that predates this field or has no such
 	// need -- most halts already carry enough signal in their own
 	// structured evidence (GateResults, Attempts, ...).
@@ -1332,6 +1361,13 @@ type Run struct {
 	// `omitempty` would drop the key in both cases and make them
 	// indistinguishable in the durable record.
 	ChangedFiles []string `json:"changed_files"`
+	// MemoryEdit is the host's evidence about root AGENTS.md at this run's
+	// result commit, recorded before the release decision: whether the
+	// fenced memory section changed, whether the run's request has an
+	// approved proposal and whether the file matches it. Nil when the run
+	// touched no AGENTS.md and has no proposal (nothing was read), and in a
+	// record written before the field existed.
+	MemoryEdit *MemoryEdit `json:"memory_edit,omitempty"`
 	// Oracles is the committed-acceptance-oracle evidence (see
 	// OracleEvidence); nil unless the base commit carries an oracle index
 	// or this run's factory host committed oracles.

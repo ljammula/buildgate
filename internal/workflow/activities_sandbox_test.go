@@ -162,6 +162,7 @@ func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testi
 	activities := &Activities{LogDir: t.TempDir(), SandboxDocker: docker, DataDir: t.TempDir()}
 	input := fixtureInput()
 	input.WorkspacePath = t.TempDir()
+	input.ProjectConfigCommitSHA = trustedCommit(t, input.WorkspacePath)
 	input.SpecPath = specPath
 	input.SpecAcceptanceCriteria = criteriaPath
 	input.SandboxImage = "factory-worker:test@sha256:deadbeef"
@@ -228,6 +229,7 @@ func runtimeActivities(t *testing.T, rt *sandboxtest.WorkerRuntime) (*Activities
 	}
 	input := fixtureInput()
 	input.WorkspacePath = workspace
+	input.ProjectConfigCommitSHA = trustedCommit(t, workspace)
 	input.SandboxImage = "factory-worker:test@sha256:deadbeef"
 	input.SandboxDocker = "/usr/bin/false"
 	input.SpecPath = ""

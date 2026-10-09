@@ -286,6 +286,7 @@ func runOracleDraftJobIn(ctx context.Context, in requestdriver.OracleDraftInput,
 	launchStart := oracleDraftClock()
 	res, err = launchOracleDraft(ctx, cfg, job, launch)
 	launchElapsed := oracleDraftClock().Sub(launchStart)
+	retainDraftPrompts(in.DataDir, job.ID, "oracle", job.Workspace, []string{oracleDraftScriptScratchDirName + "/session"})
 	if err != nil {
 		if ctx.Err() != nil {
 			return request.OracleDraft{}, fmt.Errorf("draft_acceptance_oracles.py did not run to completion: %w", err)

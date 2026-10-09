@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -245,9 +244,10 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 		beforeAttempt = a.leaseChecked(ctx, checkpointDir, beforeAttempt)
 		afterAttempt := func(attempt int, res runner.Result, _ error) error {
 			recorded := run.Attempt{
-				Kind:        kind,
-				Command:     res.Command,
-				SetupSHA256: run.SetupDigest(input.SetupCommands),
+				Kind:             kind,
+				Command:          res.Command,
+				SetupSHA256:      run.SetupDigest(input.SetupCommands),
+				FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
 				StartedAt:   res.StartedAt.Format(time.RFC3339),
 				FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 				ExitCode:    res.ExitCode,
@@ -331,25 +331,17 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 
 	if runErr != nil {
 		checkpoint.Error = stage + " subprocess infrastructure failure: " + runErr.Error()
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			checkpoint.ErrorType = CleanupUnconfirmedFailureType
-		}
+		checkpoint.ErrorType = checkpointErrorType(runErr)
 	} else if evidenceErr != nil {
 		checkpoint.Error = stage + " evidence infrastructure failure: " + evidenceErr.Error()
 	}
 	checkpoint.Result = out
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return out, temporal.NewApplicationErrorWithCause("save post-oracle-commit verify Activity checkpoint", errType, saveErr, out.Attempts)
 	}
 	if runErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
+		errType := launchErrorType(runErr)
 		return out, temporal.NewApplicationErrorWithCause(stage+" subprocess infrastructure failure", errType, runErr, out.Attempts)
 	}
 	if evidenceErr != nil {

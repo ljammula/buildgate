@@ -42,6 +42,20 @@
     "content_type": "application/json"
   },
   {
+    "pattern": "GET /projects/{project}/trend",
+    "path": "/projects/app/trend?since=2026-09-01\u0026until=2026-09-11\u0026all=1",
+    "file": "project-trend.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /projects/{project}/memory",
+    "path": "/projects/app/memory",
+    "file": "project-memory.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
     "pattern": "GET /queue-run",
     "path": "/queue-run",
     "file": "queue-run.json",
@@ -158,6 +172,34 @@
     "path": "/runs/run-accepted/handoff",
     "file": "error-no-handoff.json",
     "status": 409,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts",
+    "path": "/runs/run-quarantined/prompts",
+    "file": "run-prompts.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts",
+    "path": "/runs/run-accepted/prompts",
+    "file": "run-prompts-none.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts/{attempt}/{name}",
+    "path": "/runs/run-quarantined/prompts/build-1/build-round-1",
+    "file": "run-prompt.txt",
+    "status": 200,
+    "content_type": "text/plain"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts/{attempt}/{name}",
+    "path": "/runs/run-quarantined/prompts/build-1/nothing-here",
+    "file": "error-prompt-not-found.json",
+    "status": 404,
     "content_type": "application/json"
   },
   {

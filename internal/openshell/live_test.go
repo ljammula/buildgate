@@ -733,6 +733,82 @@ pip download --no-deps -d /tmp/p idna==3.6 2>&1 | tail -4 | sed 's/^/pip: /'; ls
 	}
 }
 
+const liveFactoryDirScript = `echo "before=$(cat /workspace/.factory/x.sh)"
+(echo y > /workspace/.factory/x.sh) 2>/dev/null && echo WRITE-OK || echo write-denied
+(echo y > /workspace/.factory/new.sh) 2>/dev/null && echo CREATE-OK || echo create-denied
+(rm /workspace/.factory/x.sh) 2>/dev/null && echo RM-OK || echo rm-denied
+(mv /workspace/.factory /workspace/f2) 2>/dev/null && echo MV-OK || echo mv-denied
+(rmdir /workspace/.factory) 2>/dev/null && echo RMDIR-OK || echo rmdir-denied
+(rm -rf /workspace/.factory) 2>/dev/null && echo RMRF-OK || echo rmrf-denied
+(chmod u+w /workspace/.factory/x.sh) 2>/dev/null && echo CHMOD-FILE-OK || echo chmod-file-denied
+(chmod u+w /workspace/.factory) 2>/dev/null && echo CHMOD-DIR-OK || echo chmod-dir-denied
+(echo y > /workspace/.Factory/x.sh) 2>/dev/null && echo ALIAS-WRITE-OK || echo alias-write-denied
+echo "alias=$(cat /workspace/.Factory/x.sh 2>/dev/null)"
+echo "after=$(cat /workspace/.factory/x.sh)"
+grep -E ' /workspace/.factory ' /proc/mounts | awk '{print "mount " $2 " " $3 " " $4}'
+ls -la /workspace | sed 's/^/ls /'
+exit 0`
+
+// TestLiveFactoryDirIsReadOnly launches a worker whose workspace holds
+// .factory/x.sh with other bytes than the trusted commit, with the commit's
+// directory mounted over it as a build, verify and gate launch has it, and
+// checks the worker reads the commit's bytes and can neither change, remove
+// nor move the mount. A write through another spelling of the name
+// (/workspace/.Factory) is reported and fails the test when it succeeds: a
+// person must see where that write went.
+func TestLiveFactoryDirIsReadOnly(t *testing.T) {
+	rt, image := liveRuntime(t)
+	spec, _ := liveLaunch(t, image, liveFactoryDirScript)
+	commit := factoryDirRepo(t, spec.WorkDir)
+	// Under the launch's own root in the data root: the VM sees it.
+	snapshot := filepath.Join(filepath.Dir(spec.WorkDir), "factory-dir")
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	mount, err := sandbox.PrepareCommitDirMount(ctx, spec.WorkDir, commit, ".factory", snapshot)
+	if err != nil {
+		t.Fatalf("PrepareCommitDirMount: %v", err)
+	}
+	t.Cleanup(func() { _ = mount.Remove() })
+	spec.WorkspaceMasks = mount.Masks()
+
+	result, _, err := sandbox.RunThroughRuntime(ctx, rt, spec, sandbox.RuntimeLaunch{Nonce: "attempt-1"})
+	logged, _ := os.ReadFile(spec.LogPath)
+	t.Logf("exit %d, err %v, output:\n%s", result.ExitCode, err, logged)
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("RunThroughRuntime: exit %d, %v", result.ExitCode, err)
+	}
+	out := string(logged)
+	for _, want := range []string{
+		"before=echo committed", "after=echo committed",
+		"write-denied", "create-denied", "rm-denied", "mv-denied", "rmdir-denied", "rmrf-denied",
+		"chmod-file-denied", "chmod-dir-denied",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if !strings.Contains(out, "mount /workspace/.factory ") {
+		t.Errorf("/proc/mounts shows no mount at /workspace/.factory")
+	}
+	snapshotText, _ := os.ReadFile(filepath.Join(mount.Mask.Source, "x.sh"))
+	worktreeText, _ := os.ReadFile(filepath.Join(spec.WorkDir, ".factory", "x.sh"))
+	if string(snapshotText) != "echo committed\n" {
+		t.Errorf("the snapshot's x.sh on the host = %q after the run, want the commit's bytes", snapshotText)
+	}
+	if _, err := os.Lstat(filepath.Join(spec.WorkDir, "f2")); err == nil {
+		t.Errorf("the worktree has f2: the mount point was moved")
+	}
+	if info, err := os.Lstat(filepath.Join(spec.WorkDir, ".factory")); err != nil || !info.IsDir() {
+		t.Errorf("the worktree's .factory after the run: %v", err)
+	}
+	if strings.Contains(out, "ALIAS-WRITE-OK") {
+		t.Logf("a write to /workspace/.Factory/x.sh SUCCEEDED; the worktree's .factory/x.sh on the host is now %q, the snapshot's %q", worktreeText, snapshotText)
+		t.Errorf("the worker wrote through the case alias /workspace/.Factory: see the log above for which copy changed")
+	} else {
+		t.Logf("a write to /workspace/.Factory/x.sh failed; the worktree's .factory/x.sh on the host is %q", worktreeText)
+	}
+}
+
 // TestLiveScript runs the shell script in OPENSHELL_LIVE_SCRIPT in a worker
 // launched through the gateway and logs its output: a probe for finding out
 // what a worker can and cannot do there.

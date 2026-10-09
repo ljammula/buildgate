@@ -102,6 +102,9 @@ type Config struct {
 	// searched, in order, for the <name>.md a target repository's
 	// .factory.yml design_guide names. See LoadDesignGuide.
 	DesignGuideDirs []string `yaml:"design_guide_dirs,omitempty"`
+	// Memory lists the repositories whose repository memory is switched on;
+	// off for every repository not listed. See MemoryFor.
+	Memory *MemoryConfig `yaml:"memory,omitempty"`
 
 	// EgressCABundle is a PEM file on this machine (e.g. a corporate TLS-
 	// interception proxy's CA) bind-mounted read-only into the relay and
@@ -510,6 +513,8 @@ type Settings struct {
 	SkillDirs []string
 	// DesignGuideDirs mirrors Config.DesignGuideDirs.
 	DesignGuideDirs []string
+	// Memory is the resolved memory.repositories list; see MemoryFor.
+	Memory []MemoryRepository
 }
 
 // EffectiveRelayCeilings returns the absolute, run-scoped relay ceilings
@@ -737,14 +742,8 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	if c.Models != nil {
 		s.Models = c.Models
 	}
-	if c.Workspaces != nil {
-		s.Workspaces = c.Workspaces
-	}
-	if c.SkillDirs != nil {
-		s.SkillDirs = c.SkillDirs
-	}
-	if c.DesignGuideDirs != nil {
-		s.DesignGuideDirs = c.DesignGuideDirs
+	if err := c.applyListKeys(&s); err != nil {
+		return s, err
 	}
 	// PresentKeys carries every top-level YAML key Load actually saw
 	// forward -- see Settings.PresentKeys' own doc comment. A Settings
@@ -757,6 +756,28 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	}
 
 	return s, nil
+}
+
+// applyListKeys overlays the list-valued keys (workspaces, skill_dirs,
+// design_guide_dirs, memory) that are present in c onto s.
+func (c *Config) applyListKeys(s *Settings) error {
+	if c.Workspaces != nil {
+		s.Workspaces = c.Workspaces
+	}
+	if c.SkillDirs != nil {
+		s.SkillDirs = c.SkillDirs
+	}
+	if c.DesignGuideDirs != nil {
+		s.DesignGuideDirs = c.DesignGuideDirs
+	}
+	repos, err := resolveMemory(c.Memory)
+	if err != nil {
+		return err
+	}
+	if c.Memory != nil {
+		s.Memory = repos
+	}
+	return nil
 }
 
 // DefaultReleaseMaxFilesChanged/DefaultReleaseMaxInsertions/
@@ -869,6 +890,13 @@ roles:
 # Folders holding team design guides (<name>.md); a repository selects one
 # with design_guide: <name> in its .factory.yml.
 # design_guide_dirs: [~/code/team-standards]
+# Repository memory is off for every repository. List a repository's root to
+# let factoryd keep short, checked lessons about it (budget keys optional).
+# memory:
+#   repositories:
+#     - path: ~/code/some-repo
+#       budget_lines: 40     # 5 to 80
+#       budget_chars: 3000   # 500 to 6000
 registry_proxy: true
 # egress_ca_bundle: /path/to/corp-ca.pem
 # open_pull_request: true

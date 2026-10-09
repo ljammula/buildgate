@@ -41,7 +41,10 @@ type runOptions struct {
 	GateCommands        map[string]string
 	SetupCommands       []string
 	AutofixCommands     []string
-	Skills              roleSkillSet
+	// ProjectConfigCommitSHA is the commit .factory.yml was read from; see
+	// the RunWorkflowInput field of the same name.
+	ProjectConfigCommitSHA string
+	Skills                 roleSkillSet
 
 	ReferenceOracleDir       string
 	ReferenceOracleMountPath string

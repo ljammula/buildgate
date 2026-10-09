@@ -2,6 +2,7 @@ package main
 
 import (
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/sandbox"
 	"bytes"
 	"errors"
 	"os"
@@ -146,6 +147,36 @@ func TestUninstallPurgeDeletesConfigDataAndVolumes(t *testing.T) {
 	}
 	if !strings.Contains(f.dockerCalls(), "compose -p buildgate down -v") {
 		t.Errorf("-purge must remove the Temporal volumes:\n%s", f.dockerCalls())
+	}
+}
+
+// A worker killed mid-launch leaves its read-only `.factory/` snapshot under
+// the run's directory (files 0444 in 0555 directories); -purge removes it.
+func TestUninstallPurgeDeletesARunDirectoryHoldingAReadOnlyFactoryDirSnapshot(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root removes a read-only tree without help")
+	}
+	dp := newTestDeps(t)
+	f := newUninstallFixture(dp, t)
+	f.env.purge = true
+	snapshot := filepath.Join(f.home, "buildgate/data/runs/r1/factory-dir-1-1/.factory/sub")
+	if err := os.MkdirAll(snapshot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "lint.sh"), []byte("exit 0\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{snapshot, filepath.Dir(snapshot)} {
+		if err := os.Chmod(dir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _ = sandbox.RemoveTree(filepath.Join(f.home, "buildgate")) })
+	if err := uninstallRun(f.env, true, false, false, strings.NewReader("")); err != nil {
+		t.Fatalf("uninstallRun: %v\n%s", err, f.out.String())
+	}
+	if f.exists("buildgate") {
+		t.Errorf("the data directory survived -purge:\n%s", f.out.String())
 	}
 }
 

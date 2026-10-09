@@ -4,4 +4,5 @@ Before you end your turn:
 3. Unless the ticket says `Tests-Required: no`, add or change a test that exercises the new behaviour.
 4. For each acceptance criterion the ticket covers, name the test or code that shows it holds.
 5. Never edit read-only reference-oracle tests; when one fails, fix the code it tests.
-6. Committing is optional (anything left uncommitted is committed for you), but never rewrite history: no reset, rebase or amend of existing commits, no push, no branch switch.
+6. The `.factory/` directory, when the repository has one, is mounted read-only: do not edit, add or remove anything under it. If a script there fails, fix the code it checks.
+7. Committing is optional (anything left uncommitted is committed for you), but never rewrite history: no reset, rebase or amend of existing commits, no push, no branch switch.

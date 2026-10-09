@@ -110,6 +110,9 @@ const (
 	SourceIssue SourceKind = "issue"
 	SourceText  SourceKind = "text"
 	SourceFile  SourceKind = "file"
+	// SourceMemory marks a request `factoryd memory propose` created: its
+	// one ticket replaces root AGENTS.md with the text the factory rendered.
+	SourceMemory SourceKind = "memory"
 )
 
 // Source records where a request's text came from -- Kind plus, for

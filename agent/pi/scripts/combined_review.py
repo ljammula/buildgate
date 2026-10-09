@@ -139,7 +139,7 @@ def run_combined_review(
 	turn = build_app.run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-combined-review-session",
 		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
-		timeout_minutes=COMBINED_REVIEW_TIMEOUT_MINUTES,
+		timeout_minutes=COMBINED_REVIEW_TIMEOUT_MINUTES, prompt_name="review-combined",
 	)
 	error = build_app.single_line(build_app.redact(turn.error, 100_000)) if turn.error else ""
 

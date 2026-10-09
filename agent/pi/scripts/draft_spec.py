@@ -268,8 +268,10 @@ def model_check(
 		check_path.unlink(missing_ok=True)
 		session_dir = workspace / ".factory-spec-draft" / "check-session"
 		session_dir.mkdir(parents=True, exist_ok=True)
+		check_prompt = build_example_check_prompt(examples, EXAMPLE_CHECK_RELATIVE_PATH)
+		build_app.saved_prompts.save_prompt(session_dir, "draft-spec-example-check", check_prompt)
 		command = adapter.invocation(
-			workspace, prompt=build_example_check_prompt(examples, EXAMPLE_CHECK_RELATIVE_PATH),
+			workspace, prompt=check_prompt,
 			session_dir=session_dir, continue_session=False, thinking=EXAMPLE_CHECK_THINKING,
 		)
 		result = build_app.sh(command, cwd=workspace, timeout=EXAMPLE_CHECK_TIMEOUT_S)
@@ -419,6 +421,7 @@ def run_draft(
 
 	session_dir = workspace / ".factory-spec-draft" / "session"
 	session_dir.mkdir(parents=True, exist_ok=True)
+	build_app.saved_prompts.save_prompt(session_dir, "draft-spec", prompt)
 	command = adapter.invocation(
 		workspace, prompt=prompt, session_dir=session_dir,
 		continue_session=False, thinking=thinking,

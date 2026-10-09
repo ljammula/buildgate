@@ -227,7 +227,10 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// SC-019: the review reads the instruction files as the base commit
 	// holds them, and is shown what the build did to them as data. An
 	// error here does not launch the review.
-	prep, err := a.prepareReviewInstructions(ctx, input, step.Name, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
+	// A prompt already in this step's session folder was not saved by this
+	// launch: the build agent could have written it. It is removed, or the
+	// step fails.
+	prep, err := a.prepareReviewLaunch(ctx, input, step, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
 	defer func() { _ = prep.finish(ctx) }()
 	if err != nil {
 		return VerifyActivityResult{}, err
@@ -303,6 +306,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// Immediately after the launch, before the clean check below: the stubs
 	// a mask over an absent path needed, and the snapshot's scratch.
 	finishErr := prep.finish(ctx)
+	a.retainReviewPrompts(ctx, input, step)
 	return a.completeReviewStep(ctx, input, step, checkpoint, path, result, runErr, finishErr, withInherited(inherited, attempts))
 }
 

@@ -2574,7 +2574,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 			base = init_repo_with_commit(root)
 			# ensure_git_repo is mocked here; in a real run factoryd's info/exclude
 			# (HarnessArtifacts) already ignores the round-state file.
-			(root / ".git" / "info" / "exclude").write_text(f"{build_app.ROUND_STATE_FILE}\n")
+			(root / ".git" / "info" / "exclude").write_text(f"{build_app.ROUND_STATE_FILE}\n.pi-build-session/\n")
 			spec = Path(spec_dir) / "spec.md"
 			spec.write_text("Fix the cache")
 			handoff = Path(spec_dir) / "handoff.md"
@@ -2613,6 +2613,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 		self.assertIn("after your turn the harness runs `go test ./...`", prompt)
 		self.assertIn("1. Run the narrowest tests that cover your change", prompt)
 		self.assertIn("never rewrite history", prompt)
+		self.assertIn("6. The `.factory/` directory, when the repository has one, is mounted read-only: do not edit, add or remove anything under it.", prompt)
 
 	def test_checklist_falls_back_to_the_tickets_verify_command(self):
 		self.assertIn("the ticket's `Verify-Command`", build_app.build_round_checklist(None))
@@ -3390,6 +3391,7 @@ class NotesTurnTests(unittest.TestCase):
 				return {
 					"result": result, "calls": calls, "states": states, "out": out.getvalue(), "err": err.getvalue(),
 					"notes": notes_file.read_text() if notes_file.exists() else None,
+					"prompts": {f.stem: f.read_text() for f in (root / ".pi-build-session" / "prompts").glob("*.md")},
 					"evidence": build_app.write_evidence_json(result).read_text(),
 					"report": build_app.write_report(result).read_text(),
 					"files": {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() and ".git" not in p.parts},
@@ -3421,6 +3423,42 @@ class NotesTurnTests(unittest.TestCase):
 		self.assertIsNone(ran["calls"][-1]["on_event"]("anything"))
 		for progress in (line for line in ran["out"].splitlines() if line.startswith("FACTORY_PROGRESS")):
 			self.assertNotIn(NOTES_MARKER, progress)
+
+	def test_every_prompt_handed_to_the_harness_is_saved_as_sent(self):
+		ran = self._run()
+		self.assertEqual(set(ran["prompts"]), {"build-round-1", "build-notes"})
+		self.assertEqual(ran["prompts"]["build-round-1"], ran["calls"][0]["command"][-1])
+		self.assertEqual(ran["prompts"]["build-notes"], ran["calls"][1]["command"][-1])
+
+	def test_the_earlier_attempts_record_is_in_the_saved_first_prompt(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			handoff = Path(spec_dir) / "handoff.md"
+			handoff.write_text("EARLIER-ATTEMPT-RECORD-MARKER")
+			completions = [subprocess.CompletedProcess([], 0, pi_output("clean"), "")]
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, [lambda: None])),
+			):
+				build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1, handoff=handoff)
+			saved = (root / ".pi-build-session" / "prompts" / "build-round-1.md").read_text()
+			self.assertIn("EARLIER-ATTEMPT-RECORD-MARKER", saved)
+			self.assertIn("Fix the cache", saved)
+
+	def test_the_sonnet_fallback_prompt_is_saved(self):
+		ran = self._run(sonnet=True)
+		self.assertIn("Original task specification", ran["prompts"]["build-sonnet-fallback"])
+
+	def test_a_prompt_that_cannot_be_saved_does_not_change_the_turn(self):
+		with mock.patch.object(build_app.saved_prompts, "PROMPTS_DIR", "x/../.."):
+			ran = self._run()
+		self.assertEqual(ran["prompts"], {})
+		self.assertEqual(len(ran["calls"]), 2)
+		self.assertEqual(ran["notes"], NOTES_REPLY)
 
 	def test_a_notes_turn_that_changes_a_file_is_recorded(self):
 		ran = self._run(notes_edit="late.go")

@@ -6,9 +6,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"buildgate/internal/observation"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
 
@@ -115,5 +117,57 @@ func TestGetProjectObservationsRejectsAProjectThatIsNotOnePathComponent(t *testi
 func TestProjectObservationsPageAddressServesTheConsole(t *testing.T) {
 	if !consoleDeepLinkPatterns["GET /projects/{project}/observations"] {
 		t.Error("the observations page address is not a console deep link")
+	}
+}
+
+// TestGetProjectObservationsDerivesTheRequestKindsFromThatProjectsRequests:
+// the request records of the project add the pushed review round and the
+// operator's gate actions, with ids and names only, and a run pair adds
+// check_fixed with the factory's own sentence; another project's request is
+// not read.
+func TestGetProjectObservationsDerivesTheRequestKindsFromThatProjectsRequests(t *testing.T) {
+	dataDir := t.TempDir()
+	seedRun(t, dataDir, run.Run{
+		ID: "run-q", Ticket: "t-1", Project: "app", State: run.StateQuarantined, UpdatedAt: "2026-10-08T09:00:00Z",
+		GateResults: []run.GateResult{{Check: "canonical_verify", ExitCode: 1}},
+	})
+	seedRun(t, dataDir, run.Run{ID: "run-a", Ticket: "t-1", Project: "app", State: run.StateAccepted, UpdatedAt: "2026-10-08T10:00:00Z", EarlierAttemptOf: "run-q"})
+	save := func(r *request.Request) {
+		t.Helper()
+		if err := os.MkdirAll(request.Dir(dataDir, r.ID), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(request.Path(dataDir, r.ID), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(&request.Request{
+		ID: "req-1", Project: "app", State: request.StateBuilding,
+		Tickets: []request.Ticket{{Index: 1, Rounds: []request.Round{{Index: 1, ThreadIDs: []string{"PRRT_a"}, RunID: "run-a", Outcome: request.RoundAccepted, Pushed: true, At: "2026-10-08T11:00:00Z"}}}},
+		Edits:   []request.Edit{{At: "2026-10-08T08:00:00Z", Path: "spec.md", FromState: request.StateSpecReview, Diff: "+ SECRET-EDIT-TEXT"}},
+	})
+	save(&request.Request{ID: "req-2", Project: "other", Edits: []request.Edit{{At: "2026-10-08T08:00:00Z", Path: "spec.md", FromState: request.StateSpecReview}}})
+
+	rec, report := getObservations(t, NewServer(dataDir), "/projects/app/observations", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	want := map[string]int{observation.KindCheckFixed: 1, observation.KindReviewCommentAccepted: 1, observation.KindOperatorEdit: 1}
+	for kind, n := range want {
+		if report.Counts[kind] != n {
+			t.Errorf("Counts[%s] = %d, want %d: %s", kind, report.Counts[kind], n, rec.Body.String())
+		}
+	}
+	if strings.Contains(rec.Body.String(), "SECRET-EDIT-TEXT") {
+		t.Errorf("an edit's text is in the report: %s", rec.Body.String())
+	}
+	for _, o := range report.Observations {
+		if o.Kind == observation.KindCheckFixed && (o.RunID != "run-q" || o.AcceptedRunID != "run-a" || len(o.Checks) != 1 || o.Checks[0].Check != "canonical_verify") {
+			t.Errorf("check_fixed = %+v", o)
+		}
 	}
 }

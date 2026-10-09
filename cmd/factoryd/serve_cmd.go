@@ -740,6 +740,7 @@ func (sv *serveRun) listenAndServe() error {
 		api.WithRunStarter(repositoryAPIStarter(apiStartStarter(sv.dp, *sv.dataDir, &sv.inFlightRuns, sv.releasePolicy, sv.sandboxLimits, sv.sandboxPolicy))),
 		api.WithProjectChecker(apiProjectChecker()),
 		api.WithProjectStatsProvider(apiProjectStatsProvider(*sv.dataDir)),
+		api.WithProjectMemory(apiProjectMemoryProvider(sv.dp, sv.baseSettings, *sv.dataDir)),
 		api.WithReleasePolicy(sv.releasePolicy),
 		// POST /requests/{id}/retry gets the same real PR-open-only retry
 		// path `factoryd retry` already wires (retryPullRequestOpener),

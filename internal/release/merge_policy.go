@@ -243,5 +243,87 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 		reasons = append(reasons, "run bypassed the mandatory project-bootstrap preflight (-skip-project-check) and policy does not allow skipped-preflight runs")
 	}
 
+	reasons = append(reasons, memoryEditReasons(r.MemoryEdit)...)
+
 	return len(reasons) == 0, reasons
+}
+
+// Reasons memoryEditReasons returns. Callers and tests match on them.
+const (
+	// ReasonMemorySectionNotMemoryChange: the base has a memory section and
+	// a run with no proposal changed a root instruction name.
+	ReasonMemorySectionNotMemoryChange = "AGENTS.md of a repository with a memory section changed by a run that is not a memory change"
+	// ReasonMemoryMarkersAdded: the base has no section and a run with no
+	// proposal left "buildgate:memory" in a root instruction file.
+	ReasonMemoryMarkersAdded = "a run that is not a memory change added memory markers to AGENTS.md"
+	// ReasonSeveralRootInstructionNames: the result tree spells the root
+	// instruction file more than one way.
+	ReasonSeveralRootInstructionNames = "the result holds more than one root file named AGENTS.md in some letter case"
+	// ReasonRootInstructionNotRegular: a run with no proposal changed a root
+	// instruction name into a symlink, a submodule or a directory.
+	ReasonRootInstructionNotRegular = "a run that is not a memory change made AGENTS.md something other than a regular file"
+	ReasonMemoryChangeNotApproved   = "memory change does not match the approved text"
+	// ReasonMemorySwitchedOff: a memory run while its repository's store
+	// holds the off marker.
+	ReasonMemorySwitchedOff = "repository memory is switched off (factoryd memory off)"
+	// ReasonMemoryBaseMoved: a memory run whose base holds another root
+	// AGENTS.md than the one its proposal was rendered from. The worker
+	// halts a memory request with the same sentence before its build.
+	ReasonMemoryBaseMoved       = "AGENTS.md changed after the memory change was proposed; propose it again"
+	reasonMemoryCheckIncomplete = "memory section check could not be completed"
+)
+
+// memoryEditReasons turns the host's evidence about the root instruction
+// names into denials. A memory request's run (one with an approved proposal)
+// is released only when AGENTS.md is exactly the approved file and no other
+// file changed, memory is not switched off for its repository, and the base
+// still holds the AGENTS.md the proposal was rendered from. Any other run may not change a root instruction name of a
+// repository whose base has a memory section, and elsewhere may not leave a
+// memory marker, a second spelling or a non-file there. It reads the evidence
+// only: the host did the I/O.
+func memoryEditReasons(m *run.MemoryEdit) []string {
+	switch {
+	case m == nil:
+		return nil
+	case m.Error != "":
+		return []string{fmt.Sprintf("%s: %s", reasonMemoryCheckIncomplete, m.Error)}
+	case m.Proposal && m.SwitchedOff:
+		return []string{ReasonMemorySwitchedOff}
+	case m.Proposal && m.BaseMoved:
+		return []string{ReasonMemoryBaseMoved}
+	case m.Proposal:
+		if m.Matches && len(m.OtherFilesChanged) == 0 {
+			return nil
+		}
+		if len(m.OtherFilesChanged) == 0 {
+			return []string{ReasonMemoryChangeNotApproved}
+		}
+		return []string{namingPaths(ReasonMemoryChangeNotApproved+": other changed files", m.OtherFilesChanged)}
+	case m.BaseHasSection:
+		if len(m.ChangedRootNames) == 0 {
+			return nil
+		}
+		return []string{namingPaths(ReasonMemorySectionNotMemoryChange, m.ChangedRootNames)}
+	}
+	var reasons []string
+	if len(m.MarkerIn) > 0 {
+		reasons = append(reasons, namingPaths(ReasonMemoryMarkersAdded, m.MarkerIn))
+	}
+	if len(m.ResultRootNames) > 1 {
+		reasons = append(reasons, namingPaths(ReasonSeveralRootInstructionNames, m.ResultRootNames))
+	}
+	if len(m.NotRegularFile) > 0 {
+		reasons = append(reasons, namingPaths(ReasonRootInstructionNotRegular, m.NotRegularFile))
+	}
+	return reasons
+}
+
+// namingPaths is reason followed by at most three of paths, quoted.
+func namingPaths(reason string, paths []string) string {
+	shown := paths[:min(len(paths), 3)]
+	reason = fmt.Sprintf("%s: %q", reason, shown)
+	if more := len(paths) - len(shown); more > 0 {
+		reason += fmt.Sprintf(" and %d more", more)
+	}
+	return reason
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/sandbox"
 	"context"
 	"errors"
 	"flag"
@@ -322,7 +323,7 @@ func (e *uninstallEnv) plan() []uninstallStep {
 	if e.purge {
 		for _, p := range e.purgeTargets() {
 			p := p
-			steps = append(steps, uninstallStep{desc: "DELETE " + p + " (config / requests, runs, evidence, logs)", run: func() error { return os.RemoveAll(p) }})
+			steps = append(steps, uninstallStep{desc: "DELETE " + p + " (config / requests, runs, evidence, logs)", run: func() error { return sandbox.RemoveTree(p) }})
 		}
 	}
 	if e.binaryPresent() {

@@ -864,6 +864,8 @@ func triageHalt(r *run.Run) string {
 		return "halted: the target repo's compose file was rejected before the build; fix the named services or compose_services_* config and retry"
 	case run.HaltReasonReviewInstructionsFailed:
 		return reviewInstructionsSentence(r)
+	case run.HaltReasonFactoryDirFailed:
+		return factoryDirSentence(r)
 	case run.HaltReasonBaselineVerifyFailed:
 		// No model call was made: the verify command failed on the base
 		// commit with a failure the ticket does not name.
@@ -900,6 +902,22 @@ func reviewInstructionsSentence(r *run.Run) string {
 		}
 	}
 	return "halted before the review (operator finding): the repository's instruction files could not be prepared; see the review attempt's record"
+}
+
+// factoryDirPrefix opens the operator's sentence for a run halted because a
+// sandbox could not be given .factory/ as the commit .factory.yml was read
+// from holds it: an operator finding, since no ticket change fixes it.
+const factoryDirPrefix = "halted (operator finding): .factory/ cannot be mounted read-only: "
+
+// factoryDirSentence quotes the cleaned reason the refused attempt recorded,
+// which names the path and what is wrong with it.
+func factoryDirSentence(r *run.Run) string {
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if cause := r.Attempts[i].FactoryDirError; cause != "" {
+			return factoryDirPrefix + safeQuote(cause, maxTriageSentenceLen-len(factoryDirPrefix))
+		}
+	}
+	return "halted (operator finding): .factory/ cannot be mounted read-only as the commit .factory.yml was read from holds it; see the refused attempt's record"
 }
 
 // classifyHaltError recognizes the handful of infrastructure-failure

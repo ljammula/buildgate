@@ -346,6 +346,16 @@ func noPullRequestHaltReason(dataDir string, r *request.Request, ticket *request
 	return fmt.Sprintf("ticket %d/%d: run %s was accepted but no pull request was opened: denied by release policy (%s) -- fix the -release-* policy configuration (rollback plan, size limits, required gates) first; retrying with it unchanged rebuilds the ticket for nothing (still denied), but `factoryd retry %s` after fixing it rebuilds under the new policy and can open a pull request then", ticket.Index, r.TicketCount, ticket.RunID, strings.Join(decision.Reasons, "; "), r.ID)
 }
 
+// nextUnbuiltTicket reports whether ticket, the lowest one with no pull
+// request, is the ticket after the current one and was never built. With
+// pull requests on, under advance_on: accepted, that happens one way: acceptTicketRun halted the
+// request on the current ticket's release decision before building ticket,
+// and a retry has since opened the current ticket's pull request. There is
+// nothing to halt on: the build goes on from ticket.
+func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket) bool {
+	return RequestAdvanceOn == AdvanceOnAccepted && ticket.RunID == "" && ticket.Index == r.TicketIndex+1
+}
+
 // AdvancePRReview is request_driver.go's own dispatch target for
 // request.StatePRReview: reads the current ticket's PR review state (at
 // most once per -pr-poll-interval, per ticket -- see prPollDue) and reacts
@@ -393,6 +403,13 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// openEvidencePullRequest's own best-effort push/open attempt
 			// simply failed, where a retry (or just re-running the opener)
 			// may well succeed.
+			if cfg.OpenPullRequest && nextUnbuiltTicket(r, ticket) {
+				r.TicketIndex = ticket.Index
+				if err := r.ResumeBuilding(now); err != nil {
+					return err
+				}
+				return r.Save(dataDir)
+			}
 			return haltRequestAcceptedNoPR(dataDir, r, noPullRequestHaltReason(dataDir, r, ticket), now)
 		}
 		if err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now); err != nil {
@@ -464,11 +481,38 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	}
 
 	newThreads := forge.NewUnresolvedThreads(state.ActionableThreads, ticket.SeenThreadIDs)
+	if len(newThreads) > 0 && r.Source.Kind == request.SourceMemory {
+		return answerMemoryRequestThreads(dp, ctx, dataDir, r, ticket, newThreads)
+	}
 	if len(newThreads) > 0 {
 		return RunCorrectiveRound(dp, ctx, dataDir, r, ticket, newThreads, cfg, now)
 	}
 
 	return advancePRReadyOrApproved(dp, ctx, dataDir, r, ticket, state, now)
+}
+
+// MemoryRequestReviewReply is what a trusted reviewer's comment on a memory
+// request's pull request is answered with. It is public, so it names no path
+// and no run.
+const MemoryRequestReviewReply = "This pull request changes the repository memory section of `AGENTS.md`. Its text is the text the operator approved, and the factory releases only that exact text, so no corrective build is started for this comment. To change a line, close this pull request, cancel the request, and propose the change again with `factoryd memory propose`."
+
+// answerMemoryRequestThreads handles new actionable threads on a memory
+// request's pull request: each is replied to once and recorded as seen, and
+// no corrective round starts. A build that reworded a line would be refused
+// at release, after its cost, because the file would no longer be the text
+// that was approved. A thread whose reply could not be posted is not recorded
+// and is answered on the next poll.
+func answerMemoryRequestThreads(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, threads []forge.Thread) error {
+	replyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for _, t := range threads {
+		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, MemoryRequestReviewReply); err != nil {
+			log.Printf("request %s: ticket %d: reply on thread %s of a memory request: %v", r.ID, ticket.Index, t.ID, err)
+			continue
+		}
+		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
+	}
+	return r.Save(dataDir)
 }
 
 // prPollDue reports whether a ticket last polled at lastPolledAt (RFC3339Nano,

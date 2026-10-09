@@ -20,10 +20,19 @@ another profile:
 - `factoryd doctor [-target-repo <repo-path>]`
 - `factoryd status [-n N] [-json]`
 - `factoryd watch [-no-follow] <id>`
-- `factoryd logs [-list] <id>` (read-only; never `-f`, which blocks)
+- `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt as the build saved it, which may quote repository content)
 - `factoryd cost [-request <id>] [-json]`
+- `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
+  getting better, per repository and per week (read-only; counts, no model call)
 - `factoryd inbox [-json]`: everything waiting on the operator across every
   profile, oldest first (it ignores the active profile and needs no `-config`)
+- `factoryd memory list -workspace <repo-path> [-json]` and
+  `factoryd memory show -workspace <repo-path> <id>`: the repository's memory
+  lines in force and its candidate lines (read-only for you: with memory on,
+  `list` also collects candidates from finished runs' notes). Never run
+  `memory add`, `drop`, `propose`, `on` or `off`: each is the operator's
+  decision, like approving a gate. Relay a candidate's id and line and let
+  the operator choose.
 - `factoryd console`
 - `factoryd submit [-verify-command '<cmd>'] -request-file <file> <repo-path>`,
   after the operator confirms the request text. Add

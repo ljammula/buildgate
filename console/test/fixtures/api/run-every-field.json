@@ -19,6 +19,7 @@
   "temporal_address": "every-field temporal_address",
   "spec_sha256": "every-field spec_sha256",
   "project_config_sha256": "every-field project_config_sha256",
+  "project_config_commit_sha": "every-field project_config_commit_sha",
   "product_spec_sha256": "every-field product_spec_sha256",
   "contract_sha256": "every-field contract_sha256",
   "skip_project_check": true,
@@ -46,6 +47,31 @@
   "changed_files": [
     "every-field changed_files"
   ],
+  "memory_edit": {
+    "proposal": true,
+    "matches": true,
+    "switched_off": true,
+    "base_moved": true,
+    "base_has_section": true,
+    "changed_root_names": [
+      "every-field changed_root_names"
+    ],
+    "result_root_names": [
+      "every-field result_root_names"
+    ],
+    "marker_in": [
+      "every-field marker_in"
+    ],
+    "not_regular_file": [
+      "every-field not_regular_file"
+    ],
+    "other_files_changed": [
+      "every-field other_files_changed"
+    ],
+    "base_sha256": "every-field base_sha256",
+    "result_sha256": "every-field result_sha256",
+    "error": "every-field error"
+  },
   "oracles": {
     "authored": [
       {
@@ -170,6 +196,9 @@
       "exit_code": 3,
       "log_path": "/data/runs/run-every-field/001-build_app.log",
       "setup_sha256": "every-field setup_sha256",
+      "factory_dir_sha256": "every-field factory_dir_sha256",
+      "factory_dir_commit": "every-field factory_dir_commit",
+      "factory_dir_error": "every-field factory_dir_error",
       "resumed_from_checkpoint": "every-field resumed_from_checkpoint",
       "image_digest": "every-field image_digest",
       "relay_image_digest": "every-field relay_image_digest",

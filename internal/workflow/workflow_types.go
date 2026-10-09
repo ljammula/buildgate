@@ -438,6 +438,12 @@ type RunWorkflowInput struct {
 	// earlier ticket's unmerged build wrote is not trusted. Empty means
 	// effectiveDiffBase().
 	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
+	// ProjectConfigCommitSHA is the full id of the commit of the operator's
+	// checkout that .factory.yml was read from at dispatch. Every launch
+	// that runs a repository command mounts `.factory/` read-only as this
+	// commit holds it (SC-012). Empty for a run dispatched before the field
+	// existed: factoryDirCommit() then uses instructionBase().
+	ProjectConfigCommitSHA string `json:"project_config_commit_sha,omitempty"`
 	// EarlierAttemptPath is -earlier-attempt: a host file holding the
 	// factory's record of an earlier attempt at this ticket that finished
 	// and failed its checks. RunBuildActivity stages it read-only beside

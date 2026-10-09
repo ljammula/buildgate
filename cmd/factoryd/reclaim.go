@@ -749,7 +749,7 @@ func haltReclaimedRunConfirmed(dataDir, requestID, workspacePath, branch string)
 	return terminal, nil
 }
 
-func reconcileReclaimedRun(ctx context.Context, temporalClient client.Client, ownerID, requestID, dataDir string) (bool, error) {
+func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.Client, ownerID, requestID, dataDir string) (bool, error) {
 	recovered, loadErr := run.Load(dataDir, requestID)
 	if loadErr != nil {
 		return false, loadErr
@@ -1049,7 +1049,7 @@ func reconcileReclaimedRun(ctx context.Context, temporalClient client.Client, ow
 		// (see that lock's own acquisition above in this function), so
 		// applyRunWorkflowResult's accepted-run side effects must not
 		// take it again.
-		if applyErr := applyRunWorkflowResult(fresh, dataDir, requestID, fresh.Ticket, fresh.WorkspacePath, fresh.BaseSHA, "reclaimed", result, false, nil, forge.GHPullRequestOpener{}, true); applyErr != nil && fresh.State != run.StateQuarantined {
+		if applyErr := applyRunWorkflowResult(dp, fresh, dataDir, requestID, fresh.Ticket, fresh.WorkspacePath, fresh.BaseSHA, "reclaimed", result, false, nil, forge.GHPullRequestOpener{}, true); applyErr != nil && fresh.State != run.StateQuarantined {
 			return applyErr
 		}
 		terminal = true

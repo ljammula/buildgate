@@ -981,6 +981,8 @@ def draft_one_criterion(
 
 	session_dir = workspace / ".factory-oracle-draft" / "session" / f"c{index:03d}"
 	session_dir.mkdir(parents=True, exist_ok=True)
+	# One folder for every criterion's prompt: the host copies session/prompts.
+	build_app.saved_prompts.save_prompt(session_dir.parent, f"draft-oracle-c{index:03d}", prompt)
 	command = adapter.invocation(
 		workspace, prompt=prompt, session_dir=session_dir,
 		continue_session=False, thinking=thinking,

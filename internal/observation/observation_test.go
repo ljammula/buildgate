@@ -1,6 +1,8 @@
 package observation
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,6 +31,13 @@ func finished(id string, state run.State, rounds ...run.AgentEvidenceRound) *run
 	return r
 }
 
+// handID is the id formula written out by hand: the first 16 hex characters
+// of the SHA-256 of kind, run ids, rounds and check joined with NUL.
+func handID(kind, runs, rounds, check string) string {
+	sum := sha256.Sum256([]byte(kind + "\x00" + runs + "\x00" + rounds + "\x00" + check))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
 func kinds(observations []Observation) []string {
 	out := make([]string, 0, len(observations))
 	for _, o := range observations {
@@ -39,18 +48,20 @@ func kinds(observations []Observation) []string {
 
 func TestFromRunsAFailureThenAPassIsOneFixedObservationWithItsOutput(t *testing.T) {
 	r := finished("r1", run.StateAccepted, failed(1, "aaaa"), passed(2, "sum.go", "sum_test.go"))
-	report := FromRuns("app", []*run.Run{r}, func(runID string, round int) (string, string) {
+	report := FromRuns("app", []*run.Run{r}, nil, Sources{RoundLog: func(runID string, round int) (string, string) {
 		if runID != "r1" || round != 1 {
 			t.Errorf("round log asked for %s round %d, want r1 round 1", runID, round)
 		}
 		return "round-logs/round-1/verify.log", "ok  pkg/a\n--- FAIL: TestSum (0.00s)\n    sum_test.go:9: got 3, want 9\nFAIL\n"
-	})
+	}})
 	got := report.Observations
 	if len(got) != 1 {
 		t.Fatalf("observations = %+v, want one", got)
 	}
 	want := Observation{
-		Kind: KindFixedAfterFailure, RunID: "r1", Ticket: "ticket-r1", At: "2026-10-08T10:00:00Z",
+		ID:   handID(KindFixedAfterFailure, "r1", "1,2", ""),
+		Kind: KindFixedAfterFailure, Source: SourceRun, RunID: "r1", Ticket: "ticket-r1", At: "2026-10-08T10:00:00Z",
+		Signature:    "aaaa",
 		What:         "Round 1 failed (canonical verification failed); round 2 passed after changing sum.go, sum_test.go.",
 		Rounds:       []int{1, 2},
 		Blockers:     []string{"canonical verification failed"},
@@ -182,18 +193,18 @@ func TestFromRunsCountsOrdersAndSkipsUnfinishedRuns(t *testing.T) {
 	late.UpdatedAt = "2026-10-08T01:10:00-06:00" // 07:10Z, though its text sorts first
 	running := finished("running", run.StateSliceRunning, failed(1, "a"))
 
-	report := FromRuns("app", []*run.Run{clean, early, nil, running, late, rescued}, nil)
+	report := FromRuns("app", []*run.Run{clean, early, nil, running, late, rescued}, nil, Sources{})
 	if report.Project != "app" || report.Runs != 4 || report.AcceptedFirstRound != 1 || report.Truncated {
 		t.Errorf("report = %+v, want 4 finished runs, one accepted in its first round", report)
 	}
 	if got, want := kinds(report.Observations), []string{KindRunHalted, KindFixedAfterFailure}; !reflect.DeepEqual(got, want) {
 		t.Errorf("order = %v, want the later run first: %v", got, want)
 	}
-	wantCounts := map[string]int{KindFixedAfterFailure: 1, KindRepeatedFailure: 0, KindRoundChangedNothing: 0, KindCheckFailed: 0, KindRunHalted: 1}
+	wantCounts := map[string]int{KindFixedAfterFailure: 1, KindRepeatedFailure: 0, KindRoundChangedNothing: 0, KindCheckFailed: 0, KindRunHalted: 1, KindCheckFixed: 0, KindReviewCommentAccepted: 0, KindOperatorEdit: 0}
 	if !reflect.DeepEqual(report.Counts, wantCounts) {
 		t.Errorf("Counts = %v, want %v", report.Counts, wantCounts)
 	}
-	if empty := FromRuns("none", nil, nil); empty.Observations == nil || len(empty.Counts) != len(Kinds) {
+	if empty := FromRuns("none", nil, nil, Sources{}); empty.Observations == nil || len(empty.Counts) != len(Kinds) {
 		t.Errorf("empty report = %+v, want an empty list and a zero for every kind", empty)
 	}
 }
@@ -207,10 +218,10 @@ func TestFromRunsCutsTheListKeepsTheCountsAndReadsOnlyWhatItLists(t *testing.T) 
 		runs = append(runs, finished("f"+strings.Repeat("x", i), run.StateAccepted, failed(1, "a"), passed(2, "a.go"), failed(3, "b")))
 	}
 	reads := 0
-	report := FromRuns("app", runs, func(string, int) (string, string) {
+	report := FromRuns("app", runs, nil, Sources{RoundLog: func(string, int) (string, string) {
 		reads++
 		return "round-logs/round-1/verify.log", "FAIL"
-	})
+	}})
 	if len(report.Observations) != MaxObservations || !report.Truncated || report.Counts[KindFixedAfterFailure] != MaxObservations+7 {
 		t.Errorf("list %d, truncated %v, count %d", len(report.Observations), report.Truncated, report.Counts[KindFixedAfterFailure])
 	}

@@ -53,6 +53,12 @@ type Result struct {
 	Skills       []string
 	SkillsSHA256 string
 	RepoSkills   []string
+	// FactoryDirSHA256, FactoryDirCommit and FactoryDirError are threaded to
+	// the run.Attempt fields of the same names: the read-only `.factory/`
+	// snapshot the launch mounted, or why the launch was refused.
+	FactoryDirSHA256 string
+	FactoryDirCommit string
+	FactoryDirError  string
 	// RelayImageDigest, RelayNetworkName, RelayContainerName, and
 	// RelayUpstream carry internal/sandbox.Result.RelayFacts' audit-safe
 	// fields when this attempt's sandboxed worker was launched with the

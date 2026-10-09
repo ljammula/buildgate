@@ -67,9 +67,10 @@ func (a *Activities) runReferenceOracleCanary(ctx context.Context, budget time.D
 	beforeAttempt = a.leaseChecked(ctx, checkpointDir, beforeAttempt)
 	afterAttempt := func(attempt int, res runner.Result, _ error) error {
 		*attempts = append(*attempts, run.Attempt{
-			Kind:        oraclecanary.AttemptKind,
-			Command:     res.Command,
-			SetupSHA256: run.SetupDigest(input.SetupCommands),
+			Kind:             oraclecanary.AttemptKind,
+			Command:          res.Command,
+			SetupSHA256:      run.SetupDigest(input.SetupCommands),
+			FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,

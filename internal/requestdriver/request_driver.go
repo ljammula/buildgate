@@ -22,6 +22,7 @@ import (
 	"buildgate/internal/notify"
 	"buildgate/internal/policy"
 	"buildgate/internal/projectconfig"
+	"buildgate/internal/release"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
@@ -850,7 +851,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// here, the one place this ticket's run is known to have reached
 		// accepted with its own Branch field populated.
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
-		return acceptTicketRun(dataDir, r, ticket, runRecord, now)
+		return acceptTicketRun(dataDir, r, ticket, runRecord, cfg.OpenPullRequest, now)
 	case run.StateQuarantined:
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
@@ -953,16 +954,48 @@ func refuseResume(dataDir string, r *request.Request, reasons []string, now time
 // "accepted · awaiting PR", found live 2026-09-24), then the next ticket
 // or pr_review. A missing PR is caught there, by AdvancePRReview's
 // noPullRequestHaltReason, which reads ticket.RunID.
-func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, now time.Time) error {
+func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, opensPullRequests bool, now time.Time) error {
 	ticket.Branch = runRecord.Branch
 	ticket.PRURL = runRecord.PullRequestURL
 	if ticket.PRURL != "" {
 		ticket.PRState = "draft"
 	}
+	// With pull requests on (opensPullRequests is WorkerConfig.OpenPullRequest,
+	// the setting BuildTicketRunArgs turns into -open-pull-request), the next
+	// ticket is built on this run's commit and judged on its own changed
+	// files only, and with no pull request here its own opens against the
+	// default branch: it would carry, and release, whatever this run's
+	// decision refused. So a run with a later ticket to come advances the
+	// request only with a pull request (opened only for an allowed decision)
+	// or an allowed decision on record. With pull requests off nothing is
+	// pushed or opened: the tickets are built in order and each run's
+	// decision is on its record.
+	if opensPullRequests && ticket.PRURL == "" && ticket.Index < r.TicketCount {
+		if refusal := releaseRefusal(dataDir, r, ticket, runRecord); refusal != "" {
+			return haltRequestAcceptedNoPR(dataDir, r, refusal, now)
+		}
+	}
 	if err := startNextTicketOrFinish(dataDir, r, now); err != nil {
 		return err
 	}
 	return r.Save(dataDir)
+}
+
+// releaseRefusal is the halt reason for an accepted run whose release
+// decision does not allow it, or "" when it does. A decision that is denied
+// or invalidated gets noPullRequestHaltReason's wording; one that is missing
+// or unreadable is not an allowed one.
+func releaseRefusal(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run) string {
+	decision, err := release.LoadDecision(dataDir, release.ProjectOf(runRecord), runRecord.ID)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("ticket %d/%d: run %s was accepted but its release decision cannot be read (%v), so no later ticket is built on it; `factoryd retry %s` evaluates it again", ticket.Index, r.TicketCount, runRecord.ID, err, r.ID)
+	case decision == nil:
+		return fmt.Sprintf("ticket %d/%d: run %s was accepted but no release decision is recorded for it, so no later ticket is built on it; `factoryd retry %s` evaluates it again", ticket.Index, r.TicketCount, runRecord.ID, r.ID)
+	case decision.Allowed && !decision.Invalidated:
+		return ""
+	}
+	return noPullRequestHaltReason(dataDir, r, ticket)
 }
 
 // ReviewCorrectiveRunner, when a test sets it, runs an automatic
@@ -1506,7 +1539,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 				return true, fmt.Errorf("request %s: ticket %d: load accepted %s run %q: %w", r.ID, ticket.Index, plan.label, loadID, err)
 			}
 			log.Printf("request %s: ticket %d/%d: %s %d/%d accepted, PR %s", r.ID, ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, correctiveRun.PullRequestURL)
-			return true, acceptTicketRun(dataDir, r, ticket, correctiveRun, now)
+			return true, acceptTicketRun(dataDir, r, ticket, correctiveRun, cfg.OpenPullRequest, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by

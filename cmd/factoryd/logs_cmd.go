@@ -40,6 +40,9 @@ type logFile struct {
 	// every mark, and notification records are not a work log -- either
 	// would win over the log the operator wants.
 	listOnly bool
+	// prompt marks a saved prompt (<dir>/prompts/<attempt>/<name>.md): listed
+	// with the other logs, read with -prompt.
+	prompt bool
 }
 
 // logsTarget is what an id resolved to: how to enumerate its logs now and
@@ -50,6 +53,9 @@ type logsTarget struct {
 	// listFiles, when set, is what -list shows instead of files (a request
 	// lists every ticket's run, not only the current one).
 	listFiles func() []logFile
+	// dirs are the run and request directories whose saved prompts the id
+	// names (-prompt); none for a process log.
+	dirs func() []string
 }
 
 func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, follow *bool, lines *int) {
@@ -59,11 +65,12 @@ func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, fol
 	list = flags.Bool("list", false, "list every log for the id (oldest first) instead of showing the newest")
 	follow = flags.Bool("f", false, "follow: print appended bytes and switch to newer log files until the request or run finishes (Ctrl-C to stop)")
 	lines = flags.Int("n", 40, "number of trailing lines to show")
+	flags.String("prompt", "", "print one prompt as the build saved it, in full: <name> or <attempt>/<name> as -list shows them (operator-only; may quote repository content)")
 	plainFlagUsage(flags)
 	return
 }
 
-const logsUsage = `usage: factoryd logs [-config <path>] [-data-dir <path>] [-list] [-f] [-n N] <request-id | run-id | queue-run | serve>`
+const logsUsage = `usage: factoryd logs [-config <path>] [-data-dir <path>] [-list] [-f] [-n N] [-prompt <name>] <request-id | run-id | queue-run | serve>`
 
 func logsMain(args []string) error {
 	flags, dataDir, configPath, list, follow, lines := newLogsFlags()
@@ -79,6 +86,9 @@ func logsMain(args []string) error {
 	}
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err
+	}
+	if prompt := flags.Lookup("prompt").Value.String(); prompt != "" {
+		return runLogsPrompt(os.Stdout, *dataDir, flags.Arg(0), prompt)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -141,6 +151,47 @@ func processLogsTarget(dataDir, name string) logsTarget {
 	}
 }
 
+// runLogsPrompt prints the saved prompts of the id that match selector, each
+// under a header, with terminal escapes stripped like any log text.
+func runLogsPrompt(w io.Writer, dataDir, id, selector string) error {
+	target, err := resolveLogsTarget(dataDir, id)
+	if err != nil {
+		return err
+	}
+	attempt, name, qualified := strings.Cut(selector, "/")
+	if !qualified {
+		attempt, name = "", selector
+	}
+	found := 0
+	for _, dir := range target.promptDirs() {
+		for _, sp := range evidence.ListSavedPrompts(dir) {
+			if sp.Name != name || (attempt != "" && sp.Attempt != attempt) {
+				continue
+			}
+			data, ok := evidence.ReadSavedPrompt(dir, sp.Attempt, sp.Name)
+			if !ok {
+				continue
+			}
+			found++
+			path := filepath.Join(dir, evidence.PromptsDirName, sp.Attempt, sp.Name+".md")
+			fmt.Fprintf(w, "==> %s (%s, modified %s ago)\n", relToDataDir(dataDir, path), humanBytes(sp.Bytes), humanAge(time.Since(sp.Modified)))
+			fmt.Fprintln(w, cleanLogText(strings.TrimSuffix(string(data), "\n")))
+		}
+	}
+	if found == 0 {
+		return fmt.Errorf("no saved prompt %q for %s in %s (factoryd logs -list %s shows them)", selector, id, dataDir, id)
+	}
+	return nil
+}
+
+// promptDirs are the directories of the target that can hold saved prompts.
+func (t logsTarget) promptDirs() []string {
+	if t.dirs == nil {
+		return nil
+	}
+	return t.dirs()
+}
+
 func requestLogsTarget(dataDir, id string) logsTarget {
 	load := func() *request.Request {
 		r, err := request.Load(dataDir, id)
@@ -159,6 +210,15 @@ func requestLogsTarget(dataDir, id string) logsTarget {
 		return out
 	}
 	return logsTarget{
+		dirs: func() []string {
+			dirs := []string{request.Dir(dataDir, id)}
+			if r := load(); r != nil {
+				for _, rid := range allRequestRunIDs(dataDir, r) {
+					dirs = append(dirs, run.Dir(dataDir, rid))
+				}
+			}
+			return dirs
+		},
 		files: func() []logFile { return gather(currentTicketRunIDs) },
 		listFiles: func() []logFile {
 			return gather(func(r *request.Request) []string { return allRequestRunIDs(dataDir, r) })
@@ -220,6 +280,7 @@ func allRequestRunIDs(dataDir string, r *request.Request) []string {
 
 func runLogsTarget(dataDir, id string) logsTarget {
 	return logsTarget{
+		dirs:  func() []string { return []string{run.Dir(dataDir, id)} },
 		files: func() []logFile { return walkLogs(run.Dir(dataDir, id)) },
 		terminal: func() bool {
 			r, err := run.Load(dataDir, id)
@@ -269,6 +330,19 @@ func walkLogs(root string) []logFile {
 		}
 		return nil
 	})
+	return append(out, promptLogFiles(root)...)
+}
+
+// promptLogFiles are the prompts saved under root, list-only: they are read
+// with -prompt, never followed.
+func promptLogFiles(root string) []logFile {
+	var out []logFile
+	for _, sp := range evidence.ListSavedPrompts(root) {
+		out = append(out, logFile{
+			path: filepath.Join(root, evidence.PromptsDirName, sp.Attempt, sp.Name+".md"),
+			size: sp.Bytes, modified: sp.Modified, listOnly: true, prompt: true,
+		})
+	}
 	return out
 }
 
@@ -301,7 +375,11 @@ func printLogList(w io.Writer, dataDir string, t logsTarget) error {
 	})
 	now := time.Now()
 	for _, f := range files {
-		fmt.Fprintf(w, "%s  %s  %s (%s ago)\n", relToDataDir(dataDir, f.path), humanBytes(f.size), f.modified.Format("2006-01-02 15:04:05"), humanAge(now.Sub(f.modified)))
+		kind := ""
+		if f.prompt {
+			kind = "  [prompt, as saved by the build]"
+		}
+		fmt.Fprintf(w, "%s  %s  %s (%s ago)%s\n", relToDataDir(dataDir, f.path), humanBytes(f.size), f.modified.Format("2006-01-02 15:04:05"), humanAge(now.Sub(f.modified)), kind)
 	}
 	if len(files) == 0 {
 		fmt.Fprintln(w, "no logs yet")

@@ -111,9 +111,11 @@ func fakeForgeOf(dp *deps) *fakeForge { return dp.forge.(*fakeForge) }
 // fakeHost is a hostBoundary whose every method is a field, set by newTestDeps
 // to the real method and replaced by a test that needs another answer.
 type fakeHost struct {
+	blobAtCommitFn       func(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommandFn     func(target string) *exec.Cmd
 	executableFn         func() (string, error)
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
+	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchctlBinaryFn    func() string
 	launchdServicePIDFn  func(domain string) (int, bool)
@@ -121,6 +123,7 @@ type fakeHost struct {
 	pidAliveFn           func(pid int) bool
 	pidLooksLikeWorkerFn func(pid int) bool
 	processUIDFn         func(pid int) (int, bool)
+	rootTreeAtCommitFn   func(ctx context.Context, repoDir string, commit string) ([]gitTreeEntry, error)
 	runUpgradeCommandFn  func(c upgradeCmd) ([]byte, error)
 	serveHealthzOKFn     func(addr string) bool
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
@@ -131,10 +134,19 @@ type fakeHost struct {
 	tlsRootFn            func(ctx context.Context, host string) (*x509.Certificate, error)
 }
 
+func (f *fakeHost) blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error) {
+	return f.blobAtCommitFn(ctx, repoDir, commit, path)
+}
+func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit string) ([]gitTreeEntry, error) {
+	return f.rootTreeAtCommitFn(ctx, repoDir, commit)
+}
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	return f.goCommandFn(ctx, dir, env, args...)
+}
+func (f *fakeHost) headCommit(ctx context.Context, repoDir string) (string, error) {
+	return f.headCommitFn(ctx, repoDir)
 }
 func (f *fakeHost) launchctl(args ...string) ([]byte, error)       { return f.launchctlFn(args...) }
 func (f *fakeHost) launchctlBinary() string                        { return f.launchctlBinaryFn() }
@@ -271,11 +283,17 @@ func newTestDeps(t testing.TB) *deps {
 	}
 	realHost := realHost{dp: dp}
 	dp.host = &fakeHost{
-		browserCommandFn: realHost.browserCommand,
-		executableFn:     realHost.executable,
+		// A local read of git objects in the directory the test names: it
+		// reaches nothing outside the test process's own temp repositories.
+		blobAtCommitFn:     realHost.blobAtCommit,
+		rootTreeAtCommitFn: realHost.rootTreeAtCommit,
+		browserCommandFn:   realHost.browserCommand,
+		executableFn:       realHost.executable,
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
 			return nil, errors.New("test host: no go command is run")
 		},
+		// A local read of the test's own temp repository, like blobAtCommit.
+		headCommitFn:         realHost.headCommit,
 		launchctlFn:          realHost.launchctl,
 		launchctlBinaryFn:    realHost.launchctlBinary,
 		launchdServicePIDFn:  realHost.launchdServicePID,
