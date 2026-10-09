@@ -70,6 +70,14 @@ var (
 // pi-stderr hint) must call Line, not Text, or a `\r`/U+2028 embedded in
 // the source can still rewrite or split that one line on a terminal (#1,
 // #2, round-2 review).
+// StripANSI removes terminal escape sequences and nothing else. It is the
+// cheap first step for a caller that scans a large log for a few lines and
+// cleans only those with Text or Line: a colour code glued to a word hides
+// the word from a pattern.
+func StripANSI(s string) string {
+	return ansiSequence.ReplaceAllString(s, "")
+}
+
 func Text(s string) string {
 	s = strings.ToValidUTF8(ansiSequence.ReplaceAllString(s, ""), "")
 	s = strings.Map(func(r rune) rune {

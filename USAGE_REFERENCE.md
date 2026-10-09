@@ -172,6 +172,24 @@ budget can consume the other's rounds. The budget is per ticket and is not
 reset by `factoryd retry`: a ticket that already used its rounds gets none
 on a rebuild, because a human chose that retry.
 
+**Corrective builds for other checks.** A ticket run quarantined by checks
+other than the two reviews alone is followed by a corrective build when its
+handoff sorts every judged failed check as `corrective` (see "What a stopped
+run left behind" in USAGE.md for the bins). The build runs on the
+quarantined run's branch (`-on-branch`/`-diff-base`) with the ticket's own
+build spec, unchanged, and the handoff rendered as text as
+`-earlier-attempt <file>`: a read-only input beside the spec that only the
+build's first prompt receives, never a review. The file is kept in the
+request's directory (`rounds/<ticket>-corrective<n>/earlier-attempt.md`), the
+round's run is `<request>-<ticket>-corrective<n>`, and the round is recorded
+on the ticket with kind `corrective`. `-review-corrective-rounds` is one
+budget per ticket build for this round and the review round together; `0`
+disables both. Not eligible: `tests_added` on a committed diff, a review that
+gave no verdict, an unknown check, a repository gate the worker never ran, a
+halt, and a run with no handoff or one that no longer matches its record.
+When verification never passed and the attempt committed nothing, the checks
+on its diff are not judged and the run is sorted on the others.
+
 **`-on-branch`/`-diff-base`.** Both travel in the workflow input
 (`RunWorkflowInput.OnBranch`/`DiffBaseSHA`): a corrective
 round checks out the quarantined run's own existing branch

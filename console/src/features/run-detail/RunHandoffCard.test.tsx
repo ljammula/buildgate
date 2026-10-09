@@ -25,7 +25,7 @@ test("a stopped run's card lists each failed check, its finding and how it is so
 
   expect(
     await screen.findByText(
-      "At least one failed check is of a kind a build is never told about, so this is not handed back to a build.",
+      "Every failed check is of a kind a build can fix when it is told what failed.",
     ),
   ).toBeInTheDocument();
   const checks = screen.getAllByTestId("run-handoff-check");
@@ -37,8 +37,14 @@ test("a stopped run's card lists each failed check, its finding and how it is so
   expect(
     within(checks[0]!).getByText("Failed (exit 1); the factory has no more to say about it."),
   ).toBeInTheDocument();
+  // The attempt committed nothing, so the check on its diff was not judged.
   expect(within(checks[1]!).getByText("tests_added: no test file changed")).toBeInTheDocument();
-  expect(within(checks[1]!).getByText("Of a kind a build is never told about")).toBeInTheDocument();
+  expect(
+    within(checks[1]!).getByText(
+      "Not judged: the attempt committed nothing, so there was no diff to check",
+    ),
+  ).toBeInTheDocument();
+  expect(within(checks[1]!).queryByText("Of a kind a build is never told about")).toBeNull();
   expect(server.sent("GET /runs/run-quarantined/handoff")).toHaveLength(1);
 });
 
@@ -66,6 +72,7 @@ test("a finding is rendered as text", async () => {
                 bin: "corrective",
                 exit_code: 2,
                 finding: 'lint failed: the log says "<img src=x onerror=alert(1)>"',
+                output: ["error: <script>alert(1)</script>", "error: second line"],
               },
             ],
           }),
@@ -74,7 +81,10 @@ test("a finding is rendered as text", async () => {
   });
   const check = await screen.findByTestId("run-handoff-check");
   expect(check).toHaveTextContent("<img src=x onerror=alert(1)>");
-  expect(check.querySelector("img")).toBeNull();
+  expect(check.querySelector("img, script")).toBeNull();
+  expect(screen.getByRole("region", { name: "Output of lint" })).toHaveTextContent(
+    "error: <script>alert(1)</script> error: second line",
+  );
 });
 
 test("a handoff the server will not vouch for shows nothing, and another failure shows its error", async () => {

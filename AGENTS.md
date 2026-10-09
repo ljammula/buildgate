@@ -45,7 +45,7 @@ This repo enforces its own safety properties on itself. Two files are
 **normative**, not descriptive, and are checked mechanically:
 
 - [`safety-contract.md`](safety-contract.md) — trust boundaries, threat
-  model, invariants SC-001–SC-017, the full run state graph. A change
+  model, invariants SC-001–SC-018, the full run state graph. A change
   that weakens an invariant needs a new contract review, not a quiet
   code edit.
 - [`CLAIMS.md`](CLAIMS.md) — every normative claim mapped to the test
@@ -192,7 +192,7 @@ that name an allow-list.
 |---|---|---|
 | `cmd/factoryd` | Flags, session config, the commands, the single-ticket run path (`ticketRun` stages, `runOptions`), the worker; builds the real `deps` in `main` and passes it down | Any `internal/` package |
 | `internal/hostcontrol` | Starts, finds and stops Temporal, Colima, the worker and serve | Allow-list: the module root (the embedded Temporal compose file), `consolelink`, `daemonheartbeat`, `sanitize`, `spinner`. Reaches the machine only through `hostcontrol.Deps` |
-| `internal/requestdriver` | Advances a request one step: drafting, planning, ticket builds, corrective rounds, PR review | Allow-list: `api`, `codereview`, `consolelink`, `evidence`, `forge`, `notify`, `policy`, `projectconfig`, `release`, `request`, `requestsubmit`, `run`, `runner`, `sandbox`, `sessionconfig`, `ticketspec`, `workflow`, `workspace`. Never `hostcontrol`. Reaches GitHub, git push and the build entry point only through `requestdriver.Deps` |
+| `internal/requestdriver` | Advances a request one step: drafting, planning, ticket builds, corrective rounds, PR review | Allow-list: `api`, `codereview`, `consolelink`, `evidence`, `forge`, `handoff`, `notify`, `policy`, `projectconfig`, `release`, `request`, `requestsubmit`, `run`, `runner`, `sandbox`, `sessionconfig`, `ticketspec`, `workflow`, `workspace`. Never `hostcontrol`. Reaches GitHub, git push and the build entry point only through `requestdriver.Deps` |
 | `internal/workflow` | The Temporal workflows and activities of a build | No allow-list. Never `cmd`, and never `requestdriver`, which imports it |
 | `internal/meter` | The spend meter the OpenShell supervisor calls for every model request (`cmd/factoryd-meter`): ceilings, sliding windows, pricing, per-format usage parsers, reasoning-effort ranking, each sandbox's usage ledger (`Account`, `Ledger`); also the route host pins and the host-side Copilot model listing and token exchange | Allow-list: its own generated `middlewarepb`. Imports no other buildgate package. `internal/claims/imports_test.go` enforces it |
 | `internal/openshell` | The `sandbox.Runtime` over the OpenShell gateway: turns a `sandbox.SandboxRequest` into the gateway's sandbox spec, workload template and network policy, pushes a route's credential, and reads Docker's view of a sandbox's containers. The only package that imports the OpenShell Go SDK | Allow-list: `sandbox`. Reaches the gateway through the SDK's client interface, plus its own `RouteReadiness` interface for the one call the SDK lacks, and Docker through its own `Containers` interface. Its `Live` tests run only with `OPENSHELL_LIVE=1` against a running gateway |

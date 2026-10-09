@@ -257,6 +257,87 @@ func resumeFromStateArgs(input RunWorkflowInput) []string {
 	return []string{"--resume-from-state", path}
 }
 
+// dropFinishedBuildSession removes the build's harness session folder from
+// the worktree once the build step has returned, after copying each
+// round's saved output into the run's log dir.
+//
+// The session holds the build's whole conversation, its first prompt
+// included, and with it anything the build was told that later steps must
+// not see: the record of an earlier attempt (SC-018). Every step after the
+// build (verify, the gates, the reviews) runs in this same worktree, and a
+// review explores it with tools. Nothing after the build needs the session:
+// a resume starts a fresh one in any case (prepareBuildHandoff).
+//
+// A build that did not return a result (runErr: its worker or sandbox was
+// lost) keeps its session folder untouched and gets runErr back: that is
+// the case a resume handles, and it does its own copy and removal.
+//
+// For a build that did return, the removal is part of the step: when the
+// session cannot be removed, or is not the plain directory the build script
+// creates (a link would leave its target, and the prompts in it, behind),
+// the returned error fails the build step, so no review runs beside it.
+// Copying the round logs out first stays best-effort.
+func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWorkflowInput, runErr error) error {
+	if runErr != nil || input.WorkspacePath == "" {
+		return runErr
+	}
+	if logDir := a.logDirFor(input); logDir != "" {
+		if _, err := evidence.RetainRoundLogs(input.WorkspacePath, filepath.Join(logDir, evidence.RoundLogsDirName)); err != nil {
+			activity.GetLogger(ctx).Warn("failed to retain every round log before removing the finished build's session", "error", err)
+		}
+	}
+	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
+		return fmt.Errorf("remove the finished build's harness session before any later step: %w", err)
+	}
+	return nil
+}
+
+// removeBuildSession deletes the session folder at path. A folder the
+// build made unwritable is made writable first; anything at path that is
+// not a directory is refused, not removed.
+func removeBuildSession(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory (mode %s)", path, info.Mode())
+	}
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(p, 0o700)
+		}
+		return nil
+	})
+	return os.RemoveAll(path)
+}
+
+// withEarlierWorkArgs adds the two things a build can be told about work
+// done before it, each as a host file staged read-only beside the spec:
+//
+//   - handoffNote (--handoff): an interrupted attempt of this same build,
+//     whose work is in the workspace (prepareBuildHandoff);
+//   - earlierAttempt (--earlier-attempt): the factory's record of an
+//     earlier attempt at this ticket that finished and failed its checks
+//     (RunWorkflowInput.EarlierAttemptPath).
+//
+// RunBuildActivity is the only caller: no review, verify or gate Activity
+// is given either file.
+func withEarlierWorkArgs(ctx context.Context, args []string, handoffNote, earlierAttempt string) (context.Context, []string) {
+	if handoffNote != "" {
+		args = append(args, "--handoff", handoffNote)
+		ctx = withExtraRunInputs(ctx, handoffNote)
+	}
+	if earlierAttempt != "" {
+		args = append(args, "--earlier-attempt", earlierAttempt)
+		ctx = withExtraRunInputs(ctx, earlierAttempt)
+	}
+	return ctx, args
+}
+
 // extraRunInputsKey carries host files an Activity wants staged into the
 // sandbox's /inputs/run mount beside the spec.
 type extraRunInputsKey struct{}

@@ -85,6 +85,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-conformity-policy", "advisory",
 		"-code-review-policy", "advisory",
 		"-spec-acceptance-criteria", write("criteria.md", "1. content.txt has one more line.\n"),
+		"-earlier-attempt", write("earlier-attempt.md", "# What the earlier attempt left (run golden-0)\n"),
 		"-max-rounds", "7",
 		"-timeout-minutes", "11",
 		"-verify-command", "true",

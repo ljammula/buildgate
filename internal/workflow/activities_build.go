@@ -292,11 +292,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
 	// see buildActivityArgs' own doc comment on that parameter for why.
 	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness))
-	runCtx := ctx
-	if resumed.NotePath != "" {
-		args = append(args, "--handoff", resumed.NotePath)
-		runCtx = withExtraRunInputs(ctx, resumed.NotePath)
-	}
+	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath)
 	args = append(args, resumeFromStateArgs(input)...)
 	buildAppInterpreter := a.buildAppInterpreterFor(input)
 	// Computed before recording intent (not after, as originally written)
@@ -424,6 +420,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 		}
 		return a.runSandboxWithRetries(runCtx, input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
 	})
+	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
 	result := BuildActivityResult{Result: subResult, Attempts: withInherited(inherited, attempts)}
 	checkpoint.Result = result
 	if runErr != nil {

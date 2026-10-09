@@ -9,14 +9,23 @@ test("GET /runs/{id}/handoff decodes", () => {
   expect(handoff).toEqual({
     runId: "run-quarantined",
     state: "quarantined",
-    next: "never",
+    next: "corrective",
     checks: [
-      { check: "canonical_verify", bin: "corrective", exitCode: 1, finding: "" },
+      {
+        check: "canonical_verify",
+        bin: "corrective",
+        exitCode: 1,
+        finding: "",
+        output: [],
+        notJudged: false,
+      },
       {
         check: "tests_added",
         bin: "never",
         exitCode: 0,
         finding: "tests_added: no test file changed",
+        output: [],
+        notJudged: true,
       },
     ],
   });

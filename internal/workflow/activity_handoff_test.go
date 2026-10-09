@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -522,4 +523,191 @@ func TestRetriedReviewStepInheritsEarlierAttemptAndJournalsOnlyItsOwn(t *testing
 		t.Fatal(err)
 	}
 	assertInheritedAndOwnJournal(t, "review "+step, result.Attempts, logDir, step, journal)
+}
+
+// The factory's record of an earlier, finished attempt at the ticket goes
+// to the build script as --earlier-attempt.
+func TestRunBuildActivityPassesTheEarlierAttemptsRecord(t *testing.T) {
+	repo := testfixture.NewGitRepo(t)
+	record := filepath.Join(t.TempDir(), "earlier-attempt.md")
+	writeFile(t, record, "# What the earlier attempt left (run r1)\n")
+	var gotArgs []string
+	activities := &Activities{
+		LogDir: t.TempDir(),
+		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, args ...string) (runner.Result, error) {
+			gotArgs = args
+			return runner.Result{}, nil
+		},
+	}
+	input := fixtureInput()
+	input.WorkspacePath = repo
+	input.EarlierAttemptPath = record
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(activities.RunBuildActivity)
+	if _, err := env.ExecuteActivity(activities.RunBuildActivity, input); err != nil {
+		t.Fatal(err)
+	}
+	passed := ""
+	for i, arg := range gotArgs {
+		if arg == "--earlier-attempt" && i+1 < len(gotArgs) {
+			passed = gotArgs[i+1]
+		}
+		if arg == "--handoff" {
+			t.Errorf("a first attempt passed --handoff: %v", gotArgs)
+		}
+	}
+	if passed != record {
+		t.Errorf("--earlier-attempt = %q, want %q (args %v)", passed, record, gotArgs)
+	}
+}
+
+func TestWithEarlierWorkArgsStagesEachFileItNames(t *testing.T) {
+	ctx, args := withEarlierWorkArgs(context.Background(), []string{"build_app.py"}, "/logs/handoff.md", "/data/earlier-attempt.md")
+	if want := []string{"build_app.py", "--handoff", "/logs/handoff.md", "--earlier-attempt", "/data/earlier-attempt.md"}; !reflect.DeepEqual(args, want) {
+		t.Errorf("args = %v, want %v", args, want)
+	}
+	if got, want := extraRunInputsFrom(ctx), []string{"/logs/handoff.md", "/data/earlier-attempt.md"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("staged = %v, want %v", got, want)
+	}
+	ctx, args = withEarlierWorkArgs(context.Background(), []string{"build_app.py"}, "", "")
+	if len(args) != 1 || len(extraRunInputsFrom(ctx)) != 0 {
+		t.Errorf("with neither: args %v, staged %v, want nothing added", args, extraRunInputsFrom(ctx))
+	}
+}
+
+// TestOnlyTheBuildIsGivenTheEarlierAttemptsRecord: the record carries what
+// an earlier build and its checks wrote, so no review, verify or gate
+// Activity may be handed it. In this package only the build Activity and
+// the helper it calls name the input.
+func TestOnlyTheBuildIsGivenTheEarlierAttemptsRecord(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{"activities_build.go": true, "activity_handoff.go": true, "workflow_types.go": true}
+	seen := 0
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mentions := strings.Contains(string(data), "EarlierAttemptPath") || strings.Contains(string(data), "--earlier-attempt")
+		if mentions {
+			seen++
+			if !allowed[path] {
+				t.Errorf("%s uses the earlier attempt's record: only the build Activity may pass it on", path)
+			}
+		}
+	}
+	if seen < 3 {
+		t.Errorf("found the earlier attempt's record in %d files, want the three that carry it to the build", seen)
+	}
+}
+
+// Once the build step has returned, its harness session (which holds its
+// prompts) is gone from the worktree the reviews then work in, and what its
+// rounds saved has been copied out first. A build that was lost keeps it.
+func TestRunBuildActivityRemovesTheFinishedBuildsSession(t *testing.T) {
+	for name, lost := range map[string]bool{"the build returned": false, "the build was lost": true} {
+		t.Run(name, func(t *testing.T) {
+			repo := testfixture.NewGitRepo(t)
+			logDir := t.TempDir()
+			activities := &Activities{
+				LogDir: logDir,
+				runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+					// What a build leaves behind.
+					writeFile(t, filepath.Join(repo, buildSessionDir, "session.jsonl"), "the first prompt, record included\n")
+					writeFile(t, filepath.Join(repo, buildSessionDir, "feedback", "round-1", "verify.log"), "--- FAIL: TestSum\n")
+					if lost {
+						return runner.Result{}, errors.New("sandbox lost")
+					}
+					return runner.Result{ExitCode: 1}, nil
+				},
+			}
+			input := fixtureInput()
+			input.WorkspacePath = repo
+			var suite testsuite.WorkflowTestSuite
+			env := suite.NewTestActivityEnvironment()
+			env.RegisterActivity(activities.RunBuildActivity)
+			_, err := env.ExecuteActivity(activities.RunBuildActivity, input)
+			_, statErr := os.Stat(filepath.Join(repo, buildSessionDir))
+			if lost {
+				if err == nil || statErr != nil {
+					t.Fatalf("a lost build: err %v, session stat %v, want the error and the session kept for a resume", err, statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !os.IsNotExist(statErr) {
+				t.Errorf("the finished build's session is still in the worktree (%v)", statErr)
+			}
+			if got, readErr := os.ReadFile(filepath.Join(logDir, evidence.RoundLogsDirName, "round-1", "verify.log")); readErr != nil || string(got) != "--- FAIL: TestSum\n" {
+				t.Errorf("retained round log = %q, %v, want it copied out before the session went", got, readErr)
+			}
+		})
+	}
+}
+
+func TestRemoveBuildSession(t *testing.T) {
+	dir := t.TempDir()
+	if err := removeBuildSession(filepath.Join(dir, "missing")); err != nil {
+		t.Errorf("a missing session: %v, want no error", err)
+	}
+
+	// A session the build made unwritable still goes.
+	locked := filepath.Join(dir, "locked")
+	writeFile(t, filepath.Join(locked, "pi", "session.jsonl"), "prompt\n")
+	if err := os.Chmod(filepath.Join(locked, "pi"), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeBuildSession(locked); err != nil {
+		t.Errorf("an unwritable session: %v, want it removed", err)
+	}
+	if _, err := os.Stat(locked); !os.IsNotExist(err) {
+		t.Errorf("the unwritable session is still there (%v)", err)
+	}
+
+	// A link is refused: removing it would leave the prompts in its target.
+	target := filepath.Join(dir, "elsewhere")
+	writeFile(t, filepath.Join(target, "session.jsonl"), "prompt\n")
+	link := filepath.Join(dir, "linked")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeBuildSession(link); err == nil {
+		t.Error("a linked session was accepted, want an error")
+	}
+	if _, err := os.Stat(filepath.Join(target, "session.jsonl")); err != nil {
+		t.Errorf("the link's target was touched: %v", err)
+	}
+}
+
+// A session that cannot be removed fails the build step: no later step runs
+// beside the prompts it holds.
+func TestRunBuildActivityFailsWhenTheFinishedSessionCannotBeRemoved(t *testing.T) {
+	repo := testfixture.NewGitRepo(t)
+	elsewhere := t.TempDir()
+	activities := &Activities{
+		LogDir: t.TempDir(),
+		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+			if err := os.Symlink(elsewhere, filepath.Join(repo, buildSessionDir)); err != nil {
+				t.Fatal(err)
+			}
+			return runner.Result{}, nil
+		},
+	}
+	input := fixtureInput()
+	input.WorkspacePath = repo
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(activities.RunBuildActivity)
+	if _, err := env.ExecuteActivity(activities.RunBuildActivity, input); err == nil || !strings.Contains(err.Error(), "harness session") {
+		t.Errorf("err = %v, want the build step to fail naming the session", err)
+	}
 }

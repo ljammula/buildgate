@@ -152,6 +152,7 @@ class OneShot(unittest.TestCase):
 			run("t-2", state="quarantined", ticket="req-001-review1", created_at="2026-10-01T01:00:00Z"),
 			run("t-3", state="quarantined", ticket="req-001-review2-fix1", created_at="2026-10-01T02:00:00Z"),
 			run("t-4", state="quarantined", ticket="req-001-conformity1", created_at="2026-10-01T03:00:00Z"),
+			run("t-5", state="accepted", ticket="req-001-corrective1", created_at="2026-10-01T04:00:00Z"),
 			run("u-1", state="quarantined", ticket="a-review-of-reviews-001"),
 			# Names that only look like a follow-up stay two tickets, and
 			# the same name in another project is another ticket.

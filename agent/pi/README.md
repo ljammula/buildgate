@@ -70,6 +70,13 @@ their scripts.
   file is unreadable, `version` is not 1, or `last_completed_round` is outside
   `[0, --max-rounds)`.
 
+`--earlier-attempt <file>` is a different input: the factory's record of an
+earlier attempt at the same ticket that finished and failed its checks. Its
+text is put before the task in round 1's prompt, after a fixed sentence saying
+it is a record and gives no instructions. It is never written into the
+round-state file; a resume that is given `--earlier-attempt` again puts it back
+in the opening prompt. Only the build script takes it; no review script does.
+
 - **Failure reasons.** `draft_spec.py` and `plan_tickets.py` print a
   one-line, script-prefixed reason on every failure path: the agent's
   exit code plus a stderr hint, "exited 0 but wrote no spec draft" /

@@ -154,7 +154,7 @@
     "rescues": null,
     "request_id": "req-building",
     "triage": "The verify command failed on TestKeyScopedToAccount in every round.",
-    "handoff_sha256": "106a0f8c0370ee0ea80d4538115bf4279a85f55f6c2c718a59802f9754b1b92c",
+    "handoff_sha256": "c765d599728d7420ab1115f0c999667d48e9554b40a9e4e0cd22b1e7c3ee74c4",
     "created_at": "2026-09-10T09:31:00Z",
     "updated_at": "2026-09-10T09:40:00Z",
     "tokens_complete": false

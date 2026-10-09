@@ -869,7 +869,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
 		return acceptTicketRun(dataDir, r, ticket, runRecord, now)
 	case run.StateQuarantined:
-		if handled, cErr := TryReviewCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
+		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
 		}
 		// TryReviewCorrectiveRound returning handled=false still
@@ -1009,7 +1009,10 @@ func conformityUnanswered(runRecord *run.Run) bool {
 // gave no verdict is "review unavailable", not an unnamed quarantine.
 func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *run.Run, reason string, now time.Time) error {
 	if !reviewShapeOnly(roundRun) {
-		return quarantineRequest(dataDir, r, reason, now)
+		// The same check an uncorrected quarantine names (AdvanceBuilding):
+		// a round that again left Allowed-Files still points the operator
+		// at amend-scope.
+		return quarantineRequestWithCheck(dataDir, r, reason, nonReviewQuarantineCheck(roundRun), now)
 	}
 	check := quarantineCheckFor(roundRun)
 	if check == request.QuarantineCheckReviewUnavailable {
@@ -1234,17 +1237,149 @@ func recordTicketRunStarted(dataDir, requestID string, ticketIndex int, runID st
 }
 
 func TryReviewCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
-	if !ReviewOnlyFlagged(runRecord) {
-		return false, nil
+	return runCorrectiveRounds(dp, ctx, dataDir, r, ticket, runRecord, cfg, now, reviewCorrectivePlan(dataDir, r, ticket, cfg))
+}
+
+// nonReviewQuarantineCheck is the check a request's quarantine names for a
+// run that failed more than the reviews: diff_scope when the diff left
+// Allowed-Files (its next action is amend-scope), none otherwise.
+func nonReviewQuarantineCheck(runRecord *run.Run) string {
+	if failedGate(runRecord, "diff_scope") {
+		return request.QuarantineCheckDiffScope
 	}
-	flaggedVerdicts := flaggedConformityVerdicts(runRecord)
-	findings := blockingCodeReviewFindings(runRecord)
-	countedRounds := 0
+	return ""
+}
+
+// tryCorrectiveRound follows a quarantined ticket run with the corrective
+// round its failure allows, if any: the review round when the two reviews
+// alone failed with something to address, else the check round when every
+// failed check is one a build can fix when told about it.
+func tryCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
+	if handled, err := TryReviewCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
+		return true, err
+	}
+	return TryCheckCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now)
+}
+
+// correctivePlan is what differs between the kinds of corrective round a
+// quarantined ticket run can be followed by; runCorrectiveRounds is what
+// they share (budget, launch, recording, the accepted and quarantined
+// outcomes).
+type correctivePlan struct {
+	// kind is the request.Round kind recorded; suffix names the round's
+	// run (<request>-<ticket>-<suffix><n>); label names it in logs and
+	// quarantine reasons.
+	kind, suffix, label string
+	// eligible reports whether a quarantined run can be followed by one
+	// more round of this kind.
+	eligible func(*run.Run) bool
+	// args is the round's build argv, made from the quarantined run it
+	// follows, and one phrase saying what the round is about, for the log.
+	args func(current *run.Run, roundIndex int, roundRunID, diffBase string) (argv []string, about string, err error)
+}
+
+// reviewCorrectivePlan is the round that follows a run quarantined by the
+// two reviews alone: its spec is the ticket's build spec plus the flagged
+// criteria and blocking findings (WriteReviewAddendum).
+func reviewCorrectivePlan(dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig) correctivePlan {
+	return correctivePlan{
+		kind: request.ConformityRoundKind, suffix: "conformity", label: "review corrective round",
+		eligible: ReviewOnlyFlagged,
+		args: func(current *run.Run, roundIndex int, roundRunID, diffBase string) ([]string, string, error) {
+			flaggedVerdicts := flaggedConformityVerdicts(current)
+			findings := blockingCodeReviewFindings(current)
+			addendumPath, err := WriteReviewAddendum(dataDir, r.ID, ticket, flaggedVerdicts, findings, roundIndex)
+			if err != nil {
+				return nil, "", fmt.Errorf("write addendum: %w", err)
+			}
+			argv, err := BuildReviewCorrectiveArgs(dataDir, r, *ticket, cfg, addendumPath, roundRunID, current.Branch, diffBase)
+			about := fmt.Sprintf("review flagged %d spec-conformity criterion/criteria and %d code-review finding(s)", len(flaggedVerdicts), len(findings))
+			return argv, about, err
+		},
+	}
+}
+
+// correctiveRoundsUsed counts the corrective rounds a ticket's build has
+// already had, of either kind: one budget (-review-corrective-rounds)
+// covers them all, so a ticket is not given one round per kind of failure.
+// A round whose run never started does not count.
+func correctiveRoundsUsed(ticket *request.Ticket) int {
+	used := 0
 	for _, rnd := range ticket.Rounds {
-		if rnd.Kind == request.ConformityRoundKind && !rnd.StartFailure {
-			countedRounds++
+		if (rnd.Kind == request.ConformityRoundKind || rnd.Kind == request.CorrectiveRoundKind) && !rnd.StartFailure {
+			used++
 		}
 	}
+	return used
+}
+
+// correctiveLaunch is what one corrective round's build left to record.
+type correctiveLaunch struct {
+	// startedRunID is the round's run id once its run record existed, ""
+	// for a round that never got that far; loadID is the id its outcome
+	// was read from.
+	startedRunID, loadID string
+	outcome              request.RoundOutcome
+	errText              string
+	startFailure         bool
+}
+
+// launchCorrectiveRound runs one corrective round's build and reads its
+// outcome. stop is true when the caller must return at once with err and
+// record nothing: the request left building while the round ran (err nil),
+// the worker was asked to stop mid-round (the round is unrecorded and its
+// budget unspent), or the outcome could not be read.
+func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name string) (launched correctiveLaunch, stop bool, err error) {
+	var startedRunID string
+	runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
+		startedRunID = started.ID
+		ticket.RunID = started.ID
+		started.RequestID = r.ID
+		if err := started.Persist(dataDir); err != nil {
+			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
+		}
+		if err := recordTicketRunStarted(dataDir, r.ID, ticket.Index, started.ID); err != nil {
+			log.Printf("request %s: ticket %d: record corrective run %s: %v", r.ID, ticket.Index, started.ID, err)
+		}
+	})
+	// stillInState: see AdvanceBuilding's own identical check and doc
+	// comment. A cancel that lands while this round built must not be
+	// resurrected by the caller's own r.Save calls.
+	if ok, serr := stillInState(dataDir, r.ID, request.StateBuilding); serr != nil {
+		return correctiveLaunch{}, true, serr
+	} else if !ok {
+		log.Printf("request %s: ticket %d/%d: %s finished but the request left building while it ran (e.g. cancelled) -- discarding the result", r.ID, ticket.Index, r.TicketCount, name)
+		return correctiveLaunch{}, true, nil
+	}
+	if runErr != nil && ctx.Err() != nil {
+		// Stop requested mid-round (SIGINT/SIGTERM) -- see
+		// AdvanceBuilding's own identical ctx.Err() handling: leave
+		// the request in building with no round recorded and no
+		// budget consumed.
+		return correctiveLaunch{}, true, runErr
+	}
+	// loadID falls back to roundRunID only when the run never reached
+	// onReady -- see correctiveRoundOutcome's own doc comment (shared
+	// with the identical PR-review round) for why.
+	loadID := startedRunID
+	if loadID == "" {
+		loadID = roundRunID
+	}
+	outcome, errText, startFailure, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
+	if loadErr != nil {
+		return correctiveLaunch{}, true, fmt.Errorf("request %s: ticket %d: %s: %w", r.ID, ticket.Index, name, loadErr)
+	}
+	if errText != "" {
+		log.Printf("request %s: ticket %d: %s: %s: %s", r.ID, ticket.Index, name, outcome, errText)
+	}
+	return correctiveLaunch{startedRunID: startedRunID, loadID: loadID, outcome: outcome, errText: errText, startFailure: startFailure}, false, nil
+}
+
+func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time, plan correctivePlan) (handled bool, err error) {
+	if !plan.eligible(runRecord) {
+		return false, nil
+	}
+	countedRounds := correctiveRoundsUsed(ticket)
 	if cfg.ReviewCorrectiveRounds <= 0 || countedRounds >= cfg.ReviewCorrectiveRounds {
 		return false, nil
 	}
@@ -1253,7 +1388,7 @@ func TryReviewCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *r
 		// completed a real attempt, and every such attempt today isolates
 		// its own branch (see run.Run.Branch's own doc comment) -- but
 		// falling through to the ordinary quarantine path rather than
-		// risking an addendum build with no branch to check out is the
+		// risking a corrective build with no branch to check out is the
 		// conservative choice.
 		return false, nil
 	}
@@ -1268,73 +1403,31 @@ func TryReviewCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *r
 			return true, quarantineRequestWithCheck(dataDir, r, reason, check, now)
 		}
 
-		addendumPath, err := WriteReviewAddendum(dataDir, r.ID, ticket, flaggedVerdicts, findings, roundIndex)
-		if err != nil {
-			return true, fmt.Errorf("request %s: ticket %d: review round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
-		}
-
 		diffBase := current.DiffBaseSHA
 		if diffBase == "" {
 			diffBase = current.BaseSHA
 		}
-		roundRunID := fmt.Sprintf("%s-%03d-conformity%d", r.ID, ticket.Index, roundIndex)
-		args, err := BuildReviewCorrectiveArgs(dataDir, r, *ticket, cfg, addendumPath, roundRunID, current.Branch, diffBase)
+		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
+		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
 		if err != nil {
-			return true, fmt.Errorf("request %s: ticket %d: review round %d: %w", r.ID, ticket.Index, roundIndex, err)
+			return true, fmt.Errorf("request %s: ticket %d: %s %d: %w", r.ID, ticket.Index, plan.label, roundIndex, err)
 		}
 
-		log.Printf("request %s: ticket %d/%d: review flagged %d spec-conformity criterion/criteria and %d code-review finding(s); corrective round %d/%d", r.ID, ticket.Index, r.TicketCount, len(flaggedVerdicts), len(findings), roundIndex, cfg.ReviewCorrectiveRounds)
+		log.Printf("request %s: ticket %d/%d: %s; %s %d/%d", r.ID, ticket.Index, r.TicketCount, about, plan.label, roundIndex, cfg.ReviewCorrectiveRounds)
 
-		var startedRunID string
-		runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
-			startedRunID = started.ID
-			ticket.RunID = started.ID
-			started.RequestID = r.ID
-			if err := started.Persist(dataDir); err != nil {
-				log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
-			}
-			if err := recordTicketRunStarted(dataDir, r.ID, ticket.Index, started.ID); err != nil {
-				log.Printf("request %s: ticket %d: record corrective run %s: %v", r.ID, ticket.Index, started.ID, err)
-			}
-		})
+		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex))
+		if stop {
+			return true, err
+		}
 		// Re-stamp now, mirroring AdvanceBuilding's own post-build
 		// re-stamp (a stale timestamp fix, #9): now was captured before this
 		// potentially long-running round.
 		now = time.Now()
-		// stillInState: see AdvanceBuilding's own identical check and doc
-		// comment. A cancel that lands while this round built must not be
-		// resurrected by this function's own r.Save calls below.
-		if ok, serr := stillInState(dataDir, r.ID, request.StateBuilding); serr != nil {
-			return true, serr
-		} else if !ok {
-			log.Printf("request %s: ticket %d/%d: review corrective round %d finished but the request left building while it ran (e.g. cancelled) -- discarding the result", r.ID, ticket.Index, r.TicketCount, roundIndex)
-			return true, nil
-		}
-		if runErr != nil && ctx.Err() != nil {
-			// Stop requested mid-round (SIGINT/SIGTERM) -- see
-			// AdvanceBuilding's own identical ctx.Err() handling: leave
-			// the request in building with no round recorded and no
-			// budget consumed.
-			return true, runErr
-		}
-		// loadID falls back to roundRunID only when the run never reached
-		// onReady -- see correctiveRoundOutcome's own doc comment (shared
-		// with the identical PR-review round) for why.
-		loadID := startedRunID
-		if loadID == "" {
-			loadID = roundRunID
-		}
-		outcome, errText, startFailure, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
-		if loadErr != nil {
-			return true, fmt.Errorf("request %s: ticket %d: review round %d: %w", r.ID, ticket.Index, roundIndex, loadErr)
-		}
-		if errText != "" {
-			log.Printf("request %s: ticket %d: review round %d: %s: %s", r.ID, ticket.Index, roundIndex, outcome, errText)
-		}
+		startedRunID, loadID, outcome, errText, startFailure := launched.startedRunID, launched.loadID, launched.outcome, launched.errText, launched.startFailure
 
 		ticket.Rounds = append(ticket.Rounds, request.Round{
 			Index:        roundIndex,
-			Kind:         request.ConformityRoundKind,
+			Kind:         plan.kind,
 			RunID:        loadID,
 			Outcome:      outcome,
 			StartFailure: startFailure,
@@ -1364,9 +1457,9 @@ func TryReviewCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *r
 		if outcome == request.RoundAccepted {
 			correctiveRun, err := run.Load(dataDir, loadID)
 			if err != nil {
-				return true, fmt.Errorf("request %s: ticket %d: load accepted review round run %q: %w", r.ID, ticket.Index, loadID, err)
+				return true, fmt.Errorf("request %s: ticket %d: load accepted %s run %q: %w", r.ID, ticket.Index, plan.label, loadID, err)
 			}
-			log.Printf("request %s: ticket %d/%d: review corrective round %d/%d accepted, PR %s", r.ID, ticket.Index, r.TicketCount, roundIndex, cfg.ReviewCorrectiveRounds, correctiveRun.PullRequestURL)
+			log.Printf("request %s: ticket %d/%d: %s %d/%d accepted, PR %s", r.ID, ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, correctiveRun.PullRequestURL)
 			return true, acceptTicketRun(dataDir, r, ticket, correctiveRun, now)
 		}
 		if outcome != request.RoundQuarantined {
@@ -1374,33 +1467,34 @@ func TryReviewCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *r
 			// design -- see this function's own "never triggered when
 			// the run halted" guard): not eligible for another round
 			// regardless of remaining budget.
-			return true, quarantineRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: review corrective round %d/%d %s: %s", ticket.Index, r.TicketCount, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
+			return true, quarantineRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
 		}
 		nextRun, err := run.Load(dataDir, loadID)
 		if err != nil {
-			return true, fmt.Errorf("request %s: ticket %d: load quarantined review round run %q: %w", r.ID, ticket.Index, loadID, err)
+			return true, fmt.Errorf("request %s: ticket %d: load quarantined %s run %q: %w", r.ID, ticket.Index, plan.label, loadID, err)
 		}
-		if !ReviewOnlyFlagged(nextRun) {
-			// Quarantined again, but with nothing a further round could
-			// fix: a different gate failed this time, or the round's own
-			// review gave no verdict.
-			return true, quarantineAfterReviewRound(dataDir, r, nextRun, fmt.Sprintf("ticket %d/%d: review corrective round %d/%d %s: %s", ticket.Index, r.TicketCount, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
+		if !plan.eligible(nextRun) {
+			// Quarantined again, but with nothing a further round of this
+			// kind could fix: a different check failed this time, or the
+			// round's own review gave no verdict.
+			return true, quarantineAfterReviewRound(dataDir, r, nextRun, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
 		}
-		flaggedVerdicts = flaggedConformityVerdicts(nextRun)
-		findings = blockingCodeReviewFindings(nextRun)
 		current = nextRun
 	}
 	// The loop's own condition failed after a round that WAS still
-	// review-eligible -- budget exhausted. The message quotes the last
-	// round's own reason (which criteria/findings were still flagged), so
-	// the operator sees why from the banner without opening each run --
+	// eligible -- budget exhausted. The message quotes the last round's
+	// own reason (which criteria, findings or checks were still failing),
+	// so the operator sees why from the banner without opening each run --
 	// found live 2026-09-26: "rounds exhausted (1/1)" alone named no
-	// criterion. Genuinely review-eligible (the loop only ever exits this
-	// way after a round whose own ReviewOnlyFlagged was true), so
-	// quarantineCheckFor picks the right NextAction advice: the
-	// spec_conformity-specific send-back (Follow-up B) only when
-	// code_review wasn't itself among the failed gates.
-	return true, quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d: review corrective rounds exhausted (%d/%d); last round: %s", ticket.Index, r.TicketCount, countedRounds, cfg.ReviewCorrectiveRounds, StatusReason(current)), quarantineCheckFor(current), now)
+	// criterion. quarantineCheckFor picks the right NextAction advice for
+	// a review-shaped quarantine: the spec_conformity-specific send-back
+	// (Follow-up B) only when code_review wasn't itself among the failed
+	// gates.
+	exhaustedCheck := nonReviewQuarantineCheck(current)
+	if reviewShapeOnly(current) {
+		exhaustedCheck = quarantineCheckFor(current)
+	}
+	return true, quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d: %ss exhausted (%d/%d); last round: %s", ticket.Index, r.TicketCount, plan.label, countedRounds, cfg.ReviewCorrectiveRounds, StatusReason(current)), exhaustedCheck, now)
 }
 
 // maxConformityCriterionBytes/maxConformityVerdictBytes cap the single-line,
