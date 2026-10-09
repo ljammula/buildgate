@@ -99,6 +99,21 @@ func TestValidateTargetPath(t *testing.T) {
 	}
 }
 
+func TestValidateTargetPathRefusesTheFactoryScriptsDirectory(t *testing.T) {
+	for _, p := range []string{
+		".factory/lint_test.go", ".Factory/lint_test.go", ".FACTORY/a/b_test.go", ".fAcToRy/x/y/z_test.go", ".factory/a_oracle_test.go",
+	} {
+		if err := ValidateTargetPath(p, nil); err == nil {
+			t.Errorf("ValidateTargetPath(%q) accepted a path under .factory", p)
+		}
+	}
+	for _, p := range []string{".factoryx/a_test.go", "factory/a_test.go", "src/.factory/a_test.go", ".factory-x/a_test.go"} {
+		if err := ValidateTargetPath(p, nil); err != nil {
+			t.Errorf("ValidateTargetPath(%q) refused: %v", p, err)
+		}
+	}
+}
+
 func TestParseManifestInertWithoutTargetPath(t *testing.T) {
 	// The shape every existing flow produces: no target_path anywhere. Even a
 	// supersedes on such an entry is ignored -- nothing may activate.

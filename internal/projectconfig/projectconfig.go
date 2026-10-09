@@ -29,6 +29,11 @@ import (
 // workspace's git top level.
 const FileName = ".factory.yml"
 
+// DirName is the repository directory a project keeps the scripts its
+// FileName commands call in. Like FileName it is protected at release, and no
+// oracle may be committed under it.
+const DirName = ".factory"
+
 // PreflightProfileBrownfield mirrors cmd/factoryd's own preflightProfileBrownfield
 // constant. Duplicated rather than imported: cmd/factoryd is a main package
 // and internal/projectconfig must not depend on it.

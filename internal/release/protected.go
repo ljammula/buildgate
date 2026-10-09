@@ -13,9 +13,20 @@ import (
 // writes there, and only via a hash-pinned oracle commit.
 const buildgateDir = ".buildgate"
 
+// inFactoryDir reports whether c is projectconfig.DirName (.factory) or lies
+// under it, by a case-insensitive match of its first path component: a
+// case-insensitive worktree (macOS) lets ".Factory/x.sh" be the directory a
+// repository's commands call. A changed file whose whole path folds to
+// .factory counts too. ".factoryx/a" and "src/.factory/a" do not.
+func inFactoryDir(c string) bool {
+	first, _, _ := strings.Cut(c, "/")
+	return strings.EqualFold(first, projectconfig.DirName)
+}
+
 // ProtectedFilesTouched returns the subset of changed that is protected --
-// cfg's own ProtectedPaths, plus projectconfig.FileName (.factory.yml) and
-// the .buildgate/ directory unconditionally -- in changed's original order.
+// cfg's own ProtectedPaths, plus projectconfig.FileName (.factory.yml), the
+// projectconfig.DirName (.factory/) directory in any case, and the
+// .buildgate/ directory unconditionally -- in changed's original order.
 // .factory.yml is always
 // included, on top of whatever the operator configured: the sandboxed
 // agent must not be able to weaken its own acceptance oracle (a lower
@@ -32,7 +43,13 @@ const buildgateDir = ".buildgate"
 // ProtectedFilesTouchedByRun wherever a run record is available.
 func (cfg MergePolicy) ProtectedFilesTouched(changed []string) []string {
 	protectedPaths := append([]string{projectconfig.FileName, buildgateDir, buildgateDir + "/"}, cfg.ProtectedPaths...)
-	return matchProtected(changed, protectedPaths)
+	var touched []string
+	for _, c := range changed {
+		if inFactoryDir(c) || len(matchProtected([]string{c}, protectedPaths)) > 0 {
+			touched = append(touched, c)
+		}
+	}
+	return touched
 }
 
 // ProtectedFilesTouchedByRun is ProtectedFilesTouched with the run's
@@ -52,7 +69,9 @@ func (cfg MergePolicy) ProtectedFilesTouched(changed []string) []string {
 //     exempt only while the blob at ResultSHA hashes to the sha256 the BASE
 //     index pinned for them. The exemption is keyed on the hash, never on
 //     the path, and never on "same bytes as the round's own base";
-//   - projectconfig.FileName and cfg.ProtectedPaths are never exempt.
+//   - projectconfig.FileName, everything under projectconfig.DirName (.factory/,
+//     in any case) and cfg.ProtectedPaths are never exempt: an oracle evidence
+//     entry that lists a path under .factory/ as authored does not exempt it.
 func (cfg MergePolicy) ProtectedFilesTouchedByRun(r run.Run) []string {
 	explicit := append([]string{projectconfig.FileName}, cfg.ProtectedPaths...)
 	oracleProtected := []string{buildgateDir, buildgateDir + "/"}
@@ -76,7 +95,7 @@ func (cfg MergePolicy) ProtectedFilesTouchedByRun(r run.Run) []string {
 			touched = append(touched, c)
 			continue
 		}
-		if len(matchProtected([]string{c}, explicit)) > 0 {
+		if inFactoryDir(c) || len(matchProtected([]string{c}, explicit)) > 0 {
 			touched = append(touched, c)
 			continue
 		}
