@@ -581,6 +581,11 @@ func TestWorkspaceMaskValidation(t *testing.T) {
 		{"symlink source", WorkspaceMask{Source: link, Target: "AGENTS.md"}, "", false},
 		{"file source with Dir", WorkspaceMask{Source: file, Target: ".codex", Dir: true}, "", false},
 		{"dir source without Dir", WorkspaceMask{Source: dir, Target: "AGENTS.md"}, "", false},
+		{"colon", WorkspaceMask{Source: file, Target: "a:b/AGENTS.md"}, "", false},
+		{"comma", WorkspaceMask{Source: file, Target: "a,b/AGENTS.md"}, "", false},
+		{"newline", WorkspaceMask{Source: file, Target: "a\nb/AGENTS.md"}, "", false},
+		{"quote", WorkspaceMask{Source: file, Target: "a\"b/AGENTS.md"}, "", false},
+		{"upper-case git", WorkspaceMask{Source: file, Target: ".GIT/config"}, "", false},
 		{"relative source", WorkspaceMask{Source: "f", Target: "AGENTS.md"}, "", false},
 	}
 	for _, tc := range cases {
@@ -695,7 +700,7 @@ func TestReviewInstructionPathsMatchTheHarnessProbe(t *testing.T) {
 		}
 		for _, path := range p.Paths {
 			listed[path] = true
-			if _, _, ok := reviewInstructionTarget(path); !ok {
+			if _, ok := matchInstructionPath(strings.Split(path, "/")); !ok {
 				t.Errorf("%s lists %q, which the Go table does not cover", name, path)
 			}
 		}

@@ -20,5 +20,5 @@
 		"source": "documented",
 		"paths": ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/instructions", ".github/agents", ".github/skills", ".claude/skills", ".claude"]
 	},
-	"unprobed": ["CLAUDE.local.md"]
+	"unprobed": ["CLAUDE.local.md", ".mcp.json", ".vscode/mcp.json", ".github/hooks"]
 }
