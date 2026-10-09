@@ -82,29 +82,17 @@ func TestReviewInstructionUnchangedBaseLinks(t *testing.T) {
 		}
 	})
 	t.Run("absolute target", func(t *testing.T) {
+		// A link to an absolute path can re-enter the workspace inside the
+		// container, so it is refused whether or not anything changed.
 		r := newInstructionRepo(t, nil)
 		commitLinks(t, r, map[string]string{"CLAUDE.md": "/etc/hostname"})
-		snap, _ := mustSnap(t, r)
-		if len(snap.Masks) != 0 {
-			t.Fatalf("masks = %+v", snap.Masks)
-		}
+		mustFail(t, r, "CLAUDE.md", "not a plain relative path")
 	})
-	t.Run("chain of nine links", func(t *testing.T) {
+	t.Run("chains are refused", func(t *testing.T) {
+		// A link whose target is itself a link is a chain; none is followed.
 		r := newInstructionRepo(t, map[string]string{"real.md": "r\n"})
-		links := map[string]string{"CLAUDE.md": "l1"}
-		for i := 1; i < 8; i++ {
-			links["l"+string(rune('0'+i))] = "l" + string(rune('1'+i))
-		}
-		links["l8"] = "real.md"
-		commitLinks(t, r, links)
-		mustFail(t, r, "chain")
-	})
-	t.Run("chain of three links is fine", func(t *testing.T) {
-		r := newInstructionRepo(t, map[string]string{"real.md": "r\n"})
-		commitLinks(t, r, map[string]string{"CLAUDE.md": "l1", "l1": "l2", "l2": "real.md"})
-		if snap, _ := mustSnap(t, r); len(snap.Masks) != 0 {
-			t.Fatalf("masks = %+v", snap.Masks)
-		}
+		commitLinks(t, r, map[string]string{"CLAUDE.md": "l1", "l1": "real.md"})
+		mustFail(t, r, "CLAUDE.md", "l1", "symlink")
 	})
 }
 

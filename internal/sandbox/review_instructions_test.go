@@ -229,15 +229,19 @@ func snapshotCase8(t *testing.T) {
 	}
 }
 
-// symlink in base content is refused
+// an unchanged base link inside a masked directory is reproduced as a link
 func snapshotCase9(t *testing.T) {
 	r := newInstructionRepo(t, nil)
-	commitLinks(t, r, map[string]string{".codex/link": "/etc/hosts"})
+	commitLinks(t, r, map[string]string{".codex/link": "config.toml"})
 	r.write(".codex/other", "x\n")
 	snap, _ := mustSnap(t, r)
 	wantPaths(t, snap, ".codex")
-	if entries, err := os.ReadDir(snap.Masks[0].Source); err != nil || len(entries) != 0 {
-		t.Fatalf("entries = %v, err = %v; want an empty mask (the unchanged link is not part of it)", entries, err)
+	text, err := os.Readlink(filepath.Join(snap.Masks[0].Source, "link"))
+	if err != nil || text != "config.toml" {
+		t.Fatalf("snapshot link = %q, %v; want a symlink with text config.toml", text, err)
+	}
+	if entries, err := os.ReadDir(snap.Masks[0].Source); err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %v, err = %v; want only the link", entries, err)
 	}
 }
 
@@ -543,6 +547,10 @@ func TestWorkspaceMasksFollowTheReferenceOracleBind(t *testing.T) {
 func TestWorkspaceMaskValidation(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "f")
+	colonFile := filepath.Join(root, "f:x")
+	if err := os.WriteFile(colonFile, []byte("x"), 0o640); err != nil {
+		t.Skipf("the OS refuses a colon in a file name: %v", err)
+	}
 	dir := filepath.Join(root, "d")
 	link := filepath.Join(root, "l")
 	if err := os.WriteFile(file, []byte("x"), 0o640); err != nil {
@@ -579,6 +587,10 @@ func TestWorkspaceMaskValidation(t *testing.T) {
 		{"newline", WorkspaceMask{Source: file, Target: "a\nb/AGENTS.md"}, "", false},
 		{"quote", WorkspaceMask{Source: file, Target: "a\"b/AGENTS.md"}, "", false},
 		{"upper-case git", WorkspaceMask{Source: file, Target: ".GIT/config"}, "", false},
+		{"colon in source", WorkspaceMask{Source: colonFile, Target: "AGENTS.md"}, "", false},
+		{"git below the first component", WorkspaceMask{Source: file, Target: "sub/.GIT/x"}, "", false},
+		{"oracle in another case", WorkspaceMask{Source: dir, Target: "VERIFY", Dir: true}, "verify", false},
+		{"under the oracle in another case", WorkspaceMask{Source: file, Target: "Verify/run.sh"}, "verify", false},
 		{"relative source", WorkspaceMask{Source: "f", Target: "AGENTS.md"}, "", false},
 	}
 	for _, tc := range cases {
@@ -594,6 +606,9 @@ func TestWorkspaceMaskValidation(t *testing.T) {
 	}
 	if err := validateWorkspaceMasks([]WorkspaceMask{{Source: dir, Target: ".pi", Dir: true}, {Source: file, Target: ".pi/AGENTS.md"}}, ""); err == nil {
 		t.Fatal("nested masks accepted")
+	}
+	if err := validateWorkspaceMasks([]WorkspaceMask{{Source: dir, Target: ".pi", Dir: true}, {Source: file, Target: ".PI/AGENTS.md"}}, ""); err == nil {
+		t.Fatal("masks overlapping only by case accepted")
 	}
 
 	spec, _ := sandboxRequestFixture(t)
@@ -693,7 +708,7 @@ func TestReviewInstructionPathsMatchTheHarnessProbe(t *testing.T) {
 		}
 		for _, path := range p.Paths {
 			listed[path] = true
-			if _, ok := matchInstructionPath(strings.Split(path, "/")); !ok {
+			if _, _, ok := matchInstructionPath(strings.Split(path, "/")); !ok {
 				t.Errorf("%s lists %q, which the Go table does not cover", name, path)
 			}
 		}

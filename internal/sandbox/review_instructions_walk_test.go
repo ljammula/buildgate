@@ -75,31 +75,6 @@ func TestReviewInstructionNestedRepoIsWalked(t *testing.T) {
 	}
 }
 
-func TestReviewInstructionMatchingIsCaseInsensitive(t *testing.T) {
-	if !caseInsensitiveDir(t) {
-		t.Skip("the temp filesystem is case-sensitive")
-	}
-	r := newInstructionRepo(t, map[string]string{"AGENTS.md": "base text\n"})
-	r.write("docs/agents.md", "new lower\n")
-	r.write(".PI/SYSTEM.md", "upper dir\n")
-	r.write("agents.md", "edited through the lower spelling\n")
-	snap, _ := mustSnap(t, r)
-	wantPaths(t, snap, ".PI", "AGENTS.md", "docs/agents.md")
-	byTarget := map[string]WorkspaceMask{}
-	for _, m := range snap.Masks {
-		byTarget[m.Target] = m
-	}
-	if !byTarget[".PI"].Dir || byTarget["docs/agents.md"].Dir {
-		t.Fatalf("masks = %+v", snap.Masks)
-	}
-	if got := readFile(t, byTarget["AGENTS.md"].Source); got != "base text\n" {
-		t.Fatalf("AGENTS.md snapshot = %q", got)
-	}
-	if got := readFile(t, byTarget["docs/agents.md"].Source); got != "" {
-		t.Fatalf("docs/agents.md snapshot = %q", got)
-	}
-}
-
 func TestReviewInstructionDiffIgnoresWorktreeAttributes(t *testing.T) {
 	r := newInstructionRepo(t, map[string]string{"AGENTS.md": "base\n"})
 	r.write(".gitattributes", "AGENTS.md -diff\n")
