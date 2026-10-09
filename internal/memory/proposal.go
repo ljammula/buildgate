@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 )
 
@@ -77,41 +78,114 @@ func ProposalPath(dataDir, project, requestID string) (string, error) {
 	return filepath.Join(dataDir, "memory", project, "proposals", requestID+".json"), nil
 }
 
-// LoadProposal reads the proposal at path. A missing file is (zero, false,
-// nil). A file that is too large, has an unknown field, a wrong schema
-// version, or whose expected_sha256 is not the hash of expected is an error.
+// LoadProposal reads the proposal at path, which must be named
+// <request_id>.json for the request_id the file itself records (ProposalPath
+// names it so). A missing file is (zero, false, nil). Everything else short of
+// one usable proposal is an error: a path or a parent directory that is a
+// symlink, a file that is not a regular file (a FIFO is never opened for
+// reading its content), one that is too large, has an unknown field or a wrong
+// schema version, whose expected_sha256 is not the hash of expected, or whose
+// request_id is not the one the path names.
 func LoadProposal(path string) (Proposal, bool, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if err := realDirectory(filepath.Dir(path)); errors.Is(err, os.ErrNotExist) {
 		return Proposal{}, false, nil
+	} else if err != nil {
+		return Proposal{}, false, err
+	}
+	data, found, err := readRegularFile(path)
+	if err != nil || !found {
+		return Proposal{}, false, err
+	}
+	p, err := decodeProposal(data)
+	if err != nil {
+		return Proposal{}, false, err
+	}
+	if want := strings.TrimSuffix(filepath.Base(path), ".json"); p.RequestID != want || filepath.Base(path) != want+".json" {
+		return Proposal{}, false, fmt.Errorf("memory: proposal records request %q, not the request %q it was read for", p.RequestID, want)
+	}
+	return p, true, nil
+}
+
+// LoadProposalFor reads the proposal of one request of one project under
+// dataDir, as LoadProposal does, and also requires every directory between
+// dataDir and the file to be a real directory.
+func LoadProposalFor(dataDir, project, requestID string) (Proposal, bool, error) {
+	path, err := ProposalPath(dataDir, project, requestID)
+	if err != nil {
+		return Proposal{}, false, err
+	}
+	for _, dir := range []string{filepath.Join(dataDir, "memory"), filepath.Join(dataDir, "memory", project)} {
+		if err := realDirectory(dir); errors.Is(err, os.ErrNotExist) {
+			return Proposal{}, false, nil
+		} else if err != nil {
+			return Proposal{}, false, err
+		}
+	}
+	return LoadProposal(path)
+}
+
+// realDirectory is nil when dir is a directory and not a link to one.
+func realDirectory(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("memory: proposal directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("memory: proposal directory %s is not a real directory", filepath.Base(dir))
+	}
+	return nil
+}
+
+// readRegularFile reads path when it is a regular file and nothing else: it
+// is checked before the open, opened without following a link and without
+// blocking, and checked again on the open file. A missing path is
+// (nil, false, nil).
+func readRegularFile(path string) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
 	}
 	if err != nil {
-		return Proposal{}, false, fmt.Errorf("memory: open proposal: %w", err)
+		return nil, false, fmt.Errorf("memory: stat proposal: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, errors.New("memory: proposal is not a regular file")
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, false, fmt.Errorf("memory: open proposal: %w", err)
 	}
 	defer f.Close()
+	if opened, err := f.Stat(); err != nil || !opened.Mode().IsRegular() {
+		return nil, false, errors.New("memory: proposal is not a regular file")
+	}
 	data, err := io.ReadAll(io.LimitReader(f, MaxProposalBytes+1))
 	if err != nil {
-		return Proposal{}, false, fmt.Errorf("memory: read proposal: %w", err)
+		return nil, false, fmt.Errorf("memory: read proposal: %w", err)
 	}
 	if len(data) > MaxProposalBytes {
-		return Proposal{}, false, fmt.Errorf("memory: proposal is larger than %d bytes", MaxProposalBytes)
+		return nil, false, fmt.Errorf("memory: proposal is larger than %d bytes", MaxProposalBytes)
 	}
+	return data, true, nil
+}
+
+func decodeProposal(data []byte) (Proposal, error) {
 	var p Proposal
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
-		return Proposal{}, false, fmt.Errorf("memory: decode proposal: %w", err)
+		return Proposal{}, fmt.Errorf("memory: decode proposal: %w", err)
 	}
 	if dec.More() {
-		return Proposal{}, false, errors.New("memory: proposal has data after its JSON object")
+		return Proposal{}, errors.New("memory: proposal has data after its JSON object")
 	}
 	if p.SchemaVersion != proposalSchemaVersion {
-		return Proposal{}, false, fmt.Errorf("memory: proposal schema_version %d, want %d", p.SchemaVersion, proposalSchemaVersion)
+		return Proposal{}, fmt.Errorf("memory: proposal schema_version %d, want %d", p.SchemaVersion, proposalSchemaVersion)
 	}
 	if want := HashHex([]byte(p.Expected)); p.ExpectedSHA256 != want {
-		return Proposal{}, false, errors.New("memory: proposal expected_sha256 is not the hash of its expected text")
+		return Proposal{}, errors.New("memory: proposal expected_sha256 is not the hash of its expected text")
 	}
-	return p, true, nil
+	return p, nil
 }
 
 // SaveProposal writes p at path atomically (temp file and rename), 0600 in a

@@ -22,14 +22,20 @@ func TestMergePolicyCheckMemoryEditReasons(t *testing.T) {
 		want string // "" means no reason at all
 	}{
 		{"nil evidence", nil, ""},
-		{"nothing changed, no proposal", &run.MemoryEdit{}, ""},
-		{"section changed, no proposal", &run.MemoryEdit{SectionChanged: true}, ReasonMemorySectionNotMemoryChange},
-		{"proposal and exact match", &run.MemoryEdit{SectionChanged: true, Proposal: true, Matches: true}, ""},
-		{"proposal, file differs", &run.MemoryEdit{SectionChanged: true, Proposal: true}, ReasonMemoryChangeNotApproved},
+		{"nothing recorded, no proposal", &run.MemoryEdit{}, ""},
+		{"base has a section, a root name changed", &run.MemoryEdit{BaseHasSection: true, ChangedRootNames: []string{"AGENTS.md"}}, ReasonMemorySectionNotMemoryChange + `: ["AGENTS.md"]`},
+		{"base has a section, a variant added", &run.MemoryEdit{BaseHasSection: true, ChangedRootNames: []string{"agents.md"}, ResultRootNames: []string{"AGENTS.md", "agents.md"}}, ReasonMemorySectionNotMemoryChange + `: ["agents.md"]`},
+		{"base has a section, nothing changed", &run.MemoryEdit{BaseHasSection: true, ResultRootNames: []string{"AGENTS.md"}}, ""},
+		{"no section, prose edited", &run.MemoryEdit{ChangedRootNames: []string{"AGENTS.md"}, ResultRootNames: []string{"AGENTS.md"}}, ""},
+		{"no section, markers added", &run.MemoryEdit{ChangedRootNames: []string{"AGENTS.md"}, ResultRootNames: []string{"AGENTS.md"}, MarkerIn: []string{"AGENTS.md"}}, ReasonMemoryMarkersAdded + `: ["AGENTS.md"]`},
+		{"no section, a second spelling", &run.MemoryEdit{ChangedRootNames: []string{"agents.md"}, ResultRootNames: []string{"AGENTS.md", "agents.md"}}, ReasonSeveralRootInstructionNames},
+		{"no section, changed into a link", &run.MemoryEdit{ChangedRootNames: []string{"AGENTS.md"}, ResultRootNames: []string{"AGENTS.md"}, NotRegularFile: []string{"AGENTS.md"}}, ReasonRootInstructionNotRegular},
+		{"proposal and exact match", &run.MemoryEdit{BaseHasSection: true, ChangedRootNames: []string{"AGENTS.md"}, MarkerIn: []string{"AGENTS.md"}, Proposal: true, Matches: true}, ""},
+		{"proposal, file differs", &run.MemoryEdit{ChangedRootNames: []string{"AGENTS.md"}, Proposal: true}, ReasonMemoryChangeNotApproved},
 		{"proposal, build did nothing", &run.MemoryEdit{Proposal: true}, ReasonMemoryChangeNotApproved},
-		{"proposal, match plus another file", &run.MemoryEdit{SectionChanged: true, Proposal: true, Matches: true, OtherFilesChanged: []string{"README.md"}}, `README.md`},
-		{"fail closed", &run.MemoryEdit{Error: "git exploded", FailClosed: true}, "could not be completed: git exploded"},
-		{"error that is no evidence", &run.MemoryEdit{Error: "git exploded"}, ""},
+		{"proposal, match plus another file", &run.MemoryEdit{Proposal: true, Matches: true, OtherFilesChanged: []string{"README.md"}}, `README.md`},
+		{"an error denies", &run.MemoryEdit{Error: "git exploded"}, "could not be completed: git exploded"},
+		{"an error denies a memory run that matches", &run.MemoryEdit{Proposal: true, Matches: true, Error: "git exploded"}, "could not be completed: git exploded"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

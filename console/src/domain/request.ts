@@ -469,6 +469,11 @@ export interface RequestSummary {
   readonly enteredAt: string;
   /** First line of request.md, verbatim; empty on a record from before the field. */
   readonly title: string;
+  /**
+   * Where the request came from (source.kind): "issue", "text", "file", or
+   * "memory" for one `factoryd memory propose` opened. Empty when absent.
+   */
+  readonly sourceKind: string;
   readonly ticketIndex: number;
   readonly ticketCount: number;
   readonly tickets: readonly RequestTicket[];
@@ -567,6 +572,15 @@ function oracleDraftCriteria(raw: unknown, at: string): OracleDraftCriterion[] {
   return out;
 }
 
+function sourceKindOf(raw: unknown, at: string): string {
+  return isObject(raw) ? optString(raw, "kind", at) : "";
+}
+
+/** A request `factoryd memory propose` opened: its ticket rewrites the memory section of AGENTS.md. */
+export function isMemoryRequest(request: Pick<RequestSummary, "sourceKind">): boolean {
+  return request.sourceKind === "memory";
+}
+
 export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary {
   const oracleDraft = o.oracle_draft;
   const skipWarning = o.oracle_skip_warning;
@@ -580,6 +594,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     updatedAt: reqString(o, "updated_at", at),
     enteredAt: optString(o, "entered_at", at),
     title: optString(o, "title", at),
+    sourceKind: sourceKindOf(o.source, `${at}.source`),
     ticketIndex: numberOr(o, "ticket_index", at, 0),
     ticketCount: numberOr(o, "ticket_count", at, 0),
     tickets: objectList(o, "tickets", at, decodeRequestTicket),

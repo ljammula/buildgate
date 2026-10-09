@@ -35,7 +35,7 @@ func newOverrideFlags() (flags *flag.FlagSet, runID, dataDir, by, reason, state,
 	return
 }
 
-func overrideMain(args []string) error {
+func overrideMain(dp *deps, args []string) error {
 	flags, runID, dataDir, by, reason, state, releaseProtectedPaths, releaseMaxFilesChanged, releaseMaxInsertions, releaseRollbackPlan, releaseAllowOverrides, releaseAllowDependencyLockfileChanges, releaseAllowUnsandboxed, releaseAllowSkippedProjectCheck := newOverrideFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -73,6 +73,12 @@ func overrideMain(args []string) error {
 			return time.Now().Format(time.RFC3339)
 		}); err != nil {
 			return fmt.Errorf("override run %q: %w", *runID, err)
+		}
+		// The run was not accepted when its build ended, so nothing was read
+		// about its root AGENTS.md then: read it now, before the one save
+		// that persists it and before the release decision below.
+		if newState == run.StateAccepted {
+			recordMemoryEdit(dp, r, *dataDir, overrideObjectsDir(r))
 		}
 		if err := save(r, *dataDir); err != nil {
 			return fmt.Errorf("save overridden run %q: %w", *runID, err)
@@ -122,6 +128,17 @@ func overrideMain(args []string) error {
 		}
 		return nil
 	})
+}
+
+// overrideObjectsDir is the checkout whose git objects hold r's commits: its
+// own worktree while that exists, else the repository it was cut from.
+func overrideObjectsDir(r *run.Run) string {
+	if r.WorkspacePath != "" {
+		if info, err := os.Stat(r.WorkspacePath); err == nil && info.IsDir() {
+			return r.WorkspacePath
+		}
+	}
+	return r.ProjectPath
 }
 
 // overrideRateMain scans every durable run record under -data-dir and

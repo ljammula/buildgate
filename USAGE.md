@@ -904,8 +904,10 @@ pull request                you merge it; the line is in force from then on
 | Remove a line | `factoryd memory propose -workspace ~/code/app -remove "- The exact line."` | A memory request that takes the line out. A full section refuses `propose` until you name a line to remove |
 | Stop | `factoryd memory off -workspace ~/code/app`, or the project's kill switch | Every subcommand but `list` and `show` is refused |
 
-The section looks like this in `AGENTS.md`. Text outside the two markers is
-never touched; lines you write by hand inside them are kept as they are:
+The section looks like this in `AGENTS.md`. A memory request never touches
+text outside the two markers, and keeps lines you write by hand inside them as
+they are. Once the file has the section, no other request's ticket may change
+the file at all: you edit its other text yourself, in a commit of your own.
 
 ```text
 <!-- buildgate:memory:begin v1 -->
@@ -922,7 +924,8 @@ never touched; lines you write by hand inside them are kept as they are:
 | Choosing what to propose, or what to drop when the section is full | You name the ids and the `-remove` lines |
 | Running or checking a command a line names | You read the line at spec review and on the pull request |
 | Approving or merging a memory request | The two review gates and the merge are yours |
-| Editing the section in any other request | A run that changes it without a proposal is refused at release |
+| Editing `AGENTS.md` of a repository with a memory section in any other request, the text outside the markers included | A ticket that changes the file, or adds another letter case of its name, is refused at release; a person edits it, or `factoryd memory` does |
+| Adding the marker text to `AGENTS.md` in a repository with no section yet | Refused at release unless the run is a memory request's |
 
 
 ## Temporal: what runs every build

@@ -133,7 +133,11 @@ wording. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
-says why). The bare `-release-*`/session-config zero defaults deny
+says why). With pull requests on, a ticket whose release decision is not
+allowed halts the request before the next ticket is built (the next ticket
+is built on this one's commit and its pull request would carry the refused
+change); with pull requests off the tickets are built in order and each
+run's decision is on its record. The bare `-release-*`/session-config zero defaults deny
 everything, so a usable `-release-rollback-plan` and non-zero
 `-release-max-files-changed`/`-release-max-insertions` are required — see
 "Release policy" below. Per `-advance-on` (`accepted` default, or
@@ -1394,6 +1398,31 @@ of the repository's root path:
 | `off` | The stop marker `memory off` wrote |
 | `proposals/<request-id>.json` | The exact `AGENTS.md` a memory request must produce, and its SHA-256: what the release check compares |
 | `proposals/<request-id>.changes.json` | The lines that request adds and removes and the run ids an added line came from, for the pull request body |
+
+What the release check enforces on the repository's root `AGENTS.md`, in any
+letter case of that name (`agents.md` is the same file on a case-insensitive
+checkout). It reads git objects, never the worktree, and a read that fails
+refuses the release:
+
+| Run | Released only when |
+|---|---|
+| Of a memory request | The result holds exactly one such name, spelled `AGENTS.md`, a regular file of mode `100644` whose bytes are the proposal's text, and no other file changed |
+| Any other, in a repository whose root `AGENTS.md` has a buildgate memory section (it holds the text `buildgate:memory`) | It did not change that file in any way (text outside the markers included, its mode, a move, a delete) and added no other letter case of its name. Only a memory request, or a person, changes the file: a ticket that edits it is refused at release |
+| Any other, in a repository with no memory section | It may edit or create `AGENTS.md`, but the result holds one letter case of the name only, a regular file where the run changed it, without the text `buildgate:memory` (written plainly or as HTML character references) |
+
+| Release reason | Meaning |
+|---|---|
+| `AGENTS.md of a repository with a memory section changed by a run that is not a memory change` | The second row above |
+| `a run that is not a memory change added memory markers to AGENTS.md` | The third row: the marker text |
+| `the result holds more than one root file named AGENTS.md in some letter case` | The third row: two spellings |
+| `a run that is not a memory change made AGENTS.md something other than a regular file` | The third row: a symlink, a submodule or a directory |
+| `memory change does not match the approved text` | The first row; it names up to three other changed files |
+| `memory section check could not be completed` | The check could not read the commits, the request or the proposal |
+
+`factoryd override -state accepted` runs the same check before it records the
+release decision. The console's and the API's override cannot read the
+repository: for a run that changed a root `AGENTS.md` name, or a memory
+request's run, it answers 409 and says to run `factoryd override` on the host.
 
 `GET /projects/{project}/memory` (read token, like the project's
 observations) returns the same view as `memory list -json` for the repository

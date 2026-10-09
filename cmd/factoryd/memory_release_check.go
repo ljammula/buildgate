@@ -5,32 +5,53 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"buildgate/internal/memory"
-	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
 
-// Root AGENTS.md carries a fenced memory section that only a memory request's
-// run may change, and then only to the text the factory rendered when it
-// proposed the change. The host reads the file from git objects at the run's
-// diff base and result commit, records what it found as run.MemoryEdit, and
-// the release policy (release.MergePolicyCheck) denies from that record. The
-// worktree is never read: a build can write anything there.
+// A root instruction name is a root-level path that folds to AGENTS.md
+// (run.RootInstructionName). Two rules hold at release, and the host records
+// what it read from git objects as run.MemoryEdit for release.MergePolicyCheck
+// to deny from. The worktree is never read: a build can write anything there.
+//
+//   - A memory run (its request is a memory request, with a proposal file under
+//     its repository's store key) is released only when the
+//     result tree holds exactly one root instruction name, spelled AGENTS.md, a
+//     regular file of mode 100644 whose bytes are the proposal's expected
+//     text, and no other file changed.
+//   - Any other run: when a root instruction file at its diff base holds
+//     "buildgate:memory", it may not change a root instruction name at all;
+//     when none does, it may change or create one, but the result may hold only
+//     one such name, none of them may hold the token (plainly or as HTML
+//     character references), and none it changed may be a symlink, a submodule
+//     or a directory.
+//
+// No git call is made for a run with no proposal whose changed files name no
+// root instruction name. Any failure past that point denies the release.
 
 const (
-	agentsFile         = "AGENTS.md"
+	agentsFile         = run.RootInstructionFile
 	maxAgentsBlobBytes = 1 << 20
 	memoryGitTimeout   = 30 * time.Second
-	// maxAgentsVariants bounds the root case variants read; more is treated
-	// as a section change outright.
+	// maxAgentsVariants bounds the root instruction names read at one
+	// commit; more is an error, which denies.
 	maxAgentsVariants = 8
+	// memoryMarkerToken is in both fence markers. A root instruction file
+	// holding it, in any letter case, has (or imitates) a memory section.
+	memoryMarkerToken = "buildgate:memory"
+	gitModeFile       = "100644"
+	gitModeExecutable = "100755"
 )
 
 var (
@@ -87,188 +108,274 @@ func gitObjectOutput(ctx context.Context, repoDir string, args ...string) ([]byt
 	return out, nil
 }
 
-// agentsBlob is one root AGENTS.md (or case variant) at one commit.
-type agentsBlob struct {
-	data      []byte
-	exists    bool
-	irregular bool // a symlink, submodule or oversize file: changed and unreadable
-}
-
-func readAgentsBlob(ctx context.Context, dp *deps, repoDir, commit, path string) (agentsBlob, error) {
-	data, exists, err := dp.host.blobAtCommit(ctx, repoDir, commit, path)
-	switch {
-	case errors.Is(err, errNotRegularBlob), errors.Is(err, errBlobTooLarge):
-		return agentsBlob{exists: true, irregular: true}, nil
-	case err != nil:
-		return agentsBlob{}, err
+// rootTreeAtCommit is hostBoundary.rootTreeAtCommit's real body: the entries
+// of commit's root tree, from git objects.
+func (impl realHost) rootTreeAtCommit(ctx context.Context, repoDir, commit string) ([]gitTreeEntry, error) {
+	if !commitHexPattern.MatchString(commit) {
+		return nil, fmt.Errorf("%q is not a full commit id", commit)
 	}
-	return agentsBlob{data: data, exists: exists}, nil
-}
-
-// fencedSection is a file split around its fenced block (markers included).
-type fencedSection struct {
-	block, before, after string
-	present              bool
-}
-
-// parseFenced splits data around its fenced block; an error means a damaged
-// fence.
-func parseFenced(data []byte) (fencedSection, error) {
-	s, err := memory.ParseSection(data)
-	if err != nil || !s.Present {
-		return fencedSection{}, err
+	out, err := gitObjectOutput(ctx, repoDir, "ls-tree", "-z", commit)
+	if err != nil {
+		return nil, err
 	}
-	text := string(data)
-	return fencedSection{block: text[len(s.Before) : len(text)-len(s.After)], before: s.Before, after: s.After, present: true}, nil
+	var entries []gitTreeEntry
+	for _, record := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+		if record == "" {
+			continue
+		}
+		meta, name, ok := strings.Cut(record, "\t")
+		fields := strings.Fields(meta) // mode type object
+		if !ok || len(fields) != 3 {
+			return nil, fmt.Errorf("unexpected ls-tree output %q", meta)
+		}
+		entries = append(entries, gitTreeEntry{name: name, mode: fields[0], kind: fields[1], object: fields[2]})
+	}
+	return entries, nil
 }
 
-// sectionDiffers reports whether the fenced block differs between base and
-// result: other bytes, added, removed, or moved with the rest of the file
-// unchanged. An unreadable side, or a fence that does not parse, counts as a
-// change unless the two files are byte-identical.
-func sectionDiffers(base, result agentsBlob) bool {
-	if base.irregular || result.irregular {
+// gitTreeEntry is one entry of a commit's root tree.
+type gitTreeEntry struct {
+	name   string
+	mode   string // 100644, 100755, 120000 (symlink), 160000 (submodule), 040000 (directory)
+	kind   string // blob, commit, tree
+	object string
+}
+
+func (e gitTreeEntry) regularFile() bool {
+	return e.kind == "blob" && (e.mode == gitModeFile || e.mode == gitModeExecutable)
+}
+
+// rootInstructionEntries is the root instruction names of commit.
+func rootInstructionEntries(ctx context.Context, dp *deps, repoDir, commit string) ([]gitTreeEntry, error) {
+	all, err := dp.host.rootTreeAtCommit(ctx, repoDir, commit)
+	if err != nil {
+		return nil, fmt.Errorf("list the root of %.12s: %w", commit, err)
+	}
+	var names []gitTreeEntry
+	for _, e := range all {
+		if run.RootInstructionName(e.name) != "" {
+			names = append(names, e)
+		}
+	}
+	if len(names) > maxAgentsVariants {
+		return nil, fmt.Errorf("%.12s spells %s more than %d ways at its root", commit, agentsFile, maxAgentsVariants)
+	}
+	return names, nil
+}
+
+// holdsMemoryMarker reports whether data holds memoryMarkerToken in any
+// letter case, as written or after HTML character references are decoded
+// once. NUL and format characters (a BOM, zero-width and direction marks) are
+// dropped first, so a token split by one, or a UTF-16 file, still counts.
+func holdsMemoryMarker(data []byte) bool {
+	text := strings.Map(func(r rune) rune {
+		if r == 0 || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, string(data))
+	if strings.Contains(strings.ToLower(text), memoryMarkerToken) {
 		return true
 	}
-	if base.exists == result.exists && bytes.Equal(base.data, result.data) {
-		return false
-	}
-	b, bErr := parseFenced(base.data)
-	r, rErr := parseFenced(result.data)
-	switch {
-	case bErr != nil || rErr != nil:
-		return true
-	case b.present != r.present || b.block != r.block:
-		return true
-	}
-	// The same block at another place: only the text around it was rearranged.
-	return b.present && b.before != r.before && b.before+b.after == r.before+r.after
+	return strings.Contains(strings.ToLower(html.UnescapeString(text)), memoryMarkerToken)
 }
 
-func hasMemoryMarker(b agentsBlob) bool {
-	return b.irregular || bytes.Contains(b.data, []byte(memory.BeginMarker)) || bytes.Contains(b.data, []byte(memory.EndMarker))
+// instructionFile is what one root instruction name holds at one commit.
+type instructionFile struct {
+	entry  gitTreeEntry
+	marker bool   // a regular file holding the marker token
+	sha256 string // of a regular file's bytes
 }
 
-// rootAgentsNames splits a changed-file inventory into whether root AGENTS.md
-// itself is in it, the root names that fold to it (agents.md, Agents.MD: a
-// case-insensitive worktree makes them the same file), and every other path.
-func rootAgentsNames(changed []string) (exact bool, variants, others []string) {
+// readInstructionFiles reads every regular file among entries. A file too
+// large to check is an error.
+func readInstructionFiles(ctx context.Context, dp *deps, repoDir, commit string, entries []gitTreeEntry) ([]instructionFile, error) {
+	files := make([]instructionFile, 0, len(entries))
+	for _, e := range entries {
+		f := instructionFile{entry: e}
+		if e.regularFile() {
+			data, exists, err := dp.host.blobAtCommit(ctx, repoDir, commit, e.name)
+			if err != nil || !exists {
+				return nil, fmt.Errorf("read %q at %.12s: %w", e.name, commit, errors.Join(err, missingIf(!exists)))
+			}
+			f.marker, f.sha256 = holdsMemoryMarker(data), memory.HashHex(data)
+		}
+		files = append(files, f)
+	}
+	return files, nil
+}
+
+func missingIf(missing bool) error {
+	if missing {
+		return errors.New("listed in the tree but not found")
+	}
+	return nil
+}
+
+// changedInstructionNames is the names whose entry differs between the two
+// commits, or that only one of them has.
+func changedInstructionNames(base, result []gitTreeEntry) []string {
+	before := map[string]gitTreeEntry{}
+	for _, e := range base {
+		before[e.name] = e
+	}
+	var changed []string
+	for _, e := range result {
+		if old, had := before[e.name]; !had || old != e {
+			changed = append(changed, e.name)
+		}
+		delete(before, e.name)
+	}
+	for _, e := range base {
+		if _, gone := before[e.name]; gone {
+			changed = append(changed, e.name)
+		}
+	}
+	return changed
+}
+
+func mergeNames(lists ...[]string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, list := range lists {
+		for _, name := range list {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// otherThanAgentsFile is every changed path except root AGENTS.md itself.
+func otherThanAgentsFile(changed []string) []string {
+	var others []string
 	for _, c := range changed {
-		switch {
-		case c == agentsFile:
-			exact = true
-		case !strings.Contains(c, "/") && strings.EqualFold(c, agentsFile):
-			variants = append(variants, c)
-			others = append(others, c)
-		default:
+		if c != agentsFile {
 			others = append(others, c)
 		}
 	}
-	return exact, variants, others
+	return others
 }
 
-// memoryProposal loads the proposal of r's request. has is true when a file
-// exists; err means a request id or project that is not a safe path
-// component, or a file that is present but unusable.
+// memoryProposal loads the proposal of r's request when that request is a
+// memory request (request.SourceMemory, which only `factoryd memory propose`
+// submits); has is false for every other run, with no git call. The proposal
+// is kept under the store key of the request's repository. err means a
+// request record that exists and cannot be read, or a memory request whose
+// proposal is absent or unusable (not a regular file, recorded for another
+// request, damaged): such a run is never released.
 func memoryProposal(r *run.Run, dataDir string) (p memory.Proposal, has bool, err error) {
 	if r.RequestID == "" {
 		return memory.Proposal{}, false, nil
 	}
-	path, err := memory.ProposalPath(dataDir, release.ProjectOf(r), r.RequestID)
-	if err != nil {
-		return memory.Proposal{}, false, err
+	req, err := request.Load(dataDir, r.RequestID)
+	if errors.Is(err, os.ErrNotExist) {
+		return memory.Proposal{}, false, nil
 	}
-	return memory.LoadProposal(path)
+	if err != nil {
+		return memory.Proposal{}, false, fmt.Errorf("request %s: %w", r.RequestID, err)
+	}
+	if req.Source.Kind != request.SourceMemory {
+		return memory.Proposal{}, false, nil
+	}
+	key, ok := memoryStoreKeyOfRun(dataDir, r)
+	if !ok {
+		return memory.Proposal{}, false, fmt.Errorf("memory request %s records no repository", r.RequestID)
+	}
+	p, has, err = memory.LoadProposalFor(dataDir, key, r.RequestID)
+	if err == nil && !has {
+		err = fmt.Errorf("memory request %s has no proposal file", r.RequestID)
+	}
+	return p, has, err
 }
 
 // computeMemoryEdit is the evidence for an accepted run with a result commit,
-// or nil when the run neither changed a root AGENTS.md nor has a proposal (no
-// git call is made then). repoDir is a checkout whose object store holds both
-// commits. Computed before the release decision.
+// or nil when the run neither changed a root instruction name nor has a
+// proposal (no git call is made then). repoDir is a checkout whose object
+// store holds both commits. Computed before the release decision.
 func computeMemoryEdit(ctx context.Context, dp *deps, r *run.Run, dataDir, repoDir string) *run.MemoryEdit {
 	if r.State != run.StateAccepted || r.ResultSHA == "" || r.ChangedFiles == nil {
 		return nil
 	}
-	exact, variants, others := rootAgentsNames(r.ChangedFiles)
+	listed := run.ChangedRootInstructionNames(r.ChangedFiles)
 	proposal, has, propErr := memoryProposal(r, dataDir)
-	if !exact && len(variants) == 0 && !has && propErr == nil {
+	if len(listed) == 0 && !has && propErr == nil {
 		return nil
 	}
-	edit := &run.MemoryEdit{Proposal: has, OtherFilesChanged: others}
+	edit := &run.MemoryEdit{Proposal: has, ChangedRootNames: listed, OtherFilesChanged: otherThanAgentsFile(r.ChangedFiles)}
 	defer edit.Clean()
-	failClosed := has || propErr != nil || exact || len(variants) > 0
-	fail := func(err error) *run.MemoryEdit {
-		edit.Error, edit.FailClosed = err.Error(), failClosed
-		return edit
-	}
 	if propErr != nil {
-		return fail(fmt.Errorf("proposal: %w", propErr))
+		edit.Error = fmt.Sprintf("proposal: %v", propErr)
+		return edit
 	}
 	base := r.DiffBaseSHA
 	if base == "" {
 		base = r.BaseSHA
 	}
 	if base == "" {
-		return fail(errors.New("run has no base commit"))
+		edit.Error = "run has no base commit"
+		return edit
 	}
-	if err := fillMemoryEdit(ctx, dp, edit, r, repoDir, base, exact, variants); err != nil {
-		return fail(err)
+	if err := fillMemoryEdit(ctx, dp, edit, repoDir, base, r.ResultSHA, proposal.ExpectedSHA256); err != nil {
+		edit.Error = err.Error()
 	}
-	edit.Matches = has && edit.ResultSHA256 != "" && edit.ResultSHA256 == proposal.ExpectedSHA256
 	return edit
 }
 
-// fillMemoryEdit reads root AGENTS.md and its variants and sets
-// SectionChanged and the two hashes.
-func fillMemoryEdit(ctx context.Context, dp *deps, edit *run.MemoryEdit, r *run.Run, repoDir, base string, exact bool, variants []string) error {
-	result, err := readAgentsBlob(ctx, dp, repoDir, r.ResultSHA, agentsFile)
+// fillMemoryEdit reads the root instruction names at both commits and sets
+// everything the policy decides on.
+func fillMemoryEdit(ctx context.Context, dp *deps, edit *run.MemoryEdit, repoDir, base, result, expectedSHA256 string) error {
+	baseEntries, err := rootInstructionEntries(ctx, dp, repoDir, base)
 	if err != nil {
-		return fmt.Errorf("read %s at result: %w", agentsFile, err)
+		return err
 	}
-	edit.ResultSHA256 = hashOfBlob(result)
-	edit.BaseSHA256 = edit.ResultSHA256 // git lists the file as unchanged
-	if exact {
-		before, err := readAgentsBlob(ctx, dp, repoDir, base, agentsFile)
-		if err != nil {
-			return fmt.Errorf("read %s at base: %w", agentsFile, err)
+	resultEntries, err := rootInstructionEntries(ctx, dp, repoDir, result)
+	if err != nil {
+		return err
+	}
+	treeChanged := changedInstructionNames(baseEntries, resultEntries)
+	edit.ChangedRootNames = mergeNames(edit.ChangedRootNames, treeChanged)
+	baseFiles, err := readInstructionFiles(ctx, dp, repoDir, base, baseEntries)
+	if err != nil {
+		return err
+	}
+	for _, f := range baseFiles {
+		edit.BaseHasSection = edit.BaseHasSection || f.marker
+		if f.entry.name == agentsFile {
+			edit.BaseSHA256 = f.sha256
 		}
-		edit.BaseSHA256 = hashOfBlob(before)
-		edit.SectionChanged = sectionDiffers(before, result)
 	}
-	if len(variants) > maxAgentsVariants {
-		edit.SectionChanged = true
-		return nil
+	resultFiles, err := readInstructionFiles(ctx, dp, repoDir, result, resultEntries)
+	if err != nil {
+		return err
 	}
-	for _, v := range variants {
-		changed, err := variantCarriesMarker(ctx, dp, repoDir, base, r.ResultSHA, v)
-		if err != nil {
-			return err
+	changed := map[string]bool{}
+	for _, name := range treeChanged {
+		changed[name] = true
+	}
+	for _, f := range resultFiles {
+		edit.ResultRootNames = append(edit.ResultRootNames, f.entry.name)
+		if f.entry.name == agentsFile {
+			edit.ResultSHA256 = f.sha256
 		}
-		edit.SectionChanged = edit.SectionChanged || changed
+		if f.marker {
+			edit.MarkerIn = append(edit.MarkerIn, f.entry.name)
+		}
+		if !f.entry.regularFile() && changed[f.entry.name] {
+			edit.NotRegularFile = append(edit.NotRegularFile, f.entry.name)
+		}
 	}
+	edit.Matches = edit.Proposal && len(resultFiles) == 1 && matchesApprovedFile(resultFiles[0], expectedSHA256)
 	return nil
 }
 
-func hashOfBlob(b agentsBlob) string {
-	if !b.exists || b.irregular {
-		return ""
-	}
-	return memory.HashHex(b.data)
-}
-
-// variantCarriesMarker: a root name folding to AGENTS.md was changed and
-// holds a memory marker (or cannot be read as text) at either commit.
-func variantCarriesMarker(ctx context.Context, dp *deps, repoDir, base, result, name string) (bool, error) {
-	for _, commit := range []string{result, base} {
-		b, err := readAgentsBlob(ctx, dp, repoDir, commit, name)
-		if err != nil {
-			return false, fmt.Errorf("read %s at %.12s: %w", name, commit, err)
-		}
-		if hasMemoryMarker(b) {
-			return true, nil
-		}
-	}
-	return false, nil
+// matchesApprovedFile: f is root AGENTS.md by that spelling, a plain file of
+// mode 100644, with the approved bytes.
+func matchesApprovedFile(f instructionFile, expectedSHA256 string) bool {
+	e := f.entry
+	return e.name == agentsFile && e.kind == "blob" && e.mode == gitModeFile && f.sha256 != "" && f.sha256 == expectedSHA256
 }
 
 // recordMemoryEdit sets r.MemoryEdit for an accepted run, before its release
@@ -278,7 +385,7 @@ func recordMemoryEdit(dp *deps, r *run.Run, dataDir, repoDir string) {
 	defer cancel()
 	r.MemoryEdit = computeMemoryEdit(ctx, dp, r, dataDir, repoDir)
 	if e := r.MemoryEdit; e != nil && e.Error != "" {
-		log.Printf("run %s: memory section check: %s (fail closed: %v)", r.ID, e.Error, e.FailClosed)
+		log.Printf("run %s: memory section check: %s (the release is denied)", r.ID, e.Error)
 	}
 }
 

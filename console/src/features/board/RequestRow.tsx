@@ -16,6 +16,7 @@ import {
   requestShortTitle,
 } from "@/domain/request";
 import { requestPath } from "@/routes/paths";
+import { MemoryBadge } from "@/shared/request/MemoryBadge";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { RequestStatusUnit } from "@/shared/request/RequestStatusUnit";
@@ -92,6 +93,7 @@ export function RequestRow({ request, now, showProject }: RequestRowProps) {
           copy={false}
           className="text-fg-subtle flex text-xs"
         />
+        <MemoryBadge request={request} />
       </TableCell>
       {showProject ? (
         <TableCell className="text-fg-muted truncate" title={request.project}>

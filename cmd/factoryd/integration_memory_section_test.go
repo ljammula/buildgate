@@ -34,8 +34,8 @@ func TestIntegrationRunEditingMemorySectionIsRefusedAtRelease(t *testing.T) {
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q (gates: %+v)", r.State, run.StateAccepted, r.GateResults)
 	}
-	if r.MemoryEdit == nil || !r.MemoryEdit.SectionChanged || r.MemoryEdit.Proposal {
-		t.Fatalf("memory_edit = %+v, want a section change with no proposal", r.MemoryEdit)
+	if r.MemoryEdit == nil || !r.MemoryEdit.BaseHasSection || len(r.MemoryEdit.ChangedRootNames) != 1 || r.MemoryEdit.Proposal {
+		t.Fatalf("memory_edit = %+v, want a changed AGENTS.md on a base with a section and no proposal", r.MemoryEdit)
 	}
 	decision := readReleaseDecision(t, dataDir, release.ProjectFromWorkspace(ws), r.ID)
 	if decision.Allowed || !strings.Contains(strings.Join(decision.Reasons, ";"), release.ReasonMemorySectionNotMemoryChange) {
