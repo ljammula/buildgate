@@ -590,7 +590,7 @@ workspace; the command of the step follows only when all passed:
 | Never runs in | Review sandboxes (they hold a model route); drafting and planning jobs |
 | A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`). In the build a setup command gets 10 minutes |
 | Cost | It runs once per sandbox: a run with N gates runs it at least N+1 more times. Nothing is cached between sandboxes |
-| Network | Whatever the step already has: none for verify and gates beyond the registry proxy and Compose sidecars; in the build, the model route. `setup:` is given to no model |
+| Network | Whatever the step already has: none for verify and gates beyond the registry proxy and Compose sidecars; in the build, the model route. `setup:` is given to no planner or reviewer; a setup command that fails inside a build round is named, with its output, to that build's own agent |
 | Files it writes | Must be gitignored: untracked files are committed with the build and judged by `diff_scope` |
 | A step that did not run it | An accepted run whose canonical verify attempt does not record the digest of the commands is quarantined as the operator's (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 | Entries | One may not begin with `-` (the shell would read it as an option) |
