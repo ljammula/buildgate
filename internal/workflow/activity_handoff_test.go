@@ -563,14 +563,14 @@ func TestRunBuildActivityPassesTheEarlierAttemptsRecord(t *testing.T) {
 }
 
 func TestWithEarlierWorkArgsStagesEachFileItNames(t *testing.T) {
-	ctx, args := withEarlierWorkArgs(context.Background(), []string{"build_app.py"}, "/logs/handoff.md", "/data/earlier-attempt.md")
-	if want := []string{"build_app.py", "--handoff", "/logs/handoff.md", "--earlier-attempt", "/data/earlier-attempt.md"}; !reflect.DeepEqual(args, want) {
+	ctx, args := withEarlierWorkArgs(context.Background(), []string{"build_app.py"}, "/logs/handoff.md", "/data/earlier-attempt.md", "/logs/baseline_failure.md")
+	if want := []string{"build_app.py", "--handoff", "/logs/handoff.md", "--earlier-attempt", "/data/earlier-attempt.md", "--baseline-failure", "/logs/baseline_failure.md"}; !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
 	}
-	if got, want := extraRunInputsFrom(ctx), []string{"/logs/handoff.md", "/data/earlier-attempt.md"}; !reflect.DeepEqual(got, want) {
+	if got, want := extraRunInputsFrom(ctx), []string{"/logs/handoff.md", "/data/earlier-attempt.md", "/logs/baseline_failure.md"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("staged = %v, want %v", got, want)
 	}
-	ctx, args = withEarlierWorkArgs(context.Background(), []string{"build_app.py"}, "", "")
+	ctx, args = withEarlierWorkArgs(context.Background(), []string{"build_app.py"}, "", "", "")
 	if len(args) != 1 || len(extraRunInputsFrom(ctx)) != 0 {
 		t.Errorf("with neither: args %v, staged %v, want nothing added", args, extraRunInputsFrom(ctx))
 	}

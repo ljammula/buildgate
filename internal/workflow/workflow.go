@@ -26,6 +26,9 @@ const (
 	RunBuildActivityName       = "RunBuildActivity"
 	PostBuildActivityName      = "PostBuildActivity"
 	RunVerifyActivityName      = "RunVerifyActivity"
+	// RunBaselineVerifyActivityName runs the verify command on the base
+	// commit, before the build's first round (see baselineVerifyChange).
+	RunBaselineVerifyActivityName = "RunBaselineVerifyActivity"
 	// RunFullSuiteVerifyActivityName runs -full-suite-command (the regression-oracle gate, gap 3 of the plan's 2026-08-28 readiness review). A separate
 	// Activity from RunVerifyActivity, not a parameterization of it: it is
 	// optional (RunWorkflow only calls it when RunWorkflowInput.
@@ -125,6 +128,14 @@ const (
 	// hiccup, but still one that must halt the Workflow before
 	// RunBuildActivity ever runs (see PreflightActivity's doc comment).
 	PreflightFailureType = "PreflightFailure"
+	// BaselineVerifyFailureType marks RunBaselineVerifyActivity finding the
+	// verify command failing on the base commit with a failure the ticket
+	// does not name (run.BaselineVerify.Halts): a precondition no build of
+	// this ticket can meet, so the run halts before RunBuildActivity, as it
+	// does for PreflightFailureType. Never an infrastructure failure: it
+	// says nothing about the factory, so it does not count toward the
+	// repository owner's stop line.
+	BaselineVerifyFailureType = "BaselineVerifyFailure"
 	// SliceChainFailureType marks ValidateSliceChainActivity rejecting a
 	// declared -prior-run: this run's own execution-time base_sha doesn't
 	// match the prior run's result_sha, the prior run never reached
@@ -376,6 +387,52 @@ const requireIsolatedWorkspaceChange = "require-isolated-workspace"
 
 // NonIsolatedRunFailureType is the application error type of the refusal.
 const NonIsolatedRunFailureType = "NonIsolatedRun"
+
+// baselineVerifyChange is the GetVersion change ID under which RunWorkflow
+// runs RunBaselineVerifyActivity between preflight and the build: the
+// ticket's verify command on the base commit, in a fresh sandbox, for every
+// run. A history recorded before it replays as DefaultVersion and goes
+// from preflight straight to the build, as it did.
+const baselineVerifyChange = "baseline-verify"
+
+// preBuildChecks runs what must hold before a build spends a model call:
+// PreflightActivity (the ticket and the workspace), then, on a history that
+// has baselineVerifyChange, RunBaselineVerifyActivity. It returns the
+// baseline's attempts for the run's record. A baseline that failed the way
+// the ticket expects sets input.BaselineNotePath, which RunBuildActivity
+// gives the build; one that failed any other way returns the Activity's
+// BaselineVerifyFailureType error and the run halts.
+//
+// Every failure is wrapped with wrapActivityFailure, not a plain %w: when
+// isolation ran, worktreePath/branch are set, and the deferred rollback
+// discards them; without them on the error the caller would record the
+// shared checkout as the workspace of a run that used an isolated one.
+func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, baseSHA string, committed bool, worktreePath, branch string) ([]run.Attempt, error) {
+	current.Stage, current.StartedAt = "preflight", temporalworkflow.Now(ctx)
+	if err := temporalworkflow.ExecuteActivity(ids.with(ctx, "preflight"), PreflightActivityName, PreflightInput{
+		WorkspacePath:        input.WorkspacePath,
+		AllowedFiles:         input.AllowedFiles,
+		RequiredChangedFiles: input.RequiredChangedFiles,
+		TicketPath:           input.TicketPath,
+		TicketNumber:         input.TicketNumber,
+		RequestTicket:        input.RequestTicket,
+		SpecPath:             input.SpecPath,
+		LogDir:               input.LogDir,
+		Resumed:              input.ResumeFrom != nil,
+	}).Get(ctx, nil); err != nil {
+		return nil, wrapActivityFailure("preflight activity", err, nil, baseSHA, committed, worktreePath, branch)
+	}
+	if temporalworkflow.GetVersion(ctx, baselineVerifyChange, temporalworkflow.DefaultVersion, 1) != 1 {
+		return nil, nil
+	}
+	var baseline BaselineVerifyResult
+	current.Stage, current.StartedAt = run.BaselineVerifyAttemptKind, temporalworkflow.Now(ctx)
+	if err := temporalworkflow.ExecuteActivity(ids.with(buildVerifyCtx, "baseline-verify"), RunBaselineVerifyActivityName, *input).Get(ctx, &baseline); err != nil {
+		return nil, wrapActivityFailure("baseline verify activity", err, nil, baseSHA, committed, worktreePath, branch)
+	}
+	input.BaselineNotePath = baseline.BuildNotePath
+	return baseline.Attempts, nil
+}
 
 // RunWorkflow covers only slice_running -> verifying -> accepted|quarantined.
 func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result RunWorkflowResult, err error) {
@@ -774,30 +831,14 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	// cmd/factoryd entirely, would otherwise get none of it. Running it
 	// here closes that gap for every caller of RunWorkflow, not just
 	// today's one.
-	current.Stage, current.StartedAt = "preflight", temporalworkflow.Now(ctx)
-	if err := temporalworkflow.ExecuteActivity(ids.with(ctx, "preflight"), PreflightActivityName, PreflightInput{
-		WorkspacePath:        input.WorkspacePath,
-		AllowedFiles:         input.AllowedFiles,
-		RequiredChangedFiles: input.RequiredChangedFiles,
-		TicketPath:           input.TicketPath,
-		TicketNumber:         input.TicketNumber,
-		RequestTicket:        input.RequestTicket,
-		SpecPath:             input.SpecPath,
-		LogDir:               input.LogDir,
-		Resumed:              input.ResumeFrom != nil,
-	}).Get(ctx, nil); err != nil {
-		// wrapActivityFailure, not a plain fmt.Errorf %w wrap (found via
-		// a second GitHub Codex App review round): when isolation ran,
-		// worktreePath/branch are already set by this point, and the
-		// deferred rollback above does correctly discard them (this is
-		// a normal in-process error return, not a hard termination) —
-		// but without attaching them here, the caller has no way to
-		// learn what was actually rolled back, and would durably
-		// record the shared checkout as this run's WorkspacePath
-		// instead of the isolated one that was really used and
-		// discarded.
-		return RunWorkflowResult{}, wrapActivityFailure("preflight activity", err, nil, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	//
+	// The baseline verify follows it in the same helper: see
+	// baselineVerifyChange.
+	baselineAttempts, err := preBuildChecks(ctx, ids, buildVerifyCtx, &input, &current, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	if err != nil {
+		return RunWorkflowResult{}, err
 	}
+	result.Attempts = append(result.Attempts, baselineAttempts...)
 
 	// RunBuildActivity's successful result is BuildActivityResult, carrying
 	// per-attempt evidence alongside the flat runner.Result.
@@ -806,7 +847,7 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	current.Stage, current.StartedAt = "build", temporalworkflow.Now(ctx)
 	buildErr = temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "build"), RunBuildActivityName, input).Get(ctx, &build)
 	if buildErr != nil {
-		return RunWorkflowResult{}, wrapActivityFailure("run build activity", buildErr, nil, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+		return RunWorkflowResult{}, wrapActivityFailure("run build activity", buildErr, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	result.Build = build.Result
 	result.Attempts = append(result.Attempts, build.Attempts...)

@@ -433,6 +433,14 @@ type RunWorkflowInput struct {
 	// never an input of a review, and never part of the spec a review is
 	// given.
 	EarlierAttemptPath string `json:"earlier_attempt_path,omitempty"`
+	// BaselineNotePath is set by RunWorkflow, never by a caller: the host
+	// file RunBaselineVerifyActivity wrote when the verify command failed on
+	// the base commit the way the ticket expects (BaselineVerifyResult.
+	// BuildNotePath). RunBuildActivity stages it read-only beside the spec
+	// and names it to build_app.py as --baseline-failure, which puts it in
+	// the build's first prompt. Like EarlierAttemptPath, no other Activity
+	// reads it.
+	BaselineNotePath string `json:"baseline_note_path,omitempty"`
 	// Thinking is roles.execution's resolved Pi reasoning-effort level
 	// (internal/modelrole.Resolve), passed to build_app.py's own
 	// --thinking by RunBuildActivity (buildActivityArgs). Resolved once
@@ -1029,4 +1037,18 @@ type RunWorkflowResult struct {
 	// caller inspecting result.Runs needs a way to tell "this request
 	// failed" apart from "this request reached StateHalted on its own".
 	Err string `json:"error,omitempty"`
+}
+
+// BaselineVerifyResult is RunBaselineVerifyActivity's result for a run that
+// goes on to its build: the verify command passed on the base commit, or
+// failed the way the ticket expects. A failure the ticket does not name is
+// the Activity's BaselineVerifyFailureType error instead.
+type BaselineVerifyResult struct {
+	Record run.BaselineVerify `json:"record"`
+	// Attempts is the baseline's own launch, for the run's attempt list;
+	// empty for a resumed run, which inherits the halted run's record.
+	Attempts []run.Attempt `json:"attempts,omitempty"`
+	// BuildNotePath is the host file holding what the build is told about a
+	// baseline that failed as expected; "" when the baseline passed.
+	BuildNotePath string `json:"build_note_path,omitempty"`
 }

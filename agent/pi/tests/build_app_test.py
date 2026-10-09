@@ -1891,7 +1891,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 		self.assertIn("Fix the cache\n\n---\n\nBefore you end your turn:", prompt)
 		self.assertIn("compose services: The repository's compose services", stderr.getvalue())
 
-	def _first_prompts(self, rounds, handoff_text, earlier_attempt_text=None):
+	def _first_prompts(self, rounds, handoff_text, earlier_attempt_text=None, baseline_failure_text=None):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			init_repo_with_commit(root)
@@ -1905,6 +1905,10 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 			if earlier_attempt_text is not None:
 				earlier_attempt = Path(spec_dir) / "earlier-attempt.md"
 				earlier_attempt.write_text(earlier_attempt_text)
+			baseline_failure = None
+			if baseline_failure_text is not None:
+				baseline_failure = Path(spec_dir) / "baseline_failure.md"
+				baseline_failure.write_text(baseline_failure_text)
 			completions = [
 				subprocess.CompletedProcess([], 0, pi_output("clean") if i == rounds - 1 else pi_output("flagged", "x"), "")
 				for i in range(rounds)
@@ -1916,8 +1920,22 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 				mock.patch.object(build_app, "run_verification", side_effect=verify_results),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, writes)) as run,
 			):
-				build_app.run_build(root, spec, max_rounds=rounds, timeout_minutes=1, handoff=handoff, earlier_attempt=earlier_attempt)
+				build_app.run_build(root, spec, max_rounds=rounds, timeout_minutes=1, handoff=handoff, earlier_attempt=earlier_attempt, baseline_failure=baseline_failure)
 			return [call.args[0][-1] for call in agent_invocation_calls(run)]
+
+	def test_a_baseline_failure_note_opens_round_one_ahead_of_the_task_and_is_not_repeated(self):
+		note = "Before this build, the verify command was run on the untouched repository and failed (exit 1).\n\n- TestCacheEvicts"
+		prompts = self._first_prompts(2, None, None, note)
+		self.assertTrue(prompts[0].startswith("The factory ran the verify command on the repository before you changed anything."), prompts[0][:120])
+		self.assertEqual(prompts[0].count("- TestCacheEvicts"), 1)
+		self.assertLess(prompts[0].index("- TestCacheEvicts"), prompts[0].index("Fix the cache"))
+		self.assertIn("Fix the cache\n\n---\n\nBefore you end your turn:", prompts[0])
+		self.assertNotIn("TestCacheEvicts", prompts[1])
+
+	def test_a_baseline_failure_note_comes_before_an_earlier_attempts_record(self):
+		prompts = self._first_prompts(1, None, "# What the earlier attempt left (run r1)", "- TestCacheEvicts")
+		self.assertLess(prompts[0].index("- TestCacheEvicts"), prompts[0].index("# What the earlier attempt left (run r1)"))
+		self.assertLess(prompts[0].index("# What the earlier attempt left (run r1)"), prompts[0].index("Fix the cache"))
 
 	def test_an_earlier_attempts_record_opens_round_one_and_is_not_repeated(self):
 		record = "# What the earlier attempt left (run r1)\n\n- `lint`: \"lint failed: exit 2\""

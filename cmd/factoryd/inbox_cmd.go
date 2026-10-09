@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"buildgate/internal/request"
+	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 )
 
@@ -30,17 +31,20 @@ var inboxStates = map[request.State]bool{
 // inboxEntry is one request waiting on the operator, as `factoryd inbox`
 // prints it and as `-json` emits it.
 type inboxEntry struct {
-	Profile    string   `json:"profile"`
-	DataDir    string   `json:"data_dir"`
-	ID         string   `json:"id"`
-	Title      string   `json:"title"`
-	State      string   `json:"state"`
-	Since      string   `json:"since,omitempty"`
-	AgeSeconds int64    `json:"age_seconds"`
-	Reason     string   `json:"reason,omitempty"`
-	Next       string   `json:"next,omitempty"`
-	Approve    string   `json:"approve,omitempty"`
-	Reject     string   `json:"reject,omitempty"`
+	Profile    string `json:"profile"`
+	DataDir    string `json:"data_dir"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	State      string `json:"state"`
+	Since      string `json:"since,omitempty"`
+	AgeSeconds int64  `json:"age_seconds"`
+	Reason     string `json:"reason,omitempty"`
+	Next       string `json:"next,omitempty"`
+	Approve    string `json:"approve,omitempty"`
+	Reject     string `json:"reject,omitempty"`
+	// Baseline is the verify command's result on the base commit of each
+	// ticket this request has built (run.BaselineVerify.Summary).
+	Baseline   string   `json:"baseline,omitempty"`
 	PRURLs     []string `json:"pr_urls,omitempty"`
 	ConsoleURL string   `json:"console_url,omitempty"`
 
@@ -163,6 +167,7 @@ func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, n
 			break
 		}
 	}
+	e.Baseline = inboxBaseline(dataDir, r)
 	switch r.State {
 	case request.StateSpecReview, request.StateOracleReview, request.StatePlanReview:
 		e.Approve = fmt.Sprintf("factoryd approve -config %s %s", profile, r.ID)
@@ -180,6 +185,31 @@ func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, n
 	return e
 }
 
+// inboxBaseline is the baseline verify result of each ticket of r that has
+// a run, in ticket order; a request with several tickets names each. ""
+// before any ticket was built.
+func inboxBaseline(dataDir string, r *request.Request) string {
+	var parts []string
+	for i, t := range r.Tickets {
+		if t.RunID == "" {
+			continue
+		}
+		built, err := run.Load(dataDir, t.RunID)
+		if err != nil {
+			continue
+		}
+		summary := sanitize.Line(built.BaselineVerify.Summary())
+		if summary == "" {
+			continue
+		}
+		if len(r.Tickets) > 1 {
+			summary = fmt.Sprintf("ticket %d %s", i+1, summary)
+		}
+		parts = append(parts, summary)
+	}
+	return strings.Join(parts, "; ")
+}
+
 func printInboxEntry(w io.Writer, e inboxEntry) {
 	title := e.Title
 	if title == "" {
@@ -195,6 +225,9 @@ func printInboxEntry(w io.Writer, e inboxEntry) {
 		fmt.Fprintln(w, "  review and merge the PR on GitHub")
 	default:
 		fmt.Fprintf(w, "  reason: %s\n  next: %s\n", e.Reason, e.Next)
+	}
+	if e.Baseline != "" {
+		fmt.Fprintf(w, "  baseline verify: %s\n", e.Baseline)
 	}
 	if e.ConsoleURL != "" {
 		fmt.Fprintf(w, "  console: %s\n", e.ConsoleURL)

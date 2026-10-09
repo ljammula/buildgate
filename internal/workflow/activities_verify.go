@@ -1,15 +1,21 @@
 package workflow
 
 import (
+	"buildgate/internal/baseline"
 	"buildgate/internal/evidence"
 	"buildgate/internal/oraclecanary"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/triage"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.temporal.io/sdk/activity"
@@ -19,27 +25,42 @@ import (
 // RunVerifyActivity invokes the canonical verification command through
 // runner.RunWithRetries. Verification can rewrite files, so redispatch also
 // returns its completed durable checkpoint instead of running it again.
-func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInput) (progressResult VerifyActivityResult, err error) {
+func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInput) (VerifyActivityResult, error) {
+	return a.runVerifyCommand(ctx, input, verifyRun{kind: "verify", label: "verify"})
+}
+
+// verifyRun says which of the verify command's two runs runVerifyCommand
+// performs: canonical verification after the build (kind "verify"), or the
+// baseline on the base commit before it (run.BaselineVerifyAttemptKind).
+// kind is the progress stage, the intent and journal kind, the Attempt.Kind,
+// the log's file name and the compose evidence phase; label is the run's
+// name in an error message.
+type verifyRun struct {
+	kind  string
+	label string
+	// endDetail is the detail of the progress feed's end mark, from the
+	// run's result; nil for none.
+	endDetail func(VerifyActivityResult) string
+}
+
+// runVerifyCommand runs the verify command once in a fresh sandbox, as v
+// describes.
+func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInput, v verifyRun) (progressResult VerifyActivityResult, err error) {
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.
 	progressStarted := false
 	defer func() {
-		if !progressStarted {
-			return
+		if progressStarted {
+			v.markEnd(ctx, a.logDirFor(input), progressResult, err)
 		}
-		outcome := "pass"
-		if err != nil || progressResult.Result.ExitCode != 0 {
-			outcome = "fail"
-		}
-		progressMark(ctx, a.logDirFor(input), "verify", "end", outcome, "")
 	}()
 	if err := a.fenceEarlierAttempts(ctx, input, true); err != nil {
 		return VerifyActivityResult{}, err
 	}
 	checkpoint, path, found, err := loadRetriedActivityCheckpoint[VerifyActivityResult](ctx, a.checkpointDirFor(input))
 	if err != nil {
-		return VerifyActivityResult{}, checkpointLoadError("load verify Activity checkpoint", err)
+		return VerifyActivityResult{}, checkpointLoadError("load "+v.label+" Activity checkpoint", err)
 	}
 	if found {
 		if checkpoint.Error != "" {
@@ -52,7 +73,7 @@ func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInp
 		return checkpoint.Result, nil
 	}
 	progressStarted = true
-	progressMark(ctx, a.logDirFor(input), "verify", "start", "", "")
+	progressMark(ctx, a.logDirFor(input), v.kind, "start", "", "")
 
 	// Resolved before any intent record or Docker contact, as in
 	// RunBuildActivity: verification gets the same registry proxy the build
@@ -61,7 +82,7 @@ func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInp
 	if err != nil {
 		return VerifyActivityResult{}, temporal.NewApplicationError(err.Error(), InfrastructureFailureType)
 	}
-	composeSpec, err := a.composeServicesSpecFor(input, "verify")
+	composeSpec, err := a.composeServicesSpecFor(input, v.kind)
 	if err != nil {
 		return VerifyActivityResult{}, temporal.NewApplicationError(err.Error(), InfrastructureFailureType)
 	}
@@ -71,43 +92,43 @@ func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInp
 	// halts instead of re-running or trusting an unconfirmed result.
 	intentFound, journalFound, err := priorAttemptRecords(ctx, a.checkpointDirFor(input))
 	if err != nil {
-		return VerifyActivityResult{}, priorRecordsFailure("verify", err)
+		return VerifyActivityResult{}, priorRecordsFailure(v.label, err)
 	}
 	if intentFound {
 		return VerifyActivityResult{}, temporal.NewApplicationError(
-			"a prior attempt of this verify Activity recorded intent to run canonical verification but crashed before reaching a durable checkpoint — halting rather than risk a duplicate invocation or trusting an unconfirmed result",
+			"a prior attempt of this "+v.label+" Activity recorded intent to run "+v.what()+" but crashed before reaching a durable checkpoint — halting rather than risk a duplicate invocation or trusting an unconfirmed result",
 			AmbiguousPriorAttemptType,
 		)
 	}
 	if journalFound {
 		return VerifyActivityResult{}, temporal.NewApplicationError(
-			"a verify Activity attempt journal exists without its intent or completed checkpoint — halting rather than risk a duplicate invocation",
+			"a "+v.label+" Activity attempt journal exists without its intent or completed checkpoint — halting rather than risk a duplicate invocation",
 			AmbiguousPriorAttemptType,
 		)
 	}
-	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input), "verify", []string{"sh", "-c", a.verifyCommandFor(input)}); err != nil {
-		return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("record verify Activity intent", InfrastructureFailureType, err)
+	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input), v.kind, []string{"sh", "-c", a.verifyCommandFor(input)}); err != nil {
+		return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("record "+v.label+" Activity intent", InfrastructureFailureType, err)
 	}
 
-	logPath := activityLogPath(activityExecutionLogPath(ctx, a.logDirFor(input), "verify.log"))
+	logPath := activityLogPath(activityExecutionLogPath(ctx, a.logDirFor(input), v.kind+".log"))
 	// Mirrors cmd/factoryd's — see RunBuildActivity's matching
 	// comment for why this was previously always empty here too.
 	// Earlier Temporal attempts' evidence reaches the result and checkpoint only;
 	// attempts (and so this attempt's journal) holds this attempt's own.
-	inherited := a.earlierAttemptsFor(ctx, a.checkpointDirFor(input), "verify")
+	inherited := a.earlierAttemptsFor(ctx, a.checkpointDirFor(input), v.kind)
 	attempts := []run.Attempt{}
 	command := []string{"sh", "-c", a.verifyCommandFor(input)}
 	beforeAttempt := func(attempt int) error {
 		// RFC3339, not RFC3339Nano — see RunBuildActivity's matching
 		// beforeAttempt comment for why the precision must match
 		// afterAttempt's completed-Attempt StartedAt format exactly.
-		_, err := recordActivityAttemptIntent(ctx, a.checkpointDirFor(input), attempt, "verify", command, time.Now().UTC().Format(time.RFC3339))
+		_, err := recordActivityAttemptIntent(ctx, a.checkpointDirFor(input), attempt, v.kind, command, time.Now().UTC().Format(time.RFC3339))
 		return err
 	}
 	beforeAttempt = a.leaseChecked(ctx, a.checkpointDirFor(input), beforeAttempt)
 	afterAttempt := func(attempt int, res runner.Result, _ error) error {
 		attempts = append(attempts, run.Attempt{
-			Kind:        "verify",
+			Kind:        v.kind,
 			Command:     res.Command,
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
@@ -115,11 +136,11 @@ func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInp
 			LogPath:     logPath(attempt),
 			ImageDigest: res.ImageDigest,
 		})
-		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input), "verify", attempts)
+		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input), v.kind, attempts)
 	}
 	verifyHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: "verify", Elapsed: time.Since(verifyHeartbeatStart)})
+		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: v.kind, Elapsed: time.Since(verifyHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
@@ -145,12 +166,12 @@ func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInp
 		verifyResult.LogSHA256, err = evidence.SHA256File(result.LogPath)
 	}
 	if runErr != nil {
-		checkpoint.Error = "verify subprocess infrastructure failure: " + runErr.Error()
+		checkpoint.Error = v.label + " subprocess infrastructure failure: " + runErr.Error()
 		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
 			checkpoint.ErrorType = CleanupUnconfirmedFailureType
 		}
 	} else if err != nil {
-		checkpoint.Error = "verify evidence infrastructure failure: " + err.Error()
+		checkpoint.Error = v.label + " evidence infrastructure failure: " + err.Error()
 	}
 	checkpoint.Result = verifyResult
 	// verifyResult.Attempts is attached as this error's Details on every
@@ -161,19 +182,40 @@ func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInp
 		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
 			errType = CleanupUnconfirmedFailureType
 		}
-		return verifyResult, temporal.NewApplicationErrorWithCause("save verify Activity checkpoint", errType, saveErr, verifyResult.Attempts)
+		return verifyResult, temporal.NewApplicationErrorWithCause("save "+v.label+" Activity checkpoint", errType, saveErr, verifyResult.Attempts)
 	}
 	if runErr != nil {
 		errType := InfrastructureFailureType
 		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
 			errType = CleanupUnconfirmedFailureType
 		}
-		return verifyResult, temporal.NewApplicationErrorWithCause("verify subprocess infrastructure failure", errType, runErr, verifyResult.Attempts)
+		return verifyResult, temporal.NewApplicationErrorWithCause(v.label+" subprocess infrastructure failure", errType, runErr, verifyResult.Attempts)
 	}
 	if err != nil {
-		return verifyResult, temporal.NewApplicationErrorWithCause("verify evidence infrastructure failure", InfrastructureFailureType, err, verifyResult.Attempts)
+		return verifyResult, temporal.NewApplicationErrorWithCause(v.label+" evidence infrastructure failure", InfrastructureFailureType, err, verifyResult.Attempts)
 	}
 	return verifyResult, nil
+}
+
+// markEnd writes the run's end mark to the progress feed.
+func (v verifyRun) markEnd(ctx context.Context, logDir string, result VerifyActivityResult, err error) {
+	outcome := "pass"
+	if err != nil || result.Result.ExitCode != 0 {
+		outcome = "fail"
+	}
+	detail := ""
+	if v.endDetail != nil && err == nil {
+		detail = v.endDetail(result)
+	}
+	progressMark(ctx, logDir, v.kind, "end", outcome, detail)
+}
+
+// what names the command v runs, for the ambiguous-prior-attempt message.
+func (v verifyRun) what() string {
+	if v.kind == "verify" {
+		return "canonical verification"
+	}
+	return "the verify command on the base commit"
 }
 
 // RunFullSuiteVerifyActivity invokes input.FullSuiteCommand — cmd/factoryd's
@@ -599,4 +641,324 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		return gateResult, temporal.NewApplicationErrorWithCause(input.Check+" gate evidence infrastructure failure", InfrastructureFailureType, err, gateResult.Attempts)
 	}
 	return gateResult, nil
+}
+
+// baselineBuildNoteFileName is the file, in the run's log directory, that
+// holds what the build is told about a baseline that failed as the ticket
+// expects (baseline.BuildNote).
+const baselineBuildNoteFileName = "baseline_failure.md"
+
+// baselineLogTailBytes bounds how much of the baseline's log is read for
+// failing test names. A failure printed before the last 8 MiB is not seen.
+const baselineLogTailBytes = 8 << 20
+
+// RunBaselineVerifyActivity runs the ticket's verify command on the base
+// commit, in a fresh sandbox, before the build's first round, and judges
+// the result (baseline.Evaluate). Once the command has run to an exit code
+// it writes the run's baseline record (run.BaselineVerifyFileName) before
+// returning, so the result reaches the run record even when the run halts
+// here.
+//
+//   - passed: the build runs.
+//   - failed, and the ticket names every failing test: the build runs and is
+//     given the list (BaselineVerifyResult.BuildNotePath).
+//   - failed any other way: a BaselineVerifyFailureType error. No build of
+//     this ticket could pass the same command in canonical verification, so
+//     the run halts before a model call.
+//
+// The command runs in the run's own worktree, which RunWorkflow has just
+// created at the base commit; what the command wrote there is removed
+// afterwards (restoreBaseCommit), so the build starts from the commit, not
+// from the command's leftovers.
+//
+// Two kinds of run do not start from the untouched repository, launch
+// nothing and carry the record of the run they follow (inheritBaselineVerify):
+//
+//   - a resumed run, whose worktree holds the halted run's work. The one
+//     resumed run that does launch is one whose halted run never finished its
+//     own baseline and never started a build: its worktree holds no work, and
+//     without this the build would run with no baseline at all;
+//   - a run that continues an earlier run of the same ticket from the commit
+//     that run produced (a retry on the failed attempt's branch, a corrective
+//     round, a PR-review round: DiffBaseSHA names the ticket's real base).
+//     The verify command may fail there for the very reason the run exists,
+//     and the ticket's baseline was taken by its first run. When no run of
+//     this data directory produced the commit, the baseline runs.
+//
+// Like canonical verification, the launch gets no model route, and the
+// checkpoint, intent and journal protocol is runVerifyCommand's.
+func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWorkflowInput) (BaselineVerifyResult, error) {
+	logDir := a.logDirFor(input)
+	if from, resumed := a.baselineInheritedFrom(input); from != "" {
+		if result, inherited, err := a.inheritBaselineVerify(input, logDir, from, resumed); inherited || err != nil {
+			return result, err
+		}
+		if resumed {
+			// The halted run never got past its baseline, so the adopted
+			// worktree holds no build work: only what that run's command
+			// left behind, which must not be this baseline's starting state.
+			if err := restoreBaseCommit(ctx, input.WorkspacePath, nil); err != nil {
+				return BaselineVerifyResult{}, temporal.NewApplicationErrorWithCause("clear what the lost baseline verify left in the resumed workspace", InfrastructureFailureType, err)
+			}
+		}
+	}
+	before, err := gitStatusAllPaths(ctx, input.WorkspacePath)
+	if err != nil {
+		return BaselineVerifyResult{}, temporal.NewApplicationErrorWithCause("read the workspace's state before the baseline verify", InfrastructureFailureType, err)
+	}
+	// What the ticket is to create, read before the command can write
+	// anything: the worktree is the base commit here.
+	created := baseline.CreatedPaths(append(append([]string{}, input.AllowedFiles...), input.RequiredChangedFiles...), func(path string) bool {
+		_, err := os.Lstat(filepath.Join(input.WorkspacePath, filepath.FromSlash(path)))
+		return err == nil
+	})
+	var record *run.BaselineVerify
+	judge := func(res VerifyActivityResult) *run.BaselineVerify {
+		if record == nil {
+			record = a.judgeBaseline(input, res, created)
+		}
+		return record
+	}
+	res, err := a.runVerifyCommand(ctx, input, verifyRun{
+		kind:      run.BaselineVerifyAttemptKind,
+		label:     "baseline verify",
+		endDetail: func(res VerifyActivityResult) string { return judge(res).Summary() },
+	})
+	if errors.Is(err, sandbox.ErrComposeServicesRejected) {
+		// A rejected compose file halts a run with its own reason code
+		// (see buildActivityErrorType); the baseline is now the first
+		// launch to load the file, so it says the same.
+		return BaselineVerifyResult{Attempts: res.Attempts}, temporal.NewApplicationErrorWithCause(err.Error(), ComposeServicesRejectedFailureType, err, res.Attempts)
+	}
+	if err != nil {
+		return BaselineVerifyResult{Attempts: res.Attempts}, err
+	}
+	if err := restoreBaseCommit(ctx, input.WorkspacePath, before); err != nil {
+		return BaselineVerifyResult{Attempts: res.Attempts}, temporal.NewApplicationErrorWithCause("restore the workspace to the base commit after the baseline verify", InfrastructureFailureType, err, res.Attempts)
+	}
+	result := BaselineVerifyResult{Record: *judge(res), Attempts: res.Attempts}
+	if err := run.SaveBaselineVerify(logDir, &result.Record); err != nil {
+		return result, temporal.NewApplicationErrorWithCause("record the baseline verify", InfrastructureFailureType, err, res.Attempts)
+	}
+	if result.Record.Halts() {
+		return result, temporal.NewNonRetryableApplicationError(result.Record.HaltMessage(), BaselineVerifyFailureType, nil, res.Attempts)
+	}
+	result.BuildNotePath, err = writeBaselineBuildNote(logDir, &result.Record)
+	if err != nil {
+		return result, temporal.NewApplicationErrorWithCause("write the baseline note for the build", InfrastructureFailureType, err, res.Attempts)
+	}
+	return result, nil
+}
+
+// writeBaselineBuildNote writes what the build is told about a baseline
+// that failed as its ticket expects, and returns the file's path; "" when
+// there is nothing to tell.
+func writeBaselineBuildNote(logDir string, record *run.BaselineVerify) (string, error) {
+	note := baseline.BuildNote(record)
+	if note == "" {
+		return "", nil
+	}
+	path := filepath.Join(logDir, baselineBuildNoteFileName)
+	return path, os.WriteFile(path, []byte(note), 0o600)
+}
+
+// judgeBaseline builds the baseline record of a finished launch from its
+// log and the ticket's text.
+func (a *Activities) judgeBaseline(input RunWorkflowInput, res VerifyActivityResult, created []string) *run.BaselineVerify {
+	record := baseline.Evaluate(a.verifyCommandFor(input), res.Result.ExitCode, readFileTail(res.Result.LogPath, baselineLogTailBytes), triage.FirstFailureLine(res.Result.LogPath), a.ticketTextFor(input), created)
+	record.BaseSHA = input.BaseSHA
+	record.LogPath = res.Result.LogPath
+	record.DurationMs = res.DurationMs
+	return record
+}
+
+// ticketTextFor is what a baseline failure is looked up in: the ticket the
+// run builds, which is the text its build is given. The acceptance
+// criteria a review reads are not part of it: the build's note repeats the
+// words a test was named with, and must hold nothing the build was not
+// given. A file that cannot be read adds nothing, which can only make a
+// failure unnamed.
+func (a *Activities) ticketTextFor(input RunWorkflowInput) string {
+	var text strings.Builder
+	for _, path := range dedupStrings([]string{input.SpecPath, input.TicketPath}) {
+		if path == "" {
+			continue
+		}
+		if content, err := os.ReadFile(path); err == nil {
+			text.Write(content)
+			text.WriteByte('\n')
+		}
+	}
+	return text.String()
+}
+
+// baselineInheritedFrom names the run whose baseline record input's run
+// carries instead of taking its own, "" when it takes its own: the halted
+// run it resumes (resumed true), or the earlier run of the same ticket that
+// produced the commit it starts from.
+func (a *Activities) baselineInheritedFrom(input RunWorkflowInput) (runID string, resumed bool) {
+	if input.ResumeFrom != nil {
+		return input.ResumeFrom.RunID, true
+	}
+	if input.DiffBaseSHA == "" || input.DiffBaseSHA == input.BaseSHA || input.BaseSHA == "" {
+		return "", false
+	}
+	byRequest, err := run.ListByRequestID(a.dataDirFor(input))
+	if err != nil {
+		return "", false
+	}
+	// The newest such run: a commit is produced once, but a run that
+	// committed nothing of its own records the commit it started from.
+	var newest *run.Run
+	for _, runs := range byRequest {
+		for _, r := range runs {
+			if r.ResultSHA == input.BaseSHA && r.ID != input.RunID && (newest == nil || r.CreatedAt > newest.CreatedAt) {
+				newest = r
+			}
+		}
+	}
+	if newest == nil {
+		return "", false
+	}
+	return newest.ID, false
+}
+
+// inheritBaselineVerify gives a run the baseline record of the run it
+// follows (from), and its build the same note. inherited is false when the
+// caller must run the baseline itself: from has no record that let a build
+// run (none, or one that halted it) and, for a resumed run, never started a
+// build either, so it stopped at or during its own baseline. A resumed run whose halted run built with no record follows a
+// run from before the check existed, and has none either.
+func (a *Activities) inheritBaselineVerify(input RunWorkflowInput, logDir, from string, resumed bool) (result BaselineVerifyResult, inherited bool, err error) {
+	dataDir := a.dataDirFor(input)
+	earlier, err := run.LoadBaselineVerify(run.Dir(dataDir, from))
+	if err != nil {
+		return BaselineVerifyResult{}, true, temporal.NewApplicationErrorWithCause("read the baseline verify of the run this one follows", InfrastructureFailureType, err)
+	}
+	if earlier != nil && earlier.Halts() {
+		// A run that halted on its baseline never built. Its result is
+		// not carried: whoever follows it takes the baseline again.
+		earlier = nil
+	}
+	if earlier == nil && !resumed {
+		return BaselineVerifyResult{}, false, nil
+	}
+	if earlier == nil {
+		halted, loadErr := run.Load(dataDir, from)
+		if loadErr != nil {
+			return BaselineVerifyResult{}, true, temporal.NewApplicationErrorWithCause("read the resumed run", InfrastructureFailureType, loadErr)
+		}
+		for _, attempt := range halted.Attempts {
+			if attempt.Kind == "build" {
+				return BaselineVerifyResult{}, true, nil
+			}
+		}
+		return BaselineVerifyResult{}, false, nil
+	}
+	if earlier.InheritedFrom == "" {
+		earlier.InheritedFrom = from
+	}
+	if err := run.SaveBaselineVerify(logDir, earlier); err != nil {
+		return BaselineVerifyResult{}, true, temporal.NewApplicationErrorWithCause("record the baseline verify", InfrastructureFailureType, err)
+	}
+	result = BaselineVerifyResult{Record: *earlier}
+	// The build is a fresh session, which is given the note again.
+	if result.BuildNotePath, err = writeBaselineBuildNote(logDir, earlier); err != nil {
+		return result, true, temporal.NewApplicationErrorWithCause("write the baseline note for the build", InfrastructureFailureType, err)
+	}
+	return result, true, nil
+}
+
+// hostGitAfterSandbox is the start of a host git command line run in dir
+// after a sandboxed command wrote there. The repository's own configuration
+// can name a hooks directory or a file-system monitor inside the writable
+// workspace, and checkout and status would run it on the host: both are
+// turned off, as runner.GitCommitAll turns hooks off for its commit.
+func hostGitAfterSandbox(dir string) []string {
+	return []string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}
+}
+
+// gitStatusAllPaths lists every path git reports as changed or untracked
+// in dir, each untracked file by its own path (a new file inside a
+// directory that was already untracked is then a new entry).
+func gitStatusAllPaths(ctx context.Context, dir string) ([]string, error) {
+	out, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(dir), "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames")...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+	var paths []string
+	for _, entry := range strings.Split(string(out), "\x00") {
+		if len(entry) > 3 {
+			paths = append(paths, entry[3:])
+		}
+	}
+	return paths, nil
+}
+
+// restoreBaseCommit removes what the baseline's command left in dir: every
+// path that is dirty now and was not in before (gitStatusAllPaths before
+// the launch) is put back to HEAD, or deleted if HEAD does not have it.
+// Files git ignores are left, as canonical verification leaves them. Each
+// path is passed to git literally: a file named "*" names only itself.
+func restoreBaseCommit(ctx context.Context, dir string, before []string) error {
+	leftovers := func() ([]string, error) {
+		after, err := gitStatusAllPaths(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+		was := make(map[string]bool, len(before))
+		for _, p := range before {
+			was[p] = true
+		}
+		var added []string
+		for _, p := range after {
+			if !was[p] {
+				added = append(added, p)
+			}
+		}
+		return added, nil
+	}
+	added, err := leftovers()
+	if err != nil || len(added) == 0 {
+		return err
+	}
+	git := func(args ...string) {
+		_ = exec.CommandContext(ctx, "git", append(append(hostGitAfterSandbox(dir), "--literal-pathspecs"), args...)...).Run()
+	}
+	for _, p := range added {
+		// Each of the three is a no-op for a path it does not apply to
+		// (unstaged, not in HEAD, tracked), so only the final check decides.
+		// -ff: a directory the command left with its own .git is removed too.
+		git("reset", "-q", "HEAD", "--", p)
+		git("checkout", "-q", "HEAD", "--", p)
+		git("clean", "-ffdq", "--", p)
+	}
+	added, err = leftovers()
+	if err != nil {
+		return err
+	}
+	if len(added) > 0 {
+		return fmt.Errorf("the baseline verify left %d path(s) that could not be removed, first %q", len(added), added[0])
+	}
+	return nil
+}
+
+// readFileTail returns up to the last max bytes of path, "" if it cannot be
+// read.
+func readFileTail(path string, max int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.Size() > max {
+		if _, err := f.Seek(info.Size()-max, io.SeekStart); err != nil {
+			return ""
+		}
+	}
+	content, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+	return string(content)
 }

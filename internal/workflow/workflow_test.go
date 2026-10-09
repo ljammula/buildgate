@@ -87,6 +87,7 @@ func TestRunWorkflowScopesHeartbeatTimeoutToBuildVerifyActivities(t *testing.T) 
 		},
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(
 		func(ctx context.Context, _ RunWorkflowInput) (BuildActivityResult, error) {
 			captureInfo(ctx, RunBuildActivityName)
@@ -185,6 +186,7 @@ func TestRunWorkflowWidensBuildVerifyTimeoutForConfiguredMinutes(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(
 		func(ctx context.Context, _ RunWorkflowInput) (BuildActivityResult, error) {
 			captureInfo(ctx, RunBuildActivityName)
@@ -310,6 +312,7 @@ func TestRunWorkflowHaltsOnPreflightFailureBeforeBuild(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			buildCalled = true
@@ -357,6 +360,7 @@ func TestRunWorkflowPiTicketStructurePreflight(t *testing.T) {
 				return "fixture-base-sha", nil
 			}, activity.RegisterOptions{Name: CaptureBaseSHAActivityName})
 			env.RegisterActivityWithOptions((&Activities{}).PreflightActivity, activity.RegisterOptions{Name: PreflightActivityName})
+			registerPassingBaselineVerify(env)
 			env.RegisterActivityWithOptions(func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 				buildCalled = true
 				return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
@@ -442,6 +446,7 @@ func TestRunWorkflowPreflightFailureAfterIsolationPreservesWorkspaceDetails(t *t
 		},
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			buildCalled = true
@@ -635,6 +640,7 @@ func TestRunWorkflowRejectsSupersededPriorRunOnNonIsolatedPath(t *testing.T) {
 	env.RegisterActivityWithOptions(func(context.Context, PreflightInput) error {
 		return nil
 	}, activity.RegisterOptions{Name: PreflightActivityName})
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 		buildCalled = true
 		return BuildActivityResult{}, nil
@@ -742,6 +748,7 @@ func TestRunWorkflowPreservesAttemptsOnPostBuildFailure(t *testing.T) {
 		func(context.Context, PreflightInput) error { return nil },
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			return BuildActivityResult{Result: runner.Result{ExitCode: 0}, Attempts: buildAttempts}, nil
@@ -833,6 +840,25 @@ func newWorkflowEnvironmentSansCommitOracles(
 	gate func(context.Context, EvaluateGateInput) (run.GateResult, error),
 ) *testsuite.TestWorkflowEnvironment {
 	t.Helper()
+	return newWorkflowEnvironmentWithBaseline(t, build, verify, gate, passingBaselineVerify)
+}
+
+// passingBaselineVerify is a RunBaselineVerifyActivity whose verify command
+// passes on the base commit.
+func passingBaselineVerify(context.Context, RunWorkflowInput) (BaselineVerifyResult, error) {
+	return BaselineVerifyResult{Record: run.BaselineVerify{Passed: true}}, nil
+}
+
+// newWorkflowEnvironmentWithBaseline is newWorkflowEnvironmentSansCommitOracles
+// with the test's own RunBaselineVerifyActivity.
+func newWorkflowEnvironmentWithBaseline(
+	t *testing.T,
+	build func(context.Context, RunWorkflowInput) (BuildActivityResult, error),
+	verify func(context.Context, RunWorkflowInput) (VerifyActivityResult, error),
+	gate func(context.Context, EvaluateGateInput) (run.GateResult, error),
+	baseline func(context.Context, RunWorkflowInput) (BaselineVerifyResult, error),
+) *testsuite.TestWorkflowEnvironment {
+	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterActivityWithOptions(
@@ -843,6 +869,7 @@ func newWorkflowEnvironmentSansCommitOracles(
 		func(context.Context, PreflightInput) error { return nil },
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	env.RegisterActivityWithOptions(baseline, activity.RegisterOptions{Name: RunBaselineVerifyActivityName})
 	env.RegisterActivityWithOptions(build, activity.RegisterOptions{Name: RunBuildActivityName})
 	env.RegisterActivityWithOptions(verify, activity.RegisterOptions{Name: RunVerifyActivityName})
 	env.RegisterActivityWithOptions(gate, activity.RegisterOptions{Name: EvaluateGateActivityName})
@@ -875,6 +902,13 @@ func newWorkflowEnvironmentSansCommitOracles(
 	registerIsolationActivities(env)
 	env.SetTestTimeout(5 * time.Second)
 	return env
+}
+
+// registerPassingBaselineVerify registers a RunBaselineVerifyActivity whose
+// verify command passes on the base commit, the default for a test that is
+// not about the baseline.
+func registerPassingBaselineVerify(env *testsuite.TestWorkflowEnvironment) {
+	env.RegisterActivityWithOptions(passingBaselineVerify, activity.RegisterOptions{Name: RunBaselineVerifyActivityName})
 }
 
 // registerIsolationActivities registers the prepare, rollback and

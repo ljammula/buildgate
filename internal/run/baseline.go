@@ -1,0 +1,196 @@
+package run
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+)
+
+// BaselineVerifyAttemptKind is Attempt.Kind of the verify command's run on
+// the base commit, before the build's first round.
+const BaselineVerifyAttemptKind = "baseline_verify"
+
+// HaltReasonBaselineVerifyFailed is Run.HaltReasonCode's value when a run
+// halted before its build because the verify command failed on the base
+// commit with a failure the ticket does not name: no change the build is
+// asked to make could pass it, so no model call was made. The fix is in
+// the verify command, the sandbox image or the ticket, never in the
+// ticket's code.
+const HaltReasonBaselineVerifyFailed = "baseline_verify_failed"
+
+// BaselineVerify is the result of running the ticket's verify command on
+// the base commit, in a fresh sandbox, before the build spent a model call
+// (RunBaselineVerifyActivity). Recorded for every run; nil only on a run
+// recorded before the check existed.
+type BaselineVerify struct {
+	// Command is the verify command as run.
+	Command string `json:"command"`
+	// BaseSHA is the commit the command ran on.
+	BaseSHA  string `json:"base_sha,omitempty"`
+	ExitCode int    `json:"exit_code"`
+	Passed   bool   `json:"passed"`
+	// FailingTests names the tests (or, for a failure with no test name, the
+	// files) the command reported failing, as its log printed them, at most
+	// BaselineVerifyMaxNamed; FailingCount is how many there were.
+	FailingTests []string `json:"failing_tests,omitempty"`
+	FailingCount int      `json:"failing_count,omitempty"`
+	// Unnamed is the failing tests the ticket does not name, at most
+	// BaselineVerifyMaxNamed; UnnamedCount is how many there were.
+	Unnamed      []string `json:"unnamed,omitempty"`
+	UnnamedCount int      `json:"unnamed_count,omitempty"`
+	// NamedAs is the words the ticket names the failing tests with, at most
+	// BaselineVerifyMaxNamed: text of the ticket, never of the log.
+	NamedAs []string `json:"named_as,omitempty"`
+	// NeedsCreated is set when no test failed by name and the command's
+	// first error names a path the ticket declares and the base commit
+	// does not have: that path. The failure is then the ticket's own work.
+	NeedsCreated string `json:"needs_created,omitempty"`
+	// FirstError is the log's first recognised error line, for a failure
+	// that named no test (a missing program, a failed install).
+	FirstError string `json:"first_error,omitempty"`
+	// Expected is true when the command failed and the failure is the work
+	// the ticket asks for (it names every failing test, or NeedsCreated is
+	// set), so the build ran and was told about it.
+	Expected bool `json:"expected,omitempty"`
+	// InheritedFrom is the id of the run whose result this is: the halted
+	// run whose worktree this run resumed, or the earlier run of the same
+	// ticket whose commit this run continues from. Neither starts from the
+	// base commit, so neither takes a baseline of its own.
+	InheritedFrom string `json:"inherited_from,omitempty"`
+	LogPath       string `json:"log_path,omitempty"`
+	DurationMs    int64  `json:"duration_ms,omitempty"`
+}
+
+// BaselineVerifyMaxNamed bounds BaselineVerify.FailingTests and Unnamed.
+const BaselineVerifyMaxNamed = 20
+
+// Halts reports whether the result stops the run before its build.
+func (b *BaselineVerify) Halts() bool {
+	return b != nil && !b.Passed && !b.Expected
+}
+
+// Summary is the result in one line, as status, watch, the inbox and the
+// console print it: "passed", or "failed" with the failing test named.
+func (b *BaselineVerify) Summary() string {
+	if b == nil {
+		return ""
+	}
+	if b.Passed {
+		return "passed"
+	}
+	if b.NeedsCreated != "" {
+		return fmt.Sprintf("failed as the ticket expects: the command needs %s, which the ticket creates", b.NeedsCreated)
+	}
+	if b.FailingCount == 0 {
+		s := fmt.Sprintf("failed: exit %d", b.ExitCode)
+		if b.FirstError != "" {
+			s += fmt.Sprintf("; first error in log: %q", b.FirstError)
+		}
+		return s
+	}
+	if b.Expected {
+		return "failed as the ticket expects: " + namedAndMore(b.FailingTests, b.FailingCount)
+	}
+	s := "failed: " + namedAndMore(b.FailingTests, b.FailingCount)
+	switch {
+	case b.UnnamedCount == b.FailingCount && b.FailingCount == 1:
+		s += "; the ticket does not name it"
+	case b.UnnamedCount == b.FailingCount:
+		s += "; the ticket names none of them"
+	default:
+		s += "; the ticket does not name " + namedAndMore(b.Unnamed, b.UnnamedCount)
+	}
+	return s
+}
+
+// namedAndMore is the first name and how many others there were.
+func namedAndMore(names []string, count int) string {
+	if len(names) == 0 {
+		return fmt.Sprintf("%d tests", count)
+	}
+	if count <= 1 {
+		return names[0]
+	}
+	return fmt.Sprintf("%s and %d more", names[0], count-1)
+}
+
+// HaltMessage is why a run halted on its baseline: the failure and what
+// to do about it. RunBaselineVerifyActivity's error carries it.
+func (b *BaselineVerify) HaltMessage() string {
+	return fmt.Sprintf("baseline verify %s. %s", b.Summary(), b.HaltAdvice())
+}
+
+// HaltAdvice is HaltMessage without the failure, which the run's triage
+// sentence already names: Run.HaltError of a run halted on its baseline.
+func (b *BaselineVerify) HaltAdvice() string {
+	base := b.BaseSHA
+	if len(base) > 12 {
+		base = base[:12]
+	}
+	where := ""
+	if base != "" {
+		where = " (" + base + ")"
+	}
+	return "No model call was made: the verify command fails on the untouched repository" + where + ", so no build could pass it. " +
+		"Fix the verify command or the sandbox image it runs in; if this ticket is meant to make those tests pass, name each of them in the ticket."
+}
+
+// BaselineVerifyFileName is the baseline record in a run's directory.
+// RunBaselineVerifyActivity writes it once the command has run to an exit
+// code, before it returns, pass or fail, so
+// the result reaches the run record on every path a run ends by, a halt
+// included: Temporal hands a failed workflow's caller an error and no result.
+const BaselineVerifyFileName = "baseline_verify.json"
+
+// SaveBaselineVerify writes b as dir's baseline record, atomically.
+func SaveBaselineVerify(dir string, b *BaselineVerify) error {
+	content, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal baseline verify record: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create run dir: %w", err)
+	}
+	path := filepath.Join(dir, BaselineVerifyFileName)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, content, 0o600); err != nil {
+		return fmt.Errorf("write baseline verify record: %w", err)
+	}
+	return os.Rename(tmp, path)
+}
+
+// LoadBaselineVerify reads dir's baseline record; (nil, nil) when the run
+// has none.
+func LoadBaselineVerify(dir string) (*BaselineVerify, error) {
+	content, err := os.ReadFile(filepath.Join(dir, BaselineVerifyFileName))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var b BaselineVerify
+	if err := json.Unmarshal(content, &b); err != nil {
+		return nil, fmt.Errorf("parse baseline verify record: %w", err)
+	}
+	return &b, nil
+}
+
+// AttachBaselineVerify sets r.BaselineVerify from the run's baseline record
+// once it exists. Called by Persist, the one funnel every run-record write
+// goes through, and by internal/triage, which words a halt before that
+// save. An unreadable record is logged and leaves the field unset: it never
+// fails a save.
+func (r *Run) AttachBaselineVerify(dataDir string) {
+	if r.BaselineVerify != nil || r.ID == "" {
+		return
+	}
+	b, err := LoadBaselineVerify(Dir(dataDir, r.ID))
+	if err != nil {
+		log.Printf("run %s: warning: could not read its baseline verify record: %v", r.ID, err)
+		return
+	}
+	r.BaselineVerify = b
+}

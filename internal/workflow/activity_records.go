@@ -284,7 +284,7 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 				continue
 			}
 			var journal activityAttemptJournal
-			if json.Unmarshal(b, &journal) != nil || journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID == "" || journal.RunID == "" || journal.ActivityID == "" || (journal.Kind != "build" && journal.Kind != "verify" && journal.Kind != "full_suite_verify" && journal.Kind != postOracleCommitJournalKind) || strings.TrimSuffix(name, ".json") != activityAttemptKey(journal.WorkflowID, journal.RunID, journal.ActivityID, journal.ActivityAttempt) {
+			if json.Unmarshal(b, &journal) != nil || journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID == "" || journal.RunID == "" || journal.ActivityID == "" || !journaledKind(journal.Kind) || strings.TrimSuffix(name, ".json") != activityAttemptKey(journal.WorkflowID, journal.RunID, journal.ActivityID, journal.ActivityAttempt) {
 				continue
 			}
 			valid := true
@@ -341,7 +341,7 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 		// a kind run.Attempt's own contract never promises, on a client
 		// timeout that catches one of those two intents unmatched by a
 		// checkpoint.
-		if intent.Kind != "build" && intent.Kind != "verify" && intent.Kind != "full_suite_verify" && !isPostOracleCommitAttemptKind(intent.Kind) {
+		if !commandKind(intent.Kind) && !isPostOracleCommitAttemptKind(intent.Kind) {
 			continue
 		}
 		completedCount := len(journaled[key])
@@ -418,13 +418,32 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 	return attempts
 }
 
+// commandKind reports whether kind is one of the single-command Activities
+// whose attempts are journalled and recovered: the build, canonical
+// verification, the baseline verify before the build, and the full suite.
+func commandKind(kind string) bool {
+	switch kind {
+	case "build", "verify", run.BaselineVerifyAttemptKind, "full_suite_verify":
+		return true
+	}
+	return false
+}
+
+// journaledKind is every kind an attempt journal may carry: commandKind's,
+// and the post-oracle-commit verify's own journal.
+func journaledKind(kind string) bool {
+	return commandKind(kind) || kind == postOracleCommitJournalKind
+}
+
 // attemptKindRank orders run.Attempt.Kind values the same way a real run
-// produces them (build, then verify, then full_suite_verify) for
+// produces them (baseline_verify, build, then verify, then full_suite_verify) for
 // RecoverAttemptsFromCheckpointDir's tiebreak above. An unrecognized kind
 // sorts last rather than erroring — this is best-effort recovery, not
 // validation.
 func attemptKindRank(kind string) int {
 	switch kind {
+	case run.BaselineVerifyAttemptKind:
+		return -1
 	case "build":
 		return 0
 	case "verify":
@@ -591,7 +610,7 @@ func loadActivityAttemptJournalForExecution(logDir, workflowID, runID, activityI
 	if err := json.Unmarshal(b, &journal); err != nil {
 		return activityAttemptJournal{}, false, fmt.Errorf("unmarshal attempt journal: %w", err)
 	}
-	if journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID != workflowID || journal.RunID != runID || journal.ActivityID != activityID || journal.ActivityAttempt != activityAttempt || journal.Kind != "build" && journal.Kind != "verify" && journal.Kind != "full_suite_verify" && journal.Kind != postOracleCommitJournalKind {
+	if journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID != workflowID || journal.RunID != runID || journal.ActivityID != activityID || journal.ActivityAttempt != activityAttempt || !journaledKind(journal.Kind) {
 		return activityAttemptJournal{}, false, fmt.Errorf("attempt journal does not identify a valid Activity execution")
 	}
 	for _, attempt := range journal.Attempts {

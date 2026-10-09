@@ -357,6 +357,14 @@ func TestTriageRun(t *testing.T) {
 			want: "halted: the target repo's compose file was rejected before the build; fix the named services or compose_services_* config and retry",
 		},
 		{
+			name: "halted on the baseline verify",
+			setup: func(t *testing.T, dataDir string) *run.Run {
+				record := &run.BaselineVerify{Command: "pytest", ExitCode: 1, FailingTests: []string{"tests/test_pager.py::test_less"}, FailingCount: 1, Unnamed: []string{"tests/test_pager.py::test_less"}, UnnamedCount: 1}
+				return &run.Run{ID: id, State: run.StateHalted, HaltReasonCode: run.HaltReasonBaselineVerifyFailed, BaselineVerify: record, HaltError: "temporal workflow did not complete: baseline verify activity: ..."}
+			},
+			want: "halted before the build: baseline verify failed: tests/test_pager.py::test_less; the ticket does not name it",
+		},
+		{
 			name: "halted waiting for the compose sidecar slot",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{ID: id, State: run.StateHalted, HaltError: "acquire compose services slot: timed out waiting for the host-wide compose sidecar slot (compose_services_concurrency) held by run-a (pid 7): context deadline exceeded"}

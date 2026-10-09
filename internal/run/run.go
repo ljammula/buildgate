@@ -1475,6 +1475,11 @@ type Run struct {
 	// against a known-failing snapshot of the oracle. nil when the gate never
 	// got that far (no oracle, or the real command failed).
 	OracleCanary *OracleCanaryEvidence `json:"oracle_canary,omitempty"`
+	// BaselineVerify is the verify command's result on the base commit,
+	// run before the build's first round (see BaselineVerify's own doc
+	// comment). Read from the run's baseline record by cmd/factoryd's save,
+	// so a run that halted on it carries it too.
+	BaselineVerify *BaselineVerify `json:"baseline_verify,omitempty"`
 	// Triage is one factory-authored sentence explaining why this run
 	// quarantined or halted -- derived from evidence the factory already
 	// holds (GateResults, Attempts and their logs, ChangedFiles, halt
@@ -1811,6 +1816,7 @@ var FactorydVersion string
 func (r *Run) Persist(dataDir string) error {
 	r.UpdatedAt = time.Now().Format(time.RFC3339)
 	r.FactorydVersion = FactorydVersion
+	r.AttachBaselineVerify(dataDir)
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
@@ -1933,6 +1939,9 @@ func Load(dataDir, id string) (*Run, error) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("unmarshal run: %w", err)
 	}
+	// A run still building has its baseline record on disk and not yet in
+	// run.json: every reader (status, watch, the API) sees it from here.
+	r.AttachBaselineVerify(dataDir)
 	return &r, nil
 }
 

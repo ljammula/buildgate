@@ -600,6 +600,29 @@
       "canary_exit_code": 3,
       "message": "every-field message"
     },
+    "baseline_verify": {
+      "command": "every-field command",
+      "base_sha": "every-field base_sha",
+      "exit_code": 3,
+      "passed": true,
+      "failing_tests": [
+        "every-field failing_tests"
+      ],
+      "failing_count": 3,
+      "unnamed": [
+        "every-field unnamed"
+      ],
+      "unnamed_count": 3,
+      "named_as": [
+        "every-field named_as"
+      ],
+      "needs_created": "every-field needs_created",
+      "first_error": "every-field first_error",
+      "expected": true,
+      "inherited_from": "every-field inherited_from",
+      "log_path": "every-field log_path",
+      "duration_ms": 3
+    },
     "triage": "every-field triage",
     "handoff_sha256": "every-field handoff_sha256",
     "harness_eval": {

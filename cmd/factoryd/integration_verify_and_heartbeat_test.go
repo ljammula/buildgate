@@ -39,7 +39,7 @@ func TestIntegrationFactoryDoesNotCommitVerificationOutputWhenVerificationFails(
 	// Writes dirt (like a formatter would) and then fails, the same way a
 	// real "fmt + test" verify command can rewrite files before its test
 	// step fails.
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "echo formatted >> content.txt; exit 1", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "echo formatted >> content.txt; exit 1"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -82,8 +82,8 @@ func TestIntegrationBuildFailureQuarantines(t *testing.T) {
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
 	}
-	if len(r.Attempts) != 2 || r.Attempts[0].Kind != "build" || r.Attempts[0].ExitCode != 1 || r.Attempts[1].Kind != "verify" {
-		t.Errorf("expected one failed build attempt followed by one verify attempt, got %v", r.Attempts)
+	if attempts := afterBaselineAttempt(t, r.Attempts); len(attempts) != 2 || attempts[0].Kind != "build" || attempts[0].ExitCode != 1 || attempts[1].Kind != "verify" {
+		t.Errorf("expected the baseline, one failed build attempt, then one verify attempt, got %v", r.Attempts)
 	}
 	// canonical_verify (failing) plus tests_added (passing via the opt-out
 	// runFactoryd's spec content carries) -- see that helper's own comment.
@@ -96,7 +96,7 @@ func TestIntegrationVerifyFailureQuarantinesAndRecordsNotification(t *testing.T)
 	// not parallel-safe: newFixtureRepo calls t.Setenv, which panics if the
 	// test also calls t.Parallel.
 	ws := newFixtureRepo(t)
-	r := runFactoryd(t, ws, "commit", "false")
+	r := runFactoryd(t, ws, "commit", afterBaseline(t, "false"))
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -144,7 +144,7 @@ func TestIntegrationQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndEnv(t, ws, "commit", "false", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
+	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
 		[]string{"FACTORYD_DISCORD_WEBHOOK_URLS=" + srv.URL + "/hook-a, " + srv.URL + "/hook-b"})
 
 	if r.State != run.StateQuarantined {
@@ -181,7 +181,7 @@ func TestIntegrationQuarantineNotifiesSlackWebhook(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndEnv(t, ws, "commit", "false", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
+	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
 		[]string{"FACTORYD_SLACK_WEBHOOK_URLS=" + srv.URL})
 
 	if r.State != run.StateQuarantined {
@@ -238,7 +238,7 @@ func TestIntegrationQuarantinePersistsBeforeDiscordCompletes(t *testing.T) {
 		"-build-app-interpreter", "/bin/sh",
 		"-build-app-script", scriptPath,
 		"-timeout", "30s",
-		"-verify-command", "false",
+		"-verify-command", afterBaseline(t, "false"),
 		"-data-dir", dataDir,
 	)
 	cmd.Env = append(os.Environ(),
@@ -347,7 +347,7 @@ func TestIntegrationOverrideDuringDiscordWaitIsNotLost(t *testing.T) {
 		"-build-app-interpreter", "/bin/sh",
 		"-build-app-script", scriptPath,
 		"-timeout", "30s",
-		"-verify-command", "false",
+		"-verify-command", afterBaseline(t, "false"),
 		"-data-dir", dataDir,
 	)
 	cmd.Env = append(os.Environ(),

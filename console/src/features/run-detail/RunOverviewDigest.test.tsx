@@ -200,3 +200,48 @@ describe("the facts card", () => {
     expect(updated.getAttribute("title")).toMatch(/^2026-08-26 \d\d:20:00$/);
   });
 });
+
+describe("the baseline verify fact", () => {
+  const factsCard = (): HTMLElement =>
+    screen.getByRole("heading", { name: "Run" }).closest("section") as HTMLElement;
+
+  const baseline = (over: Wire): Wire => ({
+    command: "go test ./...",
+    exit_code: 1,
+    passed: false,
+    ...over,
+  });
+
+  test("is absent when the run has no baseline_verify", async () => {
+    renderRun(finished());
+    await screen.findByTestId("run-verdict");
+    expect(factsCard()).not.toHaveTextContent("Baseline verify");
+    expect(screen.queryByTestId("baseline-verify")).not.toBeInTheDocument();
+  });
+
+  test("a pass reads neutral", async () => {
+    renderRun(finished({ baseline_verify: baseline({ passed: true, exit_code: 0 }) }));
+    await screen.findByTestId("run-verdict");
+    expect(within(factsCard()).getByText("Baseline verify")).toBeInTheDocument();
+    const line = screen.getByTestId("baseline-verify");
+    expect(line).toHaveTextContent("passed");
+    expect(line).toHaveAttribute("data-failed", "false");
+  });
+
+  test("a failure the ticket does not name reads as a failure", async () => {
+    renderRun(
+      finished({
+        baseline_verify: baseline({
+          failing_tests: ["TestTrimBOM"],
+          failing_count: 1,
+          unnamed: ["TestTrimBOM"],
+          unnamed_count: 1,
+        }),
+      }),
+    );
+    await screen.findByTestId("run-verdict");
+    const line = screen.getByTestId("baseline-verify");
+    expect(line).toHaveTextContent("failed: TestTrimBOM; the ticket does not name it");
+    expect(line).toHaveAttribute("data-failed", "true");
+  });
+});

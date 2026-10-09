@@ -1077,6 +1077,10 @@ func TestAPIStartStarterRunsWithExecutionRoleAlias(t *testing.T) {
 		Workspace:        workspace,
 		Spec:             spec,
 		SkipProjectCheck: true,
+		// A command that passes on the fixture repo: the default one does
+		// not, and the baseline verify would halt the run before the
+		// relay launch this test is about.
+		VerifyCommand: "true",
 	})
 	// This is the actual proof: an earlier version of this test used a
 	// deliberately invalid alias id specifically so RouteSpec.Validate

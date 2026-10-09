@@ -779,7 +779,7 @@ func TestIntegrationTemporalQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "false", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
 		[]string{"FACTORYD_DISCORD_WEBHOOK_URLS=" + srv.URL + "/hook-a, " + srv.URL + "/hook-b"},
 		[]string{"-temporal-address", address})
 
@@ -819,7 +819,7 @@ func TestIntegrationTemporalQuarantineNotifiesSlackWebhook(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "false", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
 		[]string{"FACTORYD_SLACK_WEBHOOK_URLS=" + srv.URL},
 		[]string{"-temporal-address", address})
 
@@ -857,13 +857,14 @@ func TestIntegrationTemporalTimeoutStillRecoversAttemptsFromCheckpoint(t *testin
 	address := sharedTemporalAddress(t)
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "sleep 100", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "3s", nil, []string{"-temporal-address", address})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "sleep 100"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "3s", nil, []string{"-temporal-address", address})
 
 	if r.State != run.StateHalted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateHalted)
 	}
+	r.Attempts = afterBaselineAttempt(t, r.Attempts)
 	if len(r.Attempts) != 2 {
-		t.Fatalf("Attempts = %+v, want 2 (the completed build attempt and the in-flight verify attempt)", r.Attempts)
+		t.Fatalf("Attempts = %+v, want 2 after the baseline (the completed build attempt and the in-flight verify attempt)", r.Attempts)
 	}
 	if r.Attempts[0].Kind != "build" || r.Attempts[0].ExitCode != 0 || r.Attempts[0].FinishedAt == "" {
 		t.Errorf("Attempts[0] = %+v, want a completed kind=build exit_code=0 attempt", r.Attempts[0])
@@ -890,8 +891,9 @@ func TestIntegrationTemporalRecordsPerAttemptEvidence(t *testing.T) {
 	// no -full-suite-command/.factory.yml
 	// full_suite_command is configured here, so it's substituted with the
 	// resolved verify command ("true") and genuinely runs.
+	r.Attempts = afterBaselineAttempt(t, r.Attempts)
 	if len(r.Attempts) != 3 {
-		t.Fatalf("Attempts = %+v, want 3 (one build, one verify, one full_suite_verify)", r.Attempts)
+		t.Fatalf("Attempts = %+v, want 3 after the baseline (one build, one verify, one full_suite_verify)", r.Attempts)
 	}
 	if r.Attempts[0].Kind != "build" || r.Attempts[1].Kind != "verify" || r.Attempts[2].Kind != "full_suite_verify" {
 		t.Errorf("attempt Kinds = [%q %q %q], want [build verify full_suite_verify]", r.Attempts[0].Kind, r.Attempts[1].Kind, r.Attempts[2].Kind)

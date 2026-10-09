@@ -149,6 +149,11 @@ func eventText(e progress.Event, dur time.Duration, haveDur bool) string {
 		if e.Source == "worker" && e.Stage == "round" && e.Outcome != "" && e.Outcome != "pass" && e.Detail != "" {
 			return e.Detail
 		}
+		// The baseline verify's detail is its result in words ("passed",
+		// or "failed" with the failing test named), which is the line.
+		if e.Source == "factory" && e.Stage == run.BaselineVerifyAttemptKind && e.Detail != "" {
+			text = e.Detail
+		}
 		if haveDur && e.Stage != "gate" && e.Stage != "finished" {
 			text = fmt.Sprintf("%s (%s)", text, dur.Round(time.Second))
 		}
@@ -436,6 +441,8 @@ func printRunRecap(w io.Writer, r *run.Run, dataDir string) {
 		fmt.Fprintf(w, "  repo skills: %s\n", strings.Join(repo, ", "))
 	}
 
+	printRunRecapBaseline(w, r)
+
 	if r.DiffStat != nil {
 		fmt.Fprintf(w, "  changed: %d files (+%d/-%d)\n", r.DiffStat.FilesChanged, r.DiffStat.Insertions, r.DiffStat.Deletions)
 	}
@@ -512,6 +519,14 @@ func printRunRecap(w io.Writer, r *run.Run, dataDir string) {
 		fmt.Fprintf(w, "next: %s\n", next)
 	case r.PullRequestURL != "":
 		fmt.Fprintf(w, "next: review %s\n", r.PullRequestURL)
+	}
+}
+
+// printRunRecapBaseline prints the verify command's result on the base
+// commit, before the build: passed, or failed with the failing test named.
+func printRunRecapBaseline(w io.Writer, r *run.Run) {
+	if summary := sanitize.Line(r.BaselineVerify.Summary()); summary != "" {
+		fmt.Fprintf(w, "  baseline verify: %s\n", summary)
 	}
 }
 

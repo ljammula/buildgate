@@ -99,6 +99,7 @@ const retriedActivityMaximumAttempts = 2
 var nonRetryableActivityFailureTypes = []string{
 	CleanupUnconfirmedFailureType,
 	PreflightFailureType,
+	BaselineVerifyFailureType,
 	SliceChainFailureType,
 	RelayConfigurationFailureType,
 	IsolationFailureType,

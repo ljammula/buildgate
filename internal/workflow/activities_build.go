@@ -292,7 +292,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
 	// see buildActivityArgs' own doc comment on that parameter for why.
 	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness))
-	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath)
+	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath, input.BaselineNotePath)
 	args = append(args, resumeFromStateArgs(input)...)
 	buildAppInterpreter := a.buildAppInterpreterFor(input)
 	// Computed before recording intent (not after, as originally written)
