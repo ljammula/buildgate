@@ -191,7 +191,14 @@ class Round:
 			r = self.state()
 			state = r.get("state", "")
 			if state in ("spec_review", "plan_review"):
-				self.factoryd("approve", self.request, check=False)
+				try:
+					self.factoryd("approve", self.request)
+				except RuntimeError as err:
+					# The draft left a choice to the operator: nobody is here,
+					# so its own recommendation is the answer. Any other
+					# refusal is retried on the next poll, as before.
+					if state == "spec_review" and "decisions left for you" in str(err):
+						self.factoryd("reject", "-reason", "Take the recommended option for every open decision.", self.request, check=False)
 			elif state == "pr_review" and r.get("pull_request_url"):
 				return r["pull_request_url"], state
 			elif state in STOPPED:

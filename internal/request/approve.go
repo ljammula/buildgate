@@ -111,6 +111,37 @@ func ApproveShown(dataDir, id, by string, now time.Time, expectedSHA256 map[stri
 	return approve(dataDir, id, by, now, expectedSHA256, true)
 }
 
+// validateTicketSpecs is approve's re-validation of every ticket under
+// review (see its call for why an approval repeats the editor's check).
+func validateTicketSpecs(dataDir, id string, specRelPaths []string) error {
+	for _, relPath := range specRelPaths {
+		content, err := os.ReadFile(filepath.Join(Dir(dataDir, id), relPath))
+		if err != nil {
+			return fmt.Errorf("request %s: read %s: %w", id, relPath, err)
+		}
+		if err := ValidateTicketSpecContent(string(content)); err != nil {
+			return fmt.Errorf("request %s: %s: %w", id, relPath, err)
+		}
+	}
+	return nil
+}
+
+// refuseOpenDecisions is approve's check that the spec under review asks
+// the operator for nothing more: a decision the draft left to them is
+// answered before the spec is approved, never carried into planning as an
+// open choice. Its error wraps ErrOpenDecisions and names each item.
+func refuseOpenDecisions(dataDir, id string) error {
+	content, err := os.ReadFile(filepath.Join(Dir(dataDir, id), specFileName))
+	if err != nil {
+		return fmt.Errorf("request %s: read %s: %w", id, specFileName, err)
+	}
+	decisions := OpenDecisions(string(content))
+	if len(decisions) == 0 {
+		return nil
+	}
+	return fmt.Errorf("request %s: %w (%d under %q in %s): answer them by requesting changes (`factoryd reject -reason \"<your answers>\" %s`; \"take the recommended option\" is an answer) and the redraft writes the answers into the spec, or settle them yourself by editing the spec. The items: %s", id, ErrOpenDecisions, len(decisions), openQuestionsHeading, specFileName, id, strings.Join(decisions, " | "))
+}
+
 func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string, requireOracleShown bool) (*Request, error) {
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
@@ -129,6 +160,9 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 	switch r.State {
 	case StateSpecReview:
 		relPaths = []string{specFileName}
+		if err := refuseOpenDecisions(dataDir, id); err != nil {
+			return nil, err
+		}
 	case StatePlanReview:
 		relPaths, err = ticketSpecRelPaths(dataDir, id)
 		if err != nil {
@@ -146,14 +180,8 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 		// via -request-ticket's own fail-closed preflight (found live
 		// 2026-09-25). Runs before any hashing or state mutation below, so
 		// a refusal here leaves the request exactly as it was.
-		for _, relPath := range specRelPaths {
-			content, err := os.ReadFile(filepath.Join(Dir(dataDir, id), relPath))
-			if err != nil {
-				return nil, fmt.Errorf("request %s: read %s: %w", id, relPath, err)
-			}
-			if err := ValidateTicketSpecContent(string(content)); err != nil {
-				return nil, fmt.Errorf("request %s: %s: %w", id, relPath, err)
-			}
+		if err := validateTicketSpecs(dataDir, id, specRelPaths); err != nil {
+			return nil, err
 		}
 		// Any ticket's own <NNN>.oracle/ directory (an optional,
 		// operator-reviewed reference oracle drafted for that ticket) is

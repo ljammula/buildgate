@@ -3616,6 +3616,12 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
+	// The spec is as it was shown; it is the operator's answer that is
+	// missing, so this is the same precondition class.
+	if errors.Is(err, request.ErrOpenDecisions) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

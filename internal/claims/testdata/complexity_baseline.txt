@@ -53,7 +53,7 @@
 32 internal/oraclecommit/manifest.go ValidateTargetPath
 26 internal/registryproxy/server.go NewServer
 36 internal/release/merge_policy.go MergePolicyCheck
-48 internal/request/approve.go approve
+47 internal/request/approve.go approve
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
 29 internal/request/retry.go Retry

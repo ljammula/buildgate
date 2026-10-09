@@ -467,6 +467,32 @@ func TestApproveRequestHandler(t *testing.T) {
 	}
 }
 
+// TestApproveRequestHandlerRefusesOpenDecisions: a spec that still asks the
+// operator for a decision is a 409 naming the item, and the request stays in
+// spec_review.
+func TestApproveRequestHandlerRefusesOpenDecisions(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	spec := "# Spec\n\n## Open questions\n\n1. [NEEDS DECISION] Keep the sign or raise.\n"
+	if err := os.WriteFile(filepath.Join(request.Dir(dataDir, "req-1"), "spec.md"), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/approve", "test-token", ""))
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "Keep the sign or raise") {
+		t.Fatalf("status = %d, body %s; want 409 naming the item", recorder.Code, recorder.Body.String())
+	}
+	reloaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.State != request.StateSpecReview {
+		t.Errorf("State = %q, want %q", reloaded.State, request.StateSpecReview)
+	}
+}
+
 // TestApproveRequestHandlerRejectsWrongState covers approving from a
 // non-review state: refused with 409 (a precondition failure, not a
 // malformed request), naming the current state, and nothing is mutated.
