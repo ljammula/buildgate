@@ -589,6 +589,7 @@
       "message": "every-field message"
     },
     "triage": "every-field triage",
+    "handoff_sha256": "every-field handoff_sha256",
     "harness_eval": {
       "harness": "every-field harness",
       "model_id": "every-field model_id",

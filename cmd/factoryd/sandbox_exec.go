@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"buildgate/internal/composeservices"
+	"buildgate/internal/handoff"
 	"buildgate/internal/modelhost"
 	"buildgate/internal/notify"
 	"buildgate/internal/progress"
@@ -613,6 +614,38 @@ func stageExtraRunInput(path, stagedDir string) (string, error) {
 	return staged, nil
 }
 
+// recordHandoff keeps the run's handoff (internal/handoff) in step with r,
+// from the one function nearly every state transition is saved through, for
+// the reason triage is derived here: by this save r carries its gate
+// results, its rounds and its halt code.
+//
+// A run saved quarantined or halted gets the handoff built from r as it is
+// now, and its hash on r: a run first saved halted and later reconciled to
+// quarantined (a reclaimed run's delayed result), or overridden, is not left
+// with a record of a state it has since left. A run saved in any other
+// state has none: a handoff it had is removed and its hash cleared. A
+// failure to write it is logged and never fails the save; the run then has
+// no handoff, which a reader treats as nothing to hand on.
+func recordHandoff(r *run.Run, dataDir string) {
+	runDir := run.Dir(dataDir, r.ID)
+	if r.State != run.StateQuarantined && r.State != run.StateHalted {
+		if r.HandoffSHA256 != "" {
+			if err := os.Remove(filepath.Join(runDir, handoff.FileName)); err != nil && !os.IsNotExist(err) {
+				log.Printf("run %s: could not remove its handoff: %v", r.ID, err)
+			}
+			r.HandoffSHA256 = ""
+		}
+		return
+	}
+	sum, err := handoff.Save(runDir, handoff.Build(r, dataDir))
+	if err != nil {
+		log.Printf("run %s: could not write the handoff: %v", r.ID, err)
+		r.HandoffSHA256 = ""
+		return
+	}
+	r.HandoffSHA256 = sum
+}
+
 // save persists r, alerting on a fresh halt via notify.PrepareHalt (see its
 // own doc comment). cause is optional and used only to populate
 // r.HaltError before that alert is built: pass the actual error that drove
@@ -638,6 +671,7 @@ func save(r *run.Run, dataDir string, cause ...error) error {
 	if (r.State == run.StateQuarantined || r.State == run.StateHalted) && r.Triage == "" {
 		r.Triage = triage.Run(r, dataDir)
 	}
+	recordHandoff(r, dataDir)
 	// notify.PrepareHalt is save's own halt alert -- found via the
 	// 2026-09-05 Opus review, S2 -- hooking the one function every one of
 	// this file's dozens of r.State = run.StateHalted call sites already
