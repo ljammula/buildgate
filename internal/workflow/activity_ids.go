@@ -106,6 +106,7 @@ var nonRetryableActivityFailureTypes = []string{
 	RelayCeilingExceededFailureType,
 	SandboxRerunFailureType,
 	ComposeServicesRejectedFailureType,
+	ReviewInstructionsFailureType,
 	AmbiguousPriorAttemptType,
 	ActivitySupersededType,
 }

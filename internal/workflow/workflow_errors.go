@@ -71,6 +71,8 @@ func HaltReasonCodeFromError(err error) string {
 		return run.HaltReasonComposeServicesRejected
 	case BaselineVerifyFailureType:
 		return run.HaltReasonBaselineVerifyFailed
+	case ReviewInstructionsFailureType:
+		return run.HaltReasonReviewInstructionsFailed
 	}
 	return ""
 }

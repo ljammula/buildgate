@@ -203,6 +203,6 @@ overlapping runs against the same repo onto one task queue via
 - [`README.md`](../../README.md) — prose overview, install, status
 - [`USAGE.md`](../../USAGE.md) / [`USAGE_REFERENCE.md`](../../USAGE_REFERENCE.md) — operator walkthrough and reference
 - [`containment-matrix.md`](../../containment-matrix.md) — sandbox network/filesystem boundary
-- [`safety-contract.md`](../../safety-contract.md) — trust boundaries, threat model, run state graph (SC-001–SC-018)
+- [`safety-contract.md`](../../safety-contract.md) — trust boundaries, threat model, run state graph (SC-001–SC-019)
 - `internal/workflow/request_workflow.go`, `internal/requestdriver` — the request loop and its steps, source for §3
 - `internal/workflow/workflow.go` — `RunWorkflow`'s real Activity sequence, source for §4

@@ -102,6 +102,7 @@ def conformity_evidence(verdicts: list[dict], error: str, *, conformity_policy: 
 def run_conformity_review(
 	workspace: Path, *, criteria_path: Path, conformity_policy: str = "required",
 	review_base_sha: str | None = None, thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
+	instructions_diff: Path | None = None,
 ) -> dict:
 	"""Runs the conformity review and returns a JSON-serializable evidence
 	dict (the same shape write_conformity_evidence_json writes to disk),
@@ -110,7 +111,7 @@ def run_conformity_review(
 	criteria = build_app.read_acceptance_criteria(criteria_path)
 	verdicts, turn_error = build_app.run_spec_conformity_review(
 		workspace, criteria=criteria, review_base_sha=review_base_sha,
-		thinking=thinking, adapter=adapter,
+		thinking=thinking, adapter=adapter, instructions_diff=instructions_diff,
 	)
 	error = build_app.single_line(build_app.redact(turn_error, 100_000)) if turn_error else ""
 	return conformity_evidence(verdicts, error, conformity_policy=conformity_policy, thinking=thinking)
@@ -139,6 +140,10 @@ def main() -> int:
 		"--thinking", choices=build_app.THINKING_LEVELS, default=None,
 		help="Pi thinking level for this job; omitted inherits Pi's installed setting.",
 	)
+	parser.add_argument(
+		"--instructions-diff", type=Path, default=None,
+		help="Host file holding what the build did to the repository's instruction files; shown to the reviewer as data.",
+	)
 	args = parser.parse_args()
 	adapter = harness_adapters.get(args.harness)
 	adapter.prepare()
@@ -146,7 +151,7 @@ def main() -> int:
 	evidence = run_conformity_review(
 		args.workspace.resolve(), criteria_path=args.spec_acceptance_criteria,
 		conformity_policy=args.conformity_policy, review_base_sha=args.review_base_sha,
-		thinking=args.thinking, adapter=adapter,
+		thinking=args.thinking, adapter=adapter, instructions_diff=args.instructions_diff,
 	)
 	evidence_path = write_conformity_evidence_json(args.workspace.resolve(), evidence)
 	print(f"Evidence written to {evidence_path}")

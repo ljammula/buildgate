@@ -36,7 +36,7 @@ func TestSafetyContractContainsRequiredControls(t *testing.T) {
 		}
 	}
 
-	for i := 1; i <= 18; i++ {
+	for i := 1; i <= 19; i++ {
 		id := regexp.QuoteMeta(fmtInvariantID(i))
 		if !regexp.MustCompile(`(?m)^- \*\*` + id + ` —`).MatchString(contract) {
 			t.Errorf("safety contract is missing required invariant SC-%03d", i)

@@ -432,6 +432,12 @@ type RunWorkflowInput struct {
 	// temporalSliceOptions/RunWorkflowInput before this fix, was the
 	// reason -diff-base never reached the Temporal path at all.
 	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
+	// InstructionBaseSHA is the commit whose instruction files a model review
+	// of this run reads (SC-019), ports -instruction-base: for ticket N>1 of
+	// a request, the commit ticket 1 started from, so instruction text an
+	// earlier ticket's unmerged build wrote is not trusted. Empty means
+	// effectiveDiffBase().
+	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
 	// EarlierAttemptPath is -earlier-attempt: a host file holding the
 	// factory's record of an earlier attempt at this ticket that finished
 	// and failed its checks. RunBuildActivity stages it read-only beside
@@ -521,6 +527,14 @@ func (input RunWorkflowInput) effectiveDiffBase() string {
 		return input.DiffBaseSHA
 	}
 	return input.BaseSHA
+}
+
+// instructionBase is the commit a review reads the instruction files from.
+func (input RunWorkflowInput) instructionBase() string {
+	if input.InstructionBaseSHA != "" {
+		return input.InstructionBaseSHA
+	}
+	return input.effectiveDiffBase()
 }
 
 // BuildActivityResult is RunBuildActivity's output. Attempts records every

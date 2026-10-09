@@ -2333,6 +2333,10 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		}
 		fullSuiteCommand, fullSuiteSource = ResolveFullSuiteCommand("", effectiveVerifyCommand)
 	}
+	instructionBase, err := requestInstructionBase(dataDir, r, ticket)
+	if err != nil {
+		return nil, err
+	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
@@ -2369,6 +2373,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		IssueRef: r.Source.IssueRef,
 		// PRBase: computed above -- see QueueEntry.PRBase's own doc comment.
 		PRBase: prBase,
+		// InstructionBase: see requestInstructionBase.
+		InstructionBase: instructionBase,
 		// RequestTicket: see QueueEntry.RequestTicket's own doc comment --
 		// every ticket built here is a ticketspec-format spec (the ticket's
 		// own file, or its conformity-corrective addendum), never a
@@ -2382,6 +2388,49 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil
+}
+
+// requestInstructionBase is the commit a ticket build's reviews read the
+// repository's instruction files from (SC-019): the commit the request's
+// first ticket started from, as the run recorded for it says (its instruction
+// base, else its diff base, else its base; the first two are empty only in a
+// record written before the field existed). For ticket N>1 that is ticket 1's
+// run; for ticket 1 it is the ticket's own earlier run (a retry, a corrective
+// round, a PR-review round or a resume build on it). A ticket's very first
+// build has no earlier run and gets "". An earlier run that cannot be loaded
+// or records no base is an error, so the request halts instead of building
+// with reviews that would trust an earlier build's instruction files.
+func requestInstructionBase(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
+	runID := ticket.RunID
+	if ticket.Index > 1 && len(r.Tickets) > 0 {
+		runID = r.Tickets[0].RunID
+	}
+	if runID == "" && ticket.Index <= 1 {
+		return "", nil
+	}
+	cannot := func(why string) error {
+		return fmt.Errorf("ticket %d: cannot determine the commit the request started from (run %s %s): a review would trust an earlier build's instruction files", ticket.Index, runID, why)
+	}
+	if runID == "" {
+		return "", cannot("has no recorded base")
+	}
+	earlier, err := run.Load(dataDir, runID)
+	if err != nil {
+		return "", cannot(fmt.Sprintf("cannot be loaded: %v", err))
+	}
+	for _, sha := range []string{earlier.InstructionBaseSHA, diffBaseOf(earlier)} {
+		if sha != "" {
+			return sha, nil
+		}
+	}
+	// The ticket's own earlier run halted before it recorded the commit it
+	// started from, so it built and committed nothing: the build that
+	// follows it is a first build, and its own base is the request's.
+	// Refusing here would leave the request with no retry that works.
+	if ticket.Index <= 1 && earlier.ResultSHA == "" {
+		return "", nil
+	}
+	return "", cannot("has no recorded base")
 }
 
 // BuildRequestBuildArgs builds the same runMainWithReady argv shape

@@ -78,9 +78,14 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil || !reviewStepPassed(step.Name, progressResult.Result.ExitCode) {
 			outcome = "fail"
 		}
-		progressMark(ctx, a.logDirFor(input.RunWorkflowInput), step.Stage, "end", outcome, "")
+		progressMark(ctx, a.logDirFor(input.RunWorkflowInput), step.Stage, "end", outcome, reviewProgressDetail(err))
 	}()
 	if err := a.fenceEarlierAttempts(ctx, input.RunWorkflowInput, true); err != nil {
+		return VerifyActivityResult{}, err
+	}
+	// A stub an earlier attempt of this review left (its worker died
+	// mid-launch) goes before anything reads the worktree.
+	if err := a.sweepReviewStubs(ctx, input.RunWorkflowInput); err != nil {
 		return VerifyActivityResult{}, err
 	}
 	if input.RoutePolicy != nil || input.ReviewRelayPolicy != nil {
@@ -219,8 +224,16 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		)
 	}
 
+	// SC-019: the review reads the instruction files as the base commit
+	// holds them, and is shown what the build did to them as data. An
+	// error here does not launch the review.
+	prep, err := a.prepareReviewInstructions(ctx, input, step.Name, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
+	defer func() { _ = prep.finish(ctx) }()
+	if err != nil {
+		return VerifyActivityResult{}, err
+	}
 	script := filepath.Join(filepath.Dir(a.buildAppScriptFor(input.RunWorkflowInput)), step.ScriptName)
-	args := reviewStepArgs(a, step, input, script)
+	args := prep.args(reviewStepArgs(a, step, input, script))
 	buildAppInterpreter := a.buildAppInterpreterFor(input.RunWorkflowInput)
 	command := append([]string{buildAppInterpreter}, args...)
 	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), step.Name, command); err != nil {
@@ -265,6 +278,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 			Thinking:       input.ReviewThinking,
 			ExpectedEffort: run.ExpectedReasoningEffort(input.ReviewThinking, relaySpec.WorkerModelExtraJSON),
 		})
+		prep.record(&attempts[len(attempts)-1])
 		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input.RunWorkflowInput), step.Name, attempts)
 	}
 	// registrySpec/composeSpec deliberately nil: this phase only ever reads
@@ -284,52 +298,12 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(ctx, input.RunWorkflowInput, logPath, 1, beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(prep.launchContext(ctx), input.RunWorkflowInput, logPath, 1, beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
 	})
-	stepResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
-	if runErr == nil {
-		stepResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
-		stepResult.LogSHA256, err = evidence.SHA256File(result.LogPath)
-		if err == nil {
-			// A full pi agent with tool access runs this phase against the
-			// rw workspace -- see run_ticket.go's own matching comment for
-			// why this must halt, not fold into a further safety-net
-			// commit, if it somehow left the workspace dirty. Its job is
-			// to read and report, never to edit.
-			var clean bool
-			clean, err = runner.GitIsClean(input.WorkspacePath)
-			if err == nil && !clean {
-				err = fmt.Errorf("%s left the workspace dirty -- refusing to auto-commit reviewer-authored output", step.Label)
-			}
-		}
-	}
-	if runErr != nil {
-		checkpoint.Error = fmt.Sprintf("%s subprocess infrastructure failure: %v", step.Label, runErr)
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			checkpoint.ErrorType = CleanupUnconfirmedFailureType
-		}
-	} else if err != nil {
-		checkpoint.Error = fmt.Sprintf("%s evidence infrastructure failure: %v", step.Label, err)
-	}
-	checkpoint.Result = stepResult
-	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
-		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("save %s Activity checkpoint", step.Label), errType, saveErr, stepResult.Attempts)
-	}
-	if runErr != nil {
-		errType := InfrastructureFailureType
-		if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-			errType = CleanupUnconfirmedFailureType
-		}
-		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("%s subprocess infrastructure failure", step.Label), errType, runErr, stepResult.Attempts)
-	}
-	if err != nil {
-		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("%s evidence infrastructure failure", step.Label), InfrastructureFailureType, err, stepResult.Attempts)
-	}
-	return stepResult, nil
+	// Immediately after the launch, before the clean check below: the stubs
+	// a mask over an absent path needed, and the snapshot's scratch.
+	finishErr := prep.finish(ctx)
+	return a.completeReviewStep(ctx, input, step, checkpoint, path, result, runErr, finishErr, withInherited(inherited, attempts))
 }
 
 // reviewStepArgs builds step's own harness-script argv, keyed on
@@ -392,4 +366,84 @@ func reviewStepNoRelayError(step reviewstep.Step, input ReviewStepInput) string 
 		return fmt.Sprintf("-code-review-policy is %q but no relay is configured for this run -- code review needs model access and cannot be silently skipped", input.CodeReviewPolicy)
 	}
 	return "ticket declares -spec-acceptance-criteria but no relay is configured for this run -- the spec-conformity review needs model access and cannot be silently skipped"
+}
+
+// reviewProgressDetail is the progress feed's detail for a review that
+// ended with err: the fixed sentence of a ReviewInstructionsFailure, nothing
+// otherwise.
+func reviewProgressDetail(err error) string {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) && appErr.Type() == ReviewInstructionsFailureType {
+		return ReviewInstructionsFailureMessage
+	}
+	return ""
+}
+
+// failReviewInstructions ends a review whose masks, stubs or cleanup failed
+// (SC-019): the fixed message and failure type, the cleaned cause on the
+// attempt, and the same durable checkpoint as any other failed review.
+func (a *Activities) failReviewInstructions(ctx context.Context, step reviewstep.Step, checkpoint activityCheckpoint[VerifyActivityResult], path string, stepResult VerifyActivityResult, cause error) (VerifyActivityResult, error) {
+	failure := reviewInstructionsFailureOf(step.Name, cause, stepResult.Attempts)
+	stepResult.Attempts = AttemptsFromError(failure)
+	checkpoint.Result = stepResult
+	checkpoint.Error, checkpoint.ErrorType = ReviewInstructionsFailureMessage, ReviewInstructionsFailureType
+	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
+		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("save %s Activity checkpoint", step.Label), InfrastructureFailureType, saveErr, stepResult.Attempts)
+	}
+	return stepResult, failure
+}
+
+// completeReviewStep turns a review launch's outcome into the Activity's
+// result: the evidence checks, the durable checkpoint and the error type.
+// finishErr is the failure to remove the launch's stubs, which is an
+// infrastructure failure of its own.
+func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInput, step reviewstep.Step, checkpoint activityCheckpoint[VerifyActivityResult], path string, result runner.Result, runErr, finishErr error, attempts []run.Attempt) (VerifyActivityResult, error) {
+	stepResult := VerifyActivityResult{Result: result, Attempts: attempts}
+	if cause := reviewInstructionsCause(runErr, finishErr); cause != nil {
+		return a.failReviewInstructions(ctx, step, checkpoint, path, stepResult, cause)
+	}
+	var err error
+	if runErr == nil {
+		stepResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
+		err = finishErr
+		if err == nil {
+			stepResult.LogSHA256, err = evidence.SHA256File(result.LogPath)
+		}
+		if err == nil {
+			// A full pi agent with tool access runs this phase against the
+			// rw workspace -- see run_ticket.go's own matching comment for
+			// why this must halt, not fold into a further safety-net
+			// commit, if it somehow left the workspace dirty. Its job is
+			// to read and report, never to edit.
+			var clean bool
+			clean, err = runner.GitIsClean(input.WorkspacePath)
+			if err == nil && !clean {
+				err = fmt.Errorf("%s left the workspace dirty -- refusing to auto-commit reviewer-authored output", step.Label)
+			}
+		}
+	}
+	errType := InfrastructureFailureType
+	if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
+		errType = CleanupUnconfirmedFailureType
+	}
+	if runErr != nil {
+		checkpoint.Error = fmt.Sprintf("%s subprocess infrastructure failure: %v", step.Label, runErr)
+		checkpoint.ErrorType = ""
+		if errType == CleanupUnconfirmedFailureType {
+			checkpoint.ErrorType = errType
+		}
+	} else if err != nil {
+		checkpoint.Error = fmt.Sprintf("%s evidence infrastructure failure: %v", step.Label, err)
+	}
+	checkpoint.Result = stepResult
+	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
+		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("save %s Activity checkpoint", step.Label), errType, saveErr, stepResult.Attempts)
+	}
+	if runErr != nil {
+		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("%s subprocess infrastructure failure", step.Label), errType, runErr, stepResult.Attempts)
+	}
+	if err != nil {
+		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("%s evidence infrastructure failure", step.Label), InfrastructureFailureType, err, stepResult.Attempts)
+	}
+	return stepResult, nil
 }

@@ -332,6 +332,7 @@
     "state": "accepted",
     "base_sha": "every-field base_sha",
     "diff_base_sha": "every-field diff_base_sha",
+    "instruction_base_sha": "every-field instruction_base_sha",
     "result_sha": "every-field result_sha",
     "halt_confirmed": true,
     "kept_for_resume": true,
@@ -505,7 +506,15 @@
         "skills_sha256": "every-field skills_sha256",
         "repo_skills": [
           "every-field repo_skills"
-        ]
+        ],
+        "review_instructions_sha256": "every-field review_instructions_sha256",
+        "review_masked_paths": [
+          "every-field review_masked_paths"
+        ],
+        "review_removed_paths": [
+          "every-field review_removed_paths"
+        ],
+        "review_instructions_error": "every-field review_instructions_error"
       }
     ],
     "gate_results": [

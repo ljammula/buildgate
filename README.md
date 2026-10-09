@@ -354,7 +354,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`doc/designs/architecture-flows.md`](doc/designs/architecture-flows.md) | Component diagram, request lifecycle, the request workflow and a run's Activity sequence |
 | [`doc/designs/openshell-sandbox-runtime.md`](doc/designs/openshell-sandbox-runtime.md) | The sandbox runtime: gateway, supervisor, meter, one launch step by step, the restart guard |
 | [`doc/designs/progress-contract.md`](doc/designs/progress-contract.md) | The run progress feed: file format, stage vocabulary, stall semantics |
-| [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-018) |
+| [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-019) |
 | [`CLAIMS.md`](CLAIMS.md) | Every normative claim mapped to status + enforcing test |
 | [`containment-matrix.md`](containment-matrix.md) | Sandbox/network/filesystem escape boundaries: enforced vs. open |
 

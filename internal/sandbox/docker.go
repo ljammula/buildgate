@@ -880,10 +880,15 @@ func (s LaunchSpec) validateMountPaths() error {
 		}
 	}
 	if err := validateWorkspaceMasks(s.WorkspaceMasks, s.ReferenceOracleMountPath); err != nil {
-		return fmt.Errorf("sandbox workspace mask: %w", err)
+		return fmt.Errorf("sandbox workspace mask: %w: %w", ErrWorkspaceMask, err)
 	}
 	return nil
 }
+
+// ErrWorkspaceMask is wrapped by every error a launch returns for its
+// WorkspaceMasks (validation or resolution), so a caller can tell a mask
+// failure from the launch's other errors with errors.Is.
+var ErrWorkspaceMask = errors.New("workspace mask rejected")
 
 // resolveWorkspaceMasks validates masks (so a symlink source is refused
 // before it is followed) and returns a copy whose sources are resolved
@@ -893,13 +898,13 @@ func resolveWorkspaceMasks(masks []WorkspaceMask, oraclePath string) ([]Workspac
 		return nil, nil
 	}
 	if err := validateWorkspaceMasks(masks, oraclePath); err != nil {
-		return nil, fmt.Errorf("sandbox workspace mask: %w", err)
+		return nil, fmt.Errorf("sandbox workspace mask: %w: %w", ErrWorkspaceMask, err)
 	}
 	out := make([]WorkspaceMask, len(masks))
 	for i, m := range masks {
 		parent, err := filepath.EvalSymlinks(filepath.Dir(m.Source))
 		if err != nil {
-			return nil, fmt.Errorf("resolve sandbox workspace mask %s: %w", m.Target, err)
+			return nil, fmt.Errorf("resolve sandbox workspace mask %s: %w: %w", m.Target, ErrWorkspaceMask, err)
 		}
 		m.Source = filepath.Join(parent, filepath.Base(m.Source))
 		out[i] = m
@@ -2056,6 +2061,7 @@ var HarnessSiblingModules = map[string]bool{
 	"plan_tickets.design_guide.prompt.md":                true,
 	"plan_tickets.previous_draft.prompt.md":              true,
 	"plan_tickets.prompt.md":                             true,
+	"review.instructions_diff.prompt.md":                 true,
 	"spec_conformity.command_outcome_rule.prompt.md":     true,
 	"spec_conformity.diff_inline.prompt.md":              true,
 	"spec_conformity.diff_self.prompt.md":                true,

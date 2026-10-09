@@ -33,6 +33,7 @@
     "unit_tests": "echo unit"
   },
   "harness": "pi",
+  "instruction_base_sha": "<BASE_SHA>",
   "isolate_workspace": true,
   "isolated_parent_dir": "<DATA_DIR>/workspaces",
   "isolated_repo_dir": "<WORKSPACE>",

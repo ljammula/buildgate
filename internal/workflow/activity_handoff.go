@@ -191,6 +191,11 @@ func (a *Activities) prepareBuildHandoff(ctx context.Context, input RunWorkflowI
 	fail := func(what string, err error) (resumeHandoff, error) {
 		return resumeHandoff{}, temporal.NewApplicationErrorWithCause(what, InfrastructureFailureType, err)
 	}
+	// A stub a worker that died mid-review left would be committed into the
+	// snapshot below.
+	if err := a.sweepReviewStubs(ctx, input); err != nil {
+		return resumeHandoff{}, err
+	}
 	ref := checkpointRef(runID, interrupted)
 	snapshot, err := snapshotWorkspace(input.WorkspacePath, ref,
 		fmt.Sprintf("buildgate checkpoint: %s attempt %d", runID, interrupted))

@@ -239,6 +239,16 @@ round checks out the quarantined run's own existing branch
 `-diff-base`, for every ticket in a
 multi-ticket request. The review corrective round and the PR-review
 corrective round (`runCorrectiveRound`) both rely on this.
+`-instruction-base <sha>` (`RunWorkflowInput.InstructionBaseSHA`, recorded on
+every run as its `instruction_base_sha`) names the commit whose instruction
+files the run's reviews read. The request driver passes it to every build that
+follows an earlier run of the request (first build of ticket 2 onward, retry,
+corrective round, PR-review round, resume): ticket 1's recorded value, or for
+ticket 1 the value its own earlier run recorded, so an earlier build's
+unmerged instruction text is not trusted. When that run cannot be loaded or
+records no base, the request halts instead of building. It is a full
+40-character object id and an ancestor of the run's base. Default: a resumed
+run's lost run's value, else the run's diff base, else its base.
 
 **PR review (`pr_review`).** `worker`'s poll loop
 (`internal/requestdriver/pr_review_driver.go`) checks each ticket's PR at most once
@@ -1216,24 +1226,64 @@ skills, which the harness finds in `/workspace` itself.
 | codex | `.agents/skills` | Every job: the CLI reads the folder itself |
 | copilot | `.agents/skills`, `.github/skills`, `.claude/skills` | Every job: the CLI reads the folders itself |
 
-A repo skill is instruction text, and a build can write one. On codex and
-copilot a review therefore reads whatever the build left in those folders,
-and on every harness it reads the working tree's `AGENTS.md`-style files;
-the review's verdict is never enough to accept a run on its own (SC-006).
-The pi row holds at pi's default project trust: an image whose pi settings
-trust every project lets pi find the repo's skills itself, in every job.
+A repo skill is instruction text, and a build can write one. A review does
+not read what the build wrote: see "What a review reads of the repository's
+instructions" below. The pi row holds at pi's default project trust: an image
+whose pi settings trust every project lets pi find the repo's skills itself,
+in every job.
 
 Put a repo skill meant for every harness in `.agents/skills`.
 
 Review jobs take `roles.review`'s skills, or `roles.execution`'s when
 `roles.review` is unset, the same fallback as their harness. Each attempt
 records `skills`, `skills_sha256` and `repo_skills` (the repo's own project
-skills, scanned after the attempt; at most 64); drafting jobs record
+skills, scanned after the attempt from the worktree, so for a review attempt the
+masked paths are in `review_masked_paths`; at most 64); drafting jobs record
 `skills`/`skills_sha256` on the request. A Temporal Worker mounts a run's
 skills only when its own session config resolves the same ones; `factoryd status` prints them, and
 `factoryd doctor`'s `skills` row dry-runs every role's snapshot (against
 `-workspace` when given). Skill content is operator-trusted: vet a
 third-party skill like any dependency.
+
+### What a review reads of the repository's instructions
+
+Every model review of a run (spec conformity, code review, the combined
+review; a pull-request round's fix runs through the same ones) launches with
+the repository's instruction files as the base commit holds them: `AGENTS.md`,
+`AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md` in any
+directory; `.pi/`, `.codex/`, `.claude/`, `.agents/skills`, `.github/skills`,
+`.github/instructions`, `.github/agents`, `.github/hooks`,
+`.github/copilot-instructions.md`, `.mcp.json` and `.vscode/mcp.json`.
+Build, verify and gate launches are not masked.
+
+| | What the review gets |
+|---|---|
+| Which commit | The commit the request started from (the run's `instruction_base_sha`, set by `-instruction-base` for every build that follows an earlier run; for a ticket's first build, the run's own base). It must be an ancestor of the result, else the run halts as below |
+| Sees, as the base commit has them | Each instruction path the build changed, mounted read-only over the worktree; a path the build deleted is mounted back |
+| Shown as data | What the build did to those paths, as a fenced block after the diff (`--instructions-diff`, at most 60,000 characters), labelled as data about the change, never instructions. A complete, uncut list of the paths it touched comes first, and names those the cap cut out; the review is told to report such a path as a finding |
+| Removed first | Instruction-named paths the worktree holds that the result commit does not (untracked or ignored); listed in `review_removed_paths` |
+
+| Halts the run before the review launches | What to change |
+|---|---|
+| A tracked instruction file no longer matches the result commit (an uncommitted edit, or a mode or content the checkout rewrote) | Commit or discard the difference in the worktree, then `factoryd retry` |
+| An instruction path is a link to a directory that is not one, or a link whose target the build changed | Replace the link with the real file or folder in the repository |
+| A checkout converted an instruction file (line endings, filters) | Stop converting that file (`.gitattributes`) |
+| A path is spelled two ways (`AGENTS.md` and `agents.md`), or a submodule sits under an instruction path | Keep one spelling; move the submodule |
+| More than 64 instruction paths changed, over 2,000 instruction files, a file over 16 MiB, or an instruction path that changed between a file and a directory | Split the change so the build leaves fewer instruction files altered; the review attempt's `review_instructions_error` names which limit |
+
+The halt's `halt_reason_code` is `review_instructions_failed`; its message is
+a fixed sentence. The cause is in the review attempt's
+`review_instructions_error`, `factoryd status` quotes it for the operator,
+and no handoff or later build is told.
+
+| Evidence field on a review attempt | Holds |
+|---|---|
+| `review_instructions_sha256` | SHA-256 of the snapshot of base-commit instruction files the review read |
+| `review_masked_paths` | The instruction paths mounted from the base commit (at most 64, then `... and N more`) |
+| `review_removed_paths` | The instruction-named paths removed from the worktree before the review (same cap) |
+
+The list of instruction paths is a table in the code: a harness that loads a
+path not on it is not covered.
 
 ## Design guide (`design_guide`, `design_guide_dirs:`)
 

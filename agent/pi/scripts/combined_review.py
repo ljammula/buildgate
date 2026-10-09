@@ -86,6 +86,7 @@ PROMPT = prompt_templates.load(
 
 def combined_review_prompt(
 	criteria: list[str], spec_text: str, review_base_sha: str | None, diff: tuple[str, str] | None = None,
+	instructions_block: str = "",
 ) -> str:
 	"""Builds the one prompt covering both tasks. diff, when given, is
 	(stat, diff_text) from build_app.workspace_diff, inlined via
@@ -100,9 +101,10 @@ def combined_review_prompt(
 	suffix identical across every launch of this script."""
 	if diff is None:
 		diff_block = DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
+		diff_block = diff_block.removesuffix("\n") + instructions_block
 	else:
 		stat, diff_text = diff
-		diff_block = DIFF_INLINE.format(diff=build_app.format_diff_for_prompt(stat, diff_text, review_base_sha))
+		diff_block = DIFF_INLINE.format(diff=build_app.format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
 	return PROMPT.format(
 		diff_block=diff_block.removesuffix("\n"), spec_text=spec_text, criteria="\n".join(criteria),
 		conformity_command_outcome_rule=build_app.CONFORMITY_COMMAND_OUTCOME_RULE,
@@ -116,6 +118,7 @@ def run_combined_review(
 	workspace: Path, *, criteria_path: Path, spec_path: Path,
 	conformity_policy: str = "required", review_policy: str = "required",
 	review_base_sha: str | None = None, thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
+	instructions_diff: Path | None = None,
 ) -> tuple[dict, dict]:
 	"""Runs the one combined turn and returns (conformity_evidence,
 	code_review_evidence) -- both JSON-serializable evidence dicts in
@@ -130,7 +133,9 @@ def run_combined_review(
 	spec_text = spec_path.read_text()
 	diff = build_app.workspace_diff(workspace, review_base_sha) if review_base_sha else None
 	diff_fetch_failed = review_base_sha is not None and diff is None
-	prompt = combined_review_prompt(criteria, spec_text, review_base_sha, diff=diff)
+	prompt = combined_review_prompt(
+		criteria, spec_text, review_base_sha, diff=diff, instructions_block=build_app.instructions_diff_block(instructions_diff),
+	)
 	turn = build_app.run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-combined-review-session",
 		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
@@ -176,6 +181,10 @@ def main() -> int:
 		"--thinking", choices=build_app.THINKING_LEVELS, default=None,
 		help="Pi thinking level for this job; omitted inherits Pi's installed setting.",
 	)
+	parser.add_argument(
+		"--instructions-diff", type=Path, default=None,
+		help="Host file holding what the build did to the repository's instruction files; shown to the reviewer as data.",
+	)
 	args = parser.parse_args()
 	adapter = harness_adapters.get(args.harness)
 	adapter.prepare()
@@ -184,7 +193,7 @@ def main() -> int:
 		args.workspace.resolve(), criteria_path=args.spec_acceptance_criteria,
 		spec_path=args.spec.resolve(), conformity_policy=args.conformity_policy,
 		review_policy=args.review_policy, review_base_sha=args.review_base_sha,
-		thinking=args.thinking, adapter=adapter,
+		thinking=args.thinking, adapter=adapter, instructions_diff=args.instructions_diff,
 	)
 	conformity_path, review_path = write_combined_evidence(args.workspace.resolve(), conformity, review)
 	print(f"Conformity evidence written to {conformity_path}")
