@@ -207,7 +207,8 @@ func TestRunBuildActivityFailsClosedOnUnusableRelayConfiguration(t *testing.T) {
 // needs to build a spec at all.
 func testRoutedActivities(credential sandbox.RouteSecret) *Activities {
 	return &Activities{
-		CheckRoute: func(role string, p sandbox.RoutePolicy, thinking string) error { return nil },
+		snapshotReviewInstructions: noReviewInstructions,
+		CheckRoute:                 func(role string, p sandbox.RoutePolicy, thinking string) error { return nil },
 		ResolveRouteCredentials: func(route string) (RouteCredentials, error) {
 			return RouteCredentials{APIKey: credential}, nil
 		},
@@ -379,4 +380,11 @@ func TestRunWorkflowInputCannotCarryACredential(t *testing.T) {
 	if err := testfixture.FindCredentialLeak(reflect.TypeOf(RunWorkflowInput{}), forbiddenTypes, nil); err != nil {
 		t.Fatalf("%v: Temporal would persist it in Event History; the upstream credential must stay on the Worker's own static configuration (Activities.RouteSecret)", err)
 	}
+}
+
+// noReviewInstructions is the review-instructions seam for tests whose
+// worktree has no real base commit and no instruction files: it masks and
+// removes nothing.
+func noReviewInstructions(context.Context, string, string, string) (sandbox.ReviewInstructionSnapshot, error) {
+	return sandbox.ReviewInstructionSnapshot{}, nil
 }

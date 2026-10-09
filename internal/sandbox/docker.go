@@ -2056,6 +2056,7 @@ var HarnessSiblingModules = map[string]bool{
 	"plan_tickets.design_guide.prompt.md":                true,
 	"plan_tickets.previous_draft.prompt.md":              true,
 	"plan_tickets.prompt.md":                             true,
+	"review.instructions_diff.prompt.md":                 true,
 	"spec_conformity.command_outcome_rule.prompt.md":     true,
 	"spec_conformity.diff_inline.prompt.md":              true,
 	"spec_conformity.diff_self.prompt.md":                true,

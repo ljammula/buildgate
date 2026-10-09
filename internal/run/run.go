@@ -94,6 +94,12 @@ const HaltReasonRelayCeilingExceeded = "relay_ceiling_exceeded"
 // in the target repo or the operator's config, never in the ticket's code.
 const HaltReasonComposeServicesRejected = "compose_services_rejected"
 
+// HaltReasonReviewInstructionsFailed is Run.HaltReasonCode's value when a
+// run halted before a model review because the repository's instruction
+// files could not be prepared for it (SC-019). The cause is in the review
+// attempt's ReviewInstructionsError, for the operator only.
+const HaltReasonReviewInstructionsFailed = "review_instructions_failed"
+
 // RouteSkip is one route modelrole.SelectRoute passed over on its way to
 // Attempt.RelayRoute -- a durable, evidence-only copy of modelrole.
 // RouteSkip (this package cannot import internal/modelrole: modelrole
@@ -299,7 +305,28 @@ type Attempt struct {
 	// RepoSkills are the target repo's own project skills (.github/,
 	// .agents/, .claude/, .pi/skills entries) the harness could also load,
 	// scanned after the attempt so ones the worker added count too.
+	//
+	// For a review attempt this is the worktree's view after the build; the
+	// instruction paths the review saw as the base commit holds them are in
+	// ReviewMaskedPaths.
 	RepoSkills []string `json:"repo_skills,omitempty"`
+	// ReviewInstructionsSHA256 is the SHA-256 of the snapshot of base-commit
+	// instruction files a review attempt read (SC-019). Empty for any other
+	// attempt, and for a review whose build changed no instruction path.
+	ReviewInstructionsSHA256 string `json:"review_instructions_sha256,omitempty"`
+	// ReviewMaskedPaths are the workspace-relative instruction paths a review
+	// attempt saw as the base commit holds them, mounted read-only over the
+	// worktree. At most 64 are listed, then one "... and N more" entry.
+	ReviewMaskedPaths []string `json:"review_masked_paths,omitempty"`
+	// ReviewRemovedPaths are the untracked instruction-named paths the host
+	// removed from the worktree before a review attempt launched. Capped like
+	// ReviewMaskedPaths.
+	ReviewRemovedPaths []string `json:"review_removed_paths,omitempty"`
+	// ReviewInstructionsError is the cleaned text of the error that stopped a
+	// review before it launched because the repository's instruction files
+	// could not be prepared (SC-019). It is for the operator: it reaches no
+	// handoff and no later build.
+	ReviewInstructionsError string `json:"review_instructions_error,omitempty"`
 }
 
 // ExpectedReasoningEffort answers "what reasoning-effort value was Pi
@@ -1280,7 +1307,7 @@ type Run struct {
 	// pattern-match prose for -- a distinct machine-readable quarantine
 	// reason so an operator can tell "hit the ceiling" apart from "the
 	// code is wrong". Values: HaltReasonRelayCeilingExceeded,
-	// HaltReasonComposeServicesRejected.
+	// HaltReasonComposeServicesRejected, HaltReasonReviewInstructionsFailed.
 	// Empty for every halt cause that predates this field or has no such
 	// need -- most halts already carry enough signal in their own
 	// structured evidence (GateResults, Attempts, ...).

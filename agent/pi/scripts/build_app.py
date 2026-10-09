@@ -1255,6 +1255,38 @@ def format_diff_for_prompt(stat: str, diff_text: str, review_base_sha: str | Non
 	)
 
 
+INSTRUCTIONS_DIFF = prompt_templates.load("review.instructions_diff", ("diff",))
+# The most of an instructions diff a review prompt carries.
+MAX_INSTRUCTIONS_DIFF_CHARS = 60_000
+
+
+def neutralise_instructions_diff(text: str) -> str:
+	"""The instructions diff is text the build wrote, placed inside a fenced
+	block; break every run of the fence characters (and the <<< >>> section
+	delimiters, as draft_spec.neutralise_feedback does) so it can never close
+	the fence early or open a new one."""
+	while "```" in text:
+		text = text.replace("```", "` ` `")
+	return text.replace("<<<", "< < <").replace(">>>", "> > >")
+
+
+def instructions_diff_block(path: Path | None) -> str:
+	"""The text a review prompt appends after the inline diff for the host's
+	--instructions-diff file: what the build did to the repository's
+	instruction files, which the workspace itself shows as they were before
+	it (SC-019). "" when path is unset or the file is empty, so the prompt is
+	then byte-identical to one without the flag."""
+	if path is None:
+		return ""
+	text = path.read_text(encoding="utf-8", errors="replace")
+	if not text.strip():
+		return ""
+	if len(text) > MAX_INSTRUCTIONS_DIFF_CHARS:
+		omitted = len(text) - MAX_INSTRUCTIONS_DIFF_CHARS
+		text = text[:MAX_INSTRUCTIONS_DIFF_CHARS] + f"\n[instructions diff truncated here: {omitted:,} more characters not shown]"
+	return "\n\n" + INSTRUCTIONS_DIFF.format(diff=neutralise_instructions_diff(text.rstrip("\n"))).removesuffix("\n")
+
+
 def read_acceptance_criteria(path: Path) -> list[str]:
 	"""Returns one criterion per non-empty, non-comment line of path (the
 	approved spec's own numbered acceptance criteria, one per line, e.g.
@@ -1297,7 +1329,9 @@ CONFORMITY_PROMPT = prompt_templates.load(
 )
 
 
-def spec_conformity_prompt(criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None = None) -> str:
+def spec_conformity_prompt(
+	criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None = None, instructions_block: str = "",
+) -> str:
 	"""Builds the reviewer's prompt. diff, when given, is (stat, diff_text)
 	from workspace_diff: the diff is inlined directly and the reviewer is
 	told the diff is complete and not to re-fetch it, instead of being
@@ -1312,9 +1346,10 @@ def spec_conformity_prompt(criteria: list[str], review_base_sha: str | None, dif
 	itself, exactly as before this fix."""
 	if diff is None:
 		diff_instructions = CONFORMITY_DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
+		diff_instructions = diff_instructions.removesuffix("\n") + instructions_block
 	else:
 		stat, diff_text = diff
-		diff_instructions = CONFORMITY_DIFF_INLINE.format(diff=format_diff_for_prompt(stat, diff_text, review_base_sha))
+		diff_instructions = CONFORMITY_DIFF_INLINE.format(diff=format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
 	return CONFORMITY_PROMPT.format(
 		diff_instructions=diff_instructions.removesuffix("\n"), criteria="\n".join(criteria),
 		command_outcome_rule=CONFORMITY_COMMAND_OUTCOME_RULE, formatting_rule=CONFORMITY_FORMATTING_RULE,
@@ -1553,6 +1588,7 @@ def run_spec_conformity_review(
 	thinking: str | None,
 	timeout_minutes: int = 10,
 	adapter=DEFAULT_ADAPTER,
+	instructions_diff: Path | None = None,
 ) -> tuple[list[dict], str]:
 	"""Runs one bounded, standalone pi turn asking it to check the
 	workspace's current diff against each declared acceptance criterion
@@ -1586,7 +1622,7 @@ def run_spec_conformity_review(
 	operator with only "no-review-verdict" per criterion -- the actual
 	429 was invisible in that evidence before this fix."""
 	diff = workspace_diff(workspace, review_base_sha) if review_base_sha else None
-	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff)
+	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff, instructions_block=instructions_diff_block(instructions_diff))
 	turn = run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-conformity-session",
 		review_base_sha=review_base_sha, thinking=thinking,

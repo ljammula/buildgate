@@ -93,7 +93,9 @@ PROMPT = prompt_templates.load(
 )
 
 
-def code_review_prompt(spec_text: str, review_base_sha: str | None, diff: tuple[str, str] | None = None) -> str:
+def code_review_prompt(
+	spec_text: str, review_base_sha: str | None, diff: tuple[str, str] | None = None, instructions_block: str = "",
+) -> str:
 	"""Builds the reviewer's prompt. diff, when given, is (stat, diff_text)
 	from build_app.workspace_diff: the diff is inlined directly and the reviewer is
 	told not to re-fetch it, instead of being asked to run `git diff`
@@ -107,9 +109,10 @@ def code_review_prompt(spec_text: str, review_base_sha: str | None, diff: tuple[
 	fix."""
 	if diff is None:
 		diff_instructions = DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
+		diff_instructions = diff_instructions.removesuffix("\n") + instructions_block
 	else:
 		stat, diff_text = diff
-		diff_instructions = DIFF_INLINE.format(diff=build_app.format_diff_for_prompt(stat, diff_text, review_base_sha))
+		diff_instructions = DIFF_INLINE.format(diff=build_app.format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
 	return PROMPT.format(
 		diff_instructions=diff_instructions.removesuffix("\n"), spec_text=spec_text, scope_rule=SCOPE_RULE,
 		severity_rule=SEVERITY_RULE, command_outcome_rule=COMMAND_OUTCOME_RULE, json_contract=JSON_CONTRACT,
@@ -253,6 +256,7 @@ def code_review_evidence(
 def run_code_review(
 	workspace: Path, *, spec_path: Path, review_policy: str = "required",
 	review_base_sha: str | None = None, thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
+	instructions_diff: Path | None = None,
 ) -> dict:
 	"""Runs the code review and returns a JSON-serializable evidence dict
 	(the same shape write_code_review_evidence_json writes to disk), so
@@ -261,7 +265,9 @@ def run_code_review(
 	spec_text = spec_path.read_text()
 	diff = build_app.workspace_diff(workspace, review_base_sha) if review_base_sha else None
 	diff_fetch_failed = review_base_sha is not None and diff is None
-	prompt = code_review_prompt(spec_text, review_base_sha, diff=diff)
+	prompt = code_review_prompt(
+		spec_text, review_base_sha, diff=diff, instructions_block=build_app.instructions_diff_block(instructions_diff),
+	)
 	turn = build_app.run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-code-review-session",
 		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
@@ -316,6 +322,10 @@ def main() -> int:
 		"--thinking", choices=build_app.THINKING_LEVELS, default=None,
 		help="Pi thinking level for this job; omitted inherits Pi's installed setting.",
 	)
+	parser.add_argument(
+		"--instructions-diff", type=Path, default=None,
+		help="Host file holding what the build did to the repository's instruction files; shown to the reviewer as data.",
+	)
 	args = parser.parse_args()
 	adapter = harness_adapters.get(args.harness)
 
@@ -324,7 +334,7 @@ def main() -> int:
 		evidence = run_code_review(
 			args.workspace.resolve(), spec_path=args.spec.resolve(),
 			review_policy=args.review_policy, review_base_sha=args.review_base_sha,
-			thinking=args.thinking, adapter=adapter,
+			thinking=args.thinking, adapter=adapter, instructions_diff=args.instructions_diff,
 		)
 	except Exception as exc:  # noqa: BLE001 -- any crash must still leave evidence naming it
 		evidence = crashed_review_evidence(args.review_policy, args.thinking, exc)

@@ -178,6 +178,13 @@ const (
 	// sandbox.ErrComposeServicesRejected), kept distinct for the same
 	// reason as RelayCeilingExceededFailureType: see HaltReasonCodeFromError.
 	ComposeServicesRejectedFailureType = "ComposeServicesRejected"
+	// ReviewInstructionsFailureType marks RunReviewStepActivity finding
+	// the repository's instruction files in a shape it cannot give the
+	// review as the base commit holds them (SC-019), or failing to prepare
+	// them. The review does not launch and the run halts. Never an
+	// infrastructure failure: a rerun repeats it. Its message is fixed; the
+	// cleaned cause travels only in the attempt in its details.
+	ReviewInstructionsFailureType = "ReviewInstructionsFailure"
 	// AmbiguousPriorAttemptType marks a RunBuildActivity/RunVerifyActivity
 	// failure raised when a durable intent record shows a prior attempt
 	// started the subprocess but never reached its completed checkpoint —

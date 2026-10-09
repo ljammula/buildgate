@@ -494,7 +494,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// RepositoryOwnerRunWorkflowID(ownerID, RequestID), a derived,
 		// owner-namespaced string, not the durable run id
 		// ReconcileOrphans' run.Load(dataDir, id) actually looks up.
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input))}
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: workspaceMasksFrom(ctx)}
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.
 			prepared, prepareErr := registryProxy.PrepareWorker(s)
@@ -552,7 +552,11 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		}
 		last = runner.Result{Command: res.Command, ExitCode: res.ExitCode, StartedAt: res.StartedAt, FinishedAt: res.FinishedAt, LogPath: res.LogPath, ImageDigest: res.ImageDigest,
 			ScriptsSHA256: scriptsSHA256,
-			Skills:        sandbox.SkillNames(skills), SkillsSHA256: skillsSHA256, RepoSkills: sandbox.ProjectSkills(workspace),
+			// RepoSkills is scanned host-side from the worktree: for a review
+			// attempt that is the build's view, and the instruction paths the
+			// review saw as the base commit holds them are in
+			// Attempt.ReviewMaskedPaths (SC-019).
+			Skills: sandbox.SkillNames(skills), SkillsSHA256: skillsSHA256, RepoSkills: sandbox.ProjectSkills(workspace),
 			RelayImageDigest: res.RelayFacts.ImageDigest, RelayNetworkName: res.RelayFacts.NetworkName, RelayContainerName: res.RelayFacts.ContainerName, RelayUpstream: res.RelayFacts.Upstream,
 			RelayCredentialMode:         res.RelayFacts.CredentialMode,
 			RelayRoute:                  res.RelayFacts.Route,

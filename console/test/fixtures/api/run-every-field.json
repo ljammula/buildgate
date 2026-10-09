@@ -204,7 +204,15 @@
       "skills_sha256": "every-field skills_sha256",
       "repo_skills": [
         "every-field repo_skills"
-      ]
+      ],
+      "review_instructions_sha256": "every-field review_instructions_sha256",
+      "review_masked_paths": [
+        "every-field review_masked_paths"
+      ],
+      "review_removed_paths": [
+        "every-field review_removed_paths"
+      ],
+      "review_instructions_error": "every-field review_instructions_error"
     }
   ],
   "gate_results": [

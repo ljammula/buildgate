@@ -170,6 +170,10 @@ type Activities struct {
 	// effects; the zero value (production) uses the real ones. Test seam
 	// only, matching runWithRetries above.
 	registryProxyHooks sandbox.RegistryProxyHooks
+	// snapshotReviewInstructions replaces the real snapshot of base-commit
+	// instruction files a review launches with (SC-019); nil is the real
+	// one. Test seam only, for tests whose worktree has no real base commit.
+	snapshotReviewInstructions reviewInstructionsFunc
 	// composeServicesHooks is registryProxyHooks' counterpart for compose
 	// services. Test seam only.
 	composeServicesHooks sandbox.ComposeServicesHooks

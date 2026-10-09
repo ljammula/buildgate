@@ -41,6 +41,10 @@ const (
 	maxWordLen     = 40
 )
 
+// reviewInstructionsStopped is Stopped for a run whose review could not be
+// given the base commit's instruction files: it says nothing of the cause.
+const reviewInstructionsStopped = "halted before the review; an operator must look into it"
+
 // Round is one build round of the attempt, as the run record has it.
 type Round struct {
 	Index int `json:"index"`
@@ -134,6 +138,11 @@ func Build(r *run.Run, dataDir string) Document {
 	// oracle or quote its log; the checks below say the same without that.
 	if r.State == run.StateHalted {
 		doc.Stopped = clean(firstNonEmpty(r.Triage, triage.Run(r, dataDir)), maxSentenceLen)
+		if r.HaltReasonCode == run.HaltReasonReviewInstructionsFailed {
+			// The operator's sentence quotes why the instruction files could
+			// not be prepared; a later build is never told (SC-019).
+			doc.Stopped = reviewInstructionsStopped
+		}
 	}
 	runDir := run.Dir(dataDir, r.ID)
 	if r.AgentEvidence != nil {

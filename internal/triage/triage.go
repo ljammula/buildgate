@@ -862,6 +862,8 @@ func triageHalt(r *run.Run) string {
 		return "halted: relay budget ceiling exceeded"
 	case run.HaltReasonComposeServicesRejected:
 		return "halted: the target repo's compose file was rejected before the build; fix the named services or compose_services_* config and retry"
+	case run.HaltReasonReviewInstructionsFailed:
+		return reviewInstructionsSentence(r)
 	case run.HaltReasonBaselineVerifyFailed:
 		// No model call was made: the verify command failed on the base
 		// commit with a failure the ticket does not name.
@@ -882,6 +884,22 @@ func triageHalt(r *run.Run) string {
 		return ""
 	}
 	return "halted: " + firstLine
+}
+
+// reviewInstructionsPrefix opens the operator's sentence for a run halted
+// because a review could not be given the base commit's instruction files
+// (SC-019): an operator finding, since no ticket change fixes it.
+const reviewInstructionsPrefix = "halted before the review (operator finding): the repository's instruction files could not be prepared: "
+
+// reviewInstructionsSentence quotes the cleaned error the halted review
+// attempt recorded. It is for the operator only: handoff.Build never uses it.
+func reviewInstructionsSentence(r *run.Run) string {
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if cause := r.Attempts[i].ReviewInstructionsError; cause != "" {
+			return reviewInstructionsPrefix + safeQuote(cause, maxTriageSentenceLen-len(reviewInstructionsPrefix))
+		}
+	}
+	return "halted before the review (operator finding): the repository's instruction files could not be prepared; see the review attempt's record"
 }
 
 // classifyHaltError recognizes the handful of infrastructure-failure
