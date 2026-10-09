@@ -307,6 +307,20 @@ step("projects", async () => {
     .getByText(String(stats.total_runs), { exact: true })
     .first()
     .waitFor();
+  // Trend: the chart is one named image above the table of the same weeks.
+  const trend = (await api("/projects/app/trend")).body;
+  await main().getByRole("tab", { name: "Trend", exact: true }).click();
+  const panel = main().getByRole("tabpanel");
+  await panel.getByRole("img", { name: /^One-shot acceptance rate: / }).waitFor();
+  check(
+    (await panel.getByTestId("trend-chart-point").count()) ===
+      trend.buckets.filter((b) => b.metrics.one_shot_rate !== null).length,
+    "the trend chart does not draw one point per week that has a ticket",
+  );
+  check(
+    (await panel.getByTestId("trend-bucket").count()) === trend.buckets.length,
+    "the trend table lost a week",
+  );
   await main().getByRole("tab", { name: "Release", exact: true }).click();
   await main().getByRole("tabpanel").getByText("incident 42").first().waitFor();
 });

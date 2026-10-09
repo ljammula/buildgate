@@ -833,7 +833,9 @@ fresh images unless `FACTORYD_CONFIG` names some.
 ## Is it getting better?
 
 `factoryd stats` answers it per repository from the run records of the current
-data dir; the console's **Trend** tab on a project shows the same numbers.
+data dir; the console's **Trend** tab on a project shows the same numbers, with the
+one-shot rate of each week drawn as a line above the table (a week with no
+ticket is a gap).
 
 ```text
 $ factoryd stats

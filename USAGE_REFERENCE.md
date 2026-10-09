@@ -1440,7 +1440,9 @@ for memory.
 `factoryd stats` and `GET /projects/{project}/trend` (read token; query
 `since`, `until`, `bucket`, `all`, which mean what `-since`, `-bucket` and
 `-all` mean; `until` is exclusive) print one report built from the run records
-of the data dir. The console's **Trend** tab of a project reads the route. The
+of the data dir. The console's **Trend** tab of a project reads the route and draws each
+bucket's one-shot rate as a line on a 0-100% axis above the table; a bucket with
+no ticket is a gap in the line. The
 route is `/trend` because `GET /projects/{project}/stats` is the release
 figures behind the **Stats** tab. Nothing is stored and no model is called.
 

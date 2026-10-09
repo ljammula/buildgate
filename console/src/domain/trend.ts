@@ -142,3 +142,45 @@ export function medianText(spread: TrendSpread): string {
 export function bucketLabel(bucket: TrendBucket): string {
   return bucket.start.slice(0, 10);
 }
+
+function ratePercent(rate: number): number {
+  return Math.round(rate * 100);
+}
+
+/** What one charted point says: the rate, the tickets behind it and its period. */
+export function trendPointText(bucket: TrendBucket, bucketDays: number): string {
+  const m = bucket.metrics;
+  const when =
+    bucketDays === 7
+      ? `the week of ${bucketLabel(bucket)}`
+      : `the ${bucketDays} days from ${bucketLabel(bucket)}`;
+  if (m.oneShotRate === null) return `No ticket in ${when}`;
+  return `${ratePercent(m.oneShotRate)}% (${m.oneShot}/${m.tickets} tickets) in ${when}`;
+}
+
+/**
+ * The chart of one-shot rates in one sentence or two, for a reader who cannot
+ * see it: the first and the latest period with a ticket, the range between,
+ * and how many periods had none (drawn as gaps, never as 0%). "" when no
+ * period has a ticket, so there is nothing to chart.
+ */
+export function trendChartSummary(trend: ProjectTrend): string {
+  const drawn = trend.buckets.filter((b) => b.metrics.oneShotRate !== null);
+  const first = drawn[0];
+  const last = drawn.at(-1);
+  if (first === undefined || last === undefined) return "";
+  const days = trend.bucketDays;
+  const parts: string[] = [];
+  if (drawn.length === 1) {
+    parts.push(`One-shot acceptance rate: ${trendPointText(first, days)}`);
+  } else {
+    const rates = drawn.map((b) => ratePercent(b.metrics.oneShotRate ?? 0));
+    parts.push(
+      `One-shot acceptance rate: ${trendPointText(first, days)}, ${trendPointText(last, days)}`,
+      `Lowest ${Math.min(...rates)}%, highest ${Math.max(...rates)}%`,
+    );
+  }
+  const empty = trend.buckets.length - drawn.length;
+  if (empty > 0) parts.push(`${empty} of ${trend.buckets.length} periods had no ticket`);
+  return `${parts.join(". ")}.`;
+}
