@@ -37,6 +37,20 @@ type Proposal struct {
 	ExpectedSHA256 string `json:"expected_sha256"`
 	// Expected is the full AGENTS.md text.
 	Expected string `json:"expected"`
+	// Changes lists each line the proposal adds or removes and where an added
+	// line came from, for the request's pull request body. The release check
+	// reads only ExpectedSHA256.
+	Changes []Change `json:"changes,omitempty"`
+}
+
+// Change is one line a proposal adds or removes. Source and Runs say who
+// wrote an added line down: the operator, or the runs whose build agent
+// noted it (ids only).
+type Change struct {
+	Remove bool     `json:"remove,omitempty"`
+	Line   string   `json:"line"`
+	Source string   `json:"source,omitempty"`
+	Runs   []string `json:"runs,omitempty"`
 }
 
 // HashHex is the lowercase hex SHA-256 of b.

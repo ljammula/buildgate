@@ -148,6 +148,9 @@ type requestStatusEntry struct {
 	State   string `json:"state"`
 	Age     string `json:"age"`
 	Error   string `json:"error,omitempty"`
+	// Kind is "memory" for a request `factoryd memory propose` created,
+	// empty for every other. A label only.
+	Kind string `json:"kind,omitempty"`
 	// AwaitingPullRequest is set for a halted request whose only gap is a
 	// missing pull request (request.HaltAcceptedNoPR); Label is its calm
 	// one-line status with the exact next command. Both empty otherwise.
@@ -202,6 +205,19 @@ func requestTicketPRSummary(r *request.Request) string {
 	return strings.Join(parts, " ")
 }
 
+// requestRowSuffix is what follows a request's row in the table: its
+// tickets' pull request states, and its kind when it has one.
+func requestRowSuffix(r requestStatusEntry) string {
+	suffix := ""
+	if r.Tickets != "" {
+		suffix += "  tickets: " + r.Tickets
+	}
+	if r.Kind != "" {
+		suffix += "  [" + r.Kind + "]"
+	}
+	return suffix
+}
+
 // buildRequestStatusEntry converts a loaded request record into its
 // display form, with now used to compute Age from SubmittedAt and
 // waitingOn the id request.WaitingOn reports for r ("" when none).
@@ -212,6 +228,9 @@ func buildRequestStatusEntry(r *request.Request, waitingOn string, now time.Time
 		State:   string(r.State),
 		Error:   r.Error,
 		Tickets: requestTicketPRSummary(r),
+	}
+	if r.Source.Kind == request.SourceMemory {
+		entry.Kind = string(request.SourceMemory)
 	}
 	if r.AwaitingPullRequest() {
 		entry.AwaitingPullRequest = true
@@ -677,9 +696,7 @@ func statusMain(args []string) error {
 			prOrError = "queued behind " + r.WaitingOn
 		}
 		line := fmt.Sprintf("%-*s  %-24s  %-13s  %-10s  %-7s  %s", idWidth, id, r.Project, stateCol, r.Age, ticketOrDash, prOrError)
-		if r.Tickets != "" {
-			line += "  tickets: " + r.Tickets
-		}
+		line += requestRowSuffix(r)
 		if _, err := fmt.Fprintln(os.Stdout, line); err != nil {
 			return fmt.Errorf("print request status line: %w", err)
 		}

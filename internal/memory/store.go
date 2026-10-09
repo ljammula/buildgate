@@ -84,6 +84,15 @@ func Open(dataDir, project string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// OpenReadOnly returns the project's store without creating anything: Load
+// and Off work on a store that was never written (empty, not stopped).
+func OpenReadOnly(dataDir, project string) (*Store, error) {
+	if err := ValidProject(project); err != nil {
+		return nil, err
+	}
+	return &Store{dir: filepath.Join(dataDir, "memory", project)}, nil
+}
+
 // Dir is the project's store directory.
 func (s *Store) Dir() string { return s.dir }
 

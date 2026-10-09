@@ -31,10 +31,12 @@ var inboxStates = map[request.State]bool{
 // inboxEntry is one request waiting on the operator, as `factoryd inbox`
 // prints it and as `-json` emits it.
 type inboxEntry struct {
-	Profile    string `json:"profile"`
-	DataDir    string `json:"data_dir"`
-	ID         string `json:"id"`
-	Title      string `json:"title"`
+	Profile string `json:"profile"`
+	DataDir string `json:"data_dir"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	// Kind is "memory" for a request `factoryd memory propose` created.
+	Kind       string `json:"kind,omitempty"`
 	State      string `json:"state"`
 	Since      string `json:"since,omitempty"`
 	AgeSeconds int64  `json:"age_seconds"`
@@ -159,6 +161,9 @@ func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, n
 		State:      string(r.State),
 		ConsoleURL: consoleRequestURL(consoleBase, r.ID),
 	}
+	if r.Source.Kind == request.SourceMemory {
+		e.Kind = string(request.SourceMemory)
+	}
 	for _, ts := range []string{r.WaitingSince, r.EnteredAt, r.UpdatedAt} {
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 			e.since = t
@@ -214,6 +219,9 @@ func printInboxEntry(w io.Writer, e inboxEntry) {
 	title := e.Title
 	if title == "" {
 		title = "-"
+	}
+	if e.Kind != "" {
+		title = "[" + e.Kind + "] " + title
 	}
 	fmt.Fprintf(w, "%s  %s  %s  %s  %s\n", inboxAge(time.Duration(e.AgeSeconds)*time.Second), e.Profile, e.State, e.ID, title)
 	switch {

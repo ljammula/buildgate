@@ -1,0 +1,25 @@
+{
+  "project": "app",
+  "on": true,
+  "off_reason": "every-field off_reason",
+  "budget_lines": 3,
+  "budget_chars": 3,
+  "used_lines": 3,
+  "used_chars": 3,
+  "in_force": [
+    "every-field in_force"
+  ],
+  "section_error": "every-field section_error",
+  "candidates": [
+    {
+      "id": "every-field id",
+      "line": "every-field line",
+      "source": "every-field source",
+      "state": "every-field state",
+      "seen": 3,
+      "first_seen_at": "2026-09-10T09:00:00Z",
+      "last_seen_at": "2026-09-10T09:00:00Z",
+      "request_id": "every-field request_id"
+    }
+  ]
+}

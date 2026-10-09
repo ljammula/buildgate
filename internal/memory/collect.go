@@ -2,9 +2,9 @@ package memory
 
 import "strings"
 
-// normaliseNote trims a note item and strips one leading list marker and one
+// NormaliseNote trims a note item and strips one leading list marker and one
 // trailing full stop, which RenderLine puts back.
-func normaliseNote(item string) string {
+func NormaliseNote(item string) string {
 	s := strings.TrimSpace(item)
 	if strings.HasPrefix(s, "- ") || strings.HasPrefix(s, "* ") {
 		s = strings.TrimSpace(s[2:])
@@ -47,7 +47,7 @@ func CollectFromNotes(st *StoreState, runID string, items []string, sectionAtHea
 	}
 	st.CountedRuns = append(st.CountedRuns, runID)
 	for _, item := range items {
-		line, err := RenderLine(normaliseNote(item))
+		line, err := RenderLine(NormaliseNote(item))
 		if err != nil {
 			refused++
 			continue
@@ -62,7 +62,7 @@ func CollectFromNotes(st *StoreState, runID string, items []string, sectionAtHea
 		if len(st.Lessons) >= MaxLessons {
 			continue
 		}
-		l, err := NewLesson(normaliseNote(item), SourceAgent, now)
+		l, err := NewLesson(NormaliseNote(item), SourceAgent, now)
 		if err != nil {
 			refused++
 			continue

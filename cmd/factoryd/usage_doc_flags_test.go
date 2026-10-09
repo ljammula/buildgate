@@ -76,6 +76,7 @@ var docTrackedCommands = map[string]commandFlagSet{
 	"submit":            func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newSubmitFlags(); return fs },
 	"supervise":         func() *flag.FlagSet { fs, _, _ := newSuperviseFlags(); return fs },
 	"inbox":             func() *flag.FlagSet { fs, _ := newInboxFlags(); return fs },
+	"memory":            func() *flag.FlagSet { return newMemoryFlags().set },
 	"stop":              func() *flag.FlagSet { fs, _ := newStopFlags(); return fs },
 	"restart":           newRestartFlags,
 	"uninstall":         func() *flag.FlagSet { fs, _, _, _, _ := newUninstallFlags(); return fs },
