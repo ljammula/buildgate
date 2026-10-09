@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test probe-instruction-paths bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -182,6 +182,17 @@ console-walk:
 # as a table. Needs no Docker, factoryd, or network.
 live-smoke-results:
 	scripts/live-smoke.sh --results
+
+# checks: verify, agent-pi-test and console-test (and live-smoke with
+# CHECKS_LIVE=1) as one command, one after another on a machine the size of a
+# 16 GiB Mac and all at once when 32 GiB or more is free
+# (scripts/checks.sh's doc comment; CHECKS_PARALLEL=0|1 overrides).
+checks:
+	scripts/checks.sh
+
+# checks-test: offline tests of scripts/parallel-jobs.sh.
+checks-test:
+	python3 -m unittest scripts/tests/test_parallel_jobs.py -v
 
 # live-smoke-test: offline unit test for live-smoke.sh's own result-recording
 # logic (the LIVE_SMOKE_RESULTS_FILE JSONL append, and --results) -- no

@@ -19,7 +19,7 @@ STUB_FACTORYD = os.path.join(os.path.dirname(__file__), "fixtures", "stub_factor
 
 
 class LiveSmokeRecordingTest(unittest.TestCase):
-    def _run(self, state, no_workflow=False):
+    def _run(self, state, no_workflow=False, jobs=None):
         fixture_label = "live-smoke-test-fixture"
         with tempfile.TemporaryDirectory() as tmp:
             # live-smoke.sh records basename(source_repo) as the fixture
@@ -45,6 +45,14 @@ class LiveSmokeRecordingTest(unittest.TestCase):
             env["FACTORYD_BIN"] = STUB_FACTORYD
             env["LIVE_SMOKE_RESULTS_FILE"] = results_file
             env["LIVE_SMOKE_FIXTURES"] = "%s:%s:%s" % (source_repo, spec_file, fixture_label)
+            if jobs:
+                # Two fixtures, run at once as two child runs of the script.
+                env["LIVE_SMOKE_FIXTURES"] += "\n%s:%s:%s-second" % (source_repo, spec_file, fixture_label)
+                env["LIVE_SMOKE_JOBS"] = str(jobs)
+            else:
+                # The recording tests are about one sequential run, whatever
+                # the machine they run on has.
+                env["LIVE_SMOKE_JOBS"] = "1"
             env["STUB_FACTORYD_STATE"] = state
             # The stub records a temporal_workflow_id unless told not to.
             env.pop("LIVE_SMOKE_TEMPORAL", None)
@@ -80,6 +88,26 @@ class LiveSmokeRecordingTest(unittest.TestCase):
         self.assertGreaterEqual(row["duration_s"], 0)
         self.assertTrue(row["date"])
         self.assertTrue(row["git_sha"])
+
+    def test_fixtures_run_at_once_are_each_recorded_and_summed(self):
+        proc, lines, fixture_label = self._run("accepted", jobs=2)
+        self.assertEqual(0, proc.returncode, proc.stdout + proc.stderr)
+        self.assertEqual(2, len(lines), lines)
+        self.assertEqual(["accepted", "accepted"], [row["outcome"] for row in lines])
+        self.assertIn("=== live-smoke summary: 2 passed, 0 failed ===", proc.stdout)
+        self.assertEqual(1, proc.stdout.count("=== live-smoke summary:"), proc.stdout)
+        self.assertEqual(2, proc.stdout.count("PASS  " + fixture_label), proc.stdout)
+
+    def test_fixtures_run_at_once_fail_the_run_when_one_fails(self):
+        proc, lines, _ = self._run("halted", jobs=2)
+        self.assertNotEqual(0, proc.returncode, proc.stdout + proc.stderr)
+        self.assertEqual(2, len(lines), lines)
+        self.assertIn("=== live-smoke summary: 0 passed, 2 failed ===", proc.stdout)
+
+    def test_a_job_count_that_is_not_a_number_is_refused(self):
+        proc = subprocess.run(["sh", LIVE_SMOKE], env={**os.environ, "LIVE_SMOKE_JOBS": "many", "LIVE_SMOKE_FIXTURES": "a:b:c"},
+                              cwd=REPO_ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(2, proc.returncode, proc.stdout + proc.stderr)
 
     def test_unexpected_state_is_recorded_and_fails(self):
         proc, lines, _ = self._run("halted")
