@@ -27,12 +27,14 @@ import {
   type StartRunInput,
   getRun,
   getRunDiff,
+  getRunHandoff,
   listRuns,
   overrideRun,
   startRun,
   watchRun,
 } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
+import type { Handoff } from "@/domain/handoff";
 import { compareTimestamps } from "@/domain/elapsed";
 import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
@@ -131,6 +133,19 @@ export function useRunDiff(id: string, enabled = true): UseQueryResult<RunDiff> 
     queryKey: queryKeys.runs.diff(id),
     queryFn: ({ signal }) => getRunDiff(http, id, signal),
     enabled,
+  });
+}
+
+/**
+ * A stopped run's handoff. Keyed by the hash the run recorded, so a run that
+ * stops in another way (its handoff is rewritten) is read again.
+ */
+export function useRunHandoff(id: string, sha256: string): UseQueryResult<Handoff> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.runs.handoff(id, sha256),
+    queryFn: ({ signal }) => getRunHandoff(http, id, signal),
+    enabled: sha256 !== "",
   });
 }
 

@@ -29,6 +29,8 @@ export const queryKeys = {
     evidence: (id: string) => ["runs", "detail", id, "evidence"] as const,
     diff: (id: string) => ["runs", "detail", id, "evidence", "diff"] as const,
     release: (id: string) => ["runs", "detail", id, "evidence", "release"] as const,
+    handoff: (id: string, sha256: string) =>
+      ["runs", "detail", id, "evidence", "handoff", sha256] as const,
   },
   projects: {
     all: ["projects"] as const,

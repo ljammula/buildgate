@@ -19,6 +19,7 @@ test("GET /projects/{project}/observations decodes", () => {
     "repeated_failure",
     "round_changed_nothing",
     "check_failed",
+    "check_failed",
   ]);
   expect(report.observations[0]).toEqual({
     kind: "repeated_failure",
@@ -34,7 +35,10 @@ test("GET /projects/{project}/observations decodes", () => {
     excerpt:
       "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s",
   });
-  expect(report.observations[2]?.check).toBe("canonical_verify");
+  expect(report.observations.slice(2).map((o) => o.check)).toEqual([
+    "canonical_verify",
+    "tests_added",
+  ]);
 });
 
 test("counts list only the kinds that happened, known kinds first", () => {

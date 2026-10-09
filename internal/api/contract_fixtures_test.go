@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/handoff"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -83,6 +84,8 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /runs/{id}/diff", Path: "/runs/run-accepted/diff", File: "run-diff.json"},
 		{Pattern: "GET /runs/{id}/release", Path: "/runs/run-accepted/release", File: "run-release.json"},
 		{Pattern: "GET /runs/{id}/release", Path: "/runs/run-quarantined/release", File: "run-release-no-decision.json"},
+		{Pattern: "GET /runs/{id}/handoff", Path: "/runs/run-quarantined/handoff", File: "run-handoff.json"},
+		{Pattern: "GET /runs/{id}/handoff", Path: "/runs/run-accepted/handoff", File: "error-no-handoff.json"},
 		{Pattern: "GET /requests", Path: "/requests", File: "requests.json"},
 		{Pattern: "GET /requests/events", Path: "/requests/events", File: "request-events.sse", Events: len(contractRequestIDs)},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-spec-review", File: "request-spec-review.json"},
@@ -578,6 +581,13 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	seedRun(t, dataDir, quarantined)
 	write(filepath.Join(run.Dir(dataDir, quarantined.ID), "round-logs", "round-3", "verify.log"),
 		"ok  \tapp/cart\t0.012s\n--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s\n")
+	// The handoff the run's own save would have written, built from the
+	// record as seeded (the spec snapshot gives diff_scope nothing to say).
+	quarantined.GateResults = append(quarantined.GateResults, run.GateResult{Check: "tests_added", Passed: false})
+	handoffSum, err := handoff.Save(run.Dir(dataDir, quarantined.ID), handoff.Build(&quarantined, dataDir))
+	must(err)
+	quarantined.HandoffSHA256 = handoffSum
+	seedRun(t, dataDir, quarantined)
 
 	running := runBase("run-running", run.StateSliceRunning, "req-building")
 	running.CreatedAt, running.UpdatedAt = stamp(45), stamp(46)

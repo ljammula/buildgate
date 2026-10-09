@@ -25,6 +25,7 @@ import (
 
 	"buildgate/internal/consoleweb"
 	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/handoff"
 	"buildgate/internal/notify"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
@@ -687,6 +688,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs/{id}/log", s.streamRunLog)
 	s.mux.HandleFunc("GET /runs/{id}/diff", s.getRunDiff)
 	s.mux.HandleFunc("GET /runs/{id}/release", s.getRunRelease)
+	s.mux.HandleFunc("GET /runs/{id}/handoff", s.getRunHandoff)
 	s.mux.HandleFunc("GET /projects/{project}/release", s.getProjectRelease)
 	s.mux.HandleFunc("GET /projects/{project}/stats", s.getProjectStats)
 	s.mux.HandleFunc("GET /projects/{project}/observations", s.getProjectObservations)
@@ -2296,6 +2298,12 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		// against overwriting an already-set sentence, same as save()'s.
 		if (loaded.State == run.StateQuarantined || loaded.State == run.StateHalted) && loaded.Triage == "" {
 			loaded.Triage = triage.Run(loaded, s.dataDir)
+		}
+		// The run has just left the state its handoff describes (or become
+		// stopped): rewrite or remove it before the record is written, as
+		// cmd/factoryd's save does.
+		if err := handoff.Sync(loaded, s.dataDir); err != nil {
+			log.Printf("run %s: could not bring its handoff up to date after an override: %v", id, err)
 		}
 		haltNotification, dispatchHalt := notify.PrepareHalt(loaded, s.dataDir)
 		// Persist is the one funnel every run-record write goes through

@@ -271,6 +271,13 @@ step("run-log", async () => {
 
 step("run-quarantined", async () => {
   await visit("/runs/run-quarantined");
+  // The run left a handoff: the page lists what the server's record lists.
+  const handoff = (await api("/runs/run-quarantined/handoff")).body;
+  const card = page.getByTestId("run-handoff");
+  for (const failed of handoff.checks) {
+    await card.getByText(failed.check, { exact: true }).waitFor();
+    if (failed.finding) await card.getByText(failed.finding, { exact: true }).waitFor();
+  }
   await heading("Operator override").waitFor();
   await button("Override run").waitFor();
   check(

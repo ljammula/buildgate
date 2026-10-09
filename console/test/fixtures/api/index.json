@@ -147,6 +147,20 @@
     "content_type": "application/json"
   },
   {
+    "pattern": "GET /runs/{id}/handoff",
+    "path": "/runs/run-quarantined/handoff",
+    "file": "run-handoff.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/handoff",
+    "path": "/runs/run-accepted/handoff",
+    "file": "error-no-handoff.json",
+    "status": 409,
+    "content_type": "application/json"
+  },
+  {
     "pattern": "GET /requests",
     "path": "/requests",
     "file": "requests.json",
