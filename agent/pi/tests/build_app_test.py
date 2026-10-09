@@ -1557,14 +1557,34 @@ class AutofixCommandTests(unittest.TestCase):
 			time.sleep(3)
 			self.assertEqual((root / "b.txt").read_text(), "b\n")
 
-	def test_setup_leaves_no_process_behind_after_a_timeout_or_a_normal_exit(self):
-		for command, timeout in (("(sleep 2; echo late > late.txt) & wait", 0.5), ("(sleep 2; echo late > late.txt) >/dev/null 2>&1 &", 30)):
-			with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
-				root = Path(directory)
-				with mock.patch.object(build_app, "SETUP_TIMEOUT_SECONDS", timeout):
-					build_app.run_setup(root, [command], None)
-				time.sleep(3)
-				self.assertFalse((root / "late.txt").exists())
+	def test_setup_that_times_out_leaves_no_process_behind(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			with mock.patch.object(build_app, "SETUP_TIMEOUT_SECONDS", 0.5):
+				build_app.run_setup(root, ["(sleep 2; echo late > late.txt) & wait"], None)
+			time.sleep(3)
+			self.assertFalse((root / "late.txt").exists())
+
+	def test_setup_that_returns_keeps_its_background_process(self):
+		# As in a verify or gate sandbox, where the same command's background
+		# work lives until the container ends.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			failed, _ = build_app.run_setup(root, ["(sleep 1; echo up > up.txt) >/dev/null 2>&1 &"], None)
+			self.assertIsNone(failed)
+			deadline = time.monotonic() + 10
+			while time.monotonic() < deadline and not (root / "up.txt").exists():
+				time.sleep(0.1)
+			self.assertEqual((root / "up.txt").read_text(), "up\n")
+
+	def test_command_output_is_kept_only_at_its_tail(self):
+		with tempfile.TemporaryDirectory() as directory, mock.patch.object(build_app, "OWN_GROUP_OUTPUT_BYTES", 64):
+			code, output = build_app.run_in_own_group(
+				["sh", "-c", "i=0; while [ $i -lt 200 ]; do echo line-$i; i=$((i+1)); done; echo the-end"], cwd=Path(directory), timeout=30,
+			)
+			self.assertEqual(code, 0)
+			self.assertLessEqual(len(output), 64)
+			self.assertTrue(output.endswith("the-end\n"))
 
 	def test_a_short_listing_before_autofix_skips_it(self):
 		with contextlib.ExitStack() as stack:

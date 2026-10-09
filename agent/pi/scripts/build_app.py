@@ -878,34 +878,49 @@ SETUP_TIMEOUT_SECONDS = 10 * 60
 SETUP_FAILED_BLOCKER = "setup command failed: "
 
 
-def run_in_own_group(args: list[str], *, cwd: Path, timeout: float, env: dict | None = None) -> tuple[int | None, str]:
+# Output kept from one setup or autofix command: its tail, which is where a
+# failing tool says why.
+OWN_GROUP_OUTPUT_BYTES = 1 << 20
+
+
+def run_in_own_group(args: list[str], *, cwd: Path, timeout: float, env: dict | None = None, kill_after_exit: bool = True) -> tuple[int | None, str]:
 	"""Runs args in its own session, output (stdout and stderr together) in a
 	temporary file so a process it leaves behind cannot hold a pipe open.
-	Returns (exit code, output), the exit code None when it timed out. When
-	it returns, nothing the command started is alive: a timeout kills the
-	whole group, and so does a normal exit (a command that backgrounded work).
-	Raises OSError when it cannot start."""
+	Returns (exit code, the last OWN_GROUP_OUTPUT_BYTES of output), the exit
+	code None when it timed out. A timeout kills the whole process group.
+	With kill_after_exit (autofix), so does a normal exit: a command that
+	backgrounded work must not write after the caller has checked the tree.
+	Without it (setup), what the command left running in the background
+	keeps running, as it does in a verify or gate sandbox. A process that
+	detached into its own session is outside the group either way and ends
+	with the container. Raises OSError when it cannot start."""
 	with tempfile.TemporaryFile() as out:
 		proc = subprocess.Popen(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
 		try:
 			code: int | None = proc.wait(timeout=timeout)
 		except subprocess.TimeoutExpired:
 			code = None
-		try:
-			os.killpg(proc.pid, signal.SIGKILL)
-		except (ProcessLookupError, PermissionError):
-			pass
-		if code is None:
-			proc.wait()
-		deadline = time.monotonic() + 5
-		while time.monotonic() < deadline:
-			try:
-				os.killpg(proc.pid, 0)
-			except (ProcessLookupError, PermissionError):
-				break
-			time.sleep(0.01)
-		out.seek(0)
+		if code is None or kill_after_exit:
+			_kill_group(proc)
+		size = out.seek(0, os.SEEK_END)
+		out.seek(max(size - OWN_GROUP_OUTPUT_BYTES, 0))
 		return code, out.read().decode(errors="replace")
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+	"""Kills proc's process group and waits, briefly, until it is gone."""
+	try:
+		os.killpg(proc.pid, signal.SIGKILL)
+	except (ProcessLookupError, PermissionError):
+		pass
+	proc.wait()
+	deadline = time.monotonic() + 5
+	while time.monotonic() < deadline:
+		try:
+			os.killpg(proc.pid, 0)
+		except (ProcessLookupError, PermissionError):
+			return
+		time.sleep(0.01)
 
 
 def run_setup(workspace: Path, commands: list[str], log_dir: Path | None) -> tuple[str | None, str]:
@@ -921,7 +936,7 @@ def run_setup(workspace: Path, commands: list[str], log_dir: Path | None) -> tup
 	for command in commands:
 		output += f"$ {command}\n"
 		try:
-			code, captured = run_in_own_group(["sh", "-c", command], cwd=workspace, timeout=SETUP_TIMEOUT_SECONDS)
+			code, captured = run_in_own_group(["sh", "-c", command], cwd=workspace, timeout=SETUP_TIMEOUT_SECONDS, kill_after_exit=False)
 		except OSError as exc:
 			failed, header = command, f"[SETUP] `{command}` failed; the checks were not run this round."
 			output += f"{exc}\n"
