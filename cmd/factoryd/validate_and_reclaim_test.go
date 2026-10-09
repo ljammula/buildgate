@@ -414,7 +414,7 @@ func TestApplyRunWorkflowResultSetsHaltConfirmed(t *testing.T) {
 	}
 
 	result := workflow.RunWorkflowResult{State: run.StateAccepted, ResultSHA: "deadbeef"}
-	if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
+	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
 	if !r.HaltConfirmed {
@@ -458,7 +458,7 @@ func TestApplyRunWorkflowResultCopiesHaltReasonCode(t *testing.T) {
 	// regardless of the actual state) -- this test cares about the field
 	// copied before that return, not the error itself.
 	result := workflow.RunWorkflowResult{State: run.StateHalted, HaltReasonCode: run.HaltReasonRelayCeilingExceeded}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 	if r.HaltReasonCode != run.HaltReasonRelayCeilingExceeded {
 		t.Fatalf("HaltReasonCode = %q, want %q", r.HaltReasonCode, run.HaltReasonRelayCeilingExceeded)
 	}
@@ -494,7 +494,7 @@ func TestApplyRunWorkflowResultNotifiesHaltedNotQuarantined(t *testing.T) {
 	// regardless of the actual state) -- this test cares about the
 	// notification recorded before that return, not the error itself.
 	result := workflow.RunWorkflowResult{State: run.StateHalted}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 	if r.State != run.StateHalted {
 		t.Fatalf("State = %q, want %q", r.State, run.StateHalted)
 	}
@@ -544,7 +544,7 @@ func TestApplyRunWorkflowResultRecordsReleaseDecisionUnderStableProject(t *testi
 	// isolatedWorktreePath, not stableProjectPath: exactly what
 	// reconcileReclaimedRun passes as workspacePath for an isolated run
 	// (fresh.WorkspacePath).
-	if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, isolatedWorktreePath, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
+	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, isolatedWorktreePath, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
 
@@ -630,7 +630,7 @@ func TestReconcileEvaluatesPersistedReleasePolicyNotAlwaysDenyingDefault(t *test
 		// own persisted ReleasePolicy, not just that a caller-supplied
 		// pointer built from mergePolicyFromRun works.
 		result := allowingRunWorkflowResultForTest(run.StateAccepted, "deadbeef")
-		if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, false, nil, forge.GHPullRequestOpener{}, false); err != nil {
+		if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, false, nil, forge.GHPullRequestOpener{}, false); err != nil {
 			t.Fatalf("applyRunWorkflowResult: %v", err)
 		}
 		project := release.ProjectFromWorkspace(r.ProjectPath)
@@ -663,7 +663,7 @@ func TestReconcileEvaluatesPersistedReleasePolicyNotAlwaysDenyingDefault(t *test
 			t.Fatal("mergePolicyFromRun unexpectedly recovered a policy for a legacy run record")
 		}
 		result := allowingRunWorkflowResultForTest(run.StateAccepted, "deadbeef")
-		if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, false, releasePolicyPtr, forge.GHPullRequestOpener{}, false); err != nil {
+		if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, false, releasePolicyPtr, forge.GHPullRequestOpener{}, false); err != nil {
 			t.Fatalf("applyRunWorkflowResult: %v", err)
 		}
 		project := release.ProjectFromWorkspace(r.ProjectPath)
@@ -716,7 +716,7 @@ func TestReconcilePersistedPolicyRendersProtectedPathEvaluationInPRBody(t *testi
 	// this function: applyRunWorkflowResult must recover r's own
 	// ReleasePolicy and pass that recovered policy (not the nil it
 	// received) on to openEvidencePullRequest.
-	if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, false, nil, opener, false); err != nil {
+	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, false, nil, opener, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
 
@@ -797,7 +797,7 @@ func TestApplyRunWorkflowResultOpensPullRequestOnAccept(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
 
 	result := allowingRunWorkflowResultForTest(run.StateAccepted, "deadbeef")
-	if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, true, allowingMergePolicyForTest(), forge.GHPullRequestOpener{}, false); err != nil {
+	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, true, allowingMergePolicyForTest(), forge.GHPullRequestOpener{}, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
 	if !strings.Contains(logBuf.String(), "-open-pull-request set but no isolated branch exists") {
@@ -826,7 +826,7 @@ func TestApplyRunWorkflowResultDoesNotOpenPullRequestWhenNotRequested(t *testing
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
 
 	result := workflow.RunWorkflowResult{State: run.StateAccepted, ResultSHA: "deadbeef"}
-	if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
+	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, r.ProjectPath, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
 	if strings.Contains(logBuf.String(), "-open-pull-request") {
@@ -869,7 +869,7 @@ func TestApplyRunWorkflowResultUnderRunLockCompletesWithFakeOpener(t *testing.T)
 			if err != nil {
 				return err
 			}
-			return applyRunWorkflowResult(fresh, dataDir, r.ID, fresh.Ticket, fresh.ProjectPath, "basesha", "task-queue", result, true, allowingMergePolicyForTest(), opener, true)
+			return applyRunWorkflowResult(newTestDeps(t), fresh, dataDir, r.ID, fresh.Ticket, fresh.ProjectPath, "basesha", "task-queue", result, true, allowingMergePolicyForTest(), opener, true)
 		})
 	}()
 
@@ -920,7 +920,7 @@ func TestApplyRunWorkflowResultSkipsEvidenceWhenNotAttributable(t *testing.T) {
 	}
 
 	result := workflow.RunWorkflowResult{State: run.StateAccepted}
-	if err := applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
+	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
 	if r.AgentEvidence != nil {
@@ -950,7 +950,7 @@ func TestApplyRunWorkflowResultCopiesSpecConformityConfigured(t *testing.T) {
 	// on this) -- this test cares about r.SpecConformityConfigured, not
 	// the error itself.
 	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 	if !r.SpecConformityConfigured {
 		t.Fatal("SpecConformityConfigured = false after applying a result with SpecConformityConfigured=true, want true")
 	}
@@ -976,7 +976,7 @@ func TestApplyRunWorkflowResultRetainsConformityEvidence(t *testing.T) {
 	}
 
 	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 	got, err := os.ReadFile(filepath.Join(run.Dir(dataDir, r.ID), "CONFORMITY_EVIDENCE.json"))
 	if err != nil {
 		t.Fatalf("read retained CONFORMITY_EVIDENCE.json: %v", err)
@@ -1011,7 +1011,7 @@ func TestApplyRunWorkflowResultLoadsVerdictsAndOracleCoverageIntoTheRunRecord(t 
 	}
 
 	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 
 	reloaded, err := run.Load(dataDir, r.ID)
 	if err != nil {
@@ -1046,7 +1046,7 @@ func TestApplyRunWorkflowResultReclaimedRunLoadsCoverageButNotVerdicts(t *testin
 	}
 
 	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 
 	reloaded, err := run.Load(dataDir, r.ID)
 	if err != nil {
@@ -1080,7 +1080,7 @@ func TestApplyRunWorkflowResultSkipsConformityEvidenceWhenNotConfigured(t *testi
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
 
 	result := workflow.RunWorkflowResult{State: run.StateQuarantined}
-	_ = applyRunWorkflowResult(r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
+	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 	if _, err := os.Stat(filepath.Join(run.Dir(dataDir, r.ID), "CONFORMITY_EVIDENCE.json")); !os.IsNotExist(err) {
 		t.Fatalf("CONFORMITY_EVIDENCE.json retained/stat err = %v, want it to not exist", err)
 	}

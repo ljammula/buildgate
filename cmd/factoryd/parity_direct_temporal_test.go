@@ -503,7 +503,7 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 		// summary error, or a save failure) -- expected here, not a test
 		// failure; the real assertion is against the persisted run.json
 		// below.
-		_ = applyRunWorkflowResult(r, dataDir, id, ticket, workspace, baseSHA, "parity-test-task-queue", result, true, &mergePolicy, forge.GHPullRequestOpener{}, false)
+		_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, id, ticket, workspace, baseSHA, "parity-test-task-queue", result, true, &mergePolicy, forge.GHPullRequestOpener{}, false)
 	}
 
 	loaded, err := run.Load(dataDir, id)

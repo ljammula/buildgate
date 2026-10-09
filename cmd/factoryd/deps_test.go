@@ -111,6 +111,7 @@ func fakeForgeOf(dp *deps) *fakeForge { return dp.forge.(*fakeForge) }
 // fakeHost is a hostBoundary whose every method is a field, set by newTestDeps
 // to the real method and replaced by a test that needs another answer.
 type fakeHost struct {
+	blobAtCommitFn       func(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommandFn     func(target string) *exec.Cmd
 	executableFn         func() (string, error)
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
@@ -131,6 +132,9 @@ type fakeHost struct {
 	tlsRootFn            func(ctx context.Context, host string) (*x509.Certificate, error)
 }
 
+func (f *fakeHost) blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error) {
+	return f.blobAtCommitFn(ctx, repoDir, commit, path)
+}
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
@@ -271,6 +275,9 @@ func newTestDeps(t testing.TB) *deps {
 	}
 	realHost := realHost{dp: dp}
 	dp.host = &fakeHost{
+		// A local read of git objects in the directory the test names: it
+		// reaches nothing outside the test process's own temp repositories.
+		blobAtCommitFn:   realHost.blobAtCommit,
 		browserCommandFn: realHost.browserCommand,
 		executableFn:     realHost.executable,
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {

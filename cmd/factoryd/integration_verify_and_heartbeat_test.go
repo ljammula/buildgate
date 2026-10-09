@@ -1388,7 +1388,7 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 	deadline := time.Now().Add(30 * time.Second)
 	var terminal bool
 	for time.Now().Before(deadline) {
-		terminal, err = reconcileReclaimedRun(context.Background(), temporalClient, ownerID, requestID, submitterDataDir)
+		terminal, err = reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, ownerID, requestID, submitterDataDir)
 		if err != nil {
 			t.Fatalf("reconcileReclaimedRun: %v (daemon output so far:\n%s)", err, daemonOutput.String())
 		}

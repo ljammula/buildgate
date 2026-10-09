@@ -48,7 +48,7 @@ import (
 // since run.WithLock is not reentrant within one process (found via Codex
 // review of PR #86: an earlier version always took its own lock here,
 // which deadlocks under these two callers).
-func applyRunWorkflowResult(r *run.Run, dataDir, id, ticket, workspacePath, baseSHA, taskQueue string, result workflow.RunWorkflowResult, attributeWorkspaceEvidence bool, releasePolicy *release.MergePolicy, opener forge.PullRequestOpener, underRunLock bool) error {
+func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspacePath, baseSHA, taskQueue string, result workflow.RunWorkflowResult, attributeWorkspaceEvidence bool, releasePolicy *release.MergePolicy, opener forge.PullRequestOpener, underRunLock bool) error {
 	// result.BaseSHA is CaptureBaseSHAActivity's fresh read of the
 	// workspace, not this caller's own pre-submission guess — see
 	// RunWorkflowResult.BaseSHA's doc comment for why only this value is
@@ -202,6 +202,11 @@ func applyRunWorkflowResult(r *run.Run, dataDir, id, ticket, workspacePath, base
 	// r.ReferenceOracleDir from the run record itself, never workspace
 	// evidence, so a reclaimed run gets its oracle coverage too.
 	loadOracleCoverage(r, id)
+
+	// Before the release decision below reads it, and before the one save
+	// that persists it. isolatedWorkspacePath shares the repository's object
+	// store; only git objects are read from it.
+	recordMemoryEdit(dp, r, dataDir, isolatedWorkspacePath)
 
 	if r.State != run.StateAccepted {
 		var failedChecks []string

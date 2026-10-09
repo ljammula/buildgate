@@ -431,7 +431,7 @@ func reconcileAfterFailedBuild(t *testing.T, name string, deadline time.Duration
 	until := time.Now().Add(deadline)
 	var terminal bool
 	for time.Now().Before(until) {
-		terminal, err = reconcileReclaimedRun(context.Background(), temporalClient, ownerID, requestID, submitterDataDir)
+		terminal, err = reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, ownerID, requestID, submitterDataDir)
 		if err != nil {
 			t.Fatalf("reconcileReclaimedRun: %v", err)
 		}
@@ -823,7 +823,7 @@ func TestIntegrationReconcileReclaimedRunCancelsLateArrivingNeverStartedSignal(t
 	deadline := time.Now().Add(15 * time.Second)
 	var terminal bool
 	for time.Now().Before(deadline) {
-		terminal, err = reconcileReclaimedRun(context.Background(), temporalClient, ownerID, requestID, submitterDataDir)
+		terminal, err = reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, ownerID, requestID, submitterDataDir)
 		if err != nil {
 			t.Fatalf("reconcileReclaimedRun: %v", err)
 		}
@@ -1109,7 +1109,7 @@ func TestIntegrationReconcileReclaimedRunDoesNotFalselyConfirmQueuedBehindLongRu
 	// this must never fall through to a confirmed halt.
 	safetyDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(safetyDeadline) {
-		terminal, err := reconcileReclaimedRun(context.Background(), temporalClient, ownerID, queuedRequestID, submitterDataDir)
+		terminal, err := reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, ownerID, queuedRequestID, submitterDataDir)
 		if err != nil {
 			t.Fatalf("reconcileReclaimedRun: %v", err)
 		}
@@ -1174,7 +1174,7 @@ func TestIntegrationReconcileReclaimedRunDoesNotFalselyConfirmQueuedBehindLongRu
 	if !dispatched {
 		t.Fatal("owner never started the previously-queued request after the first was unblocked")
 	}
-	if terminal, err := reconcileReclaimedRun(context.Background(), temporalClient, ownerID, queuedRequestID, submitterDataDir); err != nil {
+	if terminal, err := reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, ownerID, queuedRequestID, submitterDataDir); err != nil {
 		t.Fatalf("reconcileReclaimedRun: %v", err)
 	} else if terminal {
 		t.Fatal("reconcileReclaimedRun reported the now-InProgress request terminal — it is genuinely running, not never-submitted")
@@ -1409,7 +1409,7 @@ func TestIntegrationReconcileReclaimedRunSurvivesOwnerIdleRestart(t *testing.T) 
 	deadline = time.Now().Add(30 * time.Second)
 	var terminal bool
 	for time.Now().Before(deadline) {
-		terminal, err = reconcileReclaimedRun(context.Background(), temporalClient, ownerID, requestIDA, submitterDataDir)
+		terminal, err = reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, ownerID, requestIDA, submitterDataDir)
 		if err != nil {
 			t.Fatalf("reconcileReclaimedRun: %v (daemon output so far:\n%s)", err, daemonOutput.String())
 		}
@@ -1644,7 +1644,7 @@ func TestIntegrationReconcileReclaimedRunNamespacesChildByRepository(t *testing.
 		var terminal bool
 		var reconcileErr error
 		for time.Now().Before(deadline) {
-			terminal, reconcileErr = reconcileReclaimedRun(context.Background(), temporalClient, f.ownerID, requestID, f.submitterDir)
+			terminal, reconcileErr = reconcileReclaimedRun(newTestDeps(t), context.Background(), temporalClient, f.ownerID, requestID, f.submitterDir)
 			if reconcileErr != nil {
 				t.Fatalf("reconcileReclaimedRun (%s): %v (daemon output so far:\n%s)", f.label, reconcileErr, f.daemonOutput.String())
 			}

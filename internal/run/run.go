@@ -1361,6 +1361,13 @@ type Run struct {
 	// `omitempty` would drop the key in both cases and make them
 	// indistinguishable in the durable record.
 	ChangedFiles []string `json:"changed_files"`
+	// MemoryEdit is the host's evidence about root AGENTS.md at this run's
+	// result commit, recorded before the release decision: whether the
+	// fenced memory section changed, whether the run's request has an
+	// approved proposal and whether the file matches it. Nil when the run
+	// touched no AGENTS.md and has no proposal (nothing was read), and in a
+	// record written before the field existed.
+	MemoryEdit *MemoryEdit `json:"memory_edit,omitempty"`
 	// Oracles is the committed-acceptance-oracle evidence (see
 	// OracleEvidence); nil unless the base commit carries an oracle index
 	// or this run's factory host committed oracles.
