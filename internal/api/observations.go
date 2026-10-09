@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,7 +10,9 @@ import (
 	"buildgate/internal/evidence"
 	"buildgate/internal/observation"
 	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/triage"
 )
 
 // roundLogReadBytes is how much of a retained round log is read for an
@@ -52,7 +55,33 @@ func (s *Server) getProjectObservations(w http.ResponseWriter, r *http.Request) 
 		}
 		runs = append(runs, loaded)
 	}
-	writeJSON(w, http.StatusOK, observation.FromRuns(project, runs, s.retainedRoundLog))
+	// A request list that cannot be read leaves the request-derived
+	// observations out, like a damaged run record.
+	listed, err := request.List(s.dataDir)
+	if err != nil {
+		log.Printf("observations: list requests: %v", err)
+	}
+	var requests []*request.Request
+	for _, req := range listed {
+		if req.Project == project {
+			requests = append(requests, req)
+		}
+	}
+	writeJSON(w, http.StatusOK, observation.FromRuns(project, runs, requests, observation.Sources{
+		RoundLog:  s.retainedRoundLog,
+		Sentences: s.failedCheckSentences,
+	}))
+}
+
+// failedCheckSentences is the observation.Sources sentence lookup: the
+// sentence the factory gives each failed check of a run in the handoff to a
+// later build attempt (triage.FailedGates).
+func (s *Server) failedCheckSentences(r *run.Run) map[string]string {
+	out := map[string]string{}
+	for _, f := range triage.FailedGates(r, s.dataDir) {
+		out[f.Check] = f.Sentence
+	}
+	return out
 }
 
 // retainedRoundLog is the observation.RoundLog over this data directory:

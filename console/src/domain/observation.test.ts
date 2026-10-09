@@ -20,8 +20,19 @@ test("GET /projects/{project}/observations decodes", () => {
     "round_changed_nothing",
     "check_failed",
     "check_failed",
+    "operator_edit",
   ]);
   expect(report.observations[0]).toEqual({
+    id: report.observations[0]!.id,
+    source: "run",
+    signature: "9a41c07be2d3f518",
+    acceptedRunId: "",
+    checks: [],
+    requestId: "",
+    ticketIndex: 0,
+    threadIds: [],
+    stage: "",
+    anchors: [],
     kind: "repeated_failure",
     runId: "run-quarantined",
     ticket: "ticket-run-quarantined",
@@ -35,10 +46,63 @@ test("GET /projects/{project}/observations decodes", () => {
     excerpt:
       "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s",
   });
-  expect(report.observations.slice(2).map((o) => o.check)).toEqual([
+  expect(report.observations.slice(2, 4).map((o) => o.check)).toEqual([
     "canonical_verify",
     "tests_added",
   ]);
+  expect(report.observations[0]!.id).toMatch(/^[0-9a-f]{16}$/);
+  const edit = report.observations[4]!;
+  expect([edit.source, edit.runId, edit.stage, edit.anchors]).toEqual([
+    "request",
+    "",
+    "plan_review",
+    ["tickets/001.spec.md ### Steps"],
+  ]);
+});
+
+test("the three request-era kinds decode with their fields and have labels", () => {
+  const report = decodeObservationReport(
+    {
+      project: "p",
+      runs: 1,
+      accepted_first_round: 0,
+      counts: { check_fixed: 1, review_comment_accepted: 1, operator_edit: 1 },
+      observations: [
+        {
+          id: "0123456789abcdef",
+          kind: "check_fixed",
+          source: "request",
+          run_id: "q1",
+          accepted_run_id: "a1",
+          what: "w",
+          checks: [{ check: "canonical_verify", sentence: "It failed." }, { check: "tests_added" }],
+        },
+        {
+          kind: "review_comment_accepted",
+          source: "request",
+          run_id: "r1",
+          what: "w",
+          request_id: "req-1",
+          ticket_index: 2,
+          thread_ids: ["PRRT_a"],
+        },
+      ],
+    },
+    at,
+  );
+  expect(report.observations[0]!.checks).toEqual([
+    { check: "canonical_verify", sentence: "It failed." },
+    { check: "tests_added", sentence: "" },
+  ]);
+  expect(report.observations[0]!.acceptedRunId).toBe("a1");
+  expect(report.observations[1]).toMatchObject({
+    requestId: "req-1",
+    ticketIndex: 2,
+    threadIds: ["PRRT_a"],
+  });
+  expect(observationKindLabel("check_fixed")).not.toBe("check_fixed");
+  expect(observationKindLabel("review_comment_accepted")).not.toBe("review_comment_accepted");
+  expect(observationKindLabel("operator_edit")).not.toBe("operator_edit");
 });
 
 test("counts list only the kinds that happened, known kinds first", () => {

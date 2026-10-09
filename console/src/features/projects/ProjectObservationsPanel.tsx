@@ -8,7 +8,7 @@ import {
   observationKindLabel,
 } from "@/domain/observation";
 import { escapeInvisible } from "@/domain/textEscape";
-import { projectObservationsPath, runPath } from "@/routes/paths";
+import { projectObservationsPath, requestPath, runPath } from "@/routes/paths";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -26,6 +26,48 @@ import { useLoadProject } from "./useLoadProject";
  * excerpt in it are the build agent's report, so everything is text, with
  * invisible characters written out.
  */
+function RunLink({ id }: { readonly id: string }) {
+  return (
+    <Link to={runPath(id)} className="font-mono text-accent hover:underline">
+      {id}
+    </Link>
+  );
+}
+
+/**
+ * The one line of identifiers under a sentence: the runs, the request, and
+ * for the request kinds the thread ids or the gate and the places an
+ * operator touched. Names only; no comment or edit text reaches the page.
+ */
+function ObservationRefs({ observation }: { readonly observation: Observation }) {
+  return (
+    <>
+      {observation.runId === "" ? null : <RunLink id={observation.runId} />}
+      {observation.acceptedRunId === "" ? null : (
+        <>
+          <span aria-hidden="true">{"\u2192"}</span>
+          <RunLink id={observation.acceptedRunId} />
+        </>
+      )}
+      {observation.requestId === "" ? null : (
+        <Link
+          to={requestPath(observation.requestId)}
+          className="font-mono text-accent hover:underline"
+        >
+          {observation.requestId}
+        </Link>
+      )}
+      {observation.threadIds.length === 0 ? null : (
+        <span className="font-mono">{escapeInvisible(observation.threadIds.join(", "))}</span>
+      )}
+      {observation.stage === "" ? null : <span>{observation.stage}</span>}
+      {observation.anchors.length === 0 ? null : (
+        <span className="font-mono">{escapeInvisible(observation.anchors.join("; "))}</span>
+      )}
+    </>
+  );
+}
+
 function ObservationItem({ observation }: { readonly observation: Observation }) {
   return (
     <li
@@ -35,11 +77,19 @@ function ObservationItem({ observation }: { readonly observation: Observation })
       <p className="text-sm text-fg">{escapeInvisible(observation.what)}</p>
       <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-fg-muted">
         <span>{observationKindLabel(observation.kind)}</span>
-        <Link to={runPath(observation.runId)} className="font-mono text-accent hover:underline">
-          {observation.runId}
-        </Link>
+        <ObservationRefs observation={observation} />
         {observation.at === "" ? null : <LocalTimeText value={observation.at} />}
       </p>
+      {observation.checks.length === 0 ? null : (
+        <ul className="text-xs text-fg-muted">
+          {observation.checks.map((c) => (
+            <li key={c.check}>
+              <span className="font-mono">{escapeInvisible(c.check)}</span>
+              {c.sentence === "" ? null : <> {escapeInvisible(c.sentence)}</>}
+            </li>
+          ))}
+        </ul>
+      )}
       {observation.excerpt === "" ? null : (
         <CodeBlock
           label={`Output of run ${observation.runId}: ${observation.log}`}

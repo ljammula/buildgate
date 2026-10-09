@@ -1,6 +1,7 @@
 import {
   type JsonObject,
   numberMap,
+  numberOr,
   objectList,
   optBoolean,
   optString,
@@ -16,7 +17,12 @@ import {
  * agent's own report, so they are shown as text.
  */
 export interface Observation {
+  /** 16 hex characters, stable across reads. */
+  readonly id: string;
   readonly kind: string;
+  /** The record it was derived from: "run" or "request". */
+  readonly source: string;
+  /** The run it is about (the quarantined one for check_fixed); "" for an operator edit. */
   readonly runId: string;
   readonly ticket: string;
   readonly at: string;
@@ -25,9 +31,30 @@ export interface Observation {
   readonly blockers: readonly string[];
   readonly changedFiles: readonly string[];
   readonly check: string;
+  /** The failing round's failure signature; "" when it is not about a failed round. */
+  readonly signature: string;
+  /** check_fixed: the run that was accepted after the quarantined one. */
+  readonly acceptedRunId: string;
+  /** check_fixed: each failed check with the factory's own sentence about it ("" when none). */
+  readonly checks: readonly ObservationCheck[];
+  /** Request-derived kinds: the request, and the ticket (0 when none). */
+  readonly requestId: string;
+  readonly ticketIndex: number;
+  /** review_comment_accepted: review thread ids, never a comment. */
+  readonly threadIds: readonly string[];
+  /** operator_edit: the review gate. */
+  readonly stage: string;
+  /** operator_edit: file and section names the action touched, never text. */
+  readonly anchors: readonly string[];
   /** The retained output's name, relative to the run's directory; "" when none was kept. */
   readonly log: string;
   readonly excerpt: string;
+}
+
+/** internal/observation.CheckNote. */
+export interface ObservationCheck {
+  readonly check: string;
+  readonly sentence: string;
 }
 
 /** internal/observation.Report: GET /projects/{project}/observations. */
@@ -54,9 +81,15 @@ function numberList(o: JsonObject, key: string, at: string): number[] {
   return value as number[];
 }
 
+function decodeCheck(o: JsonObject, at: string): ObservationCheck {
+  return { check: reqString(o, "check", at), sentence: optString(o, "sentence", at) };
+}
+
 function decodeObservation(o: JsonObject, at: string): Observation {
   return {
+    id: optString(o, "id", at),
     kind: reqString(o, "kind", at),
+    source: optString(o, "source", at),
     runId: reqString(o, "run_id", at),
     ticket: optString(o, "ticket", at),
     at: optString(o, "at", at),
@@ -65,6 +98,14 @@ function decodeObservation(o: JsonObject, at: string): Observation {
     blockers: stringList(o, "blockers", at),
     changedFiles: stringList(o, "changed_files", at),
     check: optString(o, "check", at),
+    signature: optString(o, "signature", at),
+    acceptedRunId: optString(o, "accepted_run_id", at),
+    checks: objectList(o, "checks", at, decodeCheck),
+    requestId: optString(o, "request_id", at),
+    ticketIndex: numberOr(o, "ticket_index", at, 0),
+    threadIds: stringList(o, "thread_ids", at),
+    stage: optString(o, "stage", at),
+    anchors: stringList(o, "anchors", at),
     log: optString(o, "log", at),
     excerpt: optString(o, "excerpt", at),
   };
@@ -91,6 +132,9 @@ const kindLabels: Readonly<Record<string, string>> = {
   round_changed_nothing: "A round changed nothing",
   check_failed: "A check failed and the run was quarantined",
   run_halted: "The run halted",
+  check_fixed: "A quarantined check was fixed by a later run",
+  review_comment_accepted: "A review round was accepted and pushed",
+  operator_edit: "The operator edited or sent back a draft",
 };
 
 export function observationKindLabel(kind: string): string {
