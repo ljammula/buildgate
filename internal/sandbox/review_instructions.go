@@ -48,11 +48,15 @@ var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.j
 var reviewInstructionBaseNames = []string{"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"}
 
 const (
-	maxReviewInstructionMasks     = 64
-	maxReviewInstructionFiles     = 2000
-	maxReviewInstructionFileBytes = 2 << 20
-	maxReviewInstructionTree      = 2000000
-	maxReviewInstructionLinkBytes = 4096
+	maxReviewInstructionMasks = 64
+	maxReviewInstructionFiles = 2000
+	// maxReviewInstructionBlobBytes bounds one base or result blob written
+	// under dst, maxReviewInstructionStagedBytes all of them. Verification of
+	// the worktree only hashes, and has no cap.
+	maxReviewInstructionBlobBytes   = 16 << 20
+	maxReviewInstructionStagedBytes = 64 << 20
+	maxReviewInstructionTree        = 2000000
+	maxReviewInstructionLinkBytes   = 4096
 	// maxReviewInstructionFileDiff and maxReviewInstructionDiffBytes bound the
 	// diff text of one file and of the whole diff file.
 	maxReviewInstructionFileDiff  = 256 << 10
@@ -79,7 +83,10 @@ type WorkspaceMask struct {
 // ReviewInstructionSnapshot is what SnapshotReviewInstructions produced. It
 // is the zero value when the result changed no instruction path and the
 // worktree held nothing under one beyond the result commit. Removed lists the
-// workspace-relative paths the host deleted from the worktree.
+// workspace-relative paths the host deleted from the worktree by this call;
+// it is not part of SHA256 (the hash covers the snapshot tree and the masks
+// only), so a second call on the same worktree has the same SHA256 and an
+// empty Removed.
 type ReviewInstructionSnapshot struct {
 	Masks    []WorkspaceMask
 	Paths    []string
@@ -419,10 +426,12 @@ type planState struct {
 	cands     map[string]*candidate
 	links     map[string]*[2]*treeEntry // relevant symlinks: base, result
 	tracked   []treeEntry               // relevant result entries, to verify on disk
+	roots     map[string]string         // folded link-target path outside the table -> its spelling
+	staged    int64                     // bytes written under dst so far
 }
 
 func newPlan(base, res *gitTree) (*planState, error) {
-	s := &planState{base: base, res: res, spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}}
+	s := &planState{base: base, res: res, spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}, roots: map[string]string{}}
 	for side, t := range []*gitTree{base, res} {
 		for _, e := range t.list {
 			if err := s.index(e, side); err != nil {
@@ -570,13 +579,12 @@ func (s *planState) stage(ctx context.Context, root, dst string, cands []*candid
 	}
 	var masks []WorkspaceMask
 	var diffs []stagedDiff
-	var total int
 	for _, c := range cands {
 		if err := validateMaskTarget(c.canon); err != nil {
 			return nil, nil, fmt.Errorf("review instructions: %w", err)
 		}
 		target := filepath.Join(treeDir, filepath.FromSlash(c.canon))
-		if err := s.writeBase(ctx, root, treeDir, target, c, &total); err != nil {
+		if err := s.writeBase(ctx, root, treeDir, target, c); err != nil {
 			return nil, nil, err
 		}
 		d, err := s.stageDiffs(ctx, root, dst, c, len(diffs))
@@ -589,7 +597,7 @@ func (s *planState) stage(ctx context.Context, root, dst string, cands []*candid
 	return masks, diffs, nil
 }
 
-func (s *planState) writeBase(ctx context.Context, root, treeDir, target string, c *candidate, total *int) error {
+func (s *planState) writeBase(ctx context.Context, root, treeDir, target string, c *candidate) error {
 	var err error
 	if c.isDir() {
 		err = os.MkdirAll(target, 0o755)
@@ -607,26 +615,73 @@ func (s *planState) writeBase(ctx context.Context, root, treeDir, target string,
 		if err := ensureContainedPath(treeDir, out); err != nil {
 			return fmt.Errorf("review instructions: %w", err)
 		}
-		body, err := readBlob(ctx, root, e.oid, maxReviewInstructionFileBytes)
-		if err != nil {
-			return fmt.Errorf("%w (at %s)", err, strconv.Quote(e.path))
-		}
-		if *total += len(body); *total > MaxSkillsBundleBytes {
-			return fmt.Errorf("review instructions: snapshot over %d bytes at %s", MaxSkillsBundleBytes, c.spelled)
-		}
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return err
 		}
-		if e.isLink() {
-			err = os.Symlink(string(body), out)
-		} else {
-			err = writeSnapshotFile(out, body, e.exec())
-		}
-		if err != nil {
-			return err
+		if err := s.writeBaseEntry(ctx, root, out, e); err != nil {
+			return fmt.Errorf("%w (at %s)", err, strconv.Quote(e.path))
 		}
 	}
 	return nil
+}
+
+func (s *planState) writeBaseEntry(ctx context.Context, root, out string, e treeEntry) error {
+	if !e.isLink() {
+		return s.streamBlob(ctx, root, e.oid, out, e.exec())
+	}
+	body, err := readBlob(ctx, root, e.oid, maxReviewInstructionLinkBytes)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(string(body), out)
+}
+
+// fileCapWriter writes the first max bytes to f and counts the rest, which are
+// dropped: the git process behind it is never blocked or killed half way.
+type fileCapWriter struct {
+	f    *os.File
+	max  int64
+	n    int64
+	over int64
+}
+
+func (w *fileCapWriter) Write(p []byte) (int, error) {
+	room := min(max(w.max-w.n, 0), int64(len(p)))
+	if _, err := w.f.Write(p[:room]); err != nil {
+		return 0, err
+	}
+	w.n += room
+	w.over += int64(len(p)) - room
+	return len(p), nil
+}
+
+// streamBlob writes a blob straight from git to dest, never holding it in
+// memory, within the per-blob and the per-snapshot caps.
+func (s *planState) streamBlob(ctx context.Context, root, oid, dest string, exec bool) error {
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	left := int64(maxReviewInstructionStagedBytes) - s.staged
+	w := &fileCapWriter{f: f, max: min(int64(maxReviewInstructionBlobBytes), left)}
+	gerr := reviewGit(ctx, root, w, "cat-file", "blob", oid)
+	cerr := f.Close()
+	s.staged += w.n
+	switch {
+	case gerr != nil:
+		return fmt.Errorf("review instructions: %w", gerr)
+	case cerr != nil:
+		return cerr
+	case w.over > 0 && left < maxReviewInstructionBlobBytes:
+		return fmt.Errorf("review instructions: snapshot over %d bytes", maxReviewInstructionStagedBytes)
+	case w.over > 0:
+		return fmt.Errorf("review instructions: blob %s is over %d bytes", oid, maxReviewInstructionBlobBytes)
+	}
+	mode := os.FileMode(0o644)
+	if exec {
+		mode = 0o755
+	}
+	return os.Chmod(dest, mode)
 }
 
 // stageDiffs pairs the entries of c by exact path and writes the result blob
@@ -663,13 +718,9 @@ func (s *planState) stageDiffs(ctx context.Context, root, dst string, c *candida
 			d.baseFile = filepath.Join(reviewInstructionTreeDir, filepath.FromSlash(p))
 		}
 		if d.res != nil && (d.base == nil || d.base.oid != d.res.oid) {
-			body, err := readBlob(ctx, root, d.res.oid, maxReviewInstructionFileBytes)
-			if err != nil {
-				return nil, fmt.Errorf("%w (at %s)", err, strconv.Quote(p))
-			}
 			d.resTmp = filepath.Join(reviewInstructionScratchDir, strconv.Itoa(offset+len(out)))
-			if err := os.WriteFile(filepath.Join(dst, d.resTmp), body, 0o644); err != nil {
-				return nil, err
+			if err := s.streamBlob(ctx, root, d.res.oid, filepath.Join(dst, d.resTmp), false); err != nil {
+				return nil, fmt.Errorf("%w (at %s)", err, strconv.Quote(p))
 			}
 		}
 		out = append(out, d)
@@ -717,12 +768,19 @@ func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA
 	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
+	// Pass one ends here: every check has run and nothing is removed yet.
 	removed, err := plan.reconcileDisk(ctx, root)
 	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
+	if err := validateWorkspaceMasks(masks, ""); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
 	if len(masks) == 0 && len(removed) == 0 {
 		return ReviewInstructionSnapshot{}, os.RemoveAll(dst)
+	}
+	if err := applyRemovals(root, removed); err != nil {
+		return ReviewInstructionSnapshot{}, err
 	}
 	return finishSnapshot(ctx, dst, masks, diffs, removed)
 }
@@ -744,7 +802,10 @@ func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (*planSt
 		return nil, nil, err
 	}
 	cands, err := plan.differing()
-	return plan, cands, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return plan, cands, plan.checkMaskParents(root, cands)
 }
 
 func finishSnapshot(ctx context.Context, dst string, masks []WorkspaceMask, diffs []stagedDiff, removed []removal) (ReviewInstructionSnapshot, error) {
@@ -764,12 +825,9 @@ func finishSnapshot(ctx context.Context, dst string, masks []WorkspaceMask, diff
 	if err := publicDirs(dst); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
-	if err := validateWorkspaceMasks(masks, ""); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
 	snap.DiffPath = filepath.Join(dst, reviewInstructionDiffFile)
 	var err error
-	snap.SHA256, err = hashSnapshot(filepath.Join(dst, reviewInstructionTreeDir), masks, snap.Removed)
+	snap.SHA256, err = hashSnapshot(filepath.Join(dst, reviewInstructionTreeDir), masks)
 	return snap, err
 }
 
@@ -878,10 +936,10 @@ func diffOne(ctx context.Context, dst string, d stagedDiff, budget int) ([]byte,
 
 // ---- the hash ----
 
-// hashSnapshot hashes the snapshot's trees, the mask list and the removed
-// list: every field is length-prefixed, so no two different snapshots share a
+// hashSnapshot hashes the snapshot's trees and the mask list (not what was
+// removed from the worktree, which a second call no longer finds): every field is length-prefixed, so no two different snapshots share a
 // byte stream. Files carry their executable bit, links their text.
-func hashSnapshot(treeDir string, masks []WorkspaceMask, removed []string) (string, error) {
+func hashSnapshot(treeDir string, masks []WorkspaceMask) (string, error) {
 	type entry struct {
 		kind byte
 		path string
@@ -939,9 +997,6 @@ func hashSnapshot(treeDir string, masks []WorkspaceMask, removed []string) (stri
 			flags[1] = 1
 		}
 		writeHashEntry(h, 'm', m.Target, flags)
-	}
-	for _, r := range removed {
-		writeHashEntry(h, 'r', r, nil)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

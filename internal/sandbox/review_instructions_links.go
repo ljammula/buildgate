@@ -68,6 +68,9 @@ func resolveLinkTarget(rel, text string) (string, error) {
 	return target, nil
 }
 
+// checkLinkTarget refuses a target through another link or changed between
+// the trees. A target outside the table becomes a verified root: the worktree
+// must hold exactly the result tree at and under it.
 func (s *planState) checkLinkTarget(link, target string) error {
 	fold := foldComponents(strings.Split(target, "/"))
 	for k := range fold {
@@ -83,5 +86,6 @@ func (s *planState) checkLinkTarget(link, target string) error {
 	if !sameEntries(s.base.foldedUnder(f), s.res.foldedUnder(f)) {
 		return fmt.Errorf("review instructions: %s is a link to %s, which this build changed: a review cannot be given the base version of it", link, target)
 	}
+	s.roots[f] = target
 	return nil
 }

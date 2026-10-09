@@ -44,10 +44,11 @@ func TestReviewInstructionArguments(t *testing.T) {
 }
 
 func TestReviewInstructionCaps(t *testing.T) {
-	t.Run("a 3 MiB blob under .codex", func(t *testing.T) {
+	// The per-blob cap is 16 MiB (verification of the worktree has no cap).
+	t.Run("a 17 MiB blob under .codex", func(t *testing.T) {
 		r := newInstructionRepo(t, nil)
-		r.write(".codex/big", strings.Repeat("x", 3<<20))
-		r.mustFail("is over 2097152 bytes", ".codex/big")
+		r.write(".codex/big", strings.Repeat("x", 17<<20))
+		r.mustFail("is over 16777216 bytes", ".codex/big")
 	})
 	t.Run("2001 files", func(t *testing.T) {
 		r := newInstructionRepo(t, nil)
@@ -119,7 +120,9 @@ func TestReviewInstructionDiffFile(t *testing.T) {
 	})
 }
 
-func TestReviewInstructionHashCoversRemoved(t *testing.T) {
+// What was removed from the worktree is not part of the hash: a second call
+// on the same worktree finds nothing to remove and must hash the same.
+func TestReviewInstructionHashIgnoresRemoved(t *testing.T) {
 	build := func(untracked string) string {
 		r := newInstructionRepo(t, map[string]string{"AGENTS.md": "rules\n"})
 		r.write("AGENTS.md", "steer\n")
@@ -130,8 +133,7 @@ func TestReviewInstructionHashCoversRemoved(t *testing.T) {
 		snap, _ := r.mustSnap()
 		return snap.SHA256
 	}
-	same, none, other := build(".pi/a"), build(""), build(".codex/a")
-	if same == "" || same == none || same == other || same != build(".pi/a") {
-		t.Fatalf("hashes: with .pi/a %q, none %q, with .codex/a %q", same, none, other)
+	if a, b := build(".pi/a"), build(""); a == "" || a != b {
+		t.Fatalf("hashes: with .pi/a %q, none %q", a, b)
 	}
 }
