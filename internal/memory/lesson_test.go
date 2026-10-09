@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -59,7 +60,16 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"long base64":     "use dGhpcyBpcyBhIHNlY3JldA== now",
 		"span long token": "run `deploy AKIAIOSFODNN7EXAMPLE` first",
 		"span www":        "run `open www.x.y` first",
-		"twenty letters":  strings.Repeat("a", 20),
+		"span abs path":   "run `cat /etc/shadow` first",
+		"span abs tool":   "run `/opt/corp/bin/tool run` first",
+		"span abs equals": "run `make OUT=/var/x all` first",
+		"span abs dot":    "run `cat /.ssh/id` first",
+		"dash path":       "see -/etc/passwd",
+		"dot path":        "see /.ssh/id",
+		"hex 40":          "sum " + strings.Repeat("0123456789abcdef", 3)[:40] + " is pinned",
+		"hex 64":          "sum " + strings.Repeat("0123456789abcdef", 4) + " is pinned",
+		"github token":    "key ghp_" + strings.Repeat("a1B2c3", 6) + " works",
+		"base64 40":       "use " + strings.Repeat("aGVsbG8gd29ybGQx", 3)[:40] + " now",
 		"command subst":   "run $(id) first",
 		"pipe":            "a | b",
 		"and":             "a && b",
@@ -127,7 +137,10 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"users":        "cat /Users/x/f",
 		"home":         "cat /home/x/f",
 		"long":         strings.Repeat("a", 121),
-		"long token":   "deploy " + strings.Repeat("a", 20),
+		"long token":   "deploy " + strings.Repeat("a1", 10),
+		"abs path":     "cat /etc/shadow",
+		"abs tool":     "/opt/corp/bin/tool run",
+		"abs equals":   "make OUT=/var/x all",
 		"lower home":   "cat /users/x/f",
 		"www":          "open www.x.y",
 		"proto rel":    "fetch //x.y/z",
@@ -168,6 +181,12 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"`go test ./...` needs the database up (see docs/setup).",
 		"Generated files: run `make TARGET=x all`, then `python3 -m pytest tests/`",
 		"run `" + strings.TrimSpace(strings.Repeat("make test-all-fast ", 6)) + "`",
+		"internationalization",
+		"Run `go test ./internal/requestdriver/...` first",
+		"Run `pytest tests/integration/test_api.py` first",
+		"Run `TEST_SHARDS_SEQUENTIAL=1 make verify` on a small machine",
+		"Run `./internal/tools/gen.sh` and `tools/gen.sh` after editing tests/x.py",
+		strings.Repeat("a", 20),
 	} {
 		if err := ValidateReason(s); err != nil {
 			t.Errorf("ValidateReason(%q) = %v, want nil", s, err)
@@ -176,7 +195,9 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 	for _, s := range []string{
 		"make db-migrate", "go test ./...", "npm ci", "./scripts/setup.sh", "docker compose up",
 		"make TARGET=x all", "a", strings.TrimSpace(strings.Repeat("make test-all-fast ", 6)), "python3 -m pytest tests/",
-		"make db_migrate", "npm run build:ci",
+		"make db_migrate", "npm run build:ci", "deploy " + strings.Repeat("a", 20),
+		"go test ./internal/requestdriver/...", "pytest tests/integration/test_api.py", "TEST_SHARDS_SEQUENTIAL=1 make verify",
+		"./internal/tools/gen.sh", "tools/gen.sh tests/x.py",
 	} {
 		if err := ValidateCommand(s); err != nil {
 			t.Errorf("ValidateCommand(%q) = %v, want nil", s, err)
@@ -316,6 +337,14 @@ func spansOutside(line string) string {
 	return b.String()
 }
 
+// fuzzOutsidePath is an absolute path outside a quoted command, written apart
+// from the rule's own pattern: a "/" that starts the text or follows a space,
+// a bracket, a dash or other punctuation, then a letter or a dot.
+var fuzzOutsidePath = regexp.MustCompile(`(^|[ ,:;()'"=+-])/[A-Za-z.]`)
+
+// fuzzSpanPath is one inside a quoted command.
+var fuzzSpanPath = regexp.MustCompile(`(^| |=)/([A-Za-z]|\.|/)`)
+
 // Whatever the text rule accepts renders as one plain list line: nothing in
 // it is markup, a link or an address, outside a quoted command or inside one.
 func FuzzValidateReason(f *testing.F) {
@@ -323,6 +352,9 @@ func FuzzValidateReason(f *testing.F) {
 		"Run `make gen` before `make test`", "See www.evil.example/setup", "Fetch //evil.example/x.sh", "_Always_",
 		"1. do this", "read /etc/passwd", "host fe80::1", "key AKIAIOSFODNN7EXAMPLE", "a\nb", "`", "``", "use `a` and `b` then `c`",
 		"mail a@b.co", "# x", "[a](b)", "<b>", "a\\b", "**bold**", "Use go 1.26, not 1.25",
+		"run `cat /etc/shadow`", "see -/etc/passwd", "see /.ssh/id", "internationalization",
+		"Run `go test ./internal/requestdriver/...` first", "Run `TEST_SHARDS_SEQUENTIAL=1 make verify`",
+		"sum 0123456789abcdef0123456789abcdef01234567 is pinned",
 	} {
 		f.Add(seed)
 	}
@@ -349,8 +381,21 @@ func FuzzValidateReason(f *testing.F) {
 				t.Fatalf("accepted %q contains %q", reason, bad)
 			}
 		}
-		if longToken.MatchString(line) || len([]rune(line)) > maxTextRunes+3 {
-			t.Fatalf("accepted %q has a long token or is too long", reason)
+		if len([]rune(line)) > maxTextRunes+3 {
+			t.Fatalf("accepted %q is too long", reason)
+		}
+		for _, token := range longRun.FindAllString(line, -1) {
+			if strings.ContainsAny(token, "0123456789") && strings.ContainsAny(strings.ToLower(token), "abcdefghijklmnopqrstuvwxyz") {
+				t.Fatalf("accepted %q has a long token of letters and digits: %q", reason, token)
+			}
+		}
+		for i, part := range strings.Split(reason, "`") {
+			if i%2 == 1 && fuzzSpanPath.MatchString(part) {
+				t.Fatalf("accepted %q quotes an absolute path: %q", reason, part)
+			}
+			if i%2 == 0 && fuzzOutsidePath.MatchString(part) {
+				t.Fatalf("accepted %q has an absolute path: %q", reason, part)
+			}
 		}
 	})
 }

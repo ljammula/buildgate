@@ -193,7 +193,7 @@ func (mc *memoryCmd) propose(ctx context.Context, ids []string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	_, _, state, err := refreshMemoryStore(store, mc.dataDir, mc.project, section.Lines, mc.stamp())
+	_, _, state, err := refreshMemoryStore(store, mc.dataDir, mc.project, mc.repoRoot, section.Lines, mc.stamp())
 	if err != nil {
 		return "", err
 	}

@@ -263,13 +263,21 @@ const (
 	// instruction name into a symlink, a submodule or a directory.
 	ReasonRootInstructionNotRegular = "a run that is not a memory change made AGENTS.md something other than a regular file"
 	ReasonMemoryChangeNotApproved   = "memory change does not match the approved text"
-	reasonMemoryCheckIncomplete     = "memory section check could not be completed"
+	// ReasonMemorySwitchedOff: a memory run while its repository's store
+	// holds the off marker.
+	ReasonMemorySwitchedOff = "repository memory is switched off (factoryd memory off)"
+	// ReasonMemoryBaseMoved: a memory run whose base holds another root
+	// AGENTS.md than the one its proposal was rendered from. The worker
+	// halts a memory request with the same sentence before its build.
+	ReasonMemoryBaseMoved       = "AGENTS.md changed after the memory change was proposed; propose it again"
+	reasonMemoryCheckIncomplete = "memory section check could not be completed"
 )
 
 // memoryEditReasons turns the host's evidence about the root instruction
 // names into denials. A memory request's run (one with an approved proposal)
 // is released only when AGENTS.md is exactly the approved file and no other
-// file changed. Any other run may not change a root instruction name of a
+// file changed, memory is not switched off for its repository, and the base
+// still holds the AGENTS.md the proposal was rendered from. Any other run may not change a root instruction name of a
 // repository whose base has a memory section, and elsewhere may not leave a
 // memory marker, a second spelling or a non-file there. It reads the evidence
 // only: the host did the I/O.
@@ -279,6 +287,10 @@ func memoryEditReasons(m *run.MemoryEdit) []string {
 		return nil
 	case m.Error != "":
 		return []string{fmt.Sprintf("%s: %s", reasonMemoryCheckIncomplete, m.Error)}
+	case m.Proposal && m.SwitchedOff:
+		return []string{ReasonMemorySwitchedOff}
+	case m.Proposal && m.BaseMoved:
+		return []string{ReasonMemoryBaseMoved}
 	case m.Proposal:
 		if m.Matches && len(m.OtherFilesChanged) == 0 {
 			return nil

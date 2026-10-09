@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"buildgate/internal/memory"
+	"buildgate/internal/release"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
@@ -29,7 +30,9 @@ import (
 //     its repository's store key) is released only when the
 //     result tree holds exactly one root instruction name, spelled AGENTS.md, a
 //     regular file of mode 100644 whose bytes are the proposal's expected
-//     text, and no other file changed.
+//     text, and no other file changed; and only while root AGENTS.md at its
+//     diff base is still the file the proposal was rendered from and the
+//     repository's store holds no off marker.
 //   - Any other run: when a root instruction file at its diff base holds
 //     "buildgate:memory", it may not change a root instruction name at all;
 //     when none does, it may change or create one, but the result may hold only
@@ -261,34 +264,98 @@ func otherThanAgentsFile(changed []string) []string {
 
 // memoryProposal loads the proposal of r's request when that request is a
 // memory request (request.SourceMemory, which only `factoryd memory propose`
-// submits); has is false for every other run, with no git call. The proposal
-// is kept under the store key of the request's repository. err means a
-// request record that exists and cannot be read, or a memory request whose
-// proposal is absent or unusable (not a regular file, recorded for another
-// request, damaged): such a run is never released.
-func memoryProposal(r *run.Run, dataDir string) (p memory.Proposal, has bool, err error) {
+// submits); has is false for every other run, with no git call. key is the
+// store key of the request's repository, which the proposal is kept under.
+// err means a request record that exists and cannot be read, or a memory
+// request whose proposal is absent or unusable (not a regular file, recorded
+// for another request, damaged): such a run is never released.
+func memoryProposal(r *run.Run, dataDir string) (p memory.Proposal, key string, has bool, err error) {
 	if r.RequestID == "" {
-		return memory.Proposal{}, false, nil
+		return memory.Proposal{}, "", false, nil
 	}
 	req, err := request.Load(dataDir, r.RequestID)
 	if errors.Is(err, os.ErrNotExist) {
-		return memory.Proposal{}, false, nil
+		return memory.Proposal{}, "", false, nil
 	}
 	if err != nil {
-		return memory.Proposal{}, false, fmt.Errorf("request %s: %w", r.RequestID, err)
+		return memory.Proposal{}, "", false, fmt.Errorf("request %s: %w", r.RequestID, err)
 	}
+	return memoryProposalOfRequest(dataDir, req)
+}
+
+// memoryProposalOfRequest is memoryProposal for a loaded request.
+func memoryProposalOfRequest(dataDir string, req *request.Request) (p memory.Proposal, key string, has bool, err error) {
 	if req.Source.Kind != request.SourceMemory {
-		return memory.Proposal{}, false, nil
+		return memory.Proposal{}, "", false, nil
 	}
-	key, ok := memoryStoreKeyOfRun(dataDir, r)
-	if !ok {
-		return memory.Proposal{}, false, fmt.Errorf("memory request %s records no repository", r.RequestID)
+	if req.Workspace == "" {
+		return memory.Proposal{}, "", false, fmt.Errorf("memory request %s records no repository", req.ID)
 	}
-	p, has, err = memory.LoadProposalFor(dataDir, key, r.RequestID)
+	key = memory.StoreKey(req.Project, release.RepositoryRoot(req.Workspace))
+	p, has, err = memory.LoadProposalFor(dataDir, key, req.ID)
 	if err == nil && !has {
-		err = fmt.Errorf("memory request %s has no proposal file", r.RequestID)
+		err = fmt.Errorf("memory request %s has no proposal file", req.ID)
 	}
-	return p, has, err
+	return p, key, has, err
+}
+
+// memorySwitchedOff reports whether the store under key holds the off marker
+// `factoryd memory off` writes. It creates nothing.
+func memorySwitchedOff(dataDir, key string) (bool, error) {
+	store, err := memory.OpenReadOnly(dataDir, key)
+	if err != nil {
+		return false, err
+	}
+	return store.Off()
+}
+
+// reasonMemoryDispatchUnchecked halts a memory request whose proposal or
+// whose AGENTS.md at HEAD could not be read before its build.
+const reasonMemoryDispatchUnchecked = "the memory change could not be checked against AGENTS.md before its build"
+
+// staleMemoryRequest is why the worker does not build req's ticket, "" when
+// it may: req is a memory request and root AGENTS.md at its checkout's HEAD
+// is no longer the file its proposal was rendered from, so the release check
+// would refuse the run (release.ReasonMemoryBaseMoved). A proposal or a HEAD
+// that cannot be read refuses too. Every other request gets "", with no git
+// call.
+func staleMemoryRequest(ctx context.Context, dp *deps, dataDir string, req *request.Request) string {
+	proposal, _, has, err := memoryProposalOfRequest(dataDir, req)
+	if err == nil && !has {
+		return ""
+	}
+	if err != nil {
+		log.Printf("request %s: memory proposal: %v", req.ID, err)
+		return reasonMemoryDispatchUnchecked
+	}
+	hash, err := agentsHashAtHead(ctx, dp, release.RepositoryRoot(req.Workspace))
+	if err != nil {
+		log.Printf("request %s: %v", req.ID, err)
+		return reasonMemoryDispatchUnchecked
+	}
+	if hash != proposal.BaseBlobSHA256 {
+		return release.ReasonMemoryBaseMoved
+	}
+	return ""
+}
+
+// agentsHashAtHead is the SHA-256 of root AGENTS.md at the checkout's HEAD,
+// read from git objects; "" when HEAD has no such file.
+func agentsHashAtHead(ctx context.Context, dp *deps, repoRoot string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, memoryGitTimeout)
+	defer cancel()
+	head, err := dp.host.headCommit(ctx, repoRoot)
+	if err != nil {
+		return "", fmt.Errorf("read HEAD of %s: %w", repoRoot, err)
+	}
+	data, exists, err := dp.host.blobAtCommit(ctx, repoRoot, head, agentsFile)
+	if err != nil {
+		return "", fmt.Errorf("read %s at HEAD: %w", agentsFile, err)
+	}
+	if !exists {
+		return "", nil
+	}
+	return memory.HashHex(data), nil
 }
 
 // computeMemoryEdit is the evidence for an accepted run with a result commit,
@@ -300,7 +367,7 @@ func computeMemoryEdit(ctx context.Context, dp *deps, r *run.Run, dataDir, repoD
 		return nil
 	}
 	listed := run.ChangedRootInstructionNames(r.ChangedFiles)
-	proposal, has, propErr := memoryProposal(r, dataDir)
+	proposal, key, has, propErr := memoryProposal(r, dataDir)
 	if len(listed) == 0 && !has && propErr == nil {
 		return nil
 	}
@@ -310,6 +377,14 @@ func computeMemoryEdit(ctx context.Context, dp *deps, r *run.Run, dataDir, repoD
 		edit.Error = fmt.Sprintf("proposal: %v", propErr)
 		return edit
 	}
+	if has {
+		off, err := memorySwitchedOff(dataDir, key)
+		if err != nil {
+			edit.Error = fmt.Sprintf("off marker: %v", err)
+			return edit
+		}
+		edit.SwitchedOff = off
+	}
 	base := r.DiffBaseSHA
 	if base == "" {
 		base = r.BaseSHA
@@ -318,7 +393,7 @@ func computeMemoryEdit(ctx context.Context, dp *deps, r *run.Run, dataDir, repoD
 		edit.Error = "run has no base commit"
 		return edit
 	}
-	if err := fillMemoryEdit(ctx, dp, edit, repoDir, base, r.ResultSHA, proposal.ExpectedSHA256); err != nil {
+	if err := fillMemoryEdit(ctx, dp, edit, repoDir, base, r.ResultSHA, proposal); err != nil {
 		edit.Error = err.Error()
 	}
 	return edit
@@ -326,7 +401,7 @@ func computeMemoryEdit(ctx context.Context, dp *deps, r *run.Run, dataDir, repoD
 
 // fillMemoryEdit reads the root instruction names at both commits and sets
 // everything the policy decides on.
-func fillMemoryEdit(ctx context.Context, dp *deps, edit *run.MemoryEdit, repoDir, base, result, expectedSHA256 string) error {
+func fillMemoryEdit(ctx context.Context, dp *deps, edit *run.MemoryEdit, repoDir, base, result string, proposal memory.Proposal) error {
 	baseEntries, err := rootInstructionEntries(ctx, dp, repoDir, base)
 	if err != nil {
 		return err
@@ -341,12 +416,16 @@ func fillMemoryEdit(ctx context.Context, dp *deps, edit *run.MemoryEdit, repoDir
 	if err != nil {
 		return err
 	}
+	baseHasFile := false
 	for _, f := range baseFiles {
 		edit.BaseHasSection = edit.BaseHasSection || f.marker
 		if f.entry.name == agentsFile {
-			edit.BaseSHA256 = f.sha256
+			edit.BaseSHA256, baseHasFile = f.sha256, true
 		}
 	}
+	// A base entry that is not a regular file has no hash: it is not the
+	// "no file" a proposal with an empty base hash was rendered from.
+	edit.BaseMoved = edit.Proposal && (edit.BaseSHA256 != proposal.BaseBlobSHA256 || baseHasFile != (proposal.BaseBlobSHA256 != ""))
 	resultFiles, err := readInstructionFiles(ctx, dp, repoDir, result, resultEntries)
 	if err != nil {
 		return err
@@ -367,7 +446,7 @@ func fillMemoryEdit(ctx context.Context, dp *deps, edit *run.MemoryEdit, repoDir
 			edit.NotRegularFile = append(edit.NotRegularFile, f.entry.name)
 		}
 	}
-	edit.Matches = edit.Proposal && len(resultFiles) == 1 && matchesApprovedFile(resultFiles[0], expectedSHA256)
+	edit.Matches = edit.Proposal && len(resultFiles) == 1 && matchesApprovedFile(resultFiles[0], proposal.ExpectedSHA256)
 	return nil
 }
 

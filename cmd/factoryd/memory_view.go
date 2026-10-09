@@ -60,6 +60,26 @@ func memorySectionAtHead(ctx context.Context, dp *deps, repoRoot string) (file [
 	return data, section, nil
 }
 
+// staleProposal is the id of the repository's open memory request whose
+// proposal no longer fits AGENTS.md at HEAD: the file there is neither the
+// one the proposal was rendered from nor the one it proposes (its pull
+// request merged). "" when there is none, or when it cannot be told.
+func staleProposal(ctx context.Context, dp *deps, dataDir, repoRoot, project string) string {
+	id, err := activeMemoryRequest(dataDir, project)
+	if err != nil || id == "" {
+		return ""
+	}
+	proposal, has, err := memory.LoadProposalFor(dataDir, memory.StoreKey(project, repoRoot), id)
+	if err != nil || !has {
+		return ""
+	}
+	hash, err := agentsHashAtHead(ctx, dp, repoRoot)
+	if err != nil || hash == proposal.BaseBlobSHA256 || hash == proposal.ExpectedSHA256 {
+		return ""
+	}
+	return id
+}
+
 // memoryRead is a project's memory as read without changing anything.
 type memoryRead struct {
 	// gateErr is the refusal a changing subcommand would get, nil when
@@ -107,7 +127,7 @@ func (ro memoryRead) view(project string) api.ProjectMemory {
 	view := api.ProjectMemory{
 		Project: project, On: ro.gateErr == nil,
 		BudgetLines: ro.budget.Lines, BudgetChars: ro.budget.Chars,
-		InForce: append([]string{}, ro.section.Lines...), Candidates: []api.MemoryCandidate{},
+		InForce: cleanLines(ro.section.Lines), Candidates: []api.MemoryCandidate{},
 	}
 	if ro.gateErr != nil {
 		view.OffReason = strings.TrimPrefix(ro.gateErr.Error(), memory.ErrMemoryOff.Error()+": ")
@@ -129,17 +149,36 @@ func (ro memoryRead) view(project string) api.ProjectMemory {
 	})
 	for _, l := range lessons {
 		view.Candidates = append(view.Candidates, api.MemoryCandidate{
-			ID: l.ID, Line: l.Line, Source: l.Source, State: string(l.State), Seen: l.Seen,
-			FirstSeenAt: l.FirstSeenAt, LastSeenAt: l.LastSeenAt, RequestID: l.RequestID,
+			ID: sanitize.Line(l.ID), Line: sanitize.Line(l.Line), Source: sanitize.Line(l.Source), State: sanitize.Line(string(l.State)), Seen: l.Seen,
+			FirstSeenAt: sanitize.Line(l.FirstSeenAt), LastSeenAt: sanitize.Line(l.LastSeenAt), RequestID: sanitize.Line(l.RequestID),
 		})
 	}
 	return view
 }
 
-// projectRunsNewestFirst loads the project's run records, newest record
-// first, at most limit. A record that cannot be read, or that names another
-// run than its directory, is left out.
-func projectRunsNewestFirst(dataDir, project string, limit int) []*run.Run {
+// cleanLines is lines, each made safe to print on a terminal or a page
+// (sanitize.Line). Lines are read from a repository or a store file, which a
+// build or a hand edit can fill with escape sequences.
+func cleanLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, sanitize.Line(l))
+	}
+	return out
+}
+
+// runOfRepository reports whether r was built for the repository at repoRoot:
+// its recorded repository root, the value the store key hashes, cleaned the
+// same way. A run that records none belongs to no repository's memory.
+func runOfRepository(r *run.Run, repoRoot string) bool {
+	return r.RepositoryRoot != "" && filepath.Clean(r.RepositoryRoot) == filepath.Clean(repoRoot)
+}
+
+// repositoryRunsNewestFirst loads the run records of the repository at
+// repoRoot (not of every repository whose base name is project), newest
+// record first, at most limit. A record that cannot be read, or that names
+// another run than its directory, is left out.
+func repositoryRunsNewestFirst(dataDir, project, repoRoot string, limit int) []*run.Run {
 	entries, err := os.ReadDir(filepath.Join(dataDir, "runs"))
 	if err != nil {
 		return nil
@@ -158,7 +197,7 @@ func projectRunsNewestFirst(dataDir, project string, limit int) []*run.Run {
 			continue
 		}
 		loaded, err := run.Load(dataDir, entry.Name())
-		if err != nil || loaded.ID != entry.Name() || release.ProjectOf(loaded) != project {
+		if err != nil || loaded.ID != entry.Name() || release.ProjectOf(loaded) != project || !runOfRepository(loaded, repoRoot) {
 			continue
 		}
 		found = append(found, dated{loaded, info.ModTime().UnixNano()})
@@ -204,11 +243,11 @@ func memoryRequestState(dataDir string) func(string) (active, known bool) {
 	}
 }
 
-// refreshMemoryStore collects candidates from the project's newest finished
-// runs, oldest of them first, and reconciles the store with the section at
-// HEAD, in one locked update. It returns the state it saved.
-func refreshMemoryStore(store *memory.Store, dataDir, project string, sectionLines []string, now string) (added, refused int, state memory.StoreState, err error) {
-	runs := projectRunsNewestFirst(dataDir, project, maxMemoryRunsScanned)
+// refreshMemoryStore collects candidates from the repository's newest
+// finished runs, oldest of them first, and reconciles the store with the
+// section at HEAD, in one locked update. It returns the state it saved.
+func refreshMemoryStore(store *memory.Store, dataDir, project, repoRoot string, sectionLines []string, now string) (added, refused int, state memory.StoreState, err error) {
+	runs := repositoryRunsNewestFirst(dataDir, project, repoRoot, maxMemoryRunsScanned)
 	err = store.Update(func(st *memory.StoreState) error {
 		counted := make(map[string]bool, len(st.CountedRuns))
 		for _, id := range st.CountedRuns {

@@ -104,7 +104,7 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 		f.t.Fatal(err)
 	}
 	rr := quarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
-	rr.Project = f.project
+	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)
 	}

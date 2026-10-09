@@ -123,6 +123,15 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			defer removeActiveRequest(id)
 		}
 		if r.State == request.StateBuilding {
+			// A memory request whose AGENTS.md moved since it was proposed
+			// would be refused at release: it is halted before a build is
+			// spent on it.
+			if reason := staleMemoryRequest(ctx, a.dp, a.dataDir, r); reason != "" {
+				if err := requestdriver.HaltRequest(a.dataDir, r, reason, time.Now()); err != nil {
+					return "", err
+				}
+				return string(r.State), nil
+			}
 			// A build on a repository another build holds gives its slot
 			// back at once; the workflow retries after requestRepoBusyRetryAfter.
 			if repoBusy(r.Workspace, a.dataDir) {

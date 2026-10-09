@@ -64,6 +64,14 @@ type MemoryEdit struct {
 	// instruction name, it is spelled AGENTS.md, it is a regular file of
 	// mode 100644 and its SHA-256 equals the proposal's expected_sha256.
 	Matches bool `json:"matches"`
+	// SwitchedOff: the run has a proposal and its repository's memory store
+	// held the off marker (`factoryd memory off`) when the host looked.
+	SwitchedOff bool `json:"switched_off,omitempty"`
+	// BaseMoved: the run has a proposal and root AGENTS.md at the diff base
+	// is not the file the proposal was rendered from (its SHA-256 differs
+	// from the proposal's base_blob_sha256, or one has a file and the other
+	// none).
+	BaseMoved bool `json:"base_moved,omitempty"`
 	// BaseHasSection: a root instruction file at the run's diff base holds
 	// the text "buildgate:memory" in any letter case.
 	BaseHasSection bool `json:"base_has_section"`

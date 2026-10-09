@@ -16,6 +16,7 @@ import (
 	"buildgate/internal/memory"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
+	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
 )
 
@@ -26,6 +27,10 @@ import (
 // factory opens an ordinary request whose one ticket rewrites the fenced
 // section of root AGENTS.md. Nothing here runs by itself: no candidate is
 // collected, proposed or dropped unless a person runs the subcommand.
+
+// memoryTextRuleHelp is what a refused line is told: the text rule as
+// memory.ValidateReason and memory.ValidateCommand apply it.
+const memoryTextRuleHelp = "a line is one plain sentence of at most 120 characters: letters, digits, spaces and . , : ; ( ) ' \" / = + - only, with a command quoted in backticks (letters, digits, spaces and . _ / : = - only, not starting with -); no markup, no URL or address, no path that starts at the root (a relative path such as ./tools/gen.sh is fine), and no unbroken run of 20 or more characters of letters, digits and + / _ - that holds both a letter and a digit (a hash, a key id, an encoded secret)"
 
 // memoryOperator is who a move made from the command line is recorded as by.
 const memoryOperator = "operator"
@@ -206,7 +211,7 @@ func (mc *memoryCmd) list(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		added, refused, state, err := refreshMemoryStore(store, mc.dataDir, mc.project, ro.section.Lines, mc.stamp())
+		added, refused, state, err := refreshMemoryStore(store, mc.dataDir, mc.project, mc.repoRoot, ro.section.Lines, mc.stamp())
 		if err != nil {
 			return err
 		}
@@ -226,10 +231,13 @@ func (mc *memoryCmd) list(ctx context.Context) error {
 	fmt.Fprintf(mc.out, "repository memory for %s (%s): %s\n", mc.project, mc.repoRoot, state)
 	fmt.Fprintf(mc.out, "budget: %d of %d lines, %d of %d characters\n", view.UsedLines, view.BudgetLines, view.UsedChars, view.BudgetChars)
 	fmt.Fprint(mc.out, collected)
+	if stale := staleProposal(ctx, mc.dp, mc.dataDir, mc.repoRoot, mc.project); stale != "" {
+		fmt.Fprintf(mc.out, "memory request %s: stale: propose again (AGENTS.md changed after it was proposed; `factoryd cancel %s` first)\n", sanitize.Line(stale), sanitize.Line(stale))
+	}
 	fmt.Fprintln(mc.out, "\nin force (the fenced section of AGENTS.md at HEAD):")
 	switch {
 	case view.SectionError != "":
-		fmt.Fprintf(mc.out, "  cannot be read: %s\n", view.SectionError)
+		fmt.Fprintf(mc.out, "  unreadable section: fix AGENTS.md by hand (%s)\n", view.SectionError)
 	case len(view.InForce) == 0:
 		fmt.Fprintln(mc.out, "  (none)")
 	}
@@ -302,9 +310,9 @@ func (mc *memoryCmd) show(args []string) error {
 	l := st.Lessons[i]
 	runs := make([]memoryRunSeen, 0, len(l.Runs))
 	for _, id := range l.Runs {
-		seen := memoryRunSeen{ID: id}
+		seen := memoryRunSeen{ID: sanitize.Line(id)}
 		if r, err := run.Load(mc.dataDir, id); err == nil && len(r.Attempts) > 0 {
-			seen.Ended = r.Attempts[len(r.Attempts)-1].FinishedAt
+			seen.Ended = sanitize.Line(r.Attempts[len(r.Attempts)-1].FinishedAt)
 		}
 		runs = append(runs, seen)
 	}
@@ -314,9 +322,11 @@ func (mc *memoryCmd) show(args []string) error {
 			RunsSeen []memoryRunSeen `json:"runs_seen"`
 		}{l, runs})
 	}
-	fmt.Fprintf(mc.out, "%s\n\nid: %s\nstate: %s\nsource: %s\nseen in: %d run(s)\nfirst seen: %s\nlast seen: %s\n", l.Line, l.ID, l.State, l.Source, l.Seen, l.FirstSeenAt, l.LastSeenAt)
+	// The store is a file: every value printed from it is cleaned first.
+	clean := sanitize.Line
+	fmt.Fprintf(mc.out, "%s\n\nid: %s\nstate: %s\nsource: %s\nseen in: %d run(s)\nfirst seen: %s\nlast seen: %s\n", clean(l.Line), clean(l.ID), clean(string(l.State)), clean(l.Source), l.Seen, clean(l.FirstSeenAt), clean(l.LastSeenAt))
 	if l.RequestID != "" {
-		fmt.Fprintf(mc.out, "request: %s\n", l.RequestID)
+		fmt.Fprintf(mc.out, "request: %s\n", clean(l.RequestID))
 	}
 	fmt.Fprintln(mc.out, "\nruns that said it (newest last):")
 	if len(runs) == 0 {
@@ -330,7 +340,7 @@ func (mc *memoryCmd) show(args []string) error {
 		fmt.Fprintln(mc.out, "  (none)")
 	}
 	for _, h := range l.History {
-		fmt.Fprintf(mc.out, "  %s  %s -> %s  by %s  %s\n", h.At, h.From, h.To, h.By, h.Reason)
+		fmt.Fprintf(mc.out, "  %s  %s -> %s  by %s  %s\n", clean(h.At), clean(string(h.From)), clean(string(h.To)), clean(h.By), clean(h.Reason))
 	}
 	return nil
 }
@@ -348,7 +358,7 @@ func (mc *memoryCmd) add(ctx context.Context, args []string) error {
 	}
 	lesson, err := memory.NewLesson(memory.NormaliseNote(args[0]), memory.SourceOperator, mc.stamp())
 	if err != nil {
-		return fmt.Errorf("%w\na line is one plain sentence of at most 120 characters: letters, digits, spaces and . , : ; ( ) ' \" / = + - only, with a command quoted in backticks (where _ is also allowed); no address, path from the root, long token or markup", err)
+		return fmt.Errorf("%w\n%s", err, memoryTextRuleHelp)
 	}
 	_, section, err := memorySectionAtHead(ctx, mc.dp, mc.repoRoot)
 	if err != nil {

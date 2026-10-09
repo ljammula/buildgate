@@ -49,34 +49,41 @@ func TestParseSectionKeepsHumanLinesVerbatim(t *testing.T) {
 func TestParseSectionFenceErrors(t *testing.T) {
 	good := SectionHeading + "\n\n- a.\n"
 	cases := map[string]string{
-		"invalid utf8":          "x\xff\n",
-		"nul":                   "x\x00\n",
-		"begin only":            BeginMarker + "\n" + good,
-		"end only":              good + EndMarker + "\n",
-		"two begins":            BeginMarker + "\n" + BeginMarker + "\n" + good + EndMarker + "\n",
-		"two ends":              BeginMarker + "\n" + good + EndMarker + "\n" + EndMarker + "\n",
-		"two sections":          canonical + "\n" + canonical,
-		"end before begin":      EndMarker + "\n" + BeginMarker + "\n" + good,
-		"trailing space":        BeginMarker + " \n" + good + EndMarker + "\n",
-		"trailing tab":          BeginMarker + "\n" + good + EndMarker + "\t\n",
-		"crlf marker":           BeginMarker + "\r\n" + good + EndMarker + "\n",
-		"indented marker":       " " + BeginMarker + "\n" + good + EndMarker + "\n",
-		"mid line marker":       "text " + BeginMarker + "\n" + good + EndMarker + "\n",
-		"text after marker":     BeginMarker + " x\n" + good + EndMarker + "\n",
-		"marker in code fence":  "```\n" + BeginMarker + "\n" + good + EndMarker + "\n```\n",
-		"marker in tilde fence": "~~~\n" + BeginMarker + "\n" + good + EndMarker + "\n~~~\n",
-		"marker in line":        BeginMarker + "\n" + SectionHeading + "\n\n- a " + EndMarker + "\n" + EndMarker + "\n",
-		"marker elsewhere":      "see " + EndMarker + " here\n" + canonical,
-		"no heading":            BeginMarker + "\n- a.\n" + EndMarker + "\n",
-		"empty block":           BeginMarker + "\n" + EndMarker + "\n",
-		"wrong heading":         BeginMarker + "\n## Other\n\n- a.\n" + EndMarker + "\n",
-		"prose in block":        BeginMarker + "\n" + SectionHeading + "\n\nsome prose\n" + EndMarker + "\n",
-		"star bullet":           BeginMarker + "\n" + SectionHeading + "\n\n* a\n" + EndMarker + "\n",
-		"indented bullet":       BeginMarker + "\n" + SectionHeading + "\n\n  - a\n" + EndMarker + "\n",
-		"crlf in block":         BeginMarker + "\n" + SectionHeading + "\r\n\n- a.\n" + EndMarker + "\n",
-		"crlf line in block":    BeginMarker + "\n" + SectionHeading + "\n\n- a.\r\n" + EndMarker + "\n",
-		"whitespace only line":  BeginMarker + "\n" + SectionHeading + "\n \n- a.\n" + EndMarker + "\n",
-		"empty bullet":          BeginMarker + "\n" + SectionHeading + "\n\n- \n" + EndMarker + "\n",
+		"invalid utf8":                         "x\xff\n",
+		"nul":                                  "x\x00\n",
+		"begin only":                           BeginMarker + "\n" + good,
+		"end only":                             good + EndMarker + "\n",
+		"two begins":                           BeginMarker + "\n" + BeginMarker + "\n" + good + EndMarker + "\n",
+		"two ends":                             BeginMarker + "\n" + good + EndMarker + "\n" + EndMarker + "\n",
+		"two sections":                         canonical + "\n" + canonical,
+		"end before begin":                     EndMarker + "\n" + BeginMarker + "\n" + good,
+		"trailing space":                       BeginMarker + " \n" + good + EndMarker + "\n",
+		"trailing tab":                         BeginMarker + "\n" + good + EndMarker + "\t\n",
+		"crlf marker":                          BeginMarker + "\r\n" + good + EndMarker + "\n",
+		"indented marker":                      " " + BeginMarker + "\n" + good + EndMarker + "\n",
+		"mid line marker":                      "text " + BeginMarker + "\n" + good + EndMarker + "\n",
+		"text after marker":                    BeginMarker + " x\n" + good + EndMarker + "\n",
+		"marker in code fence":                 "```\n" + BeginMarker + "\n" + good + EndMarker + "\n```\n",
+		"marker in tilde fence":                "~~~\n" + BeginMarker + "\n" + good + EndMarker + "\n~~~\n",
+		"marker in line":                       BeginMarker + "\n" + SectionHeading + "\n\n- a " + EndMarker + "\n" + EndMarker + "\n",
+		"marker elsewhere":                     "see " + EndMarker + " here\n" + canonical,
+		"no heading":                           BeginMarker + "\n- a.\n" + EndMarker + "\n",
+		"empty block":                          BeginMarker + "\n" + EndMarker + "\n",
+		"wrong heading":                        BeginMarker + "\n## Other\n\n- a.\n" + EndMarker + "\n",
+		"prose in block":                       BeginMarker + "\n" + SectionHeading + "\n\nsome prose\n" + EndMarker + "\n",
+		"star bullet":                          BeginMarker + "\n" + SectionHeading + "\n\n* a\n" + EndMarker + "\n",
+		"indented bullet":                      BeginMarker + "\n" + SectionHeading + "\n\n  - a\n" + EndMarker + "\n",
+		"crlf in block":                        BeginMarker + "\n" + SectionHeading + "\r\n\n- a.\n" + EndMarker + "\n",
+		"crlf line in block":                   BeginMarker + "\n" + SectionHeading + "\n\n- a.\r\n" + EndMarker + "\n",
+		"whitespace only line":                 BeginMarker + "\n" + SectionHeading + "\n \n- a.\n" + EndMarker + "\n",
+		"empty bullet":                         BeginMarker + "\n" + SectionHeading + "\n\n- \n" + EndMarker + "\n",
+		"open fence, no markers":               "# T\n\n```sh\nmake test\n",
+		"open tilde fence":                     "# T\n\n~~~\nmake test\n",
+		"shorter close":                        "````\ncode\n```\n",
+		"other fence character":                "```\ncode\n~~~\n",
+		"close with text after":                "```\ncode\n``` not a close\n",
+		"marker in long fence":                 "````\n```\n" + BeginMarker + "\n" + good + EndMarker + "\n````\n",
+		"marker after tilde in backtick fence": "```\n~~~\n```\n~~~\n" + BeginMarker + "\n" + good + EndMarker + "\n",
 	}
 	for name, file := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -84,6 +91,53 @@ func TestParseSectionFenceErrors(t *testing.T) {
 				t.Fatalf("err = %v, want ErrFence", err)
 			}
 		})
+	}
+}
+
+// A section line that holds a control or format character is not read: it
+// would reach the operator's terminal and a spec.
+func TestParseSectionRefusesControlCharacters(t *testing.T) {
+	for name, ch := range map[string]string{
+		"escape": "\x1b[31m", "bell": "\x07", "tab": "\t", "delete": "\x7f", "c1 csi": "\u009b", "c1 nel": "\u0085",
+		"rtl override": "\u202e", "zero width": "\u200b", "bom": "\ufeff", "line separator": "\u2028",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := BeginMarker + "\n" + SectionHeading + "\n\n- one " + ch + "two.\n" + EndMarker + "\n"
+			if _, err := ParseSection([]byte(file)); !errors.Is(err, ErrFence) {
+				t.Fatalf("err = %v, want ErrFence", err)
+			}
+			out := Section{}.Render([]string{"- one " + ch + "two.", "- good."})
+			if strings.Contains(string(out), ch) {
+				t.Fatalf("render kept the character: %q", out)
+			}
+		})
+	}
+}
+
+// A file with no section that leaves a code fence open is refused: a section
+// appended to it would sit inside the fence and never be read back. Closed
+// fences, of either character and any length, are not in the way.
+func TestParseSectionTracksCodeFences(t *testing.T) {
+	for _, file := range []string{
+		"# T\n\n```sh\nmake test\n```\n",
+		"````\n```\ninner\n```\n````\n",
+		"~~~\n```\n~~~\n",
+		"```\n~~~\n```\n",
+		"use `` ``` `` in prose\n",
+		"```\ncode\n`````\n",
+		"```\ncode\n```   \n",
+	} {
+		s, err := ParseSection([]byte(file))
+		if err != nil {
+			t.Errorf("%q: %v", file, err)
+			continue
+		}
+		if _, err := ParseSection(s.Render([]string{"- a."})); err != nil {
+			t.Errorf("%q: rendered section does not parse: %v", file, err)
+		}
+		if _, err := ParseSection([]byte(file + canonical)); err != nil {
+			t.Errorf("%q: section after closed fences refused: %v", file, err)
+		}
 	}
 }
 
@@ -193,6 +247,8 @@ func FuzzParseSection(f *testing.F) {
 		"```\n" + canonical + "```\n", BeginMarker + " \n" + SectionHeading + "\n" + EndMarker + "\n",
 		BeginMarker + "\r\n" + SectionHeading + "\r\n" + EndMarker + "\r\n", "\xff", "a\x00b",
 		BeginMarker + "\n" + SectionHeading + "\n\n- a " + BeginMarker + "\n" + EndMarker + "\n",
+		"# T\n\n```sh\nmake test\n", "````\n```\n````\n", "~~~\n```\n", "```\n~~~\n```\n", "   ```\nx\n",
+		BeginMarker + "\n" + SectionHeading + "\n\n- a \x1b[0m\n" + EndMarker + "\n",
 	} {
 		f.Add([]byte(s))
 	}
@@ -207,6 +263,12 @@ func FuzzParseSection(f *testing.F) {
 		if !s.Present {
 			if s.Before != string(file) {
 				t.Fatal("absent section lost bytes")
+			}
+			// Whatever is accepted can be given a section and read back.
+			lines := []string{"- a.", "- Run `x` before `y`."}
+			back, err := ParseSection(s.Render(lines))
+			if err != nil || !back.Present || !reflect.DeepEqual(back.Lines, lines) || !strings.HasPrefix(back.Before, s.Before) {
+				t.Fatalf("a section appended to an accepted file does not parse: %v\n%q", err, file)
 			}
 			return
 		}

@@ -3,6 +3,7 @@ package memory
 import (
 	"errors"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -27,13 +28,22 @@ type Section struct {
 
 func fenceErr(why string) error { return errors.Join(ErrFence, errors.New(why)) }
 
+// controlRune reports a character a section line may not hold: a C0 or C1
+// control character or DEL (an escape sequence starts with one), a format
+// character (direction marks and overrides, zero-width characters, a BOM) or
+// a line or paragraph separator.
+func controlRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
+}
+
 // listLine reports whether l is a line the block may hold: "- " then some
-// text, on one line, with no marker, NUL or invalid UTF-8.
+// text, on one line, with no marker, control or format character, or invalid
+// UTF-8.
 func listLine(l string) bool {
 	if !strings.HasPrefix(l, "- ") || strings.TrimSpace(l[2:]) == "" {
 		return false
 	}
-	if strings.ContainsAny(l, "\r\n\x00") || !utf8.ValidString(l) {
+	if strings.IndexFunc(l, controlRune) >= 0 || !utf8.ValidString(l) {
 		return false
 	}
 	return !strings.Contains(l, BeginMarker) && !strings.Contains(l, EndMarker)
@@ -56,16 +66,43 @@ func markerLine(file, marker string) (start, next int, ok bool) {
 	return 0, 0, false
 }
 
-// openCodeFence reports whether text leaves a Markdown code fence open.
+// fenceRun returns the fence character and the length of the run of it that
+// opens line after its leading spaces: three or more "`" or "~". rest is the
+// line after the run.
+func fenceRun(line string) (ch byte, n int, rest string) {
+	t := strings.TrimLeft(line, " ")
+	if t == "" || t[0] != '`' && t[0] != '~' {
+		return 0, 0, ""
+	}
+	for n < len(t) && t[n] == t[0] {
+		n++
+	}
+	if n < 3 {
+		return 0, 0, ""
+	}
+	return t[0], n, t[n:]
+}
+
+// openCodeFence reports whether text leaves a Markdown code fence open. A
+// fence opens on a line that starts with three or more "`" or "~" (a backtick
+// fence's line holds no other backtick) and closes on a later line that is a
+// run of the same character, at least as long, and nothing else.
 func openCodeFence(text string) bool {
-	open := false
+	var open byte
+	length := 0
 	for _, l := range strings.Split(text, "\n") {
-		t := strings.TrimLeft(l, " ")
-		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
-			open = !open
+		ch, n, rest := fenceRun(l)
+		switch {
+		case n == 0:
+		case open == 0:
+			if ch == '~' || !strings.Contains(rest, "`") {
+				open, length = ch, n
+			}
+		case ch == open && n >= length && strings.TrimSpace(rest) == "":
+			open, length = 0, 0
 		}
 	}
-	return open
+	return open != 0
 }
 
 // splitMarkers locates the one begin and one end marker line.
@@ -110,20 +147,25 @@ func blockLines(block string) ([]string, error) {
 		case listLine(r):
 			lines = append(lines, r)
 		default:
-			return nil, fenceErr("a block line is neither blank nor a single \"- \" line")
+			return nil, fenceErr("a block line is neither blank nor a single \"- \" line without control characters")
 		}
 	}
 	return lines, nil
 }
 
 // ParseSection splits file around its fenced block. A file with no marker at
-// all has no section; anything else short of one clean block is ErrFence.
+// all has no section, unless it ends inside a code fence (a section appended
+// there could not be read back); anything else short of one clean block is
+// ErrFence. Whatever it accepts, Render's output for it parses again.
 func ParseSection(file []byte) (Section, error) {
 	if !utf8.Valid(file) || strings.IndexByte(string(file), 0) >= 0 {
 		return Section{}, fenceErr("not UTF-8 text without NUL")
 	}
 	text := string(file)
 	if !strings.Contains(text, BeginMarker) && !strings.Contains(text, EndMarker) {
+		if openCodeFence(text) {
+			return Section{}, fenceErr("the file ends inside a code fence: close the fence by hand")
+		}
 		return Section{Before: text}, nil
 	}
 	bStart, bNext, eStart, eNext, err := splitMarkers(text)
@@ -156,7 +198,8 @@ func (s Section) separator() string {
 }
 
 // Render writes Before, the block with lines, and After. A line that could
-// not be read back (a marker, a newline, no "- " start) is dropped. Before
+// not be read back (a marker, a newline, a control character, no "- " start)
+// is dropped. Before
 // and After are written verbatim except that a new section is separated from
 // the text before it by a blank line.
 func (s Section) Render(lines []string) []byte {

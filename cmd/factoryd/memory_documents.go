@@ -48,8 +48,11 @@ func fencedVerbatim(content string) string {
 }
 
 // inlineVerbatim puts one line in inline code whose delimiter is longer than
-// any run of backticks in it.
+// any run of backticks in it. The line is cleaned first (sanitize.Line): it
+// was read from the repository or a store file, and a spec, a ticket and a
+// pull request body are printed on terminals.
 func inlineVerbatim(line string) string {
+	line = sanitize.Line(line)
 	delim := strings.Repeat("`", longestBacktickRun(line)+1)
 	return delim + " " + line + " " + delim
 }

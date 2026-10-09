@@ -139,14 +139,24 @@ func saveMemoryRequest(t *testing.T, m *memRepo, dataDir, requestID string) stri
 }
 
 // saveTestProposal records requestID as a memory request against m whose
-// approved AGENTS.md is expected.
-func saveTestProposal(t *testing.T, m *memRepo, dataDir, requestID, expected string) {
+// approved AGENTS.md is expected, rendered from root AGENTS.md at base (no
+// file there, or base "", is a proposal rendered with no file).
+func saveTestProposal(t *testing.T, m *memRepo, dataDir, requestID, expected, base string) {
 	t.Helper()
 	path, err := memory.ProposalPath(dataDir, saveMemoryRequest(t, m, dataDir, requestID), requestID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := memory.SaveProposal(path, memory.Proposal{RequestID: requestID, Expected: expected}); err != nil {
+	baseHash := ""
+	if base != "" && m.git("ls-tree", base, "--", "AGENTS.md") != "" {
+		cmd := exec.Command("git", "-C", m.dir, "cat-file", "blob", base+":AGENTS.md")
+		blob, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		baseHash = memory.HashHex(blob)
+	}
+	if err := memory.SaveProposal(path, memory.Proposal{RequestID: requestID, BaseBlobSHA256: baseHash, Expected: expected}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -415,7 +425,7 @@ func TestMemoryRunDeniedWhenAgentsFileDiffersFromApprovedText(t *testing.T) {
 			base := m.commitTree("", c.base...)
 			result := m.commitTree(base, c.result...)
 			dataDir := t.TempDir()
-			saveTestProposal(t, m, dataDir, "req-1", c.expected)
+			saveTestProposal(t, m, dataDir, "req-1", c.expected, base)
 			r := m.memoryRun(base, result, "req-1")
 			edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir)
 			reasons := memoryDenial(t, r)
@@ -442,7 +452,7 @@ func TestMemoryRunWithExecutableAgentsFileIsDenied(t *testing.T) {
 	base := m.commitTree("", treeFile{name: "AGENTS.md", body: "# Guide\n"})
 	result := m.commitTree(base, treeFile{mode: "100755", name: "AGENTS.md", body: expected})
 	dataDir := t.TempDir()
-	saveTestProposal(t, m, dataDir, "req-1", expected)
+	saveTestProposal(t, m, dataDir, "req-1", expected, base)
 	r := m.memoryRun(base, result, "req-1")
 	edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir)
 	if edit == nil || edit.Matches || edit.ResultSHA256 != memory.HashHex([]byte(expected)) {
@@ -459,7 +469,7 @@ func TestMemoryRunWithAnotherRequestsProposalIsDenied(t *testing.T) {
 	base := m.commitTree("", treeFile{name: "AGENTS.md", body: "# Guide\n"})
 	result := m.commitTree(base, treeFile{name: "AGENTS.md", body: expected})
 	dataDir := t.TempDir()
-	saveTestProposal(t, m, dataDir, "req-other", expected)
+	saveTestProposal(t, m, dataDir, "req-other", expected, base)
 	key := saveMemoryRequest(t, m, dataDir, "req-1")
 	other, _ := memory.ProposalPath(dataDir, key, "req-other")
 	mine, _ := memory.ProposalPath(dataDir, key, "req-1")
@@ -478,21 +488,115 @@ func TestMemoryRunWithAnotherRequestsProposalIsDenied(t *testing.T) {
 	wantOneReason(t, edit, memoryDenial(t, r), "memory section check could not be completed")
 }
 
-// The proposal was rendered from another base than the run's: the run is
-// judged on the expected hash alone.
-func TestMemoryRunJudgedOnExpectedHashNotOnProposalBase(t *testing.T) {
+// A person edited AGENTS.md after the change was proposed: the proposed text
+// would undo the edit, so the run is refused whatever its result holds.
+func TestMemoryRunRefusedWhenAgentsFileChangedAfterTheProposal(t *testing.T) {
+	proposedFrom := "# Guide\n\nA bad line.\n"
+	expected := fenced(proposedFrom, "", "- one")
+	cases := []struct {
+		name         string
+		proposalBase *string // nil: the proposal was rendered with no AGENTS.md
+		runBase      *string // nil: the run's base has no AGENTS.md
+		moved        bool
+	}{
+		{"the base is the file the proposal was rendered from", sp(proposedFrom), sp(proposedFrom), false},
+		{"no file then, none now", nil, nil, false},
+		{"a line was removed by hand", sp(proposedFrom), sp("# Guide\n"), true},
+		{"the file was deleted", sp(proposedFrom), nil, true},
+		{"the file was created", nil, sp("# Guide\n"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := newMemRepo(t)
+			base := m.commit(map[string]*string{"AGENTS.md": c.runBase, "README.md": sp("r\n")})
+			result := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
+			dataDir := t.TempDir()
+			proposal := memory.Proposal{RequestID: "req-1", Expected: expected}
+			if c.proposalBase != nil {
+				proposal.BaseBlobSHA256 = memory.HashHex([]byte(*c.proposalBase))
+			}
+			path, _ := memory.ProposalPath(dataDir, saveMemoryRequest(t, m, dataDir, "req-1"), "req-1")
+			if err := memory.SaveProposal(path, proposal); err != nil {
+				t.Fatal(err)
+			}
+			r := m.memoryRun(base, result, "req-1")
+			edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir)
+			reasons := memoryDenial(t, r)
+			if edit == nil || !edit.Matches || edit.BaseMoved != c.moved {
+				t.Fatalf("edit = %+v, want the approved bytes and base moved = %v", edit, c.moved)
+			}
+			if !c.moved {
+				if len(reasons) != 0 {
+					t.Fatalf("reasons = %q, want released", reasons)
+				}
+				return
+			}
+			const want = "AGENTS.md changed after the memory change was proposed; propose it again"
+			if len(reasons) != 1 || reasons[0] != want || release.ReasonMemoryBaseMoved != want {
+				t.Fatalf("reasons = %q", reasons)
+			}
+		})
+	}
+}
+
+// `factoryd memory off` stops a memory request already in flight: its run is
+// not released while the store's off marker exists, and is again once it is
+// gone. The kill switch denies the release as it denies any other.
+func TestMemoryRunRefusedWhileMemoryIsSwitchedOff(t *testing.T) {
+	expected := fenced("# Guide\n", "", "- run make verify before pushing")
 	m := newMemRepo(t)
-	expected := fenced("# Guide\n", "", "- one")
-	base := m.commit(map[string]*string{"AGENTS.md": sp("# Something newer\n")})
-	result := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
+	base := m.commitTree("", treeFile{name: "AGENTS.md", body: "# Guide\n"})
+	result := m.commitTree(base, treeFile{name: "AGENTS.md", body: expected})
 	dataDir := t.TempDir()
-	path, _ := memory.ProposalPath(dataDir, saveMemoryRequest(t, m, dataDir, "req-1"), "req-1")
-	if err := memory.SaveProposal(path, memory.Proposal{RequestID: "req-1", BaseBlobSHA256: memory.HashHex([]byte("# Guide\n")), Expected: expected}); err != nil {
+	saveTestProposal(t, m, dataDir, "req-1", expected, base)
+	store, err := memory.Open(dataDir, memory.StoreKey("widget", release.RepositoryRoot(m.dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetOff("operator", "a bad line got in"); err != nil {
 		t.Fatal(err)
 	}
 	r := m.memoryRun(base, result, "req-1")
-	if edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir); edit == nil || !edit.Matches || len(memoryDenial(t, r)) != 0 {
-		t.Fatalf("edit = %+v, want a match", edit)
+	edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir)
+	reasons := memoryDenial(t, r)
+	const want = "repository memory is switched off (factoryd memory off)"
+	if edit == nil || !edit.SwitchedOff || len(reasons) != 1 || reasons[0] != want || release.ReasonMemorySwitchedOff != want {
+		t.Fatalf("edit = %+v reasons = %q, want refused as switched off", edit, reasons)
+	}
+	// An ordinary run of the same repository is not a memory action.
+	other := m.commitTree(base, treeFile{name: "AGENTS.md", body: "# Guide\n\nMore.\n"})
+	plain := m.memoryRun(base, other, "")
+	if edit := evaluate(t, newTestDeps(t), plain, dataDir, m.dir); edit == nil || edit.SwitchedOff || len(memoryDenial(t, plain)) != 0 {
+		t.Fatalf("an ordinary run: edit = %+v, want released", edit)
+	}
+	if err := store.ClearOff(); err != nil {
+		t.Fatal(err)
+	}
+	r = m.memoryRun(base, result, "req-1")
+	if edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir); edit == nil || edit.SwitchedOff || len(memoryDenial(t, r)) != 0 {
+		t.Fatalf("after memory on: edit = %+v, want released", edit)
+	}
+}
+
+func TestKillSwitchDeniesAMemoryRunsRelease(t *testing.T) {
+	expected := fenced("# Guide\n", "", "- run make verify before pushing")
+	m := newMemRepo(t)
+	base := m.commit(map[string]*string{"AGENTS.md": sp("# Guide\n")})
+	result := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
+	dataDir := t.TempDir()
+	saveTestProposal(t, m, dataDir, "req-1", expected, base)
+	if err := release.Engage(dataDir, "widget", "operator", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
+		t.Fatal(err)
+	}
+	r, decision := applyMemoryRun(t, m, dataDir, base, result, "req-1")
+	if r.MemoryEdit == nil || !r.MemoryEdit.Matches || decision.Allowed {
+		t.Fatalf("edit = %+v decision = %+v, want the approved file and a denied release", r.MemoryEdit, decision)
+	}
+	if err := release.Disengage(dataDir, "widget", "operator", "resume", func() string { return "2026-10-09T00:01:00Z" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, decision := applyMemoryRunOf(t, m, dataDir, "widget", "run-2", base, result, "req-1"); !decision.Allowed {
+		t.Fatalf("with the kill switch off: decision = %+v, want released", decision)
 	}
 }
 
@@ -543,7 +647,7 @@ func TestMemoryEditGitFailureFailsClosed(t *testing.T) {
 	result := m.commit(map[string]*string{"AGENTS.md": sp("# Guide edited\n")})
 	other := m.commit(map[string]*string{"README.md": sp("changed\n")})
 	dataDir := t.TempDir()
-	saveTestProposal(t, m, dataDir, "req-1", "x")
+	saveTestProposal(t, m, dataDir, "req-1", "x", base)
 
 	breaks := map[string]func(*fakeHost){
 		"the tree listing fails": func(h *fakeHost) {
@@ -759,7 +863,7 @@ func TestApplyRunWorkflowResultRecordsAndEnforcesMemoryEdit(t *testing.T) {
 	base := m.commit(map[string]*string{"AGENTS.md": sp(baseFile)})
 	good := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
 	dataDir := t.TempDir()
-	saveTestProposal(t, m, dataDir, "req-1", expected)
+	saveTestProposal(t, m, dataDir, "req-1", expected, base)
 	r, decision := applyMemoryRun(t, m, dataDir, base, good, "req-1")
 	if r.MemoryEdit == nil || !r.MemoryEdit.Matches || !decision.Allowed {
 		t.Fatalf("memory run with the approved text: edit = %+v decision = %+v, want released", r.MemoryEdit, decision)
@@ -772,7 +876,7 @@ func TestApplyRunWorkflowResultRecordsAndEnforcesMemoryEdit(t *testing.T) {
 	base = m.commit(map[string]*string{"AGENTS.md": sp(baseFile)})
 	bad := m.commit(map[string]*string{"AGENTS.md": sp(edited)})
 	dataDir = t.TempDir()
-	saveTestProposal(t, m, dataDir, "req-1", expected)
+	saveTestProposal(t, m, dataDir, "req-1", expected, base)
 	if _, decision = applyMemoryRun(t, m, dataDir, base, bad, "req-1"); decision.Allowed || !strings.Contains(strings.Join(decision.Reasons, ";"), release.ReasonMemoryChangeNotApproved) {
 		t.Fatalf("decision = %+v, want refused for not matching the approved text", decision)
 	}

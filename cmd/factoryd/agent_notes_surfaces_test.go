@@ -252,7 +252,7 @@ func TestWorthKnowingNotesReachOnlyTheOperatorsMemoryList(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := quarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
-	rr.Project = f.project
+	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if err := rr.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}

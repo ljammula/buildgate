@@ -90,11 +90,18 @@ var (
 	// listStart is how a line would open a nested list, an ordered list or a
 	// quote once it follows "- ".
 	listStart = regexp.MustCompile(`^([-+>]|[0-9]+[.)])`)
-	// absolutePath is a token that starts with "/" and a letter.
-	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/-])/[A-Za-z]`)
-	// longToken is 20 or more characters with no space from the set keys,
-	// hashes and encoded secrets are written in.
-	longToken = regexp.MustCompile(`[A-Za-z0-9+/=_-]{20,}`)
+	// absolutePath is, outside a quoted command, a token that starts with
+	// "/" and a letter or a dot. A "/" inside a relative path follows a
+	// letter, a digit, "." or "_" and is not one.
+	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z.]`)
+	// spanAbsolutePath is the same inside a quoted command: a "/" at the
+	// start, or after a space or "=", followed by a letter, a dot or "/".
+	spanAbsolutePath = regexp.MustCompile(`(^|[ =])/[A-Za-z./]`)
+	// longRun is 20 or more characters with no space from the set keys,
+	// hashes and encoded secrets are written in. One is refused only when
+	// it holds both a letter and a digit (longToken): a long word, a path
+	// or a variable name has no digit, a number no letter.
+	longRun = regexp.MustCompile(`[A-Za-z0-9+/_-]{20,}`)
 )
 
 // clip makes refused text safe to put in an error: cleaned, at most 40 bytes.
@@ -152,12 +159,29 @@ func forbiddenPart(s string) string {
 	return ""
 }
 
+// longToken reports whether s holds a run of 20 or more characters of
+// [A-Za-z0-9+/_-] with at least one letter and at least one digit.
+func longToken(s string) bool {
+	for _, run := range longRun.FindAllString(s, -1) {
+		letter, digit := false, false
+		for i := 0; i < len(run); i++ {
+			c := run[i]
+			digit = digit || c >= '0' && c <= '9'
+			letter = letter || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		}
+		if letter && digit {
+			return true
+		}
+	}
+	return false
+}
+
 // forbiddenShape names a token shape refused anywhere in a reason or a
-// command: a long unbroken token, or an address.
+// command: a long unbroken token of letters and digits, or an address.
 func forbiddenShape(s string) string {
 	switch {
-	case longToken.MatchString(s):
-		return "has an unbroken token of 20 or more characters"
+	case longToken(s):
+		return "has an unbroken token of 20 or more letters and digits"
 	case ipv4Shape.MatchString(s) || hexColonShape.MatchString(s):
 		return "contains an address-shaped token"
 	}
@@ -170,7 +194,8 @@ func forbiddenShape(s string) string {
 // a command, whose inside must pass ValidateCommand. A backtick without its
 // pair is refused, and so is a start that Markdown would read as a nested
 // list, an ordered list or a quote. Anywhere: no URL in any form, no home
-// path, no address, no unbroken token of 20 characters. It never repairs.
+// path, no address, no unbroken token of 20 or more characters of
+// [A-Za-z0-9+/_-] that holds both a letter and a digit. It never repairs.
 func ValidateReason(s string) error {
 	switch {
 	case s == "":
@@ -225,7 +250,8 @@ func validateSpans(s string) error {
 
 // ValidateCommand refuses anything but 1..120 bytes of [A-Za-z0-9 ._/:=-]
 // that does not start with "-" and has no leading, trailing or doubled space,
-// no URL, home path or address, and no unbroken token of 20 characters.
+// no URL, home path, absolute path or address, and no unbroken token of 20 or
+// more letters and digits (forbiddenShape). A relative path is accepted.
 // What remains cannot hold a shell operator, quote, variable, glob,
 // redirection or newline.
 func ValidateCommand(s string) error {
@@ -238,6 +264,8 @@ func ValidateCommand(s string) error {
 		return textErr("command", "has a character outside the allowed set", s)
 	case s[0] == '-':
 		return textErr("command", "starts with a dash", s)
+	case spanAbsolutePath.MatchString(s):
+		return textErr("command", "has an absolute path", s)
 	}
 	if why := shapeProblem(s); why != "" {
 		return textErr("command", why, s)
