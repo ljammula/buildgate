@@ -1506,6 +1506,30 @@ factoryd supervise -temporal-address localhost:7233 \
   (including its PR-only re-open for an accepted ticket with no PR) work
   the same with and without `-repository`.
 
+### Baseline verify
+
+`RunWorkflow` runs `RunBaselineVerifyActivity` between `PreflightActivity`
+and `RunBuildActivity`, on every history that has the `baseline-verify`
+version marker. A history recorded before the marker replays without it.
+
+| | |
+|---|---|
+| Command | The run's verify command (`Verify-Command:`, else `-verify-command`), once, `sh -c` in a fresh sandbox with no model route; registry proxy and compose services as for canonical verify |
+| Where | The run's own worktree, just created at the base commit. What the command left there (anything `git status` reports that it did not report before) is put back to `HEAD` or deleted before the build, by host git commands that run no hook and no file-system monitor from the repository's configuration |
+| Attempt | Kind `baseline_verify`, log `<execution key>.attempt-1-baseline_verify.log`, in the run's attempt list and progress feed (stage `baseline_verify`) |
+| Record | `baseline_verify.json` in the run's directory, written once the command has run to an exit code, before the Activity returns; `run.json` carries it as `baseline_verify`. A launch that failed as infrastructure (a timeout, a lost worker) leaves no record and halts the run as any failed launch does |
+| Failing tests | Read from the last 8 MiB of the log: `--- FAIL: <Test>` (a subtest counts as its top-level test) and pytest `FAILED`/`ERROR <file>::<test>` (parameters dropped); a Go compile error (`<file>.go:<line>:<col>:`) and a pytest collection error (`ERROR <file>.py`) name a file. No other runner's output is read |
+| Named by the ticket | The run's ticket (`-spec`, `-ticket-file`), the text its build is given, holds the test's full name or the last component of a pytest node id, with no identifier or path character on either side; a Go test may be followed by `/<subtest>`; a file is named by the path the log printed, or a longer path ending in it |
+| A path the ticket creates | When no test failed by name: the log's first recognised error line names, as a path or part of one, a file from the ticket's `Allowed-Files:`/`Required-Changed-Files:` (patterns left out) that does not exist in the worktree before the command runs, or a directory above it that does not exist either. Recorded as `needs_created` |
+| Told to the build | `baseline_failure.md` in the run's directory, staged read-only and named to the build script as `--baseline-failure`: the factory's sentence, the exit code, the verify command and each test in the words the ticket names it with, or the path the ticket creates (`named_as`). No text from the command's output |
+| Halt | Application error type `BaselineVerifyFailure`, `halt_reason_code` `baseline_verify_failed`, not retried, not counted toward the repository's stop line. A rejected compose file found by this launch halts as `compose_services_rejected` |
+| A run that follows another | Nothing is launched; the earlier run's record is copied, with `inherited_from`, and the note is written again for the build. Two cases: a resumed run (the halted run it resumes), and a run with a `-diff-base` other than its own starting commit (the request run that produced that starting commit: a retry on the attempt's branch, a corrective round, a PR-review round). The baseline runs after all when the run it follows never got past its own baseline (no record, or one that halted it, and no build attempt: the kept worktree is first put back to the base commit), or when no request run produced the starting commit |
+
+`baseline_verify` fields: `command`, `base_sha`, `exit_code`, `passed`,
+`failing_tests` and `unnamed` (at most 20 each, with `failing_count` and
+`unnamed_count`), `named_as`, `needs_created`, `first_error` (when no test was named), `expected`,
+`inherited_from`, `log_path`, `duration_ms`.
+
 ### Oracle-approved runs
 
 A run with an approved oracle (`submit -draft-oracles`, or

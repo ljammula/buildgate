@@ -3,7 +3,7 @@
 // stays a line. Time is a parameter.
 import { formatTokenCount } from "@/domain/cost";
 import { elapsedBetween, formatElapsedCompact } from "@/domain/elapsed";
-import type { Attempt, ComposePhase, GateResult, Run } from "@/domain/run";
+import type { Attempt, BaselineVerify, ComposePhase, GateResult, Run } from "@/domain/run";
 import { composeServiceAddress } from "@/domain/run";
 import { combinedReviewExitBase } from "@/domain/runDetail";
 import { stateLabel } from "@/domain/status";
@@ -115,4 +115,35 @@ export function formatGateDuration(durationMs: number): string {
   if (durationMs < 1000) return `${Math.max(0, Math.round(durationMs))} ms`;
   if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)} s`;
   return formatElapsedCompact(durationMs);
+}
+
+// The first name and how many others there were (run.namedAndMore).
+function namedAndMore(names: readonly string[], count: number): string {
+  const first = names[0];
+  if (first === undefined) return `${count} tests`;
+  if (count <= 1) return first;
+  return `${first} and ${count - 1} more`;
+}
+
+/** The baseline verify result in one line (run.BaselineVerify.Summary). */
+export function baselineVerifySummary(b: BaselineVerify): string {
+  if (b.passed) return "passed";
+  if (b.needsCreated !== "")
+    return `failed as the ticket expects: the command needs ${b.needsCreated}, which the ticket creates`;
+  if (b.failingCount === 0) {
+    const s = `failed: exit ${b.exitCode}`;
+    return b.firstError === "" ? s : `${s}; first error in log: ${JSON.stringify(b.firstError)}`;
+  }
+  const failing = namedAndMore(b.failingTests, b.failingCount);
+  if (b.expected) return `failed as the ticket expects: ${failing}`;
+  const s = `failed: ${failing}`;
+  if (b.unnamedCount === b.failingCount && b.failingCount === 1)
+    return `${s}; the ticket does not name it`;
+  if (b.unnamedCount === b.failingCount) return `${s}; the ticket names none of them`;
+  return `${s}; the ticket does not name ${namedAndMore(b.unnamed, b.unnamedCount)}`;
+}
+
+/** Whether the baseline result is a failure the ticket does not account for. */
+export function baselineVerifyFailed(b: BaselineVerify): boolean {
+  return !b.passed && !b.expected;
 }

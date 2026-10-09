@@ -188,7 +188,13 @@ func TestParityDirectAndTemporalPaths(t *testing.T) {
 				addFixtureCommit(t, temporalWS)
 			}
 
-			temporalRun := runTemporalPathFixtureWithGates(t, temporalWS, sc.mode, sc.verifyCommand, spec, false, sc.gateCommands)
+			// A scenario whose verify fails means "fails after the build":
+			// on the base commit it would halt the run before it.
+			verifyCommand := sc.verifyCommand
+			if verifyCommand == "false" {
+				verifyCommand = afterBaseline(t, "false")
+			}
+			temporalRun := runTemporalPathFixtureWithGates(t, temporalWS, sc.mode, verifyCommand, spec, false, sc.gateCommands)
 
 			if temporalRun.State != sc.wantState {
 				t.Errorf("temporal path state = %q, want %q", temporalRun.State, sc.wantState)

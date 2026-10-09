@@ -84,6 +84,7 @@ export function attemptModelLine(
 const stageOrder: readonly string[] = [
   "prepare_workspace",
   "preflight",
+  "baseline_verify",
   "build",
   "post_build",
   "verify",
@@ -110,6 +111,7 @@ const stageOrder: readonly string[] = [
 export const stageLabels: Readonly<Record<string, string>> = {
   prepare_workspace: "Prepare workspace",
   preflight: "Preflight",
+  baseline_verify: "Baseline verify",
   build: "Build",
   post_build: "Post-build",
   verify: "Verify",

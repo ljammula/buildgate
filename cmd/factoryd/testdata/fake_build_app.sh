@@ -43,6 +43,7 @@ timeout_minutes=""
 review_base_sha=""
 verify_command=""
 reference_oracle_command=""
+baseline_failure=""
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -54,6 +55,7 @@ while [ $# -gt 0 ]; do
 	--review-base-sha) review_base_sha="$2"; shift 2 ;;
 	--verify-command) verify_command="$2"; shift 2 ;;
 	--reference-oracle-command) reference_oracle_command="$2"; shift 2 ;;
+	--baseline-failure) baseline_failure="$2"; shift 2 ;;
 	--harness) shift 2 ;;
 	*) echo "fake_build_app: unrecognized arg $1" >&2; exit 2 ;;
 	esac
@@ -72,6 +74,9 @@ done
 
 echo "fake_build_app: mode=${FAKE_BUILD_APP_MODE:-unset} workspace=$workspace review_base_sha=$review_base_sha verify_command=$verify_command"
 echo "fake_build_app: reference_oracle_command=$reference_oracle_command"
+if [ -n "$baseline_failure" ]; then
+	echo "fake_build_app: baseline_failure=$(tr '\n' '|' <"$baseline_failure")"
+fi
 
 if [ "${FAKE_BUILD_APP_MODE:-}" = "fail" ]; then
 	exit 1

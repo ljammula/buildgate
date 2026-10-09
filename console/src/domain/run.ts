@@ -187,6 +187,48 @@ function decodeDiffStat(o: JsonObject, at: string): DiffStat {
   };
 }
 
+/**
+ * The verify command's run on the untouched base commit, before the build
+ * (run.BaselineVerify). Counts and lists are 0 / empty when the server
+ * omitted them.
+ */
+export interface BaselineVerify {
+  readonly command: string;
+  readonly baseSha: string;
+  readonly exitCode: number;
+  readonly passed: boolean;
+  readonly failingTests: readonly string[];
+  readonly failingCount: number;
+  readonly unnamed: readonly string[];
+  readonly unnamedCount: number;
+  /** A path the ticket creates that the command needed; "" when that was not the failure. */
+  readonly needsCreated: string;
+  readonly firstError: string;
+  readonly expected: boolean;
+  readonly inheritedFrom: string;
+  readonly logPath: string;
+  readonly durationMs: number;
+}
+
+function decodeBaselineVerify(o: JsonObject, at: string): BaselineVerify {
+  return {
+    command: reqString(o, "command", at),
+    baseSha: optString(o, "base_sha", at),
+    exitCode: reqNumber(o, "exit_code", at),
+    passed: reqBoolean(o, "passed", at),
+    failingTests: o.failing_tests == null ? [] : stringList(o, "failing_tests", at),
+    failingCount: numberOr(o, "failing_count", at, 0),
+    unnamed: o.unnamed == null ? [] : stringList(o, "unnamed", at),
+    unnamedCount: numberOr(o, "unnamed_count", at, 0),
+    needsCreated: optString(o, "needs_created", at),
+    firstError: optString(o, "first_error", at),
+    expected: optBoolean(o, "expected", at),
+    inheritedFrom: optString(o, "inherited_from", at),
+    logPath: optString(o, "log_path", at),
+    durationMs: numberOr(o, "duration_ms", at, 0),
+  };
+}
+
 /** One notification record of a run (run.NotificationRecord). */
 export interface RunNotification {
   readonly runId: string;
@@ -348,6 +390,8 @@ export interface Run {
   /** Null when the server sent none: distinct from an empty list. */
   readonly changedFiles: readonly string[] | null;
   readonly diffStat: DiffStat | null;
+  /** Null on a run recorded before the check existed, or not yet at it. */
+  readonly baselineVerify: BaselineVerify | null;
   /**
    * Mirrors run.Run.DiffAvailable: whether a diff snapshot exists to fetch
    * (GET /runs/{id}/diff). False for a run predating the field, or one
@@ -433,6 +477,7 @@ export function decodeRun(o: JsonObject, at: string): Run {
     committedByFactoryd: reqBoolean(o, "committed_by_factoryd", at),
     changedFiles: o.changed_files == null ? null : stringList(o, "changed_files", at),
     diffStat: optObject(o, "diff_stat", at, decodeDiffStat),
+    baselineVerify: optObject(o, "baseline_verify", at, decodeBaselineVerify),
     diffAvailable: optBoolean(o, "diff_available", at),
     diffTruncated: optBoolean(o, "diff_truncated", at),
     attempts: objectList(o, "attempts", at, decodeAttempt),

@@ -1,0 +1,77 @@
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:52
+[31m[1m______________________ ERROR at setup of test_naturalday _______________________[0m
+file /workspace/tests/test_benchmarks.py, line 56
+  def test_naturalday(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:56
+[31m[1m_____________________ ERROR at setup of test_naturaldelta ______________________[0m
+file /workspace/tests/test_benchmarks.py, line 60
+  def test_naturaldelta(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:60
+[31m[1m______________________ ERROR at setup of test_naturalsize ______________________[0m
+file /workspace/tests/test_benchmarks.py, line 64
+  def test_naturalsize(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:64
+[31m[1m______________________ ERROR at setup of test_naturaltime ______________________[0m
+file /workspace/tests/test_benchmarks.py, line 68
+  def test_naturaltime(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:68
+[31m[1m________________________ ERROR at setup of test_ordinal ________________________[0m
+file /workspace/tests/test_benchmarks.py, line 73
+  def test_ordinal(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:73
+[31m[1m_____________________ ERROR at setup of test_precisedelta ______________________[0m
+file /workspace/tests/test_benchmarks.py, line 77
+  def test_precisedelta(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:77
+[31m[1m______________________ ERROR at setup of test_scientific _______________________[0m
+file /workspace/tests/test_benchmarks.py, line 81
+  def test_scientific(benchmark: BenchmarkFixture) -> None:
+[31mE       fixture 'benchmark' not found[0m
+[31m>       available fixtures: _warmup_i18n, cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory[0m
+[31m>       use 'pytest --fixtures [testpath]' for help on them.[0m
+
+/workspace/tests/test_benchmarks.py:81
+[36m[1m=========================== short test summary info ============================[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_apnumber[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_clamp[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_fractional[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_intcomma[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_intword[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_metric[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_natural_list[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_naturaldate[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_naturalday[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_naturaldelta[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_naturalsize[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_naturaltime[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_ordinal[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_precisedelta[0m
+[31mERROR[0m tests/test_benchmarks.py::[1mtest_scientific[0m
+[31m[32m736 passed[0m, [33m112 skipped[0m, [31m[1m15 errors[0m[31m in 1.03s[0m[0m
+chmod: changing permissions of '/workspace/.git': Read-only file system

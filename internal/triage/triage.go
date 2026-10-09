@@ -731,6 +731,14 @@ func extractFailureMarker(logPath string) (marker string, wholeLine bool) {
 	return marker, wholeLine
 }
 
+// FirstFailureLine is the earliest failure marker in the log at logPath,
+// as extractFailureMarker finds it, for a caller that reports a failed
+// command outside a gate (the baseline verify); "" when none is recognised.
+func FirstFailureLine(logPath string) string {
+	marker, _ := extractFailureMarker(logPath)
+	return marker
+}
+
 // truncateMarker caps s at maxTriageMarkerLen bytes, at a UTF-8-safe
 // boundary -- see maxTriageMarkerLen's own doc comment. A coarse,
 // early pre-bound only: quotedLogMarkerSentence does its own precise,
@@ -836,6 +844,13 @@ func triageHalt(r *run.Run) string {
 		return "halted: relay budget ceiling exceeded"
 	case run.HaltReasonComposeServicesRejected:
 		return "halted: the target repo's compose file was rejected before the build; fix the named services or compose_services_* config and retry"
+	case run.HaltReasonBaselineVerifyFailed:
+		// No model call was made: the verify command failed on the base
+		// commit with a failure the ticket does not name.
+		if r.BaselineVerify != nil {
+			return "halted before the build: baseline verify " + r.BaselineVerify.Summary()
+		}
+		return "halted before the build: the verify command fails on the untouched repository"
 	}
 	if r.HaltError == "" {
 		return ""

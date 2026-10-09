@@ -360,6 +360,12 @@ func reconcileAfterFailedBuild(t *testing.T, name string, deadline time.Duration
 		func(context.Context, workflow.PreflightInput) error { return nil },
 		activity.RegisterOptions{Name: workflow.PreflightActivityName},
 	)
+	w.RegisterActivityWithOptions(
+		func(context.Context, workflow.RunWorkflowInput) (workflow.BaselineVerifyResult, error) {
+			return workflow.BaselineVerifyResult{Record: run.BaselineVerify{Passed: true}}, nil
+		},
+		activity.RegisterOptions{Name: workflow.RunBaselineVerifyActivityName},
+	)
 	w.RegisterActivityWithOptions(buildActivity, activity.RegisterOptions{Name: workflow.RunBuildActivityName})
 	w.RegisterActivityWithOptions(
 		func(context.Context, workflow.PrepareIsolatedWorkspaceInput) (workflow.PrepareIsolatedWorkspaceResult, error) {

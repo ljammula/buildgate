@@ -63,8 +63,14 @@ func HaltReasonCodeFromError(err error) string {
 		return run.HaltReasonComposeServicesRejected
 	}
 	var appErr *temporal.ApplicationError
-	if errors.As(err, &appErr) && appErr.Type() == ComposeServicesRejectedFailureType {
+	if !errors.As(err, &appErr) {
+		return ""
+	}
+	switch appErr.Type() {
+	case ComposeServicesRejectedFailureType:
 		return run.HaltReasonComposeServicesRejected
+	case BaselineVerifyFailureType:
+		return run.HaltReasonBaselineVerifyFailed
 	}
 	return ""
 }

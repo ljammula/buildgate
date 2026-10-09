@@ -60,6 +60,9 @@ func applyRunWorkflowResult(r *run.Run, dataDir, id, ticket, workspacePath, base
 		baseSHA = result.BaseSHA
 	}
 	r.BaseSHA = baseSHA
+	// The run's baseline record is on disk by now; the triage sentence
+	// built below, before the save, words a halt on it.
+	r.AttachBaselineVerify(dataDir)
 	// result.WorkspacePath/Branch are set only when this run isolated its
 	// execution (RunWorkflowInput.IsolateWorkspace) — see
 	// RunWorkflowResult's doc comment. r.ProjectPath (already set from

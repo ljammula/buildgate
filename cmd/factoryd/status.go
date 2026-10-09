@@ -48,6 +48,10 @@ type statusEntry struct {
 	// TemporalUIURL's own doc comment) — empty for a direct (non-Temporal)
 	// run, or one whose Temporal server isn't on the default port.
 	TemporalUIURL string `json:"temporal_ui_url,omitempty"`
+	// Baseline is the verify command's result on the base commit, before
+	// the build (run.BaselineVerify.Summary): "passed", or "failed" with
+	// the failing test named. Empty until the run has got that far.
+	Baseline string `json:"baseline,omitempty"`
 
 	// Stage/LastActivityAt/WaitingReason/Stalled are a non-terminal run's
 	// current-activity summary from its own progress feed
@@ -355,7 +359,21 @@ func buildStatusEntry(r *run.Run, now time.Time) statusEntry {
 		entry.Reason = requestdriver.StatusReason(r)
 	}
 	entry.TemporalUIURL = TemporalUIURL(r.TemporalAddress, r.TemporalWorkflowID, r.TemporalRunID)
+	entry.Baseline = sanitize.Line(r.BaselineVerify.Summary())
 	return entry
+}
+
+// statusRunDetailLines is what a run's row is followed by in the plain
+// table: its baseline verify result and its Temporal Web UI link.
+func statusRunDetailLines(e statusEntry) []string {
+	var lines []string
+	if e.Baseline != "" {
+		lines = append(lines, "baseline verify: "+e.Baseline)
+	}
+	if e.TemporalUIURL != "" {
+		lines = append(lines, e.TemporalUIURL)
+	}
+	return lines
 }
 
 // loadStatusRuns loads every run record under dataDir, warning to stderr
@@ -696,9 +714,9 @@ func statusMain(args []string) error {
 			id, e.Project, e.Repository, e.Ticket, e.State, elapsedOrDuration, cost, prOrReason); err != nil {
 			return fmt.Errorf("print status line: %w", err)
 		}
-		if e.TemporalUIURL != "" {
-			if _, err := fmt.Fprintf(os.Stdout, "  %s\n", e.TemporalUIURL); err != nil {
-				return fmt.Errorf("print status Temporal UI line: %w", err)
+		for _, line := range statusRunDetailLines(e) {
+			if _, err := fmt.Fprintf(os.Stdout, "  %s\n", line); err != nil {
+				return fmt.Errorf("print status detail line: %w", err)
 			}
 		}
 	}

@@ -4,7 +4,8 @@ import { ArrowRight, ExternalLink } from "lucide-react";
 import { describeError } from "@/ui/ErrorDisplay";
 import { formatModelUsageLine } from "@/domain/cost";
 import type { Run } from "@/domain/run";
-import { runTokensText } from "@/domain/runSummary";
+import { baselineVerifyFailed, baselineVerifySummary, runTokensText } from "@/domain/runSummary";
+import { cn } from "@/ui/cn";
 import { Badge } from "@/ui/Badge";
 import { Button } from "@/ui/Button";
 import { CompactId } from "@/ui/CompactId";
@@ -96,6 +97,19 @@ export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardPr
                 ))}
               </ul>
             </Disclosure>
+          </DescriptionItem>
+        )}
+        {run.baselineVerify === null ? null : (
+          <DescriptionItem label="Baseline verify">
+            <span
+              data-testid="baseline-verify"
+              data-failed={baselineVerifyFailed(run.baselineVerify)}
+              className={cn(
+                baselineVerifyFailed(run.baselineVerify) && "font-medium text-tone-danger",
+              )}
+            >
+              {baselineVerifySummary(run.baselineVerify)}
+            </span>
           </DescriptionItem>
         )}
         {streamError !== null ? (

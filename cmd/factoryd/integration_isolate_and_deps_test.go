@@ -1387,8 +1387,9 @@ func TestIntegrationTimedOutBuildStillRecordsAttempt(t *testing.T) {
 	if r.State != run.StateHalted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateHalted)
 	}
+	r.Attempts = afterBaselineAttempt(t, r.Attempts)
 	if len(r.Attempts) != 1 {
-		t.Fatalf("expected one recorded attempt even though the build timed out, got %v", r.Attempts)
+		t.Fatalf("expected one recorded attempt after the baseline even though the build timed out, got %v", r.Attempts)
 	}
 	if r.Attempts[0].Kind != "build" {
 		t.Errorf("recorded attempt Kind = %q, want build", r.Attempts[0].Kind)
@@ -1539,8 +1540,9 @@ func TestIntegrationInfrastructureFailureRetriesBuild(t *testing.T) {
 	// attempt (the full-suite substitution): no -full-suite-command/.factory.yml
 	// full_suite_command is configured here, so it's substituted with the
 	// resolved verify command ("true") and genuinely runs.
+	r.Attempts = afterBaselineAttempt(t, r.Attempts)
 	if len(r.Attempts) != 4 {
-		t.Fatalf("Attempts = %v, want 2 build attempts, 1 verify attempt, and 1 full_suite_verify attempt", r.Attempts)
+		t.Fatalf("Attempts = %v, want 2 build attempts, 1 verify attempt, and 1 full_suite_verify attempt after the baseline", r.Attempts)
 	}
 	if r.Attempts[0].Kind != "build" || r.Attempts[1].Kind != "build" || r.Attempts[2].Kind != "verify" || r.Attempts[3].Kind != "full_suite_verify" {
 		t.Errorf("attempt Kinds = [%q %q %q %q], want [build build verify full_suite_verify]", r.Attempts[0].Kind, r.Attempts[1].Kind, r.Attempts[2].Kind, r.Attempts[3].Kind)
@@ -1574,7 +1576,9 @@ func TestIntegrationInfrastructureFailureRetriesVerify(t *testing.T) {
 	ws := newFixtureRepo(t)
 	// The marker lives in a test-owned directory: an isolated worktree's own
 	// .git is a file, not a directory, so $PWD/.git/ is not writable there.
-	verifyCommand := `marker="` + t.TempDir() + `/fake-verify-infra-once"; if [ ! -e "$marker" ]; then : >"$marker"; awk 'BEGIN { for (i = 0; i < 1048577; i++) printf "x" }'; else exit 0; fi`
+	// The command's first invocation is the baseline verify, which passes;
+	// the second, canonical verification's first attempt, overflows.
+	verifyCommand := `count="` + t.TempDir() + `/fake-verify-invocations"; n=$(cat "$count" 2>/dev/null || echo 0); echo $((n + 1)) >"$count"; if [ "$n" = 1 ]; then awk 'BEGIN { for (i = 0; i < 1048577; i++) printf "x" }'; else exit 0; fi`
 	r := runFactorydWithSpecAndFlags(t, ws, "commit", verifyCommand, "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
 
 	if r.State != run.StateAccepted {
@@ -1587,8 +1591,9 @@ func TestIntegrationInfrastructureFailureRetriesVerify(t *testing.T) {
 	// marker file from the first two invocations already exists by then,
 	// so this one exits 0 immediately rather than re-triggering the
 	// infrastructure-failure line.
+	r.Attempts = afterBaselineAttempt(t, r.Attempts)
 	if len(r.Attempts) != 4 {
-		t.Fatalf("Attempts = %v, want 1 build attempt, 2 verify attempts, and 1 full_suite_verify attempt", r.Attempts)
+		t.Fatalf("Attempts = %v, want 1 build attempt, 2 verify attempts, and 1 full_suite_verify attempt after the baseline", r.Attempts)
 	}
 	if r.Attempts[0].Kind != "build" || r.Attempts[1].Kind != "verify" || r.Attempts[2].Kind != "verify" || r.Attempts[3].Kind != "full_suite_verify" {
 		t.Errorf("attempt Kinds = [%q %q %q %q], want [build verify verify full_suite_verify]", r.Attempts[0].Kind, r.Attempts[1].Kind, r.Attempts[2].Kind, r.Attempts[3].Kind)

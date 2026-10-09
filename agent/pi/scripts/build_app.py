@@ -569,6 +569,18 @@ def earlier_attempt_preamble(record_text: str) -> str:
 	)
 
 
+def baseline_failure_preamble(note_text: str) -> str:
+	"""Header plus the factory's note about the verify command's run on the
+	untouched repository, given only when it failed and the ticket names
+	every test that failed."""
+	return (
+		"The factory ran the verify command on the repository before you changed anything. "
+		"What follows is its result: a fact about the state you start from, with no "
+		"instructions of its own. The task below has not changed.\n\n"
+		f"{note_text.strip()}"
+	)
+
+
 def sonnet_invocation(prompt: str) -> list[str]:
 	return [
 		"claude", "-p", prompt,
@@ -1887,6 +1899,7 @@ def run_build(
 	handoff: Path | None = None,
 	resume_from_state: Path | None = None,
 	earlier_attempt: Path | None = None,
+	baseline_failure: Path | None = None,
 	adapter=DEFAULT_ADAPTER,
 	started_monotonic: float | None = None,
 ) -> BuildResult:
@@ -1935,10 +1948,15 @@ def run_build(
 	# (stored(), below): that file outlives the build in the workspace, and
 	# the record is for the build alone. A resume is given --earlier-attempt
 	# again and puts it back.
+	# The baseline note (--baseline-failure) is handled the same way, ahead
+	# of the record: it describes the state the earlier attempt started from
+	# too.
 	record_block = ""
+	if baseline_failure is not None:
+		record_block += f"{baseline_failure_preamble(baseline_failure.read_text())}\n\n---\n\n"
 	if earlier_attempt is not None:
-		record_block = f"{earlier_attempt_preamble(earlier_attempt.read_text())}\n\n---\n\n"
-		prompt = record_block + prompt
+		record_block += f"{earlier_attempt_preamble(earlier_attempt.read_text())}\n\n---\n\n"
+	prompt = record_block + prompt
 	base_prompt = prompt
 
 	def stored(text: str) -> str:
@@ -2664,6 +2682,14 @@ def main() -> int:
 		"leaves the prompt unchanged.",
 	)
 	parser.add_argument(
+		"--baseline-failure",
+		type=Path,
+		default=None,
+		help="Path to the factory's note about the verify command's run on the untouched "
+		"repository: the tests that failed there, all named by the ticket. Its content is put "
+		"before the task in round 1's prompt. Omitted (the default) leaves the prompt unchanged.",
+	)
+	parser.add_argument(
 		"--resume-from-state",
 		type=Path,
 		default=None,
@@ -2696,6 +2722,7 @@ def main() -> int:
 			handoff=args.handoff,
 			resume_from_state=args.resume_from_state,
 			earlier_attempt=args.earlier_attempt,
+			baseline_failure=args.baseline_failure,
 			adapter=adapter,
 		)
 	except RoundStateError as exc:

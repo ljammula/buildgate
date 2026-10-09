@@ -172,10 +172,11 @@ func TestIntegrationReferenceOracleCommandNotForwardedToBuildWithoutInLoopFlag(t
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
 	}
-	if len(r.Attempts) == 0 || r.Attempts[0].Kind != "build" {
-		t.Fatalf("Attempts = %+v, want the build attempt first", r.Attempts)
+	attempts := afterBaselineAttempt(t, r.Attempts)
+	if len(attempts) == 0 || attempts[0].Kind != "build" {
+		t.Fatalf("Attempts = %+v, want the build attempt right after the baseline", r.Attempts)
 	}
-	log, err := os.ReadFile(r.Attempts[0].LogPath)
+	log, err := os.ReadFile(attempts[0].LogPath)
 	if err != nil {
 		t.Fatalf("read build log: %v", err)
 	}
@@ -1440,4 +1441,33 @@ func waitForServeHealthy(t *testing.T, client *http.Client, addr string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("factoryd serve never answered /healthz on %s", addr)
+}
+
+// afterBaseline wraps a verify command so its first invocation, the
+// baseline verify on the base commit, passes, and every later one (canonical
+// verification, the full suite) runs command: how a fixture says "the
+// build broke verification" now that a command failing on the base commit
+// halts the run before the build. The marker is outside the workspace.
+func afterBaseline(t *testing.T, command string) string {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "baseline-verify-ran")
+	return fmt.Sprintf(`if [ -e '%s' ]; then %s; else : >'%s'; fi`, marker, command, marker)
+}
+
+// afterBaselineAttempt checks that a run's first attempt is its baseline
+// verify, passed, and returns the attempts after it.
+func afterBaselineAttempt(t *testing.T, attempts []run.Attempt) []run.Attempt {
+	t.Helper()
+	if len(attempts) == 0 || attempts[0].Kind != run.BaselineVerifyAttemptKind || attempts[0].ExitCode != 0 {
+		t.Fatalf("Attempts = %+v, want a passed baseline verify first", attempts)
+	}
+	return attempts[1:]
+}
+
+// afterBaselineFailing is afterBaseline the other way round: the first
+// invocation, the baseline verify, runs command, and every later one passes.
+func afterBaselineFailing(t *testing.T, command string) string {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "baseline-verify-ran")
+	return fmt.Sprintf(`if [ -e '%s' ]; then exit 0; else : >'%s'; %s; fi`, marker, marker, command)
 }

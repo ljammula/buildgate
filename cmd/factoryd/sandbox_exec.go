@@ -640,6 +640,13 @@ func save(r *run.Run, dataDir string, cause ...error) error {
 	if len(cause) > 0 && cause[0] != nil && r.HaltError == "" {
 		r.HaltError = cause[0].Error()
 	}
+	// A run halted on its baseline (workflow.BaselineVerifyFailureType)
+	// reaches here with the Temporal error chain as its HaltError; the
+	// baseline record says the same thing in words an operator can act on.
+	r.AttachBaselineVerify(dataDir)
+	if r.HaltReasonCode == run.HaltReasonBaselineVerifyFailed && r.BaselineVerify != nil {
+		r.HaltError = r.BaselineVerify.HaltAdvice()
+	}
 	// Derived once, here, rather than at each of this package's dozens of
 	// quarantine/halt call sites: save is the one function nearly every
 	// r.State transition already goes through to persist it (see the

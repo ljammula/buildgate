@@ -328,18 +328,21 @@ func removeBuildSession(path string) error {
 	return os.RemoveAll(path)
 }
 
-// withEarlierWorkArgs adds the two things a build can be told about work
-// done before it, each as a host file staged read-only beside the spec:
+// withEarlierWorkArgs adds the three things a build can be told about what
+// came before it, each as a host file staged read-only beside the spec:
 //
 //   - handoffNote (--handoff): an interrupted attempt of this same build,
 //     whose work is in the workspace (prepareBuildHandoff);
 //   - earlierAttempt (--earlier-attempt): the factory's record of an
 //     earlier attempt at this ticket that finished and failed its checks
-//     (RunWorkflowInput.EarlierAttemptPath).
+//     (RunWorkflowInput.EarlierAttemptPath);
+//   - baselineNote (--baseline-failure): the tests the verify command
+//     failed on the base commit, all named by the ticket
+//     (RunWorkflowInput.BaselineNotePath).
 //
 // RunBuildActivity is the only caller: no review, verify or gate Activity
-// is given either file.
-func withEarlierWorkArgs(ctx context.Context, args []string, handoffNote, earlierAttempt string) (context.Context, []string) {
+// is given any of them.
+func withEarlierWorkArgs(ctx context.Context, args []string, handoffNote, earlierAttempt, baselineNote string) (context.Context, []string) {
 	if handoffNote != "" {
 		args = append(args, "--handoff", handoffNote)
 		ctx = withExtraRunInputs(ctx, handoffNote)
@@ -347,6 +350,10 @@ func withEarlierWorkArgs(ctx context.Context, args []string, handoffNote, earlie
 	if earlierAttempt != "" {
 		args = append(args, "--earlier-attempt", earlierAttempt)
 		ctx = withExtraRunInputs(ctx, earlierAttempt)
+	}
+	if baselineNote != "" {
+		args = append(args, "--baseline-failure", baselineNote)
+		ctx = withExtraRunInputs(ctx, baselineNote)
 	}
 	return ctx, args
 }

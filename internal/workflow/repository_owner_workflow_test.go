@@ -62,6 +62,7 @@ func TestRepositoryOwnerWorkflowProcessesSubmittedRunsSerially(t *testing.T) {
 		func(context.Context, PreflightInput) error { return nil },
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(build, activity.RegisterOptions{Name: RunBuildActivityName})
 	env.RegisterActivityWithOptions(verify, activity.RegisterOptions{Name: RunVerifyActivityName})
 	env.RegisterActivityWithOptions(gate, activity.RegisterOptions{Name: EvaluateGateActivityName})
@@ -933,6 +934,7 @@ func TestRepositoryOwnerWorkflowStopsAfterCommittedThenFailedChild(t *testing.T)
 		func(context.Context, PreflightInput) error { return nil },
 		activity.RegisterOptions{Name: PreflightActivityName},
 	)
+	registerPassingBaselineVerify(env)
 	env.RegisterActivityWithOptions(
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil

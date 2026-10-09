@@ -51,7 +51,9 @@ Emitted by `cmd/factoryd/run_ticket.go` (before the workflow starts) and by
 the Activities in `internal/workflow/activities_*.go`, via the
 `progressMark` helpers:
 
-`prepare_workspace`, `preflight`, `build` (one `start`/`end` per attempt,
+`prepare_workspace`, `preflight`, `baseline_verify` (the `end` event's
+`detail` is the result: `passed`, or `failed` with the failing test named),
+`build` (one `start`/`end` per attempt,
 `detail` = `attempt N/M`), `post_build`, `verify`, `full_suite`, `gate`
 (`detail` = gate name, e.g. `diff_scope`), `evidence`, one of
 `conformity_review`/`code_review`/`review` (`internal/reviewstep.Plan`

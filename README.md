@@ -171,6 +171,12 @@ Inside `building`, one ticket at a time:
   ticket + spec
        |
        v
+  baseline verify: the verify command on the untouched base commit,
+  in a fresh sandbox, no model call
+       |
+       +-- fails, and the failure is not the ticket's own work --> halted
+       |
+       v
   agent builds in the sandbox ----- worker lost (sleep, crash, stop) ----+
        |                                                                 |
        v                                                                 v
@@ -197,6 +203,7 @@ Inside `building`, one ticket at a time:
 |---|---|
 | Execution | One path, live-proven: Temporal, for every command (`worker`, the single-ticket run, `live-smoke`), started with Docker when down. A run whose Temporal is unreachable halts |
 | Lost steps | A lost build keeps its worktree for `factoryd resume`; nothing reruns a lost step on its own |
+| Baseline verify | Before a build spends a model call, every ticket's verify command runs on the commit the ticket starts from. Passed: the build runs. Failed for a reason that is the ticket's own work (it names every failing test, or the command needs a path the ticket creates): the build runs and is told. Failed any other way: the run halts with the failing test named. [USAGE.md § Baseline verify](USAGE.md#baseline-verify-the-verify-command-runs-before-the-build) |
 | `code_review` | `-code-review-policy off\|advisory\|required`; CLI default `off`, `quickstart` writes `required` for new configs |
 | The PR | Title from the ticket's `## Goal`; branch `factoryd/<slug>-<shorthash>`; opens as a draft, and `factoryd` marks it ready (`gh pr ready`) once checks pass and no reviewer thread blocks it |
 | Ready to merge | The deliverable. Checked on every poll: out of draft, checks pass, no review thread open, head is the commit the factory built, and that build's code review of the whole diff passed. `factoryd status` and the request page say so, or name what is missing: [STATUS.md § Ready to merge](STATUS.md#ready-to-merge). Merging is yours |
@@ -284,6 +291,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 - **Your own worker image needs a `make` built without `posix_spawn`**; build it on the image `make install` produces (`make project-sandbox-image`). `su` and `sudo` fail in the sandbox too.
 - **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
 - **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
+- **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.
 - **Narrow live coverage.** Multi-module `go.work`, cgo and generated code are unproven. Private Go modules are proven on one fixture (`make live-private-module`), with a file `GOPROXY` standing in for a company's.
 
 ## Operations

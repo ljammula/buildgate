@@ -3,6 +3,8 @@ import { type Run, decodeRun } from "@/domain/run";
 import {
   attemptFailed,
   attemptsSummary,
+  baselineVerifyFailed,
+  baselineVerifySummary,
   composeSummary,
   formatGateDuration,
   gatesSummary,
@@ -138,5 +140,78 @@ describe("formatGateDuration", () => {
     [125_000, "02:05"],
   ])("%d ms reads %s", (ms, want) => {
     expect(formatGateDuration(ms)).toBe(want);
+  });
+});
+
+describe("baselineVerifySummary", () => {
+  const bv = (extra: Record<string, unknown>) =>
+    run({ baseline_verify: { command: "go test ./...", exit_code: 1, passed: false, ...extra } })
+      .baselineVerify!;
+
+  test("a run without the record decodes to null", () => {
+    expect(run().baselineVerify).toBeNull();
+  });
+
+  test.each([
+    ["passed", { passed: true, exit_code: 0 }, "passed"],
+    ["failed, no test named", { exit_code: 2 }, "failed: exit 2"],
+    [
+      "failed, first error",
+      { exit_code: 127, first_error: "sh: 1: pytest: not found" },
+      'failed: exit 127; first error in log: "sh: 1: pytest: not found"',
+    ],
+    [
+      "needs a path the ticket creates",
+      { exit_code: 1, expected: true, needs_created: "tests", first_error: "ImportError: x" },
+      "failed as the ticket expects: the command needs tests, which the ticket creates",
+    ],
+    [
+      "expected",
+      { expected: true, failing_tests: ["TestA", "TestB", "TestC"], failing_count: 3 },
+      "failed as the ticket expects: TestA and 2 more",
+    ],
+    [
+      "one failure the ticket does not name",
+      {
+        failing_tests: ["TestTrimBOM"],
+        failing_count: 1,
+        unnamed: ["TestTrimBOM"],
+        unnamed_count: 1,
+      },
+      "failed: TestTrimBOM; the ticket does not name it",
+    ],
+    [
+      "several, none named",
+      {
+        failing_tests: ["TestA", "TestB"],
+        failing_count: 2,
+        unnamed: ["TestA", "TestB"],
+        unnamed_count: 2,
+      },
+      "failed: TestA and 1 more; the ticket names none of them",
+    ],
+    [
+      "some named",
+      {
+        failing_tests: ["TestA", "TestB", "TestC"],
+        failing_count: 3,
+        unnamed: ["TestB", "TestC"],
+        unnamed_count: 2,
+      },
+      "failed: TestA and 2 more; the ticket does not name TestB and 1 more",
+    ],
+    [
+      "names omitted",
+      { failing_count: 4, unnamed_count: 1 },
+      "failed: 4 tests; the ticket does not name 1 tests",
+    ],
+  ])("%s", (_name, extra, want) => {
+    expect(baselineVerifySummary(bv(extra))).toBe(want);
+  });
+
+  test("only a failure the ticket does not expect counts as failed", () => {
+    expect(baselineVerifyFailed(bv({ passed: true }))).toBe(false);
+    expect(baselineVerifyFailed(bv({ expected: true, failing_count: 1 }))).toBe(false);
+    expect(baselineVerifyFailed(bv({ failing_count: 1 }))).toBe(true);
   });
 });
