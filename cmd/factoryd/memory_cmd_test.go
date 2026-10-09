@@ -266,7 +266,7 @@ var offCases = map[string]struct {
 		}
 	}, "factoryd memory on"},
 	"kill switch": {func(t *testing.T, f *memFix) {
-		if err := release.Engage(f.data, f.project, "kanna", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
+		if err := release.Engage(f.data, f.project, "operator", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
 			t.Fatal(err)
 		}
 	}, "kill switch"},

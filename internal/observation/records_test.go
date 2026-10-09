@@ -136,15 +136,15 @@ func requestWithRecords() *request.Request {
 			{Index: 1, Kind: request.CorrectiveRoundKind, RunID: "c-run", Outcome: request.RoundAccepted, Pushed: true},
 		}}},
 		Edits: []request.Edit{
-			{By: "kanna", At: "2026-10-08T08:00:00Z", Path: "spec.md", FromState: request.StateSpecReview, Diff: "+ " + editMarker},
-			{By: "kanna", At: "2026-10-08T08:10:00Z", Path: "tickets/001.spec.md", FromState: request.StatePlanReview, Diff: "- " + editMarker},
-			{By: "kanna", At: "2026-10-08T08:20:00Z", Path: "oracle/RUN_COMMAND.txt", FromState: request.StateOracleReview, Diff: editMarker},
+			{By: "operator", At: "2026-10-08T08:00:00Z", Path: "spec.md", FromState: request.StateSpecReview, Diff: "+ " + editMarker},
+			{By: "operator", At: "2026-10-08T08:10:00Z", Path: "tickets/001.spec.md", FromState: request.StatePlanReview, Diff: "- " + editMarker},
+			{By: "operator", At: "2026-10-08T08:20:00Z", Path: "oracle/RUN_COMMAND.txt", FromState: request.StateOracleReview, Diff: editMarker},
 		},
 		Rejections: []request.Rejection{
-			{By: "kanna", At: "2026-10-08T08:30:00Z", FromState: request.StateSpecReview, Reason: rejectionMarker,
+			{By: "operator", At: "2026-10-08T08:30:00Z", FromState: request.StateSpecReview, Reason: rejectionMarker,
 				Anchors: []request.RejectionAnchor{{Path: "spec.md", Section: "## Acceptance criteria", Item: 2, Note: rejectionMarker}}, Note: rejectionMarker},
-			{By: "kanna", At: "2026-10-08T08:40:00Z", FromState: request.StateOracleReview, Reason: rejectionMarker},
-			{By: "kanna", At: "2026-10-08T08:50:00Z", FromState: request.StateQuarantined, ForStage: request.StatePlanReview, Reason: rejectionMarker},
+			{By: "operator", At: "2026-10-08T08:40:00Z", FromState: request.StateOracleReview, Reason: rejectionMarker},
+			{By: "operator", At: "2026-10-08T08:50:00Z", FromState: request.StateQuarantined, ForStage: request.StatePlanReview, Reason: rejectionMarker},
 		},
 	}
 }

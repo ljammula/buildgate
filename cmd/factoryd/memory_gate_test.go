@@ -35,7 +35,7 @@ func TestMemoryGateRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetOff("kanna", "paused"); err != nil {
+	if err := store.SetOff("operator", "paused"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := memoryGate(dp, memorySettings(root), data, root, "proj"); !errors.Is(err, memory.ErrMemoryOff) || !strings.Contains(err.Error(), "memory on") {
@@ -49,7 +49,7 @@ func TestMemoryGateRefusals(t *testing.T) {
 func TestKillSwitchStopsMemoryVerbs(t *testing.T) {
 	data, root := t.TempDir(), t.TempDir()
 	now := func() string { return "2026-10-09T00:00:00Z" }
-	if err := release.Engage(data, "proj", "kanna", "halt", now); err != nil {
+	if err := release.Engage(data, "proj", "operator", "halt", now); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := memoryGate(newTestDeps(t), memorySettings(root), data, root, "proj")
