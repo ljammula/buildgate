@@ -493,7 +493,7 @@ func realMain(dp *deps) error {
 		return nil
 	}
 	if len(os.Args) > 1 && os.Args[1] == "override" {
-		return overrideMain(os.Args[2:])
+		return overrideMain(dp, os.Args[2:])
 	}
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		return serveMain(dp, os.Args[2:])

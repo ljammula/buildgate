@@ -48,16 +48,27 @@
     "every-field changed_files"
   ],
   "memory_edit": {
-    "section_changed": true,
     "proposal": true,
     "matches": true,
+    "base_has_section": true,
+    "changed_root_names": [
+      "every-field changed_root_names"
+    ],
+    "result_root_names": [
+      "every-field result_root_names"
+    ],
+    "marker_in": [
+      "every-field marker_in"
+    ],
+    "not_regular_file": [
+      "every-field not_regular_file"
+    ],
     "other_files_changed": [
       "every-field other_files_changed"
     ],
     "base_sha256": "every-field base_sha256",
     "result_sha256": "every-field result_sha256",
-    "error": "every-field error",
-    "fail_closed": true
+    "error": "every-field error"
   },
   "oracles": {
     "authored": [

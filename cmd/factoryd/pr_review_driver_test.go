@@ -1694,6 +1694,11 @@ func TestAdvancePRReviewHaltsOnTicketWithoutPullRequest(t *testing.T) {
 // than the one shared AwaitingPRTicket call) fails this test.
 func TestAdvancePRReviewAndAwaitingPRTicketCannotDisagree(t *testing.T) {
 	dp := newTestDeps(t)
+	// Under advance_on: accepted a never-built next ticket is built, not
+	// halted on (TestRetryAfterADeniedTicketOpensItsPullRequestAndBuildsTheNextTicket).
+	previous := requestdriver.RequestAdvanceOn
+	requestdriver.RequestAdvanceOn = requestdriver.AdvanceOnPRApproved
+	defer func() { requestdriver.RequestAdvanceOn = previous }()
 	r, dataDir := stubPRReviewTestFixture(t, 1)
 	// Ticket 1 (from the fixture) already has an open PR; add a second
 	// ticket that has never been built at all.

@@ -22,6 +22,7 @@ import (
 	"buildgate/internal/notify"
 	"buildgate/internal/policy"
 	"buildgate/internal/projectconfig"
+	"buildgate/internal/release"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
@@ -959,10 +960,38 @@ func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket,
 	if ticket.PRURL != "" {
 		ticket.PRState = "draft"
 	}
+	// The next ticket is built on this run's commit and judged on its own
+	// changed files only, and with no pull request here its own opens
+	// against the default branch: it would carry, and release, whatever this
+	// run's decision refused. So a run with a later ticket to come advances
+	// the request only with a pull request (opened only for an allowed
+	// decision) or an allowed decision on record.
+	if ticket.PRURL == "" && ticket.Index < r.TicketCount {
+		if refusal := releaseRefusal(dataDir, r, ticket, runRecord); refusal != "" {
+			return haltRequestAcceptedNoPR(dataDir, r, refusal, now)
+		}
+	}
 	if err := startNextTicketOrFinish(dataDir, r, now); err != nil {
 		return err
 	}
 	return r.Save(dataDir)
+}
+
+// releaseRefusal is the halt reason for an accepted run whose release
+// decision does not allow it, or "" when it does. A decision that is denied
+// or invalidated gets noPullRequestHaltReason's wording; one that is missing
+// or unreadable is not an allowed one.
+func releaseRefusal(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run) string {
+	decision, err := release.LoadDecision(dataDir, release.ProjectOf(runRecord), runRecord.ID)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("ticket %d/%d: run %s was accepted but its release decision cannot be read (%v), so no later ticket is built on it; `factoryd retry %s` evaluates it again", ticket.Index, r.TicketCount, runRecord.ID, err, r.ID)
+	case decision == nil:
+		return fmt.Sprintf("ticket %d/%d: run %s was accepted but no release decision is recorded for it, so no later ticket is built on it; `factoryd retry %s` evaluates it again", ticket.Index, r.TicketCount, runRecord.ID, r.ID)
+	case decision.Allowed && !decision.Invalidated:
+		return ""
+	}
+	return noPullRequestHaltReason(dataDir, r, ticket)
 }
 
 // ReviewCorrectiveRunner, when a test sets it, runs an automatic

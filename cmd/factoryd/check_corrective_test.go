@@ -11,6 +11,7 @@ import (
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/handoff"
+	"buildgate/internal/release"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
@@ -571,7 +572,12 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 		ticket := argValue(args, "-ticket")
 		onReady(&run.Run{ID: ticket})
 		if ticket == id+"-001" || len(builds) > 2 {
-			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, BaseSHA: base, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
+			// An accepted run always has a release decision; ticket 2 is
+			// built on ticket 1 only when that decision allows it.
+			if err := release.SaveDecision(dataDir, release.Decision{RunID: ticket, Project: "app", Allowed: true}); err != nil {
+				t.Fatal(err)
+			}
+			return (&run.Run{ID: ticket, Ticket: ticket, Project: "app", State: run.StateAccepted, BaseSHA: base, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
 		}
 		rr := quarantinedOn(t, dataDir, ticket, branch2, base, result, "lint")
 		rr.RequestID = id

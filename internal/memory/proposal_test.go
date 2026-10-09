@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestProposalPathRefusesUnsafeComponents(t *testing.T) {
@@ -68,12 +70,124 @@ func TestLoadProposalRefusals(t *testing.T) {
 		"oversize":      `{"schema_version":1,"expected":"` + strings.Repeat("a", MaxProposalBytes) + `"}`,
 	}
 	for name, body := range cases {
-		path := filepath.Join(t.TempDir(), "p.json")
+		path := filepath.Join(t.TempDir(), "r.json")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if _, ok, err := LoadProposal(path); err == nil || ok {
 			t.Errorf("%s: ok=%v err=%v, want an error", name, ok, err)
 		}
+	}
+}
+
+// loadWithin fails the test when a load does not return: a FIFO with no
+// writer blocks a plain open for ever.
+func loadWithin(t *testing.T, load func() (Proposal, bool, error)) (Proposal, bool, error) {
+	t.Helper()
+	type result struct {
+		p   Proposal
+		ok  bool
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		p, ok, err := load()
+		done <- result{p, ok, err}
+	}()
+	select {
+	case r := <-done:
+		return r.p, r.ok, r.err
+	case <-time.After(10 * time.Second):
+		t.Fatal("the load did not return")
+		return Proposal{}, false, nil
+	}
+}
+
+func TestLoadProposalRefusesAFileRecordedForAnotherRequest(t *testing.T) {
+	dataDir := t.TempDir()
+	other, _ := ProposalPath(dataDir, "widget", "req-other")
+	if err := SaveProposal(other, Proposal{RequestID: "req-other", Expected: "text\n"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := ProposalPath(dataDir, "widget", "req-1")
+	if err := os.WriteFile(mine, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := LoadProposal(mine); err == nil || ok {
+		t.Fatalf("LoadProposal: ok=%v err=%v, want an error for a file whose request_id is another request's", ok, err)
+	}
+	if _, ok, err := LoadProposalFor(dataDir, "widget", "req-1"); err == nil || ok {
+		t.Fatalf("LoadProposalFor: ok=%v err=%v, want an error", ok, err)
+	}
+	if p, ok, err := LoadProposalFor(dataDir, "widget", "req-other"); err != nil || !ok || p.RequestID != "req-other" {
+		t.Fatalf("the request's own file: %+v, %v, %v", p, ok, err)
+	}
+	if _, ok, err := LoadProposalFor(dataDir, "widget", "req-none"); err != nil || ok {
+		t.Fatalf("no file: ok=%v err=%v, want false, nil", ok, err)
+	}
+	if _, ok, err := LoadProposalFor(t.TempDir(), "widget", "req-1"); err != nil || ok {
+		t.Fatalf("no memory directory: ok=%v err=%v, want false, nil", ok, err)
+	}
+}
+
+func TestLoadProposalRefusesASymlink(t *testing.T) {
+	dataDir := t.TempDir()
+	real, _ := ProposalPath(dataDir, "widget", "req-1")
+	if err := SaveProposal(real, Proposal{RequestID: "req-1", Expected: "text\n"}); err != nil {
+		t.Fatal(err)
+	}
+	// The file itself is a link, to a proposal that would otherwise load.
+	elsewhere := filepath.Join(t.TempDir(), "req-2.json")
+	data, _ := os.ReadFile(real)
+	if err := os.WriteFile(elsewhere, []byte(strings.Replace(string(data), "req-1", "req-2", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link, _ := ProposalPath(dataDir, "widget", "req-2")
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := LoadProposal(link); err == nil || ok {
+		t.Fatalf("a symlinked file: ok=%v err=%v, want an error", ok, err)
+	}
+	// The proposals directory is a link to a real one.
+	linkedData := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(linkedData, "memory", "widget"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(real), filepath.Join(linkedData, "memory", "widget", "proposals")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := LoadProposalFor(linkedData, "widget", "req-1"); err == nil || ok {
+		t.Fatalf("a symlinked proposals directory: ok=%v err=%v, want an error", ok, err)
+	}
+	// The project directory is a link to a real one.
+	linkedProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(linkedProject, "memory"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dataDir, "memory", "widget"), filepath.Join(linkedProject, "memory", "widget")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := LoadProposalFor(linkedProject, "widget", "req-1"); err == nil || ok {
+		t.Fatalf("a symlinked project directory: ok=%v err=%v, want an error", ok, err)
+	}
+}
+
+func TestLoadProposalDoesNotBlockOnAFIFO(t *testing.T) {
+	dataDir := t.TempDir()
+	path, _ := ProposalPath(dataDir, "widget", "req-1")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	_, ok, err := loadWithin(t, func() (Proposal, bool, error) { return LoadProposalFor(dataDir, "widget", "req-1") })
+	if err == nil || ok {
+		t.Fatalf("a FIFO: ok=%v err=%v, want an error", ok, err)
 	}
 }

@@ -250,36 +250,68 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 
 // Reasons memoryEditReasons returns. Callers and tests match on them.
 const (
-	ReasonMemorySectionNotMemoryChange = "memory section of AGENTS.md changed by a run that is not a memory change"
-	ReasonMemoryChangeNotApproved      = "memory change does not match the approved text"
-	reasonMemoryCheckIncomplete        = "memory section check could not be completed"
+	// ReasonMemorySectionNotMemoryChange: the base has a memory section and
+	// a run with no proposal changed a root instruction name.
+	ReasonMemorySectionNotMemoryChange = "AGENTS.md of a repository with a memory section changed by a run that is not a memory change"
+	// ReasonMemoryMarkersAdded: the base has no section and a run with no
+	// proposal left "buildgate:memory" in a root instruction file.
+	ReasonMemoryMarkersAdded = "a run that is not a memory change added memory markers to AGENTS.md"
+	// ReasonSeveralRootInstructionNames: the result tree spells the root
+	// instruction file more than one way.
+	ReasonSeveralRootInstructionNames = "the result holds more than one root file named AGENTS.md in some letter case"
+	// ReasonRootInstructionNotRegular: a run with no proposal changed a root
+	// instruction name into a symlink, a submodule or a directory.
+	ReasonRootInstructionNotRegular = "a run that is not a memory change made AGENTS.md something other than a regular file"
+	ReasonMemoryChangeNotApproved   = "memory change does not match the approved text"
+	reasonMemoryCheckIncomplete     = "memory section check could not be completed"
 )
 
-// memoryEditReasons turns the host's AGENTS.md evidence into denials. Only a
-// memory request's run (one with an approved proposal) may change the fenced
-// section, and then only to exactly the approved file with no other file
-// changed. It reads the evidence only: the host did the I/O.
+// memoryEditReasons turns the host's evidence about the root instruction
+// names into denials. A memory request's run (one with an approved proposal)
+// is released only when AGENTS.md is exactly the approved file and no other
+// file changed. Any other run may not change a root instruction name of a
+// repository whose base has a memory section, and elsewhere may not leave a
+// memory marker, a second spelling or a non-file there. It reads the evidence
+// only: the host did the I/O.
 func memoryEditReasons(m *run.MemoryEdit) []string {
-	if m == nil {
+	switch {
+	case m == nil:
 		return nil
+	case m.Error != "":
+		return []string{fmt.Sprintf("%s: %s", reasonMemoryCheckIncomplete, m.Error)}
+	case m.Proposal:
+		if m.Matches && len(m.OtherFilesChanged) == 0 {
+			return nil
+		}
+		if len(m.OtherFilesChanged) == 0 {
+			return []string{ReasonMemoryChangeNotApproved}
+		}
+		return []string{namingPaths(ReasonMemoryChangeNotApproved+": other changed files", m.OtherFilesChanged)}
+	case m.BaseHasSection:
+		if len(m.ChangedRootNames) == 0 {
+			return nil
+		}
+		return []string{namingPaths(ReasonMemorySectionNotMemoryChange, m.ChangedRootNames)}
 	}
 	var reasons []string
-	switch {
-	case m.Error != "" && m.FailClosed:
-		reasons = append(reasons, fmt.Sprintf("%s: %s", reasonMemoryCheckIncomplete, m.Error))
-	case m.Error != "":
-	case m.SectionChanged && !m.Proposal:
-		reasons = append(reasons, ReasonMemorySectionNotMemoryChange)
-	case m.Proposal && (!m.Matches || len(m.OtherFilesChanged) > 0):
-		reason := ReasonMemoryChangeNotApproved
-		if n := len(m.OtherFilesChanged); n > 0 {
-			shown := m.OtherFilesChanged[:min(n, 3)]
-			reason = fmt.Sprintf("%s: other changed files %q", reason, shown)
-			if n > len(shown) {
-				reason += fmt.Sprintf(" and %d more", n-len(shown))
-			}
-		}
-		reasons = append(reasons, reason)
+	if len(m.MarkerIn) > 0 {
+		reasons = append(reasons, namingPaths(ReasonMemoryMarkersAdded, m.MarkerIn))
+	}
+	if len(m.ResultRootNames) > 1 {
+		reasons = append(reasons, namingPaths(ReasonSeveralRootInstructionNames, m.ResultRootNames))
+	}
+	if len(m.NotRegularFile) > 0 {
+		reasons = append(reasons, namingPaths(ReasonRootInstructionNotRegular, m.NotRegularFile))
 	}
 	return reasons
+}
+
+// namingPaths is reason followed by at most three of paths, quoted.
+func namingPaths(reason string, paths []string) string {
+	shown := paths[:min(len(paths), 3)]
+	reason = fmt.Sprintf("%s: %q", reason, shown)
+	if more := len(paths) - len(shown); more > 0 {
+		reason += fmt.Sprintf(" and %d more", more)
+	}
+	return reason
 }

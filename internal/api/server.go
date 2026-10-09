@@ -26,6 +26,7 @@ import (
 	"buildgate/internal/consoleweb"
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/handoff"
+	"buildgate/internal/memory"
 	"buildgate/internal/notify"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
@@ -2278,6 +2279,15 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+		// Before anything is saved: the release decision below reads the
+		// run's recorded check of root AGENTS.md, and this server cannot
+		// compute a missing one (it has no git access).
+		if newState == run.StateAccepted {
+			if why := memoryEvidenceMissing(s.dataDir, loaded); why != "" {
+				writeError(w, http.StatusConflict, why)
+				return nil
+			}
+		}
 		// Matches cmd/factoryd's own save() helper: notify.PrepareHalt/
 		// DispatchDiscord give an override-to-halted through this HTTP
 		// route the same halt alert save() already gives every CLI- or
@@ -2393,6 +2403,28 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		// above.
 		writeError(w, http.StatusInternalServerError, "acquire override lock")
 	}
+}
+
+// memoryEvidenceMissing is why an override to accepted cannot be decided by
+// this server, or "": the run has no recorded check of root AGENTS.md
+// (run.MemoryEdit, which the host computes from git objects when a run is
+// accepted, so a quarantined run has none) and it needs one, because it
+// changed a root instruction name or its request is a memory change. The
+// CLI's override computes the check; with one recorded, the release decision
+// reads it as it does for any accepted run.
+func memoryEvidenceMissing(dataDir string, r *run.Run) string {
+	if r.MemoryEdit != nil {
+		return ""
+	}
+	governed := len(run.ChangedRootInstructionNames(r.ChangedFiles)) > 0
+	if !governed && r.RequestID != "" {
+		_, has, err := memory.LoadProposalFor(dataDir, release.ProjectOf(r), r.RequestID)
+		governed = has || err != nil
+	}
+	if !governed {
+		return ""
+	}
+	return "this run changed the repository's root AGENTS.md, or is a memory change, and has no recorded check of that file; the check reads the repository, so run `factoryd override` on the host instead"
 }
 
 // approveRequestBody is POST /requests/{id}/approve's JSON request body.

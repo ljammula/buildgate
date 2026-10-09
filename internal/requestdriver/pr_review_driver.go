@@ -346,6 +346,16 @@ func noPullRequestHaltReason(dataDir string, r *request.Request, ticket *request
 	return fmt.Sprintf("ticket %d/%d: run %s was accepted but no pull request was opened: denied by release policy (%s) -- fix the -release-* policy configuration (rollback plan, size limits, required gates) first; retrying with it unchanged rebuilds the ticket for nothing (still denied), but `factoryd retry %s` after fixing it rebuilds under the new policy and can open a pull request then", ticket.Index, r.TicketCount, ticket.RunID, strings.Join(decision.Reasons, "; "), r.ID)
 }
 
+// nextUnbuiltTicket reports whether ticket, the lowest one with no pull
+// request, is the ticket after the current one and was never built. Under
+// advance_on: accepted that happens one way: acceptTicketRun halted the
+// request on the current ticket's release decision before building ticket,
+// and a retry has since opened the current ticket's pull request. There is
+// nothing to halt on: the build goes on from ticket.
+func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket) bool {
+	return RequestAdvanceOn == AdvanceOnAccepted && ticket.RunID == "" && ticket.Index == r.TicketIndex+1
+}
+
 // AdvancePRReview is request_driver.go's own dispatch target for
 // request.StatePRReview: reads the current ticket's PR review state (at
 // most once per -pr-poll-interval, per ticket -- see prPollDue) and reacts
@@ -393,6 +403,13 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// openEvidencePullRequest's own best-effort push/open attempt
 			// simply failed, where a retry (or just re-running the opener)
 			// may well succeed.
+			if nextUnbuiltTicket(r, ticket) {
+				r.TicketIndex = ticket.Index
+				if err := r.ResumeBuilding(now); err != nil {
+					return err
+				}
+				return r.Save(dataDir)
+			}
 			return haltRequestAcceptedNoPR(dataDir, r, noPullRequestHaltReason(dataDir, r, ticket), now)
 		}
 		if err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now); err != nil {

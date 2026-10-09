@@ -104,6 +104,9 @@ type hostBoundary interface {
 	blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommand(target string) *exec.Cmd
 	executable() (string, error)
+	// rootTreeAtCommit lists the entries of commit's root tree in repoDir
+	// (name, mode, type, object) from git objects, never from a worktree.
+	rootTreeAtCommit(ctx context.Context, repoDir string, commit string) ([]gitTreeEntry, error)
 	// goCommand runs the operator's go command in dir with env added to the
 	// process environment, and returns its standard output.
 	goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
