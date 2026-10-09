@@ -358,7 +358,56 @@ func TestPrepareIsolatedWorkspaceActivityWritesOwnershipMarkers(t *testing.T) {
 	if marker.RunID != input.DurableRunID || marker.WorktreeID != input.RunID || !marker.Prepared {
 		t.Fatalf("ownership marker = %+v, want durable run %q, worktree %q, prepared", marker, input.DurableRunID, input.RunID)
 	}
+	if marker.OnBranch {
+		t.Fatal("ordinary prepare wrote an ownership marker with OnBranch true")
+	}
+	if _, _, _, onBranch := RecoverIsolatedWorkspaceFromCheckpointDir(checkpointDir); onBranch {
+		t.Fatal("ordinary prepare recorded an on-branch recovery marker")
+	}
 	if _, err := os.Stat(filepath.Join(checkpointDir, "isolated-workspace.json")); err != nil {
 		t.Fatalf("existing isolated-workspace marker was not written: %v", err)
+	}
+}
+
+func TestPrepareIsolatedWorkspaceActivityOnBranchMarksBothMarkersOnBranch(t *testing.T) {
+	repoDir := testfixture.NewGitRepo(t)
+	baseSHA, err := runner.GitRevParseHEAD(repoDir)
+	if err != nil {
+		t.Fatalf("capture fixture HEAD: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "branch", "feature").CombinedOutput(); err != nil {
+		t.Fatalf("branch: %v: %s", err, out)
+	}
+	dataDir := t.TempDir()
+	checkpointDir := t.TempDir()
+	parentDir := filepath.Join(dataDir, "workspaces")
+	activities := &Activities{CheckpointDir: checkpointDir}
+	input := PrepareIsolatedWorkspaceInput{
+		RepoDir: repoDir, ParentDir: parentDir, RunID: "on-branch-worktree",
+		BaseSHA: baseSHA, DataDir: dataDir, DurableRunID: "on-branch-durable",
+		WorkflowID: "workflow-id", OnBranch: "feature",
+	}
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	var result PrepareIsolatedWorkspaceResult
+	env.RegisterActivity(activities.PrepareIsolatedWorkspaceActivity)
+	encoded, err := env.ExecuteActivity(activities.PrepareIsolatedWorkspaceActivity, input)
+	if err != nil {
+		t.Fatalf("prepare activity: %v", err)
+	}
+	if err := encoded.Get(&result); err != nil {
+		t.Fatalf("decode prepare activity result: %v", err)
+	}
+	defer func() { _ = wsisolation.RemoveWorktreeOnly(repoDir, result.WorktreePath) }()
+	marker, err := wsisolation.LoadIsolationMarker(wsisolation.IsolationMarkerPath(dataDir, input.DurableRunID))
+	if err != nil {
+		t.Fatalf("load ownership marker: %v", err)
+	}
+	if !marker.OnBranch || marker.Branch != "feature" {
+		t.Fatalf("ownership marker = %+v, want OnBranch true on branch feature", marker)
+	}
+	_, worktreePath, branch, onBranch := RecoverIsolatedWorkspaceFromCheckpointDir(checkpointDir)
+	if !onBranch || branch != "feature" || worktreePath != result.WorktreePath {
+		t.Fatalf("recovered (%q, %q, %v), want (%q, feature, true)", worktreePath, branch, onBranch, result.WorktreePath)
 	}
 }

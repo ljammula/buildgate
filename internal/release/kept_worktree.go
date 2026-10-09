@@ -49,7 +49,7 @@ func ClearKeptForResume(dataDir, runID string) error {
 			if claimedByAnotherMarker(dataDir, runID, r.WorkspacePath) {
 				break
 			}
-			if err := Rollback(r.ProjectPath, r.WorkspacePath, r.Branch); err != nil {
+			if err := Rollback(r.ProjectPath, r.WorkspacePath, r.Branch, r.OnBranch != ""); err != nil {
 				if _, statErr := os.Stat(r.WorkspacePath); !os.IsNotExist(statErr) {
 					return fmt.Errorf("remove kept worktree of run %s (no isolation marker): %w", runID, err)
 				}

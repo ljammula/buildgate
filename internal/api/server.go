@@ -2341,7 +2341,7 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 			// and non-fatal: a run whose build never got far enough to
 			// write one simply has nothing here to retain.
 			s.retainBuildArtifacts(id, loaded.WorkspacePath)
-			if err := release.Rollback(loaded.ProjectPath, loaded.WorkspacePath, loaded.Branch); err != nil {
+			if err := release.Rollback(loaded.ProjectPath, loaded.WorkspacePath, loaded.Branch, loaded.OnBranch != ""); err != nil {
 				log.Printf("run %s: rollback of isolated workspace after override failed: %v", id, err)
 			} else {
 				// The override is the human decision that ends a kept

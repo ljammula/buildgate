@@ -3,7 +3,6 @@ package workflow
 import (
 	"buildgate/internal/release"
 	"buildgate/internal/run"
-	wsisolation "buildgate/internal/workspace"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -91,25 +90,8 @@ func (a *Activities) RollbackIsolatedWorkspaceActivity(ctx context.Context, inpu
 	}
 
 	// OnBranch: this run only checked out an existing PR branch (never
-	// created it) — RemoveWorktreeOnly, as cmd/factoryd's rollbackIsolatedWorkspace does,
-	// leaves it untouched. release.Rollback would otherwise `branch -D`
-	// it once its worktree registration is gone.
-	if input.OnBranch {
-		rollbackErr := wsisolation.RemoveWorktreeOnly(input.RepoDir, input.WorktreePath)
-		var activityErr error
-		if rollbackErr != nil {
-			activityErr = temporal.NewApplicationErrorWithCause("rollback isolated workspace", IsolationFailureType, rollbackErr)
-			checkpoint.Error = activityErr.Error()
-		}
-		if path != "" {
-			if err := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); err != nil {
-				activity.GetLogger(ctx).Warn("failed to save isolate-workspace-rollback Activity checkpoint", "error", err)
-			}
-		}
-		return activityErr
-	}
-
-	rollbackErr := release.Rollback(input.RepoDir, input.WorktreePath, input.Branch)
+	// created it); Rollback then removes the worktree and keeps the branch.
+	rollbackErr := release.Rollback(input.RepoDir, input.WorktreePath, input.Branch, input.OnBranch)
 	var activityErr error
 	if rollbackErr != nil {
 		activityErr = temporal.NewApplicationErrorWithCause("rollback isolated workspace", IsolationFailureType, rollbackErr)
@@ -132,6 +114,9 @@ type isolatedWorkspaceMarker struct {
 	RepoDir      string `json:"repo_dir"`
 	WorktreePath string `json:"worktree_path"`
 	Branch       string `json:"branch"`
+	// OnBranch: Branch is an existing branch the run only checked out, so a
+	// caller-side rollback removes the worktree and keeps the branch.
+	OnBranch bool `json:"on_branch,omitempty"`
 }
 
 func isolatedWorkspaceMarkerPath(checkpointDir string) string {
@@ -156,12 +141,12 @@ func isolatedWorkspaceMarkerPath(checkpointDir string) string {
 // to recover Details from either — a client-side context.DeadlineExceeded
 // carries none — so this is the only channel left to learn where a real,
 // already-created worktree/branch lives.
-func recordIsolatedWorkspaceMarker(checkpointDir, repoDir, worktreePath, branch string) error {
+func recordIsolatedWorkspaceMarker(checkpointDir, repoDir, worktreePath, branch string, onBranch bool) error {
 	path := isolatedWorkspaceMarkerPath(checkpointDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create isolated workspace marker dir: %w", err)
 	}
-	b, err := json.MarshalIndent(isolatedWorkspaceMarker{RepoDir: repoDir, WorktreePath: worktreePath, Branch: branch}, "", "  ")
+	b, err := json.MarshalIndent(isolatedWorkspaceMarker{RepoDir: repoDir, WorktreePath: worktreePath, Branch: branch, OnBranch: onBranch}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal isolated workspace marker: %w", err)
 	}
@@ -178,17 +163,17 @@ func recordIsolatedWorkspaceMarker(checkpointDir, repoDir, worktreePath, branch 
 // RecoverIsolatedWorkspaceFromCheckpointDir best-effort reads the marker
 // recordIsolatedWorkspaceMarker writes — see that function's own doc
 // comment for why a caller needs this independent of any error object at
-// all. Returns empty strings if the marker was never written, can't be
+// all. Returns empty values if the marker was never written, can't be
 // read, or can't be parsed; this is best-effort recovery, never the
 // source of truth for whether isolation was used.
-func RecoverIsolatedWorkspaceFromCheckpointDir(checkpointDir string) (repoDir, worktreePath, branch string) {
+func RecoverIsolatedWorkspaceFromCheckpointDir(checkpointDir string) (repoDir, worktreePath, branch string, onBranch bool) {
 	b, err := os.ReadFile(isolatedWorkspaceMarkerPath(checkpointDir))
 	if err != nil {
-		return "", "", ""
+		return "", "", "", false
 	}
 	var m isolatedWorkspaceMarker
 	if err := json.Unmarshal(b, &m); err != nil {
-		return "", "", ""
+		return "", "", "", false
 	}
-	return m.RepoDir, m.WorktreePath, m.Branch
+	return m.RepoDir, m.WorktreePath, m.Branch, m.OnBranch
 }

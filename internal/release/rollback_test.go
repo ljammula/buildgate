@@ -3,6 +3,7 @@ package release
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"buildgate/internal/testfixture"
@@ -46,7 +47,7 @@ func TestRollbackDiscardsWorktreeAndBranch(t *testing.T) {
 	}
 
 	// Call Rollback.
-	if err := Rollback(repoDir, worktreePath, branch); err != nil {
+	if err := Rollback(repoDir, worktreePath, branch, false); err != nil {
 		t.Fatalf("Rollback failed: %v", err)
 	}
 
@@ -64,5 +65,38 @@ func TestRollbackDiscardsWorktreeAndBranch(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Fatalf("branch should not exist after Rollback, but got output: %s", out)
+	}
+}
+
+// TestRollbackOfAnOnBranchWorkspaceKeepsTheBranch verifies that a run on an
+// existing branch loses its worktree but not the branch or its commits.
+func TestRollbackOfAnOnBranchWorkspaceKeepsTheBranch(t *testing.T) {
+	repoDir := newFixtureRepo(t)
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", repoDir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("branch", "feature")
+	worktreePath, err := workspace.PrepareOnBranch(repoDir, t.TempDir(), "keep-run", "feature")
+	if err != nil {
+		t.Fatalf("PrepareOnBranch: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", worktreePath, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-m", "extra").CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v: %s", err, out)
+	}
+	tip := git("rev-parse", "refs/heads/feature")
+
+	if err := Rollback(repoDir, worktreePath, "feature", true); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree still present after Rollback: %v", err)
+	}
+	if got := git("rev-parse", "refs/heads/feature"); got != tip {
+		t.Fatalf("feature = %s after Rollback, want %s", got, tip)
 	}
 }

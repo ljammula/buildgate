@@ -30,6 +30,13 @@ type IsolationMarker struct {
 	ActivityRunID string `json:"activity_run_id,omitempty"`
 	ActivityID    string `json:"activity_id,omitempty"`
 	CheckpointDir string `json:"checkpoint_dir,omitempty"`
+	// OnBranch is true when Branch is an existing branch this run only
+	// checked out (-on-branch), never one the factory created: every reaper
+	// then removes the worktree and leaves the branch and its commits alone.
+	// A marker written before this field existed has it false and is reaped
+	// as an ordinary run's (worktree and branch); nothing guesses from the
+	// branch name.
+	OnBranch bool `json:"on_branch,omitempty"`
 }
 
 func IsolationMarkerPath(dataDir, runID string) string {
@@ -227,7 +234,8 @@ func ValidateIsolationMarker(marker IsolationMarker, dataDir, repoDir string) er
 }
 
 // ReapIsolationMarker removes only the exact registered worktree and branch
-// described by a validated marker. An existing path not registered by Git or
+// described by a validated marker (only the worktree when marker.OnBranch:
+// the branch is not the factory's to delete). An existing path not registered by Git or
 // a registration with another branch is deliberately left untouched.
 func ReapIsolationMarker(repoDir string, marker IsolationMarker) error {
 	unlock, err := lockGitMetadata(repoDir)
@@ -254,6 +262,9 @@ func ReapIsolationMarker(repoDir string, marker IsolationMarker) error {
 		if err != nil {
 			return fmt.Errorf("remove isolated worktree: %w: %s", err, out)
 		}
+	}
+	if marker.OnBranch {
+		return nil
 	}
 	if _, err := exec.Command("git", "-C", repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+marker.Branch).CombinedOutput(); err != nil {
 		return nil
