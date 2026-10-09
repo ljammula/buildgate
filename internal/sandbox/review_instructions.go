@@ -364,6 +364,11 @@ func sameEntries(a, b []treeEntry) bool {
 	return true
 }
 
+// maxReviewInstructionRetained bounds the entries kept from one commit's
+// listing (instruction paths, links, submodules) while it streams, before any
+// later cap applies. A variable so a test can lower it.
+var maxReviewInstructionRetained = 50000
+
 // ---- the plan ----
 
 // candidate is the outermost table entry covering a set of paths, with what
@@ -383,6 +388,7 @@ type planState struct {
 	targets   map[string]string         // file a link points to outside the table -> the first link naming it
 	staged    int64                     // bytes written under dst so far
 	retained  int                       // entries kept from the listings, for a test
+	sideKept  [2]int                    // entries kept from each commit's listing, bounded by maxReviewInstructionRetained
 	shas      [2]string                 // the base and result commits
 }
 
@@ -432,6 +438,9 @@ func (s *planState) index(t *gitTree, e treeEntry, side int) error {
 	if e.isLink() || e.isGitlink() || ip.relevant() {
 		t.byPath[e.path] = e
 		s.retained++
+		if s.sideKept[side]++; s.sideKept[side] > maxReviewInstructionRetained {
+			return fmt.Errorf("review instructions: more than %d instruction-path, link or submodule entries in commit %s", maxReviewInstructionRetained, s.shas[side])
+		}
 	}
 	if ip.n == 0 && ip.lead == 0 {
 		return nil
@@ -758,7 +767,7 @@ func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA
 	if len(masks) == 0 && len(removed) == 0 {
 		return ReviewInstructionSnapshot{}, os.RemoveAll(dst)
 	}
-	if err := applyRemovals(root, removed); err != nil {
+	if err := applyRemovals(root, removed, plan.tracked); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
 	return finishSnapshot(ctx, dst, masks, diffs, removed)

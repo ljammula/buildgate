@@ -55,6 +55,8 @@ type diskState struct {
 	collected []removal
 	kids      map[string][]string  // tracked directory -> names of its tracked children
 	kidInfo   map[string][]kidFile // tracked directory -> those children as they are on disk
+	dirsByLen map[int][]kidFile    // tracked directories, by component count, as they are on disk; built on first use
+	prefixOK  map[string]bool      // on-disk prefixes already checked against dirsByLen
 }
 
 // reconcileDisk is pass one over the worktree: every tracked entry under an
@@ -317,6 +319,9 @@ func (d *diskState) reconcile(p, rel string, ip instrPath, de fs.DirEntry) error
 	if err := d.sameAsTracked(p, rel); err != nil {
 		return err
 	}
+	if err := d.ancestorsAreTracked(rel); err != nil {
+		return err
+	}
 	r, err := d.describe(p, rel, de)
 	if err != nil {
 		return err
@@ -353,6 +358,58 @@ func (d *diskState) sameAsTracked(p, rel string) error {
 		if os.SameFile(info, ki.info) {
 			return fmt.Errorf("review instructions: %s is the tracked path %s under another spelling: it is not removed", strconv.Quote(rel), strconv.Quote(joinSlash(dir, ki.name)))
 		}
+	}
+	return nil
+}
+
+// trackedDirs builds, once, every proper ancestor directory (in the result
+// tree's spelling) of every verified entry, with its Lstat when it exists.
+func (d *diskState) trackedDirs() map[int][]kidFile {
+	if d.dirsByLen != nil {
+		return d.dirsByLen
+	}
+	d.dirsByLen = map[int][]kidFile{}
+	seen := map[string]bool{}
+	for _, e := range d.tracked {
+		parts := strings.Split(e.path, "/")
+		for k := 1; k < len(parts); k++ {
+			dir := strings.Join(parts[:k], "/")
+			if seen[dir] {
+				continue
+			}
+			seen[dir] = true
+			if info, err := os.Lstat(filepath.Join(d.root, filepath.FromSlash(dir))); err == nil {
+				d.dirsByLen[k] = append(d.dirsByLen[k], kidFile{dir, info})
+			}
+		}
+	}
+	return d.dirsByLen
+}
+
+// ancestorsAreTracked refuses a removal candidate when a directory above it is
+// the same directory as a committed one spelled differently (os.SameFile, so
+// no fold of names decides it): the removal would reach a tracked file through
+// a renamed ancestor. Directories cannot be hard links, so a match is a rename.
+func (d *diskState) ancestorsAreTracked(rel string) error {
+	if d.prefixOK == nil {
+		d.prefixOK = map[string]bool{}
+	}
+	parts := strings.Split(rel, "/")
+	for k := 1; k < len(parts); k++ {
+		prefix := strings.Join(parts[:k], "/")
+		if d.prefixOK[prefix] {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(d.root, filepath.FromSlash(prefix)))
+		if err != nil {
+			return fmt.Errorf("review instructions: inspect %s: %w", strconv.Quote(prefix), err)
+		}
+		for _, td := range d.trackedDirs()[k] {
+			if td.name != prefix && os.SameFile(info, td.info) {
+				return fmt.Errorf("review instructions: %s is the committed path %s under another spelling: a review cannot tell them apart", strconv.Quote(prefix), strconv.Quote(td.name))
+			}
+		}
+		d.prefixOK[prefix] = true
 	}
 	return nil
 }
@@ -406,13 +463,19 @@ func (d *diskState) describeFile(r removal, p string, de fs.DirEntry) (removal, 
 // applyRemovals is pass two: it deletes the collected entries, each only after
 // every directory from the workspace root to its parent is checked again to be
 // a real directory.
-func applyRemovals(root string, removed []removal) error {
+// Last, every verified entry must still exist.
+func applyRemovals(root string, removed []removal, verified []treeEntry) error {
 	for _, r := range removed {
 		if err := requireRealDirs(root, strings.Split(path.Dir(r.path), "/"), false); err != nil {
 			return fmt.Errorf("review instructions: remove %s: %w", strconv.Quote(r.path), err)
 		}
 		if err := os.RemoveAll(r.abs); err != nil {
 			return fmt.Errorf("review instructions: remove %s: %w", strconv.Quote(r.path), err)
+		}
+	}
+	for _, e := range verified {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(e.path))); err != nil {
+			return fmt.Errorf("review instructions: the removal of untracked instruction paths removed the committed %s", strconv.Quote(e.path))
 		}
 	}
 	return nil
