@@ -200,6 +200,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		args := planTicketsArgs(script, r.Workspace, specPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
 		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.PlanTicketsInterpreter, args[1:]...)
 	}
+	retainDraftPrompts(dataDir, r.ID, "plan", r.Workspace, []string{planTicketsScratchDirName + "/session"})
 	if err != nil {
 		return nil, nil, fmt.Errorf("plan_tickets.py did not run to completion: %w", err)
 	}

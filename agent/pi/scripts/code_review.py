@@ -270,7 +270,7 @@ def run_code_review(
 	)
 	turn = build_app.run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-code-review-session",
-		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
+		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter, prompt_name="review-code",
 	)
 	error = build_app.single_line(build_app.redact(turn.error, 100_000)) if turn.error else ""
 	available, findings = parse_code_review_findings(turn.text)

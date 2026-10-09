@@ -376,6 +376,8 @@ class RunPlanTests(unittest.TestCase):
 			spy_pi_invocation.assert_called_once()
 			self.assertIn("split ticket 1", spy_pi_invocation.call_args.kwargs["prompt"])
 			self.assertIn("<<<BEGIN OPERATOR FEEDBACK>>>", spy_pi_invocation.call_args.kwargs["prompt"])
+			saved = workspace / ".factory-plan-draft" / "session" / "prompts" / "draft-plan.md"
+			self.assertEqual(saved.read_text(encoding="utf-8"), spy_pi_invocation.call_args.kwargs["prompt"])
 
 	def test_pi_failure_writes_evidence_but_no_tickets_and_exits_2(self):
 		with tempfile.TemporaryDirectory() as directory:

@@ -13,6 +13,7 @@ import { listKeys } from "@/features/run-detail/listKeys";
 import { OverrideSection } from "@/features/run-detail/OverrideSection";
 import { RunFactsCard } from "@/features/run-detail/RunFactsCard";
 import { RunHandoffCard } from "@/features/run-detail/RunHandoffCard";
+import { RunPromptsCard } from "@/features/run-detail/RunPromptsCard";
 import { RunReleaseCard } from "@/features/run-detail/RunReleaseCard";
 import { RunStopCallout } from "./RunStopCallout";
 import { RunVerdictLine } from "@/features/run-detail/RunVerdictLine";
@@ -70,6 +71,7 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
             <BuildLogPane runId={run.id} enabled={logOn} onEnabledChange={setLogOn} />
           </div>
         </Section>
+        <RunPromptsCard runId={run.id} />
         {attemptsFailed ? null : attempts}
         {gatesFailed ? null : gates}
         <ComposeBlock phases={run.composePhases} />

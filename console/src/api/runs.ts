@@ -6,6 +6,7 @@ import { parseSseFrame, watchSse } from "@/api/sse";
 import type { ApiError } from "@/domain/apiError";
 import { asObject } from "@/domain/decode";
 import { type Handoff, decodeHandoff } from "@/domain/handoff";
+import { type SavedPrompt, decodeSavedPrompts } from "@/domain/savedPrompt";
 import {
   type ProgressEvent,
   type Run,
@@ -101,6 +102,32 @@ export async function getRunHandoff(
   const at = "GET /runs/{id}/handoff";
   const json = await http.getJson(`/runs/${encodeURIComponent(id)}/handoff`, readToken, signal);
   return decodeHandoff(asObject(json, at), at);
+}
+
+/**
+ * GET /runs/{id}/prompts: the prompts the run's launches were handed, oldest
+ * first. Operator-only; may quote repository content.
+ */
+export async function getRunPrompts(
+  http: Http,
+  id: string,
+  signal?: AbortSignal,
+): Promise<SavedPrompt[]> {
+  const at = "GET /runs/{id}/prompts";
+  const json = await http.getJson(`/runs/${encodeURIComponent(id)}/prompts`, readToken, signal);
+  return decodeSavedPrompts(asObject(json, at), at);
+}
+
+/** GET /runs/{id}/prompts/{attempt}/{name}: one prompt's text, as sent. */
+export async function getRunPromptText(
+  http: Http,
+  id: string,
+  attempt: string,
+  name: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const path = `/runs/${encodeURIComponent(id)}/prompts/${encodeURIComponent(attempt)}/${encodeURIComponent(name)}`;
+  return new TextDecoder().decode(await http.getBytes(path, readToken, signal));
 }
 
 export interface WatchBackoff {

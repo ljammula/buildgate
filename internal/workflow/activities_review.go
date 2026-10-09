@@ -232,6 +232,9 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	if err != nil {
 		return VerifyActivityResult{}, err
 	}
+	// A prompt already in this step's session folder was not saved by this
+	// launch: the build agent could have written it.
+	a.dropStaleReviewPrompts(ctx, input, step)
 	script := filepath.Join(filepath.Dir(a.buildAppScriptFor(input.RunWorkflowInput)), step.ScriptName)
 	args := prep.args(reviewStepArgs(a, step, input, script))
 	buildAppInterpreter := a.buildAppInterpreterFor(input.RunWorkflowInput)
@@ -303,6 +306,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// Immediately after the launch, before the clean check below: the stubs
 	// a mask over an absent path needed, and the snapshot's scratch.
 	finishErr := prep.finish(ctx)
+	a.retainReviewPrompts(ctx, input, step)
 	return a.completeReviewStep(ctx, input, step, checkpoint, path, result, runErr, finishErr, withInherited(inherited, attempts))
 }
 

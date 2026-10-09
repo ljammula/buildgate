@@ -689,6 +689,8 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs/{id}/diff", s.getRunDiff)
 	s.mux.HandleFunc("GET /runs/{id}/release", s.getRunRelease)
 	s.mux.HandleFunc("GET /runs/{id}/handoff", s.getRunHandoff)
+	s.mux.HandleFunc("GET /runs/{id}/prompts", s.getRunPrompts)
+	s.mux.HandleFunc("GET /runs/{id}/prompts/{attempt}/{name}", s.getRunPrompt)
 	s.mux.HandleFunc("GET /projects/{project}/release", s.getProjectRelease)
 	s.mux.HandleFunc("GET /projects/{project}/stats", s.getProjectStats)
 	s.mux.HandleFunc("GET /projects/{project}/observations", s.getProjectObservations)

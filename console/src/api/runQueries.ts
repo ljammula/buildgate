@@ -28,6 +28,8 @@ import {
   getRun,
   getRunDiff,
   getRunHandoff,
+  getRunPromptText,
+  getRunPrompts,
   listRuns,
   overrideRun,
   startRun,
@@ -35,6 +37,7 @@ import {
 } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
 import type { Handoff } from "@/domain/handoff";
+import type { SavedPrompt } from "@/domain/savedPrompt";
 import { compareTimestamps } from "@/domain/elapsed";
 import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
@@ -146,6 +149,32 @@ export function useRunHandoff(id: string, sha256: string): UseQueryResult<Handof
     queryKey: queryKeys.runs.handoff(id, sha256),
     queryFn: ({ signal }) => getRunHandoff(http, id, signal),
     enabled: sha256 !== "",
+  });
+}
+
+/** The prompts a run's launches were sent; empty for a run that kept none. */
+export function useRunPrompts(id: string): UseQueryResult<SavedPrompt[]> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.runs.prompts(id),
+    queryFn: ({ signal }) => getRunPrompts(http, id, signal),
+  });
+}
+
+/** One prompt's text, read when the operator opens it; it never changes. */
+export function useRunPromptText(
+  id: string,
+  attempt: string,
+  name: string,
+  enabled: boolean,
+): UseQueryResult<string> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.runs.promptText(id, attempt, name),
+    queryFn: ({ signal }) => getRunPromptText(http, id, attempt, name, signal),
+    enabled,
+    retry: false,
+    staleTime: Infinity,
   });
 }
 
