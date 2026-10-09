@@ -430,18 +430,6 @@ func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *re
 	return url
 }
 
-// memoryChangesMarkdown is the section a memory request's pull request body
-// ends with, "" for every other run: the lines its proposal adds and removes
-// and the ids of the runs an added line came from. A proposal that cannot be
-// read adds nothing; the release check has already judged it.
-func memoryChangesMarkdown(dataDir string, r *run.Run) string {
-	proposal, has, err := memoryProposal(r, dataDir)
-	if err != nil || !has {
-		return ""
-	}
-	return "\n" + memoryPullRequestSection(proposal.Changes)
-}
-
 // retryPullRequestOpener is request.PROpener's one real implementation.
 // request.Retry calls it for a ticket halted with request.HaltAcceptedNoPR -- its run
 // was accepted (a real, paid build already succeeded) but no PR exists

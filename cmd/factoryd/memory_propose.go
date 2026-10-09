@@ -206,16 +206,15 @@ func (mc *memoryCmd) propose(ctx context.Context, ids []string) (string, error) 
 	if file != nil && string(expected) == string(file) {
 		return "", errors.New("nothing to change: every line named is already in the section")
 	}
-	proposal := memory.Proposal{
-		BaseBlobSHA256: "", Expected: string(expected), Changes: proposalChanges(picked, remove),
-	}
+	proposal := memory.Proposal{BaseBlobSHA256: "", Expected: string(expected)}
+	changes := proposalChanges(picked, remove)
 	if file != nil {
 		proposal.BaseBlobSHA256 = memory.HashHex(file)
 	}
 	for _, l := range picked {
 		proposal.LessonIDs = append(proposal.LessonIDs, l.ID)
 	}
-	requestID, err := mc.submitMemoryRequest(ctx, proposal, verify, file != nil)
+	requestID, err := mc.submitMemoryRequest(ctx, proposal, changes, verify, file != nil)
 	if err != nil {
 		return "", err
 	}
@@ -238,20 +237,23 @@ func (mc *memoryCmd) propose(ctx context.Context, ids []string) (string, error) 
 	return requestID, nil
 }
 
-// submitMemoryRequest claims the request's id, saves the proposal under it
-// and submits the request through the entry point `factoryd submit
-// -spec-file -plan-dir` uses. A failed submit leaves no proposal and no
-// claimed id.
-func (mc *memoryCmd) submitMemoryRequest(ctx context.Context, proposal memory.Proposal, verify string, fileExists bool) (string, error) {
+// submitMemoryRequest claims the request's id, saves the proposal and its
+// list of changes under it and submits the request through the entry point
+// `factoryd submit -spec-file -plan-dir` uses. A failed submit leaves no
+// proposal, no list and no claimed id.
+func (mc *memoryCmd) submitMemoryRequest(ctx context.Context, proposal memory.Proposal, changes []memory.Change, verify string, fileExists bool) (string, error) {
 	requestID, err := request.ClaimID(mc.dataDir, request.GenerateID("memory "+mc.project, mc.now))
 	if err != nil {
 		return "", fmt.Errorf("claim a request id: %w", err)
 	}
 	proposal.RequestID = requestID
-	proposalPath, err := memory.ProposalPath(mc.dataDir, mc.project, requestID)
+	proposalPath, err := memory.ProposalPath(mc.dataDir, mc.storeKey(), requestID)
+	changesPath, _ := memory.ChangesPath(mc.dataDir, mc.storeKey(), requestID)
 	undo := func() {
-		if proposalPath != "" {
-			_ = os.Remove(proposalPath)
+		for _, path := range []string{proposalPath, changesPath} {
+			if path != "" {
+				_ = os.Remove(path)
+			}
 		}
 		_ = os.RemoveAll(request.Dir(mc.dataDir, requestID))
 	}
@@ -263,7 +265,11 @@ func (mc *memoryCmd) submitMemoryRequest(ctx context.Context, proposal memory.Pr
 		undo()
 		return "", err
 	}
-	docs := memoryRequestDocuments(proposal, verify, fileExists)
+	if err := memory.SaveChanges(changesPath, changes); err != nil {
+		undo()
+		return "", err
+	}
+	docs := memoryRequestDocuments(proposal, changes, verify, fileExists)
 	scratch, err := os.MkdirTemp("", "factoryd-memory-request-")
 	if err != nil {
 		undo()

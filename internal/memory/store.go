@@ -45,7 +45,18 @@ type StoreState struct {
 	CountedRuns []string `json:"counted_runs,omitempty"`
 }
 
-// Store is one project's durable memory under <data-dir>/memory/<project>.
+// StoreKey names one repository's store directory: the lower-cased project
+// name, then the first 12 hex characters of the SHA-256 of the repository's
+// cleaned absolute root path. Two repositories that share a base name, or
+// whose names differ only by case, get different stores, stop markers and
+// proposals. Every caller of Open, OpenReadOnly, ProposalPath and ChangesPath
+// passes this key where the store's directory name is wanted.
+func StoreKey(project, repoRoot string) string {
+	return strings.ToLower(project) + "-" + HashHex([]byte(filepath.Clean(repoRoot)))[:12]
+}
+
+// Store is one repository's durable memory under <data-dir>/memory/<key>,
+// where key is its StoreKey.
 type Store struct {
 	dir string
 }
@@ -70,7 +81,8 @@ func ValidProject(project string) error {
 	return nil
 }
 
-// Open creates the project's directories (mode 0700) and returns its store.
+// Open creates the store's directories (mode 0700) and returns it. project is
+// the repository's StoreKey.
 func Open(dataDir, project string) (*Store, error) {
 	if err := ValidProject(project); err != nil {
 		return nil, err

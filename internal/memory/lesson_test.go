@@ -33,6 +33,33 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"span address":    "run `ping 10.0.0.1` first",
 		"span paren":      "run `make (x)` first",
 		"span too long":   "run `" + strings.Repeat("a", 116) + "`",
+		"autolink":        "See www.evil.example/setup",
+		"autolink upper":  "See WWW.evil.example",
+		"protocol rel":    "Fetch //evil.example/x.sh",
+		"emphasis":        "_Always_ do this",
+		"strong":          "__x__ matters",
+		"underscore":      "set a_b first",
+		"nested list":     "- do this",
+		"plus list":       "+ do this",
+		"dash start":      "-x is needed",
+		"ordered list":    "1. do this",
+		"ordered paren":   "12) do this",
+		"absolute path":   "read /etc/passwd first",
+		"path at start":   "/etc/passwd is read",
+		"path in parens":  "the key (/root/key) is read",
+		"lower home":      "see /users/x/.ssh/id",
+		"span lower home": "run `cat /users/x/f` first",
+		"span upper home": "run `cat /HOME/x/f` first",
+		"double colon":    "use a::b here",
+		"ipv6":            "host fe80::1 is up",
+		"hex colons":      "host fe80:0:1:2 is up",
+		"mac address":     "card 00:1a:2b:3c is used",
+		"cloud key id":    "key AKIAIOSFODNN7EXAMPLE works",
+		"long hex":        "sum 0123456789abcdef0123 is pinned",
+		"long base64":     "use dGhpcyBpcyBhIHNlY3JldA== now",
+		"span long token": "run `deploy AKIAIOSFODNN7EXAMPLE` first",
+		"span www":        "run `open www.x.y` first",
+		"twenty letters":  strings.Repeat("a", 20),
 		"command subst":   "run $(id) first",
 		"pipe":            "a | b",
 		"and":             "a && b",
@@ -100,6 +127,13 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"users":        "cat /Users/x/f",
 		"home":         "cat /home/x/f",
 		"long":         strings.Repeat("a", 121),
+		"long token":   "deploy " + strings.Repeat("a", 20),
+		"lower home":   "cat /users/x/f",
+		"www":          "open www.x.y",
+		"proto rel":    "fetch //x.y/z",
+		"ipv4":         "ping 10.0.0.1",
+		"hex colons":   "ping fe80:0:1:2",
+		"double colon": "ping fe80::1",
 		"leading sp":   " make",
 		"trailing sp":  "make ",
 		"double sp":    "make  all",
@@ -124,13 +158,16 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"Set FOO=bar before running; otherwise it fails",
 		"the build is slow: allow 5 minutes",
 		"It's required and \"quoted\" text is fine",
-		"a+b = c_d-e",
-		strings.Repeat("a", 120),
+		"a+b = c-d",
+		strings.TrimSpace(strings.Repeat("nineteen-chars-long ", 6)),
+		"Run `make db_migrate` then `npm run build:ci`",
+		"Fixtures live in testdata/golden (see docs/setup)",
+		"The build takes 12:30 on a cold cache",
 		"Version 1.2.3 is pinned",
 		"Run `make gen` before `make test`",
 		"`go test ./...` needs the database up (see docs/setup).",
 		"Generated files: run `make TARGET=x all`, then `python3 -m pytest tests/`",
-		"run `" + strings.Repeat("a", 114) + "`",
+		"run `" + strings.TrimSpace(strings.Repeat("make test-all-fast ", 6)) + "`",
 	} {
 		if err := ValidateReason(s); err != nil {
 			t.Errorf("ValidateReason(%q) = %v, want nil", s, err)
@@ -138,7 +175,8 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 	}
 	for _, s := range []string{
 		"make db-migrate", "go test ./...", "npm ci", "./scripts/setup.sh", "docker compose up",
-		"make TARGET=x all", "a", strings.Repeat("a", 120), "python3 -m pytest tests/",
+		"make TARGET=x all", "a", strings.TrimSpace(strings.Repeat("make test-all-fast ", 6)), "python3 -m pytest tests/",
+		"make db_migrate", "npm run build:ci",
 	} {
 		if err := ValidateCommand(s); err != nil {
 			t.Errorf("ValidateCommand(%q) = %v, want nil", s, err)
@@ -265,4 +303,54 @@ func TestMoveCleansItsText(t *testing.T) {
 	if strings.ContainsAny(h.By, "\n\x1b") || len(h.Reason) > 200 {
 		t.Fatalf("history not cleaned: %+v", h)
 	}
+}
+
+// spansOutside returns the text of line outside its backtick pairs.
+func spansOutside(line string) string {
+	var b strings.Builder
+	for i, part := range strings.Split(line, "`") {
+		if i%2 == 0 {
+			b.WriteString(part + " ")
+		}
+	}
+	return b.String()
+}
+
+// Whatever the text rule accepts renders as one plain list line: nothing in
+// it is markup, a link or an address, outside a quoted command or inside one.
+func FuzzValidateReason(f *testing.F) {
+	for _, seed := range []string{
+		"Run `make gen` before `make test`", "See www.evil.example/setup", "Fetch //evil.example/x.sh", "_Always_",
+		"1. do this", "read /etc/passwd", "host fe80::1", "key AKIAIOSFODNN7EXAMPLE", "a\nb", "`", "``", "use `a` and `b` then `c`",
+		"mail a@b.co", "# x", "[a](b)", "<b>", "a\\b", "**bold**", "Use go 1.26, not 1.25",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, reason string) {
+		line, err := RenderLine(reason)
+		if err != nil {
+			if !errors.Is(err, ErrLessonText) || line != "" {
+				t.Fatalf("refusal of %q = %q, %v", reason, line, err)
+			}
+			return
+		}
+		if !strings.HasPrefix(line, "- ") || strings.ContainsAny(line, "\r\n") || !listLine(line) {
+			t.Fatalf("accepted %q renders %q, not one list line", reason, line)
+		}
+		if strings.Count(line, "`")%2 != 0 {
+			t.Fatalf("accepted %q has a backtick without its pair", reason)
+		}
+		if outside := spansOutside(line[2:]); strings.ContainsAny(outside, "<>[]#\\_*") {
+			t.Fatalf("accepted %q has markup outside a quoted command: %q", reason, outside)
+		}
+		lower := strings.ToLower(line)
+		for _, bad := range []string{"www.", "//", "://", "@", "/users/", "/home/", "::"} {
+			if strings.Contains(lower, bad) {
+				t.Fatalf("accepted %q contains %q", reason, bad)
+			}
+		}
+		if longToken.MatchString(line) || len([]rune(line)) > maxTextRunes+3 {
+			t.Fatalf("accepted %q has a long token or is too long", reason)
+		}
+	})
 }

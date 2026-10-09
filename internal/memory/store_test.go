@@ -352,3 +352,71 @@ func TestGateOrderAndReasons(t *testing.T) {
 		}
 	}
 }
+
+// Two repositories that share a base name, or whose names differ only by
+// case, have different stores, stop markers and proposal paths.
+func TestStoreKeySeparatesRepositoriesWithOneName(t *testing.T) {
+	a, b := StoreKey("api", "/clients/acme/api"), StoreKey("api", "/clients/beta/api")
+	if a == b || !strings.HasPrefix(a, "api-") || len(a) != len("api-")+12 {
+		t.Fatalf("keys %q and %q", a, b)
+	}
+	if StoreKey("api", "/clients/acme/api/") != a || StoreKey("api", "/clients/acme/./api") != a {
+		t.Fatal("the key depends on how the root path is written")
+	}
+	upper, lower := StoreKey("API", "/src/API"), StoreKey("api", "/src/api")
+	if upper == lower || !strings.HasPrefix(upper, "api-") || strings.EqualFold(upper, lower) {
+		t.Fatalf("names differing by case share a store on a case-insensitive filesystem: %q %q", upper, lower)
+	}
+	if err := ValidProject(a); err != nil {
+		t.Fatalf("a key is not a valid store name: %v", err)
+	}
+	data := t.TempDir()
+	one, err := Open(data, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(data, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := one.SetOff("op", "pause"); err != nil {
+		t.Fatal(err)
+	}
+	if off, _ := other.Off(); off {
+		t.Fatal("one repository's stop marker stopped the other")
+	}
+	pa, _ := ProposalPath(data, a, "req-1")
+	pb, _ := ProposalPath(data, b, "req-1")
+	if pa == pb {
+		t.Fatal("the two repositories share a proposal path")
+	}
+}
+
+func TestChangesRoundTripBesideTheProposal(t *testing.T) {
+	data := t.TempDir()
+	key := StoreKey("app", "/src/app")
+	path, err := ChangesPath(data, key, "req-1")
+	if err != nil || filepath.Base(path) != "req-1.changes.json" || filepath.Base(filepath.Dir(path)) != "proposals" {
+		t.Fatalf("path %q, %v", path, err)
+	}
+	if got, err := LoadChanges(path); err != nil || got != nil {
+		t.Fatalf("missing file = %v, %v", got, err)
+	}
+	want := []Change{{Line: "- a.", Source: SourceAgent, Runs: []string{"r1"}}, {Remove: true, Line: "- b."}}
+	if err := SaveChanges(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadChanges(path)
+	if err != nil || len(got) != 2 || got[0].Runs[0] != "r1" || !got[1].Remove {
+		t.Fatalf("round trip = %+v, %v", got, err)
+	}
+	if err := os.WriteFile(path, []byte(`[{"line":"x","extra":1}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadChanges(path); err == nil {
+		t.Fatal("an unknown field was accepted")
+	}
+	if _, err := ChangesPath(data, "../x", "req-1"); err == nil {
+		t.Fatal("a hostile key was accepted")
+	}
+}

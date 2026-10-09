@@ -765,7 +765,7 @@ every request verb takes `-config`):
 | Quick offline run summary | `factoryd status` — first line `profile: <name> (<config path>) · data dir <dir>` (`-json`: `profile`, `config_path`), then one line per run/request: id, project, ticket, state, elapsed, cost, PR URL or halt/quarantine reason. `-project`, `-state`, `-n` (default 20), `-json`. On `chatgpt-codex`/`github-copilot`, cost reads `(API-price est.; billed to your subscription)` (aggregates: `(includes subscription-billed runs; API-price est.)`). While `worker` is alive, also prints `worker route: <credential-mode> · <worker-model>` — which subscription is billed; the route itself is daemon-wide, changed by the operator via `worker`/`quickstart -route`, not per request |
 | Remove buildgate from this machine | `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]`: stops everything `stop -all` does, then removes the launchd services, the Temporal containers (`docker compose -p buildgate down`), the OpenShell gateway and meter containers (`docker compose -p buildgate-openshell down`), the `factoryd-local-registry` container, the images `make install` built (`localhost:5050/{buildgate-worker,factoryd-meter,factoryd-registry-proxy,buildgate-pifork,project-worker}:local`), the `buildgate` skill in `~/.agents/skills` and `~/.claude/skills` (only a real directory holding a `SKILL.md`; a symlink is left), and the `factoryd` binary. Only steps whose target exists are listed. If a daemon cannot be stopped (a request is building) nothing else is removed; `-force` cancels the build. `~/.config/factoryd` and `~/buildgate` stay unless `-purge` (also drops the Temporal volumes and the gateway's state; you type `purge` to confirm). With `-purge` the gateway's own state on the Docker VM (`/var/lib/openshell`: its database, keys and stored credentials) is deleted too, through a throwaway container of the worker image run before that image is removed; if the image is already gone it prints the manual command (`colima ssh -- sudo rm -rf /var/lib/openshell`) instead. Reinstall with `make install` |
 | Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. A launchd-supervised one is left running with a pointer to `factoryd uninstall-service`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when colima is the Docker provider and no other container runs, `colima stop` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`); it refuses while any `worker` is still live unless `-force` |
-| Everything waiting on you, across profiles | `factoryd inbox [-json]`: every request in `spec_review`, `oracle_review`, `plan_review`, `pr_review`, `resume_review`, `halted` or `quarantined` in each distinct profile data dir, oldest first. Each entry: `<age>  <profile>  <state>  <id>  <title>`, then the `factoryd approve -config <profile> <id>` / `factoryd reject -config <profile> -reason "..." <id>` commands (the PR URL for `pr_review`; `reason:` and `next:` for halted/quarantined), then `console: <link>` when a console link resolves. Prints `Nothing is waiting on you.` when empty |
+| Everything waiting on you, across profiles | `factoryd inbox [-json]`: every request in `spec_review`, `oracle_review`, `plan_review`, `pr_review`, `resume_review`, `halted` or `quarantined` in each distinct profile data dir, oldest first. Each entry: `<age>  <profile>  <state>  <id>  <title>`, then the `factoryd approve -config <profile> <id>` / `factoryd reject -config <profile> -reason "..." <id>` commands (the PR URL for `pr_review`; `reason:` and `next:` for halted/quarantined), then `console: <link>` when a console link resolves. A memory request's title is prefixed `[memory]` (and its `factoryd status` row ends with `[memory]`). Prints `Nothing is waiting on you.` when empty |
 | Follow one run live | `factoryd watch <run-or-request-id>`: on a terminal, one animated working line with the real state (e.g. `⠹ Forging… spec drafting · planning role luna (pi) · 1m12s`, or a run's stage, round, what it waits on and `STALLED <Nm>` past 5 min of silence); piped or logged, one plain line per change. `quickstart`, `doctor` and `make install`'s image builds show the same kind of line while they wait; console Timeline/Pipeline stepper; the Temporal Web UI; desktop/Slack/Discord notifications on accept/quarantine/halt |
 | Why a build round failed | The console run page, under Build: each finished round shows what blocked it, the files its agent turn changed, `The same failure as round N` when it failed the way the round before did, the name of the saved full output (a copy of each is kept in the run's directory, `round-logs/round-<n>/verify.log`, `fast-check.log` or `oracle.log`, and outlives the worktree; a resumed build's interrupted attempt has its own under `round-logs/before-attempt-<n>/`), and what happened to the agent process when no command failed (it changed nothing, timed out, stalled, or its model route failed). The same five fields are in the run record (`run.json`, `agent_evidence.rounds[]`: `blockers`, `changed_files`, `failure_signature`, `failure_log`, `agent_notes`). They are the build agent's own report: factoryd shows them as text and never decides on them; `blockers` and `changed_files` are `null` on a run recorded before they existed. `make baseline` counts repeated failures from them |
 | What a repository's runs have shown | The console's Projects page, a project's **Observations** tab (or `/projects/<project>/observations`): for that project's finished runs in this data directory, newest first, each round that failed and was then fixed (and the files the fixing round changed), each failure that repeated, each round that changed no file, each check that quarantined a run and each halt, with the failing lines of the round's saved output; each check a later run of the same ticket fixed (`check_fixed`: the quarantined and the accepted run, the failed checks with the factory's own sentence about each, the files the fixing round changed), each pushed pull-request review round (`review_comment_accepted`: request, ticket, round, run and review thread ids only) and each operator edit or send-back at the spec or plan gate (`operator_edit`: request, gate, time and the files and sections touched, never the text). Every observation carries a stable `id` (16 hex characters), a `source` (`run` or `request`) and, for a failed round, its `signature`. It also counts the runs accepted in their first round. Computed from the run records on every load (`GET /projects/{project}/observations`, gated like `GET /runs`): nothing is stored, no model is called, and nothing on the page changes how a build runs |
@@ -828,6 +828,65 @@ then `~/.config/factoryd/config.yml`, then `~/.factory/config.yml`. An active
 profile whose file is missing is an error naming the fix (`factoryd use
 <name>`), never a fallback. `make install` re-points every profile at the
 fresh images unless `FACTORYD_CONFIG` names some.
+
+## Repository memory
+
+A build that ends without passing may leave notes, one list of them "things
+worth knowing about this repository". Repository memory turns those notes into
+lines of the repository's own `AGENTS.md`, which every later agent reads, and
+only through you: you see the candidates, you propose some, you approve the
+request and you merge its pull request.
+
+```text
+build ends without passing
+        |  its agent's "worth knowing" notes (kept in the run's handoff)
+        v
+factoryd memory list        collects candidates; only you see them
+        |
+factoryd memory propose     one request: its ticket rewrites the fenced
+        |                   section of AGENTS.md to the text shown in its spec
+        v
+spec_review -> plan_review  you approve each, as for any request
+        |
+build -> release check      AGENTS.md must be byte-for-byte that text,
+        |                   and no other file may change
+        v
+pull request                you merge it; the line is in force from then on
+```
+
+| Step | Command | What happens |
+|---|---|---|
+| Switch it on | Add the repository under `memory.repositories` in the session config (`- path: ~/code/app`, optional `budget_lines`, `budget_chars`) | Off for every repository not listed. Default budget: 40 lines, 3000 characters |
+| See what there is | `factoryd memory list -workspace ~/code/app` | The lines in force and the candidates, each with how many runs said it |
+| Look at one | `factoryd memory show -workspace ~/code/app <id>` | The line, the runs that said it, its history |
+| Write your own | `factoryd memory add -workspace ~/code/app "The integration tests need the database up"` | A candidate from you, under the same text rule (USAGE_REFERENCE has the rule); a command goes inside backticks, quoted for your shell |
+| Discard one | `factoryd memory drop -workspace ~/code/app -reason "wrong" <id>` | It is never proposed; runs that repeat it are still counted |
+| Propose | `factoryd memory propose -workspace ~/code/app <id> <id>` (no id: the most seen that fit) | One request, at most five changes, waiting at `spec_review`. Its spec ends with the whole `AGENTS.md` it will produce |
+| Approve | `factoryd approve <request-id>`, twice (spec, then plan) | The ticket is built in the sandbox like any other |
+| Merge | Merge its pull request | A reviewer's comment on it starts no corrective build: to change a line, close it, `factoryd cancel <request-id>` and propose again |
+| Remove a line | `factoryd memory propose -workspace ~/code/app -remove "- The exact line."` | A memory request that takes the line out. A full section refuses `propose` until you name a line to remove |
+| Stop | `factoryd memory off -workspace ~/code/app`, or the project's kill switch | Every subcommand but `list` and `show` is refused |
+
+The section looks like this in `AGENTS.md`. Text outside the two markers is
+never touched; lines you write by hand inside them are kept as they are:
+
+```text
+<!-- buildgate:memory:begin v1 -->
+## Working in this repository
+
+- Run `make gen` before `make test`.
+- The integration tests need the database up.
+<!-- buildgate:memory:end -->
+```
+
+| Never done automatically | Instead |
+|---|---|
+| Collecting candidates | `memory list` and `memory propose` collect when you run them |
+| Choosing what to propose, or what to drop when the section is full | You name the ids and the `-remove` lines |
+| Running or checking a command a line names | You read the line at spec review and on the pull request |
+| Approving or merging a memory request | The two review gates and the merge are yours |
+| Editing the section in any other request | A run that changes it without a proposal is refused at release |
+
 
 ## Temporal: what runs every build
 

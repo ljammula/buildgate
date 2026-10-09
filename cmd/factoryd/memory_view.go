@@ -76,7 +76,10 @@ type memoryRead struct {
 // creates no file or directory.
 func readMemory(ctx context.Context, dp *deps, settings sessionconfig.Settings, dataDir, repoRoot, project string) (memoryRead, error) {
 	var ro memoryRead
-	store, err := memory.OpenReadOnly(dataDir, project)
+	if err := memory.ValidProject(project); err != nil {
+		return ro, err
+	}
+	store, err := memory.OpenReadOnly(dataDir, memory.StoreKey(project, repoRoot))
 	if err != nil {
 		return ro, err
 	}
@@ -260,4 +263,20 @@ func apiProjectMemoryProvider(dp *deps, settings sessionconfig.Settings, dataDir
 		}
 		return ro.view(project), true, nil
 	}
+}
+
+// memoryStoreKeyOfRun is the store key of the repository a run's request was
+// submitted against (memory.StoreKey of the request's project and the git
+// root of its workspace), false for a run of no request or one whose request
+// cannot be loaded. A memory request's proposal and changes are kept under
+// this key.
+func memoryStoreKeyOfRun(dataDir string, r *run.Run) (string, bool) {
+	if r.RequestID == "" {
+		return "", false
+	}
+	req, err := request.Load(dataDir, r.RequestID)
+	if err != nil || req.Workspace == "" {
+		return "", false
+	}
+	return memory.StoreKey(req.Project, release.RepositoryRoot(req.Workspace)), true
 }

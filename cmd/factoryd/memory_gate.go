@@ -28,7 +28,7 @@ func memoryGate(dp *deps, settings sessionconfig.Settings, dataDir, repoRoot, pr
 	if err := memory.Gate(on, false, engaged); err != nil {
 		return nil, memory.Budget{}, err
 	}
-	store, err := memory.Open(dataDir, project)
+	store, err := memory.Open(dataDir, memory.StoreKey(project, repoRoot))
 	if err != nil {
 		return nil, memory.Budget{}, err
 	}

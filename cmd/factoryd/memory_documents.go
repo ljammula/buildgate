@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"buildgate/internal/memory"
+	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 )
 
@@ -121,8 +122,8 @@ func fileEnding(expected string) string {
 // memoryRequestDocuments writes a memory request's spec and ticket around the
 // expected AGENTS.md. The expected text is the last section of each, in a
 // fence its content cannot close; every other word is the factory's.
-func memoryRequestDocuments(p memory.Proposal, verifyCommand string, fileExists bool) memoryDocuments {
-	added, removed := splitChanges(p.Changes)
+func memoryRequestDocuments(p memory.Proposal, changes []memory.Change, verifyCommand string, fileExists bool) memoryDocuments {
+	added, removed := splitChanges(changes)
 	action := "Replace the file `AGENTS.md` at the repository root"
 	if !fileExists {
 		action = "The repository has no `AGENTS.md`. Create it at the repository root"
@@ -150,7 +151,7 @@ func memoryRequestDocuments(p memory.Proposal, verifyCommand string, fileExists 
 	var spec strings.Builder
 	spec.WriteString("# Spec\n\n## Problem\n\n")
 	fmt.Fprintf(&spec, "The operator proposed a change to this repository's memory: the section of `AGENTS.md` headed \"%s\", which every later build agent reads. %d line(s) are added and %d removed.\n\n", strings.TrimPrefix(memory.SectionHeading, "## "), len(added), len(removed))
-	spec.WriteString("## Scope\n\n" + exact + " No other file may change.\n\n" + changeList(p.Changes) + "\n")
+	spec.WriteString("## Scope\n\n" + exact + " No other file may change.\n\n" + changeList(changes) + "\n")
 	spec.WriteString("## Non-goals\n\n- Rewording, reordering or reformatting any line, inside or outside the memory section.\n- Changing any file other than `AGENTS.md`.\n- Running or checking a command a line names.\n\n")
 	spec.WriteString("## Affected services and packages\n\n- `AGENTS.md` at the repository root. No code, test or configuration file.\n\n")
 	spec.WriteString("## Acceptance criteria\n\n" + criteria.String() + "\n")
@@ -181,4 +182,25 @@ func memoryPullRequestSection(changes []memory.Change) string {
 		return ""
 	}
 	return "## Repository memory\n\nThis pull request replaces `AGENTS.md` with the text the operator approved at spec review. The factory rendered that text; the release check passed only because the file matches it byte for byte and no other file changed.\n\n" + changeList(changes) + "\n"
+}
+
+// memoryChangesMarkdown is the section a memory request's pull request body
+// ends with, "" for every other run: the lines its proposal adds and removes
+// and the ids of the runs an added line came from, read from the list saved
+// beside the request's proposal. A list that is absent or cannot be read adds
+// nothing; the release check has already judged the run.
+func memoryChangesMarkdown(dataDir string, r *run.Run) string {
+	key, ok := memoryStoreKeyOfRun(dataDir, r)
+	if !ok {
+		return ""
+	}
+	path, err := memory.ChangesPath(dataDir, key, r.RequestID)
+	if err != nil {
+		return ""
+	}
+	changes, err := memory.LoadChanges(path)
+	if err != nil || len(changes) == 0 {
+		return ""
+	}
+	return "\n" + memoryPullRequestSection(changes)
 }

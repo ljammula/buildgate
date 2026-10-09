@@ -99,6 +99,9 @@ type memoryCmd struct {
 	now      time.Time
 }
 
+// storeKey names the repository's store: see memory.StoreKey.
+func (mc *memoryCmd) storeKey() string { return memory.StoreKey(mc.project, mc.repoRoot) }
+
 func (mc *memoryCmd) stamp() string { return mc.now.UTC().Format(time.RFC3339) }
 
 // memoryMain implements `factoryd memory`. A request `propose` submitted
@@ -284,7 +287,7 @@ func (mc *memoryCmd) show(args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: factoryd memory show -workspace <repository> <id>")
 	}
-	store, err := memory.OpenReadOnly(mc.dataDir, mc.project)
+	store, err := memory.OpenReadOnly(mc.dataDir, mc.storeKey())
 	if err != nil {
 		return err
 	}
@@ -444,7 +447,7 @@ func (mc *memoryCmd) on() error {
 		}
 		return err
 	}
-	store, err := memory.Open(mc.dataDir, mc.project)
+	store, err := memory.Open(mc.dataDir, mc.storeKey())
 	if err != nil {
 		return err
 	}

@@ -75,14 +75,27 @@ const (
 	maxHistory      = 50
 	maxEchoBytes    = 40
 	maxMoveTextLen  = 200
-	reasonPunct     = " .,:;()'\"/_=+-"
+	reasonPunct     = " .,:;()'\"/=+-"
 	commandPunct    = " ._/:=-"
 )
 
 // MaxLessonRuns bounds the run ids one lesson keeps.
 const MaxLessonRuns = 20
 
-var ipv4Shape = regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+`)
+var (
+	ipv4Shape = regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+`)
+	// hexColonShape is three or more short hex groups joined by colons: the
+	// shape of an IPv6 or hardware address.
+	hexColonShape = regexp.MustCompile(`[0-9A-Fa-f]{1,4}(:[0-9A-Fa-f]{1,4}){2,}`)
+	// listStart is how a line would open a nested list, an ordered list or a
+	// quote once it follows "- ".
+	listStart = regexp.MustCompile(`^([-+>]|[0-9]+[.)])`)
+	// absolutePath is a token that starts with "/" and a letter.
+	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/-])/[A-Za-z]`)
+	// longToken is 20 or more characters with no space from the set keys,
+	// hashes and encoded secrets are written in.
+	longToken = regexp.MustCompile(`[A-Za-z0-9+/=_-]{20,}`)
+)
 
 // clip makes refused text safe to put in an error: cleaned, at most 40 bytes.
 func clip(s string) string {
@@ -124,28 +137,49 @@ func shapeProblem(s string) string {
 	return ""
 }
 
-var forbiddenParts = []string{"://", "/Users/", "/home/"}
+// forbiddenParts are refused anywhere, in any letter case: a URL in any form
+// ("//" covers "://" and a protocol-relative one, "www." an autolink), a home
+// path and a doubled colon.
+var forbiddenParts = []string{"//", "www.", "/users/", "/home/", "::"}
 
 func forbiddenPart(s string) string {
+	lower := strings.ToLower(s)
 	for _, p := range forbiddenParts {
-		if strings.Contains(s, p) {
+		if strings.Contains(lower, p) {
 			return p
 		}
 	}
 	return ""
 }
 
+// forbiddenShape names a token shape refused anywhere in a reason or a
+// command: a long unbroken token, or an address.
+func forbiddenShape(s string) string {
+	switch {
+	case longToken.MatchString(s):
+		return "has an unbroken token of 20 or more characters"
+	case ipv4Shape.MatchString(s) || hexColonShape.MatchString(s):
+		return "contains an address-shaped token"
+	}
+	return ""
+}
+
 // ValidateReason refuses a reason that is not one plain sentence-like line of
 // at most 120 runes. Outside backticks the characters are
-// [A-Za-z0-9 .,:;()'"/_=+-]; a pair of backticks quotes a command, whose
-// inside must pass ValidateCommand. A backtick without its pair is refused.
-// It never repairs.
+// [A-Za-z0-9 .,:;()'"/=+-], with no absolute path; a pair of backticks quotes
+// a command, whose inside must pass ValidateCommand. A backtick without its
+// pair is refused, and so is a start that Markdown would read as a nested
+// list, an ordered list or a quote. Anywhere: no URL in any form, no home
+// path, no address, no unbroken token of 20 characters. It never repairs.
 func ValidateReason(s string) error {
 	switch {
 	case s == "":
 		return textErr("reason", "is empty", s)
 	case utf8.RuneCountInString(s) > maxTextRunes:
 		return textErr("reason", "is longer than 120 runes", s)
+	}
+	if listStart.MatchString(s) {
+		return textErr("reason", "starts like a list item or a quote", s)
 	}
 	if err := validateSpans(s); err != nil {
 		return err
@@ -159,8 +193,8 @@ func ValidateReason(s string) error {
 	if p := forbiddenPart(s); p != "" {
 		return textErr("reason", "contains "+p, s)
 	}
-	if ipv4Shape.MatchString(s) {
-		return textErr("reason", "contains an address-shaped token", s)
+	if why := forbiddenShape(s); why != "" {
+		return textErr("reason", why, s)
 	}
 	return nil
 }
@@ -182,12 +216,16 @@ func validateSpans(s string) error {
 		if firstOutside(part, reasonPunct) >= 0 {
 			return textErr("reason", "has a character outside the allowed set", s)
 		}
+		if absolutePath.MatchString(part) {
+			return textErr("reason", "has an absolute path", s)
+		}
 	}
 	return nil
 }
 
 // ValidateCommand refuses anything but 1..120 bytes of [A-Za-z0-9 ._/:=-]
-// that does not start with "-" and has no leading, trailing or doubled space.
+// that does not start with "-" and has no leading, trailing or doubled space,
+// no URL, home path or address, and no unbroken token of 20 characters.
 // What remains cannot hold a shell operator, quote, variable, glob,
 // redirection or newline.
 func ValidateCommand(s string) error {
@@ -207,6 +245,9 @@ func ValidateCommand(s string) error {
 	if p := forbiddenPart(s); p != "" {
 		return textErr("command", "contains "+p, s)
 	}
+	if why := forbiddenShape(s); why != "" {
+		return textErr("command", why, s)
+	}
 	return nil
 }
 
@@ -218,6 +259,10 @@ func RenderLine(reason string) (string, error) {
 	}
 	if !strings.HasSuffix(reason, ".") {
 		reason += "."
+	}
+	// The full stop can complete a refused shape ("www" becomes "www.").
+	if p := forbiddenPart(reason); p != "" {
+		return "", textErr("reason", "contains "+p, reason)
 	}
 	return "- " + reason, nil
 }
