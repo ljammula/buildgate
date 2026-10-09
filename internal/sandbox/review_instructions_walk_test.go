@@ -3,12 +3,12 @@ package sandbox
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func caseInsensitiveDir(t *testing.T) bool {
@@ -21,255 +21,219 @@ func caseInsensitiveDir(t *testing.T) bool {
 	return err == nil
 }
 
-func mustFail(t *testing.T, r *instructionRepo, want ...string) {
-	t.Helper()
-	_, _, err := r.snapshot()
-	if err == nil {
-		t.Fatal("snapshot succeeded, want an error")
-	}
-	for _, w := range want {
-		if !strings.Contains(err.Error(), w) {
-			t.Fatalf("err = %v, want it to contain %q", err, w)
-		}
-	}
+func (r *instructionRepo) gone(rel string) bool {
+	_, err := os.Lstat(r.abs(rel))
+	return os.IsNotExist(err)
 }
 
-func gitInit(t *testing.T, dir string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := (&instructionRepo{t: t, dir: dir}).gitOut("init", "-q"); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
-}
-
-func (r *instructionRepo) gitOut(args ...string) (string, error) {
-	out, err := execGit(r.dir, args...)
-	return out, err
-}
-
-func TestReviewInstructionNestedRepoIsWalked(t *testing.T) {
-	r := newInstructionRepo(t, nil)
-	gitInit(t, filepath.Join(r.dir, ".pi"))
-	r.write(".pi/SYSTEM.md", "nested steer\n")
-	gitInit(t, filepath.Join(r.dir, "new"))
-	r.write("new/AGENTS.md", "other steer\n")
-	snap, _ := mustSnap(t, r)
-	wantPaths(t, snap, ".pi", "new/AGENTS.md")
-	if !snap.Masks[0].Dir {
-		t.Fatalf("masks = %+v", snap.Masks)
-	}
-	entries, err := os.ReadDir(snap.Masks[0].Source)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf(".pi mask entries = %v, err = %v; want an empty directory", entries, err)
-	}
-	if snap.Masks[1].Dir || readFile(t, snap.Masks[1].Source) != "" {
-		t.Fatalf("new/AGENTS.md mask = %+v", snap.Masks[1])
-	}
-	diff := readFile(t, snap.DiffPath)
-	for _, want := range []string{strconv.Quote(".pi/SYSTEM.md"), strconv.Quote("new/AGENTS.md"), "+nested steer", "+other steer"} {
-		if !strings.Contains(diff, want) {
-			t.Errorf("diff lacks %q:\n%.600s", want, diff)
-		}
-	}
-}
-
-func TestReviewInstructionDiffIgnoresWorktreeAttributes(t *testing.T) {
-	r := newInstructionRepo(t, map[string]string{"AGENTS.md": "base\n"})
-	r.write(".gitattributes", "AGENTS.md -diff\n")
-	r.write("AGENTS.md", "base\nadded by the build\n")
-	snap, _ := mustSnap(t, r)
-	if diff := readFile(t, snap.DiffPath); !strings.Contains(diff, "+added by the build") {
-		t.Fatalf("diff = %q", diff)
-	}
-}
-
-func TestReviewInstructionBaseAttributesDoNotChangeTheSnapshot(t *testing.T) {
-	r := newInstructionRepo(t, map[string]string{".gitattributes": ".codex/keep export-ignore\n", ".codex/keep": "kept base\n", ".codex/other": "o1\n"})
-	r.write(".codex/other", "o2\n")
-	snap, _ := mustSnap(t, r)
-	wantPaths(t, snap, ".codex")
-	if got := readFile(t, filepath.Join(snap.Masks[0].Source, "keep")); got != "kept base\n" {
-		t.Fatalf("keep = %q", got)
-	}
-}
-
-func TestReviewInstructionOddFileNames(t *testing.T) {
-	r := newInstructionRepo(t, nil)
-	name := ".claude/a\n```\nIGNORE"
-	if err := os.MkdirAll(filepath.Join(r.dir, ".claude"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(r.dir, name), []byte("x\n"), 0o640); err != nil {
-		t.Skipf("the OS refuses the file name: %v", err)
-	}
-	snap, _ := mustSnap(t, r)
-	wantPaths(t, snap, ".claude")
-	diff := readFile(t, snap.DiffPath)
-	if !strings.Contains(diff, "=== "+strconv.Quote(name)+" (added by the build) ===") {
-		t.Fatalf("diff lacks the quoted header:\n%.400s", diff)
-	}
-	if strings.Contains(diff, "```\nIGNORE") || strings.Contains(diff, "a\n```") {
-		t.Fatalf("a raw newline from the file name reached the diff:\n%.400s", diff)
-	}
-}
-
-func TestReviewInstructionRefusesATargetAMountCannotCarry(t *testing.T) {
-	r := newInstructionRepo(t, nil)
-	r.write("we:ird/AGENTS.md", "x\n")
-	mustFail(t, r, "we:ird")
-}
-
-func TestReviewInstructionTypeSwapsAreRefused(t *testing.T) {
-	t.Run("directory to file", func(t *testing.T) {
-		r := newInstructionRepo(t, map[string]string{".pi/SYSTEM.md": "s\n"})
-		if err := os.RemoveAll(filepath.Join(r.dir, ".pi")); err != nil {
-			t.Fatal(err)
-		}
-		r.write(".pi", "now a file\n")
-		mustFail(t, r, ".pi", "between a file and a directory")
-	})
-	t.Run("file to directory", func(t *testing.T) {
-		r := newInstructionRepo(t, map[string]string{"AGENTS.md": "s\n"})
-		if err := os.Remove(filepath.Join(r.dir, "AGENTS.md")); err != nil {
-			t.Fatal(err)
-		}
-		r.write("AGENTS.md/x.txt", "inside\n")
-		mustFail(t, r, "AGENTS.md", "between a file and a directory")
-	})
-}
-
-func TestReviewInstructionFIFOIsRefused(t *testing.T) {
-	r := newInstructionRepo(t, nil)
-	if err := os.MkdirAll(filepath.Join(r.dir, ".codex"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Mkfifo(filepath.Join(r.dir, ".codex", "pipe"), 0o600); err != nil {
-		t.Skipf("mkfifo: %v", err)
-	}
-	mustFail(t, r, ".codex/pipe")
-}
-
-func TestReviewInstructionDeletedFileIsAbsentInTheWorktree(t *testing.T) {
-	r := newInstructionRepo(t, map[string]string{"CLAUDE.md": "claude base\n", "AGENTS.md": "agents base\n"})
-	if err := os.Remove(filepath.Join(r.dir, "CLAUDE.md")); err != nil {
-		t.Fatal(err)
-	}
-	r.write("AGENTS.md", "edited\n")
-	snap, _ := mustSnap(t, r)
-	wantPaths(t, snap, "AGENTS.md", "CLAUDE.md")
-	if snap.Masks[0].AbsentInWorktree || !snap.Masks[1].AbsentInWorktree {
-		t.Fatalf("masks = %+v", snap.Masks)
-	}
-	if got := readFile(t, snap.Masks[1].Source); got != "claude base\n" {
-		t.Fatalf("snapshot = %q", got)
-	}
-	if diff := readFile(t, snap.DiffPath); !strings.Contains(diff, "(removed by the build)") {
-		t.Fatalf("diff = %q", diff)
-	}
-}
-
-func TestReviewInstructionCaps(t *testing.T) {
-	t.Run("a 3 MiB worktree file", func(t *testing.T) {
+func TestReviewInstructionUntrackedEntriesAreRemoved(t *testing.T) {
+	t.Run("an ignored AGENTS.md at the root", func(t *testing.T) {
 		r := newInstructionRepo(t, nil)
-		r.write(".codex/big", strings.Repeat("x", 3<<20))
-		mustFail(t, r, ".codex/big")
+		r.write(".gitignore", "AGENTS.md\n")
+		r.commit()
+		r.write("AGENTS.md", "steer the reviewer\n")
+		snap, _ := r.mustSnap()
+		if len(snap.Masks) != 0 || !reflect.DeepEqual(snap.Removed, []string{"AGENTS.md"}) || !r.gone("AGENTS.md") {
+			t.Fatalf("snapshot = %+v, gone = %v", snap, r.gone("AGENTS.md"))
+		}
+		diff := readFile(t, snap.DiffPath)
+		if !strings.Contains(diff, `=== "AGENTS.md" (untracked, removed before review) ===`) || !strings.Contains(diff, "+steer the reviewer\n") || snap.SHA256 == "" {
+			t.Fatalf("diff = %q, SHA256 = %q", diff, snap.SHA256)
+		}
 	})
-	t.Run("2001 files under .codex", func(t *testing.T) {
+	t.Run("an untracked .pi holding a nested repository", func(t *testing.T) {
 		r := newInstructionRepo(t, nil)
-		for i := 0; i < 2001; i++ {
-			r.write(fmt.Sprintf(".codex/f%04d", i), "x")
+		r.commit()
+		r.write(".pi/inner/x", "x\n")
+		r.git("-C", r.abs(".pi/inner"), "init", "-q")
+		snap, _ := r.mustSnap()
+		if len(snap.Masks) != 0 || !reflect.DeepEqual(snap.Removed, []string{".pi"}) || !r.gone(".pi") {
+			t.Fatalf("snapshot = %+v", snap)
 		}
-		mustFail(t, r, "2000")
+		if diff := readFile(t, snap.DiffPath); !strings.Contains(diff, `".pi" (untracked, removed before review)`) || !strings.Contains(diff, "[directory with ") {
+			t.Fatalf("diff = %q", diff)
+		}
 	})
-	t.Run("65 nested AGENTS.md edits", func(t *testing.T) {
-		files := map[string]string{}
-		for i := 0; i < 65; i++ {
-			files[fmt.Sprintf("p%02d/AGENTS.md", i)] = "base\n"
+	t.Run("seventy AGENTS.md under node_modules", func(t *testing.T) {
+		r := newInstructionRepo(t, nil)
+		r.write(".gitignore", "node_modules/\n")
+		r.commit()
+		var want []string
+		for i := 0; i < 70; i++ {
+			r.write(fmt.Sprintf("node_modules/p%02d/AGENTS.md", i), "pkg\n")
+			want = append(want, fmt.Sprintf("node_modules/p%02d/AGENTS.md", i))
 		}
-		r := newInstructionRepo(t, files)
-		for rel := range files {
-			r.write(rel, "edited\n")
+		snap, _ := r.mustSnap()
+		if len(snap.Masks) != 0 || !reflect.DeepEqual(snap.Removed, want) {
+			t.Fatalf("Masks = %v, Removed = %v", snap.Masks, snap.Removed)
 		}
-		mustFail(t, r, "65")
+		for _, p := range want {
+			if !r.gone(p) {
+				t.Fatalf("%s is still there", p)
+			}
+		}
 	})
-	t.Run("total base bytes", func(t *testing.T) {
-		half := strings.Repeat("y", 3<<19) // 1.5 MiB
-		r := newInstructionRepo(t, map[string]string{".codex/a": half, ".codex/b": half})
-		r.write(".codex/a", "changed")
-		mustFail(t, r, ".codex")
+	t.Run("node_modules/p/Agents.md", func(t *testing.T) {
+		r := newInstructionRepo(t, nil)
+		r.write(".gitignore", "node_modules/\n")
+		r.commit()
+		r.write("node_modules/p/Agents.md", "x\n")
+		snap, _ := r.mustSnap()
+		if !reflect.DeepEqual(snap.Removed, []string{"node_modules/p/Agents.md"}) || !r.gone("node_modules/p/Agents.md") {
+			t.Fatalf("snapshot = %+v", snap)
+		}
 	})
 }
 
-func TestReviewInstructionDiffIsBounded(t *testing.T) {
-	files := map[string]string{}
-	for i := 0; i < 40; i++ {
-		files[fmt.Sprintf("d%02d/AGENTS.md", i)] = "base\n"
-	}
-	r := newInstructionRepo(t, files)
-	big := strings.Repeat("a line of added text\n", 30000) // ~600 KB
-	for rel := range files {
-		r.write(rel, big)
-	}
-	snap, _ := mustSnap(t, r)
-	diff := readFile(t, snap.DiffPath)
-	const headers = 40 * 100
-	if len(diff) > maxReviewInstructionDiffBytes+headers+40*60 {
-		t.Fatalf("diff file is %d bytes", len(diff))
-	}
-	for rel := range files {
-		if !strings.Contains(diff, "=== "+strconv.Quote(rel)+" (changed) ===") {
-			t.Errorf("no header for %s", rel)
+func TestReviewInstructionUntrackedInsideTracked(t *testing.T) {
+	t.Run("an ignored file dropped into a tracked .codex", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{".codex/config.toml": "a = 1\n", ".gitignore": "*.cache\n"})
+		r.commit()
+		r.write(".codex/steer.cache", "steer\n")
+		r.write(".codex/sub/deep.md", "steer\n")
+		snap, _ := r.mustSnap()
+		if len(snap.Masks) != 0 || !reflect.DeepEqual(snap.Removed, []string{".codex/steer.cache", ".codex/sub"}) {
+			t.Fatalf("snapshot = %+v", snap)
 		}
-	}
-	if !strings.Contains(diff, "[truncated: ") || !strings.Contains(diff, " more bytes not shown]") {
-		t.Fatal("no truncation line")
-	}
+		if readFile(t, r.abs(".codex/config.toml")) != "a = 1\n" || !r.gone(".codex/steer.cache") || !r.gone(".codex/sub") {
+			t.Fatal("the tracked sibling was touched or the ignored files remain")
+		}
+	})
 }
 
-func TestReviewInstructionHashIsLengthPrefixed(t *testing.T) {
-	tree := func(path, body string) string {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o640); err != nil {
+func TestReviewInstructionUntrackedSpecialEntries(t *testing.T) {
+	t.Run("a FIFO named AGENTS.md", func(t *testing.T) {
+		r := newInstructionRepo(t, nil)
+		r.commit()
+		if err := os.MkdirAll(r.abs("sub"), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		return dir
+		if err := syscall.Mkfifo(r.abs("sub/AGENTS.md"), 0o600); err != nil {
+			t.Skipf("mkfifo: %v", err)
+		}
+		snap, _ := r.mustSnap()
+		if !reflect.DeepEqual(snap.Removed, []string{"sub/AGENTS.md"}) || !r.gone("sub/AGENTS.md") || !strings.Contains(readFile(t, snap.DiffPath), "[special file]") {
+			t.Fatalf("snapshot = %+v", snap)
+		}
+	})
+	t.Run("an untracked symlink named CLAUDE.md is removed, not followed", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{"secret.txt": "s\n"})
+		r.commit()
+		r.link("CLAUDE.md", "secret.txt")
+		snap, _ := r.mustSnap()
+		if !reflect.DeepEqual(snap.Removed, []string{"CLAUDE.md"}) || !r.gone("CLAUDE.md") || readFile(t, r.abs("secret.txt")) != "s\n" {
+			t.Fatalf("snapshot = %+v", snap)
+		}
+	})
+	t.Run("an untracked symlink where a fixed path's parent is", func(t *testing.T) {
+		r := newInstructionRepo(t, nil)
+		r.commit()
+		r.link(".github", "docs")
+		r.mustFail("symlink the result commit does not hold")
+	})
+	t.Run("a deleted tracked file recreated untracked is removed", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{"CLAUDE.md": "rules\n", ".gitignore": ""})
+		r.remove("CLAUDE.md")
+		r.write(".gitignore", "CLAUDE.md\n")
+		r.commit()
+		r.write("CLAUDE.md", "steer\n")
+		snap, _ := r.mustSnap()
+		wantPaths(t, snap, "CLAUDE.md")
+		if !snap.Masks[0].AbsentInWorktree || !reflect.DeepEqual(snap.Removed, []string{"CLAUDE.md"}) || !r.gone("CLAUDE.md") {
+			t.Fatalf("snapshot = %+v", snap)
+		}
+	})
+}
+
+func TestReviewInstructionTrackedFilesMustMatchTheResultCommit(t *testing.T) {
+	t.Run("modified after the commit", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{"AGENTS.md": "rules\n"})
+		r.commit()
+		r.write("AGENTS.md", "steer!\n") // same size as before
+		r.mustFail(`tracked instruction path "AGENTS.md" does not match the result commit`)
+	})
+	t.Run("only the exec bit changed after the commit", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{".codex/run.sh": "x\n"})
+		r.commit()
+		r.chmod(".codex/run.sh", 0o755)
+		r.mustFail("does not match the result commit")
+	})
+	t.Run("deleted after the commit", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{".codex/a.md": "a\n"})
+		r.commit()
+		r.remove(".codex/a.md")
+		r.mustFail("does not match the result commit")
+	})
+	t.Run("replaced by a symlink after the commit", func(t *testing.T) {
+		r := newInstructionRepo(t, map[string]string{".codex/a.md": "a\n", "elsewhere/a.md": "a\n"})
+		r.commit()
+		r.remove(".codex")
+		r.link(".codex", "elsewhere")
+		r.mustFail("does not match the result commit")
+	})
+	t.Run("the same file through another case", func(t *testing.T) {
+		if !caseInsensitiveDir(t) {
+			t.Skip("the filesystem is case-sensitive: claude.md is a different file from CLAUDE.md")
+		}
+		r := newInstructionRepo(t, map[string]string{"CLAUDE.md": "rules\n"})
+		r.commit()
+		r.write("claude.md", "steer\n")
+		r.mustFail("does not match the result commit")
+		if got := readFile(t, r.abs("CLAUDE.md")); got != "steer\n" {
+			t.Fatalf("the tracked file was removed or reverted: %q", got)
+		}
+	})
+}
+
+func TestReviewInstructionRerunIsIdempotent(t *testing.T) {
+	r := newInstructionRepo(t, map[string]string{"AGENTS.md": "rules\n"})
+	r.write("AGENTS.md", "steer\n")
+	r.commit()
+	r.write(".pi/x", "x\n")
+	first, _ := r.mustSnap()
+	second, _ := r.mustSnap()
+	if !reflect.DeepEqual(first.Paths, []string{"AGENTS.md"}) || !reflect.DeepEqual(first.Removed, []string{".pi"}) {
+		t.Fatalf("first = %+v", first)
 	}
-	a, err := hashSnapshotTree(tree("a", "bc"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := hashSnapshotTree(tree("ab", "c"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a == b {
-		t.Fatal("path a / content bc hashes like path ab / content c")
-	}
-	dir := tree("a", "bc")
-	m1 := []WorkspaceMask{{Source: dir, Target: "a"}}
-	m2 := []WorkspaceMask{{Source: dir, Target: "a", AbsentInWorktree: true}}
-	h1, _ := hashSnapshotTree(dir, m1)
-	h2, _ := hashSnapshotTree(dir, m2)
-	h3, _ := hashSnapshotTree(dir, m1)
-	if h1 == h2 || h1 != h3 {
-		t.Fatalf("hashes %s %s %s", h1, h2, h3)
+	if !reflect.DeepEqual(second.Paths, first.Paths) || second.Removed != nil || !reflect.DeepEqual(second.Masks[0].Target, "AGENTS.md") {
+		t.Fatalf("second = %+v", second)
 	}
 }
 
-func TestReviewInstructionIgnoredBulkYieldsNothing(t *testing.T) {
-	r := newInstructionRepo(t, map[string]string{".gitignore": "node_modules/\n"})
-	for i := 0; i < 1000; i++ {
-		r.write(fmt.Sprintf("node_modules/pkg/f%04d.js", i), "x")
-	}
-	snap, _ := mustSnap(t, r)
-	if len(snap.Masks) != 0 || snap.SHA256 != "" {
-		t.Fatalf("snapshot = %+v", snap)
-	}
-}
-
-func execGit(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
-	return string(out), err
+func TestReviewInstructionWalkIsBounded(t *testing.T) {
+	t.Run("a large tree without table matches", func(t *testing.T) {
+		r := newInstructionRepo(t, nil)
+		r.write(".gitignore", "big/\n")
+		r.commit()
+		const dirs, perDir = 150, 1000
+		for d := 0; d < dirs; d++ {
+			dir := r.abs(fmt.Sprintf("big/d%03d", d))
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			for f := 0; f < perDir; f++ {
+				if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%04d.txt", f)), nil, 0o640); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		start := time.Now()
+		snap, _ := r.mustSnap()
+		wantNothing(t, snap)
+		if took := time.Since(start); took > 30*time.Second {
+			t.Fatalf("snapshot of %d entries took %v", dirs*perDir, took)
+		}
+	})
+	t.Run("more entries than the budget", func(t *testing.T) {
+		old := maxReviewInstructionWalk
+		maxReviewInstructionWalk = 50
+		t.Cleanup(func() { maxReviewInstructionWalk = old })
+		r := newInstructionRepo(t, nil)
+		r.write(".gitignore", "many/\n")
+		r.commit()
+		for i := 0; i < 60; i++ {
+			r.write(fmt.Sprintf("many/f%02d", i), "x")
+		}
+		r.mustFail("more than 50 entries")
+	})
 }

@@ -13,27 +13,31 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"unicode"
-	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
-// Matching of every table entry is case-folding (foldPath): the workspace is a
-// host directory that may be case-insensitive (macOS), and the container sees
-// that same directory, so agents.md or .PI/SYSTEM.md written by a build can be
-// the file a harness loads. A mask is mounted at the table's own spelling, so a
-// candidate spelled any other way is refused unless the base has it exactly so.
+// A coding-agent harness loads instructions, skills, agent definitions and
+// hooks from the paths below, and a build writes the worktree a review then
+// runs in. The snapshot therefore decides what the build changed by comparing
+// two immutable git trees (the base commit's and the result commit's), never
+// by trusting what the worktree holds, and removes what the worktree holds
+// beyond the result commit under those paths.
 //
-// reviewInstructionDirs are the directories, relative to a workspace, whose
-// contents a coding-agent harness loads as instructions, skills, agent
-// definitions or hooks. A build writes the worktree a review then runs in, so
-// a change under one of these could steer its own reviewer.
+// Every comparison of names is by foldName: the workspace is a host directory
+// that may be case- and normalisation-insensitive (macOS) and the container
+// sees that same directory, so agents.md or .PI/SYSTEM.md can be the file a
+// harness loads. A mask is mounted at the table's own spelling, so a candidate
+// spelled any other way is refused unless both trees leave it identical.
+
+// reviewInstructionDirs are directories, relative to a workspace, whose
+// contents a harness loads.
 var reviewInstructionDirs = []string{".agents/skills", ".github/skills", ".claude/skills", ".pi/skills", ".pi", ".codex", ".claude", ".github/instructions", ".github/agents", ".github/hooks"}
 
 // reviewInstructionFiles are single instruction files at a fixed path.
@@ -44,43 +48,27 @@ var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.j
 var reviewInstructionBaseNames = []string{"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"}
 
 const (
-	// maxReviewInstructionMasks bounds the masks of one snapshot.
-	maxReviewInstructionMasks = 64
-	// maxReviewInstructionFiles bounds the files under all candidates, on each
-	// side.
-	maxReviewInstructionFiles = 2000
-	// maxReviewInstructionFileBytes bounds one file, on each side.
+	maxReviewInstructionMasks     = 64
+	maxReviewInstructionFiles     = 2000
 	maxReviewInstructionFileBytes = 2 << 20
+	maxReviewInstructionTree      = 2000000
+	maxReviewInstructionLinkBytes = 4096
 	// maxReviewInstructionFileDiff and maxReviewInstructionDiffBytes bound the
 	// diff text of one file and of the whole diff file.
 	maxReviewInstructionFileDiff  = 256 << 10
 	maxReviewInstructionDiffBytes = 2 << 20
+	reviewInstructionDiffFile     = "instructions.diff"
+	reviewInstructionTreeDir      = "tree"
+	reviewInstructionScratchDir   = "scratch"
 )
 
-// maxReviewInstructionEntries bounds, per snapshot, the worktree entries
-// visited (the main walk and every link-target comparison together) and,
-// separately, the base tree entries read. A variable so a test can lower it.
-var maxReviewInstructionEntries = 200000
-
-// foldedGit is how foldPath spells ".git".
-var foldedGit = foldPath(".git")
-
 var fullGitSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
-
-// reviewInstructionDiffFile is the snapshot's record of what the build
-// changed under the masked paths.
-const reviewInstructionDiffFile = "instructions.diff"
 
 // WorkspaceMask is one read-only overlay of a launch: Source (an absolute
 // host file or directory) is bind-mounted over Target, a slash-separated
 // path relative to the workspace root. AbsentInWorktree is true when the
-// build left nothing at Target: the caller must create a mountpoint there
+// result leaves nothing at Target: the caller must create a mountpoint there
 // before the launch and remove it after, or the runtime leaves a stub.
-//
-// The snapshot is only as good as the worktree it was read from: the caller
-// must launch while nothing writes the worktree (the build has ended and no
-// other container has it mounted writable), and must itself create, and
-// afterwards remove, the mountpoint of a mask with AbsentInWorktree.
 type WorkspaceMask struct {
 	Source           string
 	Target           string
@@ -88,18 +76,19 @@ type WorkspaceMask struct {
 	AbsentInWorktree bool
 }
 
-// ReviewInstructionSnapshot is what SnapshotReviewInstructions produced.
-// Masks is empty (and Paths, DiffPath and SHA256 are empty) when the build
-// changed no instruction path.
+// ReviewInstructionSnapshot is what SnapshotReviewInstructions produced. It
+// is the zero value when the result changed no instruction path and the
+// worktree held nothing under one beyond the result commit. Removed lists the
+// workspace-relative paths the host deleted from the worktree.
 type ReviewInstructionSnapshot struct {
 	Masks    []WorkspaceMask
 	Paths    []string
+	Removed  []string
 	DiffPath string
 	SHA256   string
 }
 
-// foldRune is the smallest rune of r's unicode.SimpleFold orbit, so two runes
-// fold alike exactly when strings.EqualFold treats them as equal.
+// foldRune is the smallest rune of r's unicode.SimpleFold orbit.
 func foldRune(r rune) rune {
 	m := r
 	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
@@ -110,792 +99,114 @@ func foldRune(r rune) rune {
 	return m
 }
 
-// foldPath folds every rune of s with foldRune (an invalid byte stays as it
-// is). It is the one comparison used for table matching, grouping and every
-// lookup against the base tree.
-func foldPath(s string) string {
+// foldName is the one fold behind every match and collision check: NFKD, then
+// the smallest rune of each rune's simple-fold orbit. It over-matches (safe).
+func foldName(s string) string {
+	ascii := true
+	for i := 0; i < len(s) && ascii; i++ {
+		ascii = s[i] < 0x80
+	}
+	if ascii {
+		return strings.ToUpper(s) // the orbit minimum of an ASCII letter is its capital
+	}
 	var b strings.Builder
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			b.WriteByte(s[i])
-		} else {
-			b.WriteRune(foldRune(r))
-		}
-		i += size
+	for _, r := range norm.NFKD.String(s) {
+		b.WriteRune(foldRune(r))
 	}
 	return b.String()
 }
 
-// tableEntry is a table path: its canonical components and their folds.
-type tableEntry struct{ canon, fold []string }
+var foldedGit = foldName(".git")
 
-func foldTable(entries []string) []tableEntry {
-	out := make([]tableEntry, len(entries))
-	for i, e := range entries {
-		out[i].canon = strings.Split(e, "/")
-		for _, c := range out[i].canon {
-			out[i].fold = append(out[i].fold, foldPath(c))
-		}
+type fixedPath struct{ canon, fold []string }
+
+func foldComponents(parts []string) []string {
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = foldName(p)
 	}
 	return out
 }
 
 var (
-	reviewDirTable  = foldTable(reviewInstructionDirs)
-	reviewFileTable = foldTable(reviewInstructionFiles)
-	reviewNameTable = foldTable(reviewInstructionBaseNames)
-)
-
-func hasFoldPrefix(fold []string, prefix []string) bool {
-	if len(fold) < len(prefix) {
-		return false
-	}
-	for i, p := range prefix {
-		if fold[i] != p {
-			return false
+	reviewFixedPaths = func() (out []fixedPath) {
+		for _, e := range append(append([]string(nil), reviewInstructionDirs...), reviewInstructionFiles...) {
+			parts := strings.Split(e, "/")
+			out = append(out, fixedPath{parts, foldComponents(parts)})
 		}
-	}
-	return true
-}
-
-// matchInstructionPath reports how many leading components of parts form the
-// outermost instruction entry covering it (a table directory, a table file, or
-// the first component that is a base-name file) and the canonical spelling of
-// those components. ok is false for any other path.
-func matchInstructionPath(parts []string) (n int, canon string, ok bool) {
-	fold := make([]string, len(parts))
-	for i, p := range parts {
-		fold[i] = foldPath(p)
-	}
-	var best []string
-	consider := func(canonical []string) {
-		if n == 0 || len(canonical) < n {
-			n, best = len(canonical), canonical
-		}
-	}
-	for _, d := range reviewDirTable {
-		if hasFoldPrefix(fold, d.fold) {
-			consider(d.canon)
-		}
-	}
-	for _, f := range reviewFileTable {
-		if len(fold) == len(f.fold) && hasFoldPrefix(fold, f.fold) {
-			consider(f.canon)
-		}
-	}
-	for i, c := range fold {
-		for _, name := range reviewNameTable {
-			if c == name.fold[0] && (n == 0 || i+1 < n) {
-				consider(append(append([]string(nil), parts[:i]...), name.canon[0]))
-			}
-		}
-	}
-	return n, strings.Join(best, "/"), n > 0
-}
-
-type instrKind int
-
-const (
-	kindAbsent instrKind = iota
-	kindFile
-	kindDir
-	kindLink
-)
-
-type instrFile struct {
-	rel  string // below the target; "" for a file target
-	abs  string // worktree side only
-	sha  string // base side only
-	size int64
-	exec bool
-	link bool // an unchanged symlink, already checked by linkChecker
-}
-
-// instrSide is one side (worktree or base) of a candidate entry.
-type instrSide struct {
-	kind  instrKind
-	name  string // the side's spelling of the target
-	files map[string]instrFile
-}
-
-type instrGroup struct {
-	canon      string // the table's spelling of the target
-	work, base instrSide
-}
-
-// instrBudget counts what one snapshot has read: worktree entries visited,
-// files under candidates on each side.
-type instrBudget struct{ work, base, entries int }
-
-func (b *instrBudget) visit() error {
-	if b.entries++; b.entries > maxReviewInstructionEntries {
-		return fmt.Errorf("review instructions: the workspace has more than %d entries", maxReviewInstructionEntries)
-	}
-	return nil
-}
-
-// instrDiff is one file that differs between the sides.
-type instrDiff struct {
-	display  string
-	workAbs  string // "" when absent in the worktree
-	hasBase  bool
-	hasWork  bool
-	relInDst string
-	modeOnly bool   // same bytes, other executable bit
-	modeNote string // "mode changed: 100644 -> 100755" or ""
-}
-
-type instrPlan struct {
-	target string
-	dir    bool
-	absent bool
-	diffs  []instrDiff
-	base   *instrSide
-}
-
-// SnapshotReviewInstructions writes under dst the content, as of baseSHA, of
-// every instruction path (the tables above) whose bytes or executable bit in
-// the working tree at workDir differ from baseSHA, and returns one mask per
-// outermost differing entry. A launch that mounts the masks read-only gives
-// the harness the base instructions whatever the build wrote. The worktree is
-// walked on disk (never following a symlink, nested repositories included) and
-// the base is read from its tree and blobs, so no git attribute, filter or
-// ignore rule of the worktree decides what is seen. Anything unusual (a path
-// spelled two ways, a symlink the base does not have, a path a mask cannot
-// carry) is an error: the review does not launch. dst is cleared first and
-// must lie outside workDir.
-func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, dst string) (ReviewInstructionSnapshot, error) {
-	if !fullGitSHAPattern.MatchString(baseSHA) {
-		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: base %q is not a full 40-hex commit id", baseSHA)
-	}
-	if err := requireDestinationOutside(workDir, dst); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	root, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: resolve workspace: %w", err)
-	}
-	base, err := readBaseTree(ctx, root, baseSHA)
-	if err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	groups := map[string]*instrGroup{}
-	budget := &instrBudget{}
-	if err := collectBase(base, groups, budget); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	checker := &linkChecker{ctx: ctx, root: root, base: base, budget: budget}
-	if err := checker.checkTablePaths(); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	if err := walkWorktree(root, groups, budget, checker); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	plans, err := planMasks(ctx, root, groups)
-	if err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	if err := os.RemoveAll(dst); err != nil {
-		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: clear %s: %w", dst, err)
-	}
-	if len(plans) == 0 {
-		return ReviewInstructionSnapshot{}, nil
-	}
-	return buildSnapshot(ctx, root, dst, plans)
-}
-
-// planMasks decides, by bytes and executable bit, which candidate entries
-// differ.
-func planMasks(ctx context.Context, root string, groups map[string]*instrGroup) ([]instrPlan, error) {
-	keys := make([]string, 0, len(groups))
-	for k := range groups {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var plans []instrPlan
-	var total int64
-	for _, k := range keys {
-		g := groups[k]
-		plan, err := planGroup(ctx, root, g)
-		if err != nil {
-			return nil, err
-		}
-		if plan == nil {
-			continue
-		}
-		for _, f := range g.base.files {
-			if total += f.size; total > MaxSkillsBundleBytes {
-				return nil, fmt.Errorf("review instructions: snapshot over %d bytes at %s", MaxSkillsBundleBytes, plan.target)
-			}
-		}
-		plans = append(plans, *plan)
-	}
-	if len(plans) > maxReviewInstructionMasks {
-		return nil, fmt.Errorf("review instructions: %d instruction paths changed, over the limit of %d", len(plans), maxReviewInstructionMasks)
-	}
-	return plans, nil
-}
-
-// sidesDisagree reports a group whose two sides spell the target differently
-// or hold different kinds of entry.
-func sidesDisagree(g *instrGroup) (spelling, kind bool) {
-	spelling = g.work.name != "" && g.base.name != "" && g.work.name != g.base.name
-	kind = g.work.kind != kindAbsent && g.base.kind != kindAbsent && g.work.kind != g.base.kind
-	return spelling, kind
-}
-
-// planGroup returns the mask for g, or nil when it is unchanged.
-func planGroup(ctx context.Context, root string, g *instrGroup) (*instrPlan, error) {
-	target := g.work.name
-	if g.work.kind == kindAbsent {
-		target = g.base.name
-	}
-	spelling, kind := sidesDisagree(g)
-	if spelling {
-		return nil, fmt.Errorf("review instructions: instruction path spelled two ways: %q (working tree) and %q (base)", g.work.name, g.base.name)
-	}
-	if kind {
-		return nil, fmt.Errorf("review instructions: the build changed %s between a file and a directory (or a link)", target)
-	}
-	// A link at the target itself was checked when it was walked.
-	chain := target
-	if g.work.kind == kindLink {
-		chain = path.Dir(target)
-	}
-	if err := refuseSymlink(root, chain); err != nil {
-		return nil, err
-	}
-	diffs, err := diffGroup(ctx, root, g, target)
-	if err != nil {
-		return nil, err
-	}
-	if g.base.kind == kindLink && len(diffs) > 0 {
-		return nil, fmt.Errorf("review instructions: %s was a symlink at base and the build changed it", target)
-	}
-	if target != g.canon {
-		if len(diffs) == 0 && g.work.kind != kindAbsent && g.base.kind != kindAbsent {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("review instructions: instruction path %s is not spelled %s; a review cannot mask it", target, g.canon)
-	}
-	if len(diffs) == 0 {
-		return nil, nil
-	}
-	if err := validateMaskTarget(target); err != nil {
-		return nil, fmt.Errorf("review instructions: %w", err)
-	}
-	k := g.work.kind
-	if k == kindAbsent {
-		k = g.base.kind
-	}
-	return &instrPlan{target: target, dir: k == kindDir, absent: g.work.kind == kindAbsent, diffs: diffs, base: &g.base}, nil
-}
-
-// diffGroup lists the files of g that are absent on one side or whose bytes or
-// executable bit differ. An unchanged link is the same on both sides.
-func diffGroup(ctx context.Context, root string, g *instrGroup, target string) ([]instrDiff, error) {
-	keys := map[string]bool{}
-	for k := range g.work.files {
-		keys[k] = true
-	}
-	for k := range g.base.files {
-		keys[k] = true
-	}
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
-	var out []instrDiff
-	for _, k := range sorted {
-		b, hasBase := g.base.files[k]
-		w, hasWork := g.work.files[k]
-		d := instrDiff{display: target, hasBase: hasBase, hasWork: hasWork}
-		if hasBase && hasWork {
-			same, err := sameFile(ctx, root, b, w)
-			if err != nil {
-				return nil, err
-			}
-			if same {
-				continue
-			}
-			d.modeOnly, d.modeNote = modeChange(ctx, root, b, w)
-		}
-		if hasWork {
-			d.display += suffixRel(w.rel)
-			d.workAbs = w.abs
-		} else {
-			d.display += suffixRel(b.rel)
-		}
-		if hasBase {
-			d.relInDst = target + suffixRel(b.rel)
-		}
-		out = append(out, d)
-	}
-	return out, nil
-}
-
-func suffixRel(rel string) string {
-	if rel == "" {
-		return ""
-	}
-	return "/" + rel
-}
-
-func modeString(exec bool) string {
-	if exec {
-		return "100755"
-	}
-	return "100644"
-}
-
-// modeChange describes an executable-bit change between b and w, and whether
-// the bytes are the same, so that is the only change.
-func modeChange(ctx context.Context, root string, b, w instrFile) (modeOnly bool, note string) {
-	if b.link || w.link || b.exec == w.exec {
-		return false, ""
-	}
-	note = fmt.Sprintf("mode changed: %s -> %s", modeString(b.exec), modeString(w.exec))
-	w.exec = b.exec
-	same, err := sameFile(ctx, root, b, w)
-	return err == nil && same, note
-}
-
-// sameFile compares bytes and executable bit; links were checked already.
-func sameFile(ctx context.Context, root string, b, w instrFile) (bool, error) {
-	if b.link || w.link {
-		return b.link && w.link, nil
-	}
-	if b.exec != w.exec || b.size != w.size {
-		return false, nil
-	}
-	baseBytes, err := readBlob(ctx, root, b)
-	if err != nil {
-		return false, err
-	}
-	f, err := os.Open(w.abs)
-	if err != nil {
-		return false, fmt.Errorf("review instructions: read %s: %w", w.abs, err)
-	}
-	defer f.Close()
-	workBytes, err := io.ReadAll(io.LimitReader(f, maxReviewInstructionFileBytes+1))
-	if err != nil {
-		return false, fmt.Errorf("review instructions: read %s: %w", w.abs, err)
-	}
-	return bytes.Equal(baseBytes, workBytes), nil
-}
-
-func buildSnapshot(ctx context.Context, root, dst string, plans []instrPlan) (ReviewInstructionSnapshot, error) {
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: create %s: %w", dst, err)
-	}
-	var snap ReviewInstructionSnapshot
-	var all []instrDiff
-	for _, p := range plans {
-		if err := materializePlan(ctx, root, dst, p); err != nil {
-			return ReviewInstructionSnapshot{}, err
-		}
-		snap.Paths = append(snap.Paths, p.target)
-		snap.Masks = append(snap.Masks, WorkspaceMask{Source: filepath.Join(dst, filepath.FromSlash(p.target)), Target: p.target, Dir: p.dir, AbsentInWorktree: p.absent})
-		all = append(all, p.diffs...)
-	}
-	if err := publicDirs(dst); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	if err := writeReviewInstructionDiff(ctx, dst, all); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	snap.DiffPath = filepath.Join(dst, reviewInstructionDiffFile)
-	var err error
-	if snap.SHA256, err = hashSnapshotTree(dst, snap.Masks); err != nil {
-		return ReviewInstructionSnapshot{}, err
-	}
-	return snap, nil
-}
-
-// publicDirs makes every directory of the snapshot 0755 whatever the umask:
-// the container runs as another uid and must read them.
-func publicDirs(dst string) error {
-	return filepath.WalkDir(dst, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
-			return err
-		}
-		return os.Chmod(p, 0o755)
-	})
-}
-
-// writeSnapshotFile writes a world-readable file, executable when the base
-// mode was.
-func writeSnapshotFile(path string, body []byte, exec bool) error {
-	mode := os.FileMode(0o644)
-	if exec {
-		mode = 0o755
-	}
-	if err := os.WriteFile(path, body, mode); err != nil {
-		return err
-	}
-	return os.Chmod(path, mode)
-}
-
-// materializePlan writes p's base content at dst/target: the blobs of the
-// base (a base link as a link, with its text checked again), or an empty file
-// or directory when the base lacks it.
-func materializePlan(ctx context.Context, root, dst string, p instrPlan) error {
-	target := filepath.Join(dst, filepath.FromSlash(p.target))
-	if err := ensureContainedPath(dst, target); err != nil {
-		return fmt.Errorf("review instructions: %w", err)
-	}
-	if p.dir {
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return err
-		}
-	} else if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	if len(p.base.files) == 0 && !p.dir {
-		return writeSnapshotFile(target, nil, false)
-	}
-	for _, f := range p.base.files {
-		out := target
-		if f.rel != "" {
-			out = filepath.Join(target, filepath.FromSlash(f.rel))
-		}
-		if err := ensureContainedPath(dst, out); err != nil {
-			return fmt.Errorf("review instructions: %w", err)
-		}
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-			return err
-		}
-		if err := materializeFile(ctx, root, p.target, out, f); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func materializeFile(ctx context.Context, root, target, out string, f instrFile) error {
-	body, err := readBlob(ctx, root, f)
-	if err != nil {
-		return err
-	}
-	if !f.link {
-		return writeSnapshotFile(out, body, f.exec)
-	}
-	rel := target + suffixRel(f.rel)
-	if _, err := resolveLinkTarget(rel, string(body)); err != nil {
-		return fmt.Errorf("review instructions: base link %s: %w", rel, err)
-	}
-	return os.Symlink(string(body), out)
-}
-
-// worktreeWalk records every instruction-table match below root, skipping only
-// the root .git entry and never following a symlink.
-type worktreeWalk struct {
-	root    string
-	groups  map[string]*instrGroup
-	budget  *instrBudget
-	checker *linkChecker
-}
-
-func walkWorktree(root string, groups map[string]*instrGroup, budget *instrBudget, checker *linkChecker) error {
-	w := &worktreeWalk{root: root, groups: groups, budget: budget, checker: checker}
-	return filepath.WalkDir(root, w.visit)
-}
-
-func (w *worktreeWalk) visit(p string, d fs.DirEntry, err error) error {
-	if err != nil {
-		return fmt.Errorf("review instructions: walk %s: %w", p, err)
-	}
-	rel, err := filepath.Rel(w.root, p)
-	if err != nil || rel == "." {
-		return err
-	}
-	if rel == ".git" {
-		if d.IsDir() {
-			return filepath.SkipDir
-		}
-		return nil
-	}
-	if err := w.budget.visit(); err != nil {
-		return err
-	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	n, canon, ok := matchInstructionPath(parts)
-	if !ok {
-		return nil
-	}
-	display := strings.Join(parts, "/")
-	if d.Type()&fs.ModeSymlink != 0 {
-		if err := w.checker.check(display); err != nil {
-			return err
-		}
-		return recordWorkLink(w.groups, w.budget, parts, n, canon)
-	}
-	if _, wasLink := w.checker.base.links[foldPath(display)]; wasLink {
-		return fmt.Errorf("review instructions: %s was a symlink at base and is now a file or directory", display)
-	}
-	return recordWorkEntry(w.groups, w.budget, parts, n, canon, p, d)
-}
-
-func groupFor(groups map[string]*instrGroup, prefix []string, canon string) *instrGroup {
-	key := foldPath(strings.Join(prefix, "/"))
-	g := groups[key]
-	if g == nil {
-		g = &instrGroup{canon: canon}
-		groups[key] = g
-	}
-	return g
-}
-
-// record notes an entry spelled spelling on side s with kind k.
-func (s *instrSide) record(spelling string, kind instrKind, f *instrFile) error {
-	if s.name != "" && s.name != spelling {
-		return fmt.Errorf("review instructions: instruction path spelled two ways: %q and %q", s.name, spelling)
-	}
-	s.name = spelling
-	if kind != kindAbsent {
-		s.kind = kind
-	}
-	if f == nil {
-		return nil
-	}
-	if s.files == nil {
-		s.files = map[string]instrFile{}
-	}
-	key := foldPath(f.rel)
-	if prev, dup := s.files[key]; dup {
-		return fmt.Errorf("review instructions: %q and %q are the same file spelled two ways", spelling+suffixRel(prev.rel), spelling+suffixRel(f.rel))
-	}
-	s.files[key] = *f
-	return nil
-}
-
-// entryKind is the kind of the entry at parts[:n]: below it a directory, at it
-// a file, a directory or (isLink) a link.
-func entryKind(parts []string, n int, isDir, isLink bool) instrKind {
-	switch {
-	case len(parts) > n || isDir:
-		return kindDir
-	case isLink:
-		return kindLink
-	}
-	return kindFile
-}
-
-// recordWorkLink records a symlink linkChecker accepted as the base's own.
-func recordWorkLink(groups map[string]*instrGroup, budget *instrBudget, parts []string, n int, canon string) error {
-	if budget.work++; budget.work > maxReviewInstructionFiles {
-		return fmt.Errorf("review instructions: more than %d files under instruction paths (at %s)", maxReviewInstructionFiles, strings.Join(parts, "/"))
-	}
-	g := groupFor(groups, parts[:n], canon)
-	return g.work.record(strings.Join(parts[:n], "/"), entryKind(parts, n, false, true), &instrFile{rel: strings.Join(parts[n:], "/"), link: true})
-}
-
-func recordWorkEntry(groups map[string]*instrGroup, budget *instrBudget, parts []string, n int, canon, abs string, d fs.DirEntry) error {
-	display := strings.Join(parts, "/")
-	if d.Type()&fs.ModeSymlink != 0 {
-		return fmt.Errorf("review instructions: %s is a symlink in the working tree", display)
-	}
-	if !d.IsDir() && !d.Type().IsRegular() {
-		return fmt.Errorf("review instructions: %s is not a regular file or directory", display)
-	}
-	g := groupFor(groups, parts[:n], canon)
-	spelling := strings.Join(parts[:n], "/")
-	kind := entryKind(parts, n, d.IsDir(), false)
-	var file *instrFile
-	if !d.IsDir() {
-		info, err := d.Info()
-		if err != nil {
-			return fmt.Errorf("review instructions: inspect %s: %w", display, err)
-		}
-		if info.Size() > maxReviewInstructionFileBytes {
-			return fmt.Errorf("review instructions: %s is over %d bytes", display, maxReviewInstructionFileBytes)
-		}
-		if budget.work++; budget.work > maxReviewInstructionFiles {
-			return fmt.Errorf("review instructions: more than %d files under instruction paths (at %s)", maxReviewInstructionFiles, display)
-		}
-		file = &instrFile{rel: strings.Join(parts[n:], "/"), abs: abs, size: info.Size(), exec: info.Mode()&0o100 != 0}
-	}
-	return g.work.record(spelling, kind, file)
-}
-
-// collectBase records every instruction-table match of the base tree.
-func collectBase(base *baseTree, groups map[string]*instrGroup, budget *instrBudget) error {
-	for _, e := range base.entries {
-		parts := strings.Split(e.name, "/")
-		n, canon, ok := matchInstructionPath(parts)
-		if !ok {
-			continue
-		}
-		if err := recordBaseEntry(groups, budget, e, parts, n, canon, false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// recordBaseEntry records one base tree entry as part of the entry of the
-// first n components. A link is recorded as a link file unless strict, where
-// a link or submodule is an error.
-func recordBaseEntry(groups map[string]*instrGroup, budget *instrBudget, e baseEntry, parts []string, n int, canon string, strict bool) error {
-	isLink := e.mode == "120000"
-	if e.kind != "blob" || (isLink && strict) {
-		return fmt.Errorf("review instructions: base entry %s is a symlink or submodule", strconv.Quote(e.name))
-	}
-	if e.size > maxReviewInstructionFileBytes {
-		return fmt.Errorf("review instructions: %s is over %d bytes at base", strconv.Quote(e.name), maxReviewInstructionFileBytes)
-	}
-	if budget.base++; budget.base > maxReviewInstructionFiles {
-		return fmt.Errorf("review instructions: more than %d base files under instruction paths (at %s)", maxReviewInstructionFiles, strconv.Quote(e.name))
-	}
-	g := groupFor(groups, parts[:n], canon)
-	return g.base.record(strings.Join(parts[:n], "/"), entryKind(parts, n, false, isLink), &instrFile{rel: strings.Join(parts[n:], "/"), sha: e.sha, size: e.size, exec: e.exec(), link: isLink})
-}
-
-// baseEntry is one `git ls-tree -r -l` record.
-type baseEntry struct {
-	name, fold, mode, kind, sha string
-	size                        int64
-}
-
-// exec reports the executable bit of the entry's mode.
-func (e baseEntry) exec() bool {
-	m, err := strconv.ParseInt(e.mode, 8, 32)
-	return err == nil && m&0o100 != 0
-}
-
-// baseTree is the whole base listing, sorted by folded name, and its symlinks
-// by folded name. It answers every question about the base, so no worktree
-// name or link text ever reaches git as a pathspec.
-type baseTree struct {
-	entries []baseEntry
-	links   map[string]baseEntry
-}
-
-// parseTreeRecord reads one NUL-separated record: "<mode> <type> <sha> <size>\t<path>".
-func parseTreeRecord(rec string) (baseEntry, error) {
-	meta, name, ok := strings.Cut(rec, "\t")
-	fields := strings.Fields(meta)
-	if !ok || name == "" || len(fields) != 4 {
-		return baseEntry{}, fmt.Errorf("review instructions: unreadable tree entry %q", rec)
-	}
-	e := baseEntry{name: name, fold: foldPath(name), mode: fields[0], kind: fields[1], sha: fields[2]}
-	if e.kind == "blob" {
-		size, err := strconv.ParseInt(fields[3], 10, 64)
-		if err != nil || size < 0 {
-			return baseEntry{}, fmt.Errorf("review instructions: unreadable size of %s", strconv.Quote(name))
-		}
-		e.size = size
-	}
-	return e, nil
-}
-
-// readBaseTree reads `git ls-tree -r -l` of baseSHA, failing once more than
-// maxReviewInstructionEntries have been read.
-func readBaseTree(ctx context.Context, root, baseSHA string) (*baseTree, error) {
-	t := &baseTree{links: map[string]baseEntry{}}
-	err := scanBaseTree(ctx, root, baseSHA, func(rec string) error {
-		e, err := parseTreeRecord(rec)
-		if err != nil {
-			return err
-		}
-		t.entries = append(t.entries, e)
-		if e.mode == "120000" {
-			t.links[e.fold] = e
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.SliceStable(t.entries, func(i, j int) bool { return t.entries[i].fold < t.entries[j].fold })
-	return t, nil
-}
-
-// under lists the entries at target or below it, matching names by fold.
-func (t *baseTree) under(target string) []baseEntry {
-	f := foldPath(target)
-	var out []baseEntry
-	for i := sort.Search(len(t.entries), func(i int) bool { return t.entries[i].fold >= f }); i < len(t.entries) && t.entries[i].fold == f; i++ {
-		out = append(out, t.entries[i])
-	}
-	prefix := f + "/"
-	for i := sort.Search(len(t.entries), func(i int) bool { return t.entries[i].fold >= prefix }); i < len(t.entries) && strings.HasPrefix(t.entries[i].fold, prefix); i++ {
-		out = append(out, t.entries[i])
-	}
-	return out
-}
-
-func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
-	if i := bytes.IndexByte(data, 0); i >= 0 {
-		return i + 1, data[:i], nil
-	}
-	if atEOF && len(data) > 0 {
-		return len(data), data, nil
-	}
-	return 0, nil, nil
-}
-
-// scanBaseTree streams `git ls-tree -r -l` of baseSHA to visit, one record at
-// a time, failing once more than maxReviewInstructionEntries have been read.
-func scanBaseTree(ctx context.Context, root, baseSHA string, visit func(rec string) error) (err error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", reviewGitArgs(root, "ls-tree", "-r", "-l", "-z", "--full-tree", baseSHA)...)
-	cmd.Env = reviewGitEnv()
-	stderr := &cappedWriter{max: 4096}
-	cmd.Stderr = stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("review instructions: git ls-tree: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			cancel()
-		}
-		if werr := cmd.Wait(); err == nil && werr != nil {
-			err = fmt.Errorf("review instructions: git ls-tree: %w: %s", werr, strings.TrimSpace(stderr.buf.String()))
-		}
+		return out
 	}()
-	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	sc.Split(splitNUL)
-	count := 0
-	for sc.Scan() {
-		if count++; count > maxReviewInstructionEntries {
-			return fmt.Errorf("review instructions: the base tree has more than %d entries", maxReviewInstructionEntries)
+	reviewNameFolds = foldComponents(reviewInstructionBaseNames)
+	// leadingFolds are the proper prefixes of the fixed paths (".github"): a
+	// link there would redirect a fixed path.
+	leadingFolds = func() map[string]bool {
+		m := map[string]bool{}
+		for _, f := range reviewFixedPaths {
+			for k := 1; k < len(f.fold); k++ {
+				m[strings.Join(f.fold[:k], "/")] = true
+			}
 		}
-		if err := visit(sc.Text()); err != nil {
-			return err
-		}
+		return m
+	}()
+)
+
+func joinSlash(a, b string) string {
+	if a == "" {
+		return b
 	}
-	return sc.Err()
+	return a + "/" + b
 }
 
-// cappedWriter keeps the first max bytes written and counts the rest.
-type cappedWriter struct {
-	max  int
-	buf  bytes.Buffer
-	over int64
+// matchFold returns the number of leading components forming the outermost
+// table entry covering a path (a fixed path, or the first component that is a
+// base-name file), and the table's spelling of those components.
+func matchFold(parts, fold []string) (n int, canon string) {
+	for _, f := range reviewFixedPaths {
+		if len(fold) >= len(f.fold) && strings.Join(fold[:len(f.fold)], "/") == strings.Join(f.fold, "/") && (n == 0 || len(f.canon) < n) {
+			n, canon = len(f.canon), strings.Join(f.canon, "/")
+		}
+	}
+	for i := 0; i < len(fold) && (n == 0 || i+1 < n); i++ {
+		for j, name := range reviewNameFolds {
+			if fold[i] == name {
+				n, canon = i+1, joinSlash(strings.Join(parts[:i], "/"), reviewInstructionBaseNames[j])
+			}
+		}
+	}
+	return n, canon
 }
 
-func (w *cappedWriter) Write(p []byte) (int, error) {
-	room := w.max - w.buf.Len()
-	if room > len(p) {
-		room = len(p)
-	}
-	if room > 0 {
-		w.buf.Write(p[:room])
-	} else {
-		room = 0
-	}
-	w.over += int64(len(p) - room)
-	return len(p), nil
+// matchInstructionPath reports whether parts is at or under a table entry.
+func matchInstructionPath(parts []string) (n int, canon string, ok bool) {
+	n, canon = matchFold(parts, foldComponents(parts))
+	return n, canon, n > 0
 }
+
+// instrPath is a slash-separated path classified against the table.
+type instrPath struct {
+	parts, fold []string
+	n           int    // components of the outermost table match; 0 for none
+	canon       string // the table's spelling of them
+	lead        int    // when n == 0: components forming a proper prefix of a fixed path
+}
+
+func classify(p string) instrPath {
+	parts := strings.Split(p, "/")
+	ip := instrPath{parts: parts, fold: foldComponents(parts)}
+	ip.n, ip.canon = matchFold(parts, ip.fold)
+	for k := 1; ip.n == 0 && k <= len(parts) && k <= 3; k++ {
+		if leadingFolds[strings.Join(ip.fold[:k], "/")] {
+			ip.lead = k
+		}
+	}
+	return ip
+}
+
+// relevant: the path is at or under a table entry, or is exactly a prefix of a
+// fixed path (a file or link that could redirect one).
+func (ip instrPath) relevant() bool { return ip.n > 0 || (ip.lead > 0 && ip.lead == len(ip.parts)) }
+
+// ---- git ----
 
 // reviewGitEnv is the environment of every git call here: no pathspec magic
 // (a name is a literal), no lock, prompt or system configuration.
@@ -915,74 +226,626 @@ func reviewGitArgs(dir string, args ...string) []string {
 	}, args...)
 }
 
-// readBlob reads one base blob, at most maxReviewInstructionFileBytes.
-func readBlob(ctx context.Context, root string, f instrFile) ([]byte, error) {
-	out := &cappedWriter{max: maxReviewInstructionFileBytes}
-	cmd := exec.CommandContext(ctx, "git", reviewGitArgs(root, "cat-file", "blob", f.sha)...)
+// cappedWriter keeps the first max bytes written and counts the rest.
+type cappedWriter struct {
+	max  int
+	buf  bytes.Buffer
+	over int64
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	room := min(max(w.max-w.buf.Len(), 0), len(p))
+	w.buf.Write(p[:room])
+	w.over += int64(len(p) - room)
+	return len(p), nil
+}
+
+func reviewGit(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", reviewGitArgs(dir, args...)...)
 	cmd.Env = reviewGitEnv()
-	cmd.Stdout = out
 	stderr := &cappedWriter{max: 4096}
-	cmd.Stderr = stderr
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("review instructions: git cat-file %s: %w: %s", f.sha, err, strings.TrimSpace(stderr.buf.String()))
+		return fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.buf.String()))
+	}
+	return nil
+}
+
+// readBlob reads one blob by object id, at most limit bytes.
+func readBlob(ctx context.Context, root, oid string, limit int) ([]byte, error) {
+	out := &cappedWriter{max: limit}
+	if err := reviewGit(ctx, root, out, "cat-file", "blob", oid); err != nil {
+		return nil, fmt.Errorf("review instructions: %w", err)
 	}
 	if out.over > 0 {
-		return nil, fmt.Errorf("review instructions: blob %s is over %d bytes", f.sha, maxReviewInstructionFileBytes)
+		return nil, fmt.Errorf("review instructions: blob %s is over %d bytes", oid, limit)
 	}
 	return out.buf.Bytes(), nil
 }
 
-// writeReviewInstructionDiff writes dst/instructions.diff: for each differing
-// file, a quoted header, a mode line when the executable bit changed, and a
-// bounded text diff of the snapshot's base content against the worktree file.
-// git runs in dst, outside the worktree, so no worktree attribute file
-// applies; only the hunks are kept, so no host path reaches the file.
-func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []instrDiff) error {
-	sort.Slice(diffs, func(i, j int) bool { return diffs[i].display < diffs[j].display })
+// ---- trees ----
+
+// treeEntry is one `git ls-tree -r` record: a blob (any mode) or a gitlink.
+type treeEntry struct{ path, mode, oid string }
+
+func (e treeEntry) isLink() bool    { return e.mode == "120000" }
+func (e treeEntry) isGitlink() bool { return e.mode == "160000" }
+func (e treeEntry) exec() bool {
+	m, err := strconv.ParseUint(e.mode, 8, 32)
+	return err == nil && m&0o100 != 0
+}
+
+type foldedEntry struct {
+	fold string
+	e    treeEntry
+}
+
+// gitTree is one commit's whole listing, sorted by path.
+type gitTree struct {
+	list     []treeEntry
+	byPath   map[string]treeEntry
+	folded   []foldedEntry
+	linkFold map[string]bool
+}
+
+var treeModePattern = regexp.MustCompile(`^[0-7]{6}$`)
+
+func validTreePath(p string) bool {
+	return p != "" && !strings.ContainsRune(p, 0) && !strings.Contains("/"+p+"/", "//") && !strings.Contains("/"+p+"/", "/./") && !strings.Contains("/"+p+"/", "/../")
+}
+
+// parseTreeRecord reads "<mode> <type> <oid>\t<path>".
+func parseTreeRecord(rec string) (treeEntry, error) {
+	meta, p, ok := strings.Cut(rec, "\t")
+	f := strings.Split(meta, " ")
+	if !ok || len(f) != 3 || !treeModePattern.MatchString(f[0]) || (f[1] != "blob" && f[1] != "commit") || !fullGitSHAPattern.MatchString(f[2]) || !validTreePath(p) {
+		return treeEntry{}, fmt.Errorf("review instructions: unreadable tree entry %q", rec)
+	}
+	return treeEntry{path: p, mode: f[0], oid: f[2]}, nil
+}
+
+func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexByte(data, 0); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+// readTree streams `git ls-tree -r -z --full-tree sha` once.
+func readTree(ctx context.Context, root, sha string) (*gitTree, error) {
+	pr, pw := io.Pipe()
+	t := &gitTree{byPath: map[string]treeEntry{}}
+	done := make(chan error, 1)
+	go func() {
+		err := reviewGit(ctx, root, pw, "ls-tree", "-r", "-z", "--full-tree", sha)
+		pw.CloseWithError(err)
+		done <- err
+	}()
+	err := scanTree(pr, t)
+	pr.CloseWithError(errors.New("done"))
+	if gerr := <-done; err == nil && gerr != nil {
+		err = gerr
+	}
+	if err != nil {
+		return nil, fmt.Errorf("review instructions: read tree %s: %w", sha, err)
+	}
+	if !sort.SliceIsSorted(t.list, func(i, j int) bool { return t.list[i].path < t.list[j].path }) {
+		sort.Slice(t.list, func(i, j int) bool { return t.list[i].path < t.list[j].path })
+	}
+	return t, nil
+}
+
+func scanTree(r io.Reader, t *gitTree) error {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	sc.Split(splitNUL)
+	for sc.Scan() {
+		if len(t.list) >= maxReviewInstructionTree {
+			return fmt.Errorf("more than %d entries", maxReviewInstructionTree)
+		}
+		e, err := parseTreeRecord(sc.Text())
+		if err != nil {
+			return err
+		}
+		t.list = append(t.list, e)
+		t.byPath[e.path] = e
+	}
+	return sc.Err()
+}
+
+// foldedUnder lists the entries whose folded path is f or lies below it.
+func (t *gitTree) foldedUnder(f string) []treeEntry {
+	if t.folded == nil {
+		t.folded = make([]foldedEntry, 0, len(t.list))
+		for _, e := range t.list {
+			t.folded = append(t.folded, foldedEntry{foldName(e.path), e})
+		}
+		sort.Slice(t.folded, func(i, j int) bool { return t.folded[i].fold < t.folded[j].fold })
+	}
+	var out []treeEntry
+	for _, key := range []string{f, f + "/"} {
+		for i := sort.Search(len(t.folded), func(i int) bool { return t.folded[i].fold >= key }); i < len(t.folded); i++ {
+			if t.folded[i].fold != key && (key == f || !strings.HasPrefix(t.folded[i].fold, key)) {
+				break
+			}
+			out = append(out, t.folded[i].e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	return out
+}
+
+// isLink reports whether some entry's folded path is f and a symlink.
+func (t *gitTree) isLink(f string) bool {
+	if t.linkFold == nil {
+		t.linkFold = map[string]bool{}
+		for _, e := range t.list {
+			if e.isLink() {
+				t.linkFold[foldName(e.path)] = true
+			}
+		}
+	}
+	return t.linkFold[f]
+}
+
+func sameEntries(a, b []treeEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ---- the plan ----
+
+// candidate is the outermost table entry covering a set of paths, with what
+// each tree holds at or under it.
+type candidate struct {
+	canon, spelled string
+	base, res      []treeEntry
+}
+
+type planState struct {
+	base, res *gitTree
+	spell     map[string]string // folded prefix -> spelling, for relevant prefixes of both trees
+	resDirs   map[string]bool   // directories of relevant result paths
+	cands     map[string]*candidate
+	links     map[string]*[2]*treeEntry // relevant symlinks: base, result
+	tracked   []treeEntry               // relevant result entries, to verify on disk
+}
+
+func newPlan(base, res *gitTree) (*planState, error) {
+	s := &planState{base: base, res: res, spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}}
+	for side, t := range []*gitTree{base, res} {
+		for _, e := range t.list {
+			if err := s.index(e, side); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return s, nil
+}
+
+// register records the spelling of every prefix that leads to or lies under a
+// table match; two spellings of one folded prefix are an error.
+func (s *planState) register(ip instrPath, side int) error {
+	top := ip.lead
+	if ip.n > 0 {
+		top = len(ip.parts)
+	}
+	spelled, folded := "", ""
+	for k := 0; k < top; k++ {
+		spelled, folded = joinSlash(spelled, ip.parts[k]), joinSlash(folded, ip.fold[k])
+		if prev, ok := s.spell[folded]; ok && prev != spelled {
+			return fmt.Errorf("review instructions: %q and %q are one path on a case-insensitive host", prev, spelled)
+		}
+		s.spell[folded] = spelled
+		if side == 1 && k+1 < len(ip.parts) {
+			s.resDirs[spelled] = true
+		}
+	}
+	return nil
+}
+
+func (s *planState) index(e treeEntry, side int) error {
+	ip := classify(e.path)
+	if ip.n == 0 && ip.lead == 0 {
+		return nil
+	}
+	if err := s.register(ip, side); err != nil {
+		return err
+	}
+	if !ip.relevant() {
+		return nil
+	}
+	if e.isGitlink() && ip.n > 0 {
+		return fmt.Errorf("review instructions: %s is a submodule under an instruction path", strconv.Quote(e.path))
+	}
+	if side == 1 {
+		s.tracked = append(s.tracked, e)
+	}
+	if e.isLink() {
+		pair := s.links[e.path]
+		if pair == nil {
+			pair = &[2]*treeEntry{}
+			s.links[e.path] = pair
+		}
+		pair[side] = &e
+	}
+	if ip.n == 0 {
+		return nil
+	}
+	key := strings.Join(ip.fold[:ip.n], "/")
+	c := s.cands[key]
+	if c == nil {
+		c = &candidate{canon: ip.canon, spelled: strings.Join(ip.parts[:ip.n], "/")}
+		s.cands[key] = c
+	}
+	if side == 0 {
+		c.base = append(c.base, e)
+	} else {
+		c.res = append(c.res, e)
+	}
+	return nil
+}
+
+func (c *candidate) isDir() bool {
+	for _, side := range [][]treeEntry{c.res, c.base} {
+		if len(side) > 0 {
+			return side[0].path != c.spelled
+		}
+	}
+	return false
+}
+
+// differing returns the candidates the two trees do not hold identically, in
+// order, after the spelling, type and cap rules.
+func (s *planState) differing() ([]*candidate, error) {
+	keys := make([]string, 0, len(s.cands))
+	for k := range s.cands {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var out []*candidate
+	var baseFiles, resFiles int
+	for _, k := range keys {
+		c := s.cands[k]
+		if sameEntries(c.base, c.res) {
+			continue
+		}
+		if c.spelled != c.canon {
+			return nil, fmt.Errorf("review instructions: instruction path %s is not spelled %s; a review cannot mask it", c.spelled, c.canon)
+		}
+		if len(c.base) > 0 && len(c.res) > 0 && (c.base[0].path == c.spelled) != (c.res[0].path == c.spelled) {
+			return nil, fmt.Errorf("review instructions: the build changed %s between a file and a directory", c.spelled)
+		}
+		if baseFiles += len(c.base); baseFiles > maxReviewInstructionFiles || resFiles+len(c.res) > maxReviewInstructionFiles {
+			return nil, fmt.Errorf("review instructions: more than %d files under instruction paths (at %s)", maxReviewInstructionFiles, c.spelled)
+		}
+		resFiles += len(c.res)
+		out = append(out, c)
+	}
+	if len(out) > maxReviewInstructionMasks {
+		return nil, fmt.Errorf("review instructions: %d instruction paths changed, over the limit of %d", len(out), maxReviewInstructionMasks)
+	}
+	return out, nil
+}
+
+// ---- staging ----
+
+// stagedDiff is one path a differing candidate holds differently.
+type stagedDiff struct {
+	path             string
+	base, res        *treeEntry
+	baseFile, resTmp string // relative to dst; "" when absent
+}
+
+func writeSnapshotFile(path string, body []byte, exec bool) error {
+	mode := os.FileMode(0o644)
+	if exec {
+		mode = 0o755
+	}
+	if err := os.WriteFile(path, body, mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
+}
+
+// stage writes the base content of every differing candidate under
+// dst/tree and the result blobs of the changed files under dst/scratch.
+func (s *planState) stage(ctx context.Context, root, dst string, cands []*candidate) ([]WorkspaceMask, []stagedDiff, error) {
+	treeDir := filepath.Join(dst, reviewInstructionTreeDir)
+	if err := os.MkdirAll(filepath.Join(dst, reviewInstructionScratchDir), 0o755); err != nil {
+		return nil, nil, err
+	}
+	if err := os.MkdirAll(treeDir, 0o755); err != nil {
+		return nil, nil, err
+	}
+	var masks []WorkspaceMask
+	var diffs []stagedDiff
+	var total int
+	for _, c := range cands {
+		if err := validateMaskTarget(c.canon); err != nil {
+			return nil, nil, fmt.Errorf("review instructions: %w", err)
+		}
+		target := filepath.Join(treeDir, filepath.FromSlash(c.canon))
+		if err := s.writeBase(ctx, root, treeDir, target, c, &total); err != nil {
+			return nil, nil, err
+		}
+		d, err := s.stageDiffs(ctx, root, dst, c, len(diffs))
+		if err != nil {
+			return nil, nil, err
+		}
+		diffs = append(diffs, d...)
+		masks = append(masks, WorkspaceMask{Source: target, Target: c.canon, Dir: c.isDir(), AbsentInWorktree: len(c.res) == 0})
+	}
+	return masks, diffs, nil
+}
+
+func (s *planState) writeBase(ctx context.Context, root, treeDir, target string, c *candidate, total *int) error {
+	var err error
+	if c.isDir() {
+		err = os.MkdirAll(target, 0o755)
+	} else {
+		err = os.MkdirAll(filepath.Dir(target), 0o755)
+	}
+	if err != nil {
+		return err
+	}
+	if len(c.base) == 0 && !c.isDir() {
+		return writeSnapshotFile(target, nil, false)
+	}
+	for _, e := range c.base {
+		out := filepath.Join(treeDir, filepath.FromSlash(e.path))
+		if err := ensureContainedPath(treeDir, out); err != nil {
+			return fmt.Errorf("review instructions: %w", err)
+		}
+		body, err := readBlob(ctx, root, e.oid, maxReviewInstructionFileBytes)
+		if err != nil {
+			return fmt.Errorf("%w (at %s)", err, strconv.Quote(e.path))
+		}
+		if *total += len(body); *total > MaxSkillsBundleBytes {
+			return fmt.Errorf("review instructions: snapshot over %d bytes at %s", MaxSkillsBundleBytes, c.spelled)
+		}
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return err
+		}
+		if e.isLink() {
+			err = os.Symlink(string(body), out)
+		} else {
+			err = writeSnapshotFile(out, body, e.exec())
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stageDiffs pairs the entries of c by exact path and writes the result blob
+// of each pair that differs.
+func (s *planState) stageDiffs(ctx context.Context, root, dst string, c *candidate, offset int) ([]stagedDiff, error) {
+	byPath := map[string]*stagedDiff{}
+	var order []string
+	pair := func(e treeEntry, side int) {
+		d := byPath[e.path]
+		if d == nil {
+			d = &stagedDiff{path: e.path}
+			byPath[e.path] = d
+			order = append(order, e.path)
+		}
+		if side == 0 {
+			d.base = &e
+		} else {
+			d.res = &e
+		}
+	}
+	for _, e := range c.base {
+		pair(e, 0)
+	}
+	for _, e := range c.res {
+		pair(e, 1)
+	}
+	var out []stagedDiff
+	for _, p := range order {
+		d := *byPath[p]
+		if d.base != nil && d.res != nil && *d.base == *d.res {
+			continue
+		}
+		if d.base != nil {
+			d.baseFile = filepath.Join(reviewInstructionTreeDir, filepath.FromSlash(p))
+		}
+		if d.res != nil && (d.base == nil || d.base.oid != d.res.oid) {
+			body, err := readBlob(ctx, root, d.res.oid, maxReviewInstructionFileBytes)
+			if err != nil {
+				return nil, fmt.Errorf("%w (at %s)", err, strconv.Quote(p))
+			}
+			d.resTmp = filepath.Join(reviewInstructionScratchDir, strconv.Itoa(offset+len(out)))
+			if err := os.WriteFile(filepath.Join(dst, d.resTmp), body, 0o644); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// ---- the entry point ----
+
+// SnapshotReviewInstructions writes under dst the content, as of baseSHA, of
+// every instruction path (the tables above) that resultSHA, the commit checked
+// out at workDir, holds differently, and returns one mask per outermost
+// differing entry. A launch that mounts the masks read-only gives the harness
+// the base instructions whatever the build committed. It also removes from the
+// worktree every on-disk entry under an instruction path that the result tree
+// does not hold, and fails if a tracked one no longer matches the result
+// commit. Anything a mask cannot carry (a path spelled two ways or not as the
+// table spells it, a link whose target changed, a submodule) is an error: the
+// review does not launch. dst is cleared first and must lie outside workDir.
+func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA, dst string) (ReviewInstructionSnapshot, error) {
+	for _, sha := range []string{baseSHA, resultSHA} {
+		if !fullGitSHAPattern.MatchString(sha) {
+			return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: %q is not a full 40-hex commit id", sha)
+		}
+	}
+	if err := requireDestinationOutside(workDir, dst); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	root, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: resolve workspace: %w", err)
+	}
+	head := &cappedWriter{max: 128}
+	if err := reviewGit(ctx, root, head, "rev-parse", "HEAD"); err != nil || strings.TrimSpace(head.buf.String()) != resultSHA {
+		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: HEAD of the workspace is not the result commit %s (%v)", resultSHA, err)
+	}
+	plan, cands, err := planSnapshot(ctx, root, baseSHA, resultSHA)
+	if err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: clear %s: %w", dst, err)
+	}
+	masks, diffs, err := plan.stage(ctx, root, dst, cands)
+	if err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	removed, err := plan.reconcileDisk(ctx, root)
+	if err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	if len(masks) == 0 && len(removed) == 0 {
+		return ReviewInstructionSnapshot{}, os.RemoveAll(dst)
+	}
+	return finishSnapshot(ctx, dst, masks, diffs, removed)
+}
+
+func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (*planState, []*candidate, error) {
+	base, err := readTree(ctx, root, baseSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := readTree(ctx, root, resultSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	plan, err := newPlan(base, res)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := plan.checkLinks(ctx, root); err != nil {
+		return nil, nil, err
+	}
+	cands, err := plan.differing()
+	return plan, cands, err
+}
+
+func finishSnapshot(ctx context.Context, dst string, masks []WorkspaceMask, diffs []stagedDiff, removed []removal) (ReviewInstructionSnapshot, error) {
+	snap := ReviewInstructionSnapshot{Masks: masks}
+	for _, m := range masks {
+		snap.Paths = append(snap.Paths, m.Target)
+	}
+	for _, r := range removed {
+		snap.Removed = append(snap.Removed, r.path)
+	}
+	if err := writeReviewInstructionDiff(ctx, dst, diffs, removed); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	if err := os.RemoveAll(filepath.Join(dst, reviewInstructionScratchDir)); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	if err := publicDirs(dst); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	if err := validateWorkspaceMasks(masks, ""); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	snap.DiffPath = filepath.Join(dst, reviewInstructionDiffFile)
+	var err error
+	snap.SHA256, err = hashSnapshot(filepath.Join(dst, reviewInstructionTreeDir), masks, snap.Removed)
+	return snap, err
+}
+
+// publicDirs makes every directory of the snapshot 0755 whatever the umask:
+// the container runs as another uid and must read them.
+func publicDirs(dst string) error {
+	return filepath.WalkDir(dst, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return err
+		}
+		return os.Chmod(p, 0o755)
+	})
+}
+
+// ---- the diff file ----
+
+// writeReviewInstructionDiff writes dst/instructions.diff: for each changed
+// file a quoted header, a mode line when the executable bit changed and the
+// bounded hunks of the base blob against the result blob (git runs in dst on
+// blobs written there, so no worktree attribute applies and no host path
+// reaches the file), then one section per removed untracked entry.
+func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []stagedDiff, removed []removal) error {
+	sort.Slice(diffs, func(i, j int) bool { return diffs[i].path < diffs[j].path })
 	var out bytes.Buffer
 	used := 0
 	for _, d := range diffs {
 		label := "changed"
 		switch {
-		case !d.hasBase:
+		case d.base == nil:
 			label = "added by the build"
-		case !d.hasWork:
+		case d.res == nil:
 			label = "removed by the build"
 		}
-		fmt.Fprintf(&out, "=== %s (%s) ===\n", strconv.Quote(d.display), label)
-		if d.modeNote != "" {
-			out.WriteString(d.modeNote + "\n")
+		fmt.Fprintf(&out, "=== %s (%s) ===\n", strconv.Quote(d.path), label)
+		if d.base != nil && d.res != nil && d.base.mode != d.res.mode {
+			fmt.Fprintf(&out, "mode changed: %s -> %s\n", d.base.mode, d.res.mode)
 		}
-		budget := maxReviewInstructionDiffBytes - used
-		if budget > maxReviewInstructionFileDiff {
-			budget = maxReviewInstructionFileDiff
-		}
-		text, over, err := diffOne(ctx, dst, d, budget)
+		text, over, err := diffOne(ctx, dst, d, min(maxReviewInstructionDiffBytes-used, maxReviewInstructionFileDiff))
 		if err != nil {
 			return err
 		}
 		used += len(text)
-		out.Write(text)
-		if over > 0 {
-			if len(text) > 0 && text[len(text)-1] != '\n' {
-				out.WriteByte('\n')
-			}
-			fmt.Fprintf(&out, "[truncated: %d more bytes not shown]\n", over)
+		appendBounded(&out, text, over)
+	}
+	for _, r := range removed {
+		fmt.Fprintf(&out, "=== %s (untracked, removed before review) ===\n", strconv.Quote(r.path))
+		body := r.body
+		room := max(maxReviewInstructionDiffBytes-used, 0)
+		over := int64(max(len(body)-room, 0))
+		body = body[:len(body)-int(over)]
+		used += len(body)
+		appendBounded(&out, body, over)
+		if r.note != "" {
+			out.WriteString(r.note + "\n")
 		}
 	}
 	return writeSnapshotFile(filepath.Join(dst, reviewInstructionDiffFile), out.Bytes(), false)
 }
 
+func appendBounded(out *bytes.Buffer, text []byte, over int64) {
+	out.Write(text)
+	if over > 0 {
+		if len(text) > 0 && text[len(text)-1] != '\n' {
+			out.WriteByte('\n')
+		}
+		fmt.Fprintf(out, "[truncated: %d more bytes not shown]\n", over)
+	}
+}
+
 // keepHunks drops everything git printed before the first hunk (its diff,
-// index, --- and +++ lines carry the host paths) and keeps the hunk lines.
+// index, --- and +++ lines carry paths) and keeps the hunk lines.
 func keepHunks(raw []byte) []byte {
 	var out bytes.Buffer
 	started := false
 	for _, line := range bytes.SplitAfter(raw, []byte("\n")) {
-		if len(line) == 0 {
-			continue
-		}
-		if !started && !bytes.HasPrefix(line, []byte("@@")) {
+		if len(line) == 0 || (!started && !bytes.HasPrefix(line, []byte("@@"))) {
 			continue
 		}
 		started = true
@@ -993,74 +856,68 @@ func keepHunks(raw []byte) []byte {
 	return out.Bytes()
 }
 
-func diffOne(ctx context.Context, dst string, d instrDiff, budget int) ([]byte, int64, error) {
-	if d.modeOnly {
-		return nil, 0, nil
+func diffOne(ctx context.Context, dst string, d stagedDiff, budget int) ([]byte, int64, error) {
+	if d.resTmp == "" && d.base != nil && d.res != nil || d.base != nil && d.base.isLink() {
+		return nil, 0, nil // mode only, or a link (identical in both trees)
 	}
 	oldPath, newPath := "/dev/null", "/dev/null"
-	if d.hasBase {
-		oldPath = d.relInDst
+	if d.baseFile != "" {
+		oldPath = d.baseFile
 	}
-	if d.hasWork {
-		newPath = d.workAbs
+	if d.resTmp != "" {
+		newPath = d.resTmp
 	}
-	w := &cappedWriter{max: budget}
-	stderr := &cappedWriter{max: 4096}
-	args := reviewGitArgs(dst, "diff", "--no-index", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--", oldPath, newPath)
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = reviewGitEnv()
-	cmd.Stdout, cmd.Stderr = w, stderr
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-			return nil, 0, fmt.Errorf("review instructions: git diff of %s: %w: %s", strconv.Quote(d.display), err, strings.TrimSpace(stderr.buf.String()))
-		}
+	w := &cappedWriter{max: max(budget, 0)}
+	err := reviewGit(ctx, dst, w, "diff", "--no-index", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--", oldPath, newPath)
+	var exit *exec.ExitError
+	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
+		return nil, 0, fmt.Errorf("review instructions: diff of %s: %w", strconv.Quote(d.path), err)
 	}
 	return keepHunks(w.buf.Bytes()), w.over, nil
 }
 
-// hashSnapshotTree hashes the masked trees under root (not the diff file) and
-// the mask list: every field is length-prefixed, so no two different
-// snapshots share a byte stream. Files carry their executable bit, links
-// their text.
-func hashSnapshotTree(root string, masks []WorkspaceMask) (string, error) {
+// ---- the hash ----
+
+// hashSnapshot hashes the snapshot's trees, the mask list and the removed
+// list: every field is length-prefixed, so no two different snapshots share a
+// byte stream. Files carry their executable bit, links their text.
+func hashSnapshot(treeDir string, masks []WorkspaceMask, removed []string) (string, error) {
 	type entry struct {
 		kind byte
 		path string
 		body []byte
 	}
 	var entries []entry
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(treeDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil || rel == "." || rel == reviewInstructionDiffFile {
+		rel, err := filepath.Rel(treeDir, p)
+		if err != nil || rel == "." {
 			return err
 		}
-		rel = filepath.ToSlash(rel)
+		e := entry{kind: 'd', path: filepath.ToSlash(rel)}
 		switch {
 		case d.IsDir():
-			entries = append(entries, entry{kind: 'd', path: rel})
 		case d.Type()&fs.ModeSymlink != 0:
 			text, err := os.Readlink(p)
+			e.kind, e.body = 'l', []byte(text)
 			if err != nil {
 				return err
 			}
-			entries = append(entries, entry{kind: 'l', path: rel, body: []byte(text)})
 		case d.Type().IsRegular():
 			body, err := os.ReadFile(p)
+			e.kind, e.body = 'f', body
+			if info, ierr := d.Info(); ierr == nil && info.Mode()&0o100 != 0 {
+				e.kind = 'x'
+			}
 			if err != nil {
 				return err
 			}
-			kind := byte('f')
-			if info, err := d.Info(); err == nil && info.Mode()&0o100 != 0 {
-				kind = 'x'
-			}
-			entries = append(entries, entry{kind: kind, path: rel, body: body})
 		default:
 			return fmt.Errorf("review instructions: %s is not a regular file", rel)
 		}
+		entries = append(entries, e)
 		return nil
 	})
 	if err != nil {
@@ -1083,6 +940,9 @@ func hashSnapshotTree(root string, masks []WorkspaceMask) (string, error) {
 		}
 		writeHashEntry(h, 'm', m.Target, flags)
 	}
+	for _, r := range removed {
+		writeHashEntry(h, 'r', r, nil)
+	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -1097,33 +957,7 @@ func writeHashEntry(h io.Writer, kind byte, path string, body []byte) {
 	h.Write(body)
 }
 
-// missingPath reports an error for a path that does not exist (or whose parent
-// is not a directory).
-func missingPath(err error) bool {
-	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
-}
-
-// refuseSymlink refuses rel when it or any parent component below workDir is
-// a symlink in the working tree: a link at a parent (pkg replaced by a link)
-// makes the file behind it read as unchanged by content. A component that
-// does not exist is fine: the build deleted it and the snapshot restores it.
-func refuseSymlink(workDir, rel string) error {
-	cur := workDir
-	for _, part := range strings.Split(rel, "/") {
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if missingPath(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("review instructions: inspect %s: %w", rel, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("review instructions: %s is a symlink in the working tree (at %s)", rel, strings.TrimPrefix(cur, workDir+"/"))
-		}
-	}
-	return nil
-}
+// ---- destination and mask validation ----
 
 // requireDestinationOutside refuses a dst that is, lies inside, or contains
 // workDir, after resolving the symlinks of its nearest existing ancestor.
@@ -1193,7 +1027,7 @@ func validateMaskTarget(target string) error {
 		return fmt.Errorf("workspace mask target %q has a character a mount argument cannot carry", target)
 	}
 	for _, part := range strings.Split(target, "/") {
-		if part == "" || part == "." || part == ".." || foldPath(part) == foldedGit {
+		if part == "" || part == "." || part == ".." || foldName(part) == foldedGit {
 			return fmt.Errorf("workspace mask target %q may not use component %q", target, part)
 		}
 	}
@@ -1210,8 +1044,8 @@ func validateWorkspaceMask(m WorkspaceMask, oraclePath string) error {
 		return err
 	}
 	if oraclePath != "" {
-		oracle := foldPath(filepath.ToSlash(filepath.Clean(oraclePath)))
-		if t := foldPath(m.Target); pathWithin(oracle, t) || pathWithin(t, oracle) {
+		oracle := foldName(filepath.ToSlash(filepath.Clean(oraclePath)))
+		if t := foldName(m.Target); pathWithin(oracle, t) || pathWithin(t, oracle) {
 			return fmt.Errorf("workspace mask target %q overlaps the reference-oracle mount %q", m.Target, oraclePath)
 		}
 	}
@@ -1243,7 +1077,7 @@ func validateWorkspaceMasks(masks []WorkspaceMask, oraclePath string) error {
 			return err
 		}
 		for _, other := range masks[:i] {
-			a, b := foldPath(other.Target), foldPath(m.Target)
+			a, b := foldName(other.Target), foldName(m.Target)
 			if pathWithin(a, b) || pathWithin(b, a) {
 				return fmt.Errorf("workspace mask targets %q and %q overlap", other.Target, m.Target)
 			}
