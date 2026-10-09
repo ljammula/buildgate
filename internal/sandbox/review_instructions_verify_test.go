@@ -8,30 +8,12 @@ import (
 	"testing"
 )
 
-// A link's target outside the table is verified on disk like a table path.
+// A link's target outside the table is one regular file, verified on disk
+// like a table path. The earlier tests of a directory target as a root to
+// verify and clean (an ignored skill written under it was removed) are gone:
+// a directory target outside the table is an error now, see
+// TestReviewInstructionLinkTargetRules.
 func TestReviewInstructionLinkTargetsAreVerifiedOnDisk(t *testing.T) {
-	t.Run("an ignored skill written under the target of .claude/skills", func(t *testing.T) {
-		r := newInstructionRepoWithLinks(t, map[string]string{"shared/ok.md": "ok\n"}, map[string]string{".claude/skills": "../shared"})
-		r.write(".gitignore", "shared/evil/\n")
-		r.commit()
-		r.write("shared/evil/SKILL.md", "steer\n")
-		snap, _ := r.mustSnap()
-		if len(snap.Masks) != 0 || !reflect.DeepEqual(snap.Removed, []string{"shared/evil"}) || !r.gone("shared/evil") || readFile(t, r.abs("shared/ok.md")) != "ok\n" {
-			t.Fatalf("snapshot = %+v", snap)
-		}
-	})
-	t.Run("a base link recreated inside a masked directory", func(t *testing.T) {
-		r := newInstructionRepoWithLinks(t, map[string]string{".codex/config.toml": "a = 1\n", "shared/ok.md": "ok\n"}, map[string]string{".codex/prompts": "../shared"})
-		r.write(".codex/config.toml", "a = 2\n")
-		r.write(".gitignore", "shared/evil/\n")
-		r.commit()
-		r.write("shared/evil/SKILL.md", "steer\n")
-		snap, _ := r.mustSnap()
-		wantPaths(t, snap, ".codex")
-		if !reflect.DeepEqual(snap.Removed, []string{"shared/evil"}) || !r.gone("shared/evil") {
-			t.Fatalf("snapshot = %+v", snap)
-		}
-	})
 	t.Run("the target of a file link edited on disk after the commit", func(t *testing.T) {
 		r := newInstructionRepoWithLinks(t, map[string]string{"docs/guide.md": "guide\n"}, map[string]string{"CLAUDE.md": "docs/guide.md"})
 		r.commit()
@@ -107,13 +89,13 @@ func TestReviewInstructionSubmodulesAndNestedGitDirs(t *testing.T) {
 		snap, _ := gitlinkRepo(t).mustSnap()
 		wantNothing(t, snap)
 	})
-	t.Run("a nested .git directory is left alone", func(t *testing.T) {
+	t.Run("a nested .git directory is walked and left alone", func(t *testing.T) {
 		r := newInstructionRepo(t, nil)
 		r.commit()
-		r.write("d/.git/AGENTS.md", "inner\n")
+		r.write("d/.git/config", "inner\n")
 		r.write("d/AGENTS.md", "steer\n")
 		snap, _ := r.mustSnap()
-		if !reflect.DeepEqual(snap.Removed, []string{"d/AGENTS.md"}) || !r.gone("d/AGENTS.md") || readFile(t, r.abs("d/.git/AGENTS.md")) != "inner\n" {
+		if !reflect.DeepEqual(snap.Removed, []string{"d/AGENTS.md"}) || !r.gone("d/AGENTS.md") || readFile(t, r.abs("d/.git/config")) != "inner\n" {
 			t.Fatalf("snapshot = %+v", snap)
 		}
 	})

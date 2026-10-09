@@ -18,8 +18,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
+	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -95,32 +95,18 @@ type ReviewInstructionSnapshot struct {
 	SHA256   string
 }
 
-// foldRune is the smallest rune of r's unicode.SimpleFold orbit.
-func foldRune(r rune) rune {
-	m := r
-	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
-		if f < m {
-			m = f
-		}
-	}
-	return m
-}
-
-// foldName is the one fold behind every match and collision check: NFKD, then
-// the smallest rune of each rune's simple-fold orbit. It over-matches (safe).
+// foldName is the one fold behind every match and collision check: NFKD,
+// then Unicode full case folding (so a sharp s folds to "ss"), then NFKD again
+// because folding can leave a composed rune. It over-matches (safe).
 func foldName(s string) string {
 	ascii := true
 	for i := 0; i < len(s) && ascii; i++ {
 		ascii = s[i] < 0x80
 	}
 	if ascii {
-		return strings.ToUpper(s) // the orbit minimum of an ASCII letter is its capital
+		return strings.ToLower(s) // the full case fold of ASCII is its lower case
 	}
-	var b strings.Builder
-	for _, r := range norm.NFKD.String(s) {
-		b.WriteRune(foldRune(r))
-	}
-	return b.String()
+	return norm.NFKD.String(cases.Fold().String(norm.NFKD.String(s)))
 }
 
 var foldedGit = foldName(".git")
@@ -282,17 +268,17 @@ func (e treeEntry) exec() bool {
 	return err == nil && m&0o100 != 0
 }
 
-type foldedEntry struct {
-	fold string
-	e    treeEntry
+// gitTree is what one commit's listing leaves behind: the entries at or under
+// a table match or exactly above one, and every symlink and gitlink. Nothing
+// else of the listing is kept.
+type gitTree struct {
+	byPath   map[string]treeEntry
+	linkFold map[string]bool // folded paths of the symlinks
+	gitFold  map[string]bool // folded paths of the gitlinks
 }
 
-// gitTree is one commit's whole listing, sorted by path.
-type gitTree struct {
-	list     []treeEntry
-	byPath   map[string]treeEntry
-	folded   []foldedEntry
-	linkFold map[string]bool
+func newGitTree() *gitTree {
+	return &gitTree{byPath: map[string]treeEntry{}, linkFold: map[string]bool{}, gitFold: map[string]bool{}}
 }
 
 var treeModePattern = regexp.MustCompile(`^[0-7]{6}$`)
@@ -321,82 +307,50 @@ func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
 	return 0, nil, nil
 }
 
-// readTree streams `git ls-tree -r -z --full-tree sha` once.
-func readTree(ctx context.Context, root, sha string) (*gitTree, error) {
+// streamTree streams `git ls-tree -r -z --full-tree sha` once, handing each
+// entry to fn and keeping none. More than maxReviewInstructionTree entries is
+// an error: the bound on the work.
+func streamTree(ctx context.Context, root, sha string, fn func(treeEntry) error) error {
 	pr, pw := io.Pipe()
-	t := &gitTree{byPath: map[string]treeEntry{}}
 	done := make(chan error, 1)
 	go func() {
 		err := reviewGit(ctx, root, pw, "ls-tree", "-r", "-z", "--full-tree", sha)
 		pw.CloseWithError(err)
 		done <- err
 	}()
-	err := scanTree(pr, t)
+	err := scanTree(pr, fn)
 	pr.CloseWithError(errors.New("done"))
 	if gerr := <-done; err == nil && gerr != nil {
 		err = gerr
 	}
 	if err != nil {
-		return nil, fmt.Errorf("review instructions: read tree %s: %w", sha, err)
+		return fmt.Errorf("review instructions: read tree %s: %w", sha, err)
 	}
-	if !sort.SliceIsSorted(t.list, func(i, j int) bool { return t.list[i].path < t.list[j].path }) {
-		sort.Slice(t.list, func(i, j int) bool { return t.list[i].path < t.list[j].path })
-	}
-	return t, nil
+	return nil
 }
 
-func scanTree(r io.Reader, t *gitTree) error {
+func scanTree(r io.Reader, fn func(treeEntry) error) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	sc.Split(splitNUL)
+	n := 0
 	for sc.Scan() {
-		if len(t.list) >= maxReviewInstructionTree {
+		if n++; n > maxReviewInstructionTree {
 			return fmt.Errorf("more than %d entries", maxReviewInstructionTree)
 		}
 		e, err := parseTreeRecord(sc.Text())
 		if err != nil {
 			return err
 		}
-		t.list = append(t.list, e)
-		t.byPath[e.path] = e
+		if err := fn(e); err != nil {
+			return err
+		}
 	}
 	return sc.Err()
 }
 
-// foldedUnder lists the entries whose folded path is f or lies below it.
-func (t *gitTree) foldedUnder(f string) []treeEntry {
-	if t.folded == nil {
-		t.folded = make([]foldedEntry, 0, len(t.list))
-		for _, e := range t.list {
-			t.folded = append(t.folded, foldedEntry{foldName(e.path), e})
-		}
-		sort.Slice(t.folded, func(i, j int) bool { return t.folded[i].fold < t.folded[j].fold })
-	}
-	var out []treeEntry
-	for _, key := range []string{f, f + "/"} {
-		for i := sort.Search(len(t.folded), func(i int) bool { return t.folded[i].fold >= key }); i < len(t.folded); i++ {
-			if t.folded[i].fold != key && (key == f || !strings.HasPrefix(t.folded[i].fold, key)) {
-				break
-			}
-			out = append(out, t.folded[i].e)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
-	return out
-}
-
-// isLink reports whether some entry's folded path is f and a symlink.
-func (t *gitTree) isLink(f string) bool {
-	if t.linkFold == nil {
-		t.linkFold = map[string]bool{}
-		for _, e := range t.list {
-			if e.isLink() {
-				t.linkFold[foldName(e.path)] = true
-			}
-		}
-	}
-	return t.linkFold[f]
-}
+// isLink reports whether some symlink's folded path is f.
+func (t *gitTree) isLink(f string) bool { return t.linkFold[f] }
 
 func sameEntries(a, b []treeEntry) bool {
 	if len(a) != len(b) {
@@ -426,20 +380,24 @@ type planState struct {
 	cands     map[string]*candidate
 	links     map[string]*[2]*treeEntry // relevant symlinks: base, result
 	tracked   []treeEntry               // relevant result entries, to verify on disk
-	roots     map[string]string         // folded link-target path outside the table -> its spelling
+	targets   map[string]string         // file a link points to outside the table -> the first link naming it
 	staged    int64                     // bytes written under dst so far
+	retained  int                       // entries kept from the listings, for a test
+	shas      [2]string                 // the base and result commits
 }
 
-func newPlan(base, res *gitTree) (*planState, error) {
-	s := &planState{base: base, res: res, spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}, roots: map[string]string{}}
-	for side, t := range []*gitTree{base, res} {
-		for _, e := range t.list {
-			if err := s.index(e, side); err != nil {
-				return nil, err
-			}
-		}
+func newPlan() *planState {
+	return &planState{base: newGitTree(), res: newGitTree(), spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}, targets: map[string]string{}}
+}
+
+// load streams one commit's listing into the plan.
+func (s *planState) load(ctx context.Context, root, sha string, side int) error {
+	s.shas[side] = sha
+	t := s.base
+	if side == 1 {
+		t = s.res
 	}
-	return s, nil
+	return streamTree(ctx, root, sha, func(e treeEntry) error { return s.index(t, e, side) })
 }
 
 // register records the spelling of every prefix that leads to or lies under a
@@ -463,8 +421,18 @@ func (s *planState) register(ip instrPath, side int) error {
 	return nil
 }
 
-func (s *planState) index(e treeEntry, side int) error {
+func (s *planState) index(t *gitTree, e treeEntry, side int) error {
 	ip := classify(e.path)
+	switch {
+	case e.isLink():
+		t.linkFold[foldName(e.path)] = true
+	case e.isGitlink():
+		t.gitFold[foldName(e.path)] = true
+	}
+	if e.isLink() || e.isGitlink() || ip.relevant() {
+		t.byPath[e.path] = e
+		s.retained++
+	}
 	if ip.n == 0 && ip.lead == 0 {
 		return nil
 	}
@@ -740,14 +708,25 @@ func (s *planState) stageDiffs(ctx context.Context, root, dst string, c *candida
 // commit. Anything a mask cannot carry (a path spelled two ways or not as the
 // table spells it, a link whose target changed, a submodule) is an error: the
 // review does not launch. dst is cleared first and must lie outside workDir.
-func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA, dst string) (ReviewInstructionSnapshot, error) {
+// On any error after dst has been accepted, everything under dst is removed,
+// what an earlier call left there included, so no caller can read a stale or
+// partial snapshot.
+func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA, dst string) (snap ReviewInstructionSnapshot, err error) {
+	if err := requireDestinationOutside(workDir, dst); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	defer func() {
+		if err != nil {
+			snap = ReviewInstructionSnapshot{}
+			if rerr := os.RemoveAll(dst); rerr != nil {
+				err = errors.Join(err, fmt.Errorf("review instructions: clear %s: %w", dst, rerr))
+			}
+		}
+	}()
 	for _, sha := range []string{baseSHA, resultSHA} {
 		if !fullGitSHAPattern.MatchString(sha) {
 			return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: %q is not a full 40-hex commit id", sha)
 		}
-	}
-	if err := requireDestinationOutside(workDir, dst); err != nil {
-		return ReviewInstructionSnapshot{}, err
 	}
 	root, err := filepath.EvalSymlinks(workDir)
 	if err != nil {
@@ -786,17 +765,11 @@ func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA
 }
 
 func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (*planState, []*candidate, error) {
-	base, err := readTree(ctx, root, baseSHA)
-	if err != nil {
-		return nil, nil, err
-	}
-	res, err := readTree(ctx, root, resultSHA)
-	if err != nil {
-		return nil, nil, err
-	}
-	plan, err := newPlan(base, res)
-	if err != nil {
-		return nil, nil, err
+	plan := newPlan()
+	for side, sha := range []string{baseSHA, resultSHA} {
+		if err := plan.load(ctx, root, sha, side); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := plan.checkLinks(ctx, root); err != nil {
 		return nil, nil, err

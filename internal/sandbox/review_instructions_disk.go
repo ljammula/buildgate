@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,33 +40,32 @@ type removal struct {
 	note string
 }
 
+// kidFile is a tracked entry as the filesystem holds it.
+type kidFile struct {
+	name string
+	info os.FileInfo
+}
+
 type diskState struct {
 	*planState
 	root      string
 	dirsOK    map[string]bool
-	gitlinks  map[string]bool // folded paths of the result tree's gitlinks
 	visited   int
 	bodyLeft  int64
 	collected []removal
+	kids      map[string][]string  // tracked directory -> names of its tracked children
+	kidInfo   map[string][]kidFile // tracked directory -> those children as they are on disk
 }
 
 // reconcileDisk is pass one over the worktree: every tracked entry under an
-// instruction path or a link target must match the result commit, nothing
-// inside a submodule checkout may be an instruction path, and every other
-// entry that matches the table or a link target is collected for removal. It
-// removes nothing: applyRemovals does, once every check has passed.
+// instruction path (and every link target file) must match the result commit,
+// nothing inside a submodule checkout may be an instruction path, and every
+// other entry that matches the table is collected for removal. It removes
+// nothing: applyRemovals does, once every check has passed.
 func (s *planState) reconcileDisk(ctx context.Context, root string) ([]removal, error) {
-	d := &diskState{planState: s, root: root, dirsOK: map[string]bool{}, gitlinks: map[string]bool{}, bodyLeft: maxReviewInstructionRemovedBodies}
-	for _, e := range s.res.list {
-		if e.isGitlink() {
-			d.gitlinks[foldName(e.path)] = true
-		}
-	}
-	verify, err := d.verifiedEntries()
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range verify {
+	d := &diskState{planState: s, root: root, dirsOK: map[string]bool{}, bodyLeft: maxReviewInstructionRemovedBodies, kidInfo: map[string][]kidFile{}}
+	d.kids = s.trackedChildren()
+	for _, e := range s.tracked {
 		if err := d.verify(ctx, e); err != nil {
 			return nil, err
 		}
@@ -77,52 +77,34 @@ func (s *planState) reconcileDisk(ctx context.Context, root string) ([]removal, 
 	return d.collected, nil
 }
 
-// verifiedEntries are the result entries to check on disk: those at or under
-// the table, and those at or under a verified root (the target of an allowed
-// link), whose directories and spellings are registered like the table's.
-func (d *diskState) verifiedEntries() ([]treeEntry, error) {
-	out := append([]treeEntry(nil), d.tracked...)
-	folds := make([]string, 0, len(d.roots))
-	for f := range d.roots {
-		folds = append(folds, f)
-	}
-	sort.Strings(folds)
-	for _, f := range folds {
-		for _, e := range d.res.foldedUnder(f) {
-			if e.isGitlink() {
-				continue
+// trackedChildren lists, for every directory on the way to a tracked
+// instruction path, the names of the tracked entries directly in it.
+func (s *planState) trackedChildren() map[string][]string {
+	seen := map[string]map[string]bool{}
+	for _, e := range s.tracked {
+		parts := strings.Split(e.path, "/")
+		for k := range parts {
+			dir := strings.Join(parts[:k], "/")
+			if seen[dir] == nil {
+				seen[dir] = map[string]bool{}
 			}
-			if err := d.registerRootPath(e.path); err != nil {
-				return nil, err
-			}
-			out = append(out, e)
+			seen[dir][parts[k]] = true
 		}
 	}
-	return out, nil
-}
-
-// registerRootPath records the spelling of every component of a result path
-// under a verified root and the directories among them.
-func (s *planState) registerRootPath(p string) error {
-	parts := strings.Split(p, "/")
-	spelled, folded := "", ""
-	for k, part := range parts {
-		spelled, folded = joinSlash(spelled, part), joinSlash(folded, foldName(part))
-		if prev, ok := s.spell[folded]; ok && prev != spelled {
-			return fmt.Errorf("review instructions: %q and %q are one path on a case-insensitive host", prev, spelled)
+	out := make(map[string][]string, len(seen))
+	for dir, names := range seen {
+		for n := range names {
+			out[dir] = append(out[dir], n)
 		}
-		s.spell[folded] = spelled
-		if k+1 < len(parts) {
-			s.resDirs[spelled] = true
-		}
+		sort.Strings(out[dir])
 	}
-	return nil
+	return out
 }
 
 // verify compares the on-disk entry for a result-tree entry with its blob,
 // through real directories only, so a stale git stat cache decides nothing.
 func (d *diskState) verify(ctx context.Context, e treeEntry) error {
-	bad := fmt.Errorf("review instructions: tracked instruction path %s does not match the result commit", strconv.Quote(e.path))
+	bad := fmt.Errorf("review instructions: tracked instruction path %s does not match the result commit; if this repository converts files on checkout (working-tree-encoding, ident, a filter such as LFS) for this path, a review of it cannot run", strconv.Quote(e.path))
 	parts := strings.Split(e.path, "/")
 	cur := d.root
 	for i := 0; i < len(parts)-1; i++ {
@@ -158,51 +140,62 @@ func blobHasher(size int64) hash.Hash {
 	return h
 }
 
-// crlfFold passes its input on with every "\r\n" turned into "\n" and counts
-// those pairs; flush passes on a final lone "\r".
-type crlfFold struct {
-	w     io.Writer
-	pairs int64
-	cr    bool
+// crlfStrip passes its input on with the "\r" before every "\n" removed, and
+// fails (bad) on a "\n" without one or when its output would hold a "\r\n"
+// itself (the input had "\r\r\n"). A "\r" anywhere else passes unchanged.
+type crlfStrip struct {
+	w       io.Writer
+	pending bool // a "\r" is held back
+	last    byte // the last byte passed on
+	bad     bool
 }
 
-func (c *crlfFold) Write(p []byte) (int, error) {
+func (c *crlfStrip) Write(p []byte) (int, error) {
 	out := make([]byte, 0, len(p)+1)
+	emit := func(b byte) { out, c.last = append(out, b), b }
 	for _, b := range p {
-		if c.cr {
-			c.cr = false
-			if b == '\n' {
-				c.pairs++
-				out = append(out, '\n')
-				continue
+		switch {
+		case b == '\n' && !c.pending:
+			c.bad = true
+		case b == '\n':
+			c.pending = false
+			c.bad = c.bad || c.last == '\r'
+			emit('\n')
+		case b == '\r':
+			if c.pending {
+				emit('\r')
 			}
-			out = append(out, '\r')
+			c.pending = true
+		default:
+			if c.pending {
+				emit('\r')
+				c.pending = false
+			}
+			emit(b)
 		}
-		if b == '\r' {
-			c.cr = true
-			continue
-		}
-		out = append(out, b)
 	}
 	_, err := c.w.Write(out)
 	return len(p), err
 }
 
-func (c *crlfFold) flush() error {
-	if !c.cr {
+func (c *crlfStrip) flush() error {
+	if !c.pending {
 		return nil
 	}
-	c.cr = false
+	c.pending = false
 	_, err := c.w.Write([]byte{'\r'})
 	return err
 }
 
 // fileHashesTo reports whether the size bytes of the file at abs are the blob
-// oid, or are it once every "\r\n" is read as "\n" (a checkout with
-// core.autocrlf or an eol attribute: all a build can add is carriage returns).
-// It streams, with no size cap. The line-ending form needs the blob size in
-// the hash header, which only a first pass can count, so a file the first pass
-// does not match and that holds a "\r\n" is read once more.
+// oid, or are it once the "\r" before each "\n" is removed (a checkout with
+// core.autocrlf or an eol attribute). The second form is accepted only when
+// every "\n" of the file has its "\r" and the blob itself holds no "\r\n": all
+// a build can add to such a file is that one carriage return per line, and a
+// lone "\r" elsewhere must match byte for byte. It streams, with no size cap.
+// The second form needs the blob size in the hash header, which only a first
+// pass can count, so a file the first pass does not match and that holds a
+// "\n" is read once more.
 func fileHashesTo(abs string, size int64, oid string) bool {
 	f, err := os.Open(abs)
 	if err != nil {
@@ -210,25 +203,36 @@ func fileHashesTo(abs string, size int64, oid string) bool {
 	}
 	defer f.Close()
 	raw := blobHasher(size)
-	fold := &crlfFold{w: io.Discard}
-	if n, err := io.Copy(io.MultiWriter(raw, fold), io.LimitReader(f, size+1)); err != nil || n != size {
+	lines := &byteCounter{b: '\n'}
+	if n, err := io.Copy(io.MultiWriter(raw, lines), io.LimitReader(f, size+1)); err != nil || n != size {
 		return false
 	}
 	if hex.EncodeToString(raw.Sum(nil)) == oid {
 		return true
 	}
-	if fold.pairs == 0 {
+	if lines.n == 0 {
 		return false
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return false
 	}
-	norm := blobHasher(size - fold.pairs)
-	cf := &crlfFold{w: norm}
-	if n, err := io.Copy(cf, io.LimitReader(f, size+1)); err != nil || n != size || cf.flush() != nil {
+	norm := blobHasher(size - lines.n)
+	cs := &crlfStrip{w: norm}
+	if n, err := io.Copy(cs, io.LimitReader(f, size+1)); err != nil || n != size || cs.flush() != nil || cs.bad {
 		return false
 	}
 	return hex.EncodeToString(norm.Sum(nil)) == oid
+}
+
+// byteCounter counts the bytes equal to b written to it.
+type byteCounter struct {
+	b byte
+	n int64
+}
+
+func (c *byteCounter) Write(p []byte) (int, error) {
+	c.n += int64(bytes.Count(p, []byte{c.b}))
+	return len(p), nil
 }
 
 func (d *diskState) visit(p string, de fs.DirEntry, err error) error {
@@ -240,17 +244,26 @@ func (d *diskState) visit(p string, de fs.DirEntry, err error) error {
 		return err
 	}
 	rel = filepath.ToSlash(rel)
-	if de.IsDir() && foldName(de.Name()) == foldedGit {
-		return filepath.SkipDir // a repository's own metadata is never read or removed
+	if rel == ".git" {
+		// The worktree's own repository metadata (a directory, or the file of a
+		// linked worktree) is never read or removed. No other name is special:
+		// a nested repository's .git is walked like any directory.
+		if de.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
 	}
 	if d.visited++; d.visited > maxReviewInstructionWalk {
 		return fmt.Errorf("review instructions: the workspace has more than %d entries", maxReviewInstructionWalk)
 	}
-	if de.IsDir() && d.gitlinks[foldName(rel)] {
+	if de.IsDir() && d.res.gitFold[foldName(rel)] {
 		return d.checkSubmodule(p, rel)
 	}
 	ip := classify(rel)
-	if ip.n > 0 || d.underRoot(ip.fold) {
+	if ip.n > 0 {
+		if slices.Contains(ip.parts[:ip.n-1], ".git") {
+			return fmt.Errorf("review instructions: instruction path %s is inside a nested repository's .git: a review cannot verify it", strconv.Quote(rel))
+		}
 		return d.reconcile(p, rel, ip, de)
 	}
 	if ip.lead > 0 && ip.lead == len(ip.parts) && de.Type()&fs.ModeSymlink != 0 {
@@ -261,18 +274,8 @@ func (d *diskState) visit(p string, de fs.DirEntry, err error) error {
 	return nil
 }
 
-// underRoot reports whether a folded path is at or under a verified root.
-func (d *diskState) underRoot(fold []string) bool {
-	for k := 1; k <= len(fold); k++ {
-		if _, ok := d.roots[strings.Join(fold[:k], "/")]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 // checkSubmodule walks a submodule's checkout directory (which is never
-// removed from) and refuses one that holds an instruction path: a review
+// removed from, its .git included) and refuses one that holds an instruction path: a review
 // cannot verify what a submodule's checkout contains.
 func (d *diskState) checkSubmodule(p, rel string) error {
 	err := filepath.WalkDir(p, func(q string, de fs.DirEntry, err error) error {
@@ -281,9 +284,6 @@ func (d *diskState) checkSubmodule(p, rel string) error {
 		}
 		if q == p {
 			return nil
-		}
-		if de.IsDir() && foldName(de.Name()) == foldedGit {
-			return filepath.SkipDir
 		}
 		if d.visited++; d.visited > maxReviewInstructionWalk {
 			return fmt.Errorf("review instructions: the workspace has more than %d entries", maxReviewInstructionWalk)
@@ -303,15 +303,19 @@ func (d *diskState) checkSubmodule(p, rel string) error {
 	return filepath.SkipDir
 }
 
-// reconcile collects the on-disk entry at a table match or under a verified
-// root unless the result tree holds it (a tracked entry was verified; a
-// tracked directory is descended).
+// reconcile collects the on-disk entry at a table match unless the result tree
+// holds it (a tracked entry was verified; a tracked directory is descended).
+// Before collecting, it refuses an entry that is the same file as a tracked
+// one under another spelling, whatever the fold says.
 func (d *diskState) reconcile(p, rel string, ip instrPath, de fs.DirEntry) error {
 	if _, ok := d.res.byPath[rel]; ok || (de.IsDir() && d.resDirs[rel]) {
 		return nil
 	}
 	if sp, ok := d.spell[strings.Join(ip.fold, "/")]; ok && sp != rel {
 		return fmt.Errorf("review instructions: %s is the same path as the committed %s on a case-insensitive host; it is not removed", strconv.Quote(rel), strconv.Quote(sp))
+	}
+	if err := d.sameAsTracked(p, rel); err != nil {
+		return err
 	}
 	r, err := d.describe(p, rel, de)
 	if err != nil {
@@ -320,6 +324,35 @@ func (d *diskState) reconcile(p, rel string, ip instrPath, de fs.DirEntry) error
 	d.collected = append(d.collected, r)
 	if de.IsDir() {
 		return filepath.SkipDir
+	}
+	return nil
+}
+
+// sameAsTracked refuses the on-disk entry at p if it is the same file as a
+// tracked entry in its parent directory (by os.SameFile, so no fold of names
+// decides it): removing it would delete the tracked file.
+func (d *diskState) sameAsTracked(p, rel string) error {
+	info, err := os.Lstat(p)
+	if err != nil {
+		return fmt.Errorf("review instructions: inspect %s: %w", strconv.Quote(rel), err)
+	}
+	dir := path.Dir(rel)
+	if dir == "." {
+		dir = ""
+	}
+	infos, ok := d.kidInfo[dir]
+	if !ok {
+		for _, name := range d.kids[dir] {
+			if ki, err := os.Lstat(filepath.Join(d.root, filepath.FromSlash(joinSlash(dir, name)))); err == nil {
+				infos = append(infos, kidFile{name, ki})
+			}
+		}
+		d.kidInfo[dir] = infos
+	}
+	for _, ki := range infos {
+		if os.SameFile(info, ki.info) {
+			return fmt.Errorf("review instructions: %s is the tracked path %s under another spelling: it is not removed", strconv.Quote(rel), strconv.Quote(joinSlash(dir, ki.name)))
+		}
 	}
 	return nil
 }

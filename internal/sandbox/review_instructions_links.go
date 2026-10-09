@@ -10,9 +10,11 @@ import (
 
 // checkLinks applies the link rules to every symlink at, under, or exactly
 // above a fixed path ("relevant" links), in either tree. A link must be the
-// same in both trees, its text plain, and what it points to either covered by
-// the candidate rules (a table path) or identical in both trees: a mask can
-// give a review the base version of a table path, not of anything else.
+// same in both trees, its text plain, and its target either at or under a
+// table path (the candidate rules mask, verify and clean it) or one regular
+// file that both trees hold identically (verified on disk, never removed): a
+// mask can give a review the base version of a table path, not of anything
+// else, and nothing here can verify a directory outside the table.
 func (s *planState) checkLinks(ctx context.Context, root string) error {
 	paths := make([]string, 0, len(s.links))
 	for p := range s.links {
@@ -36,7 +38,7 @@ func (s *planState) checkLinks(ctx context.Context, root string) error {
 			return err
 		}
 	}
-	return nil
+	return s.checkFileTargets(ctx, root)
 }
 
 // resolveLinkTarget returns the workspace-relative path the link at rel with
@@ -68,24 +70,79 @@ func resolveLinkTarget(rel, text string) (string, error) {
 	return target, nil
 }
 
-// checkLinkTarget refuses a target through another link or changed between
-// the trees. A target outside the table becomes a verified root: the worktree
-// must hold exactly the result tree at and under it.
+// checkLinkTarget refuses a target through another link or into a submodule,
+// accepts one at or under the table, and queues any other for checkFileTargets.
 func (s *planState) checkLinkTarget(link, target string) error {
-	fold := foldComponents(strings.Split(target, "/"))
+	parts := strings.Split(target, "/")
+	fold := foldComponents(parts)
 	for k := range fold {
 		prefix := strings.Join(fold[:k+1], "/")
 		if s.base.isLink(prefix) || s.res.isLink(prefix) {
-			return fmt.Errorf("review instructions: %s is a link through %s, which is itself a symlink", link, strings.Join(strings.Split(target, "/")[:k+1], "/"))
+			return fmt.Errorf("review instructions: %s is a link through %s, which is itself a symlink", link, strings.Join(parts[:k+1], "/"))
+		}
+		if s.base.gitFold[prefix] || s.res.gitFold[prefix] {
+			return fmt.Errorf("review instructions: %s is a link into the submodule %s: a review cannot verify it", link, strings.Join(parts[:k+1], "/"))
 		}
 	}
-	if _, _, ok := matchInstructionPath(strings.Split(target, "/")); ok {
+	if _, _, ok := matchInstructionPath(parts); ok {
 		return nil
 	}
-	f := strings.Join(fold, "/")
-	if !sameEntries(s.base.foldedUnder(f), s.res.foldedUnder(f)) {
-		return fmt.Errorf("review instructions: %s is a link to %s, which this build changed: a review cannot be given the base version of it", link, target)
+	if _, ok := s.targets[target]; !ok {
+		s.targets[target] = link
 	}
-	s.roots[f] = target
+	return nil
+}
+
+// checkFileTargets reads each tree once more, keeping only the queued target
+// paths, and requires every target to be one blob (a regular file) with the
+// same id and mode in both trees. The result's entry is then verified on disk
+// with the table's tracked entries.
+func (s *planState) checkFileTargets(ctx context.Context, root string) error {
+	if len(s.targets) == 0 {
+		return nil
+	}
+	var found [2]map[string]treeEntry
+	var dirs [2]map[string]bool
+	for side, sha := range s.shas {
+		found[side], dirs[side] = map[string]treeEntry{}, map[string]bool{}
+		err := streamTree(ctx, root, sha, func(e treeEntry) error {
+			if _, ok := s.targets[e.path]; ok {
+				found[side][e.path] = e
+				s.retained++
+			}
+			for k := 0; k < len(e.path); k++ {
+				if e.path[k] == '/' {
+					if _, ok := s.targets[e.path[:k]]; ok {
+						dirs[side][e.path[:k]] = true
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	targets := make([]string, 0, len(s.targets))
+	for t := range s.targets {
+		targets = append(targets, t)
+	}
+	sort.Strings(targets)
+	for _, t := range targets {
+		link := s.targets[t]
+		b, hasB := found[0][t]
+		r, hasR := found[1][t]
+		switch {
+		case dirs[0][t] || dirs[1][t]:
+			return fmt.Errorf("review instructions: %s links an instruction path to the directory %s, which is not an instruction path: a review cannot verify it", link, t)
+		case !hasB && !hasR:
+			return fmt.Errorf("review instructions: %s links an instruction path to %s, which neither commit holds", link, t)
+		case !hasB || !hasR || b != r:
+			return fmt.Errorf("review instructions: %s is a link to %s, which this build changed: a review cannot be given the base version of it", link, t)
+		case r.mode != "100644" && r.mode != "100755":
+			return fmt.Errorf("review instructions: %s links an instruction path to %s, which is not a regular file", link, t)
+		}
+		s.tracked = append(s.tracked, r)
+	}
 	return nil
 }
