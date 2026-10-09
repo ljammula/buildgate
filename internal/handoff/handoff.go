@@ -262,13 +262,44 @@ func Save(runDir string, doc Document) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// Sync keeps the run's handoff in step with r, for a caller about to
+// persist r: a run that is quarantined or halted gets the handoff built
+// from r as it is now, and its hash on r; a run in any other state gets a
+// handoff it had removed and its hash cleared. A run first saved halted and
+// later found quarantined, or overridden by an operator, is therefore never
+// left with a record of a state it has since left. On an error r has no
+// handoff hash, which a reader treats as nothing to hand on.
+func Sync(r *run.Run, dataDir string) error {
+	runDir := run.Dir(dataDir, r.ID)
+	if r.State != run.StateQuarantined && r.State != run.StateHalted {
+		if r.HandoffSHA256 == "" {
+			return nil
+		}
+		r.HandoffSHA256 = ""
+		if err := os.Remove(filepath.Join(runDir, FileName)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove handoff: %w", err)
+		}
+		return nil
+	}
+	sum, err := Save(runDir, Build(r, dataDir))
+	if err != nil {
+		r.HandoffSHA256 = ""
+		return err
+	}
+	r.HandoffSHA256 = sum
+	return nil
+}
+
+// maxFileBytes bounds what Load reads: a Document is a few kilobytes.
+const maxFileBytes = 1 << 20
+
 // Load reads the run's Document and checks it against wantSHA256, the hash
 // the run record holds, and wantState, the state the run is in now: a
 // handoff that was changed after the run recorded it, or that describes a
 // state the run has since left, is refused, since it is on its way into a
 // prompt or a decision about a corrective build.
 func Load(runDir, wantSHA256 string, wantState run.State) (Document, error) {
-	data, err := os.ReadFile(filepath.Join(runDir, FileName))
+	data, err := evidence.ReadHostileFile(filepath.Join(runDir, FileName), maxFileBytes)
 	if err != nil {
 		return Document{}, err
 	}

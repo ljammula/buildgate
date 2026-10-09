@@ -333,6 +333,8 @@ export interface Run {
   readonly haltReasonCode: string;
   /** The factory's own triage sentence for a stopped run; empty when none was written. */
   readonly triage: string;
+  /** Non-empty when the run left a handoff: GET /runs/{id}/handoff has it. */
+  readonly handoffSha256: string;
   /**
    * Mirrors run.Run.HaltConfirmed; see runIsTerminal for why a "halted"
    * state alone is not enough to know a run is truly done. Absent on a
@@ -424,6 +426,7 @@ export function decodeRun(o: JsonObject, at: string): Run {
     haltError: optString(o, "halt_error", at),
     haltReasonCode: optString(o, "halt_reason_code", at),
     triage: optString(o, "triage", at),
+    handoffSha256: optString(o, "handoff_sha256", at),
     haltConfirmed: optBoolean(o, "halt_confirmed", at),
     baseSha: reqString(o, "base_sha", at),
     resultSha: stringOrNull(o, "result_sha", at),

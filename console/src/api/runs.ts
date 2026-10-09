@@ -5,6 +5,7 @@ import type { Http, TokenKind } from "@/api/http";
 import { parseSseFrame, watchSse } from "@/api/sse";
 import type { ApiError } from "@/domain/apiError";
 import { asObject } from "@/domain/decode";
+import { type Handoff, decodeHandoff } from "@/domain/handoff";
 import {
   type ProgressEvent,
   type Run,
@@ -85,6 +86,21 @@ export async function getRunDiff(http: Http, id: string, signal?: AbortSignal): 
   const at = "GET /runs/{id}/diff";
   const json = await http.getJson(`/runs/${encodeURIComponent(id)}/diff`, readToken, signal);
   return decodeRunDiff(asObject(json, at), at);
+}
+
+/**
+ * GET /runs/{id}/handoff: what a stopped run left for a later attempt. Throws
+ * an ApiError with status 409 for a run that has none, or whose handoff no
+ * longer matches the run.
+ */
+export async function getRunHandoff(
+  http: Http,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Handoff> {
+  const at = "GET /runs/{id}/handoff";
+  const json = await http.getJson(`/runs/${encodeURIComponent(id)}/handoff`, readToken, signal);
+  return decodeHandoff(asObject(json, at), at);
 }
 
 export interface WatchBackoff {

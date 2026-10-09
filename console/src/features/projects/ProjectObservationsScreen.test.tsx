@@ -22,7 +22,7 @@ test("a project's observations list what its runs showed, with the output as tex
     ),
   ).toBeInTheDocument();
   expect(screen.getByText("Rounds 2 and 3 ended without changing any file.")).toBeInTheDocument();
-  expect(screen.getAllByTestId("observation")).toHaveLength(3);
+  expect(screen.getAllByTestId("observation")).toHaveLength(4);
   // The counts: one row per kind that happened.
   expect(screen.getByText("Finished runs read")).toBeInTheDocument();
   expect(screen.getAllByText("Same failure twice running").length).toBeGreaterThan(0);
