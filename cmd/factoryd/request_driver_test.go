@@ -730,7 +730,7 @@ func TestBuildRequestBuildArgsUsesTicketVerifyCommand(t *testing.T) {
 	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
 	ticket := request.Ticket{Index: 3, SpecPath: specPath}
 
-	args, err := requestdriver.BuildRequestBuildArgs("data", r, ticket, requestdriver.WorkerConfig{})
+	args, err := requestdriver.BuildRequestBuildArgs(withFirstTicketRun(t, r), r, ticket, requestdriver.WorkerConfig{})
 	if err != nil {
 		t.Fatalf("buildRequestBuildArgs: %v", err)
 	}
@@ -850,7 +850,7 @@ func TestBuildRequestBuildArgsEmitsPRBaseForOpenPredecessorPR(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", Tickets: []request.Ticket{c.prevTicket, ticket2}}
-			args, err := requestdriver.BuildRequestBuildArgs("data", r, ticket2, requestdriver.WorkerConfig{})
+			args, err := requestdriver.BuildRequestBuildArgs(withFirstTicketRun(t, r), r, ticket2, requestdriver.WorkerConfig{})
 			if err != nil {
 				t.Fatalf("buildRequestBuildArgs: %v", err)
 			}
@@ -2731,6 +2731,7 @@ func TestBuildRequestBuildArgsWritesCoveredCriteriaFile(t *testing.T) {
 	if err := os.WriteFile(ticketPath, []byte(validBrownfieldTicket("make verify", 1, 3)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	seedFirstTicketRun(t, dataDir, r)
 
 	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{})
 	if err != nil {
@@ -2830,6 +2831,7 @@ func TestBuildRequestBuildArgsBuildSpecCarriesCriteriaText(t *testing.T) {
 	if err := os.WriteFile(ticketPath, []byte(validBrownfieldTicket("make verify", 8, 9)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	seedFirstTicketRun(t, dataDir, r)
 
 	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{})
 	if err != nil {
@@ -4007,4 +4009,29 @@ func TestCapFeedbackCutsOnlyAtALineStartHeading(t *testing.T) {
 	if !strings.HasPrefix(body, heading+"2026 by alice") {
 		t.Errorf("capped feedback starts %.60q, want the real heading", body)
 	}
+}
+
+// withFirstTicketRun is seedFirstTicketRun in a fresh data dir, which it
+// returns.
+func withFirstTicketRun(t *testing.T, r *request.Request) string {
+	t.Helper()
+	dataDir := t.TempDir()
+	seedFirstTicketRun(t, dataDir, r)
+	return dataDir
+}
+
+// seedFirstTicketRun gives r a first ticket whose run, saved in dataDir,
+// recorded the commit the request started from: a later ticket's build
+// arguments are refused without one (the reviews' instruction base). A
+// first ticket r already has keeps its other fields.
+func seedFirstTicketRun(t *testing.T, dataDir string, r *request.Request) {
+	t.Helper()
+	first := &run.Run{ID: r.ID + "-001-first", RequestID: r.ID, BaseSHA: fmt.Sprintf("%040d", 1)}
+	if err := first.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Tickets) == 0 {
+		r.Tickets = []request.Ticket{{Index: 1}}
+	}
+	r.Tickets[0].RunID = first.ID
 }

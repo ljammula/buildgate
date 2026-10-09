@@ -1453,6 +1453,13 @@ func TestInstructionBaseUnknownRefusesTheBuild(t *testing.T) {
 	}
 	r.Tickets[0].RunID = empty.ID
 	want(r.Tickets[1], empty.ID)
+	// Ticket 1's own earlier run with a result but no base: something was
+	// built, and what it was built on is unknown. (With no result either
+	// it built nothing: TestARetryAfterARunThatRecordedNoBaseIsAFirstBuild.)
+	empty.ResultSHA = fmt.Sprintf("%040d", 7)
+	if err := empty.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	want(r.Tickets[0], empty.ID)
 }
 
