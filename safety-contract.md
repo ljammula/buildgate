@@ -421,7 +421,16 @@ requires a new contract review and an updated machine-checkable test.
   copied it; a build can alter its own before that, because the build script
   and the coding agent run as one user in one sandbox and the script has no
   channel to the host that the agent cannot also write (its output file sits
-  in a directory the sandbox writes). The operator surfaces label it "as saved
+  in a directory the sandbox writes). No second user can be given to the
+  agent (the sandbox's seccomp filter denies every set-id system call), a
+  child of the same user can open its parent's descriptors through `/proc`,
+  and every directory the host shares with the sandbox is shared with all of
+  its processes. So the host verifies no saved prompt
+  and attributes no line of the output to the script: a `FACTORY_PROGRESS`
+  line is recorded as the worker's (`source: worker`), with the host's time,
+  in the `round` and `agent` stages only, is shown and never read by a gate,
+  a policy or a state transition, and cannot be recorded as one of the
+  factory's own lines. The operator surfaces label a saved prompt "as saved
   by the build", never "sent". Before a build or a review is launched the host
   removes whatever its session's prompts folder holds, making a folder left
   read-only removable first; a folder that cannot be shown gone fails the step
