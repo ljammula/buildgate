@@ -296,6 +296,18 @@ successive runs is the actual signal this repository's pipeline is
 improving, since code review alone has no natural stopping point (a
 sufficiently adversarial pass always finds one more thing).
 
+`make baseline` (`scripts/baseline.py`) reads the run records under
+`BASELINE_DIRS` (default `~/buildgate` and `data`) and prints a one-shot
+acceptance rate over them, overall and per project, with rounds to green, the
+share of consecutive failed rounds that failed the same way, and the checks
+that quarantined runs. It counts every record it finds, smoke fixtures and
+fixtures built to fail included, so it is the live rate only for the projects
+that are real tickets: read the per-project rows or pass `--project`. It makes
+no model call and gates nothing; run it before and after a change meant to
+move one of those numbers, and compare like with like (its doc comment says
+which same-failure figure is recorded by the build and which is rebuilt from
+older records).
+
 `make bar` (`scripts/bar.sh`) is the separate, standing measurement of the
 `-draft-oracles` default-on bar: `BAR_ROUNDS` (default 2) rounds of
 `scripts/bar/fixtures.json`, each flag off then on, strictly one run at a time

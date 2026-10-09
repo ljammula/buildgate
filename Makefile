@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -270,6 +270,21 @@ proving-ground-results:
 # scripts/tests/test_proving_ground.py.
 proving-ground-test:
 	python3 -m unittest discover -s scripts/tests -p 'test_proving_ground.py' -v
+
+# baseline: what the recorded runs under BASELINE_DIRS say about how builds go:
+# one-shot acceptance rate, rounds to green, the share of consecutive failed
+# rounds with the same failure, and which checks quarantine runs, overall and
+# summarised per project. It counts every record, fixtures included. Reads
+# run records and the build report and progress feed beside them; needs no
+# Docker, factoryd or network and gates nothing. See scripts/baseline.py's
+# own top-of-file comment.
+BASELINE_DIRS ?= $(HOME)/buildgate data
+baseline:
+	python3 scripts/baseline.py $(BASELINE_DIRS)
+
+# baseline-test: offline tests for scripts/baseline.py.
+baseline-test:
+	python3 -m unittest scripts/tests/test_baseline.py -v
 
 # Brings up the local Temporal server (docker-compose.temporal.yml:
 # Postgres-backed, `restart: unless-stopped`) so it's already running by

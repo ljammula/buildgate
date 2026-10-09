@@ -320,6 +320,8 @@ make live-smoke-test     # offline test of live-smoke.sh's result recording
 make proving-ground         # fixture corpus through factoryd, auto-classified (Docker + model); PROVING_GROUND_EXTRA_FIXTURES adds your own
 make proving-ground-results # recorded runs grouped by date/SHA, with the confidence bar
 make proving-ground-test    # offline tests: classifier, fixtures schema, ticket specs
+make baseline            # one-shot acceptance, rounds to green, repeated failures, what quarantines runs, from recorded runs (BASELINE_DIRS)
+make baseline-test       # offline tests for the baseline script
 make bar                 # -draft-oracles default-on bar (hours; human at oracle_review) -- see AGENTS.md
 make bar-test            # offline tests for bar's verdict logic
 ```
