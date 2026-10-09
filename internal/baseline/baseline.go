@@ -176,6 +176,12 @@ func Evaluate(command string, exitCode int, log, firstError, ticket string, crea
 	if b.Passed {
 		return b
 	}
+	if exitCode == run.SetupFailedExitCode {
+		if setup := run.SetupFailedCommand(log); setup != "" {
+			b.SetupFailed = sanitize.Line(setup)
+			return b
+		}
+	}
 	failures := Failures(log)
 	b.FailingCount = len(failures)
 	for _, f := range failures {

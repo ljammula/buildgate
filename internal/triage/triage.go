@@ -531,6 +531,9 @@ func triageLogGate(r *run.Run, check string, suffixReserve int) string {
 	if !ok {
 		return ""
 	}
+	if sentence := setupFailureSentence(check, logPath, exitCode); sentence != "" {
+		return sentence
+	}
 	if marker, wholeLine := extractFailureMarker(logPath); marker != "" {
 		if wholeLine {
 			// An adversarial review of #17's fix found: marker is a
@@ -551,6 +554,20 @@ func triageLogGate(r *run.Run, check string, suffixReserve int) string {
 		return fmt.Sprintf("%s failed: exit %d", check, exitCode)
 	}
 	return ""
+}
+
+// setupFailureSentence words a step that exited run.SetupFailedExitCode: its
+// repository setup command failed, and the step's log names the command. ""
+// for any other exit, or a log that names none.
+func setupFailureSentence(check, logPath string, exitCode int) string {
+	if exitCode != run.SetupFailedExitCode {
+		return ""
+	}
+	cmd := run.SetupFailedCommand(readLogTail(logPath))
+	if cmd == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s failed: setup failed: %s", check, truncateMarker(sanitize.Line(cmd)))
 }
 
 // passedInsideTheBuildSuffix says, for a failed canonical_verify, that the

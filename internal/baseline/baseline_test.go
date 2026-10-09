@@ -235,3 +235,17 @@ func TestANamedTestFailureIsNotExcusedByACreatedPath(t *testing.T) {
 		t.Errorf("halts=%v needs=%q, want a halt", b.Halts(), b.NeedsCreated)
 	}
 }
+
+func TestEvaluateNamesTheSetupCommandThatFailed(t *testing.T) {
+	b := Evaluate("make verify", 95, "x\nbuildgate: setup failed: npm ci\n", "", "", nil)
+	if b.Passed || b.Expected || !b.Halts() || b.SetupFailed != "npm ci" {
+		t.Fatalf("record = %+v, want a halting record naming npm ci", b)
+	}
+	if got, want := b.Summary(), "setup fails on the base commit: npm ci"; got != want {
+		t.Errorf("Summary() = %q, want %q", got, want)
+	}
+	plain := Evaluate("make verify", 95, "no setup line\n", "", "", nil)
+	if plain.SetupFailed != "" {
+		t.Errorf("exit 95 without the setup line named %q", plain.SetupFailed)
+	}
+}

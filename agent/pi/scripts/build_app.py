@@ -394,6 +394,7 @@ def round_blockers(
 	fast_check_ran: bool = False,
 	fast_check_passed: bool | None = None,
 	oracle_passed: bool | None = None,
+	setup_failed: str | None = None,
 ) -> tuple[list[str], ReviewSignal]:
 	blockers: list[str] = []
 	if no_changes:
@@ -414,7 +415,11 @@ def round_blockers(
 		blockers.append(f"model route unreachable ({errored}/{total} assistant turns errored)")
 	if any(trace.get("outcome") == "stall-timeout" or trace.get("stallTimeout") is True for trace in traces):
 		blockers.append("stall-timeout")
-	if fast_check_ran and fast_check_passed is False:
+	if setup_failed is not None:
+		# A repository setup command failed, so neither the fast check nor
+		# canonical verification ran this round.
+		blockers.append(SETUP_FAILED_BLOCKER + setup_failed[:200])
+	elif fast_check_ran and fast_check_passed is False:
 		# The fast check failed, so canonical verification was never
 		# attempted this round (verify_passed is None, its own "not run"
 		# value) -- attribute the blocker to the fast check specifically,
@@ -860,6 +865,56 @@ def _feedback_log(log_dir: Path | None, name: str) -> Path | None:
 
 
 FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG = "fast-check.log", "verify.log", "oracle.log"
+SETUP_LOG = "setup.log"
+# Each repository setup command (`.factory.yml` setup:) gets this long.
+SETUP_TIMEOUT_SECONDS = 10 * 60
+SETUP_FAILED_BLOCKER = "setup command failed: "
+
+
+def run_setup(workspace: Path, commands: list[str], log_dir: Path | None) -> tuple[str | None, str]:
+	"""Runs the repository's setup commands in order, in the workspace and
+	this process's own environment, before the round's checks. Their
+	combined output is saved (redacted, bounded) as setup.log in log_dir.
+	Returns (None, "") when all passed; else the first failing command and
+	the corrective-prompt text for it, and the later commands do not run."""
+	if not commands:
+		return None, ""
+	output = ""
+	failed, header = None, ""
+	for command in commands:
+		output += f"$ {command}\n"
+		try:
+			completed = sh(["sh", "-c", command], cwd=workspace, timeout=SETUP_TIMEOUT_SECONDS)
+		except subprocess.TimeoutExpired as exc:
+			captured = (exc.stdout or b"").decode(errors="ignore") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+			output += f"{captured}\n"
+			failed, header = command, f"[SETUP] `{command}` timed out after {SETUP_TIMEOUT_SECONDS // 60} minutes; the checks were not run this round."
+			break
+		output += f"{completed.stdout}\n{completed.stderr}\n"
+		if completed.returncode != 0:
+			failed, header = command, f"[SETUP] `{command}` failed; the checks were not run this round."
+			break
+	log = _feedback_log(log_dir, SETUP_LOG)
+	if failed is None:
+		if log is not None:
+			try:
+				log.parent.mkdir(parents=True, exist_ok=True)
+				log.write_text(redact(output, FAILURE_LOG_LIMIT) + "\n", encoding="utf-8")
+			except OSError:
+				pass
+		return None, ""
+	return failed, f"{header}\n\n{failure_output(output, log)}"
+
+
+def run_verification_after_setup(workspace: Path, *, setup_commands: list[str], **kwargs):
+	"""run_setup, then run_verification unless setup failed. Returns the
+	failed setup command (None when it passed or there was none) and
+	run_verification's tuple; a failed setup leaves it at the "not run"
+	values with the setup failure as its tail, as a failed fast check does."""
+	failed, tail = run_setup(workspace, setup_commands, kwargs.get("log_dir"))
+	if failed is not None:
+		return failed, (None, None, False, tail, False, None)
+	return None, run_verification(workspace, **kwargs)
 
 
 def run_verification(
@@ -1767,11 +1822,13 @@ def round_changed_files(before: dict[str, str], after: dict[str, str]) -> list[s
 	return sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
 
 
-def round_failure_log(log_dir: Path, workspace: Path) -> str:
+def round_failure_log(log_dir: Path, workspace: Path, setup_failed: bool = False) -> str:
 	"""The workspace-relative path of the log this round's failing command
-	left in log_dir, in the order the checks run, or "" when none did."""
-	for name in (FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG):
-		if (log_dir / name).is_file():
+	left in log_dir, in the order the checks run, or "" when none did.
+	setup.log is a failing command's log only when setup_failed: a passing
+	setup leaves one too."""
+	for name in (SETUP_LOG, FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG):
+		if (log_dir / name).is_file() and not (name == SETUP_LOG and not setup_failed):
 			return (log_dir / name).relative_to(workspace).as_posix()
 	return ""
 
@@ -1894,6 +1951,7 @@ def run_build(
 	review_base_sha: str | None = None,
 	verify_command_override: str | None = None,
 	fast_check_command: str | None = None,
+	setup_commands: list[str] | None = None,
 	spec_acceptance_criteria: Path | None = None,
 	oracle_command: str | None = None,
 	handoff: Path | None = None,
@@ -2044,9 +2102,9 @@ def run_build(
 		# artifacts, so only the agent's (or an interrupted attempt's) work counts.
 		differs_from_base = bool(handoff is not None and round_index == 1 and review_base_sha and workspace_differs_from_base(workspace, review_base_sha))
 
-		verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed = run_verification(
-			workspace, verify_command_override=verify_command_override, fast_check_command=fast_check_command,
-			log_dir=feedback_dir,
+		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
+			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
+			fast_check_command=fast_check_command, log_dir=feedback_dir,
 		)
 		if verify_passed is True:
 			reformatted = gofmt_changed_files(workspace, review_base_sha)
@@ -2097,6 +2155,7 @@ def run_build(
 			fast_check_ran=fast_check_ran,
 			fast_check_passed=fast_check_passed,
 			oracle_passed=oracle_passed,
+			setup_failed=setup_failed,
 		)
 		if timed_out:
 			round_end_detail = "timed out"
@@ -2139,7 +2198,7 @@ def run_build(
 				blockers, "\n".join(part for part in (verify_tail if verify_passed is not True else "", oracle_tail if oracle_passed is False else "") if part),
 				reviewer.detail if reviewer.outcome == "flagged" else "",
 			),
-			failure_log=round_failure_log(feedback_dir, workspace) if blockers else "",
+			failure_log=round_failure_log(feedback_dir, workspace, setup_failed is not None) if blockers else "",
 			agent_notes=round_feedback.agent_notes(
 				no_changes=no_changes, timed_out=timed_out, timeout_minutes=timeout_minutes,
 				returncode=agent_returncode, stderr_tail=redact(parsed.last_turn_error, 1500),
@@ -2262,8 +2321,9 @@ def run_build(
 			timed_out = False
 		duration = time.monotonic() - started
 		fingerprint_after = workspace_fingerprint(workspace)
-		verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed = run_verification(
-			workspace, verify_command_override=verify_command_override, fast_check_command=fast_check_command,
+		_, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
+			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
+			fast_check_command=fast_check_command,
 		)
 		if verify_passed is True:
 			gofmt_changed_files(workspace, review_base_sha)
@@ -2641,6 +2701,14 @@ def main() -> int:
 		"Omitted (the default) preserves prior behavior exactly -- only --verify-command runs.",
 	)
 	parser.add_argument(
+		"--setup-command",
+		action="append",
+		default=None,
+		help="A repository setup command (`.factory.yml` setup:), repeatable. Rerun in order "
+		"in the workspace before each round's fast check and verify; one that fails fails the "
+		"round and the checks are skipped. Omitted (the default) runs nothing extra.",
+	)
+	parser.add_argument(
 		"--spec-acceptance-criteria",
 		type=Path,
 		default=None,
@@ -2717,6 +2785,7 @@ def main() -> int:
 			review_base_sha=args.review_base_sha,
 			verify_command_override=args.verify_command,
 			fast_check_command=args.fast_check_command,
+			setup_commands=args.setup_command,
 			spec_acceptance_criteria=args.spec_acceptance_criteria,
 			oracle_command=args.reference_oracle_command,
 			handoff=args.handoff,

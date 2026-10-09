@@ -438,3 +438,28 @@ func TestRestoringTheBaseCommitRunsNoHookFromTheWorkspace(t *testing.T) {
 		t.Errorf("bom.go = %q, want the committed content restored", content)
 	}
 }
+
+func TestBaselineSetupFailureHaltsNamingTheCommand(t *testing.T) {
+	input := fixtureInput()
+	input.WorkspacePath = baselineRepo(t)
+	_, err, logDir, launches := runBaselineActivity(t, input, "## Goal\nstrip the mark\n", "buildgate: setup failed: npm ci\n", 95, nil)
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != BaselineVerifyFailureType || !appErr.NonRetryable() {
+		t.Fatalf("error = %v, want a non-retryable %s", err, BaselineVerifyFailureType)
+	}
+	for _, want := range []string{"setup fails on the base commit: npm ci", "No model call was made"} {
+		if !strings.Contains(appErr.Message(), want) {
+			t.Errorf("halt message %q lacks %q", appErr.Message(), want)
+		}
+	}
+	if launches != 1 {
+		t.Errorf("launches = %d, want 1", launches)
+	}
+	record := loadBaselineRecord(t, logDir)
+	if !record.Halts() || record.SetupFailed != "npm ci" {
+		t.Errorf("record = %+v", record)
+	}
+	if got := HaltReasonCodeFromError(err); got != run.HaltReasonBaselineVerifyFailed {
+		t.Errorf("halt reason = %q, want %q", got, run.HaltReasonBaselineVerifyFailed)
+	}
+}

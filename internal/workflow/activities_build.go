@@ -73,7 +73,7 @@ func reviewHarnessEnv(input RunWorkflowInput) []string { return harnessEnv(input
 // by the submitting process -- see cmd/factoryd/run_temporal.go) -- empty
 // when roles.execution is unset, which omits --thinking entirely and
 // preserves today's argv byte-for-byte.
-func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string) []string {
+func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string, setup ...string) []string {
 	args := []string{
 		buildAppScript,
 		"--workspace", workspace,
@@ -91,6 +91,9 @@ func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string,
 	}
 	if fastCheckCommand != "" {
 		args = append(args, "--fast-check-command", fastCheckCommand)
+	}
+	for _, c := range setup {
+		args = append(args, "--setup-command", c)
 	}
 	if referenceOracleCommand != "" {
 		// build_app.py's own --reference-oracle-command (Phase 0.5): the
@@ -291,7 +294,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 
 	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
 	// see buildActivityArgs' own doc comment on that parameter for why.
-	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness))
+	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
 	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath, input.BaselineNotePath)
 	args = append(args, resumeFromStateArgs(input)...)
 	buildAppInterpreter := a.buildAppInterpreterFor(input)
@@ -403,6 +406,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: "build", Elapsed: time.Since(buildHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
+			wrapped := wrapWithSetup(input.SetupCommands, append([]string{buildAppInterpreter}, args...))
 			return a.runWithRetriesFn()(
 				ctx,
 				input.WorkspacePath,
@@ -410,15 +414,15 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 				a.buildMaxAttemptsFor(input),
 				beforeAttempt,
 				afterAttempt,
-				buildAppInterpreter,
-				args...,
+				wrapped[0],
+				wrapped[1:]...,
 			)
 		}
 		skills, err := a.boundSkills(relayRoleExecution, input.Skills)
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithSetup(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, input.SetupCommands, buildAppInterpreter, args...)
 	})
 	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
 	result := BuildActivityResult{Result: subResult, Attempts: withInherited(inherited, attempts)}

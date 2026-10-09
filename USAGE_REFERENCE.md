@@ -570,7 +570,8 @@ size budget). No buildgate change or release is needed to add one.
 | A gate that did not run | An accepted run with no result for one of the repository's gates is quarantined naming it (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 
 **Setup and autofix commands.** `setup:` and `autofix:` each list shell
-commands for the repository.
+commands for the repository. `setup:` runs; `autofix:` is accepted and
+recorded only.
 
 | | |
 |---|---|
@@ -578,7 +579,20 @@ commands for the repository.
 | Shape | List of strings, one command per entry |
 | Limits | At most 8 entries per key, 2000 bytes per entry, one line each (no newline, carriage return or NUL byte), none blank |
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is read from |
-| Status | Accepted and recorded (`project_config_sha256` on the run); not run yet |
+| Status | `setup:` runs as below. `autofix:` is accepted and recorded (`project_config_sha256` on the run); not run yet |
+
+Where `setup:` runs, in the order listed, each command by `sh -c` in the
+workspace; the command of the step follows only when all passed:
+
+| | |
+|---|---|
+| Runs before | The baseline verify; the build (once before it starts, and again before each round's fast check and verify, output in the round's `setup.log`); canonical verify; the full suite; each named and repo gate; the oracle canary; the reruns after an oracle commit |
+| Never runs in | Review sandboxes (they hold a model route); drafting and planning jobs |
+| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command gets 10 minutes in a round |
+| Cost | It runs once per sandbox: a run with N gates runs it at least N+1 more times. Nothing is cached between sandboxes |
+| Network | None, except the registry proxy the step already has |
+| Files it writes | Must be gitignored: untracked files are committed with the build and judged by `diff_scope` |
+| A step that did not run it | An accepted run whose canonical verify did not carry the commands is quarantined (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 
 **Named gates.** `lint_command`/`security_command`/`unit_test_command`/
 `integration_test_command`/`reference_oracle_command` (flags:

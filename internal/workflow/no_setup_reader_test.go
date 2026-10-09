@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// Setup and autofix commands are carried on RunWorkflowInput and nothing
-// runs them yet. The change that makes an Activity read them deletes this
-// test deliberately.
-func TestNoActivityReadsSetupOrAutofixYet(t *testing.T) {
+// Autofix commands are carried on RunWorkflowInput and nothing runs them
+// yet. The change that makes an Activity read them deletes this test
+// deliberately.
+func TestNoActivityReadsAutofixYet(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -23,9 +23,9 @@ func TestNoActivityReadsSetupOrAutofixYet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, id := range []string{"SetupCommands", "AutofixCommands"} {
+		for _, id := range []string{"AutofixCommands"} {
 			if strings.Contains(string(data), id) {
-				t.Errorf("%s reads %s: nothing may run setup or autofix commands yet", f, id)
+				t.Errorf("%s reads %s: nothing may run autofix commands yet", f, id)
 			}
 		}
 	}

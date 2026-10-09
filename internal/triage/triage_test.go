@@ -949,3 +949,27 @@ func TestConformityOracleHintFitsTriageCap(t *testing.T) {
 		t.Fatalf("worst-case oracle hint is %d bytes, over the %d-byte triage cap: %q", len(line), maxTriageSentenceLen, line)
 	}
 }
+
+// A step that exited 95 with the setup line in its log is worded as a setup
+// failure naming the command; the same exit with no such line is an ordinary
+// exit sentence.
+func TestTriageLogGateNamesTheSetupCommandThatFailed(t *testing.T) {
+	dataDir := t.TempDir()
+	id := "run1"
+	writeRunFile(t, dataDir, id, "verify.log", "installing\nbuildgate: setup failed: npm ci\n")
+	writeRunFile(t, dataDir, id, "other.log", "boom\n")
+	r := &run.Run{
+		ID:    id,
+		State: run.StateQuarantined,
+		Attempts: []run.Attempt{
+			{Kind: "verify", ExitCode: 95, LogPath: filepath.Join(run.Dir(dataDir, id), "verify.log")},
+			{Kind: "lint", ExitCode: 95, LogPath: filepath.Join(run.Dir(dataDir, id), "other.log")},
+		},
+	}
+	if got, want := triageLogGate(r, "canonical_verify", 0), "canonical_verify failed: setup failed: npm ci"; got != want {
+		t.Errorf("triageLogGate() = %q, want %q", got, want)
+	}
+	if got, want := triageLogGate(r, "lint", 0), "lint failed: exit 95"; got != want {
+		t.Errorf("a 95 with no setup line: triageLogGate() = %q, want %q", got, want)
+	}
+}

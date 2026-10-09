@@ -72,6 +72,15 @@ const sandboxAttemptTeardownMargin = 10 * time.Second
 // that abort the loop), per-attempt daemon-heartbeat divergence checks,
 // and checkpoint-relative staging specific to this loop; its lifecycle ordering is kept in step with cmd/factoryd by sandbox.RegistryProxyLifecycle.
 func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflowInput, logPath func(int) string, maxAttempts int, beforeAttempt func(int) error, afterAttempt func(int, runner.Result, error) error, relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
+	return a.runSandboxWithSetup(ctx, input, logPath, maxAttempts, beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, workerEnv, skills, nil, interpreter, args...)
+}
+
+// runSandboxWithSetup is runSandboxWithRetries for a launch whose command
+// is an interpreter and arguments (the build), with the repository's setup
+// commands to run first. They wrap the command after the arguments are
+// translated, so the build script is staged as before; a verify-class launch
+// already carries its setup in its argv (stepCommand) and passes nil.
+func (a *Activities) runSandboxWithSetup(ctx context.Context, input RunWorkflowInput, logPath func(int) string, maxAttempts int, beforeAttempt func(int) error, afterAttempt func(int, runner.Result, error) error, relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, setup []string, interpreter string, args ...string) (result runner.Result, err error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -287,7 +296,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	}
 	last := runner.Result{ExitCode: -1}
 	var lastErr error
-	command := append([]string{interpreter}, translated...)
+	command := wrapWithSetup(setup, append([]string{interpreter}, translated...))
 	// modelHostLock serializes this whole model-bound Activity invocation
 	// (every attempt below) against every other factoryd run -- any
 	// repository, any -data-dir, any process on this machine, any run -- that targets the same single-instance model upstream.

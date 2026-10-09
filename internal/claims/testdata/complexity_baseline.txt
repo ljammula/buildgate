@@ -73,7 +73,7 @@
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 45 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
-94 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
+94 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithSetup
 41 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
 50 internal/workflow/activity_records.go RecoverAttemptsFromCheckpointDir
 46 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
