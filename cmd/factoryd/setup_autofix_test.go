@@ -115,6 +115,10 @@ func TestRunRecordHasProjectConfigSHA256(t *testing.T) {
 	if head := headOf(t, workspace); rec.ProjectConfigCommitSHA != head {
 		t.Errorf("project_config_commit_sha = %q, want HEAD %q", rec.ProjectConfigCommitSHA, head)
 	}
+	// What a reclaim of this run would check its result against.
+	if want := []string{"npm ci", "make generate"}; !reflect.DeepEqual(rec.SetupCommands, want) {
+		t.Errorf("setup_commands on the record = %q, want %q", rec.SetupCommands, want)
+	}
 	input := startedRunWorkflowInput(t, address, runID)
 	if got := fmt.Sprint(input["setup_commands"]); got != "[npm ci make generate]" {
 		t.Errorf("setup_commands = %s", got)

@@ -175,6 +175,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 					return alreadyReconciledResultError(fresh)
 				}
 				stampRouteSkips(giveUpResult.Attempts, opts.Slice)
+				giveUpResult = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, giveUpResult)
 				return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, ownerTaskQueue, giveUpResult, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, true)
 			})
 		}
@@ -313,8 +314,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 			return alreadyReconciledResultError(fresh)
 		}
 		stampRouteSkips(result.Attempts, opts.Slice)
-		result = requireRepoGateResults(opts.GateCommands, result)
-		result = requireSetupRan(opts.SetupCommands, result)
+		result = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, result)
 		return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, ownerTaskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, true)
 	})
 }

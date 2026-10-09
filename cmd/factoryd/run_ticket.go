@@ -1953,6 +1953,10 @@ func (tr *ticketRun) createRunRecord() error {
 		ProjectConfigSHA256: tr.projectConfigSHA256,
 		// The commit that file (or its absence) was read from.
 		ProjectConfigCommitSHA: tr.projectConfigCommitSHA,
+		// What a later reclaim of this run checks its result against
+		// (requireCurrentWorker).
+		RepoGateCommands: repoGateCommands(tr.gateCommands),
+		SetupCommands:    tr.setup,
 		// Recorded now as well as by the adoption Activity: this process
 		// saves its own copy of the record, which would otherwise overwrite
 		// the Activity's write.
