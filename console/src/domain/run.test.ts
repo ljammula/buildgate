@@ -140,6 +140,7 @@ describe("fixtures", () => {
     expect(a.relayWorkerModelId).toBe("every-field relay_worker_model_id");
     expect(a.relayReasoningEffort).toBe("every-field relay_reasoning_effort");
     expect(a.relayReasoningEffortAnomaly).toBe(true);
+    expect(a.reviewMaskedPaths).toEqual(["every-field review_masked_paths"]);
 
     const g = r.gateResults[0]!;
     expect(g).toEqual({

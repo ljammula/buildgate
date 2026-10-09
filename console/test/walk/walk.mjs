@@ -278,6 +278,12 @@ step("run-quarantined", async () => {
     await card.getByText(failed.check, { exact: true }).waitFor();
     if (failed.finding) await card.getByText(failed.finding, { exact: true }).waitFor();
   }
+  // The agent's own notes, from the same record, last in the card.
+  const notes = card.getByTestId("run-handoff-notes");
+  for (const items of Object.values(handoff.agent_notes ?? {})) {
+    for (const item of items) await notes.getByText(item, { exact: true }).waitFor();
+  }
+  check(handoff.agent_notes !== undefined, "the seeded handoff carries no agent notes");
   await heading("Operator override").waitFor();
   await button("Override run").waitFor();
   check(

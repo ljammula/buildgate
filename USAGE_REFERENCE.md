@@ -206,7 +206,7 @@ The build agent's own notes for the next attempt (the last section of
 | The turn | One reply in the build's own session, 180 s at most, asked for five fixed headings and no file change or command; `changed_files_during_notes` is set in `notes_turn` when the tree changed anyway |
 | Caps | Reply cut to 12,000 bytes of UTF-8 in the session; at most 16 KiB retained; at most 8 items per heading, each one line of at most 300 characters, cleaned like every value from a build; the notes section of the record at most 3000 bytes, last, and the first thing the size cut drops |
 | Stored | `.pi-build-session/handoff-notes.md` in the worktree, copied by the host to `agent-notes.md` in the run's directory before the session folder is removed, and parsed into `agent_notes` in `handoff.json` |
-| Readable by | The operator (`GET /runs/{id}/handoff`) and a later build of the same ticket (its first prompt). Not a review, a planner, a pull request, a notification, the progress feed, a build log, `run.json` or an MCP tool |
+| Readable by | The operator (`GET /runs/{id}/handoff`, which the console's run page shows last under **What this attempt left**, as plain text) and a later build of the same ticket (its first prompt). Not a review, a planner, a pull request, a notification, the progress feed, a build log, `run.json` or an MCP tool |
 
 **Saved prompts.** The text of each prompt a script hands to a coding agent,
 for the operator to read:
@@ -1347,7 +1347,7 @@ and no handoff or later build is told.
 | Evidence field on a review attempt | Holds |
 |---|---|
 | `review_instructions_sha256` | SHA-256 of the snapshot of base-commit instruction files the review read |
-| `review_masked_paths` | The instruction paths mounted from the base commit (at most 64, then `... and N more`) |
+| `review_masked_paths` | The instruction paths mounted from the base commit (at most 64, then `... and N more`). The console's run page lists them on the review attempt ("This review read these files as they were before the build"), folded when there are more than four |
 | `review_removed_paths` | The instruction-named paths removed from the worktree before the review (same cap) |
 
 The list of instruction paths is a table in the code: a harness that loads a
