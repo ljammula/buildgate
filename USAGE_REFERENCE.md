@@ -190,6 +190,18 @@ halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
 
+The build agent's own notes for the next attempt (the last section of
+`earlier-attempt.md`, labelled as the agent's unverified view):
+
+| | |
+|---|---|
+| Runs when | A build ends without passing, after at least one round in the process, its last turn finished cleanly (no timeout, exit 0, no error, the model route reachable), the harness can continue the session (Copilot: its session id was stored), no `--sonnet-fallback` or `--spec-acceptance-criteria`, and at least 300 seconds of the build's time budget are left (`FACTORY_BUILD_TIME_BUDGET_SECONDS`, the launch's timeout, set for the build launch only; the script measures its own elapsed time against it, not the container's clock) |
+| Skipped when | Any of the above fails, or the turn itself fails (`notes_turn failed: <exception class>`, the partial file removed, the build unaffected); `BUILD_EVIDENCE.json`'s `notes_turn` says `ran`, `skipped_reason`, `duration_s` and the turn's usage |
+| The turn | One reply in the build's own session, 180 s at most, asked for five fixed headings and no file change or command; `changed_files_during_notes` is set in `notes_turn` when the tree changed anyway |
+| Caps | Reply cut to 12,000 bytes of UTF-8 in the session; at most 16 KiB retained; at most 8 items per heading, each one line of at most 300 characters, cleaned like every value from a build; the notes section of the record at most 3000 bytes, last, and the first thing the size cut drops |
+| Stored | `.pi-build-session/handoff-notes.md` in the worktree, copied by the host to `agent-notes.md` in the run's directory before the session folder is removed, and parsed into `agent_notes` in `handoff.json` |
+| Readable by | The operator (`GET /runs/{id}/handoff`) and a later build of the same ticket (its first prompt). Not a review, a planner, a pull request, a notification, the progress feed, a build log, `run.json` or an MCP tool |
+
 **A retry's rebuild.** `factoryd retry <id>` rebuilds the quarantined ticket
 as a fresh run with every gate again. Where it starts and what it is told:
 

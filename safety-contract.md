@@ -276,7 +276,7 @@ follow it, and no means to pass a gate.
 | T-13 | Target-controlled Compose content escapes the sidecar boundary or misroutes the worker | Parse only allow-listed fields; allow only Linux platforms; ignore fixed container names; materialize relative binds from the base commit as read-only regular files/directories; attach sidecars only to the factory-owned internal network, which the worker reaches by address through the supervisor and never joins; validate and inject operator worker endpoints without protected-key overrides | Reject the entire Compose configuration before build or worker launch and quarantine | enforced in bounded slices |
 | T-14 | The sandbox runtime restarts mid-run and starts a worker's command a second time | Host control refuses to stop or restart the gateway while a request or sandbox is active; a per-launch guard lets a worker command run once, and a second start exits before touching the worktree (SC-017) | The step is recorded lost; a lost build keeps its worktree and waits in `resume_review` | partial |
 | T-15 | The gateway, a supervisor or the meter is compromised | OpenShell images pinned by digest; mTLS for gateway clients; sandbox JWT; `factoryd doctor` checks the pinned images, the gateway's TLS and mTLS settings, and both services' health | The operator stops the gateway (`factoryd stop -all`) | partial |
-| T-16 | A build, or the repository it builds, plants text in failing output, a file name or a reviewer's finding to steer the next attempt or its reviewer | The record of an earlier attempt is built by the factory from the run record; every value from a build or a reviewer is one line, length-capped, cleaned and quoted as data; it goes only to a build's first prompt, never into a spec or a review (SC-018); the hash and state are checked before use | The corrective build is a new run whose result every gate and an independent review judge against the unchanged spec; its record and the handoff it was given are kept in the run and request directories | partial |
+| T-16 | A build, or the repository it builds, plants text in failing output, a file name or a reviewer's finding, or its own notes, to steer the next attempt or its reviewer | The record of an earlier attempt is built by the factory from the run record; every value from a build or a reviewer is one line, length-capped, cleaned and quoted as data; it goes only to a build's first prompt, never into a spec or a review (SC-018); the hash and state are checked before use | The corrective build is a new run whose result every gate and an independent review judge against the unchanged spec; its record and the handoff it was given are kept in the run and request directories | partial |
 
 ## Safety invariants
 
@@ -391,19 +391,28 @@ requires a new contract review and an updated machine-checkable test.
   carries nothing a reference oracle asserted: that gate gets no finding,
   no other finding names an oracle, and the operator's triage sentence is
   not copied in. It is used only when the file's hash is the one the run
-  recorded and it describes the state the run is in now. It reaches a
-  model in one way: rendered as text and staged read-only for a later
+  recorded and it describes the state the run is in now. It, and the
+  notes in it, reach a model in one way: rendered as text and staged read-only for a later
   build attempt of the same ticket (`-earlier-attempt`, the build script's
   `--earlier-attempt`), which puts it in that build's first prompt. It is
   never part of a spec, never an input of a review, verify or gate step,
   and never given to a planner, another ticket or a pull request. It is
   not left where a later step of the same run works: the build script
-  never writes it into its round-state file, and the build's harness
+  never writes it into its round-state file, nor the notes into its
+  round-state, evidence or report files, its output or the progress feed,
+  and the build's harness
   session, which holds its prompts, is removed from the worktree when the
   build step returns (its rounds' saved output is copied to the run
   directory first); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it. What the build agent itself chooses to write into the
   workspace is an ordinary part of its diff, judged like the rest.
+  A build that ends without passing is asked once, in its own session, for
+  notes under five fixed headings. The factory copies the reply out of the
+  session folder before removing it, splits it into one-line items cleaned and
+  capped like every other value, and stores them in the handoff apart from its
+  own facts and after them. They are labelled the agent's view, never decide a
+  bin, are absent from the run record and every MCP tool, and are otherwise
+  readable only through the operator's own handoff route.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.

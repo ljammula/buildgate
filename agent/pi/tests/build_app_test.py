@@ -2798,6 +2798,246 @@ class RedactAndSingleLineTests(unittest.TestCase):
 		self.assertEqual(got, "a b c")
 
 
+
+NOTES_MARKER = "NOTES-MARKER-9d41"
+NOTES_REPLY = f"What I did\n- {NOTES_MARKER}\nMy current hypothesis\n- the cache key is wrong\n"
+
+
+def assistant_stdout(text: str, **message) -> str:
+	return json.dumps({"type": "message_end", "message": {"role": "assistant", "content": text, **message}})
+
+
+class NotesTurnTests(unittest.TestCase):
+	"""The one extra turn a build that ends without passing gets, in its own
+	session, for notes to whoever attempts the ticket next."""
+
+	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, criteria=False, sonnet=False, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			criteria_path = Path(spec_dir) / "criteria.txt"
+			criteria_path.write_text("1. it works\n")
+			if round_result is None:
+				round_result = (subprocess.CompletedProcess([], 0, pi_output("clean" if passing else "flagged", "x"), ""), False)
+			notes_result = (subprocess.CompletedProcess([], 0, assistant_stdout(reply), ""), False)
+			calls = []
+			states = []
+			real_write = build_app.write_round_state
+
+			def capture(workspace, **kwargs):
+				real_write(workspace, **kwargs)
+				states.append((workspace / build_app.ROUND_STATE_FILE).read_text())
+
+			def stream(command, *, cwd=None, timeout=None, env=None, on_event=None):
+				calls.append({"command": command, "timeout": timeout, "on_event": on_event})
+				if len(calls) == 1:
+					(root / "cache.go").write_text("one\n")
+					completed, timed_out = round_result
+				else:
+					if notes_edit:
+						(root / notes_edit).write_text("x\n")
+					completed, timed_out = notes_result
+				if on_event is not None and completed is not None:
+					for line in (completed.stdout or "").splitlines():
+						on_event(line)
+				return completed, timed_out
+
+			environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+			if budget is not None:
+				environ[build_app.BUILD_TIME_BUDGET_ENV] = str(budget)
+			extra = {}
+			if adapter is not None:
+				extra["adapter"] = adapter
+			out, err = io.StringIO(), io.StringIO()
+			with (
+				mock.patch.dict(os.environ, environ, clear=True),
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", passing, False, "" if passing else "boom", False, None)),
+				mock.patch.object(build_app, "write_round_state", side_effect=capture),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
+				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
+				mock.patch.object(build_app, "_process_started", 0.0),
+				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 0, "", "")) if sonnet else contextlib.nullcontext(),
+				contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=1, timeout_minutes=1, sonnet_fallback=sonnet,
+					spec_acceptance_criteria=criteria_path if criteria else None, **extra,
+				)
+				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
+				return {
+					"result": result, "calls": calls, "states": states, "out": out.getvalue(), "err": err.getvalue(),
+					"notes": notes_file.read_text() if notes_file.exists() else None,
+					"evidence": build_app.write_evidence_json(result).read_text(),
+					"report": build_app.write_report(result).read_text(),
+					"files": {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() and ".git" not in p.parts},
+				}
+
+	def test_notes_turn_runs_once_in_the_same_session_when_the_build_never_passed(self):
+		ran = self._run()
+		self.assertEqual(len(ran["calls"]), 2)
+		notes_call = ran["calls"][-1]
+		self.assertIn("--continue", notes_call["command"])
+		self.assertEqual(notes_call["command"][-1], build_app.HANDOFF_NOTES_PROMPT)
+		self.assertTrue(build_app.HANDOFF_NOTES_PROMPT.startswith("This build is ending without passing its checks. Do not change any file and do not run any command."))
+		self.assertEqual(notes_call["timeout"], 180)
+		self.assertEqual(ran["notes"], NOTES_REPLY)
+		self.assertEqual(ran["result"].notes_turn["ran"], True)
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "")
+		self.assertNotIn("changed_files_during_notes", ran["result"].notes_turn)
+		self.assertEqual(json.loads(ran["evidence"])["notes_turn"]["ran"], True)
+		self.assertEqual(json.loads(ran["evidence"])["schema_version"], 2)
+
+	def test_notes_are_never_written_outside_the_session_folder(self):
+		ran = self._run()
+		self.assertIsNotNone(ran["notes"])
+		for name, text in (("evidence", ran["evidence"]), ("report", ran["report"]), ("stdout", ran["out"]), ("stderr", ran["err"])):
+			self.assertNotIn(NOTES_MARKER, text, name)
+		for state in ran["states"]:
+			self.assertNotIn(NOTES_MARKER, state)
+		self.assertIn(f".pi-build-session/{build_app.HANDOFF_NOTES_FILE}", ran["files"])
+		self.assertIsNone(ran["calls"][-1]["on_event"]("anything"))
+		for progress in (line for line in ran["out"].splitlines() if line.startswith("FACTORY_PROGRESS")):
+			self.assertNotIn(NOTES_MARKER, progress)
+
+	def test_a_notes_turn_that_changes_a_file_is_recorded(self):
+		ran = self._run(notes_edit="late.go")
+		self.assertTrue(ran["result"].notes_turn["changed_files_during_notes"])
+
+	def test_a_stale_notes_file_is_removed_when_a_build_starts(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			stale = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
+			stale.parent.mkdir()
+			stale.write_text("stale")
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			with (
+				mock.patch.dict(os.environ, {build_app.BUILD_TIME_BUDGET_ENV: "1"}),
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "boom", False, None)),
+				mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, pi_output("flagged", "x"), ""), False)),
+				contextlib.redirect_stdout(io.StringIO()),
+			):
+				build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1)
+			self.assertFalse(stale.exists())
+
+	def test_notes_turn_is_skipped(self):
+		failed = (subprocess.CompletedProcess([], 1, "", ""), False)
+		errored = (subprocess.CompletedProcess([], 0, assistant_stdout("", stopReason="error", errorMessage="boom"), ""), False)
+		cases = {
+			"build passed": (dict(passing=True), "build passed"),
+			"last turn timed out": (dict(round_result=(None, True)), "last turn timed out"),
+			"last turn exited non-zero": (dict(round_result=failed), "last turn exited non-zero"),
+			"last turn errored": (dict(round_result=errored), "last turn errored"),
+			"no budget": (dict(budget=None), "no build time budget"),
+			"unparsable budget": (dict(budget="soon"), "no build time budget"),
+			"299 s left": (dict(budget=1000, elapsed=701), "under 300 s of the build time budget left"),
+			"spec acceptance criteria": (dict(criteria=True), "spec acceptance criteria given"),
+			"sonnet fallback": (dict(sonnet=True), "sonnet fallback enabled"),
+		}
+		for name, (kwargs, reason) in cases.items():
+			with self.subTest(name):
+				ran = self._run(**kwargs)
+				self.assertEqual(ran["result"].notes_turn["ran"], False)
+				self.assertEqual(ran["result"].notes_turn["skipped_reason"], reason)
+				self.assertEqual(json.loads(ran["evidence"])["notes_turn"]["skipped_reason"], reason)
+				self.assertIsNone(ran["notes"])
+				self.assertEqual(len(ran["calls"]), 1)
+
+	def test_notes_turn_runs_with_exactly_300_s_left(self):
+		ran = self._run(budget=1000, elapsed=700)
+		self.assertTrue(ran["result"].notes_turn["ran"])
+		self.assertEqual(ran["notes"], NOTES_REPLY)
+
+	def test_notes_turn_is_skipped_when_the_session_cannot_be_continued(self):
+		class Stuck:
+			def __init__(self, inner):
+				self._inner = inner
+
+			def __getattr__(self, name):
+				return getattr(self._inner, name)
+
+			def can_continue_session(self, session_dir):
+				return False
+
+		ran = self._run(adapter=Stuck(build_app.DEFAULT_ADAPTER))
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "session cannot be continued")
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(len(ran["calls"]), 1)
+
+	def test_notes_turn_is_skipped_when_the_model_route_is_unreachable(self):
+		unreachable = (subprocess.CompletedProcess([], 0, "", ""), False)
+		with mock.patch.object(build_app.DEFAULT_ADAPTER.__class__, "parse", autospec=True) as parse:
+			parse.return_value = mock.Mock(traces=[], turn_errors=(2, 2), route_errors=["no route"], last_turn_error="", usage={}, final_text="")
+			ran = self._run(round_result=unreachable)
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "model route unreachable")
+		self.assertIsNone(ran["notes"])
+
+	def test_notes_turn_is_skipped_when_no_round_ran_in_this_process(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			with (
+				mock.patch.dict(os.environ, {build_app.BUILD_TIME_BUDGET_ENV: "3600"}),
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_agent_streaming") as stream,
+				contextlib.redirect_stdout(io.StringIO()),
+			):
+				result = build_app.run_build(root, spec, max_rounds=0, timeout_minutes=1)
+			stream.assert_not_called()
+			self.assertEqual(result.notes_turn["skipped_reason"], "no round ran in this process")
+
+	def test_a_lone_surrogate_in_the_reply_is_written_replaced_and_the_build_reports(self):
+		ran = self._run(reply="What I did\n- bad \ud83d here\n")
+		self.assertIsNotNone(ran["notes"])
+		self.assertIn("bad", ran["notes"])
+		self.assertTrue(ran["result"].notes_turn["ran"])
+		self.assertTrue(ran["evidence"])
+		self.assertTrue(ran["report"])
+
+	def test_a_failing_parse_leaves_no_file_and_a_normal_build_result(self):
+		real = build_app.DEFAULT_ADAPTER
+
+		class Raising:
+			def __getattr__(self, name):
+				return getattr(real, name)
+
+			def parse(self, stdout):
+				parsed = real.parse(stdout)
+				if stdout and "What I did" in stdout:
+					raise ValueError(f"cannot parse {NOTES_MARKER}")
+				return parsed
+
+		ran = self._run(adapter=Raising())
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(ran["result"].notes_turn["ran"], False)
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "notes turn failed: ValueError")
+		self.assertNotIn(NOTES_MARKER, ran["evidence"])
+		self.assertEqual(ran["result"].succeeded, False)
+		self.assertTrue(ran["report"])
+
+	def test_the_reply_is_cut_to_12000_bytes_on_a_character_boundary(self):
+		ran = self._run(reply="What I did\n- " + "\u20ac" * 6000 + "\n")
+		data = ran["notes"].encode("utf-8")
+		self.assertLessEqual(len(data), 12_000 + 1)
+		self.assertGreater(len(data), 11_000)
+		self.assertEqual(build_app.HANDOFF_NOTES_MAX_BYTES, 12_000)
+		self.assertEqual(build_app.cut_utf8("\u20ac" * 5, 7), "\u20ac\u20ac")
+
+	def test_a_copilot_session_without_its_id_is_not_continued(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			adapter = harness_adapters.get("copilot")
+			self.assertFalse(adapter.can_continue_session(Path(tmp)))
+			(Path(tmp) / adapter.session_id_file).write_text("abc\n")
+			self.assertTrue(adapter.can_continue_session(Path(tmp)))
+
+
 if __name__ == "__main__":
 	unittest.main()
 

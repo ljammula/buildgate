@@ -515,6 +515,8 @@ class BuildResult:
 	conformity_policy: str = "required"
 	rounds: list[Round] = field(default_factory=list)
 	succeeded: bool = False
+	# What the notes turn did, for BUILD_EVIDENCE.json: never its reply.
+	notes_turn: dict = field(default_factory=lambda: {"ran": False, "skipped_reason": "not reached", "duration_s": 0.0})
 	stopped_reason: str = ""
 	# Recorded so BUILD_EVIDENCE.json/BUILD_REPORT.md show what repository
 	# guidance the agent actually saw, not just whether a prompt happened
@@ -1026,6 +1028,27 @@ CORRECTIVE_CLOSING = prompt_templates.load_text("build_corrective.closing")
 CORRECTIVE_HISTORY = prompt_templates.load("build_corrective.history", ("history",))
 CORRECTIVE_LOG = prompt_templates.load("build_corrective.log", ("failure_log", "failing"))
 CORRECTIVE_AGENT = prompt_templates.load("build_corrective.agent", ("agent_notes",))
+
+# The one extra turn a build that ends without passing gets, in its own
+# session, to leave notes for whoever attempts the ticket next. The reply is
+# written only to <session dir>/HANDOFF_NOTES_FILE: the session folder is
+# copied out by the host and removed from the worktree before any later step
+# (SC-018), so nothing else here may carry the text.
+HANDOFF_NOTES_PROMPT = prompt_templates.load_text("build_handoff_notes")
+HANDOFF_NOTES_FILE = "handoff-notes.md"
+HANDOFF_NOTES_TIMEOUT_S = 180
+HANDOFF_NOTES_MIN_REMAINING_S = 300
+# At most this many bytes of UTF-8, cut on a character boundary. The host
+# keeps a file of up to 16 KiB (evidence.maxAgentNotesBytes), so a larger one
+# was not written by this script.
+HANDOFF_NOTES_MAX_BYTES = 12_000
+# The launch's timeout in seconds, set by the host for the build launch only.
+# The container's wall clock is not consulted: the script measures its own
+# elapsed time on the monotonic clock against this budget.
+BUILD_TIME_BUDGET_ENV = "FACTORY_BUILD_TIME_BUDGET_SECONDS"
+_monotonic = time.monotonic
+# Set first thing in main(); run_build falls back to its own entry.
+_process_started: float | None = None
 CORRECTIVE_STUCK = prompt_templates.load("build_corrective.stuck", ("streak",))
 ROUND_CHECKLIST = prompt_templates.load("build_round_checklist", ("verify",))
 ESCALATION_PROMPT = prompt_templates.load("build_escalation", ("spec_text", "corrective"))
@@ -1759,6 +1782,93 @@ def round_history(rounds: list[Round]) -> str:
 	])
 
 
+def notes_turn_skip_reason(
+	*, result: "BuildResult", last_turn: dict | None, sonnet_fallback: bool, criteria_given: bool,
+	adapter, session_dir: Path, elapsed: float,
+) -> str:
+	"""Why the notes turn does not run, or "" when it does. It runs only for a
+	build that never passed, whose last agent turn finished cleanly in a
+	session that can be continued, with room left in the launch's time budget."""
+	if result.succeeded:
+		return "build passed"
+	if last_turn is None:
+		return "no round ran in this process"
+	if sonnet_fallback:
+		return "sonnet fallback enabled"
+	if criteria_given:
+		return "spec acceptance criteria given"
+	if last_turn["timed_out"]:
+		return "last turn timed out"
+	if last_turn["returncode"] != 0:
+		return "last turn exited non-zero"
+	if last_turn["errored"]:
+		return "last turn errored"
+	if last_turn["all_errored"] or result.stopped_reason.startswith("model route unreachable"):
+		return "model route unreachable"
+	if not adapter.can_continue_session(session_dir):
+		return "session cannot be continued"
+	try:
+		budget = int(os.environ.get(BUILD_TIME_BUDGET_ENV, ""))
+	except ValueError:
+		return "no build time budget"
+	if budget - elapsed < HANDOFF_NOTES_MIN_REMAINING_S:
+		return f"under {HANDOFF_NOTES_MIN_REMAINING_S} s of the build time budget left"
+	return ""
+
+
+def cut_utf8(text: str, limit: int) -> str:
+	"""text cut to at most limit bytes of UTF-8, on a character boundary."""
+	return text.encode("utf-8", errors="replace")[:limit].decode("utf-8", errors="ignore")
+
+
+def run_notes_turn(workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None) -> dict:
+	"""Asks the build agent, once, in its own session, for notes. Returns the
+	record for BUILD_EVIDENCE.json (no text from the reply). The reply goes,
+	redacted and cut, to session_dir/HANDOFF_NOTES_FILE and nowhere else: not
+	printed, not in the progress feed (the event callback is a no-op), not on
+	a round. The notes are an aid: whatever goes wrong inside the turn is
+	recorded by its exception class name alone (a message may hold the
+	reply), the partial file is removed, and the build goes on."""
+	record: dict = {"ran": True, "skipped_reason": "", "duration_s": 0.0}
+	started = _monotonic()
+	notes_path = session_dir / HANDOFF_NOTES_FILE
+	try:
+		return _notes_turn(workspace, notes_path, session_dir, adapter, env, thinking, record, started)
+	except Exception as exc:
+		try:
+			notes_path.unlink(missing_ok=True)
+		except OSError:
+			pass
+		record.update(ran=False, skipped_reason=f"notes turn failed: {type(exc).__name__}", duration_s=_monotonic() - started)
+		record.pop("usage", None)
+		return record
+
+
+def _notes_turn(workspace: Path, notes_path: Path, session_dir: Path, adapter, env: dict, thinking: str | None, record: dict, started: float) -> dict:
+	command = adapter.invocation(
+		workspace, prompt=HANDOFF_NOTES_PROMPT, session_dir=session_dir,
+		continue_session=True, thinking=thinking, load_repo_skills=False,
+	)
+	fingerprint_before = workspace_fingerprint(workspace)
+	completed, timed_out = run_agent_streaming(
+		command, cwd=workspace, timeout=HANDOFF_NOTES_TIMEOUT_S, env=env, on_event=lambda line: None,
+	)
+	fingerprint_after = workspace_fingerprint(workspace)
+	record["duration_s"] = _monotonic() - started
+	parsed = adapter.parse(completed.stdout if completed else "")
+	record["usage"] = parsed.usage
+	if fingerprint_before != fingerprint_after:
+		record["changed_files_during_notes"] = True
+	text = parsed.final_text.strip()
+	if timed_out or completed is None or completed.returncode != 0 or parsed.last_turn_error or not text:
+		return record
+	notes_path.unlink(missing_ok=True)
+	body = cut_utf8(redact(text, 1_000_000), HANDOFF_NOTES_MAX_BYTES)
+	with open(notes_path, "w", encoding="utf-8", errors="replace") as handle:
+		handle.write(body + "\n")
+	return record
+
+
 def run_build(
 	workspace: Path,
 	spec_path: Path,
@@ -1778,12 +1888,21 @@ def run_build(
 	resume_from_state: Path | None = None,
 	earlier_attempt: Path | None = None,
 	adapter=DEFAULT_ADAPTER,
+	started_monotonic: float | None = None,
 ) -> BuildResult:
+	if started_monotonic is None:
+		started_monotonic = _process_started if _process_started is not None else _monotonic()
 	resume = load_round_state(resume_from_state, max_rounds) if resume_from_state is not None else None
 	workspace.mkdir(parents=True, exist_ok=True)
 	ensure_git_repo(workspace)
 	session_dir = workspace / ".pi-build-session"
 	spec_text = spec_path.read_text()
+	# A file from an earlier run of this script is not this build's notes.
+	try:
+		(session_dir / HANDOFF_NOTES_FILE).unlink(missing_ok=True)
+	except OSError:
+		pass
+	last_turn: dict | None = None
 
 	agents_md_git_blob = committed_agents_md_blob(workspace)
 	result = BuildResult(
@@ -1931,6 +2050,10 @@ def run_build(
 		parsed = adapter.parse(stdout)
 		traces = parsed.traces
 		turn_errors = parsed.turn_errors
+		last_turn = {
+			"timed_out": timed_out, "returncode": agent_returncode, "errored": bool(parsed.last_turn_error),
+			"all_errored": bool(turn_errors[1] and turn_errors[0] == turn_errors[1]),
+		}
 		if turn_errors[0]:
 			error_messages = parsed.route_errors
 			if error_messages:
@@ -2081,6 +2204,19 @@ def run_build(
 		if streak >= STUCK_STOP_STREAK:
 			result.stopped_reason = f"no progress: the same failure {streak} rounds in a row; escalation required: {', '.join(blockers)}"
 			break
+
+	try:
+		skipped = notes_turn_skip_reason(
+			result=result, last_turn=last_turn, sonnet_fallback=sonnet_fallback,
+			criteria_given=spec_acceptance_criteria is not None, adapter=adapter, session_dir=session_dir,
+			elapsed=_monotonic() - started_monotonic,
+		)
+	except Exception as exc:
+		skipped = f"notes turn failed: {type(exc).__name__}"
+	if skipped:
+		result.notes_turn = {"ran": False, "skipped_reason": skipped, "duration_s": 0.0}
+	else:
+		result.notes_turn = run_notes_turn(workspace, session_dir, adapter, env, thinking)
 
 	# Deliberately does not also require resolve_verify_command(workspace)
 	# to already succeed here: that would make this unreachable in exactly
@@ -2372,6 +2508,9 @@ def write_evidence_json(result: BuildResult) -> Path:
 		"review_verdicts": result.review_verdicts,
 		"succeeded": result.succeeded,
 		"stopped_reason": result.stopped_reason,
+		# Additive: whether the one notes turn ran, and its usage. Never the
+		# notes themselves (SC-018).
+		"notes_turn": result.notes_turn,
 		"rounds": [
 			{
 				"index": rnd.index,
@@ -2416,6 +2555,8 @@ def write_evidence_json(result: BuildResult) -> Path:
 
 
 def main() -> int:
+	global _process_started
+	_process_started = _monotonic()
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--workspace", required=True, type=Path)
 	parser.add_argument("--spec", required=True, type=Path)

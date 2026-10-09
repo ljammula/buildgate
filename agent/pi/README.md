@@ -51,6 +51,7 @@ freely, headings only together with their validator.
 | `build_corrective.closing` | `build_app.py` (last part of the corrective prompt) | none: literal text |
 | `build_corrective.history`, `.agent`, `.log`, `.stuck` | `build_app.py` (`corrective_prompt`: the rounds so far, a failure of the agent process, where the failing command's whole output is, the diagnose-first steps) | `{history}`; `{agent_notes}`; `{failure_log}`, `{failing}`; `{streak}` |
 | `build_escalation.prompt.md` | `build_app.py` (`build_escalation_prompt`) | `{spec_text}`, `{corrective}` |
+| `build_handoff_notes` | `build_app.py` (`run_notes_turn`: the one extra turn of a build that ends without passing) | none: literal text |
 | `spec_conformity.command_outcome_rule`, `.formatting_rule`, `.json_contract`; `code_review.scope_rule`, `.severity_rule`, `.command_outcome_rule`, `.json_contract` | the three review prompts, shared | none: literal text (`load_text`), braces are plain characters |
 
 The review and build templates keep each paragraph on one line, as the

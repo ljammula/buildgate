@@ -154,3 +154,50 @@ func TestGetRunHandoffRefusesARecordThatNamesAnotherRun(t *testing.T) {
 		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// The notes a build agent left are for the operator and for a later build of
+// the ticket only: the handoff route returns them, and nothing else a model
+// can reach (an MCP tool), no file route and not the run record does.
+func TestTheAgentsNotesReachTheOperatorsHandoffRouteAndNoOtherReader(t *testing.T) {
+	const marker = "NOTES-MARKER-for-the-next-build"
+	dataDir := t.TempDir()
+	runDir := run.Dir(dataDir, "run-stopped")
+	if err := os.MkdirAll(runDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "agent-notes.md"), []byte("My current hypothesis\n- "+marker+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedStoppedRun(t, dataDir)
+
+	rec := getHandoff(t, NewServer(dataDir), "run-stopped", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), marker) {
+		t.Fatalf("handoff route = %d %s, want the operator to be given the notes", rec.Code, rec.Body.String())
+	}
+
+	if data, err := os.ReadFile(filepath.Join(runDir, "run.json")); err != nil || strings.Contains(string(data), marker) {
+		t.Errorf("run.json holds the notes (read error %v)", err)
+	}
+
+	server := mcpTestServer(dataDir, WithReadToken("read-token"))
+	for name, arguments := range map[string]string{"get_run": `{"id":"run-stopped"}`, "get_run_diff": `{"id":"run-stopped"}`, "list_requests": `{}`} {
+		if text, _ := mcpCall(t, server, name, arguments); strings.Contains(text, marker) {
+			t.Errorf("MCP tool %s returned the notes: %s", name, text)
+		}
+	}
+	for _, tool := range mcpTools {
+		if strings.Contains(tool.pattern, "handoff") {
+			t.Errorf("MCP tool %s replays %s: no tool may return the handoff", tool.name, tool.pattern)
+		}
+	}
+
+	for _, path := range []string{"/runs/run-stopped/agent-notes.md", "/runs/run-stopped/files/agent-notes.md", "/runs/run-stopped"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer read-token")
+		rec := httptest.NewRecorder()
+		NewServer(dataDir, WithReadToken("read-token")).ServeHTTP(rec, req)
+		if strings.Contains(rec.Body.String(), marker) {
+			t.Errorf("GET %s served the notes", path)
+		}
+	}
+}

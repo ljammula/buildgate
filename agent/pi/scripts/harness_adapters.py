@@ -484,6 +484,12 @@ class PiAdapter:
 		args += [prompt]
 		return args
 
+	def can_continue_session(self, session_dir: Path) -> bool:
+		"""Whether invocation(continue_session=True) continues the session a
+		round started, rather than opening a new one. Pi's --continue picks the
+		latest session in the folder, which the rounds of this process made."""
+		return True
+
 	def parse(self, stdout: str) -> AgentOutput:
 		return AgentOutput(
 			final_text=final_assistant_text(stdout),
@@ -757,6 +763,11 @@ class CodexAdapter:
 		args += [prompt]
 		return args
 
+	def can_continue_session(self, session_dir: Path) -> bool:
+		"""`resume --last` in this session's own codex home continues the
+		round's session."""
+		return True
+
 	def parse(self, stdout: str) -> AgentOutput:
 		final_text = ""
 		last_turn_error = ""
@@ -944,6 +955,14 @@ class CopilotAdapter:
 		if effort is not None:
 			args += ["--reasoning-effort", effort]
 		return args + ["-p", prompt]
+
+	def can_continue_session(self, session_dir: Path) -> bool:
+		"""Only with the id the first round stored: without it a continued
+		invocation starts a fresh session that knows nothing of the build."""
+		try:
+			return bool((Path(session_dir) / self.session_id_file).read_text().strip())
+		except OSError:
+			return False
 
 	def parse(self, stdout: str) -> AgentOutput:
 		final_text = ""

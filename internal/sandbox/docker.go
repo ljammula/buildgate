@@ -1995,6 +1995,7 @@ var HarnessSiblingModules = map[string]bool{
 	"build_corrective.reviewer.prompt.md":                true,
 	"build_corrective.verify.prompt.md":                  true,
 	"build_escalation.prompt.md":                         true,
+	"build_handoff_notes.prompt.md":                      true,
 	"build_round_checklist.prompt.md":                    true,
 	"code_review.command_outcome_rule.prompt.md":         true,
 	"code_review.diff_inline.prompt.md":                  true,
