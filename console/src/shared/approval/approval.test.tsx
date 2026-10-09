@@ -336,6 +336,36 @@ test.each([
   });
 });
 
+test("retry offers a rebuild from scratch, off by default, and sends it when ticked", async () => {
+  const { server } = renderApp(
+    <Host request={specReview()} render={(props) => <RetryDialog {...props} />} />,
+    {
+      server: [
+        {
+          on: "POST /requests/req-spec-review/retry",
+          reply: json(rawFixture("request-spec-review.json")),
+        },
+      ],
+    },
+  );
+  const box = await screen.findByRole("checkbox", { name: "Retry from scratch" });
+  expect(box).not.toBeChecked();
+  expect(box).toHaveAccessibleDescription(
+    "Rebuild the ticket from the base commit instead of continuing from the failed attempt's commit.",
+  );
+  await userEvent.type(screen.getByLabelText("Reason"), "the attempt went the wrong way");
+  await userEvent.click(box);
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => {
+    expect(server.sent("POST /requests/req-spec-review/retry")).toHaveLength(1);
+  });
+  expect(server.sent("POST /requests/req-spec-review/retry")[0]?.body).toEqual({
+    reason: "the attempt went the wrong way",
+    by: "operator",
+    from: "scratch",
+  });
+});
+
 test("a failed cancel shows the server's message and keeps the reason", async () => {
   renderApp(<Host request={specReview()} render={(props) => <CancelDialog {...props} />} />, {
     server: [

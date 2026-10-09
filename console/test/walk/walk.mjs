@@ -278,6 +278,12 @@ step("run-quarantined", async () => {
     await card.getByText(failed.check, { exact: true }).waitFor();
     if (failed.finding) await card.getByText(failed.finding, { exact: true }).waitFor();
   }
+  // The agent's own notes, from the same record, last in the card.
+  const notes = card.getByTestId("run-handoff-notes");
+  for (const items of Object.values(handoff.agent_notes ?? {})) {
+    for (const item of items) await notes.getByText(item, { exact: true }).waitFor();
+  }
+  check(handoff.agent_notes !== undefined, "the seeded handoff carries no agent notes");
   await heading("Operator override").waitFor();
   await button("Override run").waitFor();
   check(
@@ -301,6 +307,20 @@ step("projects", async () => {
     .getByText(String(stats.total_runs), { exact: true })
     .first()
     .waitFor();
+  // Trend: the chart is one named image above the table of the same weeks.
+  const trend = (await api("/projects/app/trend")).body;
+  await main().getByRole("tab", { name: "Trend", exact: true }).click();
+  const panel = main().getByRole("tabpanel");
+  await panel.getByRole("img", { name: /^One-shot acceptance rate: / }).waitFor();
+  check(
+    (await panel.getByTestId("trend-chart-point").count()) ===
+      trend.buckets.filter((b) => b.metrics.one_shot_rate !== null).length,
+    "the trend chart does not draw one point per week that has a ticket",
+  );
+  check(
+    (await panel.getByTestId("trend-bucket").count()) === trend.buckets.length,
+    "the trend table lost a week",
+  );
   await main().getByRole("tab", { name: "Release", exact: true }).click();
   await main().getByRole("tabpanel").getByText("incident 42").first().waitFor();
 });

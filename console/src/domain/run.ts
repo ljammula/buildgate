@@ -54,6 +54,12 @@ export interface Attempt {
    */
   readonly relayReasoningEffort: string;
   readonly relayReasoningEffortAnomaly: boolean;
+  /**
+   * The instruction paths a review attempt read as the base commit holds
+   * them, not as the build left them: at most 64, then one "... and N more"
+   * entry. Empty for any other attempt.
+   */
+  readonly reviewMaskedPaths: readonly string[];
 }
 
 function decodeAttempt(o: JsonObject, at: string): Attempt {
@@ -71,6 +77,7 @@ function decodeAttempt(o: JsonObject, at: string): Attempt {
     relayWorkerModelId: optString(o, "relay_worker_model_id", at),
     relayReasoningEffort: optString(o, "relay_reasoning_effort", at),
     relayReasoningEffortAnomaly: optBoolean(o, "relay_reasoning_effort_anomaly", at),
+    reviewMaskedPaths: stringList(o, "review_masked_paths", at),
   };
 }
 

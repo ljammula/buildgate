@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/evidence"
 	"buildgate/internal/handoff"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
@@ -604,6 +605,14 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	// The handoff the run's own save would have written, built from the
 	// record as seeded (the spec snapshot gives diff_scope nothing to say).
 	quarantined.GateResults = append(quarantined.GateResults, run.GateResult{Check: "tests_added", Passed: false})
+	// The notes the build agent left, as the host copy keeps them: all five
+	// headings, so the console's decoder and card meet every list.
+	write(filepath.Join(run.Dir(dataDir, quarantined.ID), evidence.AgentNotesFileName),
+		"## What I did\n- Scoped the idempotency key by account id in checkout/idempotency.go.\n\n"+
+			"## What I tried that did not work, and why\n- Hashing the account id into the key: TestKeyScopedToAccount compares the raw key.\n\n"+
+			"## My current hypothesis\n- The key is built before the account is loaded, so the scope is always empty.\n\n"+
+			"## What is left to do, in order\n- Load the account before building the key.\n- Run the checkout tests.\n\n"+
+			"## Things worth knowing about this repository\n- The checkout tests need the cart fixtures to be generated first.\n")
 	handoffSum, err := handoff.Save(run.Dir(dataDir, quarantined.ID), handoff.Build(&quarantined, dataDir))
 	must(err)
 	quarantined.HandoffSHA256 = handoffSum

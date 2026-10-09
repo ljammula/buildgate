@@ -48,5 +48,23 @@
       "finding": "tests_added: no test file changed",
       "not_judged": true
     }
-  ]
+  ],
+  "agent_notes": {
+    "did": [
+      "Scoped the idempotency key by account id in checkout/idempotency.go."
+    ],
+    "tried_and_failed": [
+      "Hashing the account id into the key: TestKeyScopedToAccount compares the raw key."
+    ],
+    "hypothesis": [
+      "The key is built before the account is loaded, so the scope is always empty."
+    ],
+    "left_to_do": [
+      "Load the account before building the key.",
+      "Run the checkout tests."
+    ],
+    "repository": [
+      "The checkout tests need the cart fixtures to be generated first."
+    ]
+  }
 }
