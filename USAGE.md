@@ -44,7 +44,7 @@ act in "you" rows.
 | State | Who acts | What happens / what you do |
 |---|---|---|
 | `submitted` -> `spec_drafting` | factory | A sandboxed job drafts `spec.md`; with `submit -spec-file`, your own spec is taken as `spec.md` with no model call ([reference](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir)) |
-| `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`) |
+| `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`). A spec with a `[NEEDS DECISION]` item under Open questions is not approvable: `approve` lists the items, and `reject -reason "<your answers>"` ("take the recommended option" is an answer) has the redraft write them into the spec |
 | `oracle_drafting` | factory | Only with `-draft-oracles`: drafts executable acceptance tests from the spec |
 | `oracle_review` | **you** | Read every oracle file, then `approve` (to `planning`) or `reject -reason` (back to `oracle_drafting`) |
 | `planning` | factory | Drafts one or more tickets from the approved spec; with `submit -plan-dir`, your own tickets are taken with no model call and get the same checks |

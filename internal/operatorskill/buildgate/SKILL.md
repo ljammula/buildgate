@@ -180,7 +180,7 @@ request sits in a queue nobody drains.
 | State | Tell the operator |
 |---|---|
 | `submitted`, `spec_drafting`, `oracle_drafting`, `planning`, `building` | Factory is working; give stage and elapsed time (`building` includes the gates and the AI review) |
-| `spec_review` | Summarize `DIR/requests/<id>/spec.md`; give both gate commands (above) |
+| `spec_review` | Summarize `DIR/requests/<id>/spec.md`; give both gate commands (above). Quote every `[NEEDS DECISION]` item under Open questions: `approve` is refused while one is left, and the operator's answers go in `reject -reason` |
 | `oracle_review` | List the oracle files and any `ACTION NEEDED` line `watch` printed |
 | `plan_review` | Summarize the ticket list; approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |

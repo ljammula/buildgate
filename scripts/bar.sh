@@ -285,7 +285,15 @@ run_one() {
 		case "$s" in
 		spec_review | plan_review)
 			if [ "$approved" != "$s" ]; then
-				if "$BIN" approve -data-dir "$d/data" "$id" >>"$d/approve.log" 2>&1; then approved="$s"; else sleep 20; fi
+				if "$BIN" approve -data-dir "$d/data" "$id" >>"$d/approve.log" 2>&1; then
+					approved="$s"
+				elif [ "$s" = spec_review ] && tail -n 5 "$d/approve.log" | grep -q "decisions left for you"; then
+					# The draft left a choice to the operator: nobody is here, so
+					# its own recommendation is the answer.
+					"$BIN" reject -data-dir "$d/data" -reason "Take the recommended option for every open decision." "$id" >>"$d/approve.log" 2>&1 || sleep 20
+				else
+					sleep 20
+				fi
 			fi
 			;;
 		oracle_review)
