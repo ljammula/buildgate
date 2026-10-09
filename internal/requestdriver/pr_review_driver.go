@@ -347,8 +347,8 @@ func noPullRequestHaltReason(dataDir string, r *request.Request, ticket *request
 }
 
 // nextUnbuiltTicket reports whether ticket, the lowest one with no pull
-// request, is the ticket after the current one and was never built. Under
-// advance_on: accepted that happens one way: acceptTicketRun halted the
+// request, is the ticket after the current one and was never built. With
+// pull requests on, under advance_on: accepted, that happens one way: acceptTicketRun halted the
 // request on the current ticket's release decision before building ticket,
 // and a retry has since opened the current ticket's pull request. There is
 // nothing to halt on: the build goes on from ticket.
@@ -403,7 +403,7 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// openEvidencePullRequest's own best-effort push/open attempt
 			// simply failed, where a retry (or just re-running the opener)
 			// may well succeed.
-			if nextUnbuiltTicket(r, ticket) {
+			if cfg.OpenPullRequest && nextUnbuiltTicket(r, ticket) {
 				r.TicketIndex = ticket.Index
 				if err := r.ResumeBuilding(now); err != nil {
 					return err

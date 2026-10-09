@@ -132,10 +132,11 @@ wording. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
-says why), and when a later ticket remains the request halts there as
-accepted with no pull request, with `-open-pull-request` on or off: the
-next ticket is built on this one's commit and would carry the refused
-change. The bare `-release-*`/session-config zero defaults deny
+says why). With pull requests on, a ticket whose release decision is not
+allowed halts the request before the next ticket is built (the next ticket
+is built on this one's commit and its pull request would carry the refused
+change); with pull requests off the tickets are built in order and each
+run's decision is on its record. The bare `-release-*`/session-config zero defaults deny
 everything, so a usable `-release-rollback-plan` and non-zero
 `-release-max-files-changed`/`-release-max-insertions` are required — see
 "Release policy" below. Per `-advance-on` (`accepted` default, or

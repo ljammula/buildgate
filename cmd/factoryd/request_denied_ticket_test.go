@@ -45,22 +45,19 @@ func deniedThenAcceptingRunner(t *testing.T, dataDir, requestID string, decision
 // Ticket 2 is built on ticket 1's commit and its own changed files leave
 // ticket 1's out, so its release and its pull request would carry a change
 // the release policy refused. A ticket whose release decision is not allowed
-// therefore halts the request before any later ticket is built, with pull
-// requests on or off.
+// therefore halts the request before any later ticket is built, when pull
+// requests are on.
 func TestTicketWithADeniedReleaseDecisionHaltsTheRequestBeforeTheNextTicket(t *testing.T) {
 	denied := &release.Decision{Project: "app", Allowed: false, Reasons: []string{release.ReasonMemorySectionNotMemoryChange}}
 	invalidated := &release.Decision{Project: "app", Allowed: false, Invalidated: true, Reasons: []string{"invalidated by a later run"}}
 	cases := []struct {
 		name     string
-		openPR   bool
 		decision *release.Decision
 		reason   string
 	}{
-		{"pull requests on, denied", true, denied, release.ReasonMemorySectionNotMemoryChange},
-		{"pull requests off, denied", false, denied, release.ReasonMemorySectionNotMemoryChange},
-		{"pull requests on, invalidated", true, invalidated, "invalidated by a later run"},
-		{"pull requests on, no decision recorded", true, nil, "no release decision is recorded"},
-		{"pull requests off, no decision recorded", false, nil, "no release decision is recorded"},
+		{"denied", denied, release.ReasonMemorySectionNotMemoryChange},
+		{"invalidated", invalidated, "invalidated by a later run"},
+		{"no decision recorded", nil, "no release decision is recorded"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -68,7 +65,7 @@ func TestTicketWithADeniedReleaseDecisionHaltsTheRequestBeforeTheNextTicket(t *t
 			dataDir, id := buildingFixture(dp, t, 2)
 			var built []string
 			runner := deniedThenAcceptingRunner(t, dataDir, id, c.decision, &built)
-			cfg := requestdriver.WorkerConfig{OpenPullRequest: c.openPR}
+			cfg := requestdriver.WorkerConfig{OpenPullRequest: true}
 			for i := 0; i < 3; i++ {
 				if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), runner); err != nil {
 					t.Fatalf("driveRequests (pass %d): %v", i+1, err)
@@ -147,5 +144,35 @@ func TestRetryAfterADeniedTicketOpensItsPullRequestAndBuildsTheNextTicket(t *tes
 	}
 	if tk := loaded.Tickets[1]; tk.PRURL == "" {
 		t.Errorf("ticket 2 = %+v, want its pull request recorded", tk)
+	}
+}
+
+// With pull requests off nothing is pushed or opened, so nothing is released
+// by building on: the tickets are built in order, whatever ticket 1's decision
+// says (the default policy denies everything until the operator sets it), and
+// each run's decision is on its record.
+func TestTicketWithADeniedReleaseDecisionStillAdvancesWhenPullRequestsAreOff(t *testing.T) {
+	for name, decision := range map[string]*release.Decision{
+		"denied":               {Project: "app", Allowed: false, Reasons: []string{"policy has no rollback plan"}},
+		"no decision recorded": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			dataDir, id := buildingFixture(dp, t, 2)
+			var built []string
+			runner := deniedThenAcceptingRunner(t, dataDir, id, decision, &built)
+			for i := 0; i < 2; i++ {
+				if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), runner); err != nil {
+					t.Fatalf("driveRequests (pass %d): %v", i+1, err)
+				}
+			}
+			loaded, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(built) != 2 || loaded.State == request.StateHalted || loaded.TicketIndex != 2 {
+				t.Fatalf("built %q, state %q (%s), ticket index %d, want both tickets built and no halt", built, loaded.State, loaded.Error, loaded.TicketIndex)
+			}
+		})
 	}
 }
