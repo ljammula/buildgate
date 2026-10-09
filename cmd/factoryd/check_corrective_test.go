@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,11 @@ func TestAdvanceBuildingCheckCorrectiveRoundGivesTheBuildTheHandoff(t *testing.T
 	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, baseSHA, resultSHA, "lint")
 
 	calls, lastArgs := stubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+		// The round's run, as the driver saved it when it started, names
+		// the run its build's record is of: a resume of it needs that.
+		if startedRun, err := run.Load(dataDir, roundRunID); err != nil || startedRun.EarlierAttemptOf != id+"-001" {
+			t.Errorf("the started round's run: %v, carries %q, want the quarantined run %s-001", err, startedRun.EarlierAttemptOf, id)
+		}
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/7"}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
@@ -498,5 +504,284 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 				t.Errorf("Rounds = %+v, want none: a retry is not a corrective round", loaded.Tickets[0].Rounds)
 			}
 		})
+	}
+}
+
+// TestABuildThatFollowsAnUnfinishedOneIsGivenTheSameRecord: a retry's
+// rebuild is given the record of the quarantined attempt and is then lost.
+// The build that follows it, resumed in its kept worktree or started again
+// from the base, is given the record of that same attempt, loaded again
+// from that attempt's handoff, and each run carries which run its record is
+// of. A lost build that was given no record passes none on.
+func TestABuildThatFollowsAnUnfinishedOneIsGivenTheSameRecord(t *testing.T) {
+	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
+	for name, tc := range map[string]struct {
+		verb string
+		// onAttemptsBranch: the lost build ran on the quarantined
+		// attempt's branch, not on a new one from the base.
+		onAttemptsBranch bool
+		// nothingCommitted: the quarantined attempt's result commit is its
+		// base, as when its verification never passed.
+		nothingCommitted bool
+		// withdrawn removes the quarantined attempt's handoff before the
+		// build that follows the lost one starts.
+		withdrawn  bool
+		wantOpens  string
+		wantResume bool
+	}{
+		"resumed in the kept worktree, which started from the base": {
+			verb: request.ResumeRound, wantResume: true,
+			wantOpens: "This build resumes a later build of this ticket that was interrupted. The record below is of the attempt before that one, which finished and failed its checks. The interrupted build had started again from the base commit: that attempt's commit is not in the workspace",
+		},
+		"resumed in the kept worktree, which is on the attempt's branch": {
+			verb: request.ResumeRound, onAttemptsBranch: true, wantResume: true,
+			wantOpens: "This build resumes a later build of this ticket that was interrupted. The record below is of the attempt before that one, which finished and failed its checks. The interrupted build ran on that attempt's branch: what that attempt committed is in the workspace",
+		},
+		"resumed in the kept worktree, after an attempt that committed nothing": {
+			verb: request.ResumeRound, nothingCommitted: true, wantResume: true,
+			wantOpens: "This build resumes a later build of this ticket that was interrupted. The record below is of the attempt before that one, which finished and failed its checks. The interrupted build had started again from the base commit: that attempt's commit is not in the workspace",
+		},
+		"started again from the base": {
+			verb:      request.ResumeScratch,
+			wantOpens: "This build starts again from the base commit: none of that attempt's changes are in the workspace",
+		},
+		"the attempt's handoff is gone by the time of the resume": {
+			verb: request.ResumeRound, wantResume: true, withdrawn: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			dataDir, id := buildingFixture(dp, t, 1)
+			repoDir := newFixtureRepo(t)
+			var builds [][]string
+			var started []*run.Run
+			attemptResult := result
+			if tc.nothingCommitted {
+				attemptResult = base
+			}
+			buildRunner := quarantinedThenLostBuildRunner(t, dataDir, id, repoDir, [2]string{base, attemptResult}, tc.onAttemptsBranch, &builds, &started)
+			cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}}
+			drive := func() *request.Request {
+				t.Helper()
+				if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+					t.Fatalf("driveRequests: %v", err)
+				}
+				r, err := request.Load(dataDir, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return r
+			}
+			quarantined := drive()
+			if quarantined.State != request.StateQuarantined {
+				t.Fatalf("after the first build: %s, want quarantined", quarantined.State)
+			}
+			attemptID := started[0].ID
+			if started[0].EarlierAttemptOf != "" {
+				t.Fatalf("the first build carries a record's source: %q", started[0].EarlierAttemptOf)
+			}
+			if handled, err := retryRequest(dp, dataDir, quarantined, "", time.Now()); err != nil || !handled {
+				t.Fatalf("retryRequest: handled %v, err %v", handled, err)
+			}
+			lost := drive()
+			if lost.State != request.StateResumeReview {
+				t.Fatalf("after the lost rebuild: %s, want resume_review", lost.State)
+			}
+			if argValue(builds[1], "-earlier-attempt") == "" || started[1].EarlierAttemptOf != attemptID {
+				t.Fatalf("the rebuild: -earlier-attempt %q, carries %q, want the record of %s", argValue(builds[1], "-earlier-attempt"), started[1].EarlierAttemptOf, attemptID)
+			}
+			if tc.withdrawn {
+				if err := os.Remove(filepath.Join(run.Dir(dataDir, attemptID), "handoff.json")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := lost.ResumeDecide(tc.verb, "alice", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if err := lost.Save(dataDir); err != nil {
+				t.Fatal(err)
+			}
+			drive()
+			if len(builds) != 3 {
+				t.Fatalf("builds = %d, want three", len(builds))
+			}
+			following := builds[2]
+			if got := argValue(following, "-resume-worktree-of"); (got != "") != tc.wantResume {
+				t.Fatalf("-resume-worktree-of = %q, want a resume: %v", got, tc.wantResume)
+			}
+			recordPath := argValue(following, "-earlier-attempt")
+			if tc.wantOpens == "" {
+				if recordPath != "" || started[2].EarlierAttemptOf != "" {
+					t.Fatalf("-earlier-attempt = %q, carries %q, want no record: the attempt no longer vouches for one", recordPath, started[2].EarlierAttemptOf)
+				}
+				return
+			}
+			if recordPath == argValue(builds[1], "-earlier-attempt") && tc.wantResume {
+				t.Errorf("the resumed build was handed the lost build's own record file %q, want one written for it", recordPath)
+			}
+			assertRecordOf(t, recordPath, tc.wantOpens, attemptID)
+			if started[2].EarlierAttemptOf != attemptID {
+				t.Errorf("the following build carries %q, want %s", started[2].EarlierAttemptOf, attemptID)
+			}
+		})
+	}
+}
+
+// quarantinedThenLostBuildRunner builds a ticket three times, each as its
+// own run (<ticket>-build<n>): the first is quarantined by lint with a
+// handoff, the second is lost with its worktree kept, the third accepted.
+// shas are the first build's base and result commits. The first build
+// committed nothing new when they are equal. The lost build is on the first
+// one's branch when onAttemptsBranch, else on its own. Each call's argv and
+// the run the driver was shown are appended.
+func quarantinedThenLostBuildRunner(t *testing.T, dataDir, id, repoDir string, shas [2]string, onAttemptsBranch bool, builds *[][]string, started *[]*run.Run) requestdriver.TicketRunner {
+	t.Helper()
+	branch := "factoryd/" + id + "-001"
+	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		*builds = append(*builds, args)
+		n := len(*builds)
+		runID := fmt.Sprintf("%s-build%d", argValue(args, "-ticket"), n)
+		current := &run.Run{ID: runID}
+		onReady(current)
+		*started = append(*started, current)
+		switch n {
+		case 1:
+			rr := quarantinedOn(t, dataDir, runID, branch, shas[0], shas[1], "lint")
+			rr.RequestID = id
+			sum, err := evidence.SHA256File(argValue(args, "-spec"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr.SpecSHA256 = sum
+			if err := handoff.Sync(rr, dataDir); err != nil {
+				t.Fatal(err)
+			}
+			return rr.Save(dataDir)
+		case 2:
+			marker := testIsolationMarker(t, repoDir, dataDir, runID, "temporal")
+			lostBranch := marker.Branch
+			if onAttemptsBranch {
+				lostBranch = branch
+			}
+			// A rebuild from the base has the first build's base as its
+			// own, which is also that build's result when it committed
+			// nothing: the two cases must not be told apart by commit id.
+			return (&run.Run{
+				ID: runID, Ticket: runID, State: run.StateHalted, HaltConfirmed: true, KeptForResume: true,
+				RequestID: id, EarlierAttemptOf: current.EarlierAttemptOf, BaseSHA: shas[0],
+				ProjectPath: repoDir, WorkspacePath: marker.WorktreePath, Branch: lostBranch,
+			}).Save(dataDir)
+		default:
+			return (&run.Run{ID: runID, Ticket: runID, State: run.StateAccepted, Branch: branch, RequestID: id}).Save(dataDir)
+		}
+	}
+}
+
+// assertRecordOf fails unless the file at path opens with opens and is the
+// record of attemptID's failed lint.
+func assertRecordOf(t *testing.T, path, opens, attemptID string) {
+	t.Helper()
+	record, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the record: %v", err)
+	}
+	if !strings.HasPrefix(string(record), opens) {
+		t.Errorf("the record opens:\n%.300s\nwant it to open: %s", record, opens)
+	}
+	if !strings.Contains(string(record), "(run "+attemptID+")") || !strings.Contains(string(record), "- `lint` failed (exit 2)") {
+		t.Errorf("the record is not of the quarantined attempt %s:\n%s", attemptID, record)
+	}
+}
+
+// TestALostCorrectiveRoundWaitsForAResumeAndIsGivenItsRecordAgain: a
+// corrective round whose run halts with its worktree kept puts the request
+// in resume_review, not quarantined (a retry would delete the worktree),
+// and the build that resumes it is given the record of the attempt the
+// round followed, saying that attempt's commit is in the workspace.
+func TestALostCorrectiveRoundWaitsForAResumeAndIsGivenItsRecordAgain(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := buildingFixture(dp, t, 1)
+	branch := "factoryd/" + id + "-001"
+	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
+	repoDir := newFixtureRepo(t)
+	var builds [][]string
+	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		builds = append(builds, args)
+		runID := fmt.Sprintf("%s-build%d", argValue(args, "-ticket"), len(builds))
+		onReady(&run.Run{ID: runID})
+		if len(builds) > 1 {
+			return (&run.Run{ID: runID, Ticket: runID, State: run.StateAccepted, Branch: branch, RequestID: id}).Save(dataDir)
+		}
+		rr := quarantinedOn(t, dataDir, runID, branch, base, result, "lint")
+		rr.RequestID = id
+		sum, err := evidence.SHA256File(argValue(args, "-spec"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr.SpecSHA256 = sum
+		if err := handoff.Sync(rr, dataDir); err != nil {
+			t.Fatal(err)
+		}
+		return rr.Save(dataDir)
+	}
+	// The round's run is lost: halted, its worktree (on the attempt's
+	// branch) kept, carrying what the driver recorded when it started.
+	calls, _ := stubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+		startedRun, err := run.Load(dataDir, roundRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker := testIsolationMarker(t, repoDir, dataDir, roundRunID, "temporal")
+		return &run.Run{
+			ID: roundRunID, Ticket: roundRunID, State: run.StateHalted, HaltConfirmed: true, KeptForResume: true,
+			RequestID: startedRun.RequestID, EarlierAttemptOf: startedRun.EarlierAttemptOf, BaseSHA: result,
+			ProjectPath: repoDir, WorkspacePath: marker.WorktreePath, Branch: branch,
+			Attempts: []run.Attempt{{}},
+		}
+	})
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}}
+	drive := func() *request.Request {
+		t.Helper()
+		if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+		r, err := request.Load(dataDir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	lost := drive()
+	roundRunID := id + "-001-corrective1"
+	if *calls != 1 || lost.State != request.StateResumeReview || lost.Resume == nil || lost.Resume.LostRunID != roundRunID {
+		t.Fatalf("corrective calls %d, state %s, resume %+v; want one round, then resume_review for %s", *calls, lost.State, lost.Resume, roundRunID)
+	}
+	if _, err := lost.ResumeDecide(request.ResumeRound, "alice", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := lost.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	drive()
+	if len(builds) != 2 {
+		t.Fatalf("builds = %d, want the first and the resumed one", len(builds))
+	}
+	if got := argValue(builds[1], "-resume-worktree-of"); got != roundRunID {
+		t.Fatalf("-resume-worktree-of = %q, want the lost round %s", got, roundRunID)
+	}
+	assertRecordOf(t, argValue(builds[1], "-earlier-attempt"),
+		"This build resumes a later build of this ticket that was interrupted. The record below is of the attempt before that one, which finished and failed its checks. The interrupted build ran on that attempt's branch: what that attempt committed is in the workspace",
+		id+"-001-build1")
+}
+
+// TestALostBuildThatWasGivenNoRecordPassesNoneOn: the resume of a ticket's
+// first build, which follows no attempt, is given no record.
+func TestALostBuildThatWasGivenNoRecordPassesNoneOn(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id, _ := lostBuildFixture(dp, t, request.ResumeRound)
+	var calls [][]string
+	advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}, capturingBuildRunner(t, dataDir, &calls))
+	if len(calls) != 1 || hasFlag(calls[0], "-earlier-attempt") {
+		t.Fatalf("calls = %v, want one build with no -earlier-attempt", calls)
 	}
 }

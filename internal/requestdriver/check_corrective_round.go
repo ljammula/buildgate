@@ -109,45 +109,80 @@ func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, b
 	return doc, true
 }
 
-// withEarlierAttemptOf gives a ticket's rebuild the factory's record of the
-// attempt it follows: after `factoryd retry`, the ticket's last run is the
-// quarantined one, and when its handoff is one a build may be given
-// (handoffForABuild) the fresh build is told what that attempt failed on
-// instead of starting from the spec alone. The rebuild itself is unchanged:
-// a new run from the base, the ticket's own spec, every gate again.
+// withEarlierAttemptOf gives a ticket's build the factory's record of the
+// attempt it follows, and returns the id of the run that record is of ("" when
+// the build is given none), for the started run to carry
+// (run.Run.EarlierAttemptOf).
+//
+// A rebuild after `factoryd retry`: the ticket's last run is the quarantined
+// one, and when its handoff is one a build may be given (handoffForABuild)
+// the fresh build is told what that attempt failed on instead of starting
+// from the spec alone. The rebuild itself is unchanged: a new run from the
+// base, the ticket's own spec, every gate again.
+//
+// A build that follows one which never finished: the ticket's last run
+// halted (its worker was lost, its sandbox could not start) and its own
+// build had been given a record, as a corrective round or a retry's rebuild
+// is. The build that follows it, resumed in its kept worktree (`factoryd
+// resume`, resumeRunID) or started again from the base (`resume -from
+// scratch`, `retry`), is given the record of that same attempt. The record
+// is loaded again from that attempt's handoff, under every check of the
+// first time; it is never copied from what the halted run was handed, and
+// the halted run itself has nothing a build is told.
 //
 // Anything else adds nothing: a ticket's first build, a run that was
-// accepted or halted, a run of another request, a ticket whose spec has
-// changed since (sameSpec), a failure a build is never told about, a
-// handoff the run does not vouch for. An error writing the record is logged and the
-// build goes ahead without it; the record is an aid, never a condition.
-func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string) []string {
-	if ticket.RunID == "" {
-		return args
+// accepted, a halted run that was given no record, a run of another
+// request, a ticket whose spec has changed since (sameSpec), a failure a
+// build is never told about, a handoff the run does not vouch for. An error
+// writing the record is logged and the build goes ahead without it; the
+// record is an aid, never a condition.
+func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string, resumeRunID string) (argv []string, recordOf string) {
+	lastID := ticket.RunID
+	if resumeRunID != "" {
+		lastID = resumeRunID
 	}
-	previous, err := run.Load(dataDir, ticket.RunID)
+	if lastID == "" {
+		return args, ""
+	}
+	previous, err := run.Load(dataDir, lastID)
 	// The record of another request's run is never this build's.
 	if err != nil || previous.RequestID != r.ID {
-		return args
+		return args, ""
+	}
+	dirName, start := "retry", startsFromBase
+	if previous.State == run.StateHalted && previous.EarlierAttemptOf != "" {
+		unfinished := previous
+		if previous, err = run.Load(dataDir, unfinished.EarlierAttemptOf); err != nil || previous.RequestID != r.ID {
+			return args, ""
+		}
+		if resumeRunID != "" {
+			// Whether the attempt's commit is under the interrupted
+			// build's work is a fact about branches, not commit ids: an
+			// attempt that committed nothing has its base as its result.
+			dirName, start = "resume", resumesLostBuild+" "+interruptedStartedFromBase
+			if previous.Branch != "" && unfinished.Branch == previous.Branch {
+				start = resumesLostBuild + " " + interruptedStartedOnItsBranch
+			}
+		}
 	}
 	// The ticket's spec has changed since that attempt (an amended scope, an
 	// edited ticket): what it failed on was judged against another task, and
 	// telling the build "the task has not changed" would be false.
 	if !sameSpec(previous, argValueOf(args, "-spec")) {
-		return args
+		return args, ""
 	}
 	doc, ok := handoffForABuild(dataDir, previous)
 	if !ok {
-		return args
+		return args, ""
 	}
-	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-retry", ticket.Index))
-	path, err := writeRecordFile(dir, doc, startsFromBase)
+	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-%s", ticket.Index, dirName))
+	path, err := writeRecordFile(dir, doc, start)
 	if err != nil {
-		log.Printf("request %s: ticket %d: the rebuild goes ahead without the record of run %s: %v", r.ID, ticket.Index, previous.ID, err)
-		return args
+		log.Printf("request %s: ticket %d: the build goes ahead without the record of run %s: %v", r.ID, ticket.Index, previous.ID, err)
+		return args, ""
 	}
-	log.Printf("request %s: ticket %d/%d: the rebuild is given the record of run %s (failed %s)", r.ID, ticket.Index, r.TicketCount, previous.ID, failedCheckNames(doc))
-	return append(args, "-earlier-attempt", path)
+	log.Printf("request %s: ticket %d/%d: the build is given the record of run %s (failed %s)", r.ID, ticket.Index, r.TicketCount, previous.ID, failedCheckNames(doc))
+	return append(args, "-earlier-attempt", path), previous.ID
 }
 
 // The sentence a record opens with, saying where the build that reads it
@@ -156,6 +191,13 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 const (
 	startsOnItsBranch = "This build continues on that attempt's branch: what it committed is in the workspace."
 	startsFromBase    = "This build starts again from the base commit: none of that attempt's changes are in the workspace, and the commit and files named below are not there."
+	// A resumed build's record says two things: which attempt the record
+	// is of (not the interrupted build, which the handoff note beside it
+	// describes), and whether that attempt's commit is under the
+	// interrupted build's work.
+	resumesLostBuild              = "This build resumes a later build of this ticket that was interrupted. The record below is of the attempt before that one, which finished and failed its checks."
+	interruptedStartedOnItsBranch = "The interrupted build ran on that attempt's branch: what that attempt committed is in the workspace, under whatever the interrupted build changed."
+	interruptedStartedFromBase    = "The interrupted build had started again from the base commit: that attempt's commit is not in the workspace, and a file named below is there only if the interrupted build wrote it again."
 )
 
 // sameSpec reports whether specPath holds the spec previous was built from.
