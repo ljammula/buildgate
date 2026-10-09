@@ -9,7 +9,8 @@ and [`USAGE.md`](../../USAGE.md).
 
 | Script | Role | `factoryd` flag |
 |---|---|---|
-| `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only oracles, no history rewrites) | `-build-app-script` |
+| `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only oracles, no history rewrites). Every later round continues the same harness session and is told what the round before it left (see "What a failed round hands the next one") | `-build-app-script` |
+| `round_feedback.py` | Pure helpers for that: the excerpt of a failing command's output, the names it reports failing, an id for "the same failure", the per-round history, and the note for a failure of the agent process itself | imported by `build_app.py` |
 | `goal_pilot.py` | Spec/contract/ticket drafting | `-goal-pilot-script` |
 | `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |
 | `draft_spec.py` | Request driver's one-shot spec draft | `worker -draft-spec-script` |
@@ -48,6 +49,7 @@ freely, headings only together with their validator.
 | `build_round_checklist.prompt.md` | `build_app.py` (the definition of done after the ticket in round 1) | `{verify}` |
 | `build_corrective.intro`, `.verify`, `.excerpt`, `.oracle`, `.reviewer` | `build_app.py` (`corrective_prompt`, one part each, joined by blank lines) | `{round_index}`, `{max_rounds}`, `{blockers}`; `{verify_command}`, `{verify_tail}`; `{verify_tail}`; `{oracle_command}`, `{oracle_tail}`; `{detail}` |
 | `build_corrective.closing` | `build_app.py` (last part of the corrective prompt) | none: literal text |
+| `build_corrective.history`, `.agent`, `.log`, `.stuck` | `build_app.py` (`corrective_prompt`: the rounds so far, a failure of the agent process, where the failing command's whole output is, the diagnose-first steps) | `{history}`; `{agent_notes}`; `{failure_log}`, `{failing}`; `{streak}` |
 | `build_escalation.prompt.md` | `build_app.py` (`build_escalation_prompt`) | `{spec_text}`, `{corrective}` |
 | `spec_conformity.command_outcome_rule`, `.formatting_rule`, `.json_contract`; `code_review.scope_rule`, `.severity_rule`, `.command_outcome_rule`, `.json_contract` | the three review prompts, shared | none: literal text (`load_text`), braces are plain characters |
 
@@ -190,3 +192,29 @@ python3 -m pytest agent/pi/tests/    # or: make agent-pi-test
 ```
 
 Not part of `make verify` (separate toolchain); `make ci` runs it.
+
+
+## What a failed round hands the next one
+
+No round ends in failure without the next one being told what failed and why.
+
+| Failure | What the next round's prompt holds |
+|---|---|
+| Fast check, verify or reference oracle failed | The block around the first reported failure plus the end of the output (8,000 characters, never less than the last 3,000; `round_feedback.failure_excerpt`); a timeout keeps the line that says so first; the failing tests or targets it names, and the path of the whole output: `.pi-build-session/feedback/round-<n>/{fast-check,verify,oracle}.log` |
+| The agent changed nothing | That it changed nothing, and its own final message |
+| The agent timed out, stalled, or its CLI exited non-zero | How it ended and the CLI's last error |
+| The model route returned errors | The route's messages |
+| The reviewer flagged the diff | Its findings |
+| Any of the above | One line per round so far: the files that round changed and how it ended |
+| The same failure as the round before (`failure_signature`: the blockers, the lines that report a failure and the reviewer's findings, with durations, addresses, temporary paths and timestamps blanked; numbers are kept) | The line is marked as a repeat, and the prompt adds diagnose-first steps |
+| The same failure three rounds in a row | The loop stops with `no progress: the same failure 3 rounds in a row` instead of spending another round. Only with `--max-rounds` above the default 3, where the budget ends the loop first. The escalation pass, when enabled, follows either stop |
+
+The log folder is under the session folder, which every exclude list covers:
+it is never committed and never counts as the agent's change, and each round
+clears its own folder first. A resumed build has no earlier session folder;
+its first prompt says the named log is gone. Failure text is redacted before
+it is saved or shown. It is output from the repository's own commands and
+the agent's own last message: the prompt quotes it, and nothing stops it
+from reading as an instruction, as was already true of the tail it replaces.
+Checks that fail after the build (the full suite, gates, the reviews) are
+not part of this loop.
