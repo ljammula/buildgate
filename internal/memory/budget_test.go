@@ -1,135 +1,120 @@
 package memory
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-func eq(t *testing.T, name string, got, want []string) {
+func applyErr(t *testing.T, err error, what string, have, limit int) {
 	t.Helper()
-	if len(got) == 0 && len(want) == 0 {
-		return
+	var ae *ApplyError
+	if !errors.As(err, &ae) || !errors.Is(err, ErrApply) {
+		t.Fatalf("err = %v, want an *ApplyError", err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("%s = %q, want %q", name, got, want)
+	if ae.What != what || ae.Have != have || ae.Limit != limit {
+		t.Fatalf("refusal = %+v (%v), want %s %d/%d", ae, err, what, have, limit)
 	}
 }
 
-func TestFitWithinBudget(t *testing.T) {
-	r := Fit([]string{"- h."}, nil, []string{"- a.", "- b."}, Budget{}, 5)
-	eq(t, "lines", r.Lines, []string{"- h.", "- a.", "- b."})
-	eq(t, "added", r.Added, []string{"- a.", "- b."})
-	eq(t, "removed", r.Removed, nil)
-	eq(t, "notfitting", r.NotFitting, nil)
-}
-
-func TestFitLinesBudget(t *testing.T) {
-	r := Fit([]string{"- h1.", "- h2."}, nil, []string{"- a.", "- b."}, Budget{Lines: 3, Chars: 1000}, 5)
-	eq(t, "lines", r.Lines, []string{"- h1.", "- h2.", "- a."})
-	eq(t, "notfitting", r.NotFitting, []string{"- b."})
-}
-
-func TestFitCharsBudget(t *testing.T) {
-	// "- h1." is 5 bytes + newline = 6; "- aaaa." is 7+1 = 8.
-	r := Fit([]string{"- h1."}, nil, []string{"- aaaa.", "- bbbb."}, Budget{Lines: 10, Chars: 14}, 5)
-	eq(t, "added", r.Added, []string{"- aaaa."})
-	eq(t, "notfitting", r.NotFitting, []string{"- bbbb."})
-	big := strings.Repeat("x", 100)
-	r = Fit(nil, nil, []string{"- " + big}, Budget{Lines: 10, Chars: 50}, 5)
-	eq(t, "notfitting", r.NotFitting, []string{"- " + big})
-}
-
-func TestFitHumanLinesAreNeverRemoved(t *testing.T) {
-	r := Fit([]string{"- h1.", "- h2."}, map[string]KnownLine{}, []string{"- a."}, Budget{Lines: 2, Chars: 1000}, 5)
-	eq(t, "lines", r.Lines, []string{"- h1.", "- h2."})
-	eq(t, "removed", r.Removed, nil)
-	eq(t, "notfitting", r.NotFitting, []string{"- a."})
-}
-
-func TestFitRemovesRetireProposedFirst(t *testing.T) {
-	known := map[string]KnownLine{
-		"- old.":   {LastConfirmedAt: "2026-01-01"},
-		"- stale.": {RetireProposed: true, LastConfirmedAt: "2026-09-01"},
+func TestApplyAddsAndRemoves(t *testing.T) {
+	current := []string{"- a human line with *anything* in it", "- b.", "- c."}
+	got, err := Apply(current, []string{"- d.", "- e."}, []string{"- b."}, Budget{}, 5)
+	want := []string{"- a human line with *anything* in it", "- c.", "- d.", "- e."}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("Apply = %v, %v, want %v", got, err, want)
 	}
-	r := Fit([]string{"- human.", "- old.", "- stale."}, known, []string{"- new."}, Budget{Lines: 3, Chars: 1000}, 5)
-	eq(t, "lines", r.Lines, []string{"- human.", "- old.", "- new."})
-	eq(t, "removed", r.Removed, []string{"- stale."})
-	eq(t, "added", r.Added, []string{"- new."})
-}
-
-func TestFitRetireProposedGoesEvenWithRoom(t *testing.T) {
-	known := map[string]KnownLine{"- stale.": {RetireProposed: true}}
-	r := Fit([]string{"- stale.", "- keep."}, known, nil, Budget{}, 5)
-	eq(t, "lines", r.Lines, []string{"- keep."})
-	eq(t, "removed", r.Removed, []string{"- stale."})
-}
-
-func TestFitEvictsOldestConfirmedNext(t *testing.T) {
-	known := map[string]KnownLine{
-		"- a.": {LastConfirmedAt: "2026-05-01"},
-		"- b.": {LastConfirmedAt: "2026-03-01"},
-		"- c.": {},
-		"- d.": {LastConfirmedAt: "2026-03-01"},
+	if !reflect.DeepEqual(current, []string{"- a human line with *anything* in it", "- b.", "- c."}) {
+		t.Fatalf("Apply changed its input: %v", current)
 	}
-	r := Fit([]string{"- a.", "- b.", "- c.", "- d."}, known, []string{"- n."}, Budget{Lines: 4, Chars: 1000}, 5)
-	eq(t, "removed", r.Removed, []string{"- c."}) // empty sorts oldest
-	r = Fit([]string{"- a.", "- b.", "- d."}, known, []string{"- n."}, Budget{Lines: 3, Chars: 1000}, 5)
-	eq(t, "removed tie by position", r.Removed, []string{"- b."})
-	eq(t, "lines", r.Lines, []string{"- a.", "- d.", "- n."})
-}
-
-func TestFitMaxChangesCountsRemovals(t *testing.T) {
-	known := map[string]KnownLine{}
-	var cur []string
-	for _, s := range []string{"- r1.", "- r2.", "- r3.", "- r4.", "- r5.", "- r6."} {
-		known[s] = KnownLine{RetireProposed: true}
-		cur = append(cur, s)
+	got, err = Apply(nil, nil, nil, Budget{}, 5)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty change = %v, %v", got, err)
 	}
-	r := Fit(cur, known, []string{"- n."}, Budget{}, 5)
-	eq(t, "removed", r.Removed, cur[:5])
-	eq(t, "notfitting", r.NotFitting, []string{"- n."})
-	eq(t, "lines", r.Lines, []string{"- r6."})
+}
 
-	// An eviction plus an addition needs two changes.
-	k2 := map[string]KnownLine{"- a.": {}}
-	r = Fit([]string{"- a."}, k2, []string{"- n."}, Budget{Lines: 1, Chars: 100}, 1)
-	eq(t, "notfitting", r.NotFitting, []string{"- n."})
-	eq(t, "kept", r.Lines, []string{"- a."})
-	r = Fit([]string{"- a."}, k2, []string{"- n."}, Budget{Lines: 1, Chars: 100}, 2)
-	eq(t, "lines", r.Lines, []string{"- n."})
-
-	r = Fit(nil, nil, []string{"- 1.", "- 2.", "- 3.", "- 4.", "- 5.", "- 6.", "- 7."}, Budget{}, 5)
-	if len(r.Added) != 5 || len(r.NotFitting) != 2 {
-		t.Fatalf("added %d notfitting %d", len(r.Added), len(r.NotFitting))
+func TestApplyBudgetLines(t *testing.T) {
+	current := []string{"- a.", "- b."}
+	_, err := Apply(current, []string{"- c."}, nil, Budget{Lines: 2}, 5)
+	applyErr(t, err, ApplyOverLines, 3, 2)
+	if !strings.Contains(err.Error(), "3 lines") || !strings.Contains(err.Error(), "budget of 2") {
+		t.Fatalf("the refusal does not name the numbers: %v", err)
 	}
-	r = Fit(nil, nil, []string{"- 1."}, Budget{}, 0)
-	eq(t, "zero changes", r.NotFitting, []string{"- 1."})
+	// The caller makes room; Apply never picks a line to drop.
+	got, err := Apply(current, []string{"- c."}, []string{"- a."}, Budget{Lines: 2}, 5)
+	if err != nil || !reflect.DeepEqual(got, []string{"- b.", "- c."}) {
+		t.Fatalf("with room made: %v, %v", got, err)
+	}
+	if _, err := Apply(current, nil, nil, Budget{Lines: 1}, 5); err != nil {
+		t.Fatalf("a section already over budget with nothing added: %v", err)
+	}
+	if got, err := Apply(current, nil, []string{"- a."}, Budget{Lines: 0, Chars: 1}, 5); err != nil || len(got) != 1 {
+		t.Fatalf("a removal alone needs no room: %v, %v", got, err)
+	}
 }
 
-func TestFitDuplicates(t *testing.T) {
-	r := Fit([]string{"- a."}, nil, []string{"- a.", "- b.", "- b."}, Budget{}, 5)
-	eq(t, "lines", r.Lines, []string{"- a.", "- b."})
-	eq(t, "added", r.Added, []string{"- b."})
+func TestApplyBudgetChars(t *testing.T) {
+	// "- aaaa." is 7 bytes and counts 8 with its newline.
+	_, err := Apply([]string{"- aaaa."}, []string{"- bbbb."}, nil, Budget{Chars: 15}, 5)
+	applyErr(t, err, ApplyOverChars, 16, 15)
+	if _, err := Apply([]string{"- aaaa."}, []string{"- bbbb."}, nil, Budget{Chars: 16}, 5); err != nil {
+		t.Fatalf("exactly at the budget: %v", err)
+	}
+	var forty []string
+	for i := 0; i < DefaultBudgetLines; i++ {
+		forty = append(forty, "- line "+strings.Repeat("x", i+1))
+	}
+	_, err = Apply(forty, []string{"- one more."}, nil, Budget{}, 5)
+	applyErr(t, err, ApplyOverLines, DefaultBudgetLines+1, DefaultBudgetLines)
 }
 
-func TestFitRefusesLinesTheFenceCouldNotRead(t *testing.T) {
-	r := Fit(nil, nil, []string{"no bullet", "- two\nlines", "- ok."}, Budget{}, 5)
-	eq(t, "added", r.Added, []string{"- ok."})
-	eq(t, "notfitting", r.NotFitting, []string{"no bullet", "- two\nlines"})
+func TestApplyMaxChanges(t *testing.T) {
+	current := []string{"- a.", "- b.", "- c."}
+	_, err := Apply(current, []string{"- 1.", "- 2.", "- 3."}, []string{"- a.", "- b.", "- c."}, Budget{}, 5)
+	applyErr(t, err, ApplyOverChanges, 6, 5)
+	if _, err := Apply(current, []string{"- 1.", "- 2."}, []string{"- a.", "- b.", "- c."}, Budget{}, 5); err != nil {
+		t.Fatalf("five changes: %v", err)
+	}
+	// A line already present is not a change.
+	if _, err := Apply(current, []string{"- a.", "- 1.", "- 2.", "- 3.", "- 4.", "- 5."}, nil, Budget{}, 5); err != nil {
+		t.Fatalf("five additions and one already there: %v", err)
+	}
+	_, err = Apply(current, []string{"- 1."}, nil, Budget{}, 0)
+	applyErr(t, err, ApplyOverChanges, 1, 0)
 }
 
-func TestFitIsDeterministic(t *testing.T) {
-	known := map[string]KnownLine{"- a.": {}, "- b.": {}, "- c.": {LastConfirmedAt: "x"}, "- s.": {RetireProposed: true}}
-	cur := []string{"- a.", "- b.", "- c.", "- s.", "- h."}
-	add := []string{"- n1.", "- n2.", "- n3."}
-	first := Fit(cur, known, add, Budget{Lines: 5, Chars: 1000}, 5)
-	for i := 0; i < 50; i++ {
-		if got := Fit(cur, known, add, Budget{Lines: 5, Chars: 1000}, 5); !reflect.DeepEqual(got, first) {
-			t.Fatalf("run %d differs: %+v vs %+v", i, got, first)
+func TestApplyRemovingAMissingLine(t *testing.T) {
+	_, err := Apply([]string{"- a."}, nil, []string{"- a"}, Budget{}, 5)
+	applyErr(t, err, ApplyMissing, 0, 0)
+	_, err = Apply([]string{"- a."}, []string{"- b."}, []string{"- b."}, Budget{}, 5)
+	applyErr(t, err, ApplyMissing, 0, 0)
+	_, err = Apply([]string{"- a."}, []string{"- a."}, []string{"- a."}, Budget{}, 5)
+	applyErr(t, err, ApplyBothWays, 0, 0)
+}
+
+func TestApplyDuplicates(t *testing.T) {
+	got, err := Apply([]string{"- a.", "- b.", "- a."}, []string{"- c.", "- c.", "- b."}, []string{"- a.", "- a."}, Budget{}, 2)
+	if err != nil || !reflect.DeepEqual(got, []string{"- b.", "- c."}) {
+		t.Fatalf("Apply = %v, %v", got, err)
+	}
+}
+
+func TestApplyRefusesLinesTheFenceCouldNotRead(t *testing.T) {
+	for _, l := range []string{"no dash", "- ", "- a\nb", "- " + BeginMarker, "- " + EndMarker, "- a\x00"} {
+		_, err := Apply(nil, []string{l}, nil, Budget{}, 5)
+		applyErr(t, err, ApplyUnreadable, 0, 0)
+		if len(err.Error()) > 200 {
+			t.Fatalf("error echoes too much: %v", err)
 		}
 	}
-	if !reflect.DeepEqual(cur, []string{"- a.", "- b.", "- c.", "- s.", "- h."}) {
-		t.Fatal("input was modified")
+}
+
+func TestUsedCountsANewlinePerLine(t *testing.T) {
+	if n, c := Used([]string{"- a.", "- bb."}); n != 2 || c != 5+6 {
+		t.Fatalf("Used = %d, %d", n, c)
+	}
+	if b := (Budget{}).OrDefault(); b.Lines != 40 || b.Chars != 3000 {
+		t.Fatalf("default budget = %+v", b)
 	}
 }

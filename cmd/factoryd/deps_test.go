@@ -115,6 +115,7 @@ type fakeHost struct {
 	browserCommandFn     func(target string) *exec.Cmd
 	executableFn         func() (string, error)
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
+	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchctlBinaryFn    func() string
 	launchdServicePIDFn  func(domain string) (int, bool)
@@ -139,6 +140,9 @@ func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCom
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	return f.goCommandFn(ctx, dir, env, args...)
+}
+func (f *fakeHost) headCommit(ctx context.Context, repoDir string) (string, error) {
+	return f.headCommitFn(ctx, repoDir)
 }
 func (f *fakeHost) launchctl(args ...string) ([]byte, error)       { return f.launchctlFn(args...) }
 func (f *fakeHost) launchctlBinary() string                        { return f.launchctlBinaryFn() }
@@ -283,6 +287,8 @@ func newTestDeps(t testing.TB) *deps {
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
 			return nil, errors.New("test host: no go command is run")
 		},
+		// A local read of the test's own temp repository, like blobAtCommit.
+		headCommitFn:         realHost.headCommit,
 		launchctlFn:          realHost.launchctl,
 		launchctlBinaryFn:    realHost.launchctlBinary,
 		launchdServicePIDFn:  realHost.launchdServicePID,

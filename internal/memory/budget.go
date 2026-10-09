@@ -1,6 +1,9 @@
 package memory
 
-import "sort"
+import (
+	"errors"
+	"fmt"
+)
 
 // Budget bounds the section: the number of "- " lines and their total bytes
 // (each line counts one newline). A zero field takes its default.
@@ -9,30 +12,53 @@ type Budget struct{ Lines, Chars int }
 const (
 	DefaultBudgetLines = 40
 	DefaultBudgetChars = 3000
+	// MaxChangesPerRequest is how many lines one memory request may add and
+	// remove in total.
+	MaxChangesPerRequest = 5
 )
 
-// Candidate is a proposed addition or removal of one line.
-type Candidate struct {
-	Line   string
-	Remove bool
+// ErrApply wraps every refusal of Apply.
+var ErrApply = errors.New("memory: change refused")
+
+// The reasons Apply refuses a change.
+const (
+	ApplyOverLines   = "lines"
+	ApplyOverChars   = "chars"
+	ApplyOverChanges = "changes"
+	ApplyMissing     = "missing"
+	ApplyUnreadable  = "unreadable"
+	ApplyBothWays    = "added_and_removed"
+)
+
+// ApplyError says why Apply refused: What is one of the Apply* reasons, Have
+// and Limit the two numbers compared (zero for a refusal about one line), and
+// Line the line concerned, clipped.
+type ApplyError struct {
+	What        string
+	Have, Limit int
+	Line        string
 }
 
-// KnownLine is what the store knows about a line the section holds, keyed by
-// exact line text. A current line absent from the map is a human line.
-type KnownLine struct {
-	RetireProposed  bool
-	LastConfirmedAt string
+func (e *ApplyError) Error() string {
+	switch e.What {
+	case ApplyOverLines:
+		return fmt.Sprintf("%v: the section would hold %d lines, over its budget of %d", ErrApply, e.Have, e.Limit)
+	case ApplyOverChars:
+		return fmt.Sprintf("%v: the section would hold %d characters, over its budget of %d", ErrApply, e.Have, e.Limit)
+	case ApplyOverChanges:
+		return fmt.Sprintf("%v: %d lines added and removed, over the limit of %d for one request", ErrApply, e.Have, e.Limit)
+	case ApplyMissing:
+		return fmt.Sprintf("%v: the line to remove is not in the section (%q)", ErrApply, e.Line)
+	case ApplyBothWays:
+		return fmt.Sprintf("%v: a line is both added and removed (%q)", ErrApply, e.Line)
+	}
+	return fmt.Sprintf("%v: a line to add is not a single \"- \" line (%q)", ErrApply, e.Line)
 }
 
-// FitResult is the outcome of Fit. Lines is the section after the change.
-type FitResult struct {
-	Lines      []string
-	Added      []string
-	Removed    []string
-	NotFitting []string
-}
+func (e *ApplyError) Unwrap() error { return ErrApply }
 
-func (b Budget) orDefault() Budget {
+// OrDefault fills a zero field with its default.
+func (b Budget) OrDefault() Budget {
 	if b.Lines <= 0 {
 		b.Lines = DefaultBudgetLines
 	}
@@ -42,67 +68,13 @@ func (b Budget) orDefault() Budget {
 	return b
 }
 
-func chars(lines []string) int {
-	n := 0
+// Used is what lines take of a budget: their number and their bytes, one
+// newline each.
+func Used(lines []string) (count, chars int) {
 	for _, l := range lines {
-		n += len(l) + 1
+		chars += len(l) + 1
 	}
-	return n
-}
-
-func fits(lines []string, extra string, b Budget) bool {
-	return len(lines)+1 <= b.Lines && chars(lines)+len(extra)+1 <= b.Chars
-}
-
-// victims lists the indices of removable lines in the order to remove them:
-// retire-proposed first, then oldest confirmation (empty is oldest), ties by
-// position. Lines in keep (added in this call) are never listed.
-func victims(lines []string, known map[string]KnownLine, keep map[string]bool) []int {
-	var idx []int
-	for i, l := range lines {
-		if _, ok := known[l]; ok && !keep[l] {
-			idx = append(idx, i)
-		}
-	}
-	sort.SliceStable(idx, func(a, b int) bool {
-		ka, kb := known[lines[idx[a]]], known[lines[idx[b]]]
-		if ka.RetireProposed != kb.RetireProposed {
-			return ka.RetireProposed
-		}
-		return ka.LastConfirmedAt < kb.LastConfirmedAt
-	})
-	return idx
-}
-
-func without(lines []string, drop map[int]bool) []string {
-	out := make([]string, 0, len(lines))
-	for i, l := range lines {
-		if !drop[i] {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// planRoom returns the indices to remove so that extra fits, or false when no
-// removal order within the change allowance makes it fit.
-func planRoom(lines []string, known map[string]KnownLine, keep map[string]bool, extra string, b Budget, allowance int) ([]int, bool) {
-	if fits(lines, extra, b) {
-		return nil, true
-	}
-	var chosen []int
-	drop := map[int]bool{}
-	for _, i := range victims(lines, known, keep) {
-		if len(chosen)+2 > allowance {
-			return nil, false
-		}
-		chosen = append(chosen, i)
-		drop[i] = true
-		if fits(without(lines, drop), extra, b) {
-			return chosen, true
-		}
-	}
-	return nil, false
+	return len(lines), chars
 }
 
 func contains(list []string, s string) bool {
@@ -114,59 +86,59 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// retireProposedLines lists, in position order, the known retire-proposed
-// lines that fit in the change allowance.
-func retireProposedLines(lines []string, known map[string]KnownLine, allowance int) []string {
-	var out []string
-	for _, l := range lines {
-		if len(out) >= allowance {
-			break
-		}
-		if k, ok := known[l]; ok && k.RetireProposed && !contains(out, l) {
-			out = append(out, l)
+func dedupe(list []string) []string {
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if !contains(out, s) {
+			out = append(out, s)
 		}
 	}
 	return out
 }
 
-// Fit changes the section's lines within the budget and at most maxChanges
-// additions plus removals (zero or less: none). Retire-proposed known lines
-// are removed first. An addition that needs room evicts known lines (retire-
-// proposed, then least recently confirmed); a human line is never removed.
-// What cannot be added is returned in NotFitting. The result is deterministic.
-func Fit(current []string, known map[string]KnownLine, add []string, budget Budget, maxChanges int) FitResult {
-	b := budget.orDefault()
-	res := FitResult{}
-	lines := append([]string(nil), current...)
-	res.Removed = retireProposedLines(lines, known, maxChanges)
-	drop := map[int]bool{}
-	for i, l := range lines {
-		if contains(res.Removed, l) {
-			drop[i] = true
+// Apply returns current without the remove lines and with the add lines
+// appended. Each remove line must be in current exactly as written (every
+// copy of it goes); an add line already in current is not a change. Every
+// other line of current is kept verbatim and in order. It refuses, with an
+// *ApplyError naming the numbers, a change of more than maxChanges lines or a
+// result that adds a line and is over the budget's lines or characters. It
+// never chooses a line to drop: making room is the caller's remove list.
+func Apply(current []string, add, remove []string, budget Budget, maxChanges int) ([]string, error) {
+	b := budget.OrDefault()
+	remove = dedupe(remove)
+	for _, l := range remove {
+		if !contains(current, l) {
+			return nil, &ApplyError{What: ApplyMissing, Line: clip(l)}
 		}
 	}
-	lines = without(lines, drop)
-	changes := len(res.Removed)
-	keep := map[string]bool{}
-	for _, l := range add {
-		if contains(current, l) || contains(res.Added, l) || contains(res.NotFitting, l) {
-			continue
+	var adding []string
+	for _, l := range dedupe(add) {
+		switch {
+		case !listLine(l):
+			return nil, &ApplyError{What: ApplyUnreadable, Line: clip(l)}
+		case contains(remove, l):
+			return nil, &ApplyError{What: ApplyBothWays, Line: clip(l)}
+		case !contains(current, l):
+			adding = append(adding, l)
 		}
-		plan, ok := planRoom(lines, known, keep, l, b, maxChanges-changes)
-		if !ok || !listLine(l) || changes >= maxChanges {
-			res.NotFitting = append(res.NotFitting, l)
-			continue
-		}
-		drop = map[int]bool{}
-		for _, i := range plan {
-			res.Removed = append(res.Removed, lines[i])
-			drop[i] = true
-		}
-		lines = append(without(lines, drop), l)
-		res.Added = append(res.Added, l)
-		keep[l] = true
-		changes += len(plan) + 1
 	}
-	res.Lines = lines
-	return res
+	if n := len(adding) + len(remove); n > maxChanges {
+		return nil, &ApplyError{What: ApplyOverChanges, Have: n, Limit: maxChanges}
+	}
+	lines := make([]string, 0, len(current)+len(adding))
+	for _, l := range current {
+		if !contains(remove, l) {
+			lines = append(lines, l)
+		}
+	}
+	lines = append(lines, adding...)
+	count, chars := Used(lines)
+	switch {
+	case len(adding) == 0: // a removal alone never needs room
+	case count > b.Lines:
+		return nil, &ApplyError{What: ApplyOverLines, Have: count, Limit: b.Lines}
+	case chars > b.Chars:
+		return nil, &ApplyError{What: ApplyOverChars, Have: chars, Limit: b.Chars}
+	}
+	return lines, nil
 }

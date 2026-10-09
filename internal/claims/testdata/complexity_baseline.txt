@@ -34,7 +34,7 @@
 46 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
-41 cmd/factoryd/status.go statusMain
+40 cmd/factoryd/status.go statusMain
 30 cmd/factoryd/watch.go printRunRecap
 30 cmd/factoryd/watch.go watchRequest
 27 cmd/factoryd/worker_config.go loadWorkerConfig

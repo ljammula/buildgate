@@ -464,11 +464,38 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	}
 
 	newThreads := forge.NewUnresolvedThreads(state.ActionableThreads, ticket.SeenThreadIDs)
+	if len(newThreads) > 0 && r.Source.Kind == request.SourceMemory {
+		return answerMemoryRequestThreads(dp, ctx, dataDir, r, ticket, newThreads)
+	}
 	if len(newThreads) > 0 {
 		return RunCorrectiveRound(dp, ctx, dataDir, r, ticket, newThreads, cfg, now)
 	}
 
 	return advancePRReadyOrApproved(dp, ctx, dataDir, r, ticket, state, now)
+}
+
+// MemoryRequestReviewReply is what a trusted reviewer's comment on a memory
+// request's pull request is answered with. It is public, so it names no path
+// and no run.
+const MemoryRequestReviewReply = "This pull request changes the repository memory section of `AGENTS.md`. Its text is the text the operator approved, and the factory releases only that exact text, so no corrective build is started for this comment. To change a line, close this pull request, cancel the request, and propose the change again with `factoryd memory propose`."
+
+// answerMemoryRequestThreads handles new actionable threads on a memory
+// request's pull request: each is replied to once and recorded as seen, and
+// no corrective round starts. A build that reworded a line would be refused
+// at release, after its cost, because the file would no longer be the text
+// that was approved. A thread whose reply could not be posted is not recorded
+// and is answered on the next poll.
+func answerMemoryRequestThreads(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, threads []forge.Thread) error {
+	replyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for _, t := range threads {
+		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, MemoryRequestReviewReply); err != nil {
+			log.Printf("request %s: ticket %d: reply on thread %s of a memory request: %v", r.ID, ticket.Index, t.ID, err)
+			continue
+		}
+		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
+	}
+	return r.Save(dataDir)
 }
 
 // prPollDue reports whether a ticket last polled at lastPolledAt (RFC3339Nano,

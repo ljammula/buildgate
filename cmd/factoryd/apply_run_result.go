@@ -353,7 +353,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		var prURL, prWithheldReason string
 		if r.OpenPullRequest {
 			if decision != nil && decision.Allowed {
-				prURL = openEvidencePullRequest(isolatedWorkspacePath, id, r, prPolicy, opener)
+				prURL = openEvidencePullRequest(dataDir, isolatedWorkspacePath, id, r, prPolicy, opener)
 			} else {
 				prWithheldReason = releasePullRequestWithheldReason(decision)
 				log.Printf("run %s: -open-pull-request set but release decision denies it: %s", id, prWithheldReason)

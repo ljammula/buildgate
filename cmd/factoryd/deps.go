@@ -104,6 +104,8 @@ type hostBoundary interface {
 	blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommand(target string) *exec.Cmd
 	executable() (string, error)
+	// headCommit is the full id of the commit HEAD names in repoDir.
+	headCommit(ctx context.Context, repoDir string) (string, error)
 	// goCommand runs the operator's go command in dir with env added to the
 	// process environment, and returns its standard output.
 	goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)

@@ -40,12 +40,23 @@ const (
 type StoreState struct {
 	SchemaVersion int      `json:"schema_version"`
 	Lessons       []Lesson `json:"lessons"`
-	// CountedRuns lists the run ids already counted toward confirm/retire
-	// thresholds, newest last.
+	// CountedRuns lists the run ids whose notes were already collected,
+	// newest last.
 	CountedRuns []string `json:"counted_runs,omitempty"`
 }
 
-// Store is one project's durable memory under <data-dir>/memory/<project>.
+// StoreKey names one repository's store directory: the lower-cased project
+// name, then the first 12 hex characters of the SHA-256 of the repository's
+// cleaned absolute root path. Two repositories that share a base name, or
+// whose names differ only by case, get different stores, stop markers and
+// proposals. Every caller of Open, OpenReadOnly, ProposalPath and ChangesPath
+// passes this key where the store's directory name is wanted.
+func StoreKey(project, repoRoot string) string {
+	return strings.ToLower(project) + "-" + HashHex([]byte(filepath.Clean(repoRoot)))[:12]
+}
+
+// Store is one repository's durable memory under <data-dir>/memory/<key>,
+// where key is its StoreKey.
 type Store struct {
 	dir string
 }
@@ -70,18 +81,28 @@ func ValidProject(project string) error {
 	return nil
 }
 
-// Open creates the project's directories (mode 0700) and returns its store.
+// Open creates the store's directories (mode 0700) and returns it. project is
+// the repository's StoreKey.
 func Open(dataDir, project string) (*Store, error) {
 	if err := ValidProject(project); err != nil {
 		return nil, err
 	}
 	dir := filepath.Join(dataDir, "memory", project)
-	for _, d := range []string{dir, filepath.Join(dir, "jobs"), filepath.Join(dir, "proposals")} {
+	for _, d := range []string{dir, filepath.Join(dir, "proposals")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, fmt.Errorf("memory: create %s: %w", d, err)
 		}
 	}
 	return &Store{dir: dir}, nil
+}
+
+// OpenReadOnly returns the project's store without creating anything: Load
+// and Off work on a store that was never written (empty, not stopped).
+func OpenReadOnly(dataDir, project string) (*Store, error) {
+	if err := ValidProject(project); err != nil {
+		return nil, err
+	}
+	return &Store{dir: filepath.Join(dataDir, "memory", project)}, nil
 }
 
 // Dir is the project's store directory.
@@ -200,17 +221,15 @@ func pruneOldest(lessons []Lesson, state State, over int) []Lesson {
 // enforceBounds normalizes st and returns its encoding, or refuses.
 func enforceBounds(st *StoreState) ([]byte, error) {
 	st.SchemaVersion = StoreSchemaVersion
-	for _, state := range []State{StateRetired, StateDropped} {
-		if over := len(st.Lessons) - MaxLessons; over > 0 {
-			st.Lessons = pruneOldest(st.Lessons, state, over)
-		}
+	if over := len(st.Lessons) - MaxLessons; over > 0 {
+		st.Lessons = pruneOldest(st.Lessons, StateDropped, over)
 	}
 	if len(st.Lessons) > MaxLessons {
-		return nil, fmt.Errorf("%w: %d lessons, over the %d lesson limit with none retired or dropped to prune", ErrStore, len(st.Lessons), MaxLessons)
+		return nil, fmt.Errorf("%w: %d lessons, over the %d lesson limit with none dropped to prune", ErrStore, len(st.Lessons), MaxLessons)
 	}
 	for _, l := range st.Lessons {
-		if len(l.Observations) > maxObservations {
-			return nil, fmt.Errorf("%w: lesson %s has %d observations, over the %d limit", ErrStore, clip(l.ID), len(l.Observations), maxObservations)
+		if len(l.Runs) > MaxLessonRuns {
+			return nil, fmt.Errorf("%w: lesson %s lists %d runs, over the %d limit", ErrStore, clip(l.ID), len(l.Runs), MaxLessonRuns)
 		}
 	}
 	if n := len(st.CountedRuns); n > MaxCountedRuns {
@@ -298,28 +317,25 @@ func (s *Store) ClearOff() error {
 	return nil
 }
 
-// Reconcile applies the moves that depend on what the repository's section
-// holds at HEAD. requestState reports whether a request is still active and
-// whether it is known at all. It does no I/O.
+// Reconcile brings the store in line with the section at HEAD. A lesson whose
+// exact line the section holds is removed, whatever its state: the line is in
+// force and the file is the memory. A proposed lesson whose request is known
+// and no longer active, with the line absent, goes back to candidate.
+// requestState reports whether a request is still active and whether it is
+// known at all. It does no I/O.
 func Reconcile(st *StoreState, sectionLinesAtHead []string, requestState func(requestID string) (active bool, known bool), now string) {
-	present := make(map[string]bool, len(sectionLinesAtHead))
-	for _, l := range sectionLinesAtHead {
-		present[l] = true
-	}
-	for i := range st.Lessons {
-		l := &st.Lessons[i]
-		has := present[l.Line]
-		switch l.State {
-		case StateProposed:
-			if has {
-				_ = l.Move(StateInForce, now, "reconcile", "the line is in the section at HEAD")
-			} else if active, known := requestState(l.RequestID); known && !active {
-				_ = l.Move(StateChecked, now, "reconcile", "the request ended without the line")
-			}
-		case StateInForce, StateRetireProposed:
-			if !has {
-				_ = l.Move(StateRetired, now, "reconcile", "the line is gone from the section at HEAD")
+	kept := make([]Lesson, 0, len(st.Lessons))
+	for _, l := range st.Lessons {
+		if contains(sectionLinesAtHead, l.Line) {
+			continue
+		}
+		if l.State == StateProposed {
+			if active, known := requestState(l.RequestID); known && !active {
+				_ = l.Move(StateCandidate, now, "reconcile", "the request ended without the line")
+				l.RequestID = ""
 			}
 		}
+		kept = append(kept, l)
 	}
+	st.Lessons = kept
 }

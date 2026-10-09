@@ -23,7 +23,7 @@ func openTest(t *testing.T) *Store {
 
 func mkLesson(t *testing.T, n int, state State, at string) Lesson {
 	t.Helper()
-	l, err := NewLesson(KindConvention, fmt.Sprintf("Keep rule number %d", n), "", "", []string{"0123456789abcdef"})
+	l, err := NewLesson(fmt.Sprintf("Keep rule number %d", n), SourceAgent, "2026-10-09T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,14 +88,10 @@ func TestStoreBounds(t *testing.T) {
 	s := openTest(t)
 	err := s.Update(func(st *StoreState) error {
 		for i := 0; i < 150; i++ {
-			st.Lessons = append(st.Lessons, mkLesson(t, i, StateInForce, ""))
+			st.Lessons = append(st.Lessons, mkLesson(t, i, StateProposed, ""))
 		}
 		for i := 150; i < 200; i++ {
-			state := StateRetired
-			if i >= 190 {
-				state = StateDropped
-			}
-			st.Lessons = append(st.Lessons, mkLesson(t, i, state, fmt.Sprintf("2026-01-%02dT00:00:00Z", i-149)))
+			st.Lessons = append(st.Lessons, mkLesson(t, i, StateDropped, fmt.Sprintf("2026-01-%02dT00:00:00Z", i-149)))
 		}
 		st.Lessons = append(st.Lessons, mkLesson(t, 200, StateCandidate, ""))
 		return nil
@@ -109,7 +105,7 @@ func TestStoreBounds(t *testing.T) {
 	}
 	for _, l := range st.Lessons {
 		if l.Reason == "Keep rule number 150" {
-			t.Fatal("oldest retired lesson survived")
+			t.Fatal("oldest dropped lesson survived")
 		}
 	}
 	err = s.Update(func(st *StoreState) error {
@@ -117,13 +113,13 @@ func TestStoreBounds(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("one more with retired present: %v", err)
+		t.Fatalf("one more with dropped present: %v", err)
 	}
 	// Only active lessons: 201 refused, file unchanged.
 	s2 := openTest(t)
 	err = s2.Update(func(st *StoreState) error {
 		for i := 0; i < 201; i++ {
-			st.Lessons = append(st.Lessons, mkLesson(t, i, StateInForce, ""))
+			st.Lessons = append(st.Lessons, mkLesson(t, i, StateCandidate, ""))
 		}
 		return nil
 	})
@@ -135,14 +131,14 @@ func TestStoreBounds(t *testing.T) {
 	}
 	err = s2.Update(func(st *StoreState) error {
 		l := mkLesson(t, 1, StateCandidate, "")
-		for i := 0; i < 51; i++ {
-			l.Observations = append(l.Observations, fmt.Sprintf("%016x", i))
+		for i := 0; i < MaxLessonRuns+1; i++ {
+			l.Runs = append(l.Runs, fmt.Sprintf("run-%d", i))
 		}
 		st.Lessons = append(st.Lessons, l)
 		return nil
 	})
 	if !errors.Is(err, ErrStore) {
-		t.Fatalf("51 observations: %v", err)
+		t.Fatalf("too many runs on a lesson: %v", err)
 	}
 }
 
@@ -285,7 +281,10 @@ func TestStoreHostileProjectName(t *testing.T) {
 	}
 }
 
-func TestReconcileTransitions(t *testing.T) {
+// Each rule of Reconcile: a line the section holds leaves the store whatever
+// its state; a proposed lesson goes back to candidate only when its request
+// is known and over; everything else stays as it was.
+func TestReconcileRules(t *testing.T) {
 	mk := func(n int, state State, req string) Lesson {
 		l := mkLesson(t, n, state, "")
 		l.RequestID = req
@@ -295,12 +294,12 @@ func TestReconcileTransitions(t *testing.T) {
 	proposedGone := mk(2, StateProposed, "r-done")
 	proposedActive := mk(3, StateProposed, "r-live")
 	proposedUnknown := mk(4, StateProposed, "r-missing")
-	inForceGone := mk(5, StateInForce, "")
-	retireGone := mk(6, StateRetireProposed, "")
-	inForceKept := mk(7, StateInForce, "")
-	candidateInSection := mk(8, StateCandidate, "")
-	st := &StoreState{Lessons: []Lesson{proposedIn, proposedGone, proposedActive, proposedUnknown, inForceGone, retireGone, inForceKept, candidateInSection}}
-	section := []string{proposedIn.Line, inForceKept.Line, candidateInSection.Line, "- a human line."}
+	candidateIn := mk(5, StateCandidate, "")
+	droppedIn := mk(6, StateDropped, "")
+	candidateOut := mk(7, StateCandidate, "")
+	droppedOut := mk(8, StateDropped, "")
+	st := &StoreState{Lessons: []Lesson{proposedIn, proposedGone, proposedActive, proposedUnknown, candidateIn, droppedIn, candidateOut, droppedOut}}
+	section := []string{proposedIn.Line, candidateIn.Line, droppedIn.Line, "- a human line."}
 	reqs := func(id string) (bool, bool) {
 		switch id {
 		case "r-live":
@@ -311,14 +310,24 @@ func TestReconcileTransitions(t *testing.T) {
 		return false, false
 	}
 	Reconcile(st, section, reqs, "2026-10-09T00:00:00Z")
-	want := []State{StateInForce, StateChecked, StateProposed, StateProposed, StateRetired, StateRetired, StateInForce, StateCandidate}
-	for i, w := range want {
-		if st.Lessons[i].State != w {
-			t.Errorf("lesson %d: %s, want %s", i+1, st.Lessons[i].State, w)
+	want := map[string]State{
+		proposedGone.ID: StateCandidate, proposedActive.ID: StateProposed, proposedUnknown.ID: StateProposed,
+		candidateOut.ID: StateCandidate, droppedOut.ID: StateDropped,
+	}
+	if len(st.Lessons) != len(want) {
+		t.Fatalf("%d lessons kept, want %d: %+v", len(st.Lessons), len(want), st.Lessons)
+	}
+	for _, l := range st.Lessons {
+		if want[l.ID] != l.State {
+			t.Errorf("lesson %q: %s, want %s", l.Reason, l.State, want[l.ID])
 		}
 	}
-	if h := st.Lessons[0].History; len(h) != 1 || h[0].By != "reconcile" {
-		t.Errorf("history %+v", h)
+	back := st.Lessons[0]
+	if back.ID != proposedGone.ID || back.RequestID != "" || len(back.History) != 1 || back.History[0].By != "reconcile" {
+		t.Errorf("the lesson whose request ended: %+v", back)
+	}
+	if st.Lessons[1].RequestID != "r-live" || len(st.Lessons[1].History) != 0 {
+		t.Errorf("a lesson of an active request was touched: %+v", st.Lessons[1])
 	}
 }
 
@@ -341,5 +350,73 @@ func TestGateOrderAndReasons(t *testing.T) {
 		if !errors.Is(err, ErrMemoryOff) || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("Gate(%v,%v,%v) = %v, want %q", c.on, c.marker, c.kill, err, c.want)
 		}
+	}
+}
+
+// Two repositories that share a base name, or whose names differ only by
+// case, have different stores, stop markers and proposal paths.
+func TestStoreKeySeparatesRepositoriesWithOneName(t *testing.T) {
+	a, b := StoreKey("api", "/clients/acme/api"), StoreKey("api", "/clients/beta/api")
+	if a == b || !strings.HasPrefix(a, "api-") || len(a) != len("api-")+12 {
+		t.Fatalf("keys %q and %q", a, b)
+	}
+	if StoreKey("api", "/clients/acme/api/") != a || StoreKey("api", "/clients/acme/./api") != a {
+		t.Fatal("the key depends on how the root path is written")
+	}
+	upper, lower := StoreKey("API", "/src/API"), StoreKey("api", "/src/api")
+	if upper == lower || !strings.HasPrefix(upper, "api-") || strings.EqualFold(upper, lower) {
+		t.Fatalf("names differing by case share a store on a case-insensitive filesystem: %q %q", upper, lower)
+	}
+	if err := ValidProject(a); err != nil {
+		t.Fatalf("a key is not a valid store name: %v", err)
+	}
+	data := t.TempDir()
+	one, err := Open(data, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(data, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := one.SetOff("op", "pause"); err != nil {
+		t.Fatal(err)
+	}
+	if off, _ := other.Off(); off {
+		t.Fatal("one repository's stop marker stopped the other")
+	}
+	pa, _ := ProposalPath(data, a, "req-1")
+	pb, _ := ProposalPath(data, b, "req-1")
+	if pa == pb {
+		t.Fatal("the two repositories share a proposal path")
+	}
+}
+
+func TestChangesRoundTripBesideTheProposal(t *testing.T) {
+	data := t.TempDir()
+	key := StoreKey("app", "/src/app")
+	path, err := ChangesPath(data, key, "req-1")
+	if err != nil || filepath.Base(path) != "req-1.changes.json" || filepath.Base(filepath.Dir(path)) != "proposals" {
+		t.Fatalf("path %q, %v", path, err)
+	}
+	if got, err := LoadChanges(path); err != nil || got != nil {
+		t.Fatalf("missing file = %v, %v", got, err)
+	}
+	want := []Change{{Line: "- a.", Source: SourceAgent, Runs: []string{"r1"}}, {Remove: true, Line: "- b."}}
+	if err := SaveChanges(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadChanges(path)
+	if err != nil || len(got) != 2 || got[0].Runs[0] != "r1" || !got[1].Remove {
+		t.Fatalf("round trip = %+v, %v", got, err)
+	}
+	if err := os.WriteFile(path, []byte(`[{"line":"x","extra":1}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadChanges(path); err == nil {
+		t.Fatal("an unknown field was accepted")
+	}
+	if _, err := ChangesPath(data, "../x", "req-1"); err == nil {
+		t.Fatal("a hostile key was accepted")
 	}
 }

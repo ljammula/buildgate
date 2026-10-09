@@ -628,7 +628,7 @@ func TestOpenEvidencePullRequestSkipsWithNoBranch(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{ID: "run-1", Ticket: "012", State: run.StateAccepted, CreatedAt: "2026-09-08T10:00:00Z"}
 	opener := &fakePullRequestOpener{}
-	url := openEvidencePullRequest(t.TempDir(), "run-1", r, &release.MergePolicy{}, opener)
+	url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "run-1", r, &release.MergePolicy{}, opener)
 
 	if opener.called {
 		t.Error("opener called despite r.Branch being empty")
@@ -643,7 +643,7 @@ func TestOpenEvidencePullRequestReturnsURLOnSuccess(t *testing.T) {
 	execDir := t.TempDir()
 	r := &run.Run{ID: "run-1", Ticket: "012", State: run.StateAccepted, Branch: "factoryd/run-1", CreatedAt: "2026-09-08T10:00:00Z"}
 	opener := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/7"}
-	url := openEvidencePullRequest(execDir, "run-1", r, &release.MergePolicy{}, opener)
+	url := openEvidencePullRequest(t.TempDir(), execDir, "run-1", r, &release.MergePolicy{}, opener)
 
 	if !opener.called {
 		t.Fatal("opener was never called")
@@ -669,14 +669,14 @@ func TestOpenEvidencePullRequestForwardsPRBase(t *testing.T) {
 	execDir := t.TempDir()
 	stacked := &run.Run{ID: "run-2", Ticket: "002", State: run.StateAccepted, Branch: "factoryd/run-2", PRBase: "factoryd/run-1", CreatedAt: "2026-09-08T10:00:00Z"}
 	opener := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/8"}
-	openEvidencePullRequest(execDir, "run-2", stacked, &release.MergePolicy{}, opener)
+	openEvidencePullRequest(t.TempDir(), execDir, "run-2", stacked, &release.MergePolicy{}, opener)
 	if opener.calledBase != "factoryd/run-1" {
 		t.Errorf("opener.calledBase = %q, want %q", opener.calledBase, "factoryd/run-1")
 	}
 
 	unstacked := &run.Run{ID: "run-1", Ticket: "001", State: run.StateAccepted, Branch: "factoryd/run-1", CreatedAt: "2026-09-08T10:00:00Z"}
 	opener2 := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/7"}
-	openEvidencePullRequest(execDir, "run-1", unstacked, &release.MergePolicy{}, opener2)
+	openEvidencePullRequest(t.TempDir(), execDir, "run-1", unstacked, &release.MergePolicy{}, opener2)
 	if opener2.calledBase != "" {
 		t.Errorf("opener.calledBase = %q, want empty for a run with no PRBase", opener2.calledBase)
 	}
@@ -825,7 +825,7 @@ func TestOpenEvidencePullRequestAcceptsNilPolicy(t *testing.T) {
 	execDir := t.TempDir()
 	r := &run.Run{ID: "run-1", Ticket: "012", State: run.StateAccepted, Branch: "factoryd/run-1", CreatedAt: "2026-09-08T10:00:00Z"}
 	opener := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/7"}
-	openEvidencePullRequest(execDir, "run-1", r, nil, opener)
+	openEvidencePullRequest(t.TempDir(), execDir, "run-1", r, nil, opener)
 
 	if !opener.called {
 		t.Fatal("opener was never called")
@@ -844,7 +844,7 @@ func TestOpenEvidencePullRequestNeverFailsTheRunOnOpenerError(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{ID: "run-1", Ticket: "012", State: run.StateAccepted, Branch: "factoryd/run-1", CreatedAt: "2026-09-08T10:00:00Z"}
 	opener := &fakePullRequestOpener{err: errors.New("gh: not logged in to any hosts")}
-	url := openEvidencePullRequest(t.TempDir(), "run-1", r, &release.MergePolicy{}, opener)
+	url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "run-1", r, &release.MergePolicy{}, opener)
 
 	if url != "" {
 		t.Errorf("openEvidencePullRequest returned %q, want empty on a failed open", url)
@@ -1180,7 +1180,7 @@ func TestRecordReleaseDecisionAndOpenerGate(t *testing.T) {
 	// the opener when the decision is both non-nil and Allowed.
 	var prURL string
 	if r.OpenPullRequest && decision.Allowed {
-		prURL = openEvidencePullRequest(t.TempDir(), r.ID, r, nil, opener)
+		prURL = openEvidencePullRequest(t.TempDir(), t.TempDir(), r.ID, r, nil, opener)
 	}
 	if opener.called {
 		t.Error("openEvidencePullRequest's opener was called, want it never invoked for a denied release decision")
@@ -1203,7 +1203,7 @@ func TestOpenEvidencePullRequestRecordsTheFailureOnTheRun(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{ID: "run-1", Ticket: "012", State: run.StateAccepted, Branch: "factoryd/run-1", CreatedAt: "2026-09-08T10:00:00Z"}
 	opener := &fakePullRequestOpener{err: errors.New("pull request create failed: branch has no history in common with main\nsecond line")}
-	if url := openEvidencePullRequest(t.TempDir(), "run-1", r, &release.MergePolicy{}, opener); url != "" {
+	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "run-1", r, &release.MergePolicy{}, opener); url != "" {
 		t.Fatalf("url = %q, want empty on failure", url)
 	}
 	if r.PROpenError != "pull request create failed: branch has no history in common with main" {
