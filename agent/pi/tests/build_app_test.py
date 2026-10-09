@@ -1362,6 +1362,186 @@ class SetupCommandTests(unittest.TestCase):
 		self.assertIn(["bash", "-o", "pipefail", "-lc", "true"], argvs[0])
 
 
+class AutofixCommandTests(unittest.TestCase):
+	"""`--autofix-command`: the repository's autofix commands run inside each
+	round, after the agent's turn and before the round's checks; advisory, and
+	confined to the files the ticket already changed."""
+
+	def repo(self, stack):
+		root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+		outside = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+		init_repo_with_commit(root)
+		(root / "a.txt").write_text("a\n")
+		(root / "b.txt").write_text("b\n")
+		(root / "bin.dat").write_bytes(b"\xff\xfe\x00base\x80")
+		run = lambda *args: subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+		run("add", ".")
+		run("commit", "-m", "files")
+		base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True).stdout.strip()
+		return root, outside, base
+
+	def build(self, root, base, *, autofix, agent, verify=None, max_rounds=1, setup=None, sh_log=None, prompts=None):
+		spec = root / "spec.md"
+		spec.write_text("Fix the cache")
+		original_sh = build_app.sh
+
+		def recording_sh(args, **kwargs):
+			if sh_log is not None:
+				# The base sha differs per repository; the sequence is what is compared.
+				sh_log.append(["BASE" if part == base else part for part in args])
+			return original_sh(args, **kwargs)
+
+		def agent_turn(*a, **k):
+			agent()
+			return subprocess.CompletedProcess([], 0, pi_output("clean"), ""), False
+
+		with (
+			mock.patch.object(build_app, "sh", side_effect=recording_sh),
+			mock.patch.object(build_app, "run_verification", side_effect=verify or (lambda *a, **k: ("make verify", False, False, "boom", False, None))),
+			mock.patch.object(build_app, "run_agent_streaming", side_effect=agent_turn),
+		):
+			return build_app.run_build(
+				root, spec, max_rounds=max_rounds, timeout_minutes=1, review_base_sha=base,
+				setup_commands=setup, autofix_commands=autofix,
+			)
+
+	def test_autofix_runs_after_the_agent_and_before_the_rounds_checks(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			trace = outside / "trace"
+			note = lambda word: trace.open("a").write(word + "\n")
+
+			def verify(*a, **k):
+				note("verify")
+				return ("make verify", True, False, "", False, None)
+
+			result = self.build(
+				root, base, autofix=[f"echo autofix1 >> {trace}", f"echo autofix2 >> {trace}"],
+				setup=[f"echo setup >> {trace}"], verify=verify,
+				agent=lambda: (note("agent"), (root / "a.txt").write_text("changed\n")),
+			)
+			# setup runs once before the agent's first turn, then per round.
+			self.assertEqual(trace.read_text().split(), ["setup", "agent", "autofix1", "autofix2", "setup", "verify"])
+			self.assertTrue((root / ".pi-build-session" / "feedback" / "round-1" / "autofix.log").is_file())
+			self.assertEqual([c["command"] for c in result.rounds[0].autofix["commands"]], [f"echo autofix1 >> {trace}", f"echo autofix2 >> {trace}"])
+
+	def test_autofix_failure_is_recorded_and_does_not_fail_the_round(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			result = self.build(
+				root, base, autofix=["echo fixing; exit 3"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			rnd = result.rounds[0]
+			self.assertTrue(result.succeeded)
+			self.assertEqual(rnd.blockers, [])
+			record = rnd.autofix["commands"][0]
+			self.assertEqual((record["exit_code"], record["timed_out"]), (3, False))
+			self.assertIn("duration_s", record)
+			self.assertIn("fixing", (root / ".pi-build-session" / "feedback" / "round-1" / "autofix.log").read_text())
+			self.assertEqual(build_app.autofix_prompt_note(rnd.autofix), "autofix command failed (advisory): `echo fixing; exit 3` exit 3")
+
+	def test_autofix_failure_line_reaches_the_next_rounds_prompt_only_when_it_failed(self):
+		for command, expected in (("exit 2", True), ("true", False)):
+			with self.subTest(command=command), contextlib.ExitStack() as stack:
+				root, outside, base = self.repo(stack)
+				with mock.patch.object(build_app, "corrective_prompt", wraps=build_app.corrective_prompt):
+					result = self.build(
+						root, base, autofix=[command], max_rounds=1,
+						agent=lambda: (root / "a.txt").write_text("changed\n"),
+					)
+				state = json.loads((root / build_app.ROUND_STATE_FILE).read_text())
+				self.assertEqual("autofix command failed (advisory): `exit 2` exit 2" in state["next_prompt"], expected)
+
+	def test_autofix_timeout_is_recorded_and_does_not_fail_the_round(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			stack.enter_context(mock.patch.object(build_app, "AUTOFIX_TIMEOUT_SECONDS", 0.5))
+			result = self.build(
+				root, base, autofix=["exec sleep 5", "echo after >> after.txt"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertTrue(result.succeeded)
+			commands = result.rounds[0].autofix["commands"]
+			self.assertTrue(commands[0]["timed_out"])
+			self.assertFalse(commands[1]["timed_out"])
+			self.assertEqual(result.rounds[0].blockers, [])
+
+	def test_autofix_change_to_a_file_the_ticket_did_not_touch_is_reverted(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			(root / "sub").mkdir(exist_ok=True)
+			result = self.build(
+				root, base,
+				autofix=["echo fixed >> a.txt; echo fixed > b.txt; mkdir -p newdir; echo x > newdir/new.txt; echo y > new.txt"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertEqual((root / "a.txt").read_text(), "changed\nfixed\n")
+			self.assertEqual((root / "b.txt").read_text(), "b\n")
+			self.assertFalse((root / "new.txt").exists())
+			self.assertFalse((root / "newdir").exists())
+			record = result.rounds[0].autofix
+			self.assertEqual(record["reverted_count"], 3)
+			self.assertEqual(record["reverted"], ["b.txt", "new.txt", "newdir/new.txt"])
+			self.assertIn("reverted 3 path(s)", (root / ".pi-build-session" / "feedback" / "round-1" / "autofix.log").read_text())
+			self.assertEqual(result.rounds[0].changed_files, ["a.txt"])
+
+	def test_autofix_revert_is_binary_safe(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			result = self.build(
+				root, base, autofix=["printf '\\377\\376changed' > bin.dat"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertEqual((root / "bin.dat").read_bytes(), b"\xff\xfe\x00base\x80")
+			self.assertEqual(result.rounds[0].autofix["reverted"], ["bin.dat"])
+
+	def test_a_round_where_only_autofix_changed_files_is_still_no_changes(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			result = self.build(
+				root, base, autofix=["echo fixed >> a.txt"], agent=lambda: None,
+			)
+			rnd = result.rounds[0]
+			self.assertIn("no changes made to the workspace", rnd.blockers)
+			self.assertEqual(rnd.changed_files, [])
+
+	def test_no_autofix_commands_changes_nothing(self):
+		argvs = []
+		for autofix in (None, []):
+			with contextlib.ExitStack() as stack:
+				root, outside, base = self.repo(stack)
+				log = []
+				self.build(
+					root, base, autofix=autofix, sh_log=log,
+					verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+					agent=lambda: (root / "a.txt").write_text("changed\n"),
+				)
+				self.assertFalse((root / ".pi-build-session" / "feedback" / "round-1" / "autofix.log").exists())
+				argvs.append(log)
+		self.assertEqual(argvs[0], argvs[1])
+		without = []
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			self.build(root, base, autofix=["true"], sh_log=without, verify=lambda *a, **k: ("make verify", True, False, "", False, None), agent=lambda: (root / "a.txt").write_text("changed\n"))
+		self.assertEqual([a for a in without if a not in argvs[0]], [["sh", "-c", "true"]])
+
+	def test_evidence_carries_autofix_only_for_rounds_that_ran_it(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			result = self.build(root, base, autofix=["true"], agent=lambda: (root / "a.txt").write_text("changed\n"))
+			path = build_app.write_evidence_json(result)
+			rounds = json.loads(path.read_text())["rounds"]
+			self.assertEqual(rounds[0]["autofix"]["commands"][0]["exit_code"], 0)
+			result.rounds[0].autofix = None
+			rounds = json.loads(build_app.write_evidence_json(result).read_text())["rounds"]
+			self.assertNotIn("autofix", rounds[0])
+
+
 class EnsureGitRepoTests(unittest.TestCase):
 	"""Uses real git subprocesses, not mocks -- the bug this guards against
 	(a bare exit-code check treating an ancestor's repo as this directory's

@@ -51,6 +51,15 @@ func executionHarnessEnv(input RunWorkflowInput) []string { return harnessEnv(in
 
 func reviewHarnessEnv(input RunWorkflowInput) []string { return harnessEnv(input.ReviewHarness) }
 
+// autofixArgs is the build script's --autofix-command argument per entry.
+func autofixArgs(commands []string) []string {
+	var args []string
+	for _, c := range commands {
+		args = append(args, "--autofix-command", c)
+	}
+	return args
+}
+
 // buildActivityArgs constructs the argv passed to build_app.py on the
 // Temporal paths. Pulled out as a pure function, like cmd/factoryd's buildAppArgs (sandbox_exec.go):
 // the exact flags threaded through are unit-testable independent of any
@@ -295,6 +304,9 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
 	// see buildActivityArgs' own doc comment on that parameter for why.
 	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
+	// The build script is the only reader of the autofix list (see
+	// TestOnlyTheBuildReadsAutofix): it runs the commands inside each round.
+	args = append(args, autofixArgs(input.AutofixCommands)...)
 	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath, input.BaselineNotePath)
 	args = append(args, resumeFromStateArgs(input)...)
 	buildAppInterpreter := a.buildAppInterpreterFor(input)

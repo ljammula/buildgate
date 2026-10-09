@@ -499,6 +499,9 @@ class Round:
 	failure_signature: str = ""
 	failure_log: str = ""
 	agent_notes: str = ""
+	# run_autofix's record of this round's autofix commands (None when the
+	# repository lists none); written as `autofix` in BUILD_EVIDENCE.json.
+	autofix: dict | None = None
 
 
 @dataclass
@@ -915,6 +918,111 @@ def run_verification_after_setup(workspace: Path, *, setup_commands: list[str], 
 	if failed is not None:
 		return failed, (None, None, False, tail, False, None)
 	return None, run_verification(workspace, **kwargs)
+
+
+AUTOFIX_LOG = "autofix.log"
+# Each repository autofix command (`.factory.yml` autofix:) gets this long.
+AUTOFIX_TIMEOUT_SECONDS = 5 * 60
+AUTOFIX_REVERTED_LISTED = 20
+
+
+def _restore_from_base(workspace: Path, base: str, name: str) -> None:
+	"""Puts path `name` back to its content (and file mode) at `base` without
+	any git write: bytes from `git show`, so a binary file comes back
+	identical; a file the base does not have is deleted, and the directories
+	that became empty with it. Raises OSError when it cannot."""
+	path = workspace / name
+	tree = subprocess.run(["git", "ls-tree", "-z", base, "--", name], cwd=workspace, capture_output=True, check=False, stdin=subprocess.DEVNULL)
+	entry = tree.stdout.split(b"\0")[0].decode(errors="replace") if tree.returncode == 0 else ""
+	mode = entry.split(" ", 1)[0] if entry else ""
+	if path.is_symlink() or path.is_file():
+		path.unlink()
+	elif path.is_dir():
+		shutil.rmtree(path)
+	if mode not in ("100644", "100755", "120000"):
+		parent = path.parent
+		while parent != workspace and workspace in parent.parents:
+			try:
+				parent.rmdir()
+			except OSError:
+				break
+			parent = parent.parent
+		return
+	shown = subprocess.run(["git", "show", f"{base}:{name}"], cwd=workspace, capture_output=True, check=False, stdin=subprocess.DEVNULL)
+	if shown.returncode != 0:
+		raise OSError(f"git show {base}:{name} failed")
+	path.parent.mkdir(parents=True, exist_ok=True)
+	if mode == "120000":
+		os.symlink(shown.stdout.decode(errors="surrogateescape"), path)
+		return
+	path.write_bytes(shown.stdout)
+	path.chmod(0o755 if mode == "100755" else 0o644)
+
+
+def run_autofix(
+	workspace: Path, commands: list[str], base_sha: str | None, scope: set[str], log_dir: Path | None, env: dict | None = None,
+) -> dict | None:
+	"""Runs the repository's autofix commands (`.factory.yml` autofix:) in
+	order, in the workspace and the round's environment, after the agent's
+	turn and before the round's checks. Advisory: a command that exits
+	non-zero or times out is recorded, never a failure of the round (many
+	`--fix` tools exit non-zero when they fixed something).
+
+	scope is the paths the round's tree differs from the base in (or has
+	untracked, not ignored) before autofix; a path outside it that differs
+	afterwards is autofix's doing alone and is put back to the base's content,
+	so a formatter cannot widen the ticket's diff. The combined output and any
+	revert are saved (redacted, bounded) as autofix.log in log_dir. Returns
+	the round's `autofix` evidence record, or None when there are no commands."""
+	if not commands:
+		return None
+	output, records = "", []
+	for command in commands:
+		output += f"$ {command}\n"
+		started = time.monotonic()
+		exit_code, timed_out = 0, False
+		try:
+			completed = sh(["sh", "-c", command], cwd=workspace, timeout=AUTOFIX_TIMEOUT_SECONDS, env=env)
+			exit_code = completed.returncode
+			output += f"{completed.stdout}\n{completed.stderr}\n"
+		except subprocess.TimeoutExpired as exc:
+			timed_out, exit_code = True, -1
+			captured = exc.stdout.decode(errors="ignore") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+			output += f"{captured}\n[timed out after {AUTOFIX_TIMEOUT_SECONDS // 60} minutes]\n"
+		except OSError as exc:
+			exit_code = 127
+			output += f"{exc}\n"
+		records.append({
+			"command": command[:200], "exit_code": exit_code, "timed_out": timed_out,
+			"duration_s": round(time.monotonic() - started, 3),
+		})
+	reverted = sorted(set(changed_file_hashes(workspace, base_sha)) - scope)
+	base = base_sha or "HEAD"
+	for name in reverted:
+		try:
+			_restore_from_base(workspace, base, name)
+		except OSError as exc:
+			output += f"could not revert {name}: {exc}\n"
+	if reverted:
+		output += f"reverted {len(reverted)} path(s) the ticket had not changed: {', '.join(reverted[:AUTOFIX_REVERTED_LISTED])}\n"
+	if log_dir is not None:
+		try:
+			log_dir.mkdir(parents=True, exist_ok=True)
+			(log_dir / AUTOFIX_LOG).write_text(redact(output, FAILURE_LOG_LIMIT) + "\n", encoding="utf-8")
+		except OSError:
+			pass
+	return {"commands": records, "reverted_count": len(reverted), "reverted": reverted[:AUTOFIX_REVERTED_LISTED]}
+
+
+def autofix_prompt_note(record: dict | None) -> str:
+	"""The line a corrective prompt carries for each autofix command that
+	failed or timed out ("" when none did)."""
+	if not record:
+		return ""
+	return "\n".join(
+		f"autofix command failed (advisory): `{c['command']}` exit {c['exit_code']}"
+		for c in record["commands"] if c["exit_code"] != 0 or c["timed_out"]
+	)
 
 
 def run_verification(
@@ -2051,6 +2159,7 @@ def run_build(
 	verify_command_override: str | None = None,
 	fast_check_command: str | None = None,
 	setup_commands: list[str] | None = None,
+	autofix_commands: list[str] | None = None,
 	spec_acceptance_criteria: Path | None = None,
 	oracle_command: str | None = None,
 	handoff: Path | None = None,
@@ -2205,10 +2314,16 @@ def run_build(
 		# round changed something" even when the agent itself touched
 		# nothing.
 		fingerprint_after = workspace_fingerprint(workspace)
-		changed_files = round_changed_files(hashes_before, changed_file_hashes(workspace, review_base_sha))
+		hashes_after = changed_file_hashes(workspace, review_base_sha)
+		changed_files = round_changed_files(hashes_before, hashes_after)
 		# Taken here, before verification and gofmt below leave their own untracked
 		# artifacts, so only the agent's (or an interrupted attempt's) work counts.
 		differs_from_base = bool(handoff is not None and round_index == 1 and review_base_sha and workspace_differs_from_base(workspace, review_base_sha))
+
+		# Autofix runs after the agent-change snapshots above (its edits are
+		# never the agent's work) and before this round's checks, so they
+		# judge the fixed tree.
+		autofix_record = run_autofix(workspace, autofix_commands or [], review_base_sha, set(hashes_after), feedback_dir, env)
 
 		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
@@ -2307,6 +2422,7 @@ def run_build(
 				reviewer.detail if reviewer.outcome == "flagged" else "",
 			),
 			failure_log=round_failure_log(feedback_dir, workspace, setup_failed is not None) if blockers else "",
+			autofix=autofix_record,
 			agent_notes=round_feedback.agent_notes(
 				no_changes=no_changes, timed_out=timed_out, timeout_minutes=timeout_minutes,
 				returncode=agent_returncode, stderr_tail=redact(parsed.last_turn_error, 1500),
@@ -2377,6 +2493,8 @@ def run_build(
 			agent_notes=rnd.agent_notes,
 			streak=streak,
 		)
+		if autofix_prompt_note(autofix_record):
+			prompt += "\n\n" + autofix_prompt_note(autofix_record)
 		escalation_prompt = build_escalation_prompt(spec_text, prompt)
 		state_prompt = prompt
 		persist(round_index, prompt, fingerprint_after)
@@ -2429,6 +2547,12 @@ def run_build(
 			timed_out = False
 		duration = time.monotonic() - started
 		fingerprint_after = workspace_fingerprint(workspace)
+		sonnet_autofix = None
+		if autofix_commands:
+			sonnet_autofix = run_autofix(
+				workspace, autofix_commands, review_base_sha, set(changed_file_hashes(workspace, review_base_sha)),
+				session_dir / "feedback" / f"round-{len(result.rounds) + 1}", env,
+			)
 		sonnet_setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
 			fast_check_command=fast_check_command,
@@ -2461,6 +2585,7 @@ def run_build(
 			oracle_command=sonnet_recorded_oracle_command,
 			oracle_passed=sonnet_oracle_passed,
 			oracle_output_tail=sonnet_oracle_tail,
+			autofix=sonnet_autofix,
 		))
 		sonnet_no_changes = (
 			fingerprint_before is None or fingerprint_after is None or fingerprint_before == fingerprint_after
@@ -2734,6 +2859,8 @@ def write_evidence_json(result: BuildResult) -> Path:
 				"failure_signature": rnd.failure_signature,
 				"failure_log": rnd.failure_log,
 				"agent_notes": rnd.agent_notes,
+				# Additive, present only for a round that ran autofix commands.
+				**({"autofix": rnd.autofix} if rnd.autofix is not None else {}),
 			}
 			for rnd in result.rounds
 		],
@@ -2820,6 +2947,15 @@ def main() -> int:
 		"round and the checks are skipped. Omitted (the default) runs nothing extra.",
 	)
 	parser.add_argument(
+		"--autofix-command",
+		action="append",
+		default=None,
+		help="A repository autofix command (`.factory.yml` autofix:), repeatable. Run in order "
+		"inside each round, after the agent's turn and before the round's checks. Advisory: "
+		"a failure is recorded, never fails the round. It may change only files the ticket "
+		"already changed; any other change is reverted. Omitted (the default) runs nothing extra.",
+	)
+	parser.add_argument(
 		"--spec-acceptance-criteria",
 		type=Path,
 		default=None,
@@ -2897,6 +3033,7 @@ def main() -> int:
 			verify_command_override=args.verify_command,
 			fast_check_command=args.fast_check_command,
 			setup_commands=args.setup_command,
+			autofix_commands=args.autofix_command,
 			spec_acceptance_criteria=args.spec_acceptance_criteria,
 			oracle_command=args.reference_oracle_command,
 			handoff=args.handoff,

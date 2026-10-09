@@ -550,7 +550,7 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 #     command: "! grep -rn TODO src"
 # setup:                                            # commands for the repository; see "Setup and autofix commands"
 #   - "npm ci"
-# autofix:
+# autofix:                                         # formatters run inside each build round; see "Setup and autofix commands"
 #   - "gofmt -w ."
 # test_patterns:                                     # glob patterns for the always-on "tests_added" gate
 #   - "*_test.go"
@@ -580,8 +580,8 @@ size budget). No buildgate change or release is needed to add one.
 | A gate that did not run | An accepted run with no result for one of the repository's gates is quarantined naming it (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 
 **Setup and autofix commands.** `setup:` and `autofix:` each list shell
-commands for the repository. `setup:` runs; `autofix:` is accepted and
-recorded only.
+commands for the repository. `setup:` runs in every build, verify and gate
+sandbox; `autofix:` runs inside each build round only.
 
 | | |
 |---|---|
@@ -589,7 +589,7 @@ recorded only.
 | Shape | List of strings, one command per entry |
 | Limits | At most 8 entries per key, 2000 bytes per entry, one line each (no newline, carriage return or NUL byte), none blank |
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is read from |
-| Status | `setup:` runs as below. `autofix:` is accepted and recorded (`project_config_sha256` on the run); not run yet |
+| Status | Both run, as below. Both are recorded on the run (`project_config_sha256`) |
 
 Where `setup:` runs, in the order listed, each command by `sh -c` in the
 workspace; the command of the step follows only when all passed:
@@ -604,6 +604,16 @@ workspace; the command of the step follows only when all passed:
 | Files it writes | Must be gitignored: untracked files are committed with the build and judged by `diff_scope` |
 | A step that did not run it | An accepted run whose canonical verify attempt does not record the digest of the commands is quarantined as the operator's (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 | Entries | One may not begin with `-` (the shell would read it as an option) |
+
+`autofix:` (a formatter or a `--fix` linter) runs in the build only:
+
+| | |
+|---|---|
+| Where it runs | Inside each build round, after the agent's turn and before that round's checks (by the build script, in the order listed, each command by `sh -c` in the workspace), so the checks judge the fixed tree. Never after the build, and never in a verify, gate or review sandbox |
+| A failure | Advisory: a non-zero exit or a timeout is recorded and never fails the round (many `--fix` tools exit non-zero when they fixed something). The next round's feedback carries one line, `autofix command failed (advisory): <command> exit <n>`, only when a command failed or timed out |
+| Scope | It may change only files the ticket already changed in that round (paths that differ from the base commit or are untracked and not ignored, before autofix ran). Any other path it changed is restored to the base's content (a file the base lacks is deleted) and listed. Its edits never count as the agent's work: a round where only autofix changed files is still "no changes" |
+| Evidence | `autofix` on each round of the build evidence: per command `command` (first 200 characters), `exit_code`, `timed_out`, `duration_s`, and `reverted_count` with the first 20 `reverted` paths. The output and any revert are in `autofix.log` in the round's feedback folder |
+| Limits | 8 entries, 2000 bytes and one line each, 5 minutes per command |
 
 **Named gates.** `lint_command`/`security_command`/`unit_test_command`/
 `integration_test_command`/`reference_oracle_command` (flags:

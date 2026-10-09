@@ -217,3 +217,22 @@ func TestLoadAgentEvidenceIncompatibleFutureSchemaStillNamesTheVersionMismatch(t
 		t.Errorf("warning output = %q, want it to name the schema_version mismatch rather than only report a generic parse failure", stdout)
 	}
 }
+
+// A round's additive `autofix` record (build_app.py) does not stop the
+// evidence from loading: the field is carried by the file, not by the struct.
+func TestLoadAgentEvidenceToleratesTheAutofixRoundField(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	body := `{"schema_version": 2, "rounds": [{"index": 1, "agent": "pi", "autofix": {"commands": [{"command": "gofmt -w .", "exit_code": 1, "timed_out": false, "duration_s": 0.2}], "reverted_count": 0, "reverted": []}}]}`
+	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &run.Run{ID: "run-1"}
+	out := captureStdout(t, func() { loadAgentEvidence(r, workspace, t.TempDir(), "run-1") })
+	if strings.Contains(out, "warning") {
+		t.Errorf("loading warned: %q", out)
+	}
+	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) != 1 || r.AgentEvidence.Rounds[0].Index != 1 {
+		t.Errorf("AgentEvidence = %+v, want one round loaded", r.AgentEvidence)
+	}
+}
