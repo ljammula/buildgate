@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strings"
 
+	"buildgate/internal/meter"
 	"buildgate/internal/run"
 )
 
@@ -99,7 +100,60 @@ type evidenceFile struct {
 	SchemaVersion int               `json:"schema_version"`
 	ReviewPolicy  string            `json:"review_policy"`
 	Available     bool              `json:"available"`
+	Error         string            `json:"error"`
 	Findings      []json.RawMessage `json:"findings"`
+}
+
+// meterDenyCodes are the spend meter's deny codes that end a review for want
+// of budget rather than for anything in the diff.
+var meterDenyCodes = []string{meter.CodeBudgetExceeded, meter.CodeCeilingExceeded, meter.CodeRateLimited}
+
+// meterDenySettings names, for each of meterDenyCodes, the session-config
+// keys that set the limit the review ran into.
+var meterDenySettings = map[string]string{
+	meter.CodeBudgetExceeded:  "`meter_token_budget` or `meter_cost_budget_micro_usd` per their `_window`",
+	meter.CodeCeilingExceeded: "`meter_token_ceiling` or `meter_cost_ceiling_micro_usd`, one job's total",
+	meter.CodeRateLimited:     "`meter_requests_per_minute`",
+}
+
+// StopSettings returns the session-config keys behind a StoppedBy code, and
+// whether code is one.
+func StopSettings(code string) (string, bool) {
+	settings, ok := meterDenySettings[code]
+	return settings, ok
+}
+
+// StoppedBy returns which meterDenyCodes entry errText reports from the
+// meter, or "". errText is a review script's record of its model client's
+// error (the `error` field of CODE_REVIEW_EVIDENCE.json and
+// CONFORMITY_EVIDENCE.json), which for the codex harness carries the
+// OpenShell supervisor's deny body verbatim; a harness that rewords it gets
+// "" and the plain "gave no verdict". The text is the review container's
+// and so untrusted: only its match against this closed set is kept. A
+// reviewer that forges one sends the operator to the budget settings and
+// the spend report, which show the truth.
+func StoppedBy(errText string) string {
+	if !strings.Contains(errText, `"middleware":"meter"`) {
+		return ""
+	}
+	for _, code := range meterDenyCodes {
+		if strings.Contains(errText, `"reason_code":"`+code+`"`) {
+			return code
+		}
+	}
+	return ""
+}
+
+// EvidenceStoppedBy is StoppedBy over a review evidence file's own `error`
+// field; "" for a file that does not decode.
+func EvidenceStoppedBy(data []byte) string {
+	var file struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		return ""
+	}
+	return StoppedBy(file.Error)
 }
 
 // evidenceFindingRaw mirrors code_review.py's own JSON finding shape.
@@ -156,11 +210,15 @@ func ParseResult(data []byte) (run.CodeReviewResult, error) {
 		}
 	}
 
-	return run.CodeReviewResult{
+	result := run.CodeReviewResult{
 		Policy:    file.ReviewPolicy,
 		Available: file.Available,
 		Findings:  findings,
-	}, nil
+	}
+	if !file.Available {
+		result.StoppedBy = StoppedBy(file.Error)
+	}
+	return result, nil
 }
 
 func validateFinding(entry evidenceFindingRaw) (run.CodeReviewFinding, bool) {

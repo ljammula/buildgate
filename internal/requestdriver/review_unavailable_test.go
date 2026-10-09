@@ -38,7 +38,7 @@ func TestAReviewWithNoVerdictIsUnavailableNotFlagged(t *testing.T) {
 	if got := quarantineCheckFor(timedOut); got != request.QuarantineCheckReviewUnavailable {
 		t.Errorf("check = %q, want %q", got, request.QuarantineCheckReviewUnavailable)
 	}
-	reason := quarantinedTicketReason(2, 2, "gate failed: spec_conformity", request.QuarantineCheckReviewUnavailable)
+	reason := quarantinedTicketReason(2, 2, "gate failed: spec_conformity", request.QuarantineCheckReviewUnavailable, nil)
 	if !strings.Contains(reason, "the review gave no verdict") || !strings.Contains(reason, "gate failed: spec_conformity") {
 		t.Errorf("reason = %q", reason)
 	}
@@ -86,7 +86,7 @@ func TestReviewUnavailableCases(t *testing.T) {
 	if got := flaggedConformityVerdicts(mixed); len(got) != 1 || got[0].Verdict != "flagged" {
 		t.Errorf("flagged = %+v, want only the flagged criterion", got)
 	}
-	if got := quarantinedTicketReason(1, 3, "gate failed: diff_scope", request.QuarantineCheckDiffScope); got != "ticket 1/3 quarantined: gate failed: diff_scope" {
+	if got := quarantinedTicketReason(1, 3, "gate failed: diff_scope", request.QuarantineCheckDiffScope, nil); got != "ticket 1/3 quarantined: gate failed: diff_scope" {
 		t.Errorf("reason = %q", got)
 	}
 }
@@ -116,6 +116,43 @@ func TestQuarantineAfterReviewRoundNamesAnUnavailableReview(t *testing.T) {
 	}
 	if r.State != request.StateQuarantined || r.QuarantineCheck != request.QuarantineCheckReviewUnavailable || !strings.Contains(r.Error, "the review gave no verdict") {
 		t.Fatalf("State %q, QuarantineCheck %q, Error %q", r.State, r.QuarantineCheck, r.Error)
+	}
+
+	// A review the spend meter stopped says so, with the settings that
+	// govern it, under the same check.
+	dataDir, r = building(t)
+	stopped := reviewRun([]run.ReviewVerdict{{Criterion: "1. a", Verdict: "unavailable"}}, &run.CodeReviewResult{Policy: "required", StoppedBy: "budget_exceeded"}, "spec_conformity", "code_review")
+	if err := quarantineAfterReviewRound(dataDir, r, stopped, reason, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r.QuarantineCheck != request.QuarantineCheckReviewUnavailable {
+		t.Errorf("QuarantineCheck = %q, want %q", r.QuarantineCheck, request.QuarantineCheckReviewUnavailable)
+	}
+	for _, want := range []string{"the spend meter stopped the review's model calls", "budget_exceeded", "meter_token_budget", "was not judged"} {
+		if !strings.Contains(r.Error, want) {
+			t.Errorf("Error = %q, want it to contain %q", r.Error, want)
+		}
+	}
+	if strings.Contains(r.Error, "gave no verdict") {
+		t.Errorf("Error = %q, still words a stopped review as a silent one", r.Error)
+	}
+	if got := quarantinedTicketReason(1, 1, "gate failed: spec_conformity", request.QuarantineCheckReviewUnavailable, stopped); !strings.Contains(got, "the spend meter stopped") {
+		t.Errorf("first-run reason = %q, want it to name the spend meter", got)
+	}
+	// The conformity review alone was stopped (no code review ran), and by
+	// another limit: each code names its own settings.
+	conformityOnly := reviewRun([]run.ReviewVerdict{{Criterion: "1. a", Verdict: "unavailable"}}, nil, "spec_conformity")
+	conformityOnly.SpecConformityStoppedBy = "ceiling_exceeded"
+	if got := noVerdictCause(conformityOnly); !strings.Contains(got, "ceiling_exceeded") || !strings.Contains(got, "meter_token_ceiling") || strings.Contains(got, "meter_token_budget") {
+		t.Errorf("noVerdictCause = %q, want the ceiling settings and not the budget's", got)
+	}
+	conformityOnly.SpecConformityStoppedBy = "rate_limited"
+	if got := noVerdictCause(conformityOnly); !strings.Contains(got, "meter_requests_per_minute") {
+		t.Errorf("noVerdictCause = %q, want the request-rate setting", got)
+	}
+	conformityOnly.SpecConformityStoppedBy = "something else"
+	if got := noVerdictCause(conformityOnly); got != "the review gave no verdict" {
+		t.Errorf("noVerdictCause for an unknown code = %q", got)
 	}
 
 	dataDir, r = building(t)

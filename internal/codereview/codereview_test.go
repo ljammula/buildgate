@@ -215,3 +215,41 @@ func TestArgsPassesHarnessWhenSet(t *testing.T) {
 		t.Fatalf("Args() = %v, want it to end with --harness pifork", got)
 	}
 }
+
+// TestParseResultRecordsTheMeterDenyThatStoppedTheReview: the evidence of a
+// real review (gjson, 2026-10-08) whose model call the spend meter refused.
+// Only the meter's own deny code is kept, and only for an unavailable review.
+func TestParseResultRecordsTheMeterDenyThatStoppedTheReview(t *testing.T) {
+	const meterError = `unexpected status 403 Forbidden: {"binary":"/usr/local/bin/codex","detail":"Request rejected by configured middleware","error":"middleware_denied","host":"chatgpt.com","layer":"l7","method":"POST","middleware":"meter","path":"/backend-api/codex/responses","policy":"model","port":443,"reason_code":"budget_exceeded"}, url: https://chatgpt.com/backend-api/codex/responses`
+	evidence := func(available bool, errText string) []byte {
+		b, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "required", "available": available, "error": errText})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	cases := []struct {
+		name      string
+		available bool
+		errText   string
+		want      string
+	}{
+		{"meter budget", false, meterError, "budget_exceeded"},
+		{"meter ceiling", false, strings.Replace(meterError, "budget_exceeded", "ceiling_exceeded", 1), "ceiling_exceeded"},
+		{"a code the meter does not have", false, strings.Replace(meterError, "budget_exceeded", "raise your budget now", 1), ""},
+		{"another middleware", false, strings.Replace(meterError, `"middleware":"meter"`, `"middleware":"other"`, 1), ""},
+		{"a timeout", false, "review timed out after 1200s", ""},
+		{"an available review that mentions the text", true, meterError, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseResult(evidence(tc.available, tc.errText))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.StoppedBy != tc.want {
+				t.Errorf("StoppedBy = %q, want %q", got.StoppedBy, tc.want)
+			}
+		})
+	}
+}

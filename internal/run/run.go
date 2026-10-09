@@ -643,6 +643,11 @@ type CodeReviewResult struct {
 	Policy    string              `json:"policy"`
 	Available bool                `json:"available"`
 	Findings  []CodeReviewFinding `json:"findings,omitempty"`
+	// StoppedBy is the spend meter's deny code (meter.CodeBudgetExceeded,
+	// CodeCeilingExceeded or CodeRateLimited) when the reviewer gave no verdict
+	// because its model calls were refused, "" otherwise. One of a closed
+	// set, never text copied from the evidence file.
+	StoppedBy string `json:"stopped_by,omitempty"`
 }
 
 // AgentEvidenceRound records the structured outcome of one build_app.py
@@ -1428,6 +1433,10 @@ type Run struct {
 	// only, like AgentEvidence.ReviewVerdicts: the required/advisory
 	// enforcement already happened inside conformity_review.py.
 	SpecConformityVerdicts []ReviewVerdict `json:"spec_conformity_verdicts,omitempty"`
+	// SpecConformityStoppedBy is CodeReviewResult.StoppedBy for the
+	// conformity review: the spend meter's deny code when that review's
+	// model calls were refused, "" otherwise.
+	SpecConformityStoppedBy string `json:"spec_conformity_stopped_by,omitempty"`
 	// CodeReview is the independent code reviewer's outcome from
 	// CODE_REVIEW_EVIDENCE.json (agent/pi/scripts/code_review.py's own,
 	// separate one-turn launch -- see internal/codereview's package doc
