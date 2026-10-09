@@ -1618,6 +1618,49 @@ func TestRunCorrectiveRoundWithholdsPushWhenRoundOwnDecisionDenies(t *testing.T)
 	}
 }
 
+// A round whose release decision carries a memory reason is withheld like a
+// protected-path one: the request halts for a human, nothing is pushed, and
+// no further corrective round is started to "fix" it (the denial is about
+// who may change AGENTS.md's fenced section, which no build can repair).
+func TestRunCorrectiveRoundWithholdsPushOnMemoryDenialAndStartsNoFurtherRound(t *testing.T) {
+	for _, reason := range []string{
+		release.ReasonMemorySectionNotMemoryChange,
+		release.ReasonMemoryChangeNotApproved + `: other changed files ["README.md"]`,
+		"memory section check could not be completed: git: exploded",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			dp := newTestDeps(t)
+			threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
+			r, dataDir := stubPRReviewTestFixture(t, 1)
+			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+			rounds := 0
+			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+				rounds++
+				roundRunID := argValue(args, "-ticket")
+				roundRun := &run.Run{ID: roundRunID, Project: "widget", State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef"}
+				if err := roundRun.Save(dataDir); err != nil {
+					return err
+				}
+				return release.SaveDecision(dataDir, release.Decision{RunID: roundRunID, Project: "widget", Allowed: false, Reasons: []string{reason}, Evaluated: time.Now().UTC().Format(time.RFC3339)})
+			}
+			pushCalls := 0
+			fakeForgeOf(dp).pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
+				pushCalls++
+				return nil
+			}
+			if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if pushCalls != 0 || rounds != 1 {
+				t.Errorf("pushes = %d, corrective rounds = %d, want 0 and 1", pushCalls, rounds)
+			}
+			if r.State != request.StateHalted || !strings.Contains(r.Error, "denied by release policy") || !strings.Contains(r.Error, reason) {
+				t.Fatalf("state = %q, error = %q; want halted naming the denial", r.State, r.Error)
+			}
+		})
+	}
+}
+
 // TestAdvancePRReviewHaltsOnTicketWithoutPullRequest: a ticket accepted
 // without a PR (the best-effort open failed) can never be polled or
 // merged, so the request halts with a reason instead of idling forever.

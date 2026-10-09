@@ -243,5 +243,43 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 		reasons = append(reasons, "run bypassed the mandatory project-bootstrap preflight (-skip-project-check) and policy does not allow skipped-preflight runs")
 	}
 
+	reasons = append(reasons, memoryEditReasons(r.MemoryEdit)...)
+
 	return len(reasons) == 0, reasons
+}
+
+// Reasons memoryEditReasons returns. Callers and tests match on them.
+const (
+	ReasonMemorySectionNotMemoryChange = "memory section of AGENTS.md changed by a run that is not a memory change"
+	ReasonMemoryChangeNotApproved      = "memory change does not match the approved text"
+	reasonMemoryCheckIncomplete        = "memory section check could not be completed"
+)
+
+// memoryEditReasons turns the host's AGENTS.md evidence into denials. Only a
+// memory request's run (one with an approved proposal) may change the fenced
+// section, and then only to exactly the approved file with no other file
+// changed. It reads the evidence only: the host did the I/O.
+func memoryEditReasons(m *run.MemoryEdit) []string {
+	if m == nil {
+		return nil
+	}
+	var reasons []string
+	switch {
+	case m.Error != "" && m.FailClosed:
+		reasons = append(reasons, fmt.Sprintf("%s: %s", reasonMemoryCheckIncomplete, m.Error))
+	case m.Error != "":
+	case m.SectionChanged && !m.Proposal:
+		reasons = append(reasons, ReasonMemorySectionNotMemoryChange)
+	case m.Proposal && (!m.Matches || len(m.OtherFilesChanged) > 0):
+		reason := ReasonMemoryChangeNotApproved
+		if n := len(m.OtherFilesChanged); n > 0 {
+			shown := m.OtherFilesChanged[:min(n, 3)]
+			reason = fmt.Sprintf("%s: other changed files %q", reason, shown)
+			if n > len(shown) {
+				reason += fmt.Sprintf(" and %d more", n-len(shown))
+			}
+		}
+		reasons = append(reasons, reason)
+	}
+	return reasons
 }

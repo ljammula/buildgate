@@ -163,6 +163,12 @@ if [ -n "${FAKE_APPEND_FILE:-}" ]; then
 	printf '# edited by the agent\n' >>"$FAKE_APPEND_FILE"
 fi
 
+# $FAKE_FENCE_LINE: also adds that line inside the fenced memory section of
+# AGENTS.md (an agent editing the section a memory change owns).
+if [ -n "${FAKE_FENCE_LINE:-}" ]; then
+	awk -v line="$FAKE_FENCE_LINE" '/^<!-- buildgate:memory:end -->$/ { print line } { print }' AGENTS.md >AGENTS.md.tmp && mv AGENTS.md.tmp AGENTS.md
+fi
+
 if [ "${FAKE_BUILD_APP_MODE:-}" = "commit_with_marker" ]; then
 	echo "REQUIRED_MARKER_STRING" >>content.txt
 fi

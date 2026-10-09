@@ -529,6 +529,7 @@ func retryPullRequestOpener(dp *deps, dataDir, runID string) request.PROpenOutco
 	if !ok {
 		return request.PROpenOutcome{Err: fmt.Errorf("run %s predates recorded release policy; retry cannot re-evaluate a release decision for it", runID)}
 	}
+	ensureMemoryEdit(dp, dataDir, runID, loaded)
 	decision, recErr := release.RecordDecision(dataDir, release.ProjectOf(loaded), *loaded, policy)
 	if recErr != nil {
 		return request.PROpenOutcome{Err: fmt.Errorf("record release decision for run %s: %w", runID, recErr)}

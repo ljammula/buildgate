@@ -766,7 +766,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 	result = requireSetupRan(opts.SetupCommands, result)
 	// underRunLock=false: this call site holds no run.WithLock on id (see
 	// applyRunWorkflowResult's own doc comment on that parameter).
-	return applyRunWorkflowResult(r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, taskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, false)
+	return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, taskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, false)
 }
 
 // keepEligibleRun reports whether a lost or resumed run's worktree may be

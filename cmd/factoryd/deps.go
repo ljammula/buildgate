@@ -98,6 +98,10 @@ type forgeBoundary interface {
 type realForge struct{ dp *deps }
 
 type hostBoundary interface {
+	// blobAtCommit reads path as of commit in repoDir from git objects,
+	// never from a worktree: (nil, false, nil) when absent, errNotRegularBlob
+	// for a symlink or submodule, errBlobTooLarge over 1 MiB.
+	blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommand(target string) *exec.Cmd
 	executable() (string, error)
 	// goCommand runs the operator's go command in dir with env added to the
