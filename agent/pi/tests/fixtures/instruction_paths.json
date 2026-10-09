@@ -1,24 +1,102 @@
 {
-	"note": "Instruction paths each harness is documented to load, at the version the worker image pins. source documented means read from the harness documentation; no live probe has run yet. pifork is built from the pi base, so it carries pi's version and paths. unprobed lists the paths the review snapshot masks that no harness here is documented to load.",
+	"note": "Instruction paths each harness loads from a workspace, measured by scripts/probe_instruction_paths.py against the worker image's pinned versions: a fake model endpoint logged every request of a review turn, a build turn and a turn that reads a file under a subdirectory, and a path counts when its marker reached a request or a hook, MCP server or extension it names ran. source probed means measured; documented means read from the harness documentation. trust_gated lists table paths a harness loads only when the project is trusted, which a worker turn never grants. uncovered lists paths outside the review snapshot's table that a harness loaded in a worker turn, uncovered_trust_gated those it loads only in a trusted project. pifork is built from the pi base and carries pi's version and documented paths until an image with its launcher is probed. unprobed lists the table paths no probed harness was observed loading.",
 	"pi": {
 		"version": "0.84.4",
-		"source": "documented",
-		"paths": ["AGENTS.md", "CLAUDE.md", ".pi", ".agents/skills", ".pi/skills"]
+		"source": "probed",
+		"paths": [
+			".agents/skills",
+			"AGENTS.md",
+			"AGENTS.override.md",
+			"CLAUDE.md"
+		],
+		"trust_gated": [
+			".pi/skills",
+			".pi"
+		],
+		"uncovered": [],
+		"uncovered_trust_gated": []
 	},
 	"pifork": {
 		"version": "0.84.4",
 		"source": "documented",
-		"paths": ["AGENTS.md", "CLAUDE.md", ".pi", ".agents/skills", ".pi/skills"]
+		"paths": [
+			"AGENTS.md",
+			"CLAUDE.md",
+			".pi",
+			".agents/skills",
+			".pi/skills"
+		]
 	},
 	"codex": {
 		"version": "0.154.0",
-		"source": "documented",
-		"paths": ["AGENTS.md", "AGENTS.override.md", ".codex", ".agents/skills"]
+		"source": "probed",
+		"paths": [
+			".agents/skills",
+			".codex",
+			"AGENTS.md",
+			"AGENTS.override.md"
+		],
+		"trust_gated": [],
+		"uncovered": [],
+		"uncovered_trust_gated": []
 	},
 	"copilot": {
 		"version": "1.0.88",
-		"source": "documented",
-		"paths": ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/instructions", ".github/agents", ".github/skills", ".claude/skills", ".claude"]
+		"source": "probed",
+		"paths": [
+			".agents/skills",
+			".github/skills",
+			".claude/skills",
+			".claude",
+			".github/instructions",
+			".github/agents",
+			".github/copilot-instructions.md",
+			"AGENTS.md",
+			"CLAUDE.md",
+			"GEMINI.md"
+		],
+		"trust_gated": [
+			".github/hooks",
+			".mcp.json"
+		],
+		"uncovered": [
+			{
+				"path": "pkg/.github/copilot-instructions.md",
+				"turns": [
+					"lazy"
+				],
+				"how": [
+					"request"
+				]
+			},
+			{
+				"path": "pkg/.github/instructions/probe.instructions.md",
+				"turns": [
+					"lazy"
+				],
+				"how": [
+					"request"
+				]
+			}
+		],
+		"uncovered_trust_gated": [
+			{
+				"path": ".github/mcp.json",
+				"turns": [
+					"control"
+				],
+				"how": [
+					"executed"
+				]
+			}
+		]
 	},
-	"unprobed": ["CLAUDE.local.md", ".mcp.json", ".vscode/mcp.json", ".github/hooks"]
+	"unprobed": [
+		".pi/skills",
+		".pi",
+		".github/hooks",
+		".mcp.json",
+		".vscode/mcp.json",
+		"CLAUDE.local.md"
+	]
 }
