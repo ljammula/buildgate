@@ -370,6 +370,13 @@ type Request struct {
 	// ResumeDecide and consumed by the step it re-enables. Every other
 	// transition clears it.
 	ResumeDecision *ResumeDecision `json:"resume_decision,omitempty"`
+	// RetryFromScratch is the operator's `factoryd retry -from scratch`:
+	// the rebuild the retry leads to starts from the base commit even when
+	// the quarantined attempt's commit could be continued. Set by
+	// RetryFromScratch after its own transition and dropped by every later
+	// one, so it holds exactly while the request is in the building state
+	// that retry put it in.
+	RetryFromScratch bool `json:"retry_from_scratch,omitempty"`
 	// HaltKind is a typed marker for a halt whose recovery is not the default
 	// one (see HaltOracleMaterialize); empty for every other halt. Cleared by
 	// every transition, so it is only ever set while State is halted.
@@ -886,6 +893,9 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 		// sets it after advance returns); any other move drops a stale one.
 		r.ResumeDecision = nil
 	}
+	// A retry's choice is set after its own transition returns
+	// (RetryFromScratch); every move drops an earlier one.
+	r.RetryFromScratch = false
 	r.History = append(r.History, Transition{From: from, To: to, At: ts, By: by, Reason: reason})
 	// Only re-entering planning drops the per-ticket pins (the re-plan
 	// rewrites or deletes those files). Pruning on every transition would

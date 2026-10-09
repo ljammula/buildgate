@@ -402,11 +402,15 @@ func TestCheckCorrectiveRoundKeepsTheDiffScopeCheckOnTheRequest(t *testing.T) {
 }
 
 // TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt: after `factoryd
-// retry`, the ticket is rebuilt as an ordinary run from the base, and that
-// build is told what the quarantined attempt failed on, when a build may be
-// told. It is not a corrective round and uses none of that budget.
+// retry`, the ticket's rebuild is told what the quarantined attempt failed
+// on, when a build may be told, and then continues from that attempt's
+// commit on its branch. Any other rebuild, and every `retry -from scratch`,
+// starts from the base. It is not a corrective round and uses none of that
+// budget.
 func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
+	const fromBase = "This build starts again from the base commit: none of that attempt's changes are in the workspace"
+	const onBranch = "This build continues on that attempt's branch: what it committed is in the workspace."
 	flagged := func(rr *run.Run) {
 		rr.GateResults = []run.GateResult{{Check: "spec_conformity", Passed: false}}
 		rr.SpecConformityVerdicts = []run.ReviewVerdict{{Criterion: "2. rejects a negative amount", Verdict: "flagged", Detail: "no test covers it"}}
@@ -415,47 +419,31 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 		failed []string
 		// shape changes the quarantined run after it is built as an
 		// ordinary one of this request, built from the ticket's spec.
-		shape      func(rr *run.Run)
-		wantRecord string
+		shape       func(rr *run.Run)
+		fromScratch bool
+		wantRecord  string
+		// wantOpens is how the record opens; wantDiffBase is the
+		// -diff-base of a rebuild that continues on the attempt's branch,
+		// "" for one that starts from the base.
+		wantOpens, wantDiffBase string
 	}{
-		"a gate a build can fix":                            {[]string{"lint"}, nil, "- `lint` failed (exit 2)"},
-		"only a review failed, with a verdict":              {nil, flagged, "rejects a negative amount"},
-		"a check a build is never told of":                  {[]string{"lint", "tests_added"}, nil, ""},
-		"the run is another request's":                      {[]string{"lint"}, func(rr *run.Run) { rr.RequestID = "some-other-request" }, ""},
-		"the ticket's spec changed since":                   {[]string{"lint"}, func(rr *run.Run) { rr.SpecSHA256 = strings.Repeat("0", 64) }, ""},
-		"the handoff was changed after the run recorded it": {[]string{"lint"}, func(rr *run.Run) { rr.HandoffSHA256 = strings.Repeat("0", 64) }, ""},
+		"a gate a build can fix":                            {failed: []string{"lint"}, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: base},
+		"only a review failed, with a verdict":              {shape: flagged, wantRecord: "rejects a negative amount", wantOpens: onBranch, wantDiffBase: base},
+		"the attempt ran on a branch with an earlier base":  {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.DiffBaseSHA = fmt.Sprintf("%040d", 9) }, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: fmt.Sprintf("%040d", 9)},
+		"-from scratch":                                     {failed: []string{"lint"}, fromScratch: true, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
+		"the attempt committed nothing":                     {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.ResultSHA = rr.BaseSHA }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
+		"the attempt recorded no branch":                    {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.Branch = "" }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
+		"a check a build is never told of":                  {failed: []string{"lint", "tests_added"}},
+		"the run is another request's":                      {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.RequestID = "some-other-request" }},
+		"the ticket's spec changed since":                   {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.SpecSHA256 = strings.Repeat("0", 64) }},
+		"the handoff was changed after the run recorded it": {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.HandoffSHA256 = strings.Repeat("0", 64) }},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dp := newTestDeps(t)
 			dataDir, id := buildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			var builds [][]string
-			buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				builds = append(builds, args)
-				ticket := argValue(args, "-ticket")
-				if onReady != nil {
-					onReady(&run.Run{ID: ticket})
-				}
-				if len(builds) > 1 {
-					return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, Branch: branch, RequestID: id}).Save(dataDir)
-				}
-				rr := quarantinedOn(t, dataDir, ticket, branch, base, result, tc.failed...)
-				rr.RequestID = id
-				sum, err := evidence.SHA256File(argValue(args, "-spec"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				rr.SpecSHA256 = sum
-				if tc.shape != nil {
-					tc.shape(rr)
-				}
-				if rr.HandoffSHA256 != strings.Repeat("0", 64) {
-					if err := handoff.Sync(rr, dataDir); err != nil {
-						t.Fatal(err)
-					}
-				}
-				return rr.Save(dataDir)
-			}
+			buildRunner := quarantinedThenAcceptedBuildRunner(t, dataDir, id, [2]string{base, result}, tc.failed, tc.shape, &builds)
 			// No corrective budget: the first quarantine stands until a human retries.
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 0}
 			drive := func() {
@@ -472,7 +460,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			if got := argValue(builds[0], "-earlier-attempt"); got != "" {
 				t.Fatalf("the ticket's first build was given a record: %q", got)
 			}
-			if handled, err := retryRequest(dp, dataDir, quarantined, "", time.Now()); err != nil || !handled {
+			if handled, err := retryRequestFrom(dp, dataDir, quarantined, "", tc.fromScratch, time.Now()); err != nil || !handled {
 				t.Fatalf("retryRequest: handled %v, err %v", handled, err)
 			}
 			drive()
@@ -480,8 +468,15 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 				t.Fatalf("builds = %d, want the first and the retry's", len(builds))
 			}
 			rebuild := builds[1]
-			if got := argValue(rebuild, "-on-branch"); got != "" {
-				t.Errorf("the rebuild runs -on-branch %q, want an ordinary run from the base", got)
+			wantBranch := ""
+			if tc.wantDiffBase != "" {
+				wantBranch = branch
+			}
+			if got := argValue(rebuild, "-on-branch"); got != wantBranch {
+				t.Errorf("the rebuild runs -on-branch %q, want %q", got, wantBranch)
+			}
+			if got := argValue(rebuild, "-diff-base"); got != tc.wantDiffBase {
+				t.Errorf("the rebuild's -diff-base = %q, want %q", got, tc.wantDiffBase)
 			}
 			recordPath := argValue(rebuild, "-earlier-attempt")
 			if (recordPath != "") != (tc.wantRecord != "") {
@@ -492,8 +487,8 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 				if err != nil || !strings.Contains(string(record), tc.wantRecord) {
 					t.Errorf("the record = %q, %v, want %q", record, err, tc.wantRecord)
 				}
-				if !strings.HasPrefix(string(record), "This build starts again from the base commit: none of that attempt's changes are in the workspace") {
-					t.Errorf("the record does not open by saying the workspace starts from the base:\n%s", record)
+				if !strings.HasPrefix(string(record), tc.wantOpens) {
+					t.Errorf("the record opens:\n%.200s\nwant: %s", record, tc.wantOpens)
 				}
 			}
 			loaded, err := request.Load(dataDir, id)
@@ -503,7 +498,158 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			if len(loaded.Tickets[0].Rounds) != 0 {
 				t.Errorf("Rounds = %+v, want none: a retry is not a corrective round", loaded.Tickets[0].Rounds)
 			}
+			if loaded.RetryFromScratch {
+				t.Error("the retry's -from scratch outlived the build state it was made for")
+			}
 		})
+	}
+}
+
+// TestAResumeFromScratchAfterALostRetryStartsFromTheBase: a retry that was
+// to continue on the attempt's branch is lost before its run exists; the
+// only decision left is `resume -from scratch`, and the build it starts is
+// from the base (told so by its record), never on that branch.
+func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := buildingFixture(dp, t, 1)
+	var builds [][]string
+	buildRunner := quarantinedThenAcceptedBuildRunner(t, dataDir, id, [2]string{fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)}, []string{"lint"}, nil, &builds)
+	cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}}
+	drive := func() {
+		t.Helper()
+		if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+	}
+	drive()
+	quarantined, err := request.Load(dataDir, id)
+	if err != nil || quarantined.State != request.StateQuarantined {
+		t.Fatalf("after the first build: %v, %v, want quarantined", quarantined.State, err)
+	}
+	if handled, err := retryRequest(dp, dataDir, quarantined, "", time.Now()); err != nil || !handled {
+		t.Fatalf("retryRequest: handled %v, err %v", handled, err)
+	}
+	// The worker is lost before the rebuild's run exists: no kept run.
+	lost, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lost.EnterResumeReview(request.StateBuilding, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lost.ResumeDecide(request.ResumeScratch, "alice", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := lost.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	drive()
+	if len(builds) != 2 {
+		t.Fatalf("builds = %d, want the first and the one the resume started", len(builds))
+	}
+	if hasFlag(builds[1], "-on-branch") || hasFlag(builds[1], "-diff-base") {
+		t.Fatalf("resume -from scratch built on the attempt's branch: %v", builds[1])
+	}
+	assertRecordOf(t, argValue(builds[1], "-earlier-attempt"), "This build starts again from the base commit: none of that attempt's changes are in the workspace", id+"-001")
+}
+
+// TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun: ticket 2
+// of a request is quarantined and retried; its rebuild continues on that
+// attempt's branch, which already holds ticket 1's work, so it names no
+// -prior-run (the two are refused together).
+func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := buildingFixture(dp, t, 2)
+	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
+	branch2 := "factoryd/" + id + "-002"
+	var builds [][]string
+	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		builds = append(builds, args)
+		ticket := argValue(args, "-ticket")
+		onReady(&run.Run{ID: ticket})
+		if ticket == id+"-001" || len(builds) > 2 {
+			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
+		}
+		rr := quarantinedOn(t, dataDir, ticket, branch2, base, result, "lint")
+		rr.RequestID = id
+		sum, err := evidence.SHA256File(argValue(args, "-spec"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr.SpecSHA256 = sum
+		if err := handoff.Sync(rr, dataDir); err != nil {
+			t.Fatal(err)
+		}
+		return rr.Save(dataDir)
+	}
+	drive := func() *request.Request {
+		t.Helper()
+		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+		r, err := request.Load(dataDir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	r := drive()
+	for i := 0; i < 3 && r.State == request.StateBuilding; i++ {
+		r = drive()
+	}
+	if r.State != request.StateQuarantined || len(builds) != 2 {
+		t.Fatalf("state %s after %d builds, want ticket 1 accepted and ticket 2 quarantined", r.State, len(builds))
+	}
+	if got := argValue(builds[1], "-prior-run"); got != id+"-001" {
+		t.Fatalf("ticket 2's first build: -prior-run = %q, want ticket 1's run", got)
+	}
+	if handled, err := retryRequest(dp, dataDir, r, "", time.Now()); err != nil || !handled {
+		t.Fatalf("retryRequest: handled %v, err %v", handled, err)
+	}
+	drive()
+	if len(builds) != 3 {
+		t.Fatalf("builds = %d, want the retry's rebuild", len(builds))
+	}
+	if got := argValue(builds[2], "-on-branch"); got != branch2 {
+		t.Errorf("-on-branch = %q, want %q", got, branch2)
+	}
+	if hasFlag(builds[2], "-prior-run") {
+		t.Errorf("the rebuild names -prior-run %q beside -on-branch", argValue(builds[2], "-prior-run"))
+	}
+}
+
+// quarantinedThenAcceptedBuildRunner builds a ticket twice: the first run
+// is quarantined on failed (with a handoff, unless shape set a hash that
+// disowns it) and shaped by shape; the second is accepted. shas are the
+// first build's base and result commits.
+func quarantinedThenAcceptedBuildRunner(t *testing.T, dataDir, id string, shas [2]string, failed []string, shape func(*run.Run), builds *[][]string) requestdriver.TicketRunner {
+	t.Helper()
+	branch := "factoryd/" + id + "-001"
+	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		*builds = append(*builds, args)
+		ticket := argValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket})
+		}
+		if len(*builds) > 1 {
+			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, Branch: branch, RequestID: id}).Save(dataDir)
+		}
+		rr := quarantinedOn(t, dataDir, ticket, branch, shas[0], shas[1], failed...)
+		rr.RequestID = id
+		sum, err := evidence.SHA256File(argValue(args, "-spec"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr.SpecSHA256 = sum
+		if shape != nil {
+			shape(rr)
+		}
+		if rr.HandoffSHA256 != strings.Repeat("0", 64) {
+			if err := handoff.Sync(rr, dataDir); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return rr.Save(dataDir)
 	}
 }
 

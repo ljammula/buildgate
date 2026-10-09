@@ -496,3 +496,66 @@ func TestRetryStillOnlyRebuildsSameTicket(t *testing.T) {
 		t.Errorf("Tickets = %+v, want both tickets still recorded, unlike SendBack's own reset", got.Tickets)
 	}
 }
+
+// TestRetryFromScratchMarksTheRebuildAndNoLaterOne: `retry -from scratch`
+// is recorded on the request for the rebuild it leads to; a plain retry
+// records nothing; any later transition drops it; a retry that rebuilds no
+// ticket never sets it.
+func TestRetryFromScratchMarksTheRebuildAndNoLaterOne(t *testing.T) {
+	quarantinedTicket := func(t *testing.T) string {
+		t.Helper()
+		dataDir := t.TempDir()
+		r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+		r.State = StateQuarantined
+		r.TicketCount, r.TicketIndex = 1, 1
+		r.Tickets = []Ticket{{Index: 1, RunID: "run-1"}}
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		return dataDir
+	}
+	t.Run("from scratch", func(t *testing.T) {
+		dataDir := quarantinedTicket(t)
+		got, err := RetryFromScratch(dataDir, "req-1", "alice", "", fixedNow.Add(time.Minute), nil)
+		if err != nil || got.State != StateBuilding || !got.RetryFromScratch {
+			t.Fatalf("state %s, from scratch %v, err %v; want building, true", got.State, got.RetryFromScratch, err)
+		}
+		saved, err := Load(dataDir, "req-1")
+		if err != nil || !saved.RetryFromScratch {
+			t.Fatalf("saved: from scratch %v, err %v; want it on disk for the worker", saved.RetryFromScratch, err)
+		}
+		if err := saved.Quarantine("ticket 1/1 quarantined again", fixedNow.Add(2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if saved.RetryFromScratch {
+			t.Error("the choice survived a later transition")
+		}
+	})
+	t.Run("plain retry after a from-scratch one", func(t *testing.T) {
+		dataDir := quarantinedTicket(t)
+		r, err := Load(dataDir, "req-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.RetryFromScratch = true // as if left behind
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Retry(dataDir, "req-1", "alice", "", fixedNow.Add(time.Minute), nil)
+		if err != nil || got.RetryFromScratch {
+			t.Fatalf("from scratch %v, err %v; want a plain retry to clear it", got.RetryFromScratch, err)
+		}
+	})
+	t.Run("a retry that rebuilds no ticket", func(t *testing.T) {
+		dataDir := t.TempDir()
+		r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+		r.State = StateHalted
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		got, err := RetryFromScratch(dataDir, "req-1", "alice", "", fixedNow.Add(time.Minute), nil)
+		if err != nil || got.State != StateSpecDrafting || got.RetryFromScratch {
+			t.Fatalf("state %s, from scratch %v, err %v; want spec_drafting, false", got.State, got.RetryFromScratch, err)
+		}
+	})
+}

@@ -40,6 +40,7 @@
     "by": "every-field by",
     "at": "2026-09-10T09:00:00Z"
   },
+  "retry_from_scratch": true,
   "quarantine_check": "every-field quarantine_check",
   "approved_by": "every-field approved_by",
   "approved_at": "2026-09-10T09:00:00Z",

@@ -2570,3 +2570,50 @@ func TestListRequestsIncludesNextAction(t *testing.T) {
 		t.Errorf("got = %+v, want one entry with next_action %q", got, want)
 	}
 }
+
+// TestRetryRequestHandlerFrom: the body's "from" picks where a rebuilt
+// ticket starts ("scratch": the base commit), and any other value is
+// refused before the request changes.
+func TestRetryRequestHandlerFrom(t *testing.T) {
+	seed := func(t *testing.T) string {
+		t.Helper()
+		dataDir := t.TempDir()
+		seedApprovableRequest(t, dataDir, "req-1", request.StateQuarantined, false)
+		r, err := request.Load(dataDir, "req-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.TicketCount, r.TicketIndex = 1, 1
+		r.Tickets = []request.Ticket{{Index: 1, RunID: "run-1"}}
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		return dataDir
+	}
+	for body, want := range map[string]struct {
+		status      int
+		fromScratch bool
+		state       request.State
+	}{
+		`{"from":"scratch"}`: {http.StatusOK, true, request.StateBuilding},
+		`{"from":"attempt"}`: {http.StatusOK, false, request.StateBuilding},
+		`{}`:                 {http.StatusOK, false, request.StateBuilding},
+		`{"from":"base"}`:    {http.StatusBadRequest, false, request.StateQuarantined},
+	} {
+		t.Run(body, func(t *testing.T) {
+			dataDir := seed(t)
+			recorder := httptest.NewRecorder()
+			NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/retry", "test-token", body))
+			if recorder.Code != want.status {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, want.status, recorder.Body.String())
+			}
+			saved, err := request.Load(dataDir, "req-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saved.State != want.state || saved.RetryFromScratch != want.fromScratch {
+				t.Errorf("saved state %s, from scratch %v; want %s, %v", saved.State, saved.RetryFromScratch, want.state, want.fromScratch)
+			}
+		})
+	}
+}

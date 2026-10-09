@@ -134,6 +134,19 @@ func retryAcceptedNoPR(dataDir, id, by, reason string, r *Request, now time.Time
 // never passed it anywhere -- this function took no reason parameter at
 // all).
 func Retry(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Request, error) {
+	return retry(dataDir, id, by, reason, false, now, openPR)
+}
+
+// RetryFromScratch is Retry for an operator who wants the ticket rebuilt
+// from the base commit whatever the quarantined attempt left
+// (`factoryd retry -from scratch`): a rebuild it leads to never starts on
+// that attempt's branch (Request.RetryFromScratch). It changes nothing for a
+// retry that rebuilds no ticket.
+func RetryFromScratch(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Request, error) {
+	return retry(dataDir, id, by, reason, true, now, openPR)
+}
+
+func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, openPR PROpener) (*Request, error) {
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
 		return nil, err
@@ -197,7 +210,7 @@ func Retry(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Req
 	if r.TicketIndex >= 1 && r.TicketIndex-1 < len(r.Tickets) {
 		ticket = &r.Tickets[r.TicketIndex-1]
 	}
-	rebuild := func() error { return r.Retry(by, reason, now) }
+	rebuild := func() error { return r.retryRebuild(by, reason, fromScratch, now) }
 	switch {
 	case r.HaltKind == HaltAcceptedNoPR && openPR != nil:
 		// Found via review: this case must be checked BEFORE "ticket has
@@ -226,4 +239,15 @@ func Retry(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Req
 		return nil, err
 	}
 	return r, nil
+}
+
+// retryRebuild is Request.Retry plus the operator's choice of where the
+// rebuild starts, recorded after the transition (which drops an earlier
+// retry's choice).
+func (r *Request) retryRebuild(by, reason string, fromScratch bool, now time.Time) error {
+	if err := r.Retry(by, reason, now); err != nil {
+		return err
+	}
+	r.RetryFromScratch = fromScratch
+	return nil
 }

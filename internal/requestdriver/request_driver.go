@@ -734,20 +734,10 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
-	args, recordOf := withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
-	if resumeRunID != "" {
-		// The adopted worktree already holds the earlier tickets' work, and
-		// -resume-worktree-of refuses -prior-run.
-		args = append(args, "-resume-worktree-of", resumeRunID)
-	} else if idx > 1 {
-		prev, err := TicketAt(r, idx-1)
-		if err != nil {
-			return HaltRequest(dataDir, r, err.Error(), now)
-		}
-		if prev.RunID == "" {
-			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: previous ticket has no recorded run id to chain -prior-run from", idx, r.TicketCount), now)
-		}
-		args = append(args, "-prior-run", prev.RunID)
+	args, recordOf, onBranch := withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
+	args, err = withEarlierTicketsWork(r, idx, args, resumeRunID, onBranch)
+	if err != nil {
+		return HaltRequest(dataDir, r, err.Error(), now)
 	}
 
 	if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
@@ -828,7 +818,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// ticket.RunID still names a prior attempt this invocation
 			// never touched. Either way there is no *current* run state
 			// to consult; this is a genuine start failure.
-			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: start failed: %v", idx, r.TicketCount, runErr), now)
+			return HaltRequest(dataDir, r, startFailedReason(idx, r.TicketCount, runErr, onBranch), now)
 		}
 		// A run record exists for this invocation, so runErr alone can't
 		// tell us whether this ticket actually quarantined or genuinely
@@ -908,6 +898,42 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// expected to actually reach this branch.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
+}
+
+// startFailedReason is the halt reason of a ticket build that never started.
+// A retry that was to continue on the quarantined attempt's branch says how
+// to rebuild without it: a plain retry would choose that branch again.
+func startFailedReason(idx, count int, runErr error, onBranch bool) string {
+	reason := fmt.Sprintf("ticket %d/%d: start failed: %v", idx, count, runErr)
+	if onBranch {
+		reason += "; this retry was to continue on the earlier attempt's branch: `factoryd retry -from scratch` rebuilds from the base commit instead"
+	}
+	return reason
+}
+
+// withEarlierTicketsWork adds the argument that puts the earlier tickets'
+// work under this ticket's build: -resume-worktree-of for a resume (the
+// adopted worktree already holds it, and the flag refuses -prior-run),
+// -prior-run of the previous ticket's run otherwise. A retry that continues
+// on the quarantined attempt's branch (onBranch) needs neither: that branch
+// already holds it, as a corrective round's does.
+func withEarlierTicketsWork(r *request.Request, idx int, args []string, resumeRunID string, onBranch bool) ([]string, error) {
+	switch {
+	case onBranch:
+		return args, nil
+	case resumeRunID != "":
+		return append(args, "-resume-worktree-of", resumeRunID), nil
+	case idx <= 1:
+		return args, nil
+	}
+	prev, err := TicketAt(r, idx-1)
+	if err != nil {
+		return nil, err
+	}
+	if prev.RunID == "" {
+		return nil, fmt.Errorf("ticket %d/%d: previous ticket has no recorded run id to chain -prior-run from", idx, r.TicketCount)
+	}
+	return append(args, "-prior-run", prev.RunID), nil
 }
 
 // refuseResume returns a building request whose resume decision cannot be
@@ -1428,10 +1454,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			return true, quarantineRequestWithCheck(dataDir, r, reason, check, now)
 		}
 
-		diffBase := current.DiffBaseSHA
-		if diffBase == "" {
-			diffBase = current.BaseSHA
-		}
+		diffBase := diffBaseOf(current)
 		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
 		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
 		if err != nil {
