@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -419,5 +420,47 @@ func TestReviewInstructionNestedPathsInSubmodulesAndGitDirs(t *testing.T) {
 		if readFile(t, r.abs("d/.git/x/.pi/SYSTEM.md")) != "inner\n" {
 			t.Fatal("the file inside the nested .git was touched")
 		}
+	})
+}
+
+// A submodule checkout is never removed from, so a link there that would
+// redirect an instruction path is refused as it is anywhere else.
+func TestReviewInstructionLeadLinksInsideASubmoduleCheckoutAreRefused(t *testing.T) {
+	gitlinkRepo := func(t *testing.T) *instructionRepo {
+		r := newInstructionRepo(t, nil)
+		r.git("update-index", "--add", "--cacheinfo", "160000,"+r.base+",vendor/lib")
+		r.commitStaged()
+		return r
+	}
+	cases := []struct{ link, text, file string }{
+		{"vendor/lib/.github", "stuff", "vendor/lib/stuff/instructions/evil.instructions.md"},
+		{"vendor/lib/.github", "stuff", "vendor/lib/stuff/copilot-instructions.md"},
+		{"vendor/lib/.vscode", "stuff", "vendor/lib/stuff/mcp.json"},
+		{"vendor/lib/.agents", "stuff", "vendor/lib/stuff/skills/s/SKILL.md"},
+		{"vendor/lib/a/b/.github", "../../../../plain", "plain/instructions/evil.instructions.md"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.link+" -> "+tc.text+" for "+tc.file, func(t *testing.T) {
+			r := gitlinkRepo(t)
+			r.write(tc.file, "EVIL\n")
+			r.link(tc.link, tc.text)
+			r.mustFail(`review instructions: "` + tc.link + `" is a symlink the result commit does not hold, where it could redirect an instruction path`)
+			if text, err := os.Readlink(r.abs(tc.link)); err != nil || text != tc.text || readFile(t, r.abs(tc.file)) != "EVIL\n" {
+				t.Fatalf("the submodule checkout was touched: %q, %v", text, err)
+			}
+		})
+	}
+	t.Run("a link of another name in a submodule checkout is left alone", func(t *testing.T) {
+		r := gitlinkRepo(t)
+		r.write("vendor/lib/stuff/instructions/x.md", "x\n")
+		r.link("vendor/lib/alias", "stuff")
+		snap, _ := r.mustSnap()
+		wantNothing(t, snap)
+	})
+	t.Run("a real .github directory without an entry in a submodule checkout is left alone", func(t *testing.T) {
+		r := gitlinkRepo(t)
+		r.write("vendor/lib/.github/workflows/ci.yml", "on: push\n")
+		snap, _ := r.mustSnap()
+		wantNothing(t, snap)
 	})
 }

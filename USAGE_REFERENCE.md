@@ -1286,7 +1286,7 @@ and gate launches are not masked.
 | A tracked instruction file no longer matches the result commit (an uncommitted edit, or a mode or content the checkout rewrote) | Commit or discard the difference in the worktree, then `factoryd retry` |
 | An instruction path, or the `.github`, `.vscode` or `.agents` folder above one (in any directory), is a link to a directory that is not an instruction path, or a link whose target the build changed | Replace the link with the real file or folder in the repository |
 | A checkout converted an instruction file (line endings, filters) | Stop converting that file (`.gitattributes`) |
-| A path is spelled two ways (`AGENTS.md` and `agents.md`, or `pkg/.claude` and `Pkg/.claude`), or a submodule sits under an instruction path or holds one | Keep one spelling; move the submodule |
+| A path is spelled two ways (`AGENTS.md` and `agents.md`, or `pkg/.claude` and `Pkg/.claude`), or a submodule sits under an instruction path, or its checkout holds one or a link at the `.github`, `.vscode` or `.agents` folder above one | Keep one spelling; move the submodule |
 | More than 64 instruction paths changed, over 2,000 instruction files, a file over 16 MiB, or an instruction path that changed between a file and a directory | Split the change so the build leaves fewer instruction files altered; the review attempt's `review_instructions_error` names which limit |
 
 The halt's `halt_reason_code` is `review_instructions_failed`; its message is
