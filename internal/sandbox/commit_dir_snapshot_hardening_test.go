@@ -191,3 +191,33 @@ func TestCommitDirSnapshotDetectsCollisionsTheFilesystemMakes(t *testing.T) {
 	c = r.commitOf(file(".factory/Ᏸ", "1"), file(".factory/ᏸ", "2"))
 	r.mustRefuse(c, ".factory", "already exists")
 }
+
+// A name or path no filesystem would take is refused before any record of it
+// is kept: thousands of files under one 100 KiB directory name otherwise cost
+// a gigabyte before the write fails.
+func TestCommitDirSnapshotRefusesOverlongNamesAndPaths(t *testing.T) {
+	r := newBareRepo(t)
+	x := r.treeOf([]tf{file("x", "x")}, map[string]string{})
+	longName := strings.Repeat("n", 256)
+	deep := x
+	for i := 0; i < 21; i++ { // 21 components of 200 bytes: over 4096 with separators
+		deep = r.rawTree([3]string{"40000", strings.Repeat("d", 200), deep})
+	}
+	for _, tc := range []struct {
+		name string
+		root string
+	}{
+		{"a 256-byte name", r.rawTree([3]string{"40000", ".factory", r.rawTree([3]string{"40000", longName, x})})},
+		{"a 100 KiB name", r.rawTree([3]string{"40000", ".factory", r.rawTree([3]string{"40000", strings.Repeat("n", 100<<10), x})})},
+		{"a path over 4096 bytes", r.rawTree([3]string{"40000", ".factory", deep})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r.mustRefuse(r.commitTree(tc.root), ".factory", "bytes")
+		})
+	}
+	// A 255-byte name is taken.
+	ok := r.rawTree([3]string{"40000", ".factory", r.rawTree([3]string{"40000", strings.Repeat("n", 255), x})})
+	if _, _, err := r.takeSnapshot(r.commitTree(ok), ".factory"); err != nil {
+		t.Fatalf("a 255-byte name was refused: %v", err)
+	}
+}

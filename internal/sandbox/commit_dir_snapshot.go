@@ -27,6 +27,10 @@ const (
 	// whatever they hold: a tree whose subtrees share objects lists
 	// exponentially many paths from a handful of objects.
 	maxCommitDirRecords = 20000
+	// maxCommitDirPathBytes and maxCommitDirNameBytes bound one listed path
+	// below the directory and its last component.
+	maxCommitDirPathBytes = 4096
+	maxCommitDirNameBytes = 255
 )
 
 // commitDirTimeout is the deadline of one whole snapshot.
@@ -239,6 +243,12 @@ type commitDirLister struct {
 }
 
 func (l *commitDirLister) add(e commitDirEntry) error {
+	// Before anything of the record is kept or quoted: a path no filesystem
+	// would take, repeated over thousands of records, is otherwise held
+	// several times over.
+	if last := e.path[strings.LastIndex(e.path, "/")+1:]; len(e.path) > maxCommitDirPathBytes || len(last) > maxCommitDirNameBytes {
+		return commitDirRefuse("a path of %d bytes below %s is over %d bytes, or its last name is over %d", len(e.path), strconv.Quote(l.prefix), maxCommitDirPathBytes, maxCommitDirNameBytes)
+	}
 	shown := l.prefix + "/" + e.path
 	q := strconv.Quote(shown)
 	if len(l.records) >= maxCommitDirRecords {
