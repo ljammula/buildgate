@@ -45,9 +45,26 @@ class CoveredBy(unittest.TestCase):
 		self.assertEqual(probe.covered_by(TABLE, ".mcp.json"), ".mcp.json")
 		self.assertIsNone(probe.covered_by(TABLE, ".github/mcp.json"))
 
-	def test_fixed_paths_are_anchored_at_the_root(self):
-		self.assertIsNone(probe.covered_by(TABLE, "pkg/.github/copilot-instructions.md"))
-		self.assertIsNone(probe.covered_by(TABLE, "pkg/.pi/SYSTEM.md"))
+	def test_fixed_paths_match_in_any_directory(self):
+		self.assertEqual(probe.covered_by(TABLE, "pkg/.github/copilot-instructions.md"), ".github/copilot-instructions.md")
+		self.assertEqual(probe.covered_by(TABLE, "pkg/.pi/SYSTEM.md"), ".pi")
+		self.assertEqual(probe.covered_by(TABLE, "a/b/c/.github/hooks/probe.json"), ".github/hooks")
+		self.assertEqual(probe.covered_by(TABLE, "a/b/c/.mcp.json"), ".mcp.json")
+		self.assertIsNone(probe.covered_by(TABLE, "pkg/.github/mcp.json"))
+		self.assertIsNone(probe.covered_by(TABLE, "pkg/.github/workflows/ci.yml"))
+		self.assertIsNone(probe.covered_by(TABLE, "pkg/github/hooks/probe.json"))
+
+	def test_the_first_covering_entry_in_table_order_is_named(self):
+		self.assertEqual(probe.covered_by(TABLE, "a/.pi/x/.github/hooks/h.json"), ".pi")
+		self.assertEqual(probe.covered_by(TABLE, "a/.github/hooks/.pi/x"), ".pi")
+		real = probe.parse_table(probe.GO_TABLE.read_text())
+		self.assertEqual(probe.covered_by(real, "pkg/.claude/skills/probe/SKILL.md"), ".claude/skills")
+		self.assertEqual(probe.covered_by(real, "pkg/.claude/settings.json"), ".claude")
+
+	def test_a_saved_result_is_judged_against_the_table_as_it_is_now(self):
+		result = {"candidates": [{"path": "pkg/.github/copilot-instructions.md", "table_path": None}, {"path": ".github/mcp.json", "table_path": "stale"}]}
+		probe.recover_candidates(result, TABLE)
+		self.assertEqual([c["table_path"] for c in result["candidates"]], [".github/copilot-instructions.md", None])
 
 	def test_a_base_name_matches_in_any_directory(self):
 		self.assertEqual(probe.covered_by(TABLE, "pkg/deep/AGENTS.md"), "AGENTS.md")

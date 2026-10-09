@@ -36,6 +36,9 @@ read gets its chance).
     --harness NAME    probe only this harness (repeatable)
     --write-fixture PATH  rewrite agent/pi/tests/fixtures/instruction_paths.json
                       from the result (a harness not probed keeps its entry)
+    --from-result PATH  with --write-fixture: run nothing, and rebuild the
+                      fixture from a saved result judged against the table as
+                      it is now (after a table or coverage-rule change)
 
 The result lands in ~/buildgate/instruction-probe/result.json. No model is
 called and nothing leaves the container.
@@ -80,19 +83,32 @@ def parse_table(source):
 
 
 def covered_by(table, path):
-	"""The table entry that covers a repository-relative path, or None. A dir
-	entry covers itself and everything below it, a file entry only itself, a
-	base name that file name in any directory."""
+	"""The table entry that covers a repository-relative path, or None. Every
+	entry matches in any directory, as the Go table does: a dir entry covers
+	itself and everything below it wherever its components appear in the path,
+	a file entry a path that ends in it, a base name that file name. Of several
+	entries that cover one path, the first in the table's order is the answer
+	(.claude/skills before .claude, so a skill is counted as a skill)."""
 	parts = path.split("/")
 	for d in table["dirs"]:
-		if path == d or path.startswith(d + "/"):
+		want = d.split("/")
+		if any(parts[i:i + len(want)] == want for i in range(len(parts))):
 			return d
 	for f in table["files"]:
-		if path == f:
+		want = f.split("/")
+		if parts[-len(want):] == want:
 			return f
 	if parts[-1] in table["names"]:
 		return parts[-1]
 	return None
+
+
+def recover_candidates(result, table):
+	"""The candidates of a saved result, each judged against the table as it
+	is now: the observations stay, what counts as covered follows the table."""
+	for c in result["candidates"]:
+		c["table_path"] = covered_by(table, c["path"])
+	return result
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +246,9 @@ SPECIFIC = [
 	(".agent/rules/probe.md", md, "text"), (".gemini/GEMINI.md", md, "text"), (".gemini/settings.json", plugin_json, "text"),
 	(".cursorrules", md, "text"), (".cursor/rules/probe.mdc", cursor_mdc, "text"), (".windsurfrules", md, "text"),
 	(".clinerules", md, "text"), (".opencode/agent/probe.md", agent_md, "text"), (".opencode/AGENTS.md", md, "text"),
-	("QWEN.md", md, "text"), ("CONVENTIONS.md", md, "text"), ("pkg/GEMINI.md", md, "text"),
+	("QWEN.md", md, "text"), ("CONVENTIONS.md", md, "text"),
+	# Table entries below a directory: the table matches them at any depth.
+	("pkg/GEMINI.md", md, "text"),
 	("pkg/.github/copilot-instructions.md", md, "text"), ("pkg/.mcp.json", mcp_json, "exec"),
 	("pkg/.pi/SYSTEM.md", md, "text"), ("pkg/.claude/CLAUDE.md", md, "text"),
 	("pkg/.agents/skills/probe/SKILL.md", skill, "text"), ("pkg/.claude/skills/probe/SKILL.md", skill, "text"),
@@ -364,6 +382,11 @@ def fixture_from_result(result, table, old):
 	return fixture
 
 
+def write_fixture(path, result, table):
+	fixture_path = pathlib.Path(path)
+	fixture_path.write_text(json.dumps(fixture_from_result(result, table, json.loads(fixture_path.read_text())), indent="\t") + "\n")
+
+
 def parse_version(text):
 	m = re.search(r"\d+\.\d+\.\d+", text or "")
 	return m.group(0) if m else None
@@ -372,7 +395,8 @@ def parse_version(text):
 FIXTURE_NOTE = ("Instruction paths each harness loads from a workspace, measured by scripts/probe_instruction_paths.py "
 	"against the worker image's pinned versions: a fake model endpoint logged every request of a review turn, a build turn "
 	"and a turn that reads a file under a subdirectory, and a path counts when its marker reached a request or a hook, MCP "
-	"server or extension it names ran. source probed means measured; documented means read from the harness documentation. "
+	"server or extension it names ran. A table path is counted wherever it sits in the workspace: pkg/.github/instructions "
+	"is .github/instructions. source probed means measured; documented means read from the harness documentation. "
 	"trust_gated lists table paths a harness loads only when the project is trusted, which a worker turn never grants. "
 	"uncovered lists paths outside the review snapshot's table that a harness loaded in a worker turn, "
 	"uncovered_trust_gated those it loads only in a trusted project. pifork is built from the pi base and "
@@ -702,6 +726,7 @@ def main():
 	ap.add_argument("--keep", action="store_true")
 	ap.add_argument("--result", help="result file (default: <scratch>/result.json)")
 	ap.add_argument("--write-fixture", metavar="PATH", help="rewrite the instruction_paths.json at PATH from the result")
+	ap.add_argument("--from-result", metavar="PATH", help="rebuild the fixture from this saved result instead of running the probe")
 	args = ap.parse_args()
 	if args.inner:
 		args.harness = args.harness[0]
@@ -713,6 +738,13 @@ def main():
 		for c in candidates:
 			print(f'{c["path"]:58} {c["kind"]:5} {c["table_path"] or "NOT IN TABLE"}')
 		print(f'{len(candidates)} candidates, {sum(1 for c in candidates if not c["table_path"])} outside the table', file=sys.stderr)
+		return 0
+
+	if args.from_result:
+		if not args.write_fixture:
+			raise SystemExit("--from-result needs --write-fixture")
+		result = recover_candidates(json.loads(pathlib.Path(args.from_result).expanduser().read_text()), table)
+		write_fixture(args.write_fixture, result, table)
 		return 0
 
 	if not str(SCRATCH).startswith(str(pathlib.Path("~/buildgate").expanduser())):
@@ -740,8 +772,7 @@ def main():
 	out_file.write_text(json.dumps(result, indent=1) + "\n")
 	print_table(candidates, result)
 	if args.write_fixture:
-		fixture_path = pathlib.Path(args.write_fixture)
-		fixture_path.write_text(json.dumps(fixture_from_result(result, table, json.loads(fixture_path.read_text())), indent="\t") + "\n")
+		write_fixture(args.write_fixture, result, table)
 	print(f"result: {out_file}", file=sys.stderr)
 	return 0
 

@@ -1263,12 +1263,16 @@ third-party skill like any dependency.
 
 Every model review of a run (spec conformity, code review, the combined
 review; a pull-request round's fix runs through the same ones) launches with
-the repository's instruction files as the base commit holds them: `AGENTS.md`,
-`AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md` in any
-directory; `.pi/`, `.codex/`, `.claude/`, `.agents/skills`, `.github/skills`,
-`.github/instructions`, `.github/agents`, `.github/hooks`,
-`.github/copilot-instructions.md`, `.mcp.json` and `.vscode/mcp.json`.
-Build, verify and gate launches are not masked.
+the repository's instruction files as the base commit holds them. Each path
+below counts in any directory of the repository, at any depth
+(`packages/app/.github/instructions` as `.github/instructions`). Build, verify
+and gate launches are not masked.
+
+| Kind | Instruction paths |
+|---|---|
+| Files, by name | `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md` |
+| Folders, with everything in them | `.pi/`, `.codex/`, `.claude/`, `.agents/skills`, `.github/skills`, `.github/instructions`, `.github/agents`, `.github/hooks` |
+| Files, by path | `.github/copilot-instructions.md`, `.mcp.json`, `.vscode/mcp.json` |
 
 | | What the review gets |
 |---|---|
@@ -1280,9 +1284,9 @@ Build, verify and gate launches are not masked.
 | Halts the run before the review launches | What to change |
 |---|---|
 | A tracked instruction file no longer matches the result commit (an uncommitted edit, or a mode or content the checkout rewrote) | Commit or discard the difference in the worktree, then `factoryd retry` |
-| An instruction path is a link to a directory that is not one, or a link whose target the build changed | Replace the link with the real file or folder in the repository |
+| An instruction path, or the `.github`, `.vscode` or `.agents` folder above one (in any directory), is a link to a directory that is not an instruction path, or a link whose target the build changed | Replace the link with the real file or folder in the repository |
 | A checkout converted an instruction file (line endings, filters) | Stop converting that file (`.gitattributes`) |
-| A path is spelled two ways (`AGENTS.md` and `agents.md`), or a submodule sits under an instruction path | Keep one spelling; move the submodule |
+| A path is spelled two ways (`AGENTS.md` and `agents.md`, or `pkg/.claude` and `Pkg/.claude`), or a submodule sits under an instruction path or holds one | Keep one spelling; move the submodule |
 | More than 64 instruction paths changed, over 2,000 instruction files, a file over 16 MiB, or an instruction path that changed between a file and a directory | Split the change so the build leaves fewer instruction files altered; the review attempt's `review_instructions_error` names which limit |
 
 The halt's `halt_reason_code` is `review_instructions_failed`; its message is
@@ -1297,7 +1301,9 @@ and no handoff or later build is told.
 | `review_removed_paths` | The instruction-named paths removed from the worktree before the review (same cap) |
 
 The list of instruction paths is a table in the code: a harness that loads a
-path not on it is not covered.
+path not on it is not covered. `make probe-instruction-paths` measures what
+the pinned `pi`, `codex` and `copilot` harnesses load from a workspace (no
+model call, no network) against that table.
 
 ## Design guide (`design_guide`, `design_guide_dirs:`)
 
