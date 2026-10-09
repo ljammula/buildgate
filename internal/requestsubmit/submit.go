@@ -68,6 +68,11 @@ type Params struct {
 	// Empty means "slug RequestText itself", the prior behavior for
 	// every other source.
 	IDText string
+	// ID, when non-empty, is a request id the caller already claimed with
+	// request.ClaimID (its directory exists and is empty), used as is: a
+	// caller that must write a file keyed by the id before the request
+	// exists claims it first.
+	ID string
 	// Source describes where RequestText came from (SourceText/
 	// SourceIssue/SourceFile) and, for SourceIssue, the fully-qualified
 	// issue reference the eventual PR closes. The caller builds this
@@ -545,6 +550,23 @@ func saveRequestDocuments(p Params, id, requestText string) error {
 	return nil
 }
 
+// claimRequestID is the request's id: the one the caller claimed (p.ID), else
+// one claimed here from p.IDText, or from the request text when that is empty.
+func claimRequestID(p Params, requestText string) (string, error) {
+	if p.ID != "" {
+		return p.ID, nil
+	}
+	idText := strings.TrimSpace(p.IDText)
+	if idText == "" {
+		idText = requestText
+	}
+	id, err := request.ClaimID(p.DataDir, request.GenerateID(idText, time.Now()))
+	if err != nil {
+		return "", fmt.Errorf("generate request id: %w", err)
+	}
+	return id, nil
+}
+
 // Submit records a new internal/request.Request in StateSubmitted under
 // dataDir/requests/<id>/, exactly as cmd/factoryd's old submitRequest
 // did, and returns immediately without running anything itself.
@@ -622,13 +644,9 @@ func Submit(p Params) (Result, error) {
 		return Result{}, err
 	}
 
-	idText := strings.TrimSpace(p.IDText)
-	if idText == "" {
-		idText = requestText
-	}
-	id, err := request.ClaimID(p.DataDir, request.GenerateID(idText, time.Now()))
+	id, err := claimRequestID(p, requestText)
 	if err != nil {
-		return Result{}, fmt.Errorf("generate request id: %w", err)
+		return Result{}, err
 	}
 
 	if err := saveRequestDocuments(p, id, requestText); err != nil {

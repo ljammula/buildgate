@@ -131,6 +131,12 @@ type submitParams struct {
 	// needed only to validate models above -- see settings' own doc
 	// comment on requestsubmit.Params.Settings.
 	settings sessionconfig.Settings
+	// claimedID and sourceKind are set by `factoryd memory propose`: the
+	// request id it claimed before writing its proposal file
+	// (requestsubmit.Params.ID), and request.SourceMemory in place of the
+	// kind derived from the inputs above.
+	claimedID  string
+	sourceKind request.SourceKind
 	// fetchIssue is threaded through to resolveSubmitRequestText so tests
 	// can inject a stub the same way submitMain's own tests already do.
 	fetchIssue issueFetchFunc
@@ -178,12 +184,16 @@ func submitRequest(dp *deps, ctx context.Context, p submitParams) (submitResult,
 	case p.requestFile != "":
 		sourceKind = request.SourceFile
 	}
+	if p.sourceKind != "" {
+		sourceKind = p.sourceKind
+	}
 
 	result, err := requestsubmit.Submit(requestsubmit.Params{
 		WorkspaceArg:               p.workspaceArg,
 		DataDir:                    p.dataDir,
 		RequestText:                requestText,
 		IDText:                     idText,
+		ID:                         p.claimedID,
 		Source:                     request.Source{Kind: sourceKind, IssueRef: issueRef},
 		VerifyCommand:              p.verifyCommand,
 		VerifyCommandExplicit:      p.verifyCommandExplicit,

@@ -69,6 +69,7 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /projects/{project}/release", Path: "/projects/app/release", File: "project-release.json"},
 		{Pattern: "GET /projects/{project}/stats", Path: "/projects/app/stats", File: "project-stats.json"},
 		{Pattern: "GET /projects/{project}/observations", Path: "/projects/app/observations", File: "project-observations.json"},
+		{Pattern: "GET /projects/{project}/memory", Path: "/projects/app/memory", File: "project-memory.json"},
 		{Pattern: "GET /queue-run", Path: "/queue-run", File: "queue-run.json"},
 		{Pattern: "GET /daemons", Path: "/daemons", File: "daemons.json"},
 		{Pattern: "GET /workspaces", Path: "/workspaces", File: "workspaces.json"},
@@ -132,6 +133,12 @@ func TestConsoleContractFixtures(t *testing.T) {
 			fillEveryField(reflect.ValueOf(&stats).Elem(), "")
 			stats.Project = project
 			return stats, nil
+		}),
+		WithProjectMemory(func(_ context.Context, project string) (ProjectMemory, bool, error) {
+			var view ProjectMemory
+			fillEveryField(reflect.ValueOf(&view).Elem(), "")
+			view.Project = project
+			return view, true, nil
 		}),
 		WithStartToken("contract-token"),
 	))

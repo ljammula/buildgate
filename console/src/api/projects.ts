@@ -1,5 +1,6 @@
 import { type Http } from "@/api/http";
 import { asObject } from "@/domain/decode";
+import { type ProjectMemory, decodeProjectMemory } from "@/domain/memory";
 import { type ObservationReport, decodeObservationReport } from "@/domain/observation";
 import {
   type ProjectCheckResponse,
@@ -79,4 +80,22 @@ export async function getProjectObservations(
     signal,
   );
   return decodeObservationReport(asObject(json, at), at);
+}
+
+/**
+ * GET /projects/{project}/memory: whether repository memory is on, the lines
+ * in force and the candidate lines. Read token; the route changes nothing.
+ */
+export async function getProjectMemory(
+  http: Http,
+  project: string,
+  signal?: AbortSignal,
+): Promise<ProjectMemory> {
+  const at = "GET /projects/{project}/memory";
+  const json = await http.getJson(
+    `/projects/${encodeURIComponent(project)}/memory`,
+    "read",
+    signal,
+  );
+  return decodeProjectMemory(asObject(json, at), at);
 }

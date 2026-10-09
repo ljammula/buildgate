@@ -5,9 +5,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	"buildgate/internal/memory"
 	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
 
@@ -40,11 +41,8 @@ func TestOverrideRunToAcceptedRefusedWhenTheAgentsFileCheckIsMissing(t *testing.
 		"the run changed another spelling":      func(string) run.Run { return quarantinedForOverride("agents.md") },
 		"the run changed a file under the name": func(string) run.Run { return quarantinedForOverride("Agents.md/x.txt") },
 		"the run is a memory change": func(dataDir string) run.Run {
-			path, err := memory.ProposalPath(dataDir, "widget", "req-1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := memory.SaveProposal(path, memory.Proposal{RequestID: "req-1", Expected: "text\n"}); err != nil {
+			req := request.New("req-1", "/repos/widget", "widget", request.Source{Kind: request.SourceMemory}, time.Now())
+			if err := req.Save(dataDir); err != nil {
 				t.Fatal(err)
 			}
 			r := quarantinedForOverride("README.md")
@@ -88,7 +86,10 @@ func TestOverrideRunToAcceptedDecidesFromTheRecordedAgentsFileCheck(t *testing.T
 
 	dataDir = t.TempDir()
 	plain := quarantinedForOverride("README.md", "docs/AGENTS.md")
-	plain.RequestID = "req-1" // a request with no proposal
+	plain.RequestID = "req-1" // a request that is not a memory request
+	if err := request.New("req-1", "/repos/widget", "widget", request.Source{Kind: request.SourceText}, time.Now()).Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	seedRun(t, dataDir, plain)
 	if recorder := overrideToAccepted(t, dataDir); recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())

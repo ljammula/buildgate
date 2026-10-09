@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -15,7 +16,7 @@ import (
 	"unicode"
 
 	"buildgate/internal/memory"
-	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
 
@@ -24,7 +25,8 @@ import (
 // what it read from git objects as run.MemoryEdit for release.MergePolicyCheck
 // to deny from. The worktree is never read: a build can write anything there.
 //
-//   - A memory run (its request has a proposal file) is released only when the
+//   - A memory run (its request is a memory request, with a proposal file under
+//     its repository's store key) is released only when the
 //     result tree holds exactly one root instruction name, spelled AGENTS.md, a
 //     regular file of mode 100644 whose bytes are the proposal's expected
 //     text, and no other file changed.
@@ -257,15 +259,36 @@ func otherThanAgentsFile(changed []string) []string {
 	return others
 }
 
-// memoryProposal loads the proposal of r's request. has is true when a file
-// exists; err means a request id or project that is not a safe path
-// component, or a file that is present but unusable (not a regular file,
-// recorded for another request, damaged).
+// memoryProposal loads the proposal of r's request when that request is a
+// memory request (request.SourceMemory, which only `factoryd memory propose`
+// submits); has is false for every other run, with no git call. The proposal
+// is kept under the store key of the request's repository. err means a
+// request record that exists and cannot be read, or a memory request whose
+// proposal is absent or unusable (not a regular file, recorded for another
+// request, damaged): such a run is never released.
 func memoryProposal(r *run.Run, dataDir string) (p memory.Proposal, has bool, err error) {
 	if r.RequestID == "" {
 		return memory.Proposal{}, false, nil
 	}
-	return memory.LoadProposalFor(dataDir, release.ProjectOf(r), r.RequestID)
+	req, err := request.Load(dataDir, r.RequestID)
+	if errors.Is(err, os.ErrNotExist) {
+		return memory.Proposal{}, false, nil
+	}
+	if err != nil {
+		return memory.Proposal{}, false, fmt.Errorf("request %s: %w", r.RequestID, err)
+	}
+	if req.Source.Kind != request.SourceMemory {
+		return memory.Proposal{}, false, nil
+	}
+	key, ok := memoryStoreKeyOfRun(dataDir, r)
+	if !ok {
+		return memory.Proposal{}, false, fmt.Errorf("memory request %s records no repository", r.RequestID)
+	}
+	p, has, err = memory.LoadProposalFor(dataDir, key, r.RequestID)
+	if err == nil && !has {
+		err = fmt.Errorf("memory request %s has no proposal file", r.RequestID)
+	}
+	return p, has, err
 }
 
 // computeMemoryEdit is the evidence for an accepted run with a result commit,

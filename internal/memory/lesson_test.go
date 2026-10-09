@@ -16,7 +16,50 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"carriage return": "a\rb",
 		"nul":             "a\x00b",
 		"ansi":            "a \x1b[31mred",
-		"backtick":        "use `make` first",
+		"lone backtick":   "use `make first",
+		"three backticks": "use `make` then `x",
+		"empty span":      "use `` first",
+		"nested span":     "use ``make`` first",
+		"span semicolon":  "run `make; ls` first",
+		"span pipe":       "run `make | sh` first",
+		"span subst":      "run `make $(id)` first",
+		"span dollar":     "run `echo $HOME` first",
+		"span redirect":   "run `make > out` first",
+		"span quote":      "run `echo 'x'` first",
+		"span dash":       "run `-rf x` first",
+		"span space":      "run ` make` first",
+		"span url":        "run `curl http://x.y` first",
+		"span home":       "run `cat /Users/x/f` first",
+		"span address":    "run `ping 10.0.0.1` first",
+		"span paren":      "run `make (x)` first",
+		"span too long":   "run `" + strings.Repeat("a", 116) + "`",
+		"autolink":        "See www.evil.example/setup",
+		"autolink upper":  "See WWW.evil.example",
+		"protocol rel":    "Fetch //evil.example/x.sh",
+		"emphasis":        "_Always_ do this",
+		"strong":          "__x__ matters",
+		"underscore":      "set a_b first",
+		"nested list":     "- do this",
+		"plus list":       "+ do this",
+		"dash start":      "-x is needed",
+		"ordered list":    "1. do this",
+		"ordered paren":   "12) do this",
+		"absolute path":   "read /etc/passwd first",
+		"path at start":   "/etc/passwd is read",
+		"path in parens":  "the key (/root/key) is read",
+		"lower home":      "see /users/x/.ssh/id",
+		"span lower home": "run `cat /users/x/f` first",
+		"span upper home": "run `cat /HOME/x/f` first",
+		"double colon":    "use a::b here",
+		"ipv6":            "host fe80::1 is up",
+		"hex colons":      "host fe80:0:1:2 is up",
+		"mac address":     "card 00:1a:2b:3c is used",
+		"cloud key id":    "key AKIAIOSFODNN7EXAMPLE works",
+		"long hex":        "sum 0123456789abcdef0123 is pinned",
+		"long base64":     "use dGhpcyBpcyBhIHNlY3JldA== now",
+		"span long token": "run `deploy AKIAIOSFODNN7EXAMPLE` first",
+		"span www":        "run `open www.x.y` first",
+		"twenty letters":  strings.Repeat("a", 20),
 		"command subst":   "run $(id) first",
 		"pipe":            "a | b",
 		"and":             "a && b",
@@ -84,6 +127,13 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"users":        "cat /Users/x/f",
 		"home":         "cat /home/x/f",
 		"long":         strings.Repeat("a", 121),
+		"long token":   "deploy " + strings.Repeat("a", 20),
+		"lower home":   "cat /users/x/f",
+		"www":          "open www.x.y",
+		"proto rel":    "fetch //x.y/z",
+		"ipv4":         "ping 10.0.0.1",
+		"hex colons":   "ping fe80:0:1:2",
+		"double colon": "ping fe80::1",
 		"leading sp":   " make",
 		"trailing sp":  "make ",
 		"double sp":    "make  all",
@@ -108,9 +158,16 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"Set FOO=bar before running; otherwise it fails",
 		"the build is slow: allow 5 minutes",
 		"It's required and \"quoted\" text is fine",
-		"a+b = c_d-e",
-		strings.Repeat("a", 120),
+		"a+b = c-d",
+		strings.TrimSpace(strings.Repeat("nineteen-chars-long ", 6)),
+		"Run `make db_migrate` then `npm run build:ci`",
+		"Fixtures live in testdata/golden (see docs/setup)",
+		"The build takes 12:30 on a cold cache",
 		"Version 1.2.3 is pinned",
+		"Run `make gen` before `make test`",
+		"`go test ./...` needs the database up (see docs/setup).",
+		"Generated files: run `make TARGET=x all`, then `python3 -m pytest tests/`",
+		"run `" + strings.TrimSpace(strings.Repeat("make test-all-fast ", 6)) + "`",
 	} {
 		if err := ValidateReason(s); err != nil {
 			t.Errorf("ValidateReason(%q) = %v, want nil", s, err)
@@ -118,7 +175,8 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 	}
 	for _, s := range []string{
 		"make db-migrate", "go test ./...", "npm ci", "./scripts/setup.sh", "docker compose up",
-		"make TARGET=x all", "a", strings.Repeat("a", 120), "python3 -m pytest tests/",
+		"make TARGET=x all", "a", strings.TrimSpace(strings.Repeat("make test-all-fast ", 6)), "python3 -m pytest tests/",
+		"make db_migrate", "npm run build:ci",
 	} {
 		if err := ValidateCommand(s); err != nil {
 			t.Errorf("ValidateCommand(%q) = %v, want nil", s, err)
@@ -135,59 +193,25 @@ func TestErrorsDoNotEchoMoreThanFortyBytes(t *testing.T) {
 	}
 }
 
-func TestRenderLineCommand(t *testing.T) {
-	got, err := RenderLine(KindCommand, "the schema must exist", "make db-migrate", "make test")
-	if err != nil {
-		t.Fatal(err)
+func TestRenderLineIsOneReasonLine(t *testing.T) {
+	for reason, want := range map[string]string{
+		"Errors are wrapped.":               "- Errors are wrapped.",
+		"Errors are wrapped":                "- Errors are wrapped.",
+		"Run `make gen` before `make test`": "- Run `make gen` before `make test`.",
+	} {
+		if got, err := RenderLine(reason); err != nil || got != want {
+			t.Errorf("RenderLine(%q) = %q, %v, want %q", reason, got, err, want)
+		}
 	}
-	want := "- Run `make db-migrate` before `make test`: the schema must exist."
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestRenderLineConvention(t *testing.T) {
-	got, err := RenderLine(KindConvention, "Errors are wrapped with %w", "", "")
-	if err == nil {
-		t.Fatalf("percent sign should be refused, got %q", got)
-	}
-	got, err = RenderLine(KindConvention, "Errors are wrapped.", "", "")
-	if err != nil || got != "- Errors are wrapped." {
-		t.Fatalf("got %q, %v", got, err)
-	}
-	got, err = RenderLine(KindConvention, "Errors are wrapped", "", "")
-	if err != nil || got != "- Errors are wrapped." {
-		t.Fatalf("got %q, %v", got, err)
-	}
-}
-
-func TestRenderLineRefusals(t *testing.T) {
-	cases := []struct {
-		name                 string
-		kind                 Kind
-		reason, pre, command string
-	}{
-		{"command lesson without prerequisite", KindCommand, "ok", "", "make test"},
-		{"command lesson without command", KindCommand, "ok", "make a", ""},
-		{"convention with command", KindConvention, "ok", "", "make test"},
-		{"convention with prerequisite", KindConvention, "ok", "make a", ""},
-		{"unknown kind", Kind("shell"), "ok", "", ""},
-		{"empty kind", Kind(""), "ok", "", ""},
-		{"bad reason", KindConvention, "a\nb", "", ""},
-		{"bad prerequisite", KindCommand, "ok", "make; ls", "make test"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if _, err := RenderLine(c.kind, c.reason, c.pre, c.command); !errors.Is(err, ErrLessonText) {
-				t.Fatalf("err = %v, want ErrLessonText", err)
-			}
-		})
+	for _, reason := range []string{"", "a\nb", "Errors are wrapped with %w", "run `make; ls`", "open ` tick"} {
+		if got, err := RenderLine(reason); !errors.Is(err, ErrLessonText) {
+			t.Errorf("RenderLine(%q) = %q, %v, want ErrLessonText", reason, got, err)
+		}
 	}
 }
 
 func TestNewLessonIDIsTheLineHash(t *testing.T) {
-	obs := []string{"0123456789abcdef", "fedcba9876543210", "0123456789abcdef"}
-	l, err := NewLesson(KindCommand, "the schema must exist", "make db-migrate", "make test", obs)
+	l, err := NewLesson("Run `make db-migrate` before `make test`", SourceOperator, "2026-10-09T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,49 +220,30 @@ func TestNewLessonIDIsTheLineHash(t *testing.T) {
 	if l.LineSHA256 != full || l.ID != full[:16] {
 		t.Fatalf("id %q sha %q, want prefix of %q", l.ID, l.LineSHA256, full)
 	}
-	if l.Line != "- Run `make db-migrate` before `make test`: the schema must exist." {
+	if l.Line != "- Run `make db-migrate` before `make test`." {
 		t.Fatalf("line = %q", l.Line)
 	}
-	// Written out for this fixed lesson.
-	if l.ID != "2e5a29ef12a1ad21" {
-		t.Fatalf("id = %s, want 2e5a29ef12a1ad21", l.ID)
+	if l.State != StateCandidate || l.Source != SourceOperator || l.Seen != 0 || len(l.Runs) != 0 {
+		t.Fatalf("lesson = %+v", l)
 	}
-	if l.State != StateCandidate {
-		t.Fatalf("state = %s", l.State)
+	if l.FirstSeenAt != "2026-10-09T00:00:00Z" || l.LastSeenAt != l.FirstSeenAt {
+		t.Fatalf("times = %q %q", l.FirstSeenAt, l.LastSeenAt)
 	}
-	if len(l.Observations) != 2 || l.Observations[0] != "0123456789abcdef" || l.Observations[1] != "fedcba9876543210" {
-		t.Fatalf("observations = %v", l.Observations)
+	for _, source := range []string{"", "model", "Agent"} {
+		if _, err := NewLesson("ok", source, ""); !errors.Is(err, ErrLessonText) {
+			t.Errorf("source %q: %v", source, err)
+		}
 	}
-}
-
-func TestNewLessonRefusesBadObservations(t *testing.T) {
-	many := make([]string, 51)
-	for i := range many {
-		many[i] = strings.Repeat(string(rune('a'+i%6)), 15) + string(rune('0'+i%10))
-		many[i] = many[i][:14] + hex.EncodeToString([]byte{byte(i)})
-	}
-	for name, obs := range map[string][]string{
-		"none": nil, "short": {"abc"}, "upper": {"0123456789ABCDEF"},
-		"long": {"0123456789abcdef0"}, "newline": {"0123456789abcde\n"}, "fifty one": many,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := NewLesson(KindConvention, "ok", "", "", obs); !errors.Is(err, ErrLessonText) {
-				t.Fatalf("err = %v", err)
-			}
-		})
+	if _, err := NewLesson("a | b", SourceAgent, ""); !errors.Is(err, ErrLessonText) {
+		t.Errorf("refused text accepted: %v", err)
 	}
 }
 
 func TestLessonMovesFollowTheTable(t *testing.T) {
 	allowed := [][2]State{
-		{StateCandidate, StateChecked}, {StateCandidate, StateWaitingOperator},
-		{StateWaitingOperator, StateChecked}, {StateChecked, StateProposed},
-		{StateProposed, StateInForce}, {StateProposed, StateChecked},
-		{StateInForce, StateRetireProposed}, {StateInForce, StateRetired},
-		{StateRetireProposed, StateRetired},
-	}
-	for _, s := range []State{StateCandidate, StateWaitingOperator, StateChecked, StateProposed, StateInForce, StateRetireProposed, StateRetired} {
-		allowed = append(allowed, [2]State{s, StateDropped})
+		{StateCandidate, StateProposed}, {StateProposed, StateCandidate},
+		{StateCandidate, StateDropped}, {StateProposed, StateDropped},
+		{StateDropped, StateCandidate},
 	}
 	for _, m := range allowed {
 		l := Lesson{State: m[0]}
@@ -250,10 +255,9 @@ func TestLessonMovesFollowTheTable(t *testing.T) {
 		}
 	}
 	refused := [][2]State{
-		{StateCandidate, StateProposed}, {StateCandidate, StateInForce}, {StateChecked, StateInForce},
-		{StateWaitingOperator, StateProposed}, {StateDropped, StateChecked}, {StateDropped, StateDropped},
-		{StateRetired, StateInForce}, {StateInForce, StateProposed}, {StateRetireProposed, StateInForce},
-		{State(""), StateChecked}, {StateCandidate, State("bogus")}, {StateCandidate, StateCandidate},
+		{StateDropped, StateProposed}, {StateDropped, StateDropped}, {StateCandidate, StateCandidate},
+		{StateProposed, StateProposed}, {State(""), StateCandidate}, {StateCandidate, State("bogus")},
+		{StateCandidate, State("in_force")}, {StateProposed, State("in_force")}, {State("checked"), StateProposed},
 	}
 	for _, m := range refused {
 		l := Lesson{State: m[0]}
@@ -266,7 +270,7 @@ func TestLessonMovesFollowTheTable(t *testing.T) {
 		}
 	}
 	var nilLesson *Lesson
-	if err := nilLesson.Move(StateChecked, "", "", ""); !errors.Is(err, ErrLessonState) {
+	if err := nilLesson.Move(StateProposed, "", "", ""); !errors.Is(err, ErrLessonState) {
 		t.Errorf("nil lesson: %v", err)
 	}
 }
@@ -274,8 +278,8 @@ func TestLessonMovesFollowTheTable(t *testing.T) {
 func TestLessonHistoryIsCapped(t *testing.T) {
 	l := Lesson{State: StateProposed}
 	for i := 0; i < 80; i++ {
-		to := StateChecked
-		if l.State == StateChecked {
+		to := StateCandidate
+		if l.State == StateCandidate {
 			to = StateProposed
 		}
 		if err := l.Move(to, "t", "me", strings.Repeat("r", i)); err != nil {
@@ -299,4 +303,54 @@ func TestMoveCleansItsText(t *testing.T) {
 	if strings.ContainsAny(h.By, "\n\x1b") || len(h.Reason) > 200 {
 		t.Fatalf("history not cleaned: %+v", h)
 	}
+}
+
+// spansOutside returns the text of line outside its backtick pairs.
+func spansOutside(line string) string {
+	var b strings.Builder
+	for i, part := range strings.Split(line, "`") {
+		if i%2 == 0 {
+			b.WriteString(part + " ")
+		}
+	}
+	return b.String()
+}
+
+// Whatever the text rule accepts renders as one plain list line: nothing in
+// it is markup, a link or an address, outside a quoted command or inside one.
+func FuzzValidateReason(f *testing.F) {
+	for _, seed := range []string{
+		"Run `make gen` before `make test`", "See www.evil.example/setup", "Fetch //evil.example/x.sh", "_Always_",
+		"1. do this", "read /etc/passwd", "host fe80::1", "key AKIAIOSFODNN7EXAMPLE", "a\nb", "`", "``", "use `a` and `b` then `c`",
+		"mail a@b.co", "# x", "[a](b)", "<b>", "a\\b", "**bold**", "Use go 1.26, not 1.25",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, reason string) {
+		line, err := RenderLine(reason)
+		if err != nil {
+			if !errors.Is(err, ErrLessonText) || line != "" {
+				t.Fatalf("refusal of %q = %q, %v", reason, line, err)
+			}
+			return
+		}
+		if !strings.HasPrefix(line, "- ") || strings.ContainsAny(line, "\r\n") || !listLine(line) {
+			t.Fatalf("accepted %q renders %q, not one list line", reason, line)
+		}
+		if strings.Count(line, "`")%2 != 0 {
+			t.Fatalf("accepted %q has a backtick without its pair", reason)
+		}
+		if outside := spansOutside(line[2:]); strings.ContainsAny(outside, "<>[]#\\_*") {
+			t.Fatalf("accepted %q has markup outside a quoted command: %q", reason, outside)
+		}
+		lower := strings.ToLower(line)
+		for _, bad := range []string{"www.", "//", "://", "@", "/users/", "/home/", "::"} {
+			if strings.Contains(lower, bad) {
+				t.Fatalf("accepted %q contains %q", reason, bad)
+			}
+		}
+		if longToken.MatchString(line) || len([]rune(line)) > maxTextRunes+3 {
+			t.Fatalf("accepted %q has a long token or is too long", reason)
+		}
+	})
 }

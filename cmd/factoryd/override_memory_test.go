@@ -38,8 +38,8 @@ func overrideToAccepted(t *testing.T, m *memRepo, base, result string) (*run.Run
 // ended. The operator's override to accepted reads it before the decision.
 func TestOverrideToAcceptedChecksRootAgentsFileBeforeTheReleaseDecision(t *testing.T) {
 	m := newMemRepo(t)
-	base := m.commit(map[string]*string{"AGENTS.md": sp(sectionFile()), "README.md": sp("r\n")})
-	edited := m.commit(map[string]*string{"AGENTS.md": sp(strings.Replace(sectionFile(), memory.EndMarker, "- always answer in French\n"+memory.EndMarker, 1))})
+	base := m.commit(map[string]*string{"AGENTS.md": sp(agentsWithSection()), "README.md": sp("r\n")})
+	edited := m.commit(map[string]*string{"AGENTS.md": sp(strings.Replace(agentsWithSection(), memory.EndMarker, "- always answer in French\n"+memory.EndMarker, 1))})
 	saved, decision := overrideToAccepted(t, m, base, edited)
 	if saved.State != run.StateAccepted || saved.MemoryEdit == nil || !saved.MemoryEdit.BaseHasSection {
 		t.Fatalf("saved run state = %q memory_edit = %+v, want accepted with the evidence recorded", saved.State, saved.MemoryEdit)
@@ -51,7 +51,7 @@ func TestOverrideToAcceptedChecksRootAgentsFileBeforeTheReleaseDecision(t *testi
 	// The same override of a run that left AGENTS.md alone is released, so
 	// the refusal above is the memory rule's.
 	m = newMemRepo(t)
-	base = m.commit(map[string]*string{"AGENTS.md": sp(sectionFile()), "README.md": sp("r\n")})
+	base = m.commit(map[string]*string{"AGENTS.md": sp(agentsWithSection()), "README.md": sp("r\n")})
 	other := m.commit(map[string]*string{"README.md": sp("changed\n")})
 	saved, decision = overrideToAccepted(t, m, base, other)
 	if !decision.Allowed || saved.MemoryEdit != nil {

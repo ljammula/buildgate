@@ -401,12 +401,16 @@ func warnIfReleasePolicyCanNeverAllow(openPullRequest bool, policy release.Merge
 // policy.ProtectedFilesTouched without re-deriving or re-loading anything.
 // nil exactly when the caller has no such policy to give (see
 // renderRiskHeader's own doc comment on reconcileReclaimedRun).
-func openEvidencePullRequest(execDir, id string, r *run.Run, policy *release.MergePolicy, opener forge.PullRequestOpener) string {
+//
+// dataDir is where a memory request's proposal is read from: such a run's
+// body ends with the lines the change adds and removes
+// (memoryChangesMarkdown).
+func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *release.MergePolicy, opener forge.PullRequestOpener) string {
 	if r.Branch == "" {
 		log.Printf("run %s: -open-pull-request set but no isolated branch exists, skipping", id)
 		return ""
 	}
-	body := renderEvidenceMarkdown(r, policy)
+	body := renderEvidenceMarkdown(r, policy) + memoryChangesMarkdown(dataDir, r)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	// r.ResultSHA pinned into an explicit push refspec, not a bare branch
@@ -537,7 +541,7 @@ func retryPullRequestOpener(dp *deps, dataDir, runID string) request.PROpenOutco
 	if !decision.Allowed {
 		return request.PROpenOutcome{WithheldReason: releasePullRequestWithheldReason(decision)}
 	}
-	prURL := openEvidencePullRequest(loaded.WorkspacePath, runID, loaded, &policy, dp.forge.pullRequestOpener())
+	prURL := openEvidencePullRequest(dataDir, loaded.WorkspacePath, runID, loaded, &policy, dp.forge.pullRequestOpener())
 	if prURL == "" {
 		// The idempotency case's other half, sharpened by a round-2
 		// review: gh reporting the PR already exists is not a real

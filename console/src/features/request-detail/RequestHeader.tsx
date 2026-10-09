@@ -11,6 +11,7 @@ import {
   requestShortTitle,
 } from "@/domain/request";
 import { boardPath } from "@/routes/paths";
+import { MemoryBadge } from "@/shared/request/MemoryBadge";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { WaitingBadge } from "@/shared/request/WaitingBadge";
 import { Badge } from "@/ui/Badge";
@@ -35,6 +36,7 @@ function RequestChips({ request }: { readonly request: RequestSummary }) {
     <span className="inline-flex flex-wrap items-center gap-2">
       <CompactId value={request.id} max={34} label="request id" className="text-xs" />
       <span>{request.project}</span>
+      <MemoryBadge request={request} />
       <RequestStageChip
         state={request.state}
         awaitingPullRequest={requestAwaitingPullRequest(request)}

@@ -27,6 +27,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd console` | Prints the tokenized console link (`<addr>/#t=<token>`) from the stable token file, for the running `serve` of this data dir (the address it recorded); a plain link if no token or no such serve is found. | `-config`, `-data-dir` (when serve's differs from the config's), `-open`. Starts a `serve` for the data dir first when none is running (unless `FACTORYD_AUTOSTART=0`) |
 | `factoryd mcp` | Turns on `serve`'s MCP endpoint (`POST /mcp`): creates the token file `<config name>.mcp-token` beside the session config (`config.mcp-token` for `config.yml`, mode 0600, one per profile) if it is missing, then prints the endpoint, the token and the `claude mcp add` line. With no `serve` recorded for the data dir it prints neither, and says to start one. `serve` reads the file on every call, so nothing restarts. Tools and limits: [USAGE.md § Drive Buildgate from an MCP client](USAGE.md#drive-buildgate-from-an-mcp-client) | `-rotate` (new token; the old one stops at once), `-disable` (remove the file; endpoint off), `-config`, `-data-dir` (when serve's differs from the config's) |
 | `factoryd inbox` | Lists every request waiting on the operator (`spec_review`, `oracle_review`, `plan_review`, `pr_review`, `resume_review`, `halted`, `quarantined`) across the distinct data dirs of all profiles, oldest first (waiting since `WaitingSince`, else `EnteredAt`): age, profile, state, id, title, then the commands or PR URL or `reason:`/`next:`, then the console link. Empty: `Nothing is waiting on you.` | `-json` (the same entries as an array: `profile`, `data_dir`, `id`, `title`, `state`, `since`, `age_seconds`, `reason`, `next`, `approve`, `reject`, `pr_urls`, `console_url`) |
+| `factoryd memory <subcommand>` | Repository memory for one repository: `list` (the switch, the budget, the lines in force, the candidates; with memory on it first collects candidates from finished runs' notes), `show <id>`, `add "<text>"`, `drop <id>`, `propose [<id>...]` (opens one request that rewrites the fenced section of `AGENTS.md` and stops at `spec_review`), `on`, `off`. See "Repository memory" below. Every subcommand but `list` and `show` is refused while memory is off. | `-workspace <repository>` (required), `-config`, `-data-dir`, `-json` (`list`, `show`), `-reason` (`drop`, `off`), `-remove "<exact line>"` (`propose`, repeatable). Flags come before the arguments |
 | `factoryd stop` | Stops the `worker` and the `serve` of the data dir, one output line per process (`stopped (pid N)`, `not running`, or why it was skipped). Finds pids from `<data-dir>/quickstart-queue-run.pid` or the worker heartbeat, and from `<data-dir>/console-address` or `quickstart-serve.pid`, and signals a pid only while it still looks like factoryd. A running launchd service (`dev.factoryd.worker`/`dev.factoryd.serve`) for that data dir is left alone (`factoryd uninstall-service` removes it). Refuses when the heartbeat names any request being built or run (all are listed). With `-force`, the running builds halt at the next worker start and their requests wait in `resume_review` (`factoryd resume <id>` continues or rebuilds one). Exits non-zero on a refusal or a process that would not exit. | `-config` (path or profile name), `-data-dir`, `-all` (every profile's data dir, then, when `~/.config/factoryd/openshell` exists, `docker compose -p buildgate-openshell stop gateway meter` (refused while a request or sandbox is active), then `docker compose -f ~/.config/factoryd/temporal/docker-compose.yml stop`, then `colima stop` when colima is the Docker provider and no other container runs (`factoryd uninstall` leaves the VM running; `FACTORYD_AUTOSTART=0` leaves it too); refuses while a worker is still live; exclusive with `-config`/`-data-dir`), `-force` (stop despite a building request, cancelling its build, or, with `-all`, a live worker) |
 | `factoryd restart` | Stops every profile's running `worker` and `serve` and starts them again with this binary (a launchd service is kickstarted), one line saying what came back. A worker runs each build in its own process, so one started before an install keeps building with the code it started with; `make install` runs this itself. Refuses while a request is building, naming it, and stops nothing. If a process does not exit within 15 s of SIGTERM, restart starts the others again, leaves that one running, names it and exits non-zero: stop it by pid, then `factoryd restart`. `serve` ends open event and log streams when it is told to stop, so a console tab left open does not hold it. `factoryd doctor` warns (`worker runs this factoryd`) when the running worker is another version |
 | `factoryd setup` | Chooses the model and coding agent every run uses and writes them into the session config, keeping its recorded images. `make install` runs it. Asks which model route (detected ChatGPT/Codex and Copilot logins first) and, on a route that can run more than one (`chatgpt-codex`: `pi` or `codex`), which coding agent; the rest is defaulted. Asks nothing with no terminal (a single detected login is used, else it fails naming `-route`) or when the config already names a model. | `-route`, `-harness`, `-model-id`, `-model-host`, `-context-window`, `-credential`, `-sandbox-image`, `-egress-ca-bundle`, `-config`, `-data-dir`, `-non-interactive`, `-reconfigure` |
@@ -131,7 +132,10 @@ wording. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
-says why). The bare `-release-*`/session-config zero defaults deny
+says why), and when a later ticket remains the request halts there as
+accepted with no pull request, with `-open-pull-request` on or off: the
+next ticket is built on this one's commit and would carry the refused
+change. The bare `-release-*`/session-config zero defaults deny
 everything, so a usable `-release-rollback-plan` and non-zero
 `-release-max-files-changed`/`-release-max-insertions` are required — see
 "Release policy" below. Per `-advance-on` (`accepted` default, or
@@ -1347,6 +1351,86 @@ The list of instruction paths is a table in the code: a harness that loads a
 path not on it is not covered. `make probe-instruction-paths` measures what
 the pinned `pi`, `codex` and `copilot` harnesses load from a workspace (no
 model call, no network) against that table.
+
+## Repository memory (`factoryd memory`)
+
+`factoryd memory <subcommand> -workspace <repository> [flags] [arguments]`.
+Flags come before the arguments. The walkthrough is in USAGE.md.
+
+| Subcommand | Does | Writes |
+|---|---|---|
+| `list` | Prints whether memory is on (and which switch has it off), the budget and its use, the lines in force (the fenced section of root `AGENTS.md` at the checkout's HEAD, read from git, never the worktree) and the candidates: `ID`, `SEEN`, `SOURCE`, `STATE`, `LINE`, most seen first, then newest, dropped last. With memory on it first collects candidates from the project's newest 200 finished runs and reconciles the store with the section | The store, only with memory on |
+| `show <id>` | One candidate: its line, the runs that said it and when each ended, its history. An id may be shortened to a unique prefix | Nothing |
+| `add "<text>"` | Adds your own candidate under the text rule; the refusal names the rule broken. A dropped line added again is a candidate again | The store |
+| `drop [-reason <why>] <id>` | Moves a candidate or proposed line to `dropped`. A dropped line still counts the runs that say it and is never proposed | The store |
+| `propose [-remove "<line>"]... [<id>...]` | Opens one memory request: adds the named candidates (none named: the most seen that fit) and removes each `-remove` line. At most five changes. Refused when the section would be over its budget (pass `-remove`, or raise `budget_lines`/`budget_chars`), when the repository has no `verify_command`, or while another memory request of the repository is neither `done` nor `cancelled` | The proposal, the request, the store |
+| `off [-reason <why>]` / `on` | Writes / removes the project's stop marker. `on` does not list a repository under `memory.repositories`: that is your edit | The stop marker |
+
+| Flag | Meaning |
+|---|---|
+| `-workspace <path>` | The repository: its root or any directory inside it. Required |
+| `-config <file or profile>` | The session config whose `memory.repositories` is the switch and the budget |
+| `-data-dir <dir>` | Default: the session config's |
+| `-json` | `list` (the shape of `GET /projects/{project}/memory`) and `show` |
+| `-reason <text>` | `drop`, `off` |
+| `-remove "<exact line>"` | `propose`: a line as `memory list` prints it, `- ` included. Repeatable |
+
+The text rule a line passes (never repaired, for a build agent's note and for
+`add` alike):
+
+| A line | Rule |
+|---|---|
+| Length | One line, at most 120 characters |
+| Characters outside backticks | Letters, digits, space and `. , : ; ( ) ' " / = + -` |
+| A command | Inside one pair of backticks: letters, digits, space and `. _ / : = -`, not starting with `-` |
+| Refused anywhere | `//` and `www.` (a URL in any form), an e-mail address, `/users/` and `/home/` in any case, an IPv4 or hex-colon address, `::`, any unbroken run of 20 or more of `A-Z a-z 0-9 + / = _ -`, anything secret redaction would change |
+| Refused outside backticks | A path that starts with `/`; a start of `-`, `+` or digits followed by `.` or `)` |
+
+Store layout, under `<data-dir>/memory/<key>/`, where `<key>` is the
+lower-cased project name, `-`, and the first 12 hex characters of the SHA-256
+of the repository's root path:
+
+| File | Holds |
+|---|---|
+| `state.json` | The candidates (`candidate`, `proposed`, `dropped`), each with its line, source, the runs that said it (at most 20) and its history; and the runs already collected. At most 200 lines and 1 MiB. A line in force is not stored: the file is the memory |
+| `off` | The stop marker `memory off` wrote |
+| `proposals/<request-id>.json` | The exact `AGENTS.md` a memory request must produce, and its SHA-256: what the release check compares |
+| `proposals/<request-id>.changes.json` | The lines that request adds and removes and the run ids an added line came from, for the pull request body |
+
+What the release check enforces on the repository's root `AGENTS.md`, in any
+letter case of that name (`agents.md` is the same file on a case-insensitive
+checkout). It reads git objects, never the worktree, and a read that fails
+refuses the release:
+
+| Run | Released only when |
+|---|---|
+| Of a memory request | The result holds exactly one such name, spelled `AGENTS.md`, a regular file of mode `100644` whose bytes are the proposal's text, and no other file changed |
+| Any other, in a repository whose root `AGENTS.md` has a buildgate memory section (it holds the text `buildgate:memory`) | It did not change that file in any way (text outside the markers included, its mode, a move, a delete) and added no other letter case of its name. Only a memory request, or a person, changes the file: a ticket that edits it is refused at release |
+| Any other, in a repository with no memory section | It may edit or create `AGENTS.md`, but the result holds one letter case of the name only, a regular file where the run changed it, without the text `buildgate:memory` (written plainly or as HTML character references) |
+
+| Release reason | Meaning |
+|---|---|
+| `AGENTS.md of a repository with a memory section changed by a run that is not a memory change` | The second row above |
+| `a run that is not a memory change added memory markers to AGENTS.md` | The third row: the marker text |
+| `the result holds more than one root file named AGENTS.md in some letter case` | The third row: two spellings |
+| `a run that is not a memory change made AGENTS.md something other than a regular file` | The third row: a symlink, a submodule or a directory |
+| `memory change does not match the approved text` | The first row; it names up to three other changed files |
+| `memory section check could not be completed` | The check could not read the commits, the request or the proposal |
+
+`factoryd override -state accepted` runs the same check before it records the
+release decision. The console's and the API's override cannot read the
+repository: for a run that changed a root `AGENTS.md` name, or a memory
+request's run, it answers 409 and says to run `factoryd override` on the host.
+
+`GET /projects/{project}/memory` (read token, like the project's
+observations) returns the same view as `memory list -json` for the repository
+the project's requests are submitted against: `on`, `off_reason`,
+`budget_lines`, `budget_chars`, `used_lines`, `used_chars`, `in_force`,
+`section_error`, `candidates` (`id`, `line`, `source`, `state`, `seen`,
+`first_seen_at`, `last_seen_at`, `request_id`). It collects nothing and writes
+nothing; the console's Memory tab of a project reads it. There is no MCP tool
+for memory.
+
 
 ## Design guide (`design_guide`, `design_guide_dirs:`)
 

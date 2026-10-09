@@ -24,6 +24,13 @@ another profile:
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd inbox [-json]`: everything waiting on the operator across every
   profile, oldest first (it ignores the active profile and needs no `-config`)
+- `factoryd memory list -workspace <repo-path> [-json]` and
+  `factoryd memory show -workspace <repo-path> <id>`: the repository's memory
+  lines in force and its candidate lines (read-only for you: with memory on,
+  `list` also collects candidates from finished runs' notes). Never run
+  `memory add`, `drop`, `propose`, `on` or `off`: each is the operator's
+  decision, like approving a gate. Relay a candidate's id and line and let
+  the operator choose.
 - `factoryd console`
 - `factoryd submit [-verify-command '<cmd>'] -request-file <file> <repo-path>`,
   after the operator confirms the request text. Add

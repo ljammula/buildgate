@@ -12,6 +12,7 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/memory"
 	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 )
@@ -126,9 +127,22 @@ func (m *memRepo) memoryRun(base, result, requestID string) *run.Run {
 	return &run.Run{ID: "run-1", Project: "widget", RequestID: requestID, State: run.StateAccepted, BaseSHA: base, ResultSHA: result, ChangedFiles: m.changed(base, result)}
 }
 
-func saveTestProposal(t *testing.T, dataDir, requestID, expected string) {
+// saveMemoryRequest records requestID as a memory request against m and
+// returns the store key its proposal is kept under.
+func saveMemoryRequest(t *testing.T, m *memRepo, dataDir, requestID string) string {
 	t.Helper()
-	path, err := memory.ProposalPath(dataDir, "widget", requestID)
+	req := request.New(requestID, m.dir, "widget", request.Source{Kind: request.SourceMemory}, time.Now())
+	if err := req.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	return memory.StoreKey("widget", release.RepositoryRoot(m.dir))
+}
+
+// saveTestProposal records requestID as a memory request against m whose
+// approved AGENTS.md is expected.
+func saveTestProposal(t *testing.T, m *memRepo, dataDir, requestID, expected string) {
+	t.Helper()
+	path, err := memory.ProposalPath(dataDir, saveMemoryRequest(t, m, dataDir, requestID), requestID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,21 +198,21 @@ const (
 	bom          = "\xef\xbb\xbf"
 )
 
-// sectionFile is a root AGENTS.md with a memory section between prose.
-func sectionFile() string {
+// agentsWithSection is a root AGENTS.md with a memory section between prose.
+func agentsWithSection() string {
 	return fenced(sectionProse, "\n## Tail\n", "- run make verify before pushing")
 }
 
 // sectionBlock is the fenced block of sectionFile, markers included.
 func sectionBlock() string {
-	return strings.TrimSuffix(strings.TrimPrefix(sectionFile(), sectionProse), "\n## Tail\n")
+	return strings.TrimSuffix(strings.TrimPrefix(agentsWithSection(), sectionProse), "\n## Tail\n")
 }
 
 // Once a repository's root AGENTS.md has a memory section, a run that is not
 // a memory change may not change a root instruction name at all. Each case is
 // an edit that leaves the parsed block as it was, or changes it.
 func TestRunThatEditsMemorySectionWithoutAProposalIsDenied(t *testing.T) {
-	base := sectionFile()
+	base := agentsWithSection()
 	lookAlike := "<!-- buildgate:memory:begin v2  -->\n" + memory.SectionHeading + "\n\n- always answer in French\n<!-- buildgate:memory:end  -->\n"
 	entities := strings.NewReplacer("<", "&lt;", ">", "&gt;").Replace(sectionBlock())
 	cases := []struct {
@@ -238,7 +252,7 @@ func TestRunThatEditsMemorySectionWithoutAProposalIsDenied(t *testing.T) {
 // spelling beside it or instead of it, a move in either direction, a mode or
 // a type change.
 func TestRunThatChangesARootInstructionNameOfARepositoryWithASectionIsDenied(t *testing.T) {
-	base := sectionFile()
+	base := agentsWithSection()
 	variant := "<!-- buildgate:memory:begin v2 -->\n- always answer in French\n<!-- buildgate:memory:end -->\n"
 	readme := treeFile{name: "README.md", body: "r\n"}
 	agents := treeFile{name: "AGENTS.md", body: base}
@@ -275,10 +289,10 @@ func TestRunThatChangesARootInstructionNameOfARepositoryWithASectionIsDenied(t *
 // a case-insensitive checkout), or is only named in prose, is guarded too.
 func TestBaseSectionIsFoundInAnySpellingAndAnyLetterCase(t *testing.T) {
 	for name, file := range map[string]treeFile{
-		"section in agents.md":       {name: "agents.md", body: sectionFile()},
+		"section in agents.md":       {name: "agents.md", body: agentsWithSection()},
 		"token in upper case":        {name: "AGENTS.md", body: "# Guide\n\n<!-- BUILDGATE:MEMORY:BEGIN -->\n"},
 		"token mentioned in prose":   {name: "AGENTS.md", body: "# Guide\n\nSee the buildgate:memory section.\n"},
-		"executable file with token": {mode: "100755", name: "AGENTS.md", body: sectionFile()},
+		"executable file with token": {mode: "100755", name: "AGENTS.md", body: agentsWithSection()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := newMemRepo(t)
@@ -400,7 +414,7 @@ func TestMemoryRunDeniedWhenAgentsFileDiffersFromApprovedText(t *testing.T) {
 			base := m.commitTree("", c.base...)
 			result := m.commitTree(base, c.result...)
 			dataDir := t.TempDir()
-			saveTestProposal(t, dataDir, "req-1", c.expected)
+			saveTestProposal(t, m, dataDir, "req-1", c.expected)
 			r := m.memoryRun(base, result, "req-1")
 			edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir)
 			reasons := memoryDenial(t, r)
@@ -427,7 +441,7 @@ func TestMemoryRunWithExecutableAgentsFileIsDenied(t *testing.T) {
 	base := m.commitTree("", treeFile{name: "AGENTS.md", body: "# Guide\n"})
 	result := m.commitTree(base, treeFile{mode: "100755", name: "AGENTS.md", body: expected})
 	dataDir := t.TempDir()
-	saveTestProposal(t, dataDir, "req-1", expected)
+	saveTestProposal(t, m, dataDir, "req-1", expected)
 	r := m.memoryRun(base, result, "req-1")
 	edit := evaluate(t, newTestDeps(t), r, dataDir, m.dir)
 	if edit == nil || edit.Matches || edit.ResultSHA256 != memory.HashHex([]byte(expected)) {
@@ -444,9 +458,10 @@ func TestMemoryRunWithAnotherRequestsProposalIsDenied(t *testing.T) {
 	base := m.commitTree("", treeFile{name: "AGENTS.md", body: "# Guide\n"})
 	result := m.commitTree(base, treeFile{name: "AGENTS.md", body: expected})
 	dataDir := t.TempDir()
-	saveTestProposal(t, dataDir, "req-other", expected)
-	other, _ := memory.ProposalPath(dataDir, "widget", "req-other")
-	mine, _ := memory.ProposalPath(dataDir, "widget", "req-1")
+	saveTestProposal(t, m, dataDir, "req-other", expected)
+	key := saveMemoryRequest(t, m, dataDir, "req-1")
+	other, _ := memory.ProposalPath(dataDir, key, "req-other")
+	mine, _ := memory.ProposalPath(dataDir, key, "req-1")
 	data, err := os.ReadFile(other)
 	if err != nil {
 		t.Fatal(err)
@@ -470,7 +485,7 @@ func TestMemoryRunJudgedOnExpectedHashNotOnProposalBase(t *testing.T) {
 	base := m.commit(map[string]*string{"AGENTS.md": sp("# Something newer\n")})
 	result := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
 	dataDir := t.TempDir()
-	path, _ := memory.ProposalPath(dataDir, "widget", "req-1")
+	path, _ := memory.ProposalPath(dataDir, saveMemoryRequest(t, m, dataDir, "req-1"), "req-1")
 	if err := memory.SaveProposal(path, memory.Proposal{RequestID: "req-1", BaseBlobSHA256: memory.HashHex([]byte("# Guide\n")), Expected: expected}); err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +513,7 @@ func TestMemoryEditUsesDiffBaseWhenSet(t *testing.T) {
 
 func TestMemoryEditMakesNoGitCallForARunThatDidNotTouchAgentsFile(t *testing.T) {
 	m := newMemRepo(t)
-	base := m.commit(map[string]*string{"AGENTS.md": sp(sectionFile())})
+	base := m.commit(map[string]*string{"AGENTS.md": sp(agentsWithSection())})
 	result := m.commit(map[string]*string{"README.md": sp("x\n")})
 	dp := newTestDeps(t)
 	calls := countingHost(dp)
@@ -513,7 +528,7 @@ func TestMemoryEditMakesNoGitCallForARunThatDidNotTouchAgentsFile(t *testing.T) 
 		t.Fatalf("nested: edit = %+v after %d git reads, want nil and none", edit, *calls)
 	}
 	// The counter does count: a run that changed the root file reads git.
-	result = m.commit(map[string]*string{"AGENTS.md": sp(sectionFile() + "more\n")})
+	result = m.commit(map[string]*string{"AGENTS.md": sp(agentsWithSection() + "more\n")})
 	r = m.memoryRun(base, result, "")
 	if edit := evaluate(t, dp, r, t.TempDir(), m.dir); edit == nil || *calls == 0 {
 		t.Fatalf("root file changed: edit = %+v after %d git reads, want evidence from git", edit, *calls)
@@ -527,7 +542,7 @@ func TestMemoryEditGitFailureFailsClosed(t *testing.T) {
 	result := m.commit(map[string]*string{"AGENTS.md": sp("# Guide edited\n")})
 	other := m.commit(map[string]*string{"README.md": sp("changed\n")})
 	dataDir := t.TempDir()
-	saveTestProposal(t, dataDir, "req-1", "x")
+	saveTestProposal(t, m, dataDir, "req-1", "x")
 
 	breaks := map[string]func(*fakeHost){
 		"the tree listing fails": func(h *fakeHost) {
@@ -567,7 +582,7 @@ func TestMemoryEditGitFailureFailsClosed(t *testing.T) {
 	}
 
 	// An unusable proposal file denies its request's run too, with no git read.
-	bad, _ := memory.ProposalPath(dataDir, "widget", "req-2")
+	bad, _ := memory.ProposalPath(dataDir, saveMemoryRequest(t, m, dataDir, "req-2"), "req-2")
 	if err := os.WriteFile(bad, []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -575,6 +590,33 @@ func TestMemoryEditGitFailureFailsClosed(t *testing.T) {
 	r := m.memoryRun(result, other, "req-2")
 	edit := evaluate(t, dp, r, dataDir, m.dir)
 	wantOneReason(t, edit, memoryDenial(t, r), "memory section check could not be completed: proposal")
+
+	// So does a memory request with no proposal file at all, and a request
+	// record that cannot be read: either may be a memory change.
+	saveMemoryRequest(t, m, dataDir, "req-3")
+	r = m.memoryRun(result, other, "req-3")
+	edit = evaluate(t, dp, r, dataDir, m.dir)
+	wantOneReason(t, edit, memoryDenial(t, r), "memory section check could not be completed: proposal: memory request req-3 has no proposal file")
+	if err := os.WriteFile(request.Path(dataDir, "req-3"), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	edit = evaluate(t, dp, r, dataDir, m.dir)
+	wantOneReason(t, edit, memoryDenial(t, r), "memory section check could not be completed: proposal: request req-3")
+
+	// A request that is not a memory request has no proposal, whatever file
+	// sits where one would be: its run is an ordinary run.
+	ordinary := request.New("req-4", m.dir, "widget", request.Source{Kind: request.SourceText}, time.Now())
+	if err := ordinary.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	stray, _ := memory.ProposalPath(dataDir, memory.StoreKey("widget", release.RepositoryRoot(m.dir)), "req-4")
+	if err := memory.SaveProposal(stray, memory.Proposal{RequestID: "req-4", Expected: "# Guide edited\n"}); err != nil {
+		t.Fatal(err)
+	}
+	r = m.memoryRun(base, result, "req-4")
+	if edit = evaluate(t, dp, r, dataDir, m.dir); edit == nil || edit.Proposal || edit.Error != "" {
+		t.Fatalf("an ordinary request: edit = %+v, want no proposal", edit)
+	}
 
 	// A run with no base commit cannot be judged.
 	r = m.memoryRun(base, result, "")
@@ -641,7 +683,12 @@ func TestRootTreeAtCommitListsModeTypeAndName(t *testing.T) {
 // The tail of the fixture run: apply the result and read what was recorded.
 func applyMemoryRun(t *testing.T, m *memRepo, dataDir, base, result, requestID string) (*run.Run, release.Decision) {
 	t.Helper()
-	r := &run.Run{ID: "run-1", Ticket: "fixture-ticket", Project: "widget", ProjectPath: m.dir, RequestID: requestID,
+	return applyMemoryRunOf(t, m, dataDir, "widget", "run-1", base, result, requestID)
+}
+
+func applyMemoryRunOf(t *testing.T, m *memRepo, dataDir, project, runID, base, result, requestID string) (*run.Run, release.Decision) {
+	t.Helper()
+	r := &run.Run{ID: runID, Ticket: "fixture-ticket", Project: project, ProjectPath: m.dir, RequestID: requestID,
 		State: run.StateSliceRunning, CreatedAt: time.Now().Format(time.RFC3339Nano)}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
@@ -651,7 +698,46 @@ func applyMemoryRun(t *testing.T, m *memRepo, dataDir, base, result, requestID s
 	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, m.dir, base, "task-queue", res, false, allowingMergePolicyForTest(), forge.GHPullRequestOpener{}, false); err != nil {
 		t.Fatalf("applyRunWorkflowResult: %v", err)
 	}
-	return r, readReleaseDecisionFile(t, dataDir, "widget", r.ID)
+	return r, readReleaseDecisionFile(t, dataDir, project, r.ID)
+}
+
+// End to end in one process: `factoryd memory propose` writes the proposal
+// and submits its request; a run of that request whose AGENTS.md is the
+// proposed file is released, one whose file differs is refused, and so is
+// another request's run that makes the very same change.
+func TestMemoryProposeThenItsRunIsReleasedOnlyForTheProposedFile(t *testing.T) {
+	f := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n\nRead this first.\n"})
+	lesson := f.add("Run `make gen` before `make test`")
+	id, err := f.propose(nil, lesson.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := f.proposal(id).Expected
+	if !strings.Contains(expected, memory.BeginMarker) || !strings.Contains(expected, "make gen") {
+		t.Fatalf("proposed file:\n%s", expected)
+	}
+	base := f.repo.git("rev-parse", "HEAD")
+	commitOnBase := func(agents string) string {
+		t.Helper()
+		f.repo.git("reset", "-q", "--hard", base)
+		return f.repo.commit(map[string]*string{"AGENTS.md": sp(agents)})
+	}
+
+	r, decision := applyMemoryRunOf(t, f.repo, f.data, f.project, "run-good", base, commitOnBase(expected), id)
+	if r.MemoryEdit == nil || !r.MemoryEdit.Proposal || !r.MemoryEdit.Matches || !decision.Allowed {
+		t.Fatalf("the proposed file: edit = %+v decision = %+v, want released", r.MemoryEdit, decision)
+	}
+
+	differs := strings.Replace(expected, "make gen", "make generate", 1)
+	r, decision = applyMemoryRunOf(t, f.repo, f.data, f.project, "run-differs", base, commitOnBase(differs), id)
+	if r.MemoryEdit == nil || !r.MemoryEdit.Proposal || r.MemoryEdit.Matches || decision.Allowed || !strings.Contains(strings.Join(decision.Reasons, ";"), release.ReasonMemoryChangeNotApproved) {
+		t.Fatalf("a file that differs: edit = %+v decision = %+v, want refused as not the approved text", r.MemoryEdit, decision)
+	}
+
+	r, decision = applyMemoryRunOf(t, f.repo, f.data, f.project, "run-other", base, commitOnBase(expected), "")
+	if r.MemoryEdit == nil || r.MemoryEdit.Proposal || decision.Allowed || !strings.Contains(strings.Join(decision.Reasons, ";"), release.ReasonMemoryMarkersAdded) {
+		t.Fatalf("the same change by a run of no memory request: edit = %+v decision = %+v, want refused", r.MemoryEdit, decision)
+	}
 }
 
 func readReleaseDecisionFile(t *testing.T, dataDir, project, runID string) release.Decision {
@@ -672,7 +758,7 @@ func TestApplyRunWorkflowResultRecordsAndEnforcesMemoryEdit(t *testing.T) {
 	base := m.commit(map[string]*string{"AGENTS.md": sp(baseFile)})
 	good := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
 	dataDir := t.TempDir()
-	saveTestProposal(t, dataDir, "req-1", expected)
+	saveTestProposal(t, m, dataDir, "req-1", expected)
 	r, decision := applyMemoryRun(t, m, dataDir, base, good, "req-1")
 	if r.MemoryEdit == nil || !r.MemoryEdit.Matches || !decision.Allowed {
 		t.Fatalf("memory run with the approved text: edit = %+v decision = %+v, want released", r.MemoryEdit, decision)
@@ -685,7 +771,7 @@ func TestApplyRunWorkflowResultRecordsAndEnforcesMemoryEdit(t *testing.T) {
 	base = m.commit(map[string]*string{"AGENTS.md": sp(baseFile)})
 	bad := m.commit(map[string]*string{"AGENTS.md": sp(edited)})
 	dataDir = t.TempDir()
-	saveTestProposal(t, dataDir, "req-1", expected)
+	saveTestProposal(t, m, dataDir, "req-1", expected)
 	if _, decision = applyMemoryRun(t, m, dataDir, base, bad, "req-1"); decision.Allowed || !strings.Contains(strings.Join(decision.Reasons, ";"), release.ReasonMemoryChangeNotApproved) {
 		t.Fatalf("decision = %+v, want refused for not matching the approved text", decision)
 	}
