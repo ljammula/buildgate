@@ -878,6 +878,11 @@ func rollbackIsolatedWorkspaceIfTerminated(temporalClient client.Client, workflo
 		}
 		return worktreePath, branch
 	}
+	// What the build left goes to the run's own directory before the
+	// worktree does.
+	if err := run.RetainBuildArtifacts(worktreePath, runDirOfCheckpointDir(checkpointDir)); err != nil {
+		log.Printf("before rollback after hard termination (workflow %s): %v", workflowID, err)
+	}
 	if err := release.Rollback(repoDir, worktreePath, branch); err != nil {
 		log.Printf("rollback of isolated workspace after hard termination (workflow %s) failed: %v", workflowID, err)
 	}

@@ -407,6 +407,15 @@ func TestIntegrationIsolateWorkspaceOverrideToHaltedRollsBack(t *testing.T) {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
 	}
 
+	// What a failed round saved in the worktree must outlive it.
+	roundLog := filepath.Join(r.WorkspacePath, ".pi-build-session", "feedback", "round-1", "verify.log")
+	if err := os.MkdirAll(filepath.Dir(roundLog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(roundLog, []byte("FAIL round one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	overrideCmd := factorydCommand(t, "override",
 		"-run", r.ID,
 		"-data-dir", dataDir,
@@ -422,6 +431,9 @@ func TestIntegrationIsolateWorkspaceOverrideToHaltedRollsBack(t *testing.T) {
 		t.Errorf("isolated worktree %q still exists after override to halted, want it rolled back", r.WorkspacePath)
 	} else if !os.IsNotExist(err) {
 		t.Errorf("unexpected error checking rolled-back worktree: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(run.Dir(dataDir, r.ID), "round-logs", "round-1", "verify.log")); err != nil || string(got) != "FAIL round one\n" {
+		t.Errorf("retained round log = %q, %v, want the round's verify output", got, err)
 	}
 	branchList, err := exec.Command("git", "-C", ws, "branch", "--list", r.Branch).Output()
 	if err != nil {

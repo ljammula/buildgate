@@ -17,6 +17,7 @@ import (
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
 	"buildgate/internal/codereview"
+	"buildgate/internal/evidence"
 	"buildgate/internal/progress"
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
@@ -215,6 +216,7 @@ func TestRunBuildActivityRetryKeepsWorkAndPassesHandoff(t *testing.T) {
 			info := activity.GetInfo(ctx)
 			writeFile(t, filepath.Join(repo, "partial.go"), "package partial\n")
 			writeFile(t, filepath.Join(repo, buildSessionDir, "s.jsonl"), "old session\n")
+			writeFile(t, filepath.Join(repo, buildSessionDir, "feedback", "round-1", "verify.log"), "--- FAIL: TestPartial\n")
 			_, err := recordActivityIntentForExecution(logDir, info.WorkflowExecution.ID, info.WorkflowExecution.RunID, info.ActivityID, 1, "build", []string{"x"}, "2024-01-01T00:00:00Z")
 			return err
 		},
@@ -236,6 +238,10 @@ func TestRunBuildActivityRetryKeepsWorkAndPassesHandoff(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(repo, buildSessionDir)); !os.IsNotExist(statErr) {
 		t.Errorf("old harness session still present (stat err = %v)", statErr)
+	}
+	// The session went; what its round failed on was copied out first.
+	if got, readErr := os.ReadFile(filepath.Join(logDir, evidence.RoundLogsDirName, "before-attempt-2", "round-1", "verify.log")); readErr != nil || string(got) != "--- FAIL: TestPartial\n" {
+		t.Errorf("retained round log = %q, %v, want the interrupted attempt's verify output", got, readErr)
 	}
 	if notePath == "" || !strings.Contains(noteText, base) || !strings.Contains(noteText, "partial.go") {
 		t.Errorf("--handoff note missing or incomplete: path=%q text=%q", notePath, noteText)

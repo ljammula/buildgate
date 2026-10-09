@@ -1245,3 +1245,30 @@ func TestAttemptHarnessRoundTrip(t *testing.T) {
 		t.Errorf("Marshal(legacy) = %s, want no harness key", legacy)
 	}
 }
+
+func TestRetainBuildArtifactsCopiesTheReportAndTheRoundLogs(t *testing.T) {
+	workspace, runDir := t.TempDir(), filepath.Join(t.TempDir(), "runs", "run-1")
+	if err := RetainBuildArtifacts(workspace, runDir); err != nil {
+		t.Fatalf("a workspace with neither: %v, want no error", err)
+	}
+	roundLog := filepath.Join(workspace, ".pi-build-session", "feedback", "round-3", "oracle.log")
+	if err := os.MkdirAll(filepath.Dir(roundLog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{roundLog: "oracle said no\n", filepath.Join(workspace, AgentReportFileName): "# report\n"} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RetainBuildArtifacts(workspace, runDir); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(runDir, AgentReportFileName):                                "# report\n",
+		filepath.Join(runDir, evidence.RoundLogsDirName, "round-3", "oracle.log"): "oracle said no\n",
+	} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v, want %q", path, got, err, want)
+		}
+	}
+}

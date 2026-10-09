@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
 
@@ -64,5 +65,14 @@ func TestRunOptionsActivitiesCarriesEveryWorkerSetting(t *testing.T) {
 	}
 	if got := opts.activities(); !reflect.DeepEqual(got, want) {
 		t.Errorf("activities() =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// The hard-termination rollback is handed a checkpoint dir only and must
+// find the same run's directory from it.
+func TestRunDirOfCheckpointDirIsTheRunsOwnDirectory(t *testing.T) {
+	opts := runOptions{DataDir: filepath.Join("some", "data"), ID: "ticket-20261008-1"}
+	if got, want := runDirOfCheckpointDir(opts.checkpointDir()), run.Dir(opts.DataDir, opts.ID); got != want {
+		t.Errorf("runDirOfCheckpointDir = %q, want %q", got, want)
 	}
 }

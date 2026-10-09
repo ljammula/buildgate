@@ -118,6 +118,13 @@ func openHostileRegularFile(src string, maxSize int64) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	return checkHostileRegularFile(in, src, maxSize)
+}
+
+// checkHostileRegularFile is openHostileRegularFile's check on a file the
+// caller opened itself (with O_NOFOLLOW|O_NONBLOCK): it closes in and
+// returns an error unless in is a regular file no larger than maxSize.
+func checkHostileRegularFile(in *os.File, src string, maxSize int64) (*os.File, error) {
 	info, err := in.Stat()
 	if err != nil {
 		in.Close()
@@ -184,6 +191,11 @@ func RetainFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
+	return retainOpened(in, src, dst)
+}
+
+// retainOpened is RetainFile's copy of an already opened and checked src.
+func retainOpened(in *os.File, src, dst string) error {
 
 	dstDir := filepath.Dir(dst)
 	if err := os.MkdirAll(dstDir, 0o750); err != nil {

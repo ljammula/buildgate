@@ -25,7 +25,6 @@ import (
 
 	"buildgate/internal/consoleweb"
 	"buildgate/internal/daemonheartbeat"
-	"buildgate/internal/evidence"
 	"buildgate/internal/notify"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
@@ -2331,11 +2330,7 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 			// report already sitting in its isolated worktree. Best-effort
 			// and non-fatal: a run whose build never got far enough to
 			// write one simply has nothing here to retain.
-			src := filepath.Join(loaded.WorkspacePath, run.AgentReportFileName)
-			dst := filepath.Join(run.Dir(s.dataDir, id), run.AgentReportFileName)
-			if err := evidence.RetainFile(src, dst); err != nil && !os.IsNotExist(err) {
-				log.Printf("run %s: failed to retain agent report before override rollback: %v", id, err)
-			}
+			s.retainBuildArtifacts(id, loaded.WorkspacePath)
 			if err := release.Rollback(loaded.ProjectPath, loaded.WorkspacePath, loaded.Branch); err != nil {
 				log.Printf("run %s: rollback of isolated workspace after override failed: %v", id, err)
 			} else {
@@ -2598,6 +2593,16 @@ type ModelUsage struct {
 type modelUsageKey struct {
 	Role  string
 	Model string
+}
+
+// retainBuildArtifacts copies what a build left in workspace that a
+// rollback would delete into the run's own directory: the agent's report
+// and each failed round's saved output. Both are byte copies of
+// agent-written files (evidence.RetainFile's rules), best-effort.
+func (s *Server) retainBuildArtifacts(id, workspace string) {
+	if err := run.RetainBuildArtifacts(workspace, run.Dir(s.dataDir, id)); err != nil {
+		log.Printf("run %s: before override rollback: %v", id, err)
+	}
 }
 
 // modelUsageAccumulator rolls up ModelUsage entries in first-seen order as

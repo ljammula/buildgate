@@ -1292,6 +1292,13 @@ func TestOverrideRunToHaltedRollsBackIsolatedWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "BUILD_REPORT.md"), []byte(report), 0o644); err != nil {
 		t.Fatalf("write fixture BUILD_REPORT.md: %v", err)
 	}
+	roundLog := filepath.Join(worktreePath, ".pi-build-session", "feedback", "round-1", "verify.log")
+	if err := os.MkdirAll(filepath.Dir(roundLog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(roundLog, []byte("FAIL round one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	seedRun(t, dataDir, run.Run{
 		ID:            "run-1",
@@ -1328,6 +1335,9 @@ func TestOverrideRunToHaltedRollsBackIsolatedWorkspace(t *testing.T) {
 	}
 	if string(retained) != report {
 		t.Errorf("retained BUILD_REPORT.md = %q, want %q", retained, report)
+	}
+	if got, err := os.ReadFile(filepath.Join(run.Dir(dataDir, "run-1"), "round-logs", "round-1", "verify.log")); err != nil || string(got) != "FAIL round one\n" {
+		t.Errorf("retained round log = %q, %v, want the round's verify output", got, err)
 	}
 }
 
