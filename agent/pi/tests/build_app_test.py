@@ -1405,6 +1405,20 @@ class AutofixCommandTests(unittest.TestCase):
 				setup_commands=setup, autofix_commands=autofix,
 			)
 
+	def test_autofix_is_narrated_in_counts_only(self):
+		lines = []
+		with mock.patch.object(build_app, "print_progress", side_effect=lines.append):
+			build_app.note_autofix(2, {
+				"commands": [{"command": "secret-tool --token abc", "exit_code": 1, "timed_out": False}, {"command": "fmt", "exit_code": 0, "timed_out": False}],
+				"reverted_count": 3, "reverted": ["x"], "revert_failed_count": 0, "revert_failed": [],
+			})
+			build_app.note_autofix(2, {"skipped": "could not list the round's changed files"})
+			build_app.note_autofix(2, None)
+		self.assertEqual(lines, [
+			{"stage": "round", "event": "note", "round": 2, "detail": "autofix ran 2 command(s), 1 failed or timed out; reverted 3 path(s) outside the ticket's files"},
+			{"stage": "round", "event": "note", "round": 2, "detail": "autofix skipped: could not list the round's changed files"},
+		])
+
 	def test_autofix_runs_after_the_agent_and_before_the_rounds_checks(self):
 		with contextlib.ExitStack() as stack:
 			root, outside, base = self.repo(stack)

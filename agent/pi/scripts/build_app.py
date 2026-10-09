@@ -1044,6 +1044,22 @@ def _restore_from_base(workspace: Path, base: str, name: str) -> None:
 	path.chmod(0o755 if mode == "100755" else 0o644)
 
 
+def note_autofix(round_index: int, record: dict | None) -> None:
+	"""One progress line saying what autofix did this round, so a run's
+	feed shows it ran: counts only, never a command's text or output."""
+	if record is None:
+		return
+	if record.get("skipped"):
+		detail = "autofix skipped: " + record["skipped"]
+	else:
+		commands = record.get("commands") or []
+		failed = sum(1 for c in commands if c.get("exit_code") != 0 or c.get("timed_out"))
+		detail = f"autofix ran {len(commands)} command(s), {failed} failed or timed out; reverted {record.get('reverted_count', 0)} path(s) outside the ticket's files"
+		if record.get("revert_failed_count"):
+			detail += f"; could not revert {record['revert_failed_count']}"
+	print_progress({"stage": "round", "event": "note", "round": round_index, "detail": detail})
+
+
 def run_autofix(
 	workspace: Path, commands: list[str], base_sha: str | None, log_dir: Path | None, env: dict | None = None,
 ) -> dict | None:
@@ -2465,6 +2481,7 @@ def run_build(
 		# never the agent's work) and before this round's checks, so they
 		# judge the fixed tree.
 		autofix_record = run_autofix(workspace, autofix_commands or [], review_base_sha, feedback_dir, env)
+		note_autofix(round_index, autofix_record)
 
 		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
