@@ -66,11 +66,13 @@ func (g GateResult) SetupNotRun() bool {
 const BaselineVerifyAttemptKind = "baseline_verify"
 
 // HaltReasonBaselineVerifyFailed is Run.HaltReasonCode's value when a run
-// halted before its build because the verify command failed on the base
-// commit with a failure the ticket does not name: no change the build is
-// asked to make could pass it, so no model call was made. The fix is in
-// the verify command, the sandbox image or the ticket, never in the
-// ticket's code.
+// halted before its build because no build of the ticket could be accepted:
+// the verify command failed on the base commit with a failure the ticket
+// does not name, or the command (or a setup command) left paths outside the
+// ticket's Allowed-Files that the repository does not ignore, which the
+// factory would commit and diff_scope quarantine. No model call was made.
+// The fix is in the verify command, the sandbox image, the repository's
+// .gitignore or the ticket, never in the ticket's code.
 const HaltReasonBaselineVerifyFailed = "baseline_verify_failed"
 
 // BaselineVerify is the result of running the ticket's verify command on
@@ -111,6 +113,13 @@ type BaselineVerify struct {
 	// the ticket asks for (it names every failing test, or NeedsCreated is
 	// set), so the build ran and was told about it.
 	Expected bool `json:"expected,omitempty"`
+	// LeftOutOfScope is the paths the command left in the worktree that the
+	// repository does not ignore and the ticket's Allowed-Files do not cover
+	// (what diff_scope would flag), at most BaselineVerifyMaxNamed;
+	// LeftOutOfScopeCount is how many there were. The factory commits what a
+	// build leaves, so each would quarantine every build of the ticket.
+	LeftOutOfScope      []string `json:"left_out_of_scope,omitempty"`
+	LeftOutOfScopeCount int      `json:"left_out_of_scope_count,omitempty"`
 	// InheritedFrom is the id of the run whose result this is: the halted
 	// run whose worktree this run resumed, or the earlier run of the same
 	// ticket whose commit this run continues from. Neither starts from the
@@ -125,7 +134,18 @@ const BaselineVerifyMaxNamed = 20
 
 // Halts reports whether the result stops the run before its build.
 func (b *BaselineVerify) Halts() bool {
-	return b != nil && !b.Passed && !b.Expected
+	return b != nil && ((!b.Passed && !b.Expected) || b.LeftOutOfScopeCount > 0)
+}
+
+// leavesOutOfScope reports whether the command's only reason to halt is the
+// paths it leaves: it passed, or failed as the ticket expects.
+func (b *BaselineVerify) leavesOutOfScope() bool {
+	return b.LeftOutOfScopeCount > 0 && (b.Passed || b.Expected)
+}
+
+// leftOutOfScopeText names the first left path and how many others there were.
+func (b *BaselineVerify) leftOutOfScopeText() string {
+	return "the command leaves " + namedAndMore(b.LeftOutOfScope, b.LeftOutOfScopeCount) + " outside the ticket's Allowed-Files"
 }
 
 // Summary is the result in one line, as status, watch, the inbox and the
@@ -135,8 +155,19 @@ func (b *BaselineVerify) Summary() string {
 		return ""
 	}
 	if b.Passed {
+		if b.leavesOutOfScope() {
+			return "passed, but " + b.leftOutOfScopeText()
+		}
 		return "passed"
 	}
+	if b.leavesOutOfScope() {
+		return b.expectedSummary() + "; " + b.leftOutOfScopeText()
+	}
+	return b.expectedSummary()
+}
+
+// expectedSummary is Summary without the paths the command leaves.
+func (b *BaselineVerify) expectedSummary() string {
 	if b.SetupFailed != "" {
 		return "setup fails on the base commit: " + b.SetupFailed
 	}
@@ -188,6 +219,10 @@ func (b *BaselineVerify) HaltMessage() string {
 // HaltAdvice is HaltMessage without the failure, which the run's triage
 // sentence already names: Run.HaltError of a run halted on its baseline.
 func (b *BaselineVerify) HaltAdvice() string {
+	if b.leavesOutOfScope() {
+		return "No model call was made: every build of this ticket would be quarantined by diff_scope, because the factory commits what the command leaves. " +
+			"Ignore those paths in the repository's .gitignore, or make the command remove them."
+	}
 	if b.SetupFailed != "" {
 		return "No model call was made: a setup: command of the repository's .factory.yml fails on the untouched repository, so no build could pass verification. " +
 			"Fix the command or the sandbox image it runs in."

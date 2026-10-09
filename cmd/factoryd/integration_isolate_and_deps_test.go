@@ -1077,7 +1077,11 @@ func TestIntegrationDiffScopeGateSkippedWithoutAllowedFiles(t *testing.T) {
 func TestIntegrationDiffScopeGateCatchesVerifyCommandChanges(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt\n"
-	verifyCommand := "echo written-by-verify >> written-by-verify.txt; true"
+	// Only once the build has edited content.txt: on the base commit the
+	// command writes nothing, so the baseline verify lets the build run
+	// (a command that leaves the file there too halts the run before it;
+	// TestIntegrationBaselineVerifyThatLeavesAFileOutsideAllowedFilesHalts).
+	verifyCommand := "if grep -q 'edited by fake_build_app' content.txt; then echo written-by-verify >> written-by-verify.txt; fi; true"
 
 	r := runFactorydWithSpec(t, ws, "commit", verifyCommand, specContent, "30s")
 

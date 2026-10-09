@@ -665,6 +665,10 @@ const baselineLogTailBytes = 8 << 20
 //   - passed: the build runs.
 //   - failed, and the ticket names every failing test: the build runs and is
 //     given the list (BaselineVerifyResult.BuildNotePath).
+//   - passed or failed as the ticket expects, but the command left paths
+//     outside the ticket's Allowed-Files that its repository does not
+//     ignore: a BaselineVerifyFailureType error too (every build would be
+//     quarantined by diff_scope, which no build can fix).
 //   - failed any other way: a BaselineVerifyFailureType error. No build of
 //     this ticket could pass the same command in canonical verification, so
 //     the run halts before a model call.
@@ -716,9 +720,13 @@ func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWor
 		return err == nil
 	})
 	var record *run.BaselineVerify
+	var leftErr error
 	judge := func(res VerifyActivityResult) *run.BaselineVerify {
 		if record == nil {
 			record = a.judgeBaseline(input, res, created)
+			// The command has run and nothing has been restored yet: what
+			// it left outside the ticket's Allowed-Files is read now.
+			leftErr = recordLeftovers(ctx, input, before, record)
 		}
 		return record
 	}
@@ -740,6 +748,9 @@ func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWor
 		return BaselineVerifyResult{Attempts: res.Attempts}, temporal.NewApplicationErrorWithCause("restore the workspace to the base commit after the baseline verify", InfrastructureFailureType, err, res.Attempts)
 	}
 	result := BaselineVerifyResult{Record: *judge(res), Attempts: res.Attempts}
+	if leftErr != nil {
+		return result, temporal.NewApplicationErrorWithCause("read the workspace's state after the baseline verify", InfrastructureFailureType, leftErr, res.Attempts)
+	}
 	if err := run.SaveBaselineVerify(logDir, &result.Record); err != nil {
 		return result, temporal.NewApplicationErrorWithCause("record the baseline verify", InfrastructureFailureType, err, res.Attempts)
 	}
@@ -751,6 +762,19 @@ func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWor
 		return result, temporal.NewApplicationErrorWithCause("write the baseline note for the build", InfrastructureFailureType, err, res.Attempts)
 	}
 	return result, nil
+}
+
+// recordLeftovers sets on record the paths the command left in the workspace
+// that the ticket's diff_scope gate would flag (baseline.NoteLeftovers): the
+// factory commits what a build leaves, so such a path quarantines every build
+// of the ticket.
+func recordLeftovers(ctx context.Context, input RunWorkflowInput, before []string, record *run.BaselineVerify) error {
+	left, err := pathsAddedSince(ctx, input.WorkspacePath, before)
+	if err != nil {
+		return err
+	}
+	baseline.NoteLeftovers(record, left, input.AllowedFiles)
+	return nil
 }
 
 // writeBaselineBuildNote writes what the build is told about a baseline
@@ -902,30 +926,33 @@ func gitStatusAllPaths(ctx context.Context, dir string) ([]string, error) {
 	return paths, nil
 }
 
+// pathsAddedSince lists the paths git reports as changed or untracked in dir
+// now that before (gitStatusAllPaths at an earlier time) did not report.
+func pathsAddedSince(ctx context.Context, dir string, before []string) ([]string, error) {
+	after, err := gitStatusAllPaths(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	was := make(map[string]bool, len(before))
+	for _, p := range before {
+		was[p] = true
+	}
+	var added []string
+	for _, p := range after {
+		if !was[p] {
+			added = append(added, p)
+		}
+	}
+	return added, nil
+}
+
 // restoreBaseCommit removes what the baseline's command left in dir: every
 // path that is dirty now and was not in before (gitStatusAllPaths before
 // the launch) is put back to HEAD, or deleted if HEAD does not have it.
 // Files git ignores are left, as canonical verification leaves them. Each
 // path is passed to git literally: a file named "*" names only itself.
 func restoreBaseCommit(ctx context.Context, dir string, before []string) error {
-	leftovers := func() ([]string, error) {
-		after, err := gitStatusAllPaths(ctx, dir)
-		if err != nil {
-			return nil, err
-		}
-		was := make(map[string]bool, len(before))
-		for _, p := range before {
-			was[p] = true
-		}
-		var added []string
-		for _, p := range after {
-			if !was[p] {
-				added = append(added, p)
-			}
-		}
-		return added, nil
-	}
-	added, err := leftovers()
+	added, err := pathsAddedSince(ctx, dir, before)
 	if err != nil || len(added) == 0 {
 		return err
 	}
@@ -940,7 +967,7 @@ func restoreBaseCommit(ctx context.Context, dir string, before []string) error {
 		git("checkout", "-q", "HEAD", "--", p)
 		git("clean", "-ffdq", "--", p)
 	}
-	added, err = leftovers()
+	added, err = pathsAddedSince(ctx, dir, before)
 	if err != nil {
 		return err
 	}

@@ -72,3 +72,43 @@ func TestARunCarriesItsBaselineRecordOnLoadAndPersist(t *testing.T) {
 		t.Errorf("Persist left the run without its baseline: %+v", r.BaselineVerify)
 	}
 }
+
+func TestBaselineVerifyThatLeavesPathsOutOfScopeHaltsWithItsOwnWords(t *testing.T) {
+	left := []string{"__pycache__/x.pyc", "a.out", "b.out"}
+	for _, tc := range []struct {
+		name  string
+		b     *BaselineVerify
+		halts bool
+		want  string
+	}{
+		{"passed, none", &BaselineVerify{Passed: true}, false, "passed"},
+		{"passed, three", &BaselineVerify{Passed: true, LeftOutOfScope: left, LeftOutOfScopeCount: 3}, true,
+			"passed, but the command leaves __pycache__/x.pyc and 2 more outside the ticket's Allowed-Files"},
+		{"passed, one", &BaselineVerify{Passed: true, LeftOutOfScope: left[:1], LeftOutOfScopeCount: 1}, true,
+			"passed, but the command leaves __pycache__/x.pyc outside the ticket's Allowed-Files"},
+		{"expected failure, one", &BaselineVerify{ExitCode: 1, FailingTests: []string{"TestA"}, FailingCount: 1, Expected: true, LeftOutOfScope: left[:1], LeftOutOfScopeCount: 1}, true,
+			"failed as the ticket expects: TestA; the command leaves __pycache__/x.pyc outside the ticket's Allowed-Files"},
+		{"unexpected failure keeps its words", &BaselineVerify{ExitCode: 1, LeftOutOfScope: left[:1], LeftOutOfScopeCount: 1}, true, "failed: exit 1"},
+	} {
+		if got := tc.b.Summary(); got != tc.want {
+			t.Errorf("%s: Summary() = %q, want %q", tc.name, got, tc.want)
+		}
+		if tc.b.Halts() != tc.halts {
+			t.Errorf("%s: Halts() = %v, want %v", tc.name, tc.b.Halts(), tc.halts)
+		}
+	}
+	b := &BaselineVerify{Passed: true, LeftOutOfScope: left, LeftOutOfScopeCount: 3}
+	wantMsg := "baseline verify passed, but the command leaves __pycache__/x.pyc and 2 more outside the ticket's Allowed-Files. " +
+		"No model call was made: every build of this ticket would be quarantined by diff_scope, because the factory commits what the command leaves. " +
+		"Ignore those paths in the repository's .gitignore, or make the command remove them."
+	if got := b.HaltMessage(); got != wantMsg {
+		t.Errorf("HaltMessage() = %q, want %q", got, wantMsg)
+	}
+	if strings.Contains(b.HaltAdvice(), "Allowed-Files") {
+		t.Errorf("advice %q suggests touching Allowed-Files", b.HaltAdvice())
+	}
+	failed := &BaselineVerify{ExitCode: 1, LeftOutOfScope: left[:1], LeftOutOfScopeCount: 1}
+	if !strings.Contains(failed.HaltAdvice(), "fails on the untouched repository") {
+		t.Errorf("a baseline that fails keeps its advice, got %q", failed.HaltAdvice())
+	}
+}

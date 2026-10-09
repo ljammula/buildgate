@@ -127,7 +127,16 @@ function namedAndMore(names: readonly string[], count: number): string {
 
 /** The baseline verify result in one line (run.BaselineVerify.Summary). */
 export function baselineVerifySummary(b: BaselineVerify): string {
-  if (b.passed) return "passed";
+  const left =
+    b.leftOutOfScopeCount > 0 && (b.passed || b.expected)
+      ? `the command leaves ${namedAndMore(b.leftOutOfScope, b.leftOutOfScopeCount)} outside the ticket's Allowed-Files`
+      : "";
+  if (b.passed) return left === "" ? "passed" : `passed, but ${left}`;
+  if (left !== "") return `${baselineVerifyFailureSummary(b)}; ${left}`;
+  return baselineVerifyFailureSummary(b);
+}
+
+function baselineVerifyFailureSummary(b: BaselineVerify): string {
   if (b.needsCreated !== "")
     return `failed as the ticket expects: the command needs ${b.needsCreated}, which the ticket creates`;
   if (b.failingCount === 0) {
@@ -145,5 +154,5 @@ export function baselineVerifySummary(b: BaselineVerify): string {
 
 /** Whether the baseline result is a failure the ticket does not account for. */
 export function baselineVerifyFailed(b: BaselineVerify): boolean {
-  return !b.passed && !b.expected;
+  return (!b.passed && !b.expected) || b.leftOutOfScopeCount > 0;
 }

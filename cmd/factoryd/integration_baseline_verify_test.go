@@ -90,3 +90,34 @@ func TestIntegrationBaselineVerifyThatPassesIsOnTheAcceptedRun(t *testing.T) {
 	}
 	afterBaselineAttempt(t, r.Attempts)
 }
+
+// TestIntegrationBaselineVerifyThatLeavesAFileOutsideAllowedFilesHalts: the
+// command passes but writes a file the repository does not ignore and the
+// ticket does not allow, which every build's commit would carry into a
+// diff_scope quarantine: the run halts before the build, the file is not in
+// the worktree and the operator's checkout is untouched.
+func TestIntegrationBaselineVerifyThatLeavesAFileOutsideAllowedFilesHalts(t *testing.T) {
+	ws := newFixtureRepo(t)
+	spec := "# fixture spec\n\nAllowed-Files: content.txt\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"
+	r := runFactorydWithSpec(t, ws, "commit", "echo bytes > left.pyc", spec, "30s")
+
+	if r.State != run.StateHalted || r.HaltReasonCode != run.HaltReasonBaselineVerifyFailed {
+		t.Fatalf("state = %q, halt reason = %q (triage %q); want halted with %q", r.State, r.HaltReasonCode, r.Triage, run.HaltReasonBaselineVerifyFailed)
+	}
+	if len(r.Attempts) != 1 || r.Attempts[0].Kind != run.BaselineVerifyAttemptKind {
+		t.Errorf("Attempts = %+v, want only the baseline verify: no build ran", r.Attempts)
+	}
+	const summary = "passed, but the command leaves left.pyc outside the ticket's Allowed-Files"
+	if r.BaselineVerify == nil || r.BaselineVerify.Summary() != summary {
+		t.Errorf("BaselineVerify = %+v, want %q", r.BaselineVerify, summary)
+	}
+	if want := "halted before the build: baseline verify " + summary; r.Triage != want {
+		t.Errorf("Triage = %q, want %q", r.Triage, want)
+	}
+	if !strings.Contains(r.HaltError, ".gitignore") {
+		t.Errorf("HaltError = %q, want the .gitignore advice", r.HaltError)
+	}
+	if out, _ := exec.Command("git", "-C", ws, "status", "--porcelain").Output(); len(out) != 0 {
+		t.Errorf("the operator's checkout was touched: %s", out)
+	}
+}

@@ -201,6 +201,16 @@ describe("baselineVerifySummary", () => {
       "failed: TestA and 2 more; the ticket does not name TestB and 1 more",
     ],
     [
+      "passed, leaving files",
+      {
+        passed: true,
+        exit_code: 0,
+        left_out_of_scope: ["__pycache__/x.pyc", "a.out", "b.out"],
+        left_out_of_scope_count: 3,
+      },
+      "passed, but the command leaves __pycache__/x.pyc and 2 more outside the ticket's Allowed-Files",
+    ],
+    [
       "names omitted",
       { failing_count: 4, unnamed_count: 1 },
       "failed: 4 tests; the ticket does not name 1 tests",
@@ -213,5 +223,10 @@ describe("baselineVerifySummary", () => {
     expect(baselineVerifyFailed(bv({ passed: true }))).toBe(false);
     expect(baselineVerifyFailed(bv({ expected: true, failing_count: 1 }))).toBe(false);
     expect(baselineVerifyFailed(bv({ failing_count: 1 }))).toBe(true);
+    expect(
+      baselineVerifyFailed(
+        bv({ passed: true, left_out_of_scope: ["x.pyc"], left_out_of_scope_count: 1 }),
+      ),
+    ).toBe(true);
   });
 });

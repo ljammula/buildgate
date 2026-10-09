@@ -631,6 +631,10 @@
       "first_error": "every-field first_error",
       "setup_failed": "every-field setup_failed",
       "expected": true,
+      "left_out_of_scope": [
+        "every-field left_out_of_scope"
+      ],
+      "left_out_of_scope_count": 3,
       "inherited_from": "every-field inherited_from",
       "log_path": "every-field log_path",
       "duration_ms": 3

@@ -205,6 +205,9 @@ export interface BaselineVerify {
   readonly needsCreated: string;
   readonly firstError: string;
   readonly expected: boolean;
+  /** Paths the command left that diff_scope would flag (at most 20), and how many there were. */
+  readonly leftOutOfScope: readonly string[];
+  readonly leftOutOfScopeCount: number;
   readonly inheritedFrom: string;
   readonly logPath: string;
   readonly durationMs: number;
@@ -223,6 +226,8 @@ function decodeBaselineVerify(o: JsonObject, at: string): BaselineVerify {
     needsCreated: optString(o, "needs_created", at),
     firstError: optString(o, "first_error", at),
     expected: optBoolean(o, "expected", at),
+    leftOutOfScope: o.left_out_of_scope == null ? [] : stringList(o, "left_out_of_scope", at),
+    leftOutOfScopeCount: numberOr(o, "left_out_of_scope_count", at, 0),
     inheritedFrom: optString(o, "inherited_from", at),
     logPath: optString(o, "log_path", at),
     durationMs: numberOr(o, "duration_ms", at, 0),

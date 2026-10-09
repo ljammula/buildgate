@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 )
@@ -300,4 +301,48 @@ func BuildNote(b *run.BaselineVerify) string {
 	}
 	s.WriteString("\nVerify command: " + b.Command + "\n")
 	return s.String()
+}
+
+// OutOfScope is what the diff_scope gate would flag among left, the paths a
+// command left in the workspace: the call policy.EvaluateRun makes for a
+// run's changed files (ExcludeHarnessByproducts, then DiffScope), and under
+// the same condition, a ticket that declares Allowed-Files (non-nil).
+// A ticket without them has no such gate and nothing is out of scope. Sorted,
+// without duplicates.
+func OutOfScope(left, allowed []string) []string {
+	if allowed == nil {
+		return nil
+	}
+	_, violations := policy.DiffScope(policy.ExcludeHarnessByproducts(left), allowed)
+	seen := make(map[string]bool, len(violations))
+	var out []string
+	for _, v := range violations {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// NoteLeftovers records on b the paths of left that OutOfScope flags for
+// allowed: at most run.BaselineVerifyMaxNamed of them, each as a clean line
+// of at most maxNameLen bytes (a path is the repository's own output), and
+// how many there were.
+func NoteLeftovers(b *run.BaselineVerify, left, allowed []string) {
+	out := OutOfScope(left, allowed)
+	b.LeftOutOfScopeCount = len(out)
+	for _, p := range out {
+		if len(b.LeftOutOfScope) == run.BaselineVerifyMaxNamed {
+			break
+		}
+		p = sanitize.Line(p)
+		if len(p) > maxNameLen {
+			p = strings.ToValidUTF8(p[:maxNameLen], "")
+		}
+		if p != "" {
+			b.LeftOutOfScope = append(b.LeftOutOfScope, p)
+		}
+	}
 }
