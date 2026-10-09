@@ -462,7 +462,8 @@ requires a new contract review and an updated machine-checkable test.
   `required_content_present`, and the two reviews when they gave a verdict.
   `reference_oracle` counts only where the build is already shown the oracle
   (a request's ticket). `tests_added`, a review that gave no verdict, a
-  repository gate that never ran and any check with no bin never do, and a
+  repository gate that never ran, a check whose step a repository setup
+  command stopped and any check with no bin never do, and a
   halt never does. A check on the diff of an attempt that committed nothing
   (canonical verification never passed) is not judged either way. Such a
   build is a new run on the quarantined run's branch, started after the

@@ -531,6 +531,9 @@ class BuildResult:
 	# What the notes turn did, for BUILD_EVIDENCE.json: never its reply.
 	notes_turn: dict = field(default_factory=lambda: {"ran": False, "skipped_reason": "not reached", "duration_s": 0.0})
 	stopped_reason: str = ""
+	# The repository setup command that failed before the first agent turn,
+	# None otherwise. main then exits SETUP_FAILED_EXIT_CODE.
+	setup_failed_at_start: str | None = None
 	# Recorded so BUILD_EVIDENCE.json/BUILD_REPORT.md show what repository
 	# guidance the agent actually saw, not just whether a prompt happened
 	# to mention one.
@@ -877,6 +880,11 @@ SETUP_LOG = "setup.log"
 # Each repository setup command (`.factory.yml` setup:) gets this long.
 SETUP_TIMEOUT_SECONDS = 10 * 60
 SETUP_FAILED_BLOCKER = "setup command failed: "
+# The exit status and log line of a step whose repository setup command
+# failed, as the factory's own step script gives them for verify and the
+# gates (internal/run: SetupFailedExitCode, SetupFailedPrefix).
+SETUP_FAILED_EXIT_CODE = 95
+SETUP_FAILED_LOG_PREFIX = "buildgate: setup failed: "
 
 
 # Output kept from one setup or autofix command: its tail, which is where a
@@ -2442,6 +2450,7 @@ def run_build(
 	started_setup_failed, _ = run_setup(workspace, setup_commands or [], session_dir / "feedback" / "setup")
 	if started_setup_failed is not None:
 		result.stopped_reason = SETUP_FAILED_BLOCKER + started_setup_failed[:200]
+		result.setup_failed_at_start = started_setup_failed
 		return result
 
 	for round_index in range(first_round, max_rounds + 1):
@@ -3218,7 +3227,15 @@ def main() -> int:
 	evidence_path = write_evidence_json(result)
 	print(f"Evidence written to {evidence_path}")
 	print(f"Outcome: {'SUCCEEDED' if result.succeeded else 'DID NOT SUCCEED'} -- {result.stopped_reason}")
-	return 0 if result.succeeded else 1
+	if result.succeeded:
+		return 0
+	if result.setup_failed_at_start is not None:
+		# No agent turn ran: the build ends as every step whose setup command
+		# failed does, so the factory records a setup failure, not a build
+		# that tried and did not pass.
+		print(SETUP_FAILED_LOG_PREFIX + " ".join(result.setup_failed_at_start.split()), file=sys.stderr)
+		return SETUP_FAILED_EXIT_CODE
+	return 1
 
 
 if __name__ == "__main__":

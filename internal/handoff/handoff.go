@@ -222,6 +222,10 @@ func Build(r *run.Run, dataDir string) Document {
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
 //     repository's setup commands (a worker older than them): BinOperator.
+//   - a check whose step was stopped by a failing repository setup command
+//     (triage.SetupFailedCommand): BinOperator. Every build of the ticket
+//     runs the same commands before its first agent turn and ends there
+//     when one fails, so a build started in answer would change nothing.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
@@ -231,6 +235,8 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	case policy.IsRepoGate(finding.Check) && finding.ExitCode == -1:
 		return BinOperator
 	case finding.Check == "canonical_verify" && setupNotRun(r):
+		return BinOperator
+	case finding.SetupFailed != "":
 		return BinOperator
 	}
 	return BinOf(finding.Check)

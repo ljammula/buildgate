@@ -990,3 +990,47 @@ func TestTriageLogGateNamesTheSetupCommandThatFailed(t *testing.T) {
 		t.Errorf("a step that ran no setup: triageLogGate() = %q, want the repository's text kept out", got)
 	}
 }
+
+// A build stopped by a setup command before its first agent turn exits as a
+// step whose setup failed. The run's sentence says the build did not start
+// and names the command, ahead of "the agent made no changes" and whatever
+// the verify that followed did; a step that ran no setup, or whose log names
+// no command, is not a setup failure.
+func TestASetupFailureAtTheStartOfABuildIsNamedAsOne(t *testing.T) {
+	dataDir := t.TempDir()
+	id := "run-setup-start"
+	writeRunFile(t, dataDir, id, "build.log", "Outcome: DID NOT SUCCEED -- setup command failed: make generate\nbuildgate: setup failed: make generate\n")
+	writeRunFile(t, dataDir, id, "verify.log", "FAIL: test_x\n")
+	logOf := func(name string) string { return filepath.Join(run.Dir(dataDir, id), name) }
+	r := &run.Run{
+		ID:           id,
+		State:        run.StateQuarantined,
+		ChangedFiles: []string{},
+		Attempts: []run.Attempt{
+			{Kind: "build", ExitCode: 95, SetupSHA256: "abc", LogPath: logOf("build.log")},
+			{Kind: "verify", ExitCode: 1, SetupSHA256: "abc", LogPath: logOf("verify.log")},
+		},
+		GateResults: []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
+	}
+	if got := SetupFailedCommand(r, "canonical_verify"); got != "make generate" {
+		t.Errorf("SetupFailedCommand = %q, want the command", got)
+	}
+	if got, want := Run(r, dataDir), `build did not start; setup command failed: "make generate" (+1 more failing gate)`; got != want {
+		t.Errorf("Run() = %q, want %q", got, want)
+	}
+	findings := FailedGates(r, dataDir)
+	if len(findings) != 2 || findings[0].SetupFailed != "make generate" || findings[1].SetupFailed != "" {
+		t.Errorf("findings = %+v, want only canonical_verify marked as a setup failure", findings)
+	}
+
+	noDigest := *r
+	noDigest.Attempts = []run.Attempt{{Kind: "build", ExitCode: 95, LogPath: logOf("build.log")}}
+	if got := SetupFailedCommand(&noDigest, "canonical_verify"); got != "" {
+		t.Errorf("a build that ran no setup: SetupFailedCommand = %q, want none", got)
+	}
+	unnamed := *r
+	unnamed.Attempts = []run.Attempt{{Kind: "build", ExitCode: 95, SetupSHA256: "abc", LogPath: logOf("verify.log")}}
+	if got := SetupFailedCommand(&unnamed, "canonical_verify"); got != "" {
+		t.Errorf("a log that names no command: SetupFailedCommand = %q, want none", got)
+	}
+}
