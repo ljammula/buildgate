@@ -571,7 +571,7 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 		ticket := argValue(args, "-ticket")
 		onReady(&run.Run{ID: ticket})
 		if ticket == id+"-001" || len(builds) > 2 {
-			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
+			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, BaseSHA: base, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
 		}
 		rr := quarantinedOn(t, dataDir, ticket, branch2, base, result, "lint")
 		rr.RequestID = id

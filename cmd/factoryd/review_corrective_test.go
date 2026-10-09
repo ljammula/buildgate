@@ -985,6 +985,10 @@ func TestTryReviewCorrectiveRoundRunsForLaterTicketsUnderTemporal(t *testing.T) 
 	}
 	ticket := &r.Tickets[0]
 	ticket.Index = 2
+	ticket.RunID = "ticket-one-run"
+	if err := (&run.Run{ID: ticket.RunID, BaseSHA: fmt.Sprintf("%040d", 1)}).Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	runRecord := &run.Run{
 		ID: "run-under-test", State: run.StateQuarantined, Branch: "factoryd/" + id + "-002", BaseSHA: fmt.Sprintf("%040d", 1),
 		GateResults: []run.GateResult{
@@ -1355,10 +1359,11 @@ func TestWriteReviewAddendumFlattensHeaderInjectionInCodeReviewFinding(t *testin
 	}
 }
 
-// A stacked ticket's builds, retries and corrective rounds all carry the
-// commit ticket 1 started from as -instruction-base, so its reviews do not
-// take an earlier ticket's unmerged instruction text as genuine; ticket 1's
-// carry none.
+// Every build that follows an earlier run of a request carries the commit the
+// request started from as -instruction-base, so a review does not take an
+// earlier build's unmerged instruction text as genuine: ticket N>1 gets the
+// value recorded on ticket 1's run, ticket 1 the value recorded on its own
+// earlier run. A ticket's very first build carries none.
 func TestStackedTicketsCarryTheInstructionBase(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id := buildingFixture(dp, t, 2)
@@ -1381,18 +1386,17 @@ func TestStackedTicketsCarryTheInstructionBase(t *testing.T) {
 		return first, corrective
 	}
 
-	// Ticket 1 has no run yet: nothing to pass, for either ticket.
-	first, corrective := argsOf(r.Tickets[1])
-	if hasFlag(first, "-instruction-base") || hasFlag(corrective, "-instruction-base") {
-		t.Errorf("ticket 2 before ticket 1 has a run: %v / %v carry -instruction-base", first, corrective)
+	// Ticket 1's very first build has no earlier run: nothing to pass.
+	if first, corrective := argsOf(r.Tickets[0]); hasFlag(first, "-instruction-base") || hasFlag(corrective, "-instruction-base") {
+		t.Errorf("ticket 1 before any run carries -instruction-base: %v / %v", first, corrective)
 	}
 
-	ticketOne := &run.Run{ID: ticketRunID(id, 1), BaseSHA: ticketOneBase}
+	ticketOne := &run.Run{ID: ticketRunID(id, 1), BaseSHA: ticketOneBase, InstructionBaseSHA: ticketOneBase}
 	if err := ticketOne.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
 	r.Tickets[0].RunID = ticketOne.ID
-	for name, ticket := range map[string]request.Ticket{"ticket 2": r.Tickets[1]} {
+	for name, ticket := range map[string]request.Ticket{"ticket 1 (a retry)": r.Tickets[0], "ticket 2": r.Tickets[1]} {
 		first, corrective := argsOf(ticket)
 		for what, args := range map[string][]string{"first build and retry": first, "corrective round": corrective} {
 			if got := argValue(args, "-instruction-base"); got != ticketOneBase {
@@ -1400,13 +1404,9 @@ func TestStackedTicketsCarryTheInstructionBase(t *testing.T) {
 			}
 		}
 	}
-	first, corrective = argsOf(r.Tickets[0])
-	if hasFlag(first, "-instruction-base") || hasFlag(corrective, "-instruction-base") {
-		t.Errorf("ticket 1 args carry -instruction-base: %v / %v", first, corrective)
-	}
 
-	// Ticket 1's own diff base outranks its base; a recorded instruction base outranks both.
-	ticketOne.DiffBaseSHA = ticketOneDiffBase
+	// A record from before the field existed: its diff base outranks its base.
+	ticketOne.InstructionBaseSHA, ticketOne.DiffBaseSHA = "", ticketOneDiffBase
 	if err := ticketOne.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -1420,10 +1420,38 @@ func TestStackedTicketsCarryTheInstructionBase(t *testing.T) {
 	if first, _ := argsOf(r.Tickets[1]); argValue(first, "-instruction-base") != ticketOne.InstructionBaseSHA {
 		t.Errorf("-instruction-base = %q, want ticket 1's recorded instruction base", argValue(first, "-instruction-base"))
 	}
+}
 
-	// A ticket 1 run that cannot be loaded passes nothing.
-	r.Tickets[0].RunID = "no-such-run"
-	if first, _ := argsOf(r.Tickets[1]); hasFlag(first, "-instruction-base") {
-		t.Errorf("an unloadable ticket 1 run still gave -instruction-base: %v", first)
+// An earlier run that cannot be loaded or records no base halts the build
+// with a reason, instead of reviewing against the diff base.
+func TestInstructionBaseUnknownRefusesTheBuild(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := buildingFixture(dp, t, 2)
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
 	}
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
+	want := func(ticket request.Ticket, runID string) {
+		t.Helper()
+		_, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, cfg)
+		prefix := fmt.Sprintf("ticket %d: cannot determine the commit the request started from (run %s ", ticket.Index, runID)
+		if err == nil || !strings.Contains(err.Error(), prefix) || !strings.Contains(err.Error(), "a review would trust an earlier build's instruction files") {
+			t.Errorf("ticket %d: err = %v, want a refusal beginning %q", ticket.Index, err, prefix)
+		}
+	}
+	// Ticket 2 with no ticket 1 run, and with one that cannot be loaded.
+	want(r.Tickets[1], "")
+	r.Tickets[0].RunID = "no-such-run"
+	want(r.Tickets[1], "no-such-run")
+	// Ticket 1's own earlier run, unloadable.
+	want(r.Tickets[0], "no-such-run")
+	// A run that records no base at all.
+	empty := &run.Run{ID: ticketRunID(id, 1)}
+	if err := empty.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets[0].RunID = empty.ID
+	want(r.Tickets[1], empty.ID)
+	want(r.Tickets[0], empty.ID)
 }

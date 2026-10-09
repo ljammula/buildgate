@@ -2333,6 +2333,10 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		}
 		fullSuiteCommand, fullSuiteSource = ResolveFullSuiteCommand("", effectiveVerifyCommand)
 	}
+	instructionBase, err := requestInstructionBase(dataDir, r, ticket)
+	if err != nil {
+		return nil, err
+	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
@@ -2370,7 +2374,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// PRBase: computed above -- see QueueEntry.PRBase's own doc comment.
 		PRBase: prBase,
 		// InstructionBase: see requestInstructionBase.
-		InstructionBase: requestInstructionBase(dataDir, r, ticket),
+		InstructionBase: instructionBase,
 		// RequestTicket: see QueueEntry.RequestTicket's own doc comment --
 		// every ticket built here is a ticketspec-format spec (the ticket's
 		// own file, or its conformity-corrective addendum), never a
@@ -2386,34 +2390,40 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	}, nil
 }
 
-// requestInstructionBase is the commit a stacked ticket's reviews read the
+// requestInstructionBase is the commit a ticket build's reviews read the
 // repository's instruction files from (SC-019): the commit the request's
-// first ticket started from, taken from the run recorded for ticket 1 (its
-// instruction base if it recorded one, else its diff base, else its base).
-// Ticket 1 itself gets "" (its own diff base is that commit). "" is also the
-// answer, with one log line, when ticket 1's run cannot be loaded or records
-// no base: the review then reads its own run's diff base.
-func requestInstructionBase(dataDir string, r *request.Request, ticket request.Ticket) string {
-	if ticket.Index <= 1 || len(r.Tickets) == 0 {
-		return ""
+// first ticket started from, as the run recorded for it says (its instruction
+// base, else its diff base, else its base; the first two are empty only in a
+// record written before the field existed). For ticket N>1 that is ticket 1's
+// run; for ticket 1 it is the ticket's own earlier run (a retry, a corrective
+// round, a PR-review round or a resume build on it). A ticket's very first
+// build has no earlier run and gets "". An earlier run that cannot be loaded
+// or records no base is an error, so the request halts instead of building
+// with reviews that would trust an earlier build's instruction files.
+func requestInstructionBase(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
+	runID := ticket.RunID
+	if ticket.Index > 1 && len(r.Tickets) > 0 {
+		runID = r.Tickets[0].RunID
 	}
-	first := r.Tickets[0]
-	if first.RunID == "" {
-		log.Printf("request %s: ticket %d: ticket 1 has no run, so reviews read instruction files as this run's own base holds them", r.ID, ticket.Index)
-		return ""
+	if runID == "" && ticket.Index <= 1 {
+		return "", nil
 	}
-	root, err := run.Load(dataDir, first.RunID)
+	cannot := func(why string) error {
+		return fmt.Errorf("ticket %d: cannot determine the commit the request started from (run %s %s): a review would trust an earlier build's instruction files", ticket.Index, runID, why)
+	}
+	if runID == "" {
+		return "", cannot("has no recorded base")
+	}
+	earlier, err := run.Load(dataDir, runID)
 	if err != nil {
-		log.Printf("request %s: ticket %d: load ticket 1's run %q for the instruction base, reviews read instruction files as this run's own base holds them: %v", r.ID, ticket.Index, first.RunID, err)
-		return ""
+		return "", cannot(fmt.Sprintf("cannot be loaded: %v", err))
 	}
-	for _, sha := range []string{root.InstructionBaseSHA, diffBaseOf(root)} {
+	for _, sha := range []string{earlier.InstructionBaseSHA, diffBaseOf(earlier)} {
 		if sha != "" {
-			return sha
+			return sha, nil
 		}
 	}
-	log.Printf("request %s: ticket %d: ticket 1's run %q records no base, reviews read instruction files as this run's own base holds them", r.ID, ticket.Index, first.RunID)
-	return ""
+	return "", cannot("has no recorded base")
 }
 
 // BuildRequestBuildArgs builds the same runMainWithReady argv shape

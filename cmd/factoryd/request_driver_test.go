@@ -2214,7 +2214,7 @@ func acceptingBuildRunner(t *testing.T, dataDir string) requestdriver.TicketRunn
 		if onReady != nil {
 			onReady(&run.Run{ID: ticket, State: run.StateReady})
 		}
-		rr := &run.Run{ID: ticket, State: run.StateAccepted, PullRequestURL: "https://github.com/acme/app/pull/" + ticket}
+		rr := &run.Run{ID: ticket, State: run.StateAccepted, BaseSHA: fmt.Sprintf("%040d", 1), PullRequestURL: "https://github.com/acme/app/pull/" + ticket}
 		if err := rr.Save(dataDir); err != nil {
 			t.Fatalf("save stub run %q: %v", ticket, err)
 		}

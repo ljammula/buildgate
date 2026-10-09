@@ -270,7 +270,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.prBase = flags.String("pr-base", "", "internal: set by worker/the request driver (QueueEntry.PRBase) when this ticket's draft PR should stack on a prior ticket's still-open branch instead of the repo default branch -- must be a valid git branch name. Only used together with -open-pull-request; forge.PullRequestOpener falls back to the default branch if the named one no longer exists on origin by the time the PR actually opens")
 	f.allowSpecTicketScopeMismatch = flags.Bool("allow-spec-ticket-scope-mismatch", false, "explicit opt-out from factoryd's -spec/-ticket-file scope-mismatch check")
 	f.onBranch = flags.String("on-branch", "", "opt-in: check out this EXISTING branch into a fresh worktree instead of an ordinary run's default of a brand-new branch based at -workspace's HEAD -- the PR-review driver's own corrective-PR-review-round mechanism, which must land its commits on the same branch a ticket's already-open pull request already tracks. The branch must already exist in -workspace. Never created and, regardless of this run's own outcome, never deleted by this run -- unlike an ordinary isolated run's own disposable branch")
-	f.instructionBase = flags.String("instruction-base", "", "the commit whose instruction files this run's reviews read: the commit the request's first ticket started from. Default: this run's diff base. Must be a full 40-character object id and an ancestor of the run's base commit")
+	f.instructionBase = flags.String("instruction-base", "", "the commit whose instruction files this run's reviews read: the commit the request's first ticket started from. Default: the one a resumed run's lost run recorded, else this run's diff base. Must be a full 40-character object id and an ancestor of the run's base commit")
 	f.earlierAttempt = flags.String("earlier-attempt", "", "path to the factory's record of an earlier attempt at this ticket that finished and failed its checks (a handoff rendered as text). Given to the build's first prompt only, as a read-only input beside the spec: never to a review, and never part of the spec. The request driver sets it for a corrective build; at most 32 KiB")
 	f.diffBase = flags.String("diff-base", "", "opt-in: compute the changed-file list, diff stat, and required-content evidence fed to the diff-shape gates (diff_scope, required_files_changed, required_content, tests_added) and the PR-body evidence from <diff-base>..HEAD instead of from this run's own base_sha (the -on-branch checkout point). The PR-review driver's corrective-PR-review-round mechanism: a review round's own base_sha is the branch tip it started from, so without -diff-base those gates would judge only the round's own small delta rather than the cumulative diff the PR as a whole will merge. Must be a full 40-character hex object ID that is an ancestor of base_sha; build and canonical verification still run against the branch tip regardless")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts, continuing its build from the round state in it (Temporal only: refused with -repository, -on-branch and -prior-run). Refused unless the halted run was kept for a resume and the worktree is intact; every reason is printed")
@@ -2185,23 +2185,30 @@ func (tr *ticketRun) createRunRecord() error {
 // base must descend from, -diff-base and -instruction-base, and records them
 // on the run. A bad one halts the run before it starts.
 func (tr *ticketRun) recordAncestorInputs() error {
+	// Every run records the instruction base its reviews read: the flag's
+	// value, else (a resumed run) the one the lost run recorded, else the
+	// run's effective diff base.
+	instructionBase, descendsFrom := *tr.instructionBase, tr.baseSHA
+	if instructionBase == "" && tr.resumeFrom != nil {
+		instructionBase, descendsFrom = tr.resumeFrom.InstructionBaseSHA, tr.resumeFrom.BaseSHA
+	}
 	for _, in := range []struct {
-		flag, value string
-		record      *string
+		flag, value, base string
+		record            *string
 	}{
-		{"-diff-base", *tr.diffBase, &tr.r.DiffBaseSHA},
-		{"-instruction-base", *tr.instructionBase, &tr.r.InstructionBaseSHA},
+		{"-diff-base", *tr.diffBase, tr.baseSHA, &tr.r.DiffBaseSHA},
+		{"-instruction-base", instructionBase, descendsFrom, &tr.r.InstructionBaseSHA},
 	} {
 		if in.value == "" {
 			continue
 		}
-		// in.value and baseSHA are both commits that already exist in the
+		// in.value and in.base are both commits that already exist in the
 		// shared repository checked out at *workspace.
-		isAncestor, err := runner.GitIsAncestor(*tr.workspace, in.value, tr.baseSHA)
+		isAncestor, err := runner.GitIsAncestor(*tr.workspace, in.value, in.base)
 		if err == nil && !isAncestor {
-			err = fmt.Errorf("%s %q is not an ancestor of base SHA %q", in.flag, in.value, tr.baseSHA)
+			err = fmt.Errorf("%s %q is not an ancestor of base SHA %q", in.flag, in.value, in.base)
 		} else if err != nil {
-			err = fmt.Errorf("check %s %q is an ancestor of base SHA %q: %w", in.flag, in.value, tr.baseSHA, err)
+			err = fmt.Errorf("check %s %q is an ancestor of base SHA %q: %w", in.flag, in.value, in.base, err)
 		}
 		if err != nil {
 			tr.r.State = run.StateHalted
@@ -2213,7 +2220,19 @@ func (tr *ticketRun) recordAncestorInputs() error {
 		}
 		*in.record = in.value
 	}
+	if tr.r.InstructionBaseSHA == "" {
+		tr.r.InstructionBaseSHA = firstNonEmptyString(tr.r.DiffBaseSHA, tr.baseSHA)
+	}
 	return nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // dispatch takes the compose-services slot and hands the run to Temporal.

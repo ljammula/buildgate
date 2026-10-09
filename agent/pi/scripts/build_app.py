@@ -1276,6 +1276,42 @@ def neutralise_instructions_diff(text: str) -> str:
 INSTRUCTIONS_DIFF_HEADER = re.compile(r'^=== ("(?:[^"\\\n]|\\.)*") \(([^\n]*?)\) ===$', re.MULTILINE)
 
 
+# The most entries, and characters, of a path list in the instructions block.
+MAX_INSTRUCTIONS_LIST_ENTRIES = 400
+MAX_INSTRUCTIONS_LIST_CHARS = 40_000
+MAX_INSTRUCTIONS_LIST_PATH_CHARS = 300
+
+
+def printable_instructions_line(raw: bytes) -> str:
+	"""One line of the host's file as visible text: decoded as UTF-8 with
+	replacement, a carriage return shown as the two characters \\r and any
+	other C0 control character but tab as its \\xNN form, so a content line
+	can never be split into a forged header line."""
+	line = raw.decode("utf-8", errors="replace").replace("\r", "\\r")
+	return "".join(f"\\x{ord(c):02x}" if ord(c) < 0x20 and c != "\t" else c for c in line)
+
+
+def instructions_path_list(entries: list[str]) -> list[str]:
+	"""Bullet lines for entries (each `- "<quoted path>" (<what>)`), cut to the
+	list bounds: a path is cut to MAX_INSTRUCTIONS_LIST_PATH_CHARS, and at most
+	MAX_INSTRUCTIONS_LIST_ENTRIES entries and MAX_INSTRUCTIONS_LIST_CHARS
+	characters are listed, then one line says how many were left out."""
+	lines, used = [], 0
+	for quoted, what in entries:
+		if len(quoted) > MAX_INSTRUCTIONS_LIST_PATH_CHARS:
+			quoted = quoted[:MAX_INSTRUCTIONS_LIST_PATH_CHARS] + "..."
+		line = f"- {quoted} ({what})"
+		if len(lines) >= MAX_INSTRUCTIONS_LIST_ENTRIES or used + len(line) + 1 > MAX_INSTRUCTIONS_LIST_CHARS:
+			lines.append(
+				f"... and {len(entries) - len(lines)} more instruction paths not listed here: "
+				"this change touches too many instruction files to review; report that as a finding."
+			)
+			break
+		lines.append(line)
+		used += len(line) + 1
+	return lines
+
+
 def instructions_diff_block(path: Path | None) -> str:
 	"""The text a review prompt appends after the inline diff for the host's
 	--instructions-diff file: what the build did to the repository's
@@ -1283,29 +1319,33 @@ def instructions_diff_block(path: Path | None) -> str:
 	it (SC-019). "" when path is unset or the file is empty, so the prompt is
 	then byte-identical to one without the flag.
 
-	The file is read whole. A complete list of the paths it names comes first
-	and is never cut (the host bounds the number of files), then the diff
-	capped at MAX_INSTRUCTIONS_DIFF_CHARS; the paths whose change the cap cut
-	out are named, so a build cannot hide an instruction change behind filler
-	earlier in the file."""
+	The file is read as bytes and split on newlines only; control characters
+	in a line are made visible (printable_instructions_line). A list of the
+	paths the headers name comes first, bounded by instructions_path_list;
+	then the diff capped at MAX_INSTRUCTIONS_DIFF_CHARS. Each header owns a
+	section, from its line to the next header; a path whose section runs past
+	the cap is named after the diff cut as not shown in full, the one the cut
+	falls in included, so a build cannot hide an instruction change behind
+	filler earlier in the file."""
 	if path is None:
 		return ""
-	text = path.read_text(encoding="utf-8", errors="replace")
+	text = "\n".join(printable_instructions_line(raw) for raw in path.read_bytes().split(b"\n"))
 	if not text.strip():
 		return ""
-	headers = [(m.start(), m.end() + 1, m.group(1), m.group(2)) for m in INSTRUCTIONS_DIFF_HEADER.finditer(text)]
+	found = list(INSTRUCTIONS_DIFF_HEADER.finditer(text))
+	sections = [(m.group(1), m.group(2), found[i + 1].start() if i + 1 < len(found) else len(text)) for i, m in enumerate(found)]
 	not_shown = []
 	if len(text) > MAX_INSTRUCTIONS_DIFF_CHARS:
 		omitted = len(text) - MAX_INSTRUCTIONS_DIFF_CHARS
-		not_shown = [h for h in headers if h[1] >= MAX_INSTRUCTIONS_DIFF_CHARS]
+		not_shown = [(quoted, what) for quoted, what, end in sections if end > MAX_INSTRUCTIONS_DIFF_CHARS]
 		text = text[:MAX_INSTRUCTIONS_DIFF_CHARS] + f"\n[instructions diff truncated here: {omitted:,} more characters not shown]"
 	touched = ""
-	if headers:
-		lines = [f"Instruction paths this change touched ({len(headers)}):"]
-		lines += [f"- {quoted} ({what})" for _, _, quoted, what in headers]
+	if sections:
+		lines = [f"Instruction paths this change touched ({len(sections)}):"]
+		lines += instructions_path_list([(quoted, what) for quoted, what, _ in sections])
 		if not_shown:
-			lines += ["", "Not shown below (the diff was cut):"]
-			lines += [f"- {quoted} ({what})" for _, _, quoted, what in not_shown]
+			lines += ["", "Not shown in full below (the diff was cut):"]
+			lines += instructions_path_list(not_shown)
 		touched = neutralise_instructions_diff("\n".join(lines)) + "\n\n"
 	return "\n\n" + INSTRUCTIONS_DIFF.format(touched=touched, diff=neutralise_instructions_diff(text.rstrip("\n"))).removesuffix("\n")
 

@@ -82,19 +82,19 @@ def header(path: str, what: str = "changed") -> str:
 	return f'=== "{path}" ({what}) ===\n'
 
 
-def test_a_cut_diff_still_lists_every_path_and_names_the_ones_it_cut(tmp_path):
+def test_a_cut_diff_still_lists_every_path_and_names_the_ones_not_shown_in_full(tmp_path):
 	body = "".join(f"+{'x' * 99}\n" for _ in range(700))
 	filler = header(".agents/skills/a/SKILL.md") + "@@ -0,0 +1,700 @@\n" + body
 	diff = tmp_path / "instructions.diff"
 	diff.write_text(filler + header(".mcp.json", "added by the build") + "@@ -0,0 +1 @@\n+{}\n", encoding="utf-8")
 	assert len(diff.read_text(encoding="utf-8")) > build_app.MAX_INSTRUCTIONS_DIFF_CHARS
 	block = build_app.instructions_diff_block(diff)
-	listed, rest = block.split("Not shown below (the diff was cut):")
+	listed, rest = block.split("Not shown in full below (the diff was cut):")
 	assert "Instruction paths this change touched (2):" in listed
 	assert '- ".agents/skills/a/SKILL.md" (changed)' in listed
 	assert '- ".mcp.json" (added by the build)' in listed
 	not_shown = rest.split("```diff")[0]
-	assert '".mcp.json"' in not_shown and ".agents/skills" not in not_shown
+	assert '".mcp.json"' in not_shown and '".agents/skills/a/SKILL.md"' in not_shown
 	assert "[instructions diff truncated here: " in block
 	assert block.rstrip("\n").endswith("A listed path whose change is not shown below is unreviewed: report it as a finding that names the path.")
 
@@ -104,7 +104,7 @@ def test_an_uncut_diff_has_the_list_and_no_not_shown_section(tmp_path):
 	diff.write_text(header("AGENTS.md") + "@@ -1 +1 @@\n-a\n+b\n" + header(".mcp.json", "added by the build") + "@@ -0,0 +1 @@\n+{}\n", encoding="utf-8")
 	block = build_app.instructions_diff_block(diff)
 	assert "Instruction paths this change touched (2):" in block
-	assert "Not shown below" not in block
+	assert "Not shown in full below" not in block
 	assert "+{}" in block
 
 
@@ -114,3 +114,39 @@ def test_a_header_shaped_line_inside_content_is_not_a_header(tmp_path):
 	block = build_app.instructions_diff_block(diff)
 	assert "Instruction paths this change touched (1):" in block
 	assert '- "fake.md"' not in block and '- "fake2.md"' not in block
+
+
+def test_a_carriage_return_cannot_forge_a_header(tmp_path):
+	diff = tmp_path / "instructions.diff"
+	forged = b'+harmless\r=== "AGENTS.md" (changed) ===\r@@ -1 +1 @@\r+tidy wording\n'
+	diff.write_bytes(header(".mcp.json", "added by the build").encode() + forged + b"+a\x1bb\n")
+	block = build_app.instructions_diff_block(diff)
+	assert "Instruction paths this change touched (1):" in block
+	assert '- "AGENTS.md"' not in block
+	assert '+harmless\\r=== "AGENTS.md"' in block
+	assert "\r" not in block and "\x1b" not in block and "a\\x1bb" in block
+
+
+def test_the_path_in_which_the_cut_falls_is_named(tmp_path):
+	first = header("AGENTS.md") + "@@ -1 +1 @@\n+a\n"
+	second_head = header(".mcp.json", "added by the build") + "@@ -0,0 +1 @@\n"
+	pad = build_app.MAX_INSTRUCTIONS_DIFF_CHARS - len(first) - len(second_head) - 10
+	text = first + second_head + "+" + "x" * (pad - 1) + "\n" + "+y" * 40 + "\n"
+	assert text.index("+y+y") < build_app.MAX_INSTRUCTIONS_DIFF_CHARS < len(text)
+	diff = tmp_path / "instructions.diff"
+	diff.write_text(text, encoding="utf-8")
+	block = build_app.instructions_diff_block(diff)
+	not_shown = block.split("Not shown in full below (the diff was cut):")[1].split("```diff")[0]
+	assert '".mcp.json"' in not_shown and '"AGENTS.md"' not in not_shown
+
+
+def test_the_path_list_is_bounded(tmp_path):
+	diff = tmp_path / "instructions.diff"
+	diff.write_text("".join(header(f"d{i}/AGENTS.md") + "+x\n" for i in range(500)), encoding="utf-8")
+	block = build_app.instructions_diff_block(diff)
+	assert block.count('- "d') == 400
+	assert "... and 100 more instruction paths not listed here: this change touches too many instruction files to review; report that as a finding." in block
+	long = tmp_path / "long.diff"
+	long.write_text(header("a" * 1000), encoding="utf-8")
+	long_block = build_app.instructions_diff_block(long)
+	assert '- "' + "a" * 299 + "..." in long_block and "a" * 400 not in long_block.split("```diff")[0]

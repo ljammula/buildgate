@@ -36,6 +36,11 @@ type ResumeFrom struct {
 	// checkout's HEAD at resume time. It must equal the halted run's
 	// recorded BaseSHA.
 	BaseSHA string `json:"base_sha"`
+	// InstructionBaseSHA is the instruction base the halted run recorded
+	// (its diff base, else its base, for a record that predates the field):
+	// the resumed run's reviews trust that commit's instruction files, not
+	// the halted attempt's tip.
+	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
 }
 
 // roundState is the part of build_app.py's round-state file the host reads:
@@ -70,10 +75,11 @@ func readRoundState(worktree string) (head string, lastRound int, found bool, er
 // passed CheckResumePreconditions: its kept worktree, branch and base commit.
 func NewResumeFrom(halted *run.Run) *ResumeFrom {
 	return &ResumeFrom{
-		RunID:        halted.ID,
-		WorktreePath: halted.WorkspacePath,
-		Branch:       halted.Branch,
-		BaseSHA:      halted.BaseSHA,
+		RunID:              halted.ID,
+		WorktreePath:       halted.WorkspacePath,
+		Branch:             halted.Branch,
+		BaseSHA:            halted.BaseSHA,
+		InstructionBaseSHA: firstNonEmpty(halted.InstructionBaseSHA, halted.DiffBaseSHA, halted.BaseSHA),
 	}
 }
 
@@ -377,4 +383,13 @@ func samePath(a, b string) bool {
 		return filepath.Clean(a) == filepath.Clean(b)
 	}
 	return ca == cb
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

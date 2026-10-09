@@ -93,9 +93,10 @@ type QueueEntry struct {
 	PRBase string `json:"pr_base,omitempty"`
 	// InstructionBase is the commit whose instruction files this entry's
 	// reviews read (-instruction-base): the commit the request's first
-	// ticket started from, set by ticketQueueEntry for ticket N>1 so a
-	// stacked ticket's review does not take an earlier ticket's unmerged
-	// instruction text as genuine. Empty leaves the run's own diff base.
+	// ticket started from, set by ticketQueueEntry for every build that
+	// follows an earlier run of the request, so a review does not take an
+	// earlier build's unmerged instruction text as genuine. Empty on a
+	// ticket's first build: the run then records its own base.
 	InstructionBase string `json:"instruction_base,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request

@@ -239,13 +239,16 @@ round checks out the quarantined run's own existing branch
 `-diff-base`, for every ticket in a
 multi-ticket request. The review corrective round and the PR-review
 corrective round (`runCorrectiveRound`) both rely on this.
-`-instruction-base <sha>` (`RunWorkflowInput.InstructionBaseSHA`, recorded as
-the run's `instruction_base_sha`) names the commit whose instruction files the
-run's reviews read: the request driver passes the commit ticket 1 started from
-to every build of ticket 2 onward (first build, retry, corrective round,
-PR-review round), so an earlier ticket's unmerged instruction text is not
-trusted. It is a full 40-character object id and an ancestor of the run's base.
-Default: the run's diff base.
+`-instruction-base <sha>` (`RunWorkflowInput.InstructionBaseSHA`, recorded on
+every run as its `instruction_base_sha`) names the commit whose instruction
+files the run's reviews read. The request driver passes it to every build that
+follows an earlier run of the request (first build of ticket 2 onward, retry,
+corrective round, PR-review round, resume): ticket 1's recorded value, or for
+ticket 1 the value its own earlier run recorded, so an earlier build's
+unmerged instruction text is not trusted. When that run cannot be loaded or
+records no base, the request halts instead of building. It is a full
+40-character object id and an ancestor of the run's base. Default: a resumed
+run's lost run's value, else the run's diff base, else its base.
 
 **PR review (`pr_review`).** `worker`'s poll loop
 (`internal/requestdriver/pr_review_driver.go`) checks each ticket's PR at most once
@@ -1255,7 +1258,7 @@ Build, verify and gate launches are not masked.
 
 | | What the review gets |
 |---|---|
-| Which commit | The commit the request started from (the run's `instruction_base_sha`, set by `-instruction-base` for ticket 2 onward; for a single-ticket run, the run's own base). It must be an ancestor of the result, else the run halts as below |
+| Which commit | The commit the request started from (the run's `instruction_base_sha`, set by `-instruction-base` for every build that follows an earlier run; for a ticket's first build, the run's own base). It must be an ancestor of the result, else the run halts as below |
 | Sees, as the base commit has them | Each instruction path the build changed, mounted read-only over the worktree; a path the build deleted is mounted back |
 | Shown as data | What the build did to those paths, as a fenced block after the diff (`--instructions-diff`, at most 60,000 characters), labelled as data about the change, never instructions. A complete, uncut list of the paths it touched comes first, and names those the cap cut out; the review is told to report such a path as a finding |
 | Removed first | Instruction-named paths the worktree holds that the result commit does not (untracked or ignored); listed in `review_removed_paths` |

@@ -76,6 +76,9 @@ func lostBuildFixture(dp *deps, t *testing.T, decision string) (dataDir, id stri
 	}
 	r.TicketIndex = 2
 	r.Tickets[0].RunID = "prev-run"
+	if err := (&run.Run{ID: "prev-run", BaseSHA: strings.Repeat("1", 40)}).Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	r.Tickets[1].RunID = "lost-run"
 	if err := r.EnterResumeReview(request.StateBuilding, "lost-run", time.Now()); err != nil {
 		t.Fatal(err)
