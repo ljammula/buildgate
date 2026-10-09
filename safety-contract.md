@@ -320,11 +320,11 @@ requires a new contract review and an updated machine-checkable test.
 - **SC-012 — no oracle mutation:** the job cannot modify its canonical
   acceptance oracle; oracle and verify-surface hashes are recorded with the
   attempt; the verify surface includes the committed `.factory.yml` the run
-  read (its SHA-256 on the run record) and its `setup:` commands, and the
-  `.factory/` directory of that commit, mounted read-only (its snapshot
-  SHA-256 on each attempt), which run
+  read (its SHA-256 on the run record), its `setup:` commands, which run
   before the command of every build, verify and gate sandbox and never in a
-  review sandbox.
+  review sandbox, and the `.factory/` directory of the commit that file was
+  read from, mounted read-only in each of those sandboxes (its snapshot
+  SHA-256 on each attempt).
 - **SC-013 — asynchronous quarantine:** every failed or ambiguous policy check
   transitions to halt/quarantine and emits an out-of-band notification without
   waiting for a human response.

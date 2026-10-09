@@ -2,7 +2,10 @@ package workflow
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -500,5 +503,92 @@ func TestLaunchErrorTypeKeepsARefusedMountApartFromInfrastructure(t *testing.T) 
 	}
 	if got := buildActivityErrorType(sandbox.ErrCommitDirMount); got != FactoryDirFailureType {
 		t.Errorf("buildActivityErrorType(refused mount) = %q", got)
+	}
+}
+
+// A snapshot that could not be taken for a reason neither the commit nor the
+// worktree causes is an ordinary infrastructure failure: no halt reason code,
+// a retryable type, and no refusal on the attempt.
+func TestFactoryDirSnapshotFailureThatIsNotARefusalIsARetriedInfrastructureFailure(t *testing.T) {
+	t.Run("git cannot be run", func(t *testing.T) {
+		f := newFactoryDirFixture(t, map[string]string{".factory/x.sh": "echo committed\n"})
+		t.Setenv("PATH", t.TempDir())
+		attempts, err := f.verify()
+		requireInfrastructureFailure(t, f, attempts, err, "executable file not found")
+	})
+	t.Run("the caller's context is cancelled", func(t *testing.T) {
+		f := newFactoryDirFixture(t, map[string]string{".factory/x.sh": "echo committed\n"})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := prepareFactoryDir(ctx, f.input, f.repo, f.acts.LogDir)
+		if err == nil || errors.Is(err, sandbox.ErrCommitDirMount) || launchErrorType(err) != InfrastructureFailureType {
+			t.Fatalf("error = %v (type %q), want an infrastructure failure", err, launchErrorType(err))
+		}
+		last, err := refusedFactoryDirAttempt(nil, 1, []string{"sh"}, err)
+		if last.FactoryDirError != "" || last.ExitCode != -1 || errors.Is(err, sandbox.ErrCommitDirMount) {
+			t.Errorf("attempt = %+v, err = %v; want no refusal recorded", last, err)
+		}
+	})
+	t.Run("the staging directory cannot be written", func(t *testing.T) {
+		if os.Getuid() == 0 {
+			t.Skip("root writes into a 0555 directory")
+		}
+		f := newFactoryDirFixture(t, map[string]string{".factory/x.sh": "echo committed\n"})
+		locked := filepath.Join(t.TempDir(), "locked")
+		if err := os.Mkdir(locked, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		_, err := prepareFactoryDir(context.Background(), f.input, f.repo, locked)
+		if err == nil || errors.Is(err, sandbox.ErrCommitDirMount) || launchErrorType(err) != InfrastructureFailureType {
+			t.Fatalf("error = %v (type %q), want an infrastructure failure", err, launchErrorType(err))
+		}
+	})
+}
+
+func requireInfrastructureFailure(t *testing.T, f *factoryDirFixture, attempts []run.Attempt, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("the Activity succeeded, want a failure")
+	}
+	appErr := appErrorOf(t, err)
+	if appErr.Type() != InfrastructureFailureType || slices.Contains(nonRetryableActivityFailureTypes, appErr.Type()) {
+		t.Errorf("error type = %q, want the retried %q", appErr.Type(), InfrastructureFailureType)
+	}
+	if got := HaltReasonCodeFromError(err); got != "" {
+		t.Errorf("halt reason code = %q, want none", got)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to name %q", err, want)
+	}
+	for _, a := range attempts {
+		if a.FactoryDirError != "" {
+			t.Errorf("attempt records a refusal: %q", a.FactoryDirError)
+		}
+	}
+	if n := len(f.rt.Requests()); n != 0 {
+		t.Errorf("launches = %d, want none", n)
+	}
+}
+
+// A snapshot a killed worker left under the run's log directory is removed
+// by the next launch's staging.
+func TestNextLaunchSweepsTheSnapshotAKilledWorkerLeft(t *testing.T) {
+	f := newFactoryDirFixture(t, map[string]string{".factory/x.sh": "echo committed\n"})
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(f.acts.LogDir, fmt.Sprintf("factory-dir-%d-1", gone.Process.Pid))
+	if _, err := sandbox.PrepareCommitDirMount(context.Background(), f.repo, f.commit, ".factory", stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if left := f.stagedSnapshots(); len(left) != 0 {
+		t.Errorf("snapshots left under the log directory: %v", left)
+	}
+	if err := os.RemoveAll(f.acts.LogDir); err != nil {
+		t.Errorf("the log directory cannot be removed: %v", err)
 	}
 }

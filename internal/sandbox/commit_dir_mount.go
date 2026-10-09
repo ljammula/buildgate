@@ -8,12 +8,65 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
+	"time"
 )
 
 // ErrCommitDirMount is wrapped by every refusal of PrepareCommitDirMount: a
 // snapshot SnapshotCommitDir refused (which also wraps ErrCommitDirSnapshot)
-// and a worktree whose shape the mount cannot carry.
+// and a worktree whose shape the mount cannot carry. A failure that is not
+// about either shape (git could not run, the caller's context ended, a
+// directory could not be read or written) does not wrap it: a second call may
+// succeed.
 var ErrCommitDirMount = errors.New("commit directory mount refused")
+
+// commitDirStagingPrefix names the directories CommitDirStagingPath makes.
+const commitDirStagingPrefix = "factory-dir-"
+
+// CommitDirStagingPath is a new staging directory name under parent for one
+// PrepareCommitDirMount, after removing the ones a process that no longer
+// runs left there: such a tree is read-only, so nothing else that deletes
+// parent could remove it. The name carries this process's id; a directory of
+// a process that is still alive (another launch of this one included) is
+// left alone.
+func CommitDirStagingPath(parent string) string {
+	entries, _ := os.ReadDir(parent)
+	for _, e := range entries {
+		rest, ok := strings.CutPrefix(e.Name(), commitDirStagingPrefix)
+		pidText, _, _ := strings.Cut(rest, "-")
+		pid, err := strconv.Atoi(pidText)
+		if !ok || !e.IsDir() || err != nil || pid <= 0 || processAlive(pid) {
+			continue
+		}
+		_ = RemoveTree(filepath.Join(parent, e.Name()))
+	}
+	return filepath.Join(parent, fmt.Sprintf("%s%d-%d", commitDirStagingPrefix, os.Getpid(), time.Now().UnixNano()))
+}
+
+// processAlive reports whether a process with this id exists (one this user
+// may not signal counts as alive).
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// RemoveTree is os.RemoveAll for a tree that may hold read-only directories,
+// as a snapshot a killed process left does: when the plain removal fails, it
+// gives every directory below path its owner's write permission and removes
+// again.
+func RemoveTree(path string) error {
+	if err := os.RemoveAll(path); err == nil {
+		return nil
+	}
+	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(p, 0o700)
+		}
+		return nil
+	})
+	return os.RemoveAll(path)
+}
 
 // CommitDirMount is what PrepareCommitDirMount decided for one launch. Mask is
 // nil, and SHA256 and Commit are empty, when nothing is mounted: neither the
@@ -62,8 +115,11 @@ func PrepareCommitDirMount(ctx context.Context, workDir, commitSHA, name, dst st
 		return CommitDirMount{}, nil
 	}
 	snap, err := SnapshotCommitDir(ctx, workDir, commitSHA, name, dst)
-	if err != nil {
+	if errors.Is(err, ErrCommitDirSnapshot) {
 		return CommitDirMount{}, fmt.Errorf("%w: %w", ErrCommitDirMount, err)
+	}
+	if err != nil {
+		return CommitDirMount{}, err
 	}
 	mount := CommitDirMount{Mask: snap.Mask, SHA256: snap.SHA256, Commit: commitSHA, dir: dst}
 	switch {
@@ -85,7 +141,7 @@ func PrepareCommitDirMount(ctx context.Context, workDir, commitSHA, name, dst st
 func worktreeHasRealDir(workDir, name string) (bool, error) {
 	entries, err := os.ReadDir(workDir)
 	if err != nil {
-		return false, commitDirMountRefuse("read the worktree root: %v", err)
+		return false, fmt.Errorf("read the worktree root: %w", err)
 	}
 	fold := foldName(name)
 	for _, e := range entries {
@@ -98,7 +154,7 @@ func worktreeHasRealDir(workDir, name string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		return false, commitDirMountRefuse("inspect %s in the worktree: %v", name, err)
+		return false, fmt.Errorf("inspect %s in the worktree: %w", name, err)
 	}
 	if !info.IsDir() {
 		return false, commitDirMountRefuse("%s in the worktree is not a directory (%s)", name, info.Mode().Type())
@@ -113,7 +169,7 @@ func emptyCommitDirMount(commitSHA, name, dst string) (CommitDirMount, error) {
 	root := filepath.Join(dst, name)
 	fail := func(err error) (CommitDirMount, error) {
 		_ = mount.Remove()
-		return CommitDirMount{}, commitDirMountRefuse("stage an empty %s: %v", name, err)
+		return CommitDirMount{}, fmt.Errorf("stage an empty %s: %w", name, err)
 	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return fail(err)
@@ -142,13 +198,7 @@ func (m CommitDirMount) Remove() error {
 	if m.dir == "" {
 		return nil
 	}
-	_ = filepath.WalkDir(m.dir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() {
-			_ = os.Chmod(p, 0o700)
-		}
-		return nil
-	})
-	if err := os.RemoveAll(m.dir); err != nil {
+	if err := RemoveTree(m.dir); err != nil {
 		return fmt.Errorf("remove the staged commit directory: %w", err)
 	}
 	return nil

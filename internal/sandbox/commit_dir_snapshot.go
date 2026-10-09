@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,8 +17,15 @@ import (
 	"unicode/utf8"
 )
 
-// ErrCommitDirSnapshot is wrapped by every refusal of SnapshotCommitDir.
+// ErrCommitDirSnapshot is wrapped by every refusal of SnapshotCommitDir: what
+// the commit's objects or the arguments cause, which a second call repeats.
 var ErrCommitDirSnapshot = errors.New("commit directory snapshot")
+
+// ErrCommitDirIO is wrapped by every other failure of SnapshotCommitDir: git
+// could not be executed, the caller's context ended, or the destination
+// could not be written. It never wraps ErrCommitDirSnapshot; a second call
+// may succeed.
+var ErrCommitDirIO = errors.New("commit directory snapshot could not be taken")
 
 const (
 	maxCommitDirFiles     = 2000
@@ -56,6 +64,53 @@ type commitDirEntry struct {
 	size int64
 }
 
+// commitDirGit is reviewGit with its failure typed: a git that ran and exited
+// non-zero is returned as it is (what it read decides, so the caller refuses),
+// and a git that could not be run at all wraps ErrCommitDirIO.
+func commitDirGit(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
+	err := reviewGit(ctx, dir, stdout, args...)
+	var exit *exec.ExitError
+	if err != nil && !errors.As(err, &exit) {
+		return fmt.Errorf("%w: %w", ErrCommitDirIO, err)
+	}
+	return err
+}
+
+// commitDirGitRefuse is the error for a failed commitDirGit: the refusal for
+// a git that exited non-zero, the operational failure unchanged.
+func commitDirGitRefuse(what string, err error) error {
+	if errors.Is(err, ErrCommitDirIO) || errors.Is(err, ErrCommitDirSnapshot) {
+		return err
+	}
+	return commitDirRefuse("%s: %v", what, err)
+}
+
+// commitDirWriteFailed types a failure to write the destination.
+func commitDirWriteFailed(err error) error {
+	if err == nil || errors.Is(err, ErrCommitDirIO) || errors.Is(err, ErrCommitDirSnapshot) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrCommitDirIO, err)
+}
+
+// typeCommitDirError settles what a failed snapshot returns. The caller's
+// context having ended is never a refusal, whatever was being done when it
+// did; the snapshot's own deadline is one (the tree made it slow); a failure
+// nothing typed is operational.
+func typeCommitDirError(parent, ctx context.Context, err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case parent.Err() != nil:
+		return fmt.Errorf("%w: %v: %v", ErrCommitDirIO, parent.Err(), err)
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("%w: deadline of %v exceeded: %v", ErrCommitDirSnapshot, commitDirTimeout, err)
+	case errors.Is(err, ErrCommitDirSnapshot) || errors.Is(err, ErrCommitDirIO):
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrCommitDirIO, err)
+}
+
 func commitDirRefuse(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrCommitDirSnapshot}, args...)...)
 }
@@ -72,21 +127,22 @@ func SnapshotCommitDir(ctx context.Context, repoDir, commitSHA, name, dst string
 	if err := validateCommitDirName(name); err != nil {
 		return CommitDirSnapshot{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, commitDirTimeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, commitDirTimeout)
 	defer cancel()
 	if !commitObjectIDPattern.MatchString(commitSHA) {
 		return CommitDirSnapshot{}, commitDirRefuse("commit %q is not a full object id", commitSHA)
 	}
 	if err := requireDestinationOutside(repoDir, dst); err != nil {
+		// A path that could not be resolved is the filesystem's failure; a
+		// destination in the wrong place is the caller's, every time.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return CommitDirSnapshot{}, fmt.Errorf("%w: %w", ErrCommitDirIO, err)
+		}
 		return CommitDirSnapshot{}, fmt.Errorf("%w: %w", ErrCommitDirSnapshot, err)
 	}
-	defer func() {
-		if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			err = fmt.Errorf("%w: deadline of %v exceeded: %v", ErrCommitDirSnapshot, commitDirTimeout, err)
-		} else if err != nil && !errors.Is(err, ErrCommitDirSnapshot) {
-			err = fmt.Errorf("%w: %w", ErrCommitDirSnapshot, err)
-		}
-	}()
+	defer func() { err = typeCommitDirError(parent, ctx, err) }()
 	if err := requireCommit(ctx, repoDir, commitSHA); err != nil {
 		return CommitDirSnapshot{}, err
 	}
@@ -120,15 +176,15 @@ func requireCommit(ctx context.Context, repoDir, sha string) error {
 	// git resolves an abbreviation of a longer id (a 40-hex prefix in a
 	// 64-hex repository), so the id it prints must be the one given.
 	full := &cappedWriter{max: 128}
-	if err := reviewGit(ctx, repoDir, full, "rev-parse", "--verify", "--end-of-options", sha); err != nil {
-		return commitDirRefuse("commit %s: %v", sha, err)
+	if err := commitDirGit(ctx, repoDir, full, "rev-parse", "--verify", "--end-of-options", sha); err != nil {
+		return commitDirGitRefuse("commit "+sha, err)
 	}
 	if got := strings.TrimSpace(full.buf.String()); got != sha {
 		return commitDirRefuse("commit %s is not a full object id (it is an abbreviation of %s)", sha, got)
 	}
 	out := &cappedWriter{max: 64}
-	if err := reviewGit(ctx, repoDir, out, "cat-file", "-t", sha); err != nil {
-		return commitDirRefuse("commit %s: %v", sha, err)
+	if err := commitDirGit(ctx, repoDir, out, "cat-file", "-t", sha); err != nil {
+		return commitDirGitRefuse("commit "+sha, err)
 	}
 	if got := strings.TrimSpace(out.buf.String()); got != "commit" {
 		return commitDirRefuse("object %s is a %s, not a commit", sha, got)
@@ -163,7 +219,7 @@ func scanCommitDirRecords(ctx context.Context, repoDir string, fn func(commitDir
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		err := reviewGit(ctx, repoDir, pw, args...)
+		err := commitDirGit(ctx, repoDir, pw, args...)
 		pw.CloseWithError(err)
 		done <- err
 	}()
@@ -194,10 +250,8 @@ func scanCommitDirRecords(ctx context.Context, repoDir string, fn func(commitDir
 		err = gerr
 	}
 	if err != nil {
-		if errors.Is(err, ErrCommitDirSnapshot) {
-			return err
-		}
-		return commitDirRefuse("read tree: %v", err)
+		// A git that could not run reaches here through the pipe too.
+		return commitDirGitRefuse("read tree", err)
 	}
 	return nil
 }
@@ -325,10 +379,13 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 		dstExisted = false
 	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return CommitDirSnapshot{}, err
+		return CommitDirSnapshot{}, commitDirWriteFailed(err)
 	}
-	if err := os.Mkdir(root, 0o755); err != nil {
+	if err := os.Mkdir(root, 0o755); errors.Is(err, fs.ErrExist) {
+		// The caller's destination already holds one: the same every time.
 		return CommitDirSnapshot{}, commitDirRefuse("create %s: %v", root, err)
+	} else if err != nil {
+		return CommitDirSnapshot{}, commitDirWriteFailed(fmt.Errorf("create %s: %w", root, err))
 	}
 	defer func() {
 		if err != nil {
@@ -354,7 +411,7 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 		}
 	}
 	if err := lockCommitDir(root); err != nil {
-		return snap, err
+		return snap, commitDirWriteFailed(err)
 	}
 	mask := WorkspaceMask{Source: root, Target: name, Dir: true}
 	if err := validateWorkspaceMask(mask, ""); err != nil {
@@ -362,16 +419,21 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 	}
 	sum, err := hashSnapshot(root, []WorkspaceMask{mask})
 	if err != nil {
-		return snap, err
+		return snap, commitDirWriteFailed(err)
 	}
 	return CommitDirSnapshot{Mask: &mask, TreeOID: tree, SHA256: sum, Files: nfiles}, nil
 }
 
 func writeCommitDirFile(ctx context.Context, repoDir, out string, e commitDirEntry) error {
-	body, err := readBlob(ctx, repoDir, e.oid, maxCommitDirBlobBytes)
-	if err != nil {
-		return err
+	blob := &cappedWriter{max: maxCommitDirBlobBytes}
+	if err := commitDirGit(ctx, repoDir, blob, "cat-file", "blob", e.oid); err != nil {
+		// A blob git cannot read (missing, corrupt) is the tree's doing.
+		return commitDirGitRefuse("read "+strconv.Quote(e.path), err)
 	}
+	if blob.over > 0 {
+		return commitDirRefuse("%s is over %d bytes", strconv.Quote(e.path), maxCommitDirBlobBytes)
+	}
+	body := blob.buf.Bytes()
 	if int64(len(body)) != e.size {
 		return commitDirRefuse("%s read %d bytes, listed %d", strconv.Quote(e.path), len(body), e.size)
 	}
@@ -390,18 +452,19 @@ func writeCommitDirFile(ctx context.Context, repoDir, out string, e commitDirEnt
 		werr = cerr
 	}
 	if werr != nil {
-		return werr
+		return commitDirWriteFailed(werr)
 	}
-	return os.Chmod(out, mode)
+	return commitDirWriteFailed(os.Chmod(out, mode))
 }
 
 // commitDirCollision is the refusal for a path the destination already holds
-// (two names the filesystem folds together) or cannot create.
+// (two names the filesystem folds together); a path it cannot create for any
+// other reason is a failure to write the destination.
 func commitDirCollision(p string, err error) error {
 	if errors.Is(err, fs.ErrExist) {
 		return commitDirRefuse("%s already exists on the destination filesystem: it folds to another name in the same directory", strconv.Quote(p))
 	}
-	return commitDirRefuse("create %s: %v", strconv.Quote(p), err)
+	return commitDirWriteFailed(fmt.Errorf("create %s: %w", strconv.Quote(p), err))
 }
 
 // lockCommitDir makes every directory 0555, children before parents.

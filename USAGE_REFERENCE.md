@@ -634,7 +634,7 @@ judges it with.
 | The commit has no `.factory/` and the worktree does | An empty read-only directory is mounted over it |
 | What now fails | A command that writes into `.factory/`: a cache or report written there, `chmod +x .factory/*`. Commit the executable bit (`git update-index --chmod=+x`) and write output elsewhere (a gitignored directory, `/tmp`) |
 | A build that changes it | Its edit is not what the gates run, and the result is refused at release: `.factory/` is a protected path |
-| Evidence | `factory_dir_sha256` and `factory_dir_commit` on every attempt that had the mount (the same hash for every attempt of a run; absent on a review attempt and when neither the commit nor the worktree has the directory) |
+| Evidence | `factory_dir_sha256` and `factory_dir_commit` on every attempt that had the mount. The hash is the same for every attempt that mounted the commit's directory. An attempt records none when nothing was mounted (a review attempt, or neither the commit nor the worktree had the directory at that launch) and the empty snapshot's hash when an empty directory was mounted over a `.factory/` only the worktree has, so a run whose build creates the directory has both |
 | Not covered | Files outside `.factory/` that a script there calls (`sh .factory/lint.sh` running `scripts/check.py`, or `verify_command: make test`): those run as the build left them |
 
 | Halts the run before the sandbox starts (`halt_reason_code` `factory_dir_failed`) | What to change |
@@ -643,7 +643,10 @@ judges it with.
 | `.factory` in the worktree is a file or a symlink, or the worktree root holds another spelling (`.Factory`) | Make it one real directory named `.factory` in the repository |
 | `.factory/` at the commit holds a symlink, a submodule, names that differ only by case, or exceeds a limit above | Replace the link with the file, move the submodule, keep one spelling, or move large files out |
 
-The halt is not retried and is not an infrastructure failure. `factoryd
+The halt is not retried and is not an infrastructure failure; a snapshot that
+could not be taken for another reason (git could not run, the worker was
+stopping, the run's directory could not be written) is one, and is retried
+like any other. `factoryd
 status` quotes the reason, which names the path; it is on the refused attempt
 as `factory_dir_error`. On the baseline verify, the first sandbox of a run,
 this stops the run before any model call.
