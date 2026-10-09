@@ -734,6 +734,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
+	args = withEarlierAttemptOf(dataDir, r, ticket, args)
 	if resumeRunID != "" {
 		// The adopted worktree already holds the earlier tickets' work, and
 		// -resume-worktree-of refuses -prior-run.

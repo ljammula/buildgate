@@ -6,7 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"buildgate/internal/evidence"
 	"buildgate/internal/handoff"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
@@ -84,6 +86,9 @@ func TestAdvanceBuildingCheckCorrectiveRoundGivesTheBuildTheHandoff(t *testing.T
 	record, err := os.ReadFile(argValue(*lastArgs, "-earlier-attempt"))
 	if err != nil {
 		t.Fatalf("read -earlier-attempt: %v", err)
+	}
+	if !strings.HasPrefix(string(record), "This build continues on that attempt's branch: what it committed is in the workspace.") {
+		t.Errorf("the record does not open by saying where the build starts:\n%s", record)
 	}
 	for _, want := range []string{"# What the earlier attempt left (run " + id + "-001)", "- `lint` failed (exit 2)", "- Round 1: changed `sum.go`; fail (verify)"} {
 		if !strings.Contains(string(record), want) {
@@ -385,6 +390,112 @@ func TestCheckCorrectiveRoundKeepsTheDiffScopeCheckOnTheRequest(t *testing.T) {
 			}
 			if loaded.State != request.StateQuarantined || loaded.QuarantineCheck != request.QuarantineCheckDiffScope {
 				t.Errorf("request = %q with check %q, want quarantined naming diff_scope", loaded.State, loaded.QuarantineCheck)
+			}
+		})
+	}
+}
+
+// TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt: after `factoryd
+// retry`, the ticket is rebuilt as an ordinary run from the base, and that
+// build is told what the quarantined attempt failed on, when a build may be
+// told. It is not a corrective round and uses none of that budget.
+func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
+	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
+	flagged := func(rr *run.Run) {
+		rr.GateResults = []run.GateResult{{Check: "spec_conformity", Passed: false}}
+		rr.SpecConformityVerdicts = []run.ReviewVerdict{{Criterion: "2. rejects a negative amount", Verdict: "flagged", Detail: "no test covers it"}}
+	}
+	for name, tc := range map[string]struct {
+		failed []string
+		// shape changes the quarantined run after it is built as an
+		// ordinary one of this request, built from the ticket's spec.
+		shape      func(rr *run.Run)
+		wantRecord string
+	}{
+		"a gate a build can fix":                            {[]string{"lint"}, nil, "- `lint` failed (exit 2)"},
+		"only a review failed, with a verdict":              {nil, flagged, "rejects a negative amount"},
+		"a check a build is never told of":                  {[]string{"lint", "tests_added"}, nil, ""},
+		"the run is another request's":                      {[]string{"lint"}, func(rr *run.Run) { rr.RequestID = "some-other-request" }, ""},
+		"the ticket's spec changed since":                   {[]string{"lint"}, func(rr *run.Run) { rr.SpecSHA256 = strings.Repeat("0", 64) }, ""},
+		"the handoff was changed after the run recorded it": {[]string{"lint"}, func(rr *run.Run) { rr.HandoffSHA256 = strings.Repeat("0", 64) }, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			dataDir, id := buildingFixture(dp, t, 1)
+			branch := "factoryd/" + id + "-001"
+			var builds [][]string
+			buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+				builds = append(builds, args)
+				ticket := argValue(args, "-ticket")
+				if onReady != nil {
+					onReady(&run.Run{ID: ticket})
+				}
+				if len(builds) > 1 {
+					return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, Branch: branch, RequestID: id}).Save(dataDir)
+				}
+				rr := quarantinedOn(t, dataDir, ticket, branch, base, result, tc.failed...)
+				rr.RequestID = id
+				sum, err := evidence.SHA256File(argValue(args, "-spec"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				rr.SpecSHA256 = sum
+				if tc.shape != nil {
+					tc.shape(rr)
+				}
+				if rr.HandoffSHA256 != strings.Repeat("0", 64) {
+					if err := handoff.Sync(rr, dataDir); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return rr.Save(dataDir)
+			}
+			// No corrective budget: the first quarantine stands until a human retries.
+			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 0}
+			drive := func() {
+				t.Helper()
+				if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+					t.Fatalf("driveRequests: %v", err)
+				}
+			}
+			drive()
+			quarantined, err := request.Load(dataDir, id)
+			if err != nil || quarantined.State != request.StateQuarantined {
+				t.Fatalf("after the first build: %v, %v, want quarantined", quarantined.State, err)
+			}
+			if got := argValue(builds[0], "-earlier-attempt"); got != "" {
+				t.Fatalf("the ticket's first build was given a record: %q", got)
+			}
+			if handled, err := retryRequest(dp, dataDir, quarantined, "", time.Now()); err != nil || !handled {
+				t.Fatalf("retryRequest: handled %v, err %v", handled, err)
+			}
+			drive()
+			if len(builds) != 2 {
+				t.Fatalf("builds = %d, want the first and the retry's", len(builds))
+			}
+			rebuild := builds[1]
+			if got := argValue(rebuild, "-on-branch"); got != "" {
+				t.Errorf("the rebuild runs -on-branch %q, want an ordinary run from the base", got)
+			}
+			recordPath := argValue(rebuild, "-earlier-attempt")
+			if (recordPath != "") != (tc.wantRecord != "") {
+				t.Fatalf("-earlier-attempt = %q, want a record: %v", recordPath, tc.wantRecord != "")
+			}
+			if tc.wantRecord != "" {
+				record, err := os.ReadFile(recordPath)
+				if err != nil || !strings.Contains(string(record), tc.wantRecord) {
+					t.Errorf("the record = %q, %v, want %q", record, err, tc.wantRecord)
+				}
+				if !strings.HasPrefix(string(record), "This build starts again from the base commit: none of that attempt's changes are in the workspace") {
+					t.Errorf("the record does not open by saying the workspace starts from the base:\n%s", record)
+				}
+			}
+			loaded, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded.Tickets[0].Rounds) != 0 {
+				t.Errorf("Rounds = %+v, want none: a retry is not a corrective round", loaded.Tickets[0].Rounds)
 			}
 		})
 	}
