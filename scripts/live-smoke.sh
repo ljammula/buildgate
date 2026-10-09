@@ -144,12 +144,28 @@ if [ "${1:-}" = "--list" ]; then
 	exit 0
 fi
 
-# LIVE_SMOKE_JOBS=<n> (default 1) runs up to n fixtures at once: each as its
-# own run of this script on that one fixture, with its own scratch directory
-# and data dir, its output held back and printed whole in fixture order. The
-# fixtures share nothing but the model route, so n is bounded by what the
-# route serves at once: leave it at 1 on a single-instance local model.
-LIVE_SMOKE_JOBS="${LIVE_SMOKE_JOBS:-1}"
+# Up to LIVE_SMOKE_JOBS fixtures run at once: each as its own run of this
+# script on that one fixture, with its own scratch directory and data dir, its
+# output held back and printed whole in fixture order.
+#
+# Unset, the number comes from the machine as it is now (smoke_jobs below):
+# 6 GiB of free host memory and 4 GiB of the Docker VM's memory per fixture,
+# at most 4. A 16 GiB Mac gets 1, the sequential run. LIVE_SMOKE_JOBS=<n>
+# overrides it; set 1 on a single-instance local model route, which serves
+# one build at a time whatever the machine has.
+smoke_jobs() {
+	host="$("$REPO_ROOT/scripts/parallel-jobs.sh" 6 4 2>/dev/null || echo 1)"
+	vm_bytes="$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)"
+	case "$vm_bytes" in '' | *[!0-9]*) vm_bytes=0 ;; esac
+	vm=$((vm_bytes / 1024 / 1024 / 1024 / 4))
+	[ "$vm" -ge 1 ] || vm=1
+	[ "$host" -le "$vm" ] || host="$vm"
+	echo "$host"
+}
+if [ -z "${LIVE_SMOKE_JOBS:-}" ]; then
+	LIVE_SMOKE_JOBS="$(smoke_jobs)"
+	echo "live-smoke: $LIVE_SMOKE_JOBS fixture(s) at a time, sized from this machine's free memory (LIVE_SMOKE_JOBS=<n> overrides)"
+fi
 case "$LIVE_SMOKE_JOBS" in '' | *[!0-9]* | 0) echo "live-smoke: LIVE_SMOKE_JOBS must be a positive integer, got '$LIVE_SMOKE_JOBS'" >&2; exit 2 ;; esac
 if [ "$LIVE_SMOKE_JOBS" -gt 1 ]; then
 	mkdir -p "$HOME/buildgate/live-smoke"

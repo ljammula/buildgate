@@ -100,6 +100,13 @@ make console-test   # console: cd console && npm ci && npm run check
 python3 -m pytest agent/pi/tests/       # Python, agent/pi (every harness adapter)
 ```
 
+`make checks` runs the three as one command (`CHECKS_LIVE=1` adds
+`make live-smoke`): one after another on a machine the size of a 16 GiB Mac,
+all at once when 32 GiB or more is free. `make live-smoke` sizes how many
+fixtures it runs at a time the same way. Both read the machine each time;
+`CHECKS_PARALLEL=0|1` and `LIVE_SMOKE_JOBS=<n>` in a machine's own environment
+override them (`LIVE_SMOKE_JOBS=1` on a single-instance local model route).
+
 Run whichever toolchain(s) your change actually touches. `make verify`
 alone does not cover a console or Python change, and vice versa.
 `.github/workflows/ci.yml` is manual-only (`workflow_dispatch`) by

@@ -49,6 +49,10 @@ class LiveSmokeRecordingTest(unittest.TestCase):
                 # Two fixtures, run at once as two child runs of the script.
                 env["LIVE_SMOKE_FIXTURES"] += "\n%s:%s:%s-second" % (source_repo, spec_file, fixture_label)
                 env["LIVE_SMOKE_JOBS"] = str(jobs)
+            else:
+                # The recording tests are about one sequential run, whatever
+                # the machine they run on has.
+                env["LIVE_SMOKE_JOBS"] = "1"
             env["STUB_FACTORYD_STATE"] = state
             # The stub records a temporal_workflow_id unless told not to.
             env.pop("LIVE_SMOKE_TEMPORAL", None)
