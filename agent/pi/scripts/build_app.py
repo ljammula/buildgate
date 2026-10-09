@@ -554,8 +554,9 @@ def handoff_preamble(handoff_text: str) -> str:
 def earlier_attempt_preamble(record_text: str) -> str:
 	"""Header plus the factory's record of an earlier attempt at this ticket
 	that finished and then failed its checks. Unlike a handoff (an interrupted
-	attempt whose work is in the workspace), that attempt is over: this build
-	starts from what it committed, or from the base when it committed nothing."""
+	attempt whose work is in the workspace), that attempt is over. Where this
+	build starts (that attempt's branch, or the base again) is the record's
+	own first sentence, written by whoever started this build."""
 	return (
 		"An earlier attempt at this ticket finished its build and was not accepted: it failed "
 		"the checks listed below. You have no memory of that attempt. What follows is the "

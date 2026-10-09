@@ -3,11 +3,13 @@ package requestdriver
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"buildgate/internal/evidence"
 	"buildgate/internal/handoff"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
@@ -80,12 +82,21 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 // check), a halt, a run with no handoff, and a run only the reviews
 // failed (TryReviewCorrectiveRound's case).
 func correctableByABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
-	if quarantined.State != run.StateQuarantined || quarantined.HandoffSHA256 == "" {
-		return handoff.Document{}, false
-	}
 	// A quarantine by the two reviews alone is the review round's: when
 	// that round found nothing to address, neither is there here.
 	if reviewShapeOnly(quarantined) {
+		return handoff.Document{}, false
+	}
+	return handoffForABuild(dataDir, quarantined)
+}
+
+// handoffForABuild loads a quarantined run's handoff when a build may be
+// given it: the run recorded one, the file is the one it recorded and
+// describes the state the run is in (handoff.Load), and what its failed
+// checks allow is "corrective" (see correctableByABuild for the reference
+// oracle).
+func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
+	if quarantined.State != run.StateQuarantined || quarantined.HandoffSHA256 == "" {
 		return handoff.Document{}, false
 	}
 	doc, err := handoff.Load(run.Dir(dataDir, quarantined.ID), quarantined.HandoffSHA256, quarantined.State)
@@ -96,6 +107,74 @@ func correctableByABuild(dataDir string, quarantined *run.Run) (handoff.Document
 		return handoff.Document{}, false
 	}
 	return doc, true
+}
+
+// withEarlierAttemptOf gives a ticket's rebuild the factory's record of the
+// attempt it follows: after `factoryd retry`, the ticket's last run is the
+// quarantined one, and when its handoff is one a build may be given
+// (handoffForABuild) the fresh build is told what that attempt failed on
+// instead of starting from the spec alone. The rebuild itself is unchanged:
+// a new run from the base, the ticket's own spec, every gate again.
+//
+// Anything else adds nothing: a ticket's first build, a run that was
+// accepted or halted, a run of another request, a ticket whose spec has
+// changed since (sameSpec), a failure a build is never told about, a
+// handoff the run does not vouch for. An error writing the record is logged and the
+// build goes ahead without it; the record is an aid, never a condition.
+func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string) []string {
+	if ticket.RunID == "" {
+		return args
+	}
+	previous, err := run.Load(dataDir, ticket.RunID)
+	// The record of another request's run is never this build's.
+	if err != nil || previous.RequestID != r.ID {
+		return args
+	}
+	// The ticket's spec has changed since that attempt (an amended scope, an
+	// edited ticket): what it failed on was judged against another task, and
+	// telling the build "the task has not changed" would be false.
+	if !sameSpec(previous, argValueOf(args, "-spec")) {
+		return args
+	}
+	doc, ok := handoffForABuild(dataDir, previous)
+	if !ok {
+		return args
+	}
+	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-retry", ticket.Index))
+	path, err := writeRecordFile(dir, doc, startsFromBase)
+	if err != nil {
+		log.Printf("request %s: ticket %d: the rebuild goes ahead without the record of run %s: %v", r.ID, ticket.Index, previous.ID, err)
+		return args
+	}
+	log.Printf("request %s: ticket %d/%d: the rebuild is given the record of run %s (failed %s)", r.ID, ticket.Index, r.TicketCount, previous.ID, failedCheckNames(doc))
+	return append(args, "-earlier-attempt", path)
+}
+
+// The sentence a record opens with, saying where the build that reads it
+// starts: the two cases differ in whether the earlier attempt's changes are
+// in the workspace.
+const (
+	startsOnItsBranch = "This build continues on that attempt's branch: what it committed is in the workspace."
+	startsFromBase    = "This build starts again from the base commit: none of that attempt's changes are in the workspace, and the commit and files named below are not there."
+)
+
+// sameSpec reports whether specPath holds the spec previous was built from.
+func sameSpec(previous *run.Run, specPath string) bool {
+	if previous.SpecSHA256 == "" || specPath == "" {
+		return false
+	}
+	sum, err := evidence.SHA256File(specPath)
+	return err == nil && sum == previous.SpecSHA256
+}
+
+// argValueOf returns the value following flag in argv, "" when absent.
+func argValueOf(argv []string, flag string) string {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag {
+			return argv[i+1]
+		}
+	}
+	return ""
 }
 
 // failedCheckNames lists the checks a handoff's attempt was judged to have
@@ -115,12 +194,16 @@ func failedCheckNames(doc handoff.Document) string {
 // path. The file is the factory's: it is written outside any workspace, and
 // the build receives a read-only copy.
 func writeEarlierAttemptRecord(dataDir, requestID string, ticket *request.Ticket, doc handoff.Document, roundIndex int) (string, error) {
-	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-corrective%d", ticket.Index, roundIndex))
+	return writeRecordFile(filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-corrective%d", ticket.Index, roundIndex)), doc, startsOnItsBranch)
+}
+
+// writeRecordFile writes start, then doc, as earlier-attempt.md in dir.
+func writeRecordFile(dir string, doc handoff.Document, start string) (string, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, "earlier-attempt.md")
-	if err := os.WriteFile(path, []byte(doc.Markdown()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(start+"\n\n"+doc.Markdown()), 0o600); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil

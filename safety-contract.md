@@ -391,6 +391,9 @@ requires a new contract review and an updated machine-checkable test.
   directory first); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it. What the build agent itself chooses to write into the
   workspace is an ordinary part of its diff, judged like the rest.
+  A ticket rebuilt after `factoryd retry` is given the record of its own
+  quarantined run on the same terms, and only while the ticket's spec is the
+  one that run was built from.
   A corrective build follows a quarantined ticket run only when the handoff
   sorts every judged failed check as one a build can fix when told about it:
   `canonical_verify`, `full_suite_verify`, the named command gates, a

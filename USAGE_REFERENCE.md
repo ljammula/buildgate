@@ -190,6 +190,15 @@ halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
 
+`factoryd retry <id>` rebuilds the quarantined ticket as an ordinary run from
+the base, and when the quarantined run's handoff is one a build may be given
+(the same rule, review-only failures included) that build also receives it as
+`-earlier-attempt` (`rounds/<ticket>-retry/earlier-attempt.md`), whose first
+sentence says the workspace starts from the base. It is left out when the
+ticket's spec has changed since that run (after `amend-scope` or an edit). A
+retry is not a corrective round: it uses none of that budget and records no
+round.
+
 **`-on-branch`/`-diff-base`.** Both travel in the workflow input
 (`RunWorkflowInput.OnBranch`/`DiffBaseSHA`): a corrective
 round checks out the quarantined run's own existing branch
