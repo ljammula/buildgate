@@ -2613,6 +2613,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 		self.assertIn("after your turn the harness runs `go test ./...`", prompt)
 		self.assertIn("1. Run the narrowest tests that cover your change", prompt)
 		self.assertIn("never rewrite history", prompt)
+		self.assertIn("6. The `.factory/` directory, when the repository has one, is mounted read-only: do not edit, add or remove anything under it.", prompt)
 
 	def test_checklist_falls_back_to_the_tickets_verify_command(self):
 		self.assertIn("the ticket's `Verify-Command`", build_app.build_round_checklist(None))

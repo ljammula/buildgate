@@ -358,6 +358,54 @@ func readCommitted(abs string) ([]byte, bool, error) {
 	return headData, true, nil
 }
 
+// HeadCommit returns the full id of the commit HEAD names in the repository
+// workspaceDir is in: the commit Load reads .factory.yml from. It is "" when
+// workspaceDir is not inside a git repository or the repository has no
+// commit yet, the two cases in which Load reads the worktree file.
+func HeadCommit(workspaceDir string) string {
+	abs, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		return ""
+	}
+	out, err := exec.Command("git", "-C", abs, "rev-parse", "--verify", "-q", "HEAD^{commit}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ConfirmReadCommit returns the commit a Load of workspaceDir read
+// .factory.yml from, after proving it: HEAD is still the commit it was
+// before the read (before, "" to skip that half) and that commit's
+// .factory.yml hashes to sha256, the Config.SHA256 Load returned ("" when
+// Load found no file, which the commit must then lack too). A repository with
+// no commit returns "" and no error. An error means HEAD moved while the
+// file was being read, so the caller cannot name one commit for what it read.
+func ConfirmReadCommit(workspaceDir, before, sha256Hex string) (string, error) {
+	head := HeadCommit(workspaceDir)
+	if head == "" {
+		return "", nil
+	}
+	if before != "" && before != head {
+		return "", fmt.Errorf("HEAD moved from %s to %s while %s was read; run again", before, head, FileName)
+	}
+	abs, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", workspaceDir, err)
+	}
+	// The same read Load makes, by commit id rather than by HEAD.
+	data, showErr := exec.Command("git", "-C", abs, "show", head+":"+FileName).Output()
+	got := ""
+	if showErr == nil {
+		sum := sha256.Sum256(data)
+		got = hex.EncodeToString(sum[:])
+	}
+	if got != sha256Hex {
+		return "", fmt.Errorf("%s as commit %s holds it is not the file that was read (HEAD moved while it was read); run again", FileName, head)
+	}
+	return head, nil
+}
+
 // readWorktreeFile is the fallback path for a directory with no committed
 // tree to prefer (not a git repo, or a git repo with no HEAD commit yet).
 func readWorktreeFile(dir string) ([]byte, bool, error) {

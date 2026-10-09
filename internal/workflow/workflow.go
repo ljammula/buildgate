@@ -185,6 +185,13 @@ const (
 	// infrastructure failure: a rerun repeats it. Its message is fixed; the
 	// cleaned cause travels only in the attempt in its details.
 	ReviewInstructionsFailureType = "ReviewInstructionsFailure"
+	// FactoryDirFailureType marks a launch refused because `.factory/` could
+	// not be mounted read-only as the commit .factory.yml was read from
+	// holds it (sandbox.ErrCommitDirMount): that commit's directory, or the
+	// worktree's entry of that name, has a shape the mount cannot carry. No
+	// sandbox starts and the run halts. Never an infrastructure failure: a
+	// rerun repeats it.
+	FactoryDirFailureType = "FactoryDirFailure"
 	// AmbiguousPriorAttemptType marks a RunBuildActivity/RunVerifyActivity
 	// failure raised when a durable intent record shows a prior attempt
 	// started the subprocess but never reached its completed checkpoint —

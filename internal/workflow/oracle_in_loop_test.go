@@ -196,6 +196,7 @@ func sandboxedBuildInput(t *testing.T, docker string, dataDir string) RunWorkflo
 	t.Helper()
 	in := fixtureInput()
 	in.WorkspacePath = t.TempDir()
+	in.ProjectConfigCommitSHA = trustedCommit(t, in.WorkspacePath)
 	// A real spec file: the sandbox launch stages it into the container's
 	// /inputs mount, unlike the fake-runner tests above that never read it.
 	in.SpecPath = filepath.Join(t.TempDir(), "spec.md")

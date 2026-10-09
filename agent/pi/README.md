@@ -9,7 +9,7 @@ and [`USAGE.md`](../../USAGE.md).
 
 | Script | Role | `factoryd` flag |
 |---|---|---|
-| `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only oracles, no history rewrites). Every later round continues the same harness session and is told what the round before it left (see "What a failed round hands the next one") | `-build-app-script` |
+| `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only oracles, the read-only `.factory/`, no history rewrites). Every later round continues the same harness session and is told what the round before it left (see "What a failed round hands the next one") | `-build-app-script` |
 | `round_feedback.py` | Pure helpers for that: the excerpt of a failing command's output, the names it reports failing, an id for "the same failure", the per-round history, and the note for a failure of the agent process itself | imported by `build_app.py` |
 | `goal_pilot.py` | Spec/contract/ticket drafting | `-goal-pilot-script` |
 | `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |

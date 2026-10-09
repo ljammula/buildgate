@@ -592,7 +592,7 @@ sandbox; `autofix:` runs inside each build round only.
 | Shape | List of strings, one command per entry |
 | Limits | At most 8 entries per key, 2000 bytes per entry, one line each (no newline, carriage return or NUL byte), none blank |
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is read from |
-| Status | Both run, as below. Both are recorded on the run (`project_config_sha256`) |
+| Status | Both run, as below. Both are recorded on the run (`project_config_sha256`, and `project_config_commit_sha`: the commit the file was read from) |
 
 Where `setup:` runs, in the order listed, each command by `sh -c` in the
 workspace; the command of the step follows only when all passed:
@@ -618,6 +618,35 @@ workspace; the command of the step follows only when all passed:
 | Scope | It may change only files the ticket's build has changed so far (paths that differ from the commit the build started from, or are untracked and not ignored, before autofix ran). Any other path it changed is restored to that commit's content (a file it lacks is deleted) and listed; a submodule or directory entry is never rewritten. Its edits never count as the agent's work: a round where only autofix changed files is still "no changes". Each command runs in its own process group, which is stopped when the command returns or times out, so background work cannot write after the check; a process that detaches into its own session is not stopped and ends with the build's container |
 | Evidence | `autofix` on each round of the build evidence: per command `command` (first 200 characters), `exit_code`, `timed_out`, `duration_s`, and `reverted_count` with the first 20 `reverted` paths (only paths actually restored or deleted), `revert_failed_count` with the first 20 `revert_failed` paths, `scope_check_failed`, and `skipped` when it did not run. The output and any revert are in `autofix.log` in the round's feedback folder |
 | Limits | 8 entries, 2000 bytes and one line each, 5 minutes per command: up to 40 minutes a round, inside the build's own time limit |
+
+**The `.factory/` directory.** Scripts the commands above call
+(`lint_command: sh .factory/lint.sh`) go in `.factory/` at the repository
+root. Every sandbox that runs a repository command sees that directory as a
+trusted commit holds it, read-only, so a build cannot change the script a gate
+judges it with.
+
+| | |
+|---|---|
+| What it is | The directory `.factory/` at the repository root, committed. Regular files and subdirectories only: a symlink or a submodule in it, two names that differ only by letter case, more than 2,000 files, a file over 4 MiB or 16 MiB in all is refused |
+| Which commit | The commit `.factory.yml` was read from: `HEAD` of your checkout when the run was dispatched (`project_config_commit_sha` on the run), also for a repository with no `.factory.yml` |
+| Mounted read-only in | The baseline verify, the build, canonical verify, the full suite, each named and repo gate, the oracle canary and the reruns after an oracle commit, at `/workspace/.factory`. A new snapshot is taken from git objects before each launch |
+| Not mounted in | Review sandboxes; drafting and planning jobs (they run no repository command) |
+| The commit has no `.factory/` and the worktree does | An empty read-only directory is mounted over it |
+| What now fails | A command that writes into `.factory/`: a cache or report written there, `chmod +x .factory/*`. Commit the executable bit (`git update-index --chmod=+x`) and write output elsewhere (a gitignored directory, `/tmp`) |
+| A build that changes it | Its edit is not what the gates run, and the result is refused at release: `.factory/` is a protected path |
+| Evidence | `factory_dir_sha256` and `factory_dir_commit` on every attempt that had the mount (the same hash for every attempt of a run; absent on a review attempt and when neither the commit nor the worktree has the directory) |
+| Not covered | Files outside `.factory/` that a script there calls (`sh .factory/lint.sh` running `scripts/check.py`, or `verify_command: make test`): those run as the build left them |
+
+| Halts the run before the sandbox starts (`halt_reason_code` `factory_dir_failed`) | What to change |
+|---|---|
+| The commit has `.factory/` and the run's worktree has no such directory (the run builds on a branch or commit older than the one that added it, or a build deleted it) | Rebase the branch onto the commit that has `.factory/`, or start the request again from it |
+| `.factory` in the worktree is a file or a symlink, or the worktree root holds another spelling (`.Factory`) | Make it one real directory named `.factory` in the repository |
+| `.factory/` at the commit holds a symlink, a submodule, names that differ only by case, or exceeds a limit above | Replace the link with the file, move the submodule, keep one spelling, or move large files out |
+
+The halt is not retried and is not an infrastructure failure. `factoryd
+status` quotes the reason, which names the path; it is on the refused attempt
+as `factory_dir_error`. On the baseline verify, the first sandbox of a run,
+this stops the run before any model call.
 
 **Named gates.** `lint_command`/`security_command`/`unit_test_command`/
 `integration_test_command`/`reference_oracle_command` (flags:

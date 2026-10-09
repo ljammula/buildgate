@@ -40,6 +40,7 @@
   "log_dir": "<DATA_DIR>/runs/<RUN_ID>",
   "max_rounds": 7,
   "no_commit_oracles": true,
+  "project_config_commit_sha": "<BASE_SHA>",
   "reference_oracle_dir": "<INPUTS>/oracle",
   "reference_oracle_in_loop_retry": true,
   "reference_oracle_mount_path": "verify",

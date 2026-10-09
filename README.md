@@ -278,7 +278,7 @@ that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
 | | Area |
 |---|---|
 | ✅ Works, live-proven | The request pipeline end to end (spec review, plan review, sandboxed build, gates, PR) on several real repos; every build on Temporal; the OpenShell sandbox runtime; `quickstart` onboarding; the operator console; `pi` and `codex` harnesses on every role; compose sidecars (Postgres, Kafka, Redis) |
-| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:` and `autofix:` |
+| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:` and `autofix:`; gate scripts under `.factory/` mounted read-only from the commit the config was read from |
 | 🟡 Opt-in or partial | Acceptance oracles (`submit -draft-oracles`, Go and Python); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
 | ⬛ Never, by design | Automatic merge or deploy; a host-execution path |
 
@@ -289,6 +289,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 - **A lost step is never retried automatically.** Sleep, crash or stop halts the run and keeps the work; you choose `factoryd resume`, `resume -from scratch` or `cancel`.
 - **The repository must be under `$HOME`.** The sandbox gateway sees nothing else.
 - **Your own worker image needs a `make` built without `posix_spawn`**; build it on the image `make install` produces (`make project-sandbox-image`). `su` and `sudo` fail in the sandbox too.
+- **A gate script is protected only under `.factory/`.** That directory is mounted read-only into every build, verify and gate sandbox as the commit `.factory.yml` was read from holds it; a script there that calls files outside it runs the build's copy of them, as `verify_command: make test` does.
 - **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
 - **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
 - **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.

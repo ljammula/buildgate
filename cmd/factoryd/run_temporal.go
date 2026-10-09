@@ -365,6 +365,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		GateCommands:                     o.GateCommands,
 		SetupCommands:                    o.SetupCommands,
 		AutofixCommands:                  o.AutofixCommands,
+		ProjectConfigCommitSHA:           o.ProjectConfigCommitSHA,
 		ReferenceOracleDir:               o.ReferenceOracleDir,
 		ReferenceOracleMountPath:         o.ReferenceOracleMountPath,
 		ReferenceOracleInLoopRetry:       o.Slice.ReferenceOracleInLoopRetry,

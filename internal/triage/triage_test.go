@@ -365,6 +365,21 @@ func TestTriageRun(t *testing.T) {
 			want: "halted before the build: baseline verify failed: tests/test_pager.py::test_less; the ticket does not name it",
 		},
 		{
+			name: "halted on a .factory directory the mount cannot carry",
+			setup: func(t *testing.T, dataDir string) *run.Run {
+				return &run.Run{ID: id, State: run.StateHalted, HaltReasonCode: run.HaltReasonFactoryDirFailed, HaltError: "temporal workflow did not complete: ...",
+					Attempts: []run.Attempt{{Kind: "baseline_verify", ExitCode: -1, FactoryDirError: ".factory in the worktree is not a directory (L---------)"}}}
+			},
+			want: `halted (operator finding): .factory/ cannot be mounted read-only: ".factory in the worktree is not a directory (L---------)"`,
+		},
+		{
+			name: "halted on a .factory directory with no recorded reason",
+			setup: func(t *testing.T, dataDir string) *run.Run {
+				return &run.Run{ID: id, State: run.StateHalted, HaltReasonCode: run.HaltReasonFactoryDirFailed, HaltError: "temporal workflow did not complete: ..."}
+			},
+			want: "halted (operator finding): .factory/ cannot be mounted read-only as the commit .factory.yml was read from holds it; see the refused attempt's record",
+		},
+		{
 			name: "halted waiting for the compose sidecar slot",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{ID: id, State: run.StateHalted, HaltError: "acquire compose services slot: timed out waiting for the host-wide compose sidecar slot (compose_services_concurrency) held by run-a (pid 7): context deadline exceeded"}

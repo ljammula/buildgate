@@ -360,15 +360,16 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 			ResumedFromCheckpoint: resumed.SnapshotSHA,
 			Command:               res.Command,
 			SetupSHA256:           run.SetupDigest(input.SetupCommands),
-			StartedAt:             res.StartedAt.Format(time.RFC3339),
-			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
-			ExitCode:              res.ExitCode,
-			LogPath:               logPath(attempt),
-			ImageDigest:           res.ImageDigest,
-			HarnessScriptsSHA256:  res.ScriptsSHA256,
-			Skills:                res.Skills,
-			SkillsSHA256:          res.SkillsSHA256,
-			RepoSkills:            res.RepoSkills,
+			FactoryDirSHA256:      res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
+			StartedAt:            res.StartedAt.Format(time.RFC3339),
+			FinishedAt:           res.FinishedAt.Format(time.RFC3339),
+			ExitCode:             res.ExitCode,
+			LogPath:              logPath(attempt),
+			ImageDigest:          res.ImageDigest,
+			HarnessScriptsSHA256: res.ScriptsSHA256,
+			Skills:               res.Skills,
+			SkillsSHA256:         res.SkillsSHA256,
+			RepoSkills:           res.RepoSkills,
 			// Role/Thinking: roles.execution's own resolved values,
 			// threaded through RunWorkflowInput.Thinking (see its own doc
 			// comment) -- every build round, corrective retries included,
@@ -481,10 +482,8 @@ func buildActivityErrorType(runErr error) string {
 		return RelayCeilingExceededFailureType
 	case errors.Is(runErr, sandbox.ErrComposeServicesRejected):
 		return ComposeServicesRejectedFailureType
-	case errors.Is(runErr, sandbox.ErrCleanupUnconfirmed):
-		return CleanupUnconfirmedFailureType
 	default:
-		return InfrastructureFailureType
+		return launchErrorType(runErr)
 	}
 }
 

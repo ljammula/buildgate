@@ -90,6 +90,7 @@ func newReviewFixture(t *testing.T, baseFiles map[string]string, change func(rep
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	writeFile(t, spec, "# spec\n")
 	input.WorkspacePath, input.BaseSHA, input.SpecPath = repo, baseSHA, spec
+	input.ProjectConfigCommitSHA = baseSHA
 	input.BuildAppScript, input.BuildAppInterpreter = realScripts(t), "python3"
 	input.RoutePolicy = testRelayPolicy()
 	input.RoutePolicy.AllowUnauthenticatedUpstream = true
@@ -241,59 +242,6 @@ func TestReviewRemovesUntrackedInstructionPathsAndRecordsThem(t *testing.T) {
 	}
 	if got := res.Attempts[0].ReviewRemovedPaths; !slices.Equal(got, []string{"AGENTS.md"}) {
 		t.Errorf("review_removed_paths = %v, want [AGENTS.md]", got)
-	}
-}
-
-func TestBuildVerifyAndGateLaunchesCarryNoWorkspaceMasks(t *testing.T) {
-	launch := map[string]func(*Activities, *testsuite.TestActivityEnvironment, RunWorkflowInput) error{
-		"build": func(a *Activities, env *testsuite.TestActivityEnvironment, in RunWorkflowInput) error {
-			env.RegisterActivity(a.RunBuildActivity)
-			in.SpecPath, in.SpecAcceptanceCriteria = specAndCriteria(t)
-			_, err := env.ExecuteActivity(a.RunBuildActivity, in)
-			return err
-		},
-		"verify": func(a *Activities, env *testsuite.TestActivityEnvironment, in RunWorkflowInput) error {
-			env.RegisterActivity(a.RunVerifyActivity)
-			in.VerifyCommand = "true"
-			_, err := env.ExecuteActivity(a.RunVerifyActivity, in)
-			return err
-		},
-		"full suite": func(a *Activities, env *testsuite.TestActivityEnvironment, in RunWorkflowInput) error {
-			env.RegisterActivity(a.RunFullSuiteVerifyActivity)
-			in.FullSuiteCommand = "true"
-			_, err := env.ExecuteActivity(a.RunFullSuiteVerifyActivity, in)
-			return err
-		},
-		"named gate": func(a *Activities, env *testsuite.TestActivityEnvironment, in RunWorkflowInput) error {
-			env.RegisterActivity(a.RunNamedGateActivity)
-			_, err := env.ExecuteActivity(a.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "true"})
-			return err
-		},
-	}
-	for name, fn := range launch {
-		t.Run(name, func(t *testing.T) {
-			rt := &sandboxtest.WorkerRuntime{Lines: []string{"ok"}}
-			activities, input, _ := runtimeActivities(t, rt)
-			input.BuildAppScript, input.BuildAppInterpreter = realScripts(t), "python3"
-			planted := filepath.Join(input.WorkspacePath, "AGENTS.md")
-			writeFile(t, planted, "untracked and ignored by nothing\n")
-			var suite testsuite.WorkflowTestSuite
-			if err := fn(activities, suite.NewTestActivityEnvironment(), input); err != nil {
-				t.Fatalf("%s: %v", name, err)
-			}
-			reqs := rt.Requests()
-			if len(reqs) != 1 {
-				t.Fatalf("launches = %d, want 1", len(reqs))
-			}
-			for _, m := range reqs[0].Mounts {
-				if strings.HasPrefix(m.Target, "/workspace/") && m.Target != "/workspace/.git" {
-					t.Errorf("%s launch carries an overlay on the workspace: %+v", name, m)
-				}
-			}
-			if !exists(planted) {
-				t.Errorf("%s removed the untracked AGENTS.md", name)
-			}
-		})
 	}
 }
 

@@ -91,7 +91,9 @@ func snapshotReviewInstructionsOfWorktree(ctx context.Context, workDir, diffBase
 type workspaceMasksKey struct{}
 
 // withWorkspaceMasks marks ctx so the launch it reaches binds masks read-only
-// over the worktree. Only a review's launch is ever marked.
+// over the worktree, besides the `.factory/` mask runSandboxWithRetries adds
+// to every launch that is not a review's. Only a review's launch is ever
+// marked with masks.
 func withWorkspaceMasks(ctx context.Context, masks []sandbox.WorkspaceMask) context.Context {
 	if len(masks) == 0 {
 		return ctx
@@ -201,9 +203,10 @@ func (a *Activities) prepareReviewInstructions(ctx context.Context, input Review
 }
 
 // launchContext is ctx plus what the review launch needs of the preparation:
-// the masks, and the diff file staged beside the spec.
+// the mark that it is a review's launch (so it gets no `.factory/` mount), the
+// masks, and the diff file staged beside the spec.
 func (p reviewInstructions) launchContext(ctx context.Context) context.Context {
-	ctx = withWorkspaceMasks(ctx, p.Snapshot.Masks)
+	ctx = withWorkspaceMasks(forReviewLaunch(ctx), p.Snapshot.Masks)
 	if p.Snapshot.DiffPath != "" {
 		ctx = withExtraRunInputs(ctx, p.Snapshot.DiffPath)
 	}

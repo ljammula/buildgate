@@ -157,6 +157,12 @@ if [ -n "${FAKE_PLANT_FILE:-}" ]; then
 	printf 'package mood\n\n// planted by the agent\n' >"$FAKE_PLANT_FILE"
 fi
 
+# $FAKE_APPEND_FILE: also appends one comment line to that workspace path (an
+# agent editing a script the repository already has, leaving it runnable).
+if [ -n "${FAKE_APPEND_FILE:-}" ]; then
+	printf '# edited by the agent\n' >>"$FAKE_APPEND_FILE"
+fi
+
 if [ "${FAKE_BUILD_APP_MODE:-}" = "commit_with_marker" ]; then
 	echo "REQUIRED_MARKER_STRING" >>content.txt
 fi

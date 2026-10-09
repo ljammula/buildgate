@@ -73,10 +73,10 @@
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 35 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
-94 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
-41 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
+93 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
+38 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
 50 internal/workflow/activity_records.go RecoverAttemptsFromCheckpointDir
-46 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
+43 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
 56 internal/workflow/repository_owner_workflow.go RepositoryOwnerWorkflow
 27 internal/workflow/resume.go (*Activities).adoptLocked
 95 internal/workflow/workflow.go RunWorkflow

@@ -73,6 +73,8 @@ func HaltReasonCodeFromError(err error) string {
 		return run.HaltReasonBaselineVerifyFailed
 	case ReviewInstructionsFailureType:
 		return run.HaltReasonReviewInstructionsFailed
+	case FactoryDirFailureType:
+		return run.HaltReasonFactoryDirFailed
 	}
 	return ""
 }

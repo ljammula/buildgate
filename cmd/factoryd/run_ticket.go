@@ -403,8 +403,13 @@ type ticketRun struct {
 	// setup/autofix/projectConfigSHA256 come from the committed
 	// .factory.yml (applyCommittedProjectConfig); carried only, nothing
 	// runs them yet.
-	setup, autofix                []string
-	projectConfigSHA256           string
+	setup, autofix      []string
+	projectConfigSHA256 string
+	// headBeforeProjectConfig is the workspace's HEAD commit before the
+	// first read of .factory.yml; projectConfigCommitSHA is that commit
+	// once applyCommittedProjectConfig has proven every read came from it.
+	headBeforeProjectConfig       string
+	projectConfigCommitSHA        string
 	contractSHA256                string
 	id                            string
 	specSnapshotPath              string
@@ -731,6 +736,7 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	}
 	explicitFlags := map[string]bool{}
 	tr.flags.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+	tr.headBeforeProjectConfig = projectconfig.HeadCommit(*tr.workspace)
 	if err := applyProjectConfigDefaults(explicitFlags, *tr.workspace, tr.verifyCommand, tr.fastCheckCommand, tr.rf.gateCommands, tr.preflightProfile, tr.releaseProtectedPaths, &tr.testPatterns, tr.meterTokenCeiling, tr.meterCostCeilingMicroUSD, *tr.meterTokenBudget, *tr.meterCostBudget); err != nil {
 		return err
 	}
@@ -1945,6 +1951,8 @@ func (tr *ticketRun) createRunRecord() error {
 		SpecSHA256:     specSHA256,
 		// SHA-256 of the committed .factory.yml, "" when there is none.
 		ProjectConfigSHA256: tr.projectConfigSHA256,
+		// The commit that file (or its absence) was read from.
+		ProjectConfigCommitSHA: tr.projectConfigCommitSHA,
 		// Recorded now as well as by the adoption Activity: this process
 		// saves its own copy of the record, which would otherwise overwrite
 		// the Activity's write.
@@ -2345,6 +2353,7 @@ func (tr *ticketRun) dispatch() error {
 			GateCommands:             tr.gateCommands,
 			SetupCommands:            tr.setup,
 			AutofixCommands:          tr.autofix,
+			ProjectConfigCommitSHA:   tr.projectConfigCommitSHA,
 			Skills:                   roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
 			ReferenceOracleDir:       *tr.referenceOracleDir,
 			ReferenceOracleMountPath: *tr.referenceOracleMountPath,
@@ -2415,18 +2424,26 @@ func resolvedGateCommands(flags map[string]*string) map[string]string {
 // applyCommittedProjectConfig reads the committed .factory.yml once: it sets
 // the full-suite command (unless a flag did), and records setup, autofix
 // and the file's hash. The values come from the committed file only, never
-// the worktree copy.
+// the worktree copy. It then records the commit the file was read from
+// (projectConfigCommitSHA), for a repository without the file too: the
+// commit whose .factory/ every sandbox of the run sees.
 func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 	cfg, found, err := projectconfig.Load(*tr.workspace)
 	if err != nil {
 		return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
 	}
-	if !found {
-		return nil
+	if found {
+		if !fullSuiteExplicit && cfg.FullSuiteCommand != "" {
+			*tr.fullSuiteCommand = cfg.FullSuiteCommand
+		}
+		tr.setup, tr.autofix, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.SHA256
 	}
-	if !fullSuiteExplicit && cfg.FullSuiteCommand != "" {
-		*tr.fullSuiteCommand = cfg.FullSuiteCommand
+	// HEAD is the commit it was before the first read of the file
+	// (headBeforeProjectConfig) and that commit's file is the one just read,
+	// so the gate commands, setup and autofix all come from this commit.
+	tr.projectConfigCommitSHA, err = projectconfig.ConfirmReadCommit(*tr.workspace, tr.headBeforeProjectConfig, tr.projectConfigSHA256)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
 	}
-	tr.setup, tr.autofix, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.SHA256
 	return nil
 }
