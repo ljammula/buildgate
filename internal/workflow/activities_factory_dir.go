@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -53,8 +53,11 @@ func (input RunWorkflowInput) factoryDirCommit() string {
 
 // prepareFactoryDir stages the `.factory/` mount of one launch on workspace
 // under a new directory beside the launch's log, never inside the workspace.
-// A review launch gets the zero mount. Every error wraps
-// sandbox.ErrCommitDirMount: the launch must not happen and is not retried.
+// A review launch gets the zero mount. An error that wraps
+// sandbox.ErrCommitDirMount is a refusal: the commit's or the worktree's shape
+// causes it, the launch must not happen and is not retried. Any other error
+// (git could not run, the context ended, a directory could not be written) is
+// an ordinary infrastructure failure.
 func prepareFactoryDir(ctx context.Context, input RunWorkflowInput, workspace, logDir string) (sandbox.CommitDirMount, error) {
 	if isReviewLaunch(ctx) {
 		return sandbox.CommitDirMount{}, nil
@@ -62,23 +65,32 @@ func prepareFactoryDir(ctx context.Context, input RunWorkflowInput, workspace, l
 	commit := input.factoryDirCommit()
 	if commit != "" && !factoryDirFullCommit.MatchString(commit) {
 		resolved, err := runner.GitRevParseRef(workspace, commit+"^{commit}")
-		if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			// git ran and does not know the commit: a rerun repeats it.
 			return sandbox.CommitDirMount{}, fmt.Errorf("%w: resolve the commit %s/ is read from: %w", sandbox.ErrCommitDirMount, projectconfig.DirName, err)
+		}
+		if err != nil {
+			return sandbox.CommitDirMount{}, fmt.Errorf("resolve the commit %s/ is read from: %w", projectconfig.DirName, err)
 		}
 		commit = resolved
 	}
-	dst := filepath.Join(logDir, fmt.Sprintf("factory-dir-%d", time.Now().UnixNano()))
-	return sandbox.PrepareCommitDirMount(ctx, workspace, commit, projectconfig.DirName, dst)
+	return sandbox.PrepareCommitDirMount(ctx, workspace, commit, projectconfig.DirName, sandbox.CommitDirStagingPath(logDir))
 }
 
 // refusedFactoryDirAttempt records the attempt whose launch prepareFactoryDir
-// refused and returns what runSandboxWithRetries hands back: the attempt
-// never started a process, so it has exit code -1 and the cleaned reason.
+// did not allow and returns what runSandboxWithRetries hands back: the
+// attempt never started a process, so it has exit code -1. A refusal also
+// records its cleaned reason; a failure that is not one records none and is
+// returned as the infrastructure failure it is, for the Activity's retry.
 func refusedFactoryDirAttempt(afterAttempt func(int, runner.Result, error) error, attempt int, command []string, cause error) (runner.Result, error) {
-	// The two sentinels' own words say nothing the halt reason does not.
-	text := sanitize.Line(cause.Error())
-	text = strings.TrimPrefix(text, sandbox.ErrCommitDirMount.Error()+": ")
-	text = strings.TrimPrefix(text, sandbox.ErrCommitDirSnapshot.Error()+": ")
+	text := ""
+	if errors.Is(cause, sandbox.ErrCommitDirMount) {
+		// The two sentinels' own words say nothing the halt reason does not.
+		text = sanitize.Line(cause.Error())
+		text = strings.TrimPrefix(text, sandbox.ErrCommitDirMount.Error()+": ")
+		text = strings.TrimPrefix(text, sandbox.ErrCommitDirSnapshot.Error()+": ")
+	}
 	if len(text) > maxFactoryDirErrorBytes {
 		text = strings.ToValidUTF8(text[:maxFactoryDirErrorBytes], "")
 	}

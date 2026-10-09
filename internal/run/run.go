@@ -135,10 +135,12 @@ type Attempt struct {
 	// FactoryDirSHA256 is the hash of the read-only `.factory/` snapshot this
 	// attempt's sandbox had mounted over the worktree's, and FactoryDirCommit
 	// the commit it was taken from (Run.ProjectConfigCommitSHA). The hash is
-	// the same for every attempt of a run. Both are empty when nothing was
-	// mounted: a review attempt, or neither the commit nor the worktree has
-	// the directory. A commit without it and a worktree with it record the
-	// hash of the empty directory that was mounted.
+	// the same for every attempt that mounted the commit's directory. Both
+	// are empty when nothing was mounted: a review attempt, or neither the
+	// commit nor the worktree had the directory at that launch. A commit
+	// without it and a worktree with it record the hash of the empty
+	// directory that was mounted, so the attempts of one run can differ: ""
+	// before a build created the directory, the empty snapshot's hash after.
 	FactoryDirSHA256 string `json:"factory_dir_sha256,omitempty"`
 	FactoryDirCommit string `json:"factory_dir_commit,omitempty"`
 	// FactoryDirError is the cleaned reason a launch was refused because
