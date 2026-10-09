@@ -2,6 +2,9 @@
   "allowed_files": [
     "content.txt"
   ],
+  "autofix_commands": [
+    "gofmt -w ."
+  ],
   "base_sha": "<BASE_SHA>",
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
@@ -140,6 +143,10 @@
   "sandbox_docker": "<TESTDATA>/fake_docker.sh",
   "sandbox_image": "example.test/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "sandbox_user": "1234:5678",
+  "setup_commands": [
+    "npm ci",
+    "make generate"
+  ],
   "spec_acceptance_criteria": "<INPUTS>/criteria.md",
   "spec_path": "<DATA_DIR>/runs/<RUN_ID>/spec.snapshot.md",
   "tests_required_opt_out": "integration fixture doesn't exercise tests_added",

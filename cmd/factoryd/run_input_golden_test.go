@@ -197,6 +197,7 @@ func runInputGoldenRun(t *testing.T, runID string, extraFlags ...string) (addres
 	t.Helper()
 	address = sharedTemporalAddress(t)
 	workspace := newFixtureRepo(t)
+	commitFactoryYML(t, workspace, goldenFactoryYML)
 	dataDir, inputs := t.TempDir(), t.TempDir()
 	flags := runInputGoldenFlags(t, workspace, dataDir, inputs, runID, address)
 	cmd := factorydCommand(t, append(flags, extraFlags...)...)
@@ -264,4 +265,21 @@ func TestRepositoryOwnerRunWorkflowInputFromFullFlagSetMatchesGolden(t *testing.
 	placeholders = append([][2]string{{ownerID, "<OWNER_ID>"}, {repository, "<REPOSITORY>"}}, placeholders...)
 	childID := workflow.RepositoryOwnerRunWorkflowID(ownerID, runID)
 	compareRunInputGolden(t, "run_workflow_input_repository_owner.golden.json", startedRunWorkflowInput(t, address, childID), placeholders)
+}
+
+// goldenFactoryYML is the committed .factory.yml of the golden runs: setup and
+// autofix have no flag, so this file is the only way they reach the input.
+const goldenFactoryYML = "setup:\n  - npm ci\n  - make generate\nautofix:\n  - gofmt -w .\n"
+
+// commitFactoryYML commits content as workspace's .factory.yml.
+func commitFactoryYML(t *testing.T, workspace, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write .factory.yml: %v", err)
+	}
+	for _, args := range [][]string{{"add", ".factory.yml"}, {"commit", "-q", "-m", "add .factory.yml"}} {
+		if out, err := runGit(t, workspace, args...); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
 }

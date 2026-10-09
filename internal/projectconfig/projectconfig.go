@@ -109,6 +109,39 @@ type Config struct {
 	// verify_command: read from the committed .factory.yml, run nowhere
 	// but the sandbox. A gate can only add a denial.
 	Gates []RepoGate `yaml:"gates"`
+	// Setup and Autofix are lists of shell commands, one per entry, from
+	// the committed .factory.yml. They are validated and carried to the
+	// run; nothing runs them yet.
+	Setup   []string `yaml:"setup"`
+	Autofix []string `yaml:"autofix"`
+	// SHA256 is the hex SHA-256 of the committed file's bytes this config
+	// was parsed from. Set by Load, never read from the file.
+	SHA256 string `yaml:"-"`
+}
+
+// MaxSetupCommands bounds each of Config.Setup and Config.Autofix.
+const MaxSetupCommands = 8
+
+// maxSetupCommandBytes bounds one Setup or Autofix entry.
+const maxSetupCommandBytes = 2000
+
+// validateCommandList checks one of Config.Setup or Config.Autofix.
+func validateCommandList(key string, commands []string) error {
+	if len(commands) > MaxSetupCommands {
+		return fmt.Errorf("%s has %d entries, at most %d are allowed", key, len(commands), MaxSetupCommands)
+	}
+	for i, c := range commands {
+		n := i + 1
+		switch {
+		case strings.TrimSpace(c) == "":
+			return fmt.Errorf("%s entry %d is blank", key, n)
+		case len(c) > maxSetupCommandBytes:
+			return fmt.Errorf("%s entry %d is %d bytes, at most %d are allowed", key, n, len(c), maxSetupCommandBytes)
+		case strings.ContainsAny(c, "\x00\n\r"):
+			return fmt.Errorf("%s entry %d must be one line without a NUL byte (one command per entry)", key, n)
+		}
+	}
+	return nil
 }
 
 // RepoGate is one entry of Config.Gates.
@@ -229,6 +262,12 @@ func (c *Config) Validate() error {
 			return errors.New("test_patterns must not contain an empty entry")
 		}
 	}
+	if err := validateCommandList("setup", c.Setup); err != nil {
+		return err
+	}
+	if err := validateCommandList("autofix", c.Autofix); err != nil {
+		return err
+	}
 	return c.validateGates()
 }
 
@@ -271,6 +310,8 @@ func Load(workspaceDir string) (*Config, bool, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, false, fmt.Errorf("%s: %w", FileName, err)
 	}
+	sum := sha256.Sum256(data)
+	cfg.SHA256 = hex.EncodeToString(sum[:])
 	return &cfg, true, nil
 }
 

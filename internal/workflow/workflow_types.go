@@ -184,6 +184,13 @@ type RunWorkflowInput struct {
 	// (.factory.yml `gates:`), under policy.RepoGateCheck(id): RunWorkflow
 	// runs those after the registry's, by name (gateChecksToRun).
 	GateCommands map[string]string `json:"gate_commands,omitempty"`
+	// SetupCommands is the committed .factory.yml `setup:` list, resolved
+	// before the workflow starts and never re-read from the worktree. For
+	// now it is carried only: no Activity reads it yet.
+	SetupCommands []string `json:"setup_commands,omitempty"`
+	// AutofixCommands is the committed .factory.yml `autofix:` list, with
+	// the same source and status as SetupCommands.
+	AutofixCommands []string `json:"autofix_commands,omitempty"`
 	// ReferenceOracleDir/ReferenceOracleMountPath provide the read-only oracle mount (and the content hash it makes
 	// possible) to the Temporal/-repository path -- the parity follow-up
 	// from PR #151/#152's reviews. Same empty-means-not-configured

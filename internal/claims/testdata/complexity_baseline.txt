@@ -31,7 +31,7 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 34 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-49 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
+46 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 41 cmd/factoryd/status.go statusMain

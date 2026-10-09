@@ -18,6 +18,7 @@
   "temporal_task_queue": "every-field temporal_task_queue",
   "temporal_address": "every-field temporal_address",
   "spec_sha256": "every-field spec_sha256",
+  "project_config_sha256": "every-field project_config_sha256",
   "product_spec_sha256": "every-field product_spec_sha256",
   "contract_sha256": "every-field contract_sha256",
   "skip_project_check": true,

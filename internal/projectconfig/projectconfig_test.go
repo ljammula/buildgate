@@ -2,6 +2,8 @@ package projectconfig
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -503,5 +505,93 @@ func TestLoadRejectsBadRepoDefinedGates(t *testing.T) {
 				t.Errorf("Load accepted %s:\n%s", name, content)
 			}
 		})
+	}
+}
+
+func TestLoadSetupAndAutofix(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	content := "setup:\n  - npm ci\n  - make generate\nautofix:\n  - gofmt -w .\n"
+	commitFile(t, dir, FileName, content)
+	cfg, found, err := Load(dir)
+	if err != nil || !found {
+		t.Fatalf("Load = %v, %v, %v", cfg, found, err)
+	}
+	if got := strings.Join(cfg.Setup, "|"); got != "npm ci|make generate" {
+		t.Errorf("Setup = %q", got)
+	}
+	if got := strings.Join(cfg.Autofix, "|"); got != "gofmt -w ." {
+		t.Errorf("Autofix = %q", got)
+	}
+	sum := sha256.Sum256([]byte(content))
+	if want := hex.EncodeToString(sum[:]); cfg.SHA256 != want {
+		t.Errorf("SHA256 = %q, want %q", cfg.SHA256, want)
+	}
+}
+
+func TestLoadRejectsBadSetupOrAutofix(t *testing.T) {
+	nine := ""
+	for i := 0; i < 9; i++ {
+		nine += fmt.Sprintf("  - echo %d\n", i)
+	}
+	cases := map[string]string{
+		"nine entries":     "\n" + nine,
+		"blank entry":      "\n  - ok\n  - \"   \"\n",
+		"2001 bytes":       "\n  - " + strings.Repeat("a", 2001) + "\n",
+		"newline in entry": "\n  - \"a\\nb\"\n",
+		"carriage return":  "\n  - \"a\\rb\"\n",
+		"NUL in entry":     "\n  - \"a\\0b\"\n",
+	}
+	for _, key := range []string{"setup", "autofix"} {
+		for name, body := range cases {
+			t.Run(key+"/"+name, func(t *testing.T) {
+				dir := t.TempDir()
+				initGitRepo(t, dir)
+				commitFile(t, dir, FileName, key+":"+body)
+				_, _, err := Load(dir)
+				if err == nil || !strings.Contains(err.Error(), key) {
+					t.Fatalf("Load error = %v, want one naming %q", err, key)
+				}
+			})
+		}
+	}
+}
+
+func TestLoadAcceptsEightAndExactly2000Bytes(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	body := "setup:\n  - " + strings.Repeat("a", 2000) + "\n"
+	for i := 0; i < 7; i++ {
+		body += "  - echo ok\n"
+	}
+	commitFile(t, dir, FileName, body)
+	if _, _, err := Load(dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}
+
+func TestLoadWithoutSetupLeavesThemEmpty(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	commitFile(t, dir, FileName, "verify_command: \"true\"\n")
+	cfg, found, err := Load(dir)
+	if err != nil || !found {
+		t.Fatalf("Load = %v, %v, %v", cfg, found, err)
+	}
+	if len(cfg.Setup) != 0 || len(cfg.Autofix) != 0 {
+		t.Errorf("Setup %q Autofix %q, want empty", cfg.Setup, cfg.Autofix)
+	}
+	if cfg.SHA256 == "" {
+		t.Error("SHA256 is empty for a repository that has a .factory.yml")
+	}
+}
+
+func TestLoadWithoutFileHasNoHash(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	commitFile(t, dir, "README.md", "x\n")
+	cfg, found, err := Load(dir)
+	if err != nil || found || cfg != nil {
+		t.Fatalf("Load = %v, %v, %v, want nil, false, nil", cfg, found, err)
 	}
 }

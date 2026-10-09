@@ -39,6 +39,8 @@ type runOptions struct {
 	FastCheckCommand    string
 	FullSuiteCommand    string
 	GateCommands        map[string]string
+	SetupCommands       []string
+	AutofixCommands     []string
 	Skills              roleSkillSet
 
 	ReferenceOracleDir       string
