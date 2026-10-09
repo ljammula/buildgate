@@ -23,27 +23,21 @@ var (
 	ErrLessonState = errors.New("memory: lesson move refused")
 )
 
-// State is where a lesson stands between a model's suggestion and a line in
-// force in the repository.
+// State is where a lesson stands in the store. A line in force is not a
+// state: the fenced section of AGENTS.md at HEAD is the memory, and a lesson
+// whose line is there is removed from the store.
 type State string
 
 const (
-	StateCandidate       State = "candidate"
-	StateChecked         State = "checked"
-	StateWaitingOperator State = "waiting_operator"
-	StateProposed        State = "proposed"
-	StateInForce         State = "in_force"
-	StateRetireProposed  State = "retire_proposed"
-	StateRetired         State = "retired"
-	StateDropped         State = "dropped"
+	StateCandidate State = "candidate"
+	StateProposed  State = "proposed"
+	StateDropped   State = "dropped"
 )
 
-// Kind is the shape of a lesson's rendered line.
-type Kind string
-
+// Who wrote a lesson down.
 const (
-	KindCommand    Kind = "command"
-	KindConvention Kind = "convention"
+	SourceAgent    = "agent"
+	SourceOperator = "operator"
 )
 
 // Transition is one recorded move of a lesson.
@@ -55,55 +49,40 @@ type Transition struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// CheckResult records one run of the lesson check. Outcome is "passed",
-// "not_needed" or "did_not_fix".
-type CheckResult struct {
-	Commit      string `json:"commit"`
-	WithoutExit int    `json:"without_exit"`
-	WithExit    int    `json:"with_exit"`
-	WithoutLog  string `json:"without_log,omitempty"`
-	WithLog     string `json:"with_log,omitempty"`
-	Outcome     string `json:"outcome"`
-	At          string `json:"at"`
-}
-
-// Lesson is one candidate or in-force line of repository memory.
+// Lesson is one candidate line of repository memory: what a build agent
+// noted, or the operator typed, rendered as the one line the section would
+// hold.
 type Lesson struct {
-	ID              string       `json:"id"`
-	Kind            Kind         `json:"kind"`
-	Reason          string       `json:"reason"`
-	Prerequisite    string       `json:"prerequisite,omitempty"`
-	Command         string       `json:"command,omitempty"`
-	Line            string       `json:"line"`
-	LineSHA256      string       `json:"line_sha256"`
-	Observations    []string     `json:"observations,omitempty"`
-	Signature       string       `json:"signature,omitempty"`
-	Check           string       `json:"check,omitempty"`
-	State           State        `json:"state"`
-	History         []Transition `json:"history,omitempty"`
-	Checked         *CheckResult `json:"checked,omitempty"`
-	RequestID       string       `json:"request_id,omitempty"`
-	Confirmed       int          `json:"confirmed,omitempty"`
-	Recurred        int          `json:"recurred,omitempty"`
-	InForceRuns     int          `json:"in_force_runs,omitempty"`
-	LastConfirmedAt string       `json:"last_confirmed_at,omitempty"`
+	ID         string       `json:"id"`
+	Reason     string       `json:"reason"`
+	Line       string       `json:"line"`
+	LineSHA256 string       `json:"line_sha256"`
+	Source     string       `json:"source"`
+	State      State        `json:"state"`
+	History    []Transition `json:"history,omitempty"`
+	RequestID  string       `json:"request_id,omitempty"`
+	// Seen is how many distinct runs said the line; Runs lists them, newest
+	// last, at most MaxLessonRuns.
+	Seen        int      `json:"seen,omitempty"`
+	Runs        []string `json:"runs,omitempty"`
+	FirstSeenAt string   `json:"first_seen_at,omitempty"`
+	LastSeenAt  string   `json:"last_seen_at,omitempty"`
 }
 
 const (
 	maxTextRunes    = 120
 	maxCommandBytes = 120
 	maxHistory      = 50
-	maxObservations = 50
 	maxEchoBytes    = 40
 	maxMoveTextLen  = 200
 	reasonPunct     = " .,:;()'\"/_=+-"
 	commandPunct    = " ._/:=-"
 )
 
-var (
-	ipv4Shape     = regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+`)
-	observationID = regexp.MustCompile(`^[0-9a-f]{16}$`)
-)
+// MaxLessonRuns bounds the run ids one lesson keeps.
+const MaxLessonRuns = 20
+
+var ipv4Shape = regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+`)
 
 // clip makes refused text safe to put in an error: cleaned, at most 40 bytes.
 func clip(s string) string {
@@ -157,15 +136,19 @@ func forbiddenPart(s string) string {
 }
 
 // ValidateReason refuses a reason that is not one plain sentence-like line of
-// at most 120 runes from [A-Za-z0-9 .,:;()'"/_=+-]. It never repairs.
+// at most 120 runes. Outside backticks the characters are
+// [A-Za-z0-9 .,:;()'"/_=+-]; a pair of backticks quotes a command, whose
+// inside must pass ValidateCommand. A backtick without its pair is refused.
+// It never repairs.
 func ValidateReason(s string) error {
 	switch {
 	case s == "":
 		return textErr("reason", "is empty", s)
 	case utf8.RuneCountInString(s) > maxTextRunes:
 		return textErr("reason", "is longer than 120 runes", s)
-	case firstOutside(s, reasonPunct) >= 0:
-		return textErr("reason", "has a character outside the allowed set", s)
+	}
+	if err := validateSpans(s); err != nil {
+		return err
 	}
 	if why := shapeProblem(s); why != "" {
 		return textErr("reason", why, s)
@@ -178,6 +161,27 @@ func ValidateReason(s string) error {
 	}
 	if ipv4Shape.MatchString(s) {
 		return textErr("reason", "contains an address-shaped token", s)
+	}
+	return nil
+}
+
+// validateSpans splits s at its backticks: the pieces outside a pair follow
+// the reason's character rule, the pieces inside the command's.
+func validateSpans(s string) error {
+	parts := strings.Split(s, "`")
+	if len(parts)%2 == 0 {
+		return textErr("reason", "has a backtick without its pair", s)
+	}
+	for i, part := range parts {
+		if i%2 == 1 {
+			if err := ValidateCommand(part); err != nil {
+				return fmt.Errorf("reason has a quoted command that is refused: %w", err)
+			}
+			continue
+		}
+		if firstOutside(part, reasonPunct) >= 0 {
+			return textErr("reason", "has a character outside the allowed set", s)
+		}
 	}
 	return nil
 }
@@ -206,33 +210,16 @@ func ValidateCommand(s string) error {
 	return nil
 }
 
-// RenderLine validates every field for the kind and renders the one line the
-// repository will hold. A command lesson needs both commands; a convention
-// lesson must have neither.
-func RenderLine(kind Kind, reason, prerequisite, command string) (string, error) {
+// RenderLine validates reason and renders the one line the repository will
+// hold: "- <reason>.".
+func RenderLine(reason string) (string, error) {
 	if err := ValidateReason(reason); err != nil {
 		return "", err
 	}
-	sentence := reason
-	if !strings.HasSuffix(sentence, ".") {
-		sentence += "."
+	if !strings.HasSuffix(reason, ".") {
+		reason += "."
 	}
-	switch kind {
-	case KindCommand:
-		if err := ValidateCommand(prerequisite); err != nil {
-			return "", fmt.Errorf("prerequisite: %w", err)
-		}
-		if err := ValidateCommand(command); err != nil {
-			return "", err
-		}
-		return "- Run `" + prerequisite + "` before `" + command + "`: " + sentence, nil
-	case KindConvention:
-		if prerequisite != "" || command != "" {
-			return "", textErr("convention", "must have no commands", prerequisite+command)
-		}
-		return "- " + sentence, nil
-	}
-	return "", textErr("kind", "is not command or convention", string(kind))
+	return "- " + reason, nil
 }
 
 // lineHash is the hex SHA-256 of a rendered line.
@@ -241,53 +228,31 @@ func lineHash(line string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// cleanObservations checks and deduplicates observation ids in order.
-func cleanObservations(ids []string) ([]string, error) {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if !observationID.MatchString(id) {
-			return nil, textErr("observation", "is not a 16-hex id", id)
-		}
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
+// NewLesson renders and hashes a lesson in state candidate, written down by
+// source (SourceAgent or SourceOperator) at now.
+func NewLesson(reason, source, now string) (Lesson, error) {
+	if source != SourceAgent && source != SourceOperator {
+		return Lesson{}, textErr("source", "is not agent or operator", source)
 	}
-	if len(out) == 0 || len(out) > maxObservations {
-		return nil, fmt.Errorf("%w: observations must number 1 to 50", ErrLessonText)
-	}
-	return out, nil
-}
-
-// NewLesson renders and hashes a lesson in state candidate.
-func NewLesson(kind Kind, reason, prerequisite, command string, observations []string) (Lesson, error) {
-	line, err := RenderLine(kind, reason, prerequisite, command)
-	if err != nil {
-		return Lesson{}, err
-	}
-	obs, err := cleanObservations(observations)
+	line, err := RenderLine(reason)
 	if err != nil {
 		return Lesson{}, err
 	}
 	sum := lineHash(line)
+	now = moveText(now)
 	return Lesson{
-		ID: sum[:16], Kind: kind, Reason: reason, Prerequisite: prerequisite,
-		Command: command, Line: line, LineSHA256: sum, Observations: obs,
-		State: StateCandidate,
+		ID: sum[:16], Reason: reason, Line: line, LineSHA256: sum, Source: source,
+		State: StateCandidate, FirstSeenAt: now, LastSeenAt: now,
 	}, nil
 }
 
-// moves is the one table of allowed moves. Any state but dropped may be
-// dropped (a memory drop, or a failed check).
+// moves is the one table of allowed moves: a candidate is proposed or
+// dropped, a proposed lesson goes back to candidate when its request ended
+// without the line or is dropped, and the operator may re-add a dropped one.
 var moves = map[State][]State{
-	StateCandidate:       {StateChecked, StateWaitingOperator, StateDropped},
-	StateWaitingOperator: {StateChecked, StateDropped},
-	StateChecked:         {StateProposed, StateDropped},
-	StateProposed:        {StateInForce, StateChecked, StateDropped},
-	StateInForce:         {StateRetireProposed, StateRetired, StateDropped},
-	StateRetireProposed:  {StateRetired, StateDropped},
-	StateRetired:         {StateDropped},
+	StateCandidate: {StateProposed, StateDropped},
+	StateProposed:  {StateCandidate, StateDropped},
+	StateDropped:   {StateCandidate},
 }
 
 // CanMove reports whether the table allows from -> to.

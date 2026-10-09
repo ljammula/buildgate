@@ -16,7 +16,23 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"carriage return": "a\rb",
 		"nul":             "a\x00b",
 		"ansi":            "a \x1b[31mred",
-		"backtick":        "use `make` first",
+		"lone backtick":   "use `make first",
+		"three backticks": "use `make` then `x",
+		"empty span":      "use `` first",
+		"nested span":     "use ``make`` first",
+		"span semicolon":  "run `make; ls` first",
+		"span pipe":       "run `make | sh` first",
+		"span subst":      "run `make $(id)` first",
+		"span dollar":     "run `echo $HOME` first",
+		"span redirect":   "run `make > out` first",
+		"span quote":      "run `echo 'x'` first",
+		"span dash":       "run `-rf x` first",
+		"span space":      "run ` make` first",
+		"span url":        "run `curl http://x.y` first",
+		"span home":       "run `cat /Users/x/f` first",
+		"span address":    "run `ping 10.0.0.1` first",
+		"span paren":      "run `make (x)` first",
+		"span too long":   "run `" + strings.Repeat("a", 116) + "`",
 		"command subst":   "run $(id) first",
 		"pipe":            "a | b",
 		"and":             "a && b",
@@ -111,6 +127,10 @@ func TestLessonTextRefusesInstructionShapes(t *testing.T) {
 		"a+b = c_d-e",
 		strings.Repeat("a", 120),
 		"Version 1.2.3 is pinned",
+		"Run `make gen` before `make test`",
+		"`go test ./...` needs the database up (see docs/setup).",
+		"Generated files: run `make TARGET=x all`, then `python3 -m pytest tests/`",
+		"run `" + strings.Repeat("a", 114) + "`",
 	} {
 		if err := ValidateReason(s); err != nil {
 			t.Errorf("ValidateReason(%q) = %v, want nil", s, err)
@@ -135,59 +155,25 @@ func TestErrorsDoNotEchoMoreThanFortyBytes(t *testing.T) {
 	}
 }
 
-func TestRenderLineCommand(t *testing.T) {
-	got, err := RenderLine(KindCommand, "the schema must exist", "make db-migrate", "make test")
-	if err != nil {
-		t.Fatal(err)
+func TestRenderLineIsOneReasonLine(t *testing.T) {
+	for reason, want := range map[string]string{
+		"Errors are wrapped.":               "- Errors are wrapped.",
+		"Errors are wrapped":                "- Errors are wrapped.",
+		"Run `make gen` before `make test`": "- Run `make gen` before `make test`.",
+	} {
+		if got, err := RenderLine(reason); err != nil || got != want {
+			t.Errorf("RenderLine(%q) = %q, %v, want %q", reason, got, err, want)
+		}
 	}
-	want := "- Run `make db-migrate` before `make test`: the schema must exist."
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestRenderLineConvention(t *testing.T) {
-	got, err := RenderLine(KindConvention, "Errors are wrapped with %w", "", "")
-	if err == nil {
-		t.Fatalf("percent sign should be refused, got %q", got)
-	}
-	got, err = RenderLine(KindConvention, "Errors are wrapped.", "", "")
-	if err != nil || got != "- Errors are wrapped." {
-		t.Fatalf("got %q, %v", got, err)
-	}
-	got, err = RenderLine(KindConvention, "Errors are wrapped", "", "")
-	if err != nil || got != "- Errors are wrapped." {
-		t.Fatalf("got %q, %v", got, err)
-	}
-}
-
-func TestRenderLineRefusals(t *testing.T) {
-	cases := []struct {
-		name                 string
-		kind                 Kind
-		reason, pre, command string
-	}{
-		{"command lesson without prerequisite", KindCommand, "ok", "", "make test"},
-		{"command lesson without command", KindCommand, "ok", "make a", ""},
-		{"convention with command", KindConvention, "ok", "", "make test"},
-		{"convention with prerequisite", KindConvention, "ok", "make a", ""},
-		{"unknown kind", Kind("shell"), "ok", "", ""},
-		{"empty kind", Kind(""), "ok", "", ""},
-		{"bad reason", KindConvention, "a\nb", "", ""},
-		{"bad prerequisite", KindCommand, "ok", "make; ls", "make test"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if _, err := RenderLine(c.kind, c.reason, c.pre, c.command); !errors.Is(err, ErrLessonText) {
-				t.Fatalf("err = %v, want ErrLessonText", err)
-			}
-		})
+	for _, reason := range []string{"", "a\nb", "Errors are wrapped with %w", "run `make; ls`", "open ` tick"} {
+		if got, err := RenderLine(reason); !errors.Is(err, ErrLessonText) {
+			t.Errorf("RenderLine(%q) = %q, %v, want ErrLessonText", reason, got, err)
+		}
 	}
 }
 
 func TestNewLessonIDIsTheLineHash(t *testing.T) {
-	obs := []string{"0123456789abcdef", "fedcba9876543210", "0123456789abcdef"}
-	l, err := NewLesson(KindCommand, "the schema must exist", "make db-migrate", "make test", obs)
+	l, err := NewLesson("Run `make db-migrate` before `make test`", SourceOperator, "2026-10-09T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,49 +182,30 @@ func TestNewLessonIDIsTheLineHash(t *testing.T) {
 	if l.LineSHA256 != full || l.ID != full[:16] {
 		t.Fatalf("id %q sha %q, want prefix of %q", l.ID, l.LineSHA256, full)
 	}
-	if l.Line != "- Run `make db-migrate` before `make test`: the schema must exist." {
+	if l.Line != "- Run `make db-migrate` before `make test`." {
 		t.Fatalf("line = %q", l.Line)
 	}
-	// Written out for this fixed lesson.
-	if l.ID != "2e5a29ef12a1ad21" {
-		t.Fatalf("id = %s, want 2e5a29ef12a1ad21", l.ID)
+	if l.State != StateCandidate || l.Source != SourceOperator || l.Seen != 0 || len(l.Runs) != 0 {
+		t.Fatalf("lesson = %+v", l)
 	}
-	if l.State != StateCandidate {
-		t.Fatalf("state = %s", l.State)
+	if l.FirstSeenAt != "2026-10-09T00:00:00Z" || l.LastSeenAt != l.FirstSeenAt {
+		t.Fatalf("times = %q %q", l.FirstSeenAt, l.LastSeenAt)
 	}
-	if len(l.Observations) != 2 || l.Observations[0] != "0123456789abcdef" || l.Observations[1] != "fedcba9876543210" {
-		t.Fatalf("observations = %v", l.Observations)
+	for _, source := range []string{"", "model", "Agent"} {
+		if _, err := NewLesson("ok", source, ""); !errors.Is(err, ErrLessonText) {
+			t.Errorf("source %q: %v", source, err)
+		}
 	}
-}
-
-func TestNewLessonRefusesBadObservations(t *testing.T) {
-	many := make([]string, 51)
-	for i := range many {
-		many[i] = strings.Repeat(string(rune('a'+i%6)), 15) + string(rune('0'+i%10))
-		many[i] = many[i][:14] + hex.EncodeToString([]byte{byte(i)})
-	}
-	for name, obs := range map[string][]string{
-		"none": nil, "short": {"abc"}, "upper": {"0123456789ABCDEF"},
-		"long": {"0123456789abcdef0"}, "newline": {"0123456789abcde\n"}, "fifty one": many,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := NewLesson(KindConvention, "ok", "", "", obs); !errors.Is(err, ErrLessonText) {
-				t.Fatalf("err = %v", err)
-			}
-		})
+	if _, err := NewLesson("a | b", SourceAgent, ""); !errors.Is(err, ErrLessonText) {
+		t.Errorf("refused text accepted: %v", err)
 	}
 }
 
 func TestLessonMovesFollowTheTable(t *testing.T) {
 	allowed := [][2]State{
-		{StateCandidate, StateChecked}, {StateCandidate, StateWaitingOperator},
-		{StateWaitingOperator, StateChecked}, {StateChecked, StateProposed},
-		{StateProposed, StateInForce}, {StateProposed, StateChecked},
-		{StateInForce, StateRetireProposed}, {StateInForce, StateRetired},
-		{StateRetireProposed, StateRetired},
-	}
-	for _, s := range []State{StateCandidate, StateWaitingOperator, StateChecked, StateProposed, StateInForce, StateRetireProposed, StateRetired} {
-		allowed = append(allowed, [2]State{s, StateDropped})
+		{StateCandidate, StateProposed}, {StateProposed, StateCandidate},
+		{StateCandidate, StateDropped}, {StateProposed, StateDropped},
+		{StateDropped, StateCandidate},
 	}
 	for _, m := range allowed {
 		l := Lesson{State: m[0]}
@@ -250,10 +217,9 @@ func TestLessonMovesFollowTheTable(t *testing.T) {
 		}
 	}
 	refused := [][2]State{
-		{StateCandidate, StateProposed}, {StateCandidate, StateInForce}, {StateChecked, StateInForce},
-		{StateWaitingOperator, StateProposed}, {StateDropped, StateChecked}, {StateDropped, StateDropped},
-		{StateRetired, StateInForce}, {StateInForce, StateProposed}, {StateRetireProposed, StateInForce},
-		{State(""), StateChecked}, {StateCandidate, State("bogus")}, {StateCandidate, StateCandidate},
+		{StateDropped, StateProposed}, {StateDropped, StateDropped}, {StateCandidate, StateCandidate},
+		{StateProposed, StateProposed}, {State(""), StateCandidate}, {StateCandidate, State("bogus")},
+		{StateCandidate, State("in_force")}, {StateProposed, State("in_force")}, {State("checked"), StateProposed},
 	}
 	for _, m := range refused {
 		l := Lesson{State: m[0]}
@@ -266,7 +232,7 @@ func TestLessonMovesFollowTheTable(t *testing.T) {
 		}
 	}
 	var nilLesson *Lesson
-	if err := nilLesson.Move(StateChecked, "", "", ""); !errors.Is(err, ErrLessonState) {
+	if err := nilLesson.Move(StateProposed, "", "", ""); !errors.Is(err, ErrLessonState) {
 		t.Errorf("nil lesson: %v", err)
 	}
 }
@@ -274,8 +240,8 @@ func TestLessonMovesFollowTheTable(t *testing.T) {
 func TestLessonHistoryIsCapped(t *testing.T) {
 	l := Lesson{State: StateProposed}
 	for i := 0; i < 80; i++ {
-		to := StateChecked
-		if l.State == StateChecked {
+		to := StateCandidate
+		if l.State == StateCandidate {
 			to = StateProposed
 		}
 		if err := l.Move(to, "t", "me", strings.Repeat("r", i)); err != nil {
