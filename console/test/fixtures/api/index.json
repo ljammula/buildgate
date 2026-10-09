@@ -161,6 +161,34 @@
     "content_type": "application/json"
   },
   {
+    "pattern": "GET /runs/{id}/prompts",
+    "path": "/runs/run-quarantined/prompts",
+    "file": "run-prompts.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts",
+    "path": "/runs/run-accepted/prompts",
+    "file": "run-prompts-none.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts/{attempt}/{name}",
+    "path": "/runs/run-quarantined/prompts/build-1/build-round-1",
+    "file": "run-prompt.txt",
+    "status": 200,
+    "content_type": "text/plain"
+  },
+  {
+    "pattern": "GET /runs/{id}/prompts/{attempt}/{name}",
+    "path": "/runs/run-quarantined/prompts/build-1/nothing-here",
+    "file": "error-prompt-not-found.json",
+    "status": 404,
+    "content_type": "application/json"
+  },
+  {
     "pattern": "GET /requests",
     "path": "/requests",
     "file": "requests.json",

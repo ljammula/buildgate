@@ -86,6 +86,10 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /runs/{id}/release", Path: "/runs/run-quarantined/release", File: "run-release-no-decision.json"},
 		{Pattern: "GET /runs/{id}/handoff", Path: "/runs/run-quarantined/handoff", File: "run-handoff.json"},
 		{Pattern: "GET /runs/{id}/handoff", Path: "/runs/run-accepted/handoff", File: "error-no-handoff.json"},
+		{Pattern: "GET /runs/{id}/prompts", Path: "/runs/run-quarantined/prompts", File: "run-prompts.json"},
+		{Pattern: "GET /runs/{id}/prompts", Path: "/runs/run-accepted/prompts", File: "run-prompts-none.json"},
+		{Pattern: "GET /runs/{id}/prompts/{attempt}/{name}", Path: "/runs/run-quarantined/prompts/build-1/build-round-1", File: "run-prompt.txt"},
+		{Pattern: "GET /runs/{id}/prompts/{attempt}/{name}", Path: "/runs/run-quarantined/prompts/build-1/nothing-here", File: "error-prompt-not-found.json"},
 		{Pattern: "GET /requests", Path: "/requests", File: "requests.json"},
 		{Pattern: "GET /requests/events", Path: "/requests/events", File: "request-events.sse", Events: len(contractRequestIDs)},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-spec-review", File: "request-spec-review.json"},
@@ -581,6 +585,14 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	seedRun(t, dataDir, quarantined)
 	write(filepath.Join(run.Dir(dataDir, quarantined.ID), "round-logs", "round-3", "verify.log"),
 		"ok  \tapp/cart\t0.012s\n--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s\n")
+	// The prompts its build was sent, as the host copy keeps them (a later
+	// round carries the earlier round's failure).
+	savedPrompts := filepath.Join(run.Dir(dataDir, quarantined.ID), "prompts", "build-1")
+	write(filepath.Join(savedPrompts, "build-round-1.md"), "Fix the idempotency key scope.\n\n---\n\nBefore you end your turn:\n1. Run the narrowest tests that cover your change.\n")
+	write(filepath.Join(savedPrompts, "build-round-2.md"), "Round 2 of 3. The verify command failed:\n\n--- FAIL: TestKeyScopedToAccount (0.00s)\n")
+	for i, name := range []string{"build-round-1.md", "build-round-2.md"} {
+		must(os.Chtimes(filepath.Join(savedPrompts, name), at.Add(time.Duration(32+i)*time.Minute), at.Add(time.Duration(32+i)*time.Minute)))
+	}
 	// The handoff the run's own save would have written, built from the
 	// record as seeded (the spec snapshot gives diff_scope nothing to say).
 	quarantined.GateResults = append(quarantined.GateResults, run.GateResult{Check: "tests_added", Passed: false})

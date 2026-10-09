@@ -168,6 +168,10 @@ func localSurfaces(t *testing.T, dataDir, id, runID string, rr *run.Run) map[str
 	}
 	var tails bytes.Buffer
 	for _, f := range files {
+		// A saved prompt is listed, never tailed: logs shows it only to -prompt.
+		if f.prompt {
+			continue
+		}
 		if _, err := printTail(&tails, dataDir, f, 50); err != nil {
 			t.Fatal(err)
 		}

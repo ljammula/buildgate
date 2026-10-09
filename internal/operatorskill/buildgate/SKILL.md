@@ -20,7 +20,7 @@ another profile:
 - `factoryd doctor [-target-repo <repo-path>]`
 - `factoryd status [-n N] [-json]`
 - `factoryd watch [-no-follow] <id>`
-- `factoryd logs [-list] <id>` (read-only; never `-f`, which blocks)
+- `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt the factory sent to a model, which may quote repository content)
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd inbox [-json]`: everything waiting on the operator across every
   profile, oldest first (it ignores the active profile and needs no `-config`)

@@ -385,6 +385,9 @@ class RunDraftOraclesTests(unittest.TestCase):
 				)
 
 			self.assertEqual(exit_code, 0)
+			saved = workspace / ".factory-oracle-draft" / "session" / "prompts"
+			self.assertEqual(sorted(p.name for p in saved.glob("*.md")), ["draft-oracle-c001.md", "draft-oracle-c002.md"])
+			self.assertIn("1. Returns 200.", (saved / "draft-oracle-c001.md").read_text(encoding="utf-8"))
 			written = json.loads((out_dir / draft_acceptance_oracles.MANIFEST_FILENAME).read_text())
 			self.assertEqual([e["criterion"] for e in written], ["1. Returns 200.", "2. Code is clean."])
 			self.assertEqual([e["criterion_index"] for e in written], [1, 2])

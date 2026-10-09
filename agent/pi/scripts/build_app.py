@@ -73,6 +73,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import harness_adapters  # noqa: E402
 import prompt_templates  # noqa: E402
 import round_feedback  # noqa: E402
+import saved_prompts  # noqa: E402
 
 DEFAULT_ADAPTER = harness_adapters.get("pi")
 PI_ROOT = Path(__file__).resolve().parents[1]
@@ -1866,6 +1867,7 @@ def run_review_turn(
 	thinking: str | None,
 	timeout_minutes: int = 10,
 	adapter=DEFAULT_ADAPTER,
+	prompt_name: str | None = None,
 ) -> ReviewTurn:
 	"""Runs one bounded, standalone, non-continued model turn (shared by
 	run_spec_conformity_review and code_review.py's own run_code_review)
@@ -1874,7 +1876,10 @@ def run_review_turn(
 	just that it did. Sets AI_REVIEW_BASE_SHA in the subprocess
 	environment when review_base_sha is given, so a prompt referencing
 	"the diff against $AI_REVIEW_BASE_SHA" resolves the same way for every
-	one-turn review launch."""
+	one-turn review launch. prompt_name, when given, saves the prompt as sent
+	(saved_prompts.save_prompt) under that name in session_dir."""
+	if prompt_name:
+		saved_prompts.save_prompt(session_dir, prompt_name, prompt)
 	command = adapter.invocation(
 		workspace, prompt=prompt, session_dir=session_dir,
 		continue_session=False, thinking=thinking,
@@ -1939,7 +1944,7 @@ def run_spec_conformity_review(
 	turn = run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-conformity-session",
 		review_base_sha=review_base_sha, thinking=thinking,
-		timeout_minutes=timeout_minutes, adapter=adapter,
+		timeout_minutes=timeout_minutes, adapter=adapter, prompt_name="review-conformity",
 	)
 	return parse_conformity_verdicts(turn.text, criteria), turn.error
 
@@ -2278,6 +2283,7 @@ def run_notes_turn(workspace: Path, session_dir: Path, adapter, env: dict, think
 
 
 def _notes_turn(workspace: Path, notes_path: Path, session_dir: Path, adapter, env: dict, thinking: str | None, record: dict, started: float) -> dict:
+	saved_prompts.save_prompt(session_dir, "build-notes", HANDOFF_NOTES_PROMPT)
 	command = adapter.invocation(
 		workspace, prompt=HANDOFF_NOTES_PROMPT, session_dir=session_dir,
 		continue_session=True, thinking=thinking, load_repo_skills=False,
@@ -2440,6 +2446,7 @@ def run_build(
 
 	for round_index in range(first_round, max_rounds + 1):
 		continue_session = round_index > first_round
+		saved_prompts.save_prompt(session_dir, f"build-round-{round_index}", prompt)
 		command = adapter.invocation(
 			workspace, prompt=prompt, session_dir=session_dir,
 			continue_session=continue_session,
@@ -2688,6 +2695,7 @@ def run_build(
 	# whatever this round actually produces, so a still-unresolvable
 	# command after the Sonnet pass simply fails verify_passed normally.
 	if not result.succeeded and sonnet_fallback and escalation_prompt:
+		saved_prompts.save_prompt(session_dir, "build-sonnet-fallback", escalation_prompt)
 		command = sonnet_invocation(escalation_prompt)
 		# Same round-scoped comparison as the local rounds above: baseline
 		# is the workspace as the sonnet round finds it (i.e. after

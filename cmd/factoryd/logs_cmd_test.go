@@ -311,3 +311,60 @@ func TestLogsDefaultSkipsNotificationsAndListShowsEarlierRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestLogsListsSavedPromptsAndPrintsOneWithTerminalEscapesStripped(t *testing.T) {
+	dataDir := t.TempDir()
+	runDir := run.Dir(dataDir, "run-p")
+	if err := os.MkdirAll(filepath.Join(runDir, "prompts", "build-1"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runDir, "prompts", "build-2"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for attempt, text := range map[string]string{"build-1": "first\n\x1b[31mred\x1b[0m\n", "build-2": "second\n"} {
+		if err := os.WriteFile(filepath.Join(runDir, "prompts", attempt, "build-round-1.md"), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "build_app.log"), []byte("a log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&run.Run{ID: "run-p", State: run.StateQuarantined}).Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	var list bytes.Buffer
+	if err := runLogs(context.Background(), &list, dataDir, "run-p", true, false, 40); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"prompts/build-1/build-round-1.md", "prompts/build-2/build-round-1.md", "[prompt]", "build_app.log"} {
+		if !strings.Contains(list.String(), want) {
+			t.Errorf("-list lacks %q:\n%s", want, list.String())
+		}
+	}
+	// A prompt is never the "newest log": the default shows the build log.
+	var newest bytes.Buffer
+	if err := runLogs(context.Background(), &newest, dataDir, "run-p", false, false, 40); err != nil || !strings.Contains(newest.String(), "a log") || strings.Contains(newest.String(), "first") {
+		t.Errorf("default = %q, %v", newest.String(), err)
+	}
+
+	var one bytes.Buffer
+	if err := runLogsPrompt(&one, dataDir, "run-p", "build-1/build-round-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(one.String(), "first") || !strings.Contains(one.String(), "red") || strings.Contains(one.String(), "\x1b") || strings.Contains(one.String(), "second") {
+		t.Errorf("-prompt build-1/build-round-1 = %q", one.String())
+	}
+	var both bytes.Buffer
+	if err := runLogsPrompt(&both, dataDir, "run-p", "build-round-1"); err != nil || !strings.Contains(both.String(), "first") || !strings.Contains(both.String(), "second") {
+		t.Errorf("-prompt build-round-1 = %q, %v, want every attempt's", both.String(), err)
+	}
+	for _, bad := range []string{"nothing", "../x", "build-1/../build-2/build-round-1", "build-1/build-round-1.md"} {
+		if err := runLogsPrompt(&bytes.Buffer{}, dataDir, "run-p", bad); err == nil {
+			t.Errorf("-prompt %q: want an error", bad)
+		}
+	}
+	if err := runLogsPrompt(&bytes.Buffer{}, dataDir, "serve", "build-round-1"); err == nil {
+		t.Error("-prompt on a process log: want an error")
+	}
+}

@@ -2018,6 +2018,7 @@ var HarnessSiblingModules = map[string]bool{
 	"code_review.py":       true, // imported by combined_review.py
 	"prompt_templates.py":  true, // loads the *.prompt.md templates below
 	"round_feedback.py":    true, // imported by build_app.py
+	"saved_prompts.py":     true, // imported by build_app.py
 
 	// Run by harness_adapters.py's CopilotAdapter under node, around the
 	// Copilot CLI on a chatgpt-codex route.

@@ -298,6 +298,7 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 		args := draftSpecArgs(script, r.Workspace, requestTextPath, outPath, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
 		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.DraftSpecInterpreter, args[1:]...)
 	}
+	retainDraftPrompts(dataDir, r.ID, "spec", r.Workspace, []string{specDraftScratchDirName + "/session", specDraftScratchDirName + "/check-session"})
 	if err != nil {
 		return "", nil, fmt.Errorf("draft_spec.py did not run to completion: %w", err)
 	}
