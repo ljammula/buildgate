@@ -389,7 +389,7 @@ func (a *Activities) PrepareIsolatedWorkspaceActivity(ctx context.Context, input
 			}
 			checkpoint.Error = activityErr.Error()
 		} else {
-			if markErr := recordIsolatedWorkspaceMarker(checkpointDir, input.RepoDir, adopted.WorktreePath, adopted.Branch); markErr != nil {
+			if markErr := recordIsolatedWorkspaceMarker(checkpointDir, input.RepoDir, adopted.WorktreePath, adopted.Branch, false); markErr != nil {
 				activity.GetLogger(ctx).Warn("failed to record isolated workspace recovery marker", "error", markErr)
 			}
 			if rmErr := wsisolation.RemoveStaleEvidence(adopted.WorktreePath); rmErr != nil {
@@ -433,6 +433,7 @@ func (a *Activities) PrepareIsolatedWorkspaceActivity(ctx context.Context, input
 			ActivityRunID: activity.GetInfo(ctx).WorkflowExecution.RunID,
 			ActivityID:    activity.GetInfo(ctx).ActivityID,
 			CheckpointDir: checkpointDir,
+			OnBranch:      input.OnBranch != "",
 		}); markerErr != nil {
 			return PrepareIsolatedWorkspaceResult{}, temporal.NewApplicationErrorWithCause("record isolation ownership marker", InfrastructureFailureType, markerErr)
 		}
@@ -468,7 +469,7 @@ func (a *Activities) PrepareIsolatedWorkspaceActivity(ctx context.Context, input
 		}
 	}
 	if prepErr == nil {
-		if markErr := recordIsolatedWorkspaceMarker(checkpointDir, input.RepoDir, worktreePath, branch); markErr != nil {
+		if markErr := recordIsolatedWorkspaceMarker(checkpointDir, input.RepoDir, worktreePath, branch, input.OnBranch != ""); markErr != nil {
 			// Best-effort, logged rather than failing the Activity (found via
 			// review): a caller's own hard TerminateWorkflow (used by every
 			// give-up/timeout path in cmd/factoryd) closes the Workflow

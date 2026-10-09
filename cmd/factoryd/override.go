@@ -106,7 +106,7 @@ func overrideMain(args []string) error {
 			if err := run.RetainBuildArtifacts(r.WorkspacePath, run.Dir(*dataDir, r.ID)); err != nil {
 				log.Printf("run %s: before override rollback: %v", r.ID, err)
 			}
-			if err := release.Rollback(r.ProjectPath, r.WorkspacePath, r.Branch); err != nil {
+			if err := release.Rollback(r.ProjectPath, r.WorkspacePath, r.Branch, r.OnBranch != ""); err != nil {
 				log.Printf("run %s: rollback of isolated workspace after override failed: %v", r.ID, err)
 			} else {
 				if r.KeptForResume {

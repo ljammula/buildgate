@@ -863,9 +863,10 @@ func rollbackIsolatedWorkspaceIfTerminated(temporalClient client.Client, workflo
 	// limitation — nothing kills it once the Activity's own context is
 	// moot); it cannot close that case fully, only shrink the window.
 	var repoDir string
+	var onBranch bool
 	readDeadline := time.Now().Add(5 * time.Second)
 	for {
-		repoDir, worktreePath, branch = workflow.RecoverIsolatedWorkspaceFromCheckpointDir(checkpointDir)
+		repoDir, worktreePath, branch, onBranch = workflow.RecoverIsolatedWorkspaceFromCheckpointDir(checkpointDir)
 		if worktreePath != "" || time.Now().After(readDeadline) {
 			break
 		}
@@ -887,7 +888,7 @@ func rollbackIsolatedWorkspaceIfTerminated(temporalClient client.Client, workflo
 	if err := run.RetainBuildArtifacts(worktreePath, runDirOfCheckpointDir(checkpointDir)); err != nil {
 		log.Printf("before rollback after hard termination (workflow %s): %v", workflowID, err)
 	}
-	if err := release.Rollback(repoDir, worktreePath, branch); err != nil {
+	if err := release.Rollback(repoDir, worktreePath, branch, onBranch); err != nil {
 		log.Printf("rollback of isolated workspace after hard termination (workflow %s) failed: %v", workflowID, err)
 	}
 	return worktreePath, branch
@@ -914,7 +915,7 @@ func rollbackIsolatedWorkspaceOnSaveFailure(r *run.Run) {
 	if r.WorkspacePath == "" || r.WorkspacePath == r.ProjectPath {
 		return
 	}
-	if err := release.Rollback(r.ProjectPath, r.WorkspacePath, r.Branch); err != nil {
+	if err := release.Rollback(r.ProjectPath, r.WorkspacePath, r.Branch, r.OnBranch != ""); err != nil {
 		log.Printf("run %s: rollback of isolated workspace after a terminal-state save failure also failed: %v", r.ID, err)
 	}
 }
