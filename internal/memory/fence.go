@@ -28,7 +28,7 @@ type Section struct {
 
 func fenceErr(why string) error { return errors.Join(ErrFence, errors.New(why)) }
 
-// controlRune reports a character a section line may not hold: a C0 or C1
+// controlRune reports a character a section line may not hold: an ASCII or Latin-1
 // control character or DEL (an escape sequence starts with one), a format
 // character (direction marks and overrides, zero-width characters, a BOM) or
 // a line or paragraph separator.

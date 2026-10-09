@@ -126,7 +126,7 @@ func checkPromptSurfaces(t *testing.T, dataDir, id, runID string, rr *run.Run, d
 	}
 
 	// The listing names the prompt; nothing else shows its text.
-	if !strings.Contains(absent["factoryd logs listing"], "prompts/build-1/build-round-1.md") || !strings.Contains(absent["factoryd logs listing"], "[prompt]") {
+	if !strings.Contains(absent["factoryd logs listing"], "prompts/build-1/build-round-1.md") || !strings.Contains(absent["factoryd logs listing"], "[prompt, as saved by the build]") {
 		t.Errorf("the log listing lacks the prompt:\n%s", absent["factoryd logs listing"])
 	}
 	for name, text := range absent {

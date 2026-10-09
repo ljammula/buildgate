@@ -202,3 +202,52 @@ func TestNextPromptAttempt(t *testing.T) {
 		t.Errorf("after spec-3 = %d, want 4", got)
 	}
 }
+
+// A session folder and its prompts folder left read-only (as a build can
+// leave them) are made removable and removed: a later launch must not find a
+// prompt it did not save.
+func TestDropSavedPromptsRemovesAFolderLeftUnwritable(t *testing.T) {
+	workspace := t.TempDir()
+	session := filepath.Join(workspace, ".pi-code-review-session")
+	prompts := filepath.Join(session, "prompts")
+	nested := filepath.Join(prompts, "deeper")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{filepath.Join(prompts, "review-code.md"), filepath.Join(nested, "x.md")} {
+		if err := os.WriteFile(file, []byte("planted\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dirs := []string{nested, prompts, session}
+	for _, dir := range dirs {
+		if err := os.Chmod(dir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for i := len(dirs) - 1; i >= 0; i-- {
+			_ = os.Chmod(dirs[i], 0o755)
+		}
+	})
+	if err := DropSavedPrompts(workspace, []string{".pi-code-review-session"}); err != nil {
+		t.Fatalf("DropSavedPrompts: %v", err)
+	}
+	if _, err := os.Lstat(prompts); !os.IsNotExist(err) {
+		t.Fatalf("the prompts folder remains (%v)", err)
+	}
+}
+
+// What cannot be shown to be gone is an error: the caller must not launch.
+func TestDropSavedPromptsFailsWhenThePromptsFolderCannotBeShownGone(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, ".pi-code-review-session"), []byte("a file where the session folder goes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := DropSavedPrompts(workspace, []string{".pi-code-review-session"}); err == nil {
+		t.Fatal("DropSavedPrompts = nil for a session path that is a file, want an error")
+	}
+	if err := DropSavedPrompts(workspace, []string{".pi-absent-session"}); err != nil {
+		t.Fatalf("an absent session folder: %v", err)
+	}
+}

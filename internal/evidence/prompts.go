@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,8 +18,18 @@ import (
 
 // PromptsDirName is the directory, inside a run's own directory or a
 // request's, that holds the prompts the factory composed and handed to a
-// coding-agent harness, as sent: <dir>/prompts/<attempt>/<name>.md, the
-// attempt folder being "<kind>-<n>" (build-1, code_review-1, spec-2).
+// coding-agent harness, as the launch's script saved them:
+// <dir>/prompts/<attempt>/<name>.md, the attempt folder being "<kind>-<n>"
+// (build-1, code_review-1, spec-2).
+//
+// A saved prompt is what the launch's session folder held when the host
+// copied it. The script and the coding agent run as one user in one sandbox,
+// and everything the script could tell the host with (its output file, which
+// sits in a directory the sandbox can write, its evidence file, the session
+// folder) the agent can write too: a build can alter, add or hide its own
+// saved prompts before the copy. The host removes whatever a session's
+// prompts folder holds before each launch (DropSavedPrompts), so a file left
+// by an earlier step is never copied as a later launch's prompt.
 //
 // The text is for the operator only (SC-018): it quotes the ticket, the
 // earlier attempt's record and failing output, and a corrective round's
@@ -96,10 +107,13 @@ func RetainPrompts(workspace string, sessions []string, dstDir string) (int, err
 }
 
 // DropSavedPrompts removes the prompts folder of each session folder (relative
-// to workspace) after RetainPrompts, so a later launch in the same worktree (a
-// review) never finds a build's prompts, and a prompt planted there is not
-// taken for one. The removal goes through an os.Root on the workspace: a link
-// is removed, never followed. An absent folder is not an error.
+// to workspace) after RetainPrompts, or before a launch, so a launch never
+// finds a prompt it did not save and a prompt planted there is not taken for
+// one. The removal goes through an os.Root on the workspace: a link is
+// removed, never followed. A folder left read-only is made removable first
+// (the session folder and every directory under its prompts folder get their
+// owner's write permission). An absent folder is not an error; a prompts
+// path that is still there afterwards, or cannot be looked at, is.
 func DropSavedPrompts(workspace string, sessions []string) error {
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
@@ -112,11 +126,43 @@ func DropSavedPrompts(workspace string, sessions []string) error {
 	var errs []error
 	for _, session := range sessions {
 		src := filepath.ToSlash(filepath.Join(session, promptsSessionSubdir))
-		if err := root.RemoveAll(src); err != nil && !os.IsNotExist(err) {
+		if err := dropPromptsFolder(root, filepath.ToSlash(session), src); err != nil {
 			errs = append(errs, fmt.Errorf("remove %s: %w", src, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// dropPromptsFolder removes src, the prompts folder of session, and reports
+// anything short of src being gone.
+func dropPromptsFolder(root *os.Root, session, src string) error {
+	if err := root.RemoveAll(src); err != nil && !os.IsNotExist(err) {
+		makeRemovable(root, session, src)
+		if err := root.RemoveAll(src); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if _, err := root.Lstat(src); err == nil {
+		return errors.New("still there after its removal")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// makeRemovable gives session, when it is a real directory, and every real
+// directory under src its owner's write permission. Nothing is followed out
+// of root, and a link is never changed.
+func makeRemovable(root *os.Root, session, src string) {
+	if info, err := root.Lstat(session); err == nil && info.IsDir() {
+		_ = root.Chmod(session, 0o700)
+	}
+	_ = fs.WalkDir(root.FS(), src, func(p string, d fs.DirEntry, err error) error {
+		if d != nil && d.IsDir() {
+			_ = root.Chmod(p, 0o700)
+		}
+		return nil
+	})
 }
 
 // retainSessionPrompts copies the prompts in the folder src of root, up to

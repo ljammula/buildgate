@@ -1,7 +1,7 @@
 import { type JsonObject, objectList, reqNumber, reqString } from "@/domain/decode";
 
 /**
- * One prompt the factory sent to a coding-agent harness during a run
+ * One prompt a launch of a run saved, as the host copied it
  * (GET /runs/{id}/prompts, internal/api.PromptView). `attempt` names the
  * launch it belongs to (build-1, code_review-1); `name` the turn.
  */

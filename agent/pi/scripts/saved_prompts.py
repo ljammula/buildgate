@@ -1,5 +1,7 @@
-"""Saves each prompt a script hands to a coding-agent harness, as sent, in the
-session folder, so the operator can read what the model was told.
+"""Saves each prompt a script hands to a coding-agent harness in the session
+folder, so the operator can read what the model was told. The folder is in
+the workspace the coding agent writes: the host keeps what the folder holds
+when it copies it, and empties it before each launch.
 
 `save_prompt(session_dir, name, text)` writes `text` to
 `<session_dir>/prompts/<name>.md` (0600, UTF-8). The host copies that folder

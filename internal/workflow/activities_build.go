@@ -263,8 +263,9 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 	// This runs only after the repository owner has granted the request its
 	// serialized turn, so cleanup cannot erase another in-flight run's
 	// BUILD_EVIDENCE.json while that run is still collecting evidence.
-	if err := os.Remove(filepath.Join(input.WorkspacePath, "BUILD_EVIDENCE.json")); err != nil && !os.IsNotExist(err) {
-		return BuildActivityResult{}, temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+	// A prompt in the build's session folders was not saved by this launch.
+	if err := clearBeforeBuild(input.WorkspacePath); err != nil {
+		return BuildActivityResult{}, err
 	}
 	// Host-side info/exclude installed before the build (as in cmd/factoryd's runMainWithReady): without it the driver
 	// falls back to appending its bookkeeping names to the tracked

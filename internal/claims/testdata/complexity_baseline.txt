@@ -69,7 +69,7 @@
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
 44 internal/sessionconfig/routing.go ValidateRouting
 28 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
-40 internal/workflow/activities_build.go (*Activities).RunBuildActivity
+39 internal/workflow/activities_build.go (*Activities).RunBuildActivity
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 35 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity

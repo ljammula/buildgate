@@ -156,7 +156,7 @@ export function useRunHandoff(id: string, sha256: string): UseQueryResult<Handof
   });
 }
 
-/** The prompts a run's launches were sent; empty for a run that kept none. */
+/** The prompts a run's launches saved; empty for a run that kept none. */
 export function useRunPrompts(id: string): UseQueryResult<SavedPrompt[]> {
   const { http } = useApi();
   return useQuery({

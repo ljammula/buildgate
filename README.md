@@ -302,7 +302,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 | To | Run |
 |---|---|
 | See everything waiting on you, across profiles | `factoryd inbox` |
-| Follow a run, read its log | `factoryd watch <id>`, `factoryd logs [-f] <id\|queue-run\|serve>`; the prompts it sent a model: `factoryd logs -list <id>`, `-prompt <name>` |
+| Follow a run, read its log | `factoryd watch <id>`, `factoryd logs [-f] <id\|queue-run\|serve>`; the prompts its launches saved: `factoryd logs -list <id>`, `-prompt <name>` |
 | Drop a request | `factoryd cancel <request-id>` |
 | Stop what factoryd started | `factoryd stop [-all] [-force]` |
 | Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; refused while a request is building) |

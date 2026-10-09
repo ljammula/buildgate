@@ -351,6 +351,8 @@
     "memory_edit": {
       "proposal": true,
       "matches": true,
+      "switched_off": true,
+      "base_moved": true,
       "base_has_section": true,
       "changed_root_names": [
         "every-field changed_root_names"

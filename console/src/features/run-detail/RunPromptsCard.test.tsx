@@ -6,7 +6,7 @@ import { readFixtureJson, readFixtureText } from "@/test/fixtures";
 
 import { RunPromptsCard } from "./RunPromptsCard";
 
-test("the prompts a run was sent are listed collapsed, and a prompt is read only when opened", async () => {
+test("the prompts a run saved are listed collapsed, and a prompt is read only when opened", async () => {
   const { server } = renderApp(<RunPromptsCard runId="run-quarantined" />, {
     server: [
       {
@@ -22,9 +22,9 @@ test("the prompts a run was sent are listed collapsed, and a prompt is read only
       },
     ],
   });
-  const section = await screen.findByRole("heading", { name: "Prompts sent" });
+  const section = await screen.findByRole("heading", { name: "Prompts as saved by the build" });
   expect(section).toBeInTheDocument();
-  expect(screen.getByText(/2 prompts the factory sent to a model/)).toBeInTheDocument();
+  expect(screen.getByText(/2 prompts as saved by the build/)).toBeInTheDocument();
   expect(screen.getAllByTestId("run-prompt")).toHaveLength(2);
   // Nothing is read until one is opened.
   expect(server.sent("GET /runs/run-quarantined/prompts/build-1/build-round-1")).toHaveLength(0);
@@ -53,7 +53,9 @@ test("a prompt is shown as text, never as HTML", async () => {
       },
     ],
   });
-  await userEvent.click(await screen.findByRole("heading", { name: "Prompts sent" }));
+  await userEvent.click(
+    await screen.findByRole("heading", { name: "Prompts as saved by the build" }),
+  );
   await userEvent.click(await screen.findByRole("button", { name: /^build-round-1/ }));
   const text = await screen.findByRole("region", { name: "Prompt build-round-1" });
   expect(text.querySelector("img")).toBeNull();

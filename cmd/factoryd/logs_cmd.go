@@ -65,7 +65,7 @@ func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, fol
 	list = flags.Bool("list", false, "list every log for the id (oldest first) instead of showing the newest")
 	follow = flags.Bool("f", false, "follow: print appended bytes and switch to newer log files until the request or run finishes (Ctrl-C to stop)")
 	lines = flags.Int("n", 40, "number of trailing lines to show")
-	flags.String("prompt", "", "print one prompt the factory sent to a model, in full: <name> or <attempt>/<name> as -list shows them (operator-only; may quote repository content)")
+	flags.String("prompt", "", "print one prompt as the build saved it, in full: <name> or <attempt>/<name> as -list shows them (operator-only; may quote repository content)")
 	plainFlagUsage(flags)
 	return
 }
@@ -377,7 +377,7 @@ func printLogList(w io.Writer, dataDir string, t logsTarget) error {
 	for _, f := range files {
 		kind := ""
 		if f.prompt {
-			kind = "  [prompt]"
+			kind = "  [prompt, as saved by the build]"
 		}
 		fmt.Fprintf(w, "%s  %s  %s (%s ago)%s\n", relToDataDir(dataDir, f.path), humanBytes(f.size), f.modified.Format("2006-01-02 15:04:05"), humanAge(now.Sub(f.modified)), kind)
 	}

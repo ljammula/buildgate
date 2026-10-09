@@ -337,7 +337,7 @@ func TestLogsListsSavedPromptsAndPrintsOneWithTerminalEscapesStripped(t *testing
 	if err := runLogs(context.Background(), &list, dataDir, "run-p", true, false, 40); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"prompts/build-1/build-round-1.md", "prompts/build-2/build-round-1.md", "[prompt]", "build_app.log"} {
+	for _, want := range []string{"prompts/build-1/build-round-1.md", "prompts/build-2/build-round-1.md", "[prompt, as saved by the build]", "build_app.log"} {
 		if !strings.Contains(list.String(), want) {
 			t.Errorf("-list lacks %q:\n%s", want, list.String())
 		}

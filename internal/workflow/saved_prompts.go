@@ -2,9 +2,11 @@ package workflow
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/reviewstep"
@@ -31,8 +33,9 @@ func reviewPromptSession(stepName string) string {
 
 // retainLaunchPrompts copies the prompts a launch saved in sessions into the
 // run's own directory, under prompts/<kind>-<attempt>/ (SC-018: for the
-// operator only). Best-effort: the operator loses the prompts, the step is
-// not failed.
+// operator only). What is copied is what the session folders held: see
+// evidence.PromptsDirName. Best-effort: the operator loses the prompts, the
+// step is not failed.
 func (a *Activities) retainLaunchPrompts(ctx context.Context, input RunWorkflowInput, kind string, attempt int32, sessions []string) {
 	logDir := a.logDirFor(input)
 	if logDir == "" || input.WorkspacePath == "" {
@@ -44,12 +47,35 @@ func (a *Activities) retainLaunchPrompts(ctx context.Context, input RunWorkflowI
 	}
 }
 
-// dropStaleReviewPrompts removes what the worktree holds in step's prompts
-// folder before the launch: not saved by it, so the build agent wrote it.
-func (a *Activities) dropStaleReviewPrompts(ctx context.Context, input ReviewStepInput, step reviewstep.Step) {
-	if err := evidence.DropSavedPrompts(input.WorkspacePath, []string{reviewPromptSession(step.Name)}); err != nil {
-		activity.GetLogger(ctx).Warn("failed to remove prompts found before the review launched", "error", err)
+// prepareReviewLaunch is prepareReviewInstructions, then the removal of what
+// the worktree holds in step's prompts folder before the launch: not saved by
+// it, so the build agent wrote it. A folder left read-only is made removable
+// first; when it still cannot be shown gone the step fails as an
+// infrastructure error, and no review is launched beside it. The returned
+// preparation is finished by the caller in either case.
+func (a *Activities) prepareReviewLaunch(ctx context.Context, input ReviewStepInput, step reviewstep.Step, dst string) (reviewInstructions, error) {
+	prep, err := a.prepareReviewInstructions(ctx, input, step.Name, dst)
+	if err != nil {
+		return prep, err
 	}
+	if err := evidence.DropSavedPrompts(input.WorkspacePath, []string{reviewPromptSession(step.Name)}); err != nil {
+		return prep, temporal.NewApplicationErrorWithCause("remove the prompts found in the review's session folder before its launch", InfrastructureFailureType, err)
+	}
+	return prep, nil
+}
+
+// clearBeforeBuild removes what a build launch must not find in the worktree:
+// an earlier build's evidence file, and any prompt in the session folders the
+// launch saves its own in (not saved by it, so an earlier step or the
+// repository wrote it). A failure is an infrastructure error.
+func clearBeforeBuild(workspace string) error {
+	if err := os.Remove(filepath.Join(workspace, "BUILD_EVIDENCE.json")); err != nil && !os.IsNotExist(err) {
+		return temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+	}
+	if err := evidence.DropSavedPrompts(workspace, buildPromptSessions); err != nil {
+		return temporal.NewApplicationErrorWithCause("remove the prompts found in the build's session folders before its launch", InfrastructureFailureType, err)
+	}
+	return nil
 }
 
 // retainReviewPrompts copies the prompt a review launch saved into the run's

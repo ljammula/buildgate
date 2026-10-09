@@ -10,8 +10,9 @@ import (
 	"buildgate/internal/run"
 )
 
-// PromptView is one entry of GET /runs/{id}/prompts: a prompt the factory
-// sent to a coding-agent harness during the run, kept for the operator.
+// PromptView is one entry of GET /runs/{id}/prompts: a prompt a launch of the
+// run saved, as its session folder held it when the host copied it
+// (evidence.PromptsDirName), kept for the operator.
 type PromptView struct {
 	Name    string    `json:"name"`
 	Attempt string    `json:"attempt"`
@@ -25,7 +26,7 @@ type PromptsView struct {
 }
 
 // getRunPrompts serves GET /runs/{id}/prompts: the prompts the run's launches
-// were handed, as sent (redacted by the host copy), oldest first. Operator
+// saved, as the host copied them (redacted by the copy), oldest first. Operator
 // only (SC-018): they quote the ticket, the record of an earlier attempt and
 // failing output. Gated like GET /runs/{id}; no MCP tool replays it. A run
 // with none answers an empty list.

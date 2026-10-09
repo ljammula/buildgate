@@ -118,7 +118,7 @@ export async function getRunPrompts(
   return decodeSavedPrompts(asObject(json, at), at);
 }
 
-/** GET /runs/{id}/prompts/{attempt}/{name}: one prompt's text, as sent. */
+/** GET /runs/{id}/prompts/{attempt}/{name}: one prompt's text, as the build saved it. */
 export async function getRunPromptText(
   http: Http,
   id: string,

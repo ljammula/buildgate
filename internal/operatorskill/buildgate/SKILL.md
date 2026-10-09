@@ -20,7 +20,7 @@ another profile:
 - `factoryd doctor [-target-repo <repo-path>]`
 - `factoryd status [-n N] [-json]`
 - `factoryd watch [-no-follow] <id>`
-- `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt the factory sent to a model, which may quote repository content)
+- `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt as the build saved it, which may quote repository content)
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
   getting better, per repository and per week (read-only; counts, no model call)

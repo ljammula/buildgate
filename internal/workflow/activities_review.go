@@ -227,14 +227,14 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// SC-019: the review reads the instruction files as the base commit
 	// holds them, and is shown what the build did to them as data. An
 	// error here does not launch the review.
-	prep, err := a.prepareReviewInstructions(ctx, input, step.Name, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
+	// A prompt already in this step's session folder was not saved by this
+	// launch: the build agent could have written it. It is removed, or the
+	// step fails.
+	prep, err := a.prepareReviewLaunch(ctx, input, step, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
 	defer func() { _ = prep.finish(ctx) }()
 	if err != nil {
 		return VerifyActivityResult{}, err
 	}
-	// A prompt already in this step's session folder was not saved by this
-	// launch: the build agent could have written it.
-	a.dropStaleReviewPrompts(ctx, input, step)
 	script := filepath.Join(filepath.Dir(a.buildAppScriptFor(input.RunWorkflowInput)), step.ScriptName)
 	args := prep.args(reviewStepArgs(a, step, input, script))
 	buildAppInterpreter := a.buildAppInterpreterFor(input.RunWorkflowInput)

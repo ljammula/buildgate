@@ -53,8 +53,10 @@ function PromptRow({ runId, prompt }: PromptRowProps) {
 }
 
 /**
- * The prompts the factory sent to a model during the run, as sent (credentials
- * redacted), each opening in a text viewer. For the operator only: they quote
+ * The prompts the run's launches saved, as the host copied them from each
+ * launch's session folder (credentials redacted), each opening in a text
+ * viewer. A build can alter its own saved prompts before the copy, so the card
+ * says "as saved by the build", not "sent". For the operator only: they quote
  * the ticket, the record of an earlier attempt and failing output, so the text
  * is shown as text. Nothing for a run that kept none or whose list cannot be
  * read.
@@ -66,8 +68,8 @@ export function RunPromptsCard({ runId }: RunPromptsCardProps) {
   return (
     <div data-testid="run-prompts">
       <Disclosure
-        title="Prompts sent"
-        summary={`${count} ${count === 1 ? "prompt" : "prompts"} the factory sent to a model; may quote repository content`}
+        title="Prompts as saved by the build"
+        summary={`${count} ${count === 1 ? "prompt" : "prompts"} as saved by the build; may quote repository content`}
       >
         <ul className="flex flex-col gap-1">
           {prompts.data.map((prompt) => (
