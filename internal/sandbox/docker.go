@@ -740,7 +740,10 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 		// worker-owned too, and a build tool that tightens a directory
 		// there would otherwise leave the host-side RemoveScratchDir with
 		// an EPERM and a gigabyte of cache behind (Codex review of PR #98).
-		reclaim := "chmod -R g+rwX -- " + shSingleQuote(workerContainerWorkDir) + " || true"
+		// stderr dropped: the workspace's .git is mounted read-only, so this
+		// walk always reports it, and that line landed in every step's
+		// captured output, a gate's failing lines included.
+		reclaim := "chmod -R g+rwX -- " + shSingleQuote(workerContainerWorkDir) + " 2>/dev/null || true"
 		if s.ScratchDir != "" {
 			// stderr dropped: go's build cache trims itself concurrently,
 			// so this walk routinely reports a file that vanished under

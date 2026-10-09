@@ -120,7 +120,7 @@ func TestSandboxRequestCommandIsTheWrapperThenTheSpecCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const tail = `ulimit -n 4096; umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' || true; chmod -R g+rwX -- '/scratch' 2>/dev/null || true; exit $ec`
+	const tail = `ulimit -n 4096; umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' 2>/dev/null || true; chmod -R g+rwX -- '/scratch' 2>/dev/null || true; exit $ec`
 	if !strings.HasSuffix(req.Command[2], tail) {
 		t.Errorf("script = %q, want suffix %q", req.Command[2], tail)
 	}
