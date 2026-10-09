@@ -221,7 +221,7 @@ func TestLoadAgentEvidenceIncompatibleFutureSchemaStillNamesTheVersionMismatch(t
 // A round's additive `autofix` record (build_app.py) does not stop the
 // evidence from loading: the field is carried by the file, not by the struct.
 func TestLoadAgentEvidenceToleratesTheAutofixRoundField(t *testing.T) {
-	t.Parallel()
+	// Not parallel: captureStdout swaps os.Stdout for the whole process.
 	workspace := t.TempDir()
 	body := `{"schema_version": 2, "rounds": [{"index": 1, "agent": "pi", "autofix": {"commands": [{"command": "gofmt -w .", "exit_code": 1, "timed_out": false, "duration_s": 0.2}], "reverted_count": 0, "reverted": []}}]}`
 	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(body), 0o644); err != nil {
