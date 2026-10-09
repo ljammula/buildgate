@@ -97,11 +97,15 @@ type LaunchSpec struct {
 	// this repo had before this field existed.
 	ReferenceOracleDir       string
 	ReferenceOracleMountPath string
-	LogPath                  string
-	Name                     string
-	User                     string
-	Command                  []string
-	Environment              []string
+	// WorkspaceMasks are read-only overlays bind-mounted over paths below
+	// /workspace, after the workspace and reference-oracle binds (see
+	// SnapshotReviewInstructions). Empty mounts nothing.
+	WorkspaceMasks []WorkspaceMask
+	LogPath        string
+	Name           string
+	User           string
+	Command        []string
+	Environment    []string
 	// UnrecordedEnvironment holds KEY=VALUE entries the container gets by
 	// name only (`--env KEY`), with each value supplied through the Docker
 	// CLI process's own environment. The value never appears in the docker
@@ -677,6 +681,9 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 		// see LaunchSpec.ReferenceOracleDir's own doc comment for why.
 		args = append(args, "--volume", s.ReferenceOracleDir+":"+workerContainerWorkDir+"/"+s.ReferenceOracleMountPath+":ro")
 	}
+	for _, mask := range s.WorkspaceMasks {
+		args = append(args, "--volume", mask.Source+":"+workerContainerWorkDir+"/"+mask.Target+":ro")
+	}
 	if s.InputDir != "" {
 		args = append(args, "--volume", s.InputDir+":/inputs:ro")
 	}
@@ -781,6 +788,9 @@ func (s LaunchSpec) withResolvedMounts() (LaunchSpec, error) {
 			return LaunchSpec{}, fmt.Errorf("resolve sandbox reference-oracle mount: %w", err)
 		}
 	}
+	if s.WorkspaceMasks, err = resolveWorkspaceMasks(s.WorkspaceMasks, s.ReferenceOracleMountPath); err != nil {
+		return LaunchSpec{}, err
+	}
 	for i := range s.Inputs {
 		s.Inputs[i].Source, err = filepath.EvalSymlinks(s.Inputs[i].Source)
 		if err != nil {
@@ -869,7 +879,32 @@ func (s LaunchSpec) validateMountPaths() error {
 			return fmt.Errorf("sandbox input %s: %w", mount.Target, err)
 		}
 	}
+	if err := validateWorkspaceMasks(s.WorkspaceMasks, s.ReferenceOracleMountPath); err != nil {
+		return fmt.Errorf("sandbox workspace mask: %w", err)
+	}
 	return nil
+}
+
+// resolveWorkspaceMasks validates masks (so a symlink source is refused
+// before it is followed) and returns a copy whose sources are resolved
+// through the symlinks of their parent directories.
+func resolveWorkspaceMasks(masks []WorkspaceMask, oraclePath string) ([]WorkspaceMask, error) {
+	if len(masks) == 0 {
+		return nil, nil
+	}
+	if err := validateWorkspaceMasks(masks, oraclePath); err != nil {
+		return nil, fmt.Errorf("sandbox workspace mask: %w", err)
+	}
+	out := make([]WorkspaceMask, len(masks))
+	for i, m := range masks {
+		parent, err := filepath.EvalSymlinks(filepath.Dir(m.Source))
+		if err != nil {
+			return nil, fmt.Errorf("resolve sandbox workspace mask %s: %w", m.Target, err)
+		}
+		m.Source = filepath.Join(parent, filepath.Base(m.Source))
+		out[i] = m
+	}
+	return out, nil
 }
 
 // Run starts and waits for one disposable worker, streaming combined output

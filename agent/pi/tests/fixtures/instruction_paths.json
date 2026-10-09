@@ -1,0 +1,24 @@
+{
+	"note": "Instruction paths each harness is documented to load, at the version the worker image pins. source documented means read from the harness documentation; no live probe has run yet. pifork is built from the pi base, so it carries pi's version and paths. unprobed lists the paths the review snapshot masks that no harness here is documented to load.",
+	"pi": {
+		"version": "0.84.4",
+		"source": "documented",
+		"paths": ["AGENTS.md", "CLAUDE.md", ".pi", ".agents/skills", ".pi/skills"]
+	},
+	"pifork": {
+		"version": "0.84.4",
+		"source": "documented",
+		"paths": ["AGENTS.md", "CLAUDE.md", ".pi", ".agents/skills", ".pi/skills"]
+	},
+	"codex": {
+		"version": "0.154.0",
+		"source": "documented",
+		"paths": ["AGENTS.md", "AGENTS.override.md", ".codex", ".agents/skills"]
+	},
+	"copilot": {
+		"version": "1.0.88",
+		"source": "documented",
+		"paths": ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/instructions", ".github/agents", ".github/skills", ".claude/skills", ".claude"]
+	},
+	"unprobed": ["CLAUDE.local.md", ".mcp.json", ".vscode/mcp.json", ".github/hooks"]
+}
