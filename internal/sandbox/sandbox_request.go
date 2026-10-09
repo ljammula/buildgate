@@ -178,6 +178,9 @@ func (s LaunchSpec) sandboxMounts(launch SandboxLaunch, tmpfsBytes int64) (mount
 	if s.ReferenceOracleDir != "" {
 		bind(s.ReferenceOracleDir, workerContainerWorkDir+"/"+s.ReferenceOracleMountPath, true)
 	}
+	for _, mask := range s.WorkspaceMasks {
+		bind(mask.Source, workerContainerWorkDir+"/"+mask.Target, true)
+	}
 	if s.InputDir != "" {
 		bind(s.InputDir, "/inputs", true)
 	}

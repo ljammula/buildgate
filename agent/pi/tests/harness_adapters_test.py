@@ -441,3 +441,11 @@ class PiPlaceholderEnvTests(unittest.TestCase):
 			with self.subTest(extra=extra):
 				with self.assertRaisesRegex(SystemExit, message):
 					self._config(**extra)
+
+
+class InstructionPathsFixtureTest(unittest.TestCase):
+	def test_instruction_paths_fixture_names_every_adapter(self):
+		fixture = json.loads((Path(__file__).resolve().parent / "fixtures" / "instruction_paths.json").read_text())
+		harness_adapters = _load("harness_adapters")
+		keys = {k for k, v in fixture.items() if isinstance(v, dict)}
+		self.assertEqual(keys, set(harness_adapters.ADAPTERS))
