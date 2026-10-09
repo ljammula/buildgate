@@ -795,7 +795,6 @@ var consoleDeepLinkPatterns = map[string]bool{
 	"GET /projects/{project}/release":      true,
 	"GET /projects/{project}/stats":        true,
 	"GET /projects/{project}/observations": true,
-	"GET /projects/{project}/memory":       true,
 }
 
 // wantsHTMLNavigation reports whether r's Accept header's first

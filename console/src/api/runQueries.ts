@@ -16,6 +16,7 @@ import { getQueueRunStatus, listWorkspaces } from "@/api/ops";
 import {
   type CheckProjectInput,
   checkProject,
+  getProjectMemory,
   getProjectObservations,
   getProjectStats,
   listProjects,
@@ -36,6 +37,7 @@ import {
 import type { ApiError } from "@/domain/apiError";
 import type { Handoff } from "@/domain/handoff";
 import { compareTimestamps } from "@/domain/elapsed";
+import type { ProjectMemory } from "@/domain/memory";
 import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
@@ -214,6 +216,14 @@ export function useProjectObservations(project: string): UseQueryResult<Observat
   return useQuery({
     queryKey: queryKeys.projects.observations(project),
     queryFn: ({ signal }) => getProjectObservations(http, project, signal),
+  });
+}
+
+export function useProjectMemory(project: string): UseQueryResult<ProjectMemory> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.projects.memory(project),
+    queryFn: ({ signal }) => getProjectMemory(http, project, signal),
   });
 }
 

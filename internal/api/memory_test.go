@@ -86,9 +86,6 @@ func TestGetProjectMemoryIsGatedLikeObservations(t *testing.T) {
 	if rec, _ := getMemory(t, NewServer(t.TempDir()), "/projects/app/memory", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("no provider: status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
-	if !consoleDeepLinkPatterns["GET /projects/{project}/memory"] {
-		t.Error("the memory page address is not a console deep link")
-	}
 }
 
 // The memory route is a read: it has no write method.
