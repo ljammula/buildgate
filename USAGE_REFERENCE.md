@@ -1322,7 +1322,7 @@ and gate launches are not masked.
 |---|---|
 | Files, by name | `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md` |
 | Folders, with everything in them | `.pi/`, `.codex/`, `.claude/`, `.agents/skills`, `.github/skills`, `.github/instructions`, `.github/agents`, `.github/hooks` |
-| Files, by path | `.github/copilot-instructions.md`, `.mcp.json`, `.vscode/mcp.json` |
+| Files, by path | `.github/copilot-instructions.md`, `.mcp.json`, `.vscode/mcp.json`, `.github/mcp.json` |
 
 | | What the review gets |
 |---|---|
@@ -1338,6 +1338,7 @@ and gate launches are not masked.
 | A checkout converted an instruction file (line endings, filters) | Stop converting that file (`.gitattributes`) |
 | A path is spelled two ways (`AGENTS.md` and `agents.md`, or `pkg/.claude` and `Pkg/.claude`), or a submodule sits under an instruction path, or its checkout holds one or a link at the `.github`, `.vscode` or `.agents` folder above one | Keep one spelling; move the submodule |
 | More than 64 instruction paths changed, over 2,000 instruction files, a file over 16 MiB, or an instruction path that changed between a file and a directory | Split the change so the build leaves fewer instruction files altered; the review attempt's `review_instructions_error` names which limit |
+| One commit holds more than 100,000 directories that lead to or lie under instruction paths (every folder above a `.github`, `.vscode`, `.agents`, `.claude`, `.pi` or `.codex` folder or an `AGENTS.md`-style file counts once), or over 64 MiB of such paths | Take the generated or vendored tree that holds them out of the repository; no ordinary repository reaches either limit |
 
 The halt's `halt_reason_code` is `review_instructions_failed`; its message is
 a fixed sentence. The cause is in the review attempt's
@@ -1353,7 +1354,10 @@ and no handoff or later build is told.
 The list of instruction paths is a table in the code: a harness that loads a
 path not on it is not covered. `make probe-instruction-paths` measures what
 the pinned `pi`, `codex` and `copilot` harnesses load from a workspace (no
-model call, no network) against that table.
+model call, no network) against that table, and `pifork` when
+`scripts/probe_instruction_paths.py --pifork-image <ref>` names an image with
+its launcher. A fork of `pi` that loads
+a path `pi` does not is measured only from the operator's own image.
 
 ## Repository memory (`factoryd memory`)
 

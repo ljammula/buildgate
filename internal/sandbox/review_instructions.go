@@ -44,7 +44,7 @@ var reviewInstructionDirs = []string{".agents/skills", ".github/skills", ".claud
 
 // reviewInstructionFiles are single instruction files, matched in any
 // directory of the workspace like the directories above.
-var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.json", ".vscode/mcp.json"}
+var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.json", ".vscode/mcp.json", ".github/mcp.json"}
 
 // reviewInstructionBaseNames are instruction files a harness loads from any
 // directory of the workspace (a nested pkg/AGENTS.md counts).
@@ -418,6 +418,25 @@ func sameEntries(a, b []treeEntry) bool {
 // later cap applies. A variable so a test can lower it.
 var maxReviewInstructionRetained = 50000
 
+// maxReviewInstructionRecordedDirs and maxReviewInstructionRecordedBytes bound
+// what register keeps from one commit's listing, whatever the shape of its
+// tree. A recorded directory is a map entry in each of three maps (about 200
+// bytes, measured), so the count bounds the entries; a recorded spelling is a
+// slice of its entry's path and of that path folded, which stay in memory
+// whole, so the bytes of both are counted for every entry that records
+// anything. Neither alone is a bound: 20,000 directories 1,500 levels down
+// are 30 million entries under little path text, and a few thousand
+// directories under names of a megabyte are gigabytes of text under few
+// entries. Together a commit's records stay under about 85 MiB. Only
+// directories that lead to or lie under a table match count, not the tree's:
+// 100,000 of them is twice the entries a commit may retain and more
+// directories than the largest public monorepos hold in all, and 64 MiB (the
+// staged-bytes limit) is over 300 bytes of path for each of them.
+const (
+	maxReviewInstructionRecordedDirs  = 100000
+	maxReviewInstructionRecordedBytes = 64 << 20
+)
+
 // ---- the plan ----
 
 // candidate is the outermost table entry covering a set of paths, with what
@@ -439,6 +458,8 @@ type planState struct {
 	staged    int64                     // bytes written under dst so far
 	retained  int                       // entries kept from the listings, for a test
 	sideKept  [2]int                    // entries kept from each commit's listing, bounded by maxReviewInstructionRetained
+	recDirs   [2]int                    // directories register recorded from each commit, bounded by maxReviewInstructionRecordedDirs
+	recBytes  [2]int                    // bytes of the paths it keeps slices of, bounded by maxReviewInstructionRecordedBytes
 	shas      [2]string                 // the base and result commits
 }
 
@@ -460,7 +481,10 @@ func (s *planState) load(ctx context.Context, root, sha string, side int) error 
 // table match; two spellings of one folded prefix are an error. A directory is
 // recorded once for each commit: an entry whose directory was recorded costs
 // one lookup, whatever its depth, and a new directory only the components
-// below its nearest recorded ancestor.
+// below its nearest recorded ancestor. What one commit adds is bounded: more
+// than maxReviewInstructionRecordedDirs directories, or more than
+// maxReviewInstructionRecordedBytes of the paths that recorded something, is
+// an error.
 func (s *planState) register(ip instrPath, path string, side int) error {
 	top := ip.lead
 	if ip.n > 0 {
@@ -483,6 +507,9 @@ func (s *planState) register(ip instrPath, path string, side int) error {
 		end -= len(ip.parts[k-1]) + 1
 	}
 	folded := strings.Join(ip.fold[:top], "/")
+	if s.recBytes[side] += len(path) + len(folded); s.recBytes[side] > maxReviewInstructionRecordedBytes {
+		return fmt.Errorf("review instructions: more than %d bytes of paths that lead to or lie under an instruction path in commit %s", maxReviewInstructionRecordedBytes, s.shas[side])
+	}
 	spellEnd, foldEnd := -1, -1
 	for k := 0; k < top; k++ {
 		spellEnd, foldEnd = spellEnd+1+len(ip.parts[k]), foldEnd+1+len(ip.fold[k])
@@ -495,6 +522,9 @@ func (s *planState) register(ip instrPath, path string, side int) error {
 		}
 		s.spell[folded[:foldEnd]] = spelled
 		if k < dirs {
+			if s.recDirs[side]++; s.recDirs[side] > maxReviewInstructionRecordedDirs {
+				return fmt.Errorf("review instructions: more than %d directories that lead to or lie under an instruction path in commit %s", maxReviewInstructionRecordedDirs, s.shas[side])
+			}
 			done[spelled] = true
 			if side == 1 {
 				s.resDirs[spelled] = true
