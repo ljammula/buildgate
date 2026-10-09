@@ -16,6 +16,7 @@ import { getQueueRunStatus, listWorkspaces } from "@/api/ops";
 import {
   type CheckProjectInput,
   checkProject,
+  getProjectObservations,
   getProjectStats,
   listProjects,
 } from "@/api/projects";
@@ -33,6 +34,7 @@ import {
 } from "@/api/runs";
 import type { ApiError } from "@/domain/apiError";
 import { compareTimestamps } from "@/domain/elapsed";
+import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
 import type { ProjectReleaseView, ReleaseView } from "@/domain/release";
@@ -189,6 +191,14 @@ function projectReleaseOptions(http: Http, project: string) {
   return queryOptions({
     queryKey: queryKeys.projects.release(project),
     queryFn: ({ signal }) => getProjectRelease(http, project, signal),
+  });
+}
+
+export function useProjectObservations(project: string): UseQueryResult<ObservationReport> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.projects.observations(project),
+    queryFn: ({ signal }) => getProjectObservations(http, project, signal),
   });
 }
 

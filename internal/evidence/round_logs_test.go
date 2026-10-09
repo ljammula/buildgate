@@ -214,3 +214,69 @@ func TestRetainRoundLogsKeepsTheLatestRoundsWhenThereAreTooMany(t *testing.T) {
 		t.Errorf("the last round was not retained: %v", err)
 	}
 }
+
+func TestReadRetainedRoundLogReadsTheStartOfTheFirstLogThatExists(t *testing.T) {
+	runDir := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(runDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("round-logs/round-2/oracle.log", "oracle output")
+	write("round-logs/round-2/verify.log", "verify output, a long one")
+	name, data := ReadRetainedRoundLog(runDir, 2, 13)
+	if name != "round-logs/round-2/verify.log" || string(data) != "verify output" {
+		t.Errorf("round 2 = %q, %q, want the first 13 bytes of verify.log", name, data)
+	}
+	for _, round := range []int{0, -1, 3} {
+		if name, data := ReadRetainedRoundLog(runDir, round, 100); name != "" || data != nil {
+			t.Errorf("round %d = %q, %q, want nothing", round, name, data)
+		}
+	}
+	if name, _ := ReadRetainedRoundLog(filepath.Join(runDir, "missing"), 2, 100); name != "" {
+		t.Errorf("a run directory that does not exist gave %q", name)
+	}
+}
+
+// Nothing outside the run's own directory is read, whichever part of the
+// path was replaced by a link.
+func TestReadRetainedRoundLogRefusesLinksOutOfTheRunDirectory(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, "round-1"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(outside, "verify.log"), filepath.Join(outside, "round-1", "verify.log")} {
+		if err := os.WriteFile(path, []byte("host secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := map[string]func(runDir string) error{
+		"round-logs is a link": func(runDir string) error { return os.Symlink(outside, filepath.Join(runDir, "round-logs")) },
+		"the round folder is a link": func(runDir string) error {
+			if err := os.MkdirAll(filepath.Join(runDir, "round-logs"), 0o750); err != nil {
+				return err
+			}
+			return os.Symlink(filepath.Join(outside, "round-1"), filepath.Join(runDir, "round-logs", "round-1"))
+		},
+		"the log is a link": func(runDir string) error {
+			if err := os.MkdirAll(filepath.Join(runDir, "round-logs", "round-1"), 0o750); err != nil {
+				return err
+			}
+			return os.Symlink(filepath.Join(outside, "verify.log"), filepath.Join(runDir, "round-logs", "round-1", "verify.log"))
+		},
+	}
+	for name, plant := range cases {
+		runDir := t.TempDir()
+		if err := plant(runDir); err != nil {
+			t.Fatal(err)
+		}
+		if got, data := ReadRetainedRoundLog(runDir, 1, 100); got != "" || data != nil {
+			t.Errorf("%s: read %q, %q, want nothing", name, got, data)
+		}
+	}
+}

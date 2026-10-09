@@ -12,6 +12,7 @@ import { NewRunScreen } from "@/features/new-run/NewRunScreen";
 import { OpsScreen } from "@/features/ops/OpsScreen";
 import { ProjectListScreen } from "@/features/projects/ProjectListScreen";
 import { ProjectReleaseScreen } from "@/features/projects/ProjectReleaseScreen";
+import { ProjectObservationsScreen } from "@/features/projects/ProjectObservationsScreen";
 import { ProjectStatsScreen } from "@/features/projects/ProjectStatsScreen";
 import { RequestDetailScreen } from "@/features/request-detail/RequestDetailScreen";
 import { RunDetailScreen } from "@/features/run-detail/RunDetailScreen";
@@ -53,6 +54,7 @@ function AppRoutes() {
       <Route path={routePatterns.newRun} element={<NewRunScreen />} />
       <Route path={routePatterns.projects} element={<ProjectListScreen />} />
       <Route path={routePatterns.projectStats} element={<ProjectStatsScreen />} />
+      <Route path={routePatterns.projectObservations} element={<ProjectObservationsScreen />} />
       <Route path={routePatterns.projectRelease} element={<ProjectReleaseScreen />} />
       <Route path={routePatterns.ops} element={<OpsScreen />} />
       {/* An unknown path is the board, as the server serves the console for it. */}

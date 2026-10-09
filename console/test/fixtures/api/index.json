@@ -35,6 +35,13 @@
     "content_type": "application/json"
   },
   {
+    "pattern": "GET /projects/{project}/observations",
+    "path": "/projects/app/observations",
+    "file": "project-observations.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
     "pattern": "GET /queue-run",
     "path": "/queue-run",
     "file": "queue-run.json",

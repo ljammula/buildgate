@@ -281,7 +281,7 @@ export function decodeAgentEvidenceRound(o: JsonObject, at: string): AgentEviden
 }
 
 /**
- * Mirrors cmd/factoryd's roundOutcome (round_summary.go) exactly: the same
+ * Mirrors run.AgentEvidenceRound.Outcome (internal/run/run.go) exactly: the same
  * priority order build_app.py's own round_blockers applies (timeout, then the
  * agent invocation itself failing, then a fast check substituting for
  * verification, then verification itself), classified from only the fields

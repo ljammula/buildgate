@@ -308,6 +308,15 @@ step("project-stats", async () => {
   await page.getByText(String(stats.total_runs), { exact: true }).first().waitFor();
 });
 
+step("project-observations", async () => {
+  await visit("/projects/app/observations");
+  // The page says what the server's own report says about the seeded runs.
+  const report = (await api("/projects/app/observations")).body;
+  await page.getByText(report.observations[0].what).first().waitFor();
+  await page.getByText("idempotency_test.go:41: key reused across accounts").first().waitFor();
+  await page.getByRole("link", { name: report.observations[0].run_id }).first().waitFor();
+});
+
 step("project-release", async () => {
   await visit("/projects/app/release");
   await page.getByText("incident 42").first().waitFor();

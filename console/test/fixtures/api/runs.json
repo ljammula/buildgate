@@ -49,8 +49,98 @@
     "changed_files": null,
     "dependency_lockfiles_touched": null,
     "dependency_changes": null,
+    "agent_evidence": {
+      "schema_version": 2,
+      "generated": "2026-09-10T09:39:00Z",
+      "review_policy": "advisory",
+      "provider": null,
+      "model": null,
+      "succeeded": false,
+      "stopped_reason": "local round budget (3) exhausted",
+      "rounds": [
+        {
+          "index": 1,
+          "agent": "pi",
+          "agent_returncode": 0,
+          "agent_timed_out": false,
+          "usage": null,
+          "reviewer_outcome": "",
+          "reviewer_detail": "",
+          "verify_passed": false,
+          "verify_timed_out": false,
+          "duration_s": 95,
+          "fast_check_ran": false,
+          "fast_check_passed": null,
+          "blockers": [
+            "canonical verification failed"
+          ],
+          "changed_files": [
+            "checkout/idempotency.go"
+          ],
+          "failure_signature": "5f2c9d0a71e4b386",
+          "failure_log": ".pi-build-session/feedback/round-1/verify.log"
+        },
+        {
+          "index": 2,
+          "agent": "pi",
+          "agent_returncode": 0,
+          "agent_timed_out": false,
+          "usage": null,
+          "reviewer_outcome": "",
+          "reviewer_detail": "",
+          "verify_passed": false,
+          "verify_timed_out": false,
+          "duration_s": 40,
+          "fast_check_ran": false,
+          "fast_check_passed": null,
+          "blockers": [
+            "no changes made to the workspace",
+            "canonical verification failed"
+          ],
+          "changed_files": [],
+          "failure_signature": "9a41c07be2d3f518",
+          "failure_log": ".pi-build-session/feedback/round-2/verify.log",
+          "agent_notes": "Your previous turn ended without changing any file in the workspace, so there was nothing new to check."
+        },
+        {
+          "index": 3,
+          "agent": "pi",
+          "agent_returncode": 0,
+          "agent_timed_out": false,
+          "usage": null,
+          "reviewer_outcome": "",
+          "reviewer_detail": "",
+          "verify_passed": false,
+          "verify_timed_out": false,
+          "duration_s": 38,
+          "fast_check_ran": false,
+          "fast_check_passed": null,
+          "blockers": [
+            "no changes made to the workspace",
+            "canonical verification failed"
+          ],
+          "changed_files": [],
+          "failure_signature": "9a41c07be2d3f518",
+          "failure_log": ".pi-build-session/feedback/round-3/verify.log"
+        }
+      ],
+      "agents_md_used": false
+    },
     "attempts": null,
-    "gate_results": null,
+    "gate_results": [
+      {
+        "check": "canonical_verify",
+        "command": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "duration_ms": 3100,
+        "log_sha256": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
+      }
+    ],
     "notifications": null,
     "overrides": null,
     "rescues": null,

@@ -67,6 +67,7 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /projects", Path: "/projects", File: "projects.json"},
 		{Pattern: "GET /projects/{project}/release", Path: "/projects/app/release", File: "project-release.json"},
 		{Pattern: "GET /projects/{project}/stats", Path: "/projects/app/stats", File: "project-stats.json"},
+		{Pattern: "GET /projects/{project}/observations", Path: "/projects/app/observations", File: "project-observations.json"},
 		{Pattern: "GET /queue-run", Path: "/queue-run", File: "queue-run.json"},
 		{Pattern: "GET /daemons", Path: "/daemons", File: "daemons.json"},
 		{Pattern: "GET /workspaces", Path: "/workspaces", File: "workspaces.json"},
@@ -560,7 +561,23 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	quarantined.HaltError, quarantined.HaltReasonCode = "verify failed after 3 rounds", "verify_failed"
 	quarantined.Triage = "The verify command failed on TestKeyScopedToAccount in every round."
 	quarantined.CreatedAt, quarantined.UpdatedAt = stamp(31), stamp(40)
+	// Three rounds that each failed, the last two the same way and the
+	// second without changing a file, then the check that quarantined it:
+	// what the project's observations are made of.
+	failed := false
+	verifyFailed := []string{"canonical verification failed"}
+	quarantined.AgentEvidence = &run.AgentEvidence{
+		SchemaVersion: run.AgentEvidenceSchemaVersion, Generated: stamp(39), ReviewPolicy: "advisory", StoppedReason: "local round budget (3) exhausted",
+		Rounds: []run.AgentEvidenceRound{
+			{Index: 1, Agent: "pi", VerifyPassed: &failed, DurationS: 95, Blockers: verifyFailed, ChangedFiles: []string{"checkout/idempotency.go"}, FailureSignature: "5f2c9d0a71e4b386", FailureLog: ".pi-build-session/feedback/round-1/verify.log"},
+			{Index: 2, Agent: "pi", VerifyPassed: &failed, DurationS: 40, Blockers: []string{"no changes made to the workspace", "canonical verification failed"}, ChangedFiles: []string{}, FailureSignature: "9a41c07be2d3f518", FailureLog: ".pi-build-session/feedback/round-2/verify.log", AgentNotes: "Your previous turn ended without changing any file in the workspace, so there was nothing new to check."},
+			{Index: 3, Agent: "pi", VerifyPassed: &failed, DurationS: 38, Blockers: []string{"no changes made to the workspace", "canonical verification failed"}, ChangedFiles: []string{}, FailureSignature: "9a41c07be2d3f518", FailureLog: ".pi-build-session/feedback/round-3/verify.log"},
+		},
+	}
+	quarantined.GateResults = []run.GateResult{{Check: "canonical_verify", Command: []string{"go", "test", "./..."}, Passed: false, ExitCode: 1, DurationMs: 3100, LogSHA256: strings.Repeat("0a", 32)}}
 	seedRun(t, dataDir, quarantined)
+	write(filepath.Join(run.Dir(dataDir, quarantined.ID), "round-logs", "round-3", "verify.log"),
+		"ok  \tapp/cart\t0.012s\n--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s\n")
 
 	running := runBase("run-running", run.StateSliceRunning, "req-building")
 	running.CreatedAt, running.UpdatedAt = stamp(45), stamp(46)
