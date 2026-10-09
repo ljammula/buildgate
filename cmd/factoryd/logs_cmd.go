@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/evidence"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
@@ -250,6 +251,12 @@ func walkLogs(root string) []logFile {
 			return nil
 		}
 		name := d.Name()
+		// The build agent's notes sit in the run directory; only the
+		// handoff reads them (SC-018). Skipped by name, not left out by
+		// their suffix alone.
+		if name == evidence.AgentNotesFileName {
+			return nil
+		}
 		switch {
 		case name == "progress.jsonl" || name == "notifications.log":
 			if lf, ok := statLog(p, true); ok {

@@ -206,8 +206,8 @@ const AgentNotesFileName = "agent-notes.md"
 // worktree when the build step returns.
 const agentNotesSource = ".pi-build-session/handoff-notes.md"
 
-// maxAgentNotesBytes bounds the notes file; build_app.py cuts the reply to
-// 6000 characters, so a larger file was not written by it.
+// maxAgentNotesBytes bounds the notes file; build_app.py writes at most
+// 12,000 bytes, so a larger file was written by the agent itself.
 const maxAgentNotesBytes = 16 << 10
 
 // RetainAgentNotes copies the build's notes out of workspace to dstPath
@@ -215,7 +215,16 @@ const maxAgentNotesBytes = 16 << 10
 // source is hostile, as RetainRoundLogs': it is opened through an os.Root on
 // the workspace with no symlink followed, and must be a regular file of at
 // most maxAgentNotesBytes; a larger one retains nothing and is an error.
-func RetainAgentNotes(workspace, dstPath string) (bool, error) {
+// Whenever nothing is retained, a file already at dstPath (an earlier
+// attempt's notes) is removed, so a later attempt never inherits it.
+func RetainAgentNotes(workspace, dstPath string) (retained bool, err error) {
+	defer func() {
+		if !retained {
+			if rmErr := os.Remove(dstPath); rmErr != nil && !os.IsNotExist(rmErr) && err == nil {
+				err = rmErr
+			}
+		}
+	}()
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
 		if os.IsNotExist(err) {

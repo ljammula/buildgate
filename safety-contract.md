@@ -412,7 +412,7 @@ requires a new contract review and an updated machine-checkable test.
   capped like every other value, and stores them in the handoff apart from its
   own facts and after them. They are labelled the agent's view, never decide a
   bin, are absent from the run record and every MCP tool, and are otherwise
-  shown only to the operator.
+  readable only through the operator's own handoff route.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.

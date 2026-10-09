@@ -288,8 +288,15 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 		// The agent's notes for the next attempt of the ticket sit in the
 		// same folder. Only the handoff reads the copy (SC-018); a failure
 		// loses the notes, never the step.
-		if _, err := evidence.RetainAgentNotes(input.WorkspacePath, filepath.Join(logDir, evidence.AgentNotesFileName)); err != nil {
-			activity.GetLogger(ctx).Warn("failed to retain the build agent's notes before removing the finished build's session", "error", err)
+		// Only from a real directory: a link or a file in its place holds
+		// nothing the script wrote, and the removal below refuses it.
+		notesDst := filepath.Join(logDir, evidence.AgentNotesFileName)
+		if info, statErr := os.Lstat(filepath.Join(input.WorkspacePath, buildSessionDir)); statErr == nil && info.IsDir() {
+			if _, err := evidence.RetainAgentNotes(input.WorkspacePath, notesDst); err != nil {
+				activity.GetLogger(ctx).Warn("failed to retain the build agent's notes before removing the finished build's session", "error", err)
+			}
+		} else {
+			_ = os.Remove(notesDst)
 		}
 	}
 	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
