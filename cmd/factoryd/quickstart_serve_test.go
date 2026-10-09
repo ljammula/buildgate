@@ -1,15 +1,19 @@
 package main
 
 import (
+	"buildgate/internal/consolelink"
 	"buildgate/internal/hostcontrol"
 	"bytes"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestQuickstartServeChildEnvStripsExistingTokens proves
@@ -198,28 +202,20 @@ func TestQuickstartEnsureServeReusesVerifiedOwnServe(t *testing.T) {
 	}
 }
 
-// TestQuickstartEnsureServeRefusesUnverifiedListener is the regression
-// test for an adversarial-review finding: something answers /healthz, but
-// host.serveVerifiedOurs cannot attribute it to this operator's own
-// quickstart/install-service -- quickstartEnsureServe must NOT return a
-// token (so no tokenized link is ever printed/opened for it), must NOT
-// spawn a competing serve (the port is already taken), and must warn.
-//
-// Before that fix, quickstartEnsureServe treated any 200 from
-// /healthz as "ours" unconditionally and returned the stable token for
-// it regardless of who was actually listening -- this test fails against
-// that old behavior (token would be non-empty) and passes only once the
-// ownership check gates it.
-func TestQuickstartEnsureServeRefusesUnverifiedListener(t *testing.T) {
-	dp := newTestDeps(t)
+// heldDefaultServe sets up a default serve address that answers /healthz
+// and that the data dir cannot prove it owns (another profile's serve),
+// and returns the address every spawnServe call was given.
+func heldDefaultServe(t *testing.T, dp *deps, spawn func(dataDir, addr string)) *[]string {
+	t.Helper()
 	restoreHealthz := fakeHostOf(dp).serveHealthzOKFn
-	fakeHostOf(dp).serveHealthzOKFn = func(addr string) bool { return true }
+	fakeHostOf(dp).serveHealthzOKFn = func(addr string) bool { return addr == consolelink.DefaultServeAddr }
 	restoreVerified := fakeHostOf(dp).serveVerifiedOursFn
 	fakeHostOf(dp).serveVerifiedOursFn = func(dataDir, addr string) (int, bool) { return 0, false }
-	var spawned bool
+	var spawnedAt []string
 	restoreSpawn := fakeHostOf(dp).spawnServeFn
 	fakeHostOf(dp).spawnServeFn = func(w io.Writer, binaryPath, configPath, dataDir, addr string) error {
-		spawned = true
+		spawnedAt = append(spawnedAt, addr)
+		spawn(dataDir, addr)
 		return nil
 	}
 	t.Cleanup(func() {
@@ -227,24 +223,92 @@ func TestQuickstartEnsureServeRefusesUnverifiedListener(t *testing.T) {
 		fakeHostOf(dp).serveVerifiedOursFn = restoreVerified
 		fakeHostOf(dp).spawnServeFn = restoreSpawn
 	})
+	return &spawnedAt
+}
 
-	cfgDir := t.TempDir()
-	configPath := filepath.Join(cfgDir, "config.yml")
+func writeServeTestConfig(t *testing.T) string {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "config.yml")
 	if err := os.WriteFile(configPath, []byte("sandbox_image: img@sha256:"+strings.Repeat("a", 64)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return configPath
+}
+
+// TestQuickstartEnsureServeTakesAFreePortWhenTheDefaultIsHeld: something
+// answers /healthz at the default address and host.serveVerifiedOurs cannot
+// attribute it to this data dir (another profile's serve). That listener
+// never gets the token (an adversarial-review finding: a bare 200 from
+// /healthz proves nothing about who listens); this data dir's serve starts
+// on a free loopback port, and the token is returned once that serve has
+// recorded itself there.
+func TestQuickstartEnsureServeTakesAFreePortWhenTheDefaultIsHeld(t *testing.T) {
+	dp := newTestDeps(t)
+	// The suite stubs the probe to false (TestMain); this test's serve
+	// really listens, so the record is read with a real dial.
+	origListening := consolelink.Listening
+	t.Cleanup(func() { consolelink.Listening = origListening })
+	consolelink.Listening = func(addr string) bool {
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+		return true
+	}
+	spawnedAt := heldDefaultServe(t, dp, func(dataDir, addr string) {
+		// What a real serve does once bound: listen, then record.
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Fatalf("listen on the address quickstart chose (%s): %v", addr, err)
+		}
+		t.Cleanup(func() { l.Close() })
+		if _, err := consolelink.RecordServeAddress(dataDir, addr); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	var out bytes.Buffer
-	token := hostcontrol.QuickstartEnsureServe(dp, false, &out, "factoryd", configPath, t.TempDir())
+	dataDir := t.TempDir()
+	token := hostcontrol.QuickstartEnsureServe(dp, false, &out, "factoryd", writeServeTestConfig(t), dataDir)
+
+	if len(*spawnedAt) != 1 {
+		t.Fatalf("spawnServe calls = %v, want exactly one", *spawnedAt)
+	}
+	addr := (*spawnedAt)[0]
+	if addr == consolelink.DefaultServeAddr {
+		t.Fatalf("serve was spawned at the held default address %s", addr)
+	}
+	if host, _, err := net.SplitHostPort(addr); err != nil || host != "127.0.0.1" {
+		t.Errorf("serve was spawned at %q, want a 127.0.0.1 address", addr)
+	}
+	if token == "" {
+		t.Error("no token returned for this data dir's own recorded serve")
+	}
+	if got := consolelink.ServeAddress(dataDir); got != addr {
+		t.Errorf("recorded console address = %q, want %q", got, addr)
+	}
+	if !strings.Contains(out.String(), "held by another process") || !strings.Contains(out.String(), addr) {
+		t.Errorf("output = %q, want it to say the default is held and name %s", out.String(), addr)
+	}
+}
+
+// TestQuickstartEnsureServeGivesNoTokenUntilItsOwnServeIsRecorded: the
+// default address is held by an unverified listener and the serve spawned
+// on a free port has not recorded itself. No token is returned, so none can
+// be attached to a link at the held address.
+func TestQuickstartEnsureServeGivesNoTokenUntilItsOwnServeIsRecorded(t *testing.T) {
+	dp := newTestDeps(t)
+	spawnedAt := heldDefaultServe(t, dp, func(string, string) {})
+
+	var out bytes.Buffer
+	token := hostcontrol.QuickstartEnsureServe(dp, false, &out, "factoryd", writeServeTestConfig(t), t.TempDir())
 
 	if token != "" {
-		t.Errorf("quickstartEnsureServe returned token %q for an unverified listener, want empty", token)
+		t.Errorf("token %q returned with no recorded serve of this data dir's own", token)
 	}
-	if spawned {
-		t.Error("quickstartSpawnServe was called despite the port already being held by an unverified process")
-	}
-	if !strings.Contains(out.String(), "NOT printing") && !strings.Contains(out.String(), "not printing") {
-		t.Errorf("output = %q, want a warning about not printing/opening a tokenized link", out.String())
+	if len(*spawnedAt) != 1 || (*spawnedAt)[0] == consolelink.DefaultServeAddr {
+		t.Errorf("spawnServe calls = %v, want one, away from the held default", *spawnedAt)
 	}
 }
 
@@ -300,6 +364,9 @@ func TestQuickstartEnsureServeSpawnsWhenNotListening(t *testing.T) {
 func TestQuickstartPrintAndOpenConsoleLinkAppendsTokenOnOwnLoopbackServe(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("FACTORYD_CONSOLE_URL", "http://127.0.0.1:8090")
+	restoreVerified := fakeHostOf(dp).serveVerifiedOursFn
+	fakeHostOf(dp).serveVerifiedOursFn = func(dataDir, addr string) (int, bool) { return os.Getpid(), addr == "127.0.0.1:8090" }
+	t.Cleanup(func() { fakeHostOf(dp).serveVerifiedOursFn = restoreVerified })
 
 	var gotURL string
 	orig := fakeHostOf(dp).browserCommandFn
@@ -325,6 +392,94 @@ func TestQuickstartPrintAndOpenConsoleLinkAppendsTokenOnOwnLoopbackServe(t *test
 	}
 	if gotURL == want || gotURL == "" {
 		t.Errorf("openBrowserCommand argument = %q, want a local file path, not the bare URL", gotURL)
+	}
+}
+
+// TestQuickstartPrintAndOpenConsoleLinkOmitsTokenForAnUnverifiedListener:
+// the link points at this machine's loopback, but nothing this data dir can
+// prove it owns holds that address (another data dir's serve on the default
+// port, or a port a killed serve's record still names). The link is printed
+// without the token.
+func TestQuickstartPrintAndOpenConsoleLinkOmitsTokenForAnUnverifiedListener(t *testing.T) {
+	dp := newTestDeps(t)
+	t.Setenv("FACTORYD_CONSOLE_URL", "http://127.0.0.1:8090")
+	restoreVerified := fakeHostOf(dp).serveVerifiedOursFn
+	fakeHostOf(dp).serveVerifiedOursFn = func(dataDir, addr string) (int, bool) { return 0, false }
+	t.Cleanup(func() { fakeHostOf(dp).serveVerifiedOursFn = restoreVerified })
+
+	var out bytes.Buffer
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", "tok-abc", false)
+
+	if strings.Contains(out.String(), "tok-abc") {
+		t.Errorf("output = %q, gave the start token to a listener this data dir does not own", out.String())
+	}
+	if !strings.Contains(out.String(), "http://127.0.0.1:8090/requests/req-1") {
+		t.Errorf("output = %q, want the plain link", out.String())
+	}
+}
+
+// TestQuickstartEnsureServeWaitsForItsOwnStartingServe: the default address
+// is held by someone else and this data dir's own serve, spawned a moment
+// ago, has not recorded itself yet. A second submit starts no second serve.
+func TestQuickstartEnsureServeWaitsForItsOwnStartingServe(t *testing.T) {
+	dp := newTestDeps(t)
+	spawnedAt := heldDefaultServe(t, dp, func(string, string) {})
+	restoreLooksLike := fakeHostOf(dp).pidLooksLikeWorkerFn
+	fakeHostOf(dp).pidLooksLikeWorkerFn = func(pid int) bool { return true }
+	t.Cleanup(func() { fakeHostOf(dp).pidLooksLikeWorkerFn = restoreLooksLike })
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "quickstart-serve.pid"), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	token := hostcontrol.QuickstartEnsureServe(dp, false, &out, "factoryd", writeServeTestConfig(t), dataDir)
+
+	if len(*spawnedAt) != 0 {
+		t.Errorf("spawnServe calls = %v, want none while this data dir's serve is starting", *spawnedAt)
+	}
+	if token != "" {
+		t.Errorf("token %q returned before the serve recorded itself", token)
+	}
+	if !strings.Contains(out.String(), "still starting") {
+		t.Errorf("output = %q, want it to say the serve is still starting", out.String())
+	}
+}
+
+// TestQuickstartEnsureServeDistrustsAStaleRecord: the data dir's record
+// names an address where something listens that is not its serve (the serve
+// was killed, the port reused). The record is not adopted: the serve is
+// started at the default address.
+func TestQuickstartEnsureServeDistrustsAStaleRecord(t *testing.T) {
+	dp := newTestDeps(t)
+	if runtime.GOOS == "darwin" {
+		t.Setenv("HOME", t.TempDir())
+	}
+	origListening := consolelink.Listening
+	t.Cleanup(func() { consolelink.Listening = origListening })
+	consolelink.Listening = func(string) bool { return true }
+	dataDir := t.TempDir()
+	const stale = "127.0.0.1:18478"
+	if _, err := consolelink.RecordServeAddress(dataDir, stale); err != nil {
+		t.Fatal(err)
+	}
+	restoreHealthz, restoreVerified, restoreSpawn := fakeHostOf(dp).serveHealthzOKFn, fakeHostOf(dp).serveVerifiedOursFn, fakeHostOf(dp).spawnServeFn
+	t.Cleanup(func() {
+		fakeHostOf(dp).serveHealthzOKFn, fakeHostOf(dp).serveVerifiedOursFn, fakeHostOf(dp).spawnServeFn = restoreHealthz, restoreVerified, restoreSpawn
+	})
+	fakeHostOf(dp).serveHealthzOKFn = func(addr string) bool { return addr == stale }
+	fakeHostOf(dp).serveVerifiedOursFn = func(dataDir, addr string) (int, bool) { return 0, false }
+	var spawnedAt []string
+	fakeHostOf(dp).spawnServeFn = func(w io.Writer, binaryPath, configPath, dataDir, addr string) error {
+		spawnedAt = append(spawnedAt, addr)
+		return nil
+	}
+
+	var out bytes.Buffer
+	hostcontrol.QuickstartEnsureServe(dp, false, &out, "factoryd", writeServeTestConfig(t), dataDir)
+
+	if len(spawnedAt) != 1 || spawnedAt[0] != consolelink.DefaultServeAddr {
+		t.Errorf("spawnServe calls = %v, want one at the default address %s", spawnedAt, consolelink.DefaultServeAddr)
 	}
 }
 

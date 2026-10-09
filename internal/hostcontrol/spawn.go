@@ -295,10 +295,18 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 	if pid, alive := QuickstartReadAlivePID(dp, filepath.Join(dataDir, "quickstart-serve.pid")); alive {
 		candidates = append(candidates, pid)
 	}
-	if runtime.GOOS == "darwin" {
+	// The serve LaunchAgent serves one data dir (install-service pins its
+	// -data-dir): it is this data dir's serve only when that is the one.
+	if _, ok := servePlistFor(dataDir); ok {
 		if pid, ok := LaunchctlServicePID(dp, fmt.Sprintf("gui/%d/%s", os.Getuid(), ServeServiceLabel)); ok {
 			candidates = append(candidates, pid)
 		}
+	}
+	// A serve started by hand for this data dir (`factoryd serve`) has no
+	// pid file; it recorded itself in the data dir it serves. The port and
+	// uid checks below apply to it like any other candidate.
+	if pid, recorded, ok := consolelink.ServePID(dataDir); ok && recorded == addr {
+		candidates = append(candidates, pid)
 	}
 
 	for _, pid := range candidates {
@@ -315,7 +323,8 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 }
 
 // QuickstartEnsureServe leaves `factoryd serve` (console + API) reachable
-// at consolelink.DefaultServeAddr for this session's own config/data-dir,
+// for this session's own config/data-dir, at consolelink.DefaultServeAddr
+// unless another process holds it,
 // resolving (or generating, via ensureServeStartTokenFile) the same
 // stable start token file `factoryd install-service`'s own serve
 // LaunchAgent uses -- so a browser that visits the printed console link
@@ -337,11 +346,12 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 // Returns the start token this session's own serve is actually using, or
 // "" when none could be resolved OR verified: no session config yet to
 // place a stable token file next to (should not happen this late in
-// runQuickstart, since quickstartEnsureConfig always runs first),
-// opts.NoServe, or -- per that same review -- something already answers
-// /healthz at that address that this invocation cannot prove it owns, in
-// which case NOTHING is spawned (the port is already taken) and NO token
-// is ever associated with that unverified process. Deliberately never
+// runQuickstart, since quickstartEnsureConfig always runs first), or
+// opts.NoServe. When something already answers /healthz at the address
+// and this invocation cannot prove it owns it (per that same review; most
+// often another profile's serve on the default port), NO token is ever
+// associated with that process: this data dir's serve is spawned on a
+// free loopback port instead and records it. Deliberately never
 // fails runQuickstart outright: a serve/console problem is reported to w
 // and quickstart continues to submit+watch the request without a console
 // link, exactly as it did before this function existed -- the queued
@@ -351,7 +361,18 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 	if noServe {
 		return ""
 	}
+	// This data dir's own serve may already listen somewhere other than
+	// the default address (another data dir's serve held it when this one
+	// started): its record names where.
+	// The record is trusted only while a serve this data dir can prove it
+	// owns answers there: a record left by a killed serve can name a port
+	// some other process has since taken.
 	addr := consolelink.DefaultServeAddr
+	if recorded := consolelink.ServeAddress(dataDir); recorded != "" && dp.ServeHealthzOK(recorded) {
+		if _, ours := dp.ServeVerifiedOurs(dataDir, recorded); ours {
+			addr = recorded
+		}
+	}
 
 	var token string
 	t, tokenPath, err := dp.ServeStartToken(configPath)
@@ -366,23 +387,45 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 			fmt.Fprintf(w, "serve is already running (pid %d) at http://%s -- skipping.\n", pid, addr)
 			return token
 		}
-		fmt.Fprintf(w, "something is already listening at http://%s, but it doesn't look like a serve this quickstart manages (no matching %s/quickstart-serve.pid, and no dev.factoryd.serve LaunchAgent, provably owns that port) -- NOT printing or opening a tokenized console link. If that's your own serve, use `factoryd console` once you've confirmed it, or stop whatever holds port %s and rerun.\n", addr, dataDir, addrPort(addr))
-		return ""
+		// Something this data dir cannot prove it owns holds the address:
+		// most often another profile's serve on the default port. It never
+		// gets this session's token; this data dir's serve takes a free
+		// loopback port of its own and records it (console-address).
+		// A serve of this data dir's own that is still starting (an earlier
+		// submit spawned it and it has not recorded itself yet) is waited
+		// for, never joined by a second one on another port.
+		if pid, starting := QuickstartReadAlivePID(dp, filepath.Join(dataDir, "quickstart-serve.pid")); starting {
+			fmt.Fprintf(w, "this data dir's serve (pid %d) is still starting -- `factoryd console` prints its link once it is up.\n", pid)
+			return ""
+		}
+		free, err := freeLoopbackAddr()
+		if err != nil {
+			fmt.Fprintf(w, "http://%s is held by another process (another profile's serve?) and no free loopback port could be found (%v) -- continuing without a console; run `factoryd serve -addr 127.0.0.1:<port>` for one.\n", addr, err)
+			return ""
+		}
+		fmt.Fprintf(w, "http://%s is held by another process (another profile's serve?) -- starting this data dir's console on http://%s instead.\n", addr, free)
+		if err := dp.SpawnServe(w, binaryPath, configPath, dataDir, free); err != nil {
+			fmt.Fprintf(w, "could not start serve (%v) -- continuing without a console; worker itself is unaffected.\n", err)
+			return ""
+		}
+		// The token goes only with a serve this data dir's record names: a
+		// spawn that has not recorded itself yet leaves the held address as
+		// the only one a link could point at.
+		if consolelink.ServeAddress(dataDir) != free {
+			return ""
+		}
+		return token
 	}
 
-	if runtime.GOOS == "darwin" {
-		if plistPath, err := ServePlistPath(); err == nil {
-			if _, statErr := os.Stat(plistPath); statErr == nil {
-				if _, err := dp.Launchctl("kickstart", "-k", fmt.Sprintf("gui/%d/%s", os.Getuid(), ServeServiceLabel)); err != nil {
-					fmt.Fprintf(w, "serve is installed as a launchd service but could not be kickstarted (%v) -- spawning a detached serve instead.\n", err)
-				} else if waitForServeWithSpinner(dp, w, addr) {
-					fmt.Fprintf(w, "serve is managed by launchd (%s); (re)started it.\n", ServeServiceLabel)
-					return token
-				} else {
-					fmt.Fprintf(w, "serve is managed by launchd (%s) but did not answer /healthz within %s of being kickstarted -- it may still be starting.\n", ServeServiceLabel, quickstartServeReadyTimeout)
-					return token
-				}
-			}
+	if _, installed := servePlistFor(dataDir); installed {
+		if _, err := dp.Launchctl("kickstart", "-k", fmt.Sprintf("gui/%d/%s", os.Getuid(), ServeServiceLabel)); err != nil {
+			fmt.Fprintf(w, "serve is installed as a launchd service but could not be kickstarted (%v) -- spawning a detached serve instead.\n", err)
+		} else if waitForServeWithSpinner(dp, w, addr) {
+			fmt.Fprintf(w, "serve is managed by launchd (%s); (re)started it.\n", ServeServiceLabel)
+			return token
+		} else {
+			fmt.Fprintf(w, "serve is managed by launchd (%s) but did not answer /healthz within %s of being kickstarted -- it may still be starting.\n", ServeServiceLabel, quickstartServeReadyTimeout)
+			return token
 		}
 	}
 
@@ -393,14 +436,39 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 	return token
 }
 
-// addrPort extracts the port from an exact "host:port" address, or "?"
-// if it doesn't parse -- purely for a warning message's own wording.
-func addrPort(addr string) string {
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "?"
+// servePlistFor returns the serve LaunchAgent's plist path when one is
+// installed and serves dataDir. Another data dir's service is neither this
+// data dir's serve nor something to kickstart on its behalf.
+func servePlistFor(dataDir string) (string, bool) {
+	if runtime.GOOS != "darwin" {
+		return "", false
 	}
-	return port
+	plistPath, err := ServePlistPath()
+	if err != nil {
+		return "", false
+	}
+	b, err := os.ReadFile(plistPath)
+	if err != nil {
+		return "", false
+	}
+	got, ok := ProgramArgumentsFlagValue(ProgramArgumentsStrings(b), "-data-dir")
+	if !ok || !samePath(got, dataDir) {
+		return "", false
+	}
+	return plistPath, true
+}
+
+// freeLoopbackAddr returns a loopback address nothing listens on, for a
+// serve whose default address another process holds. The port is free when
+// this returns and the spawned serve binds it a moment later; a serve that
+// loses that race fails to bind and says so in its own log.
+func freeLoopbackAddr() (string, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer l.Close()
+	return l.Addr().String(), nil
 }
 
 // spawnServe spawns `<binaryPath> serve -config <configPath>
@@ -434,7 +502,7 @@ func RealSpawnServe(dp Deps, w io.Writer, binaryPath, configPath, dataDir, addr 
 	}
 	defer errFile.Close()
 
-	cmd := exec.Command(binaryPath, "serve", "-config", configPath, "-data-dir", dataDir)
+	cmd := exec.Command(binaryPath, "serve", "-config", configPath, "-data-dir", dataDir, "-addr", addr)
 	cmd.Stdout = outFile
 	cmd.Stderr = errFile
 	cmd.Env = QuickstartServeChildEnv()

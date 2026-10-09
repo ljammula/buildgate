@@ -1,10 +1,12 @@
 package main
 
 import (
+	"buildgate/internal/consolelink"
 	"buildgate/internal/hostcontrol"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -118,5 +120,74 @@ func TestLaunchctlServicePIDParsesOutput(t *testing.T) {
 	}
 	if _, ok := hostcontrol.LaunchctlServicePID(dp, "gui/501/dev.factoryd.serve"); ok {
 		t.Error("want ok=false when launchctl itself errors")
+	}
+}
+
+// TestServeVerifiedOursAcceptsTheDataDirsOwnRecord: a serve started by hand
+// has no pid file; the record it wrote in the data dir it serves names it.
+// The record's pid is a candidate only for the address it recorded, and is
+// held to the same port-ownership check as any other.
+func TestServeVerifiedOursAcceptsTheDataDirsOwnRecord(t *testing.T) {
+	dp := newTestDeps(t)
+	t.Setenv("HOME", t.TempDir())
+	dataDir := t.TempDir()
+	const addr = "127.0.0.1:18477"
+	if _, err := consolelink.RecordServeAddress(dataDir, addr); err != nil {
+		t.Fatal(err)
+	}
+	restoreLsof, restoreUID := fakeHostOf(dp).lsofFn, fakeHostOf(dp).processUIDFn
+	t.Cleanup(func() { fakeHostOf(dp).lsofFn, fakeHostOf(dp).processUIDFn = restoreLsof, restoreUID })
+	fakeHostOf(dp).processUIDFn = func(pid int) (int, bool) { return os.Getuid(), true }
+	fakeHostOf(dp).lsofFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
+
+	if pid, ok := dp.host.serveVerifiedOurs(dataDir, addr); !ok || pid != os.Getpid() {
+		t.Errorf("serveVerifiedOurs(recorded address) = %d, %v; want this process, true", pid, ok)
+	}
+	if _, ok := dp.host.serveVerifiedOurs(dataDir, "127.0.0.1:8090"); ok {
+		t.Error("the record vouched for an address it does not name")
+	}
+	fakeHostOf(dp).lsofFn = func(port string) ([]byte, error) { return []byte("1\n"), nil }
+	if _, ok := dp.host.serveVerifiedOurs(dataDir, addr); ok {
+		t.Error("the record vouched for a port another process holds")
+	}
+}
+
+// TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent: the serve
+// LaunchAgent is pinned to one data dir. For any other data dir its process
+// is a foreign listener, which before this check got that data dir's token
+// and left it with no console of its own.
+func TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd only")
+	}
+	dp := newTestDeps(t)
+	t.Setenv("HOME", t.TempDir())
+	serviceDir, otherDir := t.TempDir(), t.TempDir()
+	plistPath, err := hostcontrol.ServePlistPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plist := "<plist><dict><key>ProgramArguments</key><array><string>factoryd</string><string>serve</string><string>-data-dir</string><string>" + serviceDir + "</string></array></dict></plist>"
+	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restoreCtl, restoreLsof, restoreUID := fakeHostOf(dp).launchctlFn, fakeHostOf(dp).lsofFn, fakeHostOf(dp).processUIDFn
+	t.Cleanup(func() {
+		fakeHostOf(dp).launchctlFn, fakeHostOf(dp).lsofFn, fakeHostOf(dp).processUIDFn = restoreCtl, restoreLsof, restoreUID
+	})
+	fakeHostOf(dp).launchctlFn = func(args ...string) ([]byte, error) {
+		return []byte(fmt.Sprintf("pid = %d\n", os.Getpid())), nil
+	}
+	fakeHostOf(dp).lsofFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
+	fakeHostOf(dp).processUIDFn = func(pid int) (int, bool) { return os.Getuid(), true }
+
+	if _, ok := dp.host.serveVerifiedOurs(serviceDir, "127.0.0.1:8090"); !ok {
+		t.Error("the LaunchAgent's own data dir did not verify its serve")
+	}
+	if _, ok := dp.host.serveVerifiedOurs(otherDir, "127.0.0.1:8090"); ok {
+		t.Error("another data dir took the LaunchAgent's serve for its own")
 	}
 }

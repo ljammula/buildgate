@@ -2976,7 +2976,15 @@ func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID
 	// machine's own serve -- only ever attach it when base actually IS
 	// that same loopback serve, never a remote FACTORYD_CONSOLE_URL
 	// override.
-	if consoleToken != "" && consoleBaseIsOwnLoopbackServe(base, consolelink.DefaultServeAddr) {
+	// ...and only when a serve this data dir can prove it owns holds that
+	// address: its record alone can outlive the serve that wrote it, and
+	// the default address can be another data dir's serve.
+	ownServe := consolelink.ServeAddress(dataDir)
+	if ownServe == "" {
+		ownServe = consolelink.DefaultServeAddr
+	}
+	_, verified := dp.ServeVerifiedOurs(dataDir, ownServe)
+	if consoleToken != "" && verified && consoleBaseIsOwnLoopbackServe(base, ownServe) {
 		url += "#t=" + consoleToken
 	}
 	fmt.Fprintln(w, "View:", url)
