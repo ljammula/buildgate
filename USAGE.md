@@ -582,6 +582,9 @@ verify command (fresh sandbox) ---- passes ------------------------> build
         |   path the ticket creates (a tests/ directory) --> build, told which
         |
         +-- anything else --> run halted (baseline_verify_failed), no model call
+
+passes, or fails as the ticket expects, but leaves files outside Allowed-Files
+        --> run halted (baseline_verify_failed), no model call
 ```
 
 | Result on the base commit | What the run does | `status`, `watch`, `inbox`, console show |
@@ -590,6 +593,7 @@ verify command (fresh sandbox) ---- passes ------------------------> build
 | It fails and the ticket names every failing test | Builds. The build's first prompt lists those tests, in the ticket's own words for them | `baseline verify: failed as the ticket expects: <test> and N more` |
 | It fails naming no test, and its first error names a file or directory that the ticket lists in `Allowed-Files:` or `Required-Changed-Files:` and the base commit does not have | Builds. The build's first prompt names that path | `baseline verify: failed as the ticket expects: the command needs tests, which the ticket creates` |
 | It fails with a test the ticket does not name, or with no test named for any other reason (a missing program, a failed install) | Halts before the build. The worktree is discarded | `baseline verify: failed: <test> and N more; the ticket names none of them` |
+| It passes (or fails as the ticket expects) but leaves files the repository does not ignore and the ticket's `Allowed-Files:` do not cover (a `__pycache__/` directory, a build output) | Halts before the build. The worktree is discarded | `baseline verify: passed, but the command leaves __pycache__/x.pyc and 2 more outside the ticket's Allowed-Files` |
 
 Why a failure the ticket does not name halts: canonical verification is the
 same command in the same kind of sandbox, so a build is accepted only when
@@ -602,6 +606,7 @@ cannot be fixed by the ticket's change.
 | Name a test in a ticket | Write its name as the runner prints it, in the ticket's text: `TestTrimBOM` (or one of its subtests, `TestTrimBOM/utf8`), `tests/test_time.py::test_sign` or `test_sign`. A file that does not compile or import is named by its path: `bom_test.go`, `tests/test_api.py`, or a longer path ending in it (`backend/internal/bom/bom_test.go`). A test's file listed in `Allowed-Files:` does not name its tests |
 | Fix a halted single-ticket run | Fix the verify command (or the image), run it again |
 | Fix a halted request | `factoryd cancel <id>`, then submit its `spec.md` and tickets again with the working command: `factoryd submit -verify-command "..." -spec-file <spec.md> -plan-dir <tickets/> <repo>`. If the failure is the ticket's work, send the plan back so the ticket names the tests: `factoryd reject -to plan -reason "the ticket must name <test>" <id>` |
+| Fix a command that leaves files | Add the paths to the repository's `.gitignore`, or make the command remove them. Every build of the ticket would otherwise be quarantined by `diff_scope`, because the factory commits what the command leaves. A ticket with no `Allowed-Files:` has no such gate |
 | Read the full output | The run's `...baseline_verify.log` (`factoryd logs -list <run-id>`), also `log_path` in the run's `baseline_verify` |
 
 Failing tests are read from `go test` and `pytest` output; a failure in
@@ -1014,6 +1019,7 @@ What changes for a build:
 | Halt says the factoryd process running this build stopped mid-run | A `worker`'s `factoryd` process was stopped or lost | A request waits in `resume_review`: `factoryd resume <id>`; a single-ticket run is started again |
 | Request is in `resume_review`: "the factoryd worker stopped while the ... step ran" | The `worker` running that step stopped (stop, crash, reboot, sleep); no step is ever retried automatically | `factoryd resume <id>` continues it (a build from its last completed round), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it |
 | Run or request halted: `halted before the build: baseline verify failed: <test> ...; the ticket names none of them` | The verify command fails on the untouched repository: the command is wrong for this repo or image (a test needs a program the image lacks, a plugin is not installed), or the repo's default branch is red. No model call was made | Run the command in the worker image yourself, fix it, and build again: [Baseline verify](#baseline-verify-the-verify-command-runs-before-the-build). If the ticket is meant to make those tests pass, name them in the ticket |
+| Run or request halted: `halted before the build: baseline verify passed, but the command leaves <path> and N more outside the ticket's Allowed-Files` | The verify command (or a `setup:` command) writes files the repository does not ignore, and the factory commits what it leaves, so every build would be quarantined by `diff_scope`. No model call was made | Add those paths to the repository's `.gitignore`, or make the command remove them: [Baseline verify](#baseline-verify-the-verify-command-runs-before-the-build) |
 | Quarantine names a gate but not why it failed | Nothing wrong — the triage sentence quotes the first compile/test failure line from that gate's log | Read the run's full log for the rest |
 | Request halts at preflight for a repo | Repo has no `.factory.yml` (strict preflight profile) | `factoryd onboard -project <name> -root <repo> -write-factory-yml`, commit, resubmit |
 | `factoryd doctor` warns the release policy denies every PR unconditionally | `release_max_files_changed`/`release_max_insertions` is `0` or `release_rollback_plan` is empty | Add all three to `config.yml` (`init-config`'s scaffold has usable defaults; `quickstart` writes them into a fresh config automatically) |

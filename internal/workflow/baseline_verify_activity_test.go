@@ -479,3 +479,93 @@ func TestBaselineWithoutSetupIgnoresTheSetupLine(t *testing.T) {
 		t.Errorf("SetupFailed = %q for a run with no setup", record.SetupFailed)
 	}
 }
+
+// leftoverCase runs the baseline in a real repository (with .gitignore and a
+// tracked file src/a.py) whose command passes and runs leave.
+func leftoverCase(t *testing.T, allowed []string, leave func(dir string)) (BaselineVerifyResult, error, string, string) {
+	t.Helper()
+	workspace := baselineRepo(t)
+	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"src/a.py": "a = 1\n", "other.txt": "kept\n"} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "."}, {"commit", "-q", "-m", "more"}} {
+		if out, err := exec.Command("git", append([]string{"-C", workspace}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	input := fixtureInput()
+	input.WorkspacePath = workspace
+	input.AllowedFiles = allowed
+	_, err, logDir, _ := runBaselineActivity(t, input, "x", "ok\n", 0, leave)
+	result, _ := run.LoadBaselineVerify(logDir)
+	if result == nil {
+		t.Fatalf("no baseline record in %s (error %v)", logDir, err)
+	}
+	return BaselineVerifyResult{Record: *result}, err, logDir, workspace
+}
+
+func leftWriteFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBaselineVerifyThatPassesButLeavesAFileOutsideAllowedFilesHalts(t *testing.T) {
+	result, err, _, workspace := leftoverCase(t, []string{"src/"}, func(dir string) { leftWriteFile(t, dir, "__pycache__/x.pyc", "bytes") })
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != BaselineVerifyFailureType || !appErr.NonRetryable() {
+		t.Fatalf("error = %v, want a non-retryable %s", err, BaselineVerifyFailureType)
+	}
+	want := "baseline verify passed, but the command leaves __pycache__/x.pyc outside the ticket's Allowed-Files. "
+	if !strings.HasPrefix(appErr.Message(), want) || !strings.Contains(appErr.Message(), ".gitignore") {
+		t.Errorf("halt message = %q", appErr.Message())
+	}
+	if r := result.Record; !r.Passed || r.LeftOutOfScopeCount != 1 || !reflect.DeepEqual(r.LeftOutOfScope, []string{"__pycache__/x.pyc"}) {
+		t.Errorf("record = %+v", r)
+	}
+	if _, statErr := os.Stat(filepath.Join(workspace, "__pycache__", "x.pyc")); !os.IsNotExist(statErr) {
+		t.Errorf("the left file is still in the workspace (%v)", statErr)
+	}
+}
+
+func TestBaselineVerifyLeftoversTheGateWouldNotFlagDoNotHalt(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed []string
+		file    string
+	}{
+		{"matched by .gitignore", []string{"src/"}, "ignored/x.pyc"},
+		{"inside Allowed-Files", []string{"src/"}, "src/new.py"},
+		{"no Allowed-Files, no diff_scope", nil, "__pycache__/x.pyc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err, _, _ := leftoverCase(t, tc.allowed, func(dir string) { leftWriteFile(t, dir, tc.file, "x") })
+			if err != nil || result.Record.LeftOutOfScopeCount != 0 || result.Record.Halts() {
+				t.Errorf("err=%v record=%+v, want no halt and nothing recorded", err, result.Record)
+			}
+		})
+	}
+}
+
+func TestBaselineVerifyThatModifiesATrackedFileOutsideAllowedFilesHaltsAndRestoresIt(t *testing.T) {
+	result, err, _, workspace := leftoverCase(t, []string{"src/"}, func(dir string) { leftWriteFile(t, dir, "other.txt", "rewritten\n") })
+	if err == nil || !reflect.DeepEqual(result.Record.LeftOutOfScope, []string{"other.txt"}) {
+		t.Fatalf("err=%v record=%+v, want a halt naming other.txt", err, result.Record)
+	}
+	if content, _ := os.ReadFile(filepath.Join(workspace, "other.txt")); string(content) != "kept\n" {
+		t.Errorf("other.txt = %q, want the committed content", content)
+	}
+}
