@@ -1,4 +1,4 @@
-.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
+.PHONY: meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test probe-instruction-paths bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -208,6 +208,12 @@ live-round-results:
 # live-round-test: offline unit tests for live_round.py's own logic.
 live-round-test:
 	python3 -m unittest scripts/tests/test_live_round.py -v
+
+# probe-instruction-paths: which repository paths each pinned harness really
+# loads (scripts/probe_instruction_paths.py): one fake-model container per
+# harness and turn kind, no network, no model call; never part of verify.
+probe-instruction-paths:
+	python3 scripts/probe_instruction_paths.py
 
 # install-prereqs is `make install`'s first step: Homebrew installs the
 # tools the later steps need and this machine lacks, Docker's buildx plugin

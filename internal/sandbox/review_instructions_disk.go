@@ -268,17 +268,29 @@ func (d *diskState) visit(p string, de fs.DirEntry, err error) error {
 		}
 		return d.reconcile(p, rel, ip, de)
 	}
-	if ip.lead > 0 && ip.lead == len(ip.parts) && de.Type()&fs.ModeSymlink != 0 {
-		if e, ok := d.res.byPath[rel]; !ok || !e.isLink() {
-			return fmt.Errorf("review instructions: %s is a symlink the result commit does not hold, where it could redirect an instruction path", strconv.Quote(rel))
-		}
+	return d.checkLeadLink(rel, ip, de)
+}
+
+// checkLeadLink refuses an on-disk symlink at a proper prefix of a fixed path
+// (.github, pkg/.vscode) unless the result commit holds that link, which the
+// link rules then checked: any other would redirect an instruction path to
+// content nothing here verified. It is the one rule for the worktree and for
+// a submodule checkout, where the result commit holds no link at all.
+func (d *diskState) checkLeadLink(rel string, ip instrPath, de fs.DirEntry) error {
+	if ip.lead == 0 || ip.lead != len(ip.parts) || de.Type()&fs.ModeSymlink == 0 {
+		return nil
+	}
+	if e, ok := d.res.byPath[rel]; !ok || !e.isLink() {
+		return fmt.Errorf("review instructions: %s is a symlink the result commit does not hold, where it could redirect an instruction path", strconv.Quote(rel))
 	}
 	return nil
 }
 
 // checkSubmodule walks a submodule's checkout directory (which is never
-// removed from, its .git included) and refuses one that holds an instruction path: a review
-// cannot verify what a submodule's checkout contains.
+// removed from, its .git included) and refuses one that holds an instruction
+// path, or a link that would redirect one: a review cannot verify what a
+// submodule's checkout contains. Each entry is classified by its path from
+// the workspace root, as visit classifies an entry outside a submodule.
 func (d *diskState) checkSubmodule(p, rel string) error {
 	err := filepath.WalkDir(p, func(q string, de fs.DirEntry, err error) error {
 		if err != nil {
@@ -294,10 +306,12 @@ func (d *diskState) checkSubmodule(p, rel string) error {
 		if err != nil {
 			return err
 		}
-		if ip := classify(filepath.ToSlash(inner)); ip.n > 0 {
-			return fmt.Errorf("review instructions: instruction path %s is inside the submodule checkout %s: a review cannot verify it", strconv.Quote(rel+"/"+filepath.ToSlash(inner)), strconv.Quote(rel))
+		full := rel + "/" + filepath.ToSlash(inner)
+		ip := classify(full)
+		if ip.n > 0 {
+			return fmt.Errorf("review instructions: instruction path %s is inside the submodule checkout %s: a review cannot verify it", strconv.Quote(full), strconv.Quote(rel))
 		}
-		return nil
+		return d.checkLeadLink(full, ip, de)
 	})
 	if err != nil {
 		return err

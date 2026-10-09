@@ -36,11 +36,14 @@ import (
 // harness loads. A mask is mounted at the table's own spelling, so a candidate
 // spelled any other way is refused unless both trees leave it identical.
 
-// reviewInstructionDirs are directories, relative to a workspace, whose
-// contents a harness loads.
+// reviewInstructionDirs are directories whose contents a harness loads. An
+// entry names the last components of a path: it matches in any directory of
+// the workspace (.github/instructions and pkg/.github/instructions both), as a
+// harness that walks the directories of the files it reads would find it.
 var reviewInstructionDirs = []string{".agents/skills", ".github/skills", ".claude/skills", ".pi/skills", ".pi", ".codex", ".claude", ".github/instructions", ".github/agents", ".github/hooks"}
 
-// reviewInstructionFiles are single instruction files at a fixed path.
+// reviewInstructionFiles are single instruction files, matched in any
+// directory of the workspace like the directories above.
 var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.json", ".vscode/mcp.json"}
 
 // reviewInstructionBaseNames are instruction files a harness loads from any
@@ -129,19 +132,29 @@ var (
 		}
 		return out
 	}()
-	reviewNameFolds = foldComponents(reviewInstructionBaseNames)
-	// leadingFolds are the proper prefixes of the fixed paths (".github"): a
-	// link there would redirect a fixed path.
-	leadingFolds = func() map[string]bool {
-		m := map[string]bool{}
+	// tableByFirst lists the table by first folded component, so a path
+	// component that starts no entry costs one lookup: the base name of that
+	// fold (its table spelling, "" for none) and the fixed paths it begins.
+	tableByFirst = func() map[string]tableStart {
+		m := map[string]tableStart{}
 		for _, f := range reviewFixedPaths {
-			for k := 1; k < len(f.fold); k++ {
-				m[strings.Join(f.fold[:k], "/")] = true
-			}
+			e := m[f.fold[0]]
+			e.fixed = append(e.fixed, f)
+			m[f.fold[0]] = e
+		}
+		for _, name := range reviewInstructionBaseNames {
+			e := m[foldName(name)]
+			e.name = name
+			m[foldName(name)] = e
 		}
 		return m
 	}()
 )
+
+type tableStart struct {
+	name  string
+	fixed []fixedPath
+}
 
 func joinSlash(a, b string) string {
 	if a == "" {
@@ -150,28 +163,58 @@ func joinSlash(a, b string) string {
 	return a + "/" + b
 }
 
-// matchFold returns the number of leading components forming the outermost
-// table entry covering a path (a fixed path, or the first component that is a
-// base-name file), and the table's spelling of those components.
-func matchFold(parts, fold []string) (n int, canon string) {
-	for _, f := range reviewFixedPaths {
-		if len(fold) >= len(f.fold) && strings.Join(fold[:len(f.fold)], "/") == strings.Join(f.fold, "/") && (n == 0 || len(f.canon) < n) {
-			n, canon = len(f.canon), strings.Join(f.canon, "/")
+// foldsAt reports whether want is the components of fold from index i on.
+func foldsAt(fold []string, i int, want []string) bool {
+	if len(fold)-i < len(want) {
+		return false
+	}
+	for k, w := range want {
+		if fold[i+k] != w {
+			return false
 		}
 	}
+	return true
+}
+
+// scanFold classifies a path in one pass over its components. n is the number
+// of leading components forming the outermost table entry covering it, canon
+// the spelling a mask of it has: the path's own directories above the entry,
+// then the table's spelling of the entry. An entry (a fixed path or a base
+// name) matches at any depth; the outermost is the match that ends first, so
+// a/.claude/b/.github/instructions/x is covered by a/.claude. When nothing
+// matches, lead is the number of leading components that end in a proper
+// prefix of a fixed path (pkg/.github of pkg/.github/workflows/ci.yml is 2),
+// the longest when there are several: a link there would redirect a fixed
+// path. The work is the path's components plus, for each that starts an entry,
+// the entries it starts.
+func scanFold(parts, fold []string) (n int, canon string, lead int) {
 	for i := 0; i < len(fold) && (n == 0 || i+1 < n); i++ {
-		for j, name := range reviewNameFolds {
-			if fold[i] == name {
-				n, canon = i+1, joinSlash(strings.Join(parts[:i], "/"), reviewInstructionBaseNames[j])
+		start, ok := tableByFirst[fold[i]]
+		if !ok {
+			continue
+		}
+		if start.name != "" {
+			// No match starting here or later ends before this one.
+			return i + 1, joinSlash(strings.Join(parts[:i], "/"), start.name), 0
+		}
+		for _, f := range start.fixed {
+			if end := i + len(f.fold); (n == 0 || end < n) && foldsAt(fold, i, f.fold) {
+				n, canon = end, joinSlash(strings.Join(parts[:i], "/"), strings.Join(f.canon, "/"))
+			}
+			for k := 1; n == 0 && k < len(f.fold) && foldsAt(fold, i, f.fold[:k]); k++ {
+				lead = max(lead, i+k)
 			}
 		}
 	}
-	return n, canon
+	if n > 0 {
+		lead = 0
+	}
+	return n, canon, lead
 }
 
 // matchInstructionPath reports whether parts is at or under a table entry.
 func matchInstructionPath(parts []string) (n int, canon string, ok bool) {
-	n, canon = matchFold(parts, foldComponents(parts))
+	n, canon, _ = scanFold(parts, foldComponents(parts))
 	return n, canon, n > 0
 }
 
@@ -179,24 +222,19 @@ func matchInstructionPath(parts []string) (n int, canon string, ok bool) {
 type instrPath struct {
 	parts, fold []string
 	n           int    // components of the outermost table match; 0 for none
-	canon       string // the table's spelling of them
-	lead        int    // when n == 0: components forming a proper prefix of a fixed path
+	canon       string // the mask spelling of them
+	lead        int    // when n == 0: leading components that end in a proper prefix of a fixed path
 }
 
 func classify(p string) instrPath {
 	parts := strings.Split(p, "/")
 	ip := instrPath{parts: parts, fold: foldComponents(parts)}
-	ip.n, ip.canon = matchFold(parts, ip.fold)
-	for k := 1; ip.n == 0 && k <= len(parts) && k <= 3; k++ {
-		if leadingFolds[strings.Join(ip.fold[:k], "/")] {
-			ip.lead = k
-		}
-	}
+	ip.n, ip.canon, ip.lead = scanFold(parts, ip.fold)
 	return ip
 }
 
-// relevant: the path is at or under a table entry, or is exactly a prefix of a
-// fixed path (a file or link that could redirect one).
+// relevant: the path is at or under a table entry, or ends exactly in a proper
+// prefix of a fixed path (a file or link that could redirect one).
 func (ip instrPath) relevant() bool { return ip.n > 0 || (ip.lead > 0 && ip.lead == len(ip.parts)) }
 
 // ---- git ----
@@ -391,8 +429,9 @@ type candidate struct {
 
 type planState struct {
 	base, res *gitTree
-	spell     map[string]string // folded prefix -> spelling, for relevant prefixes of both trees
-	resDirs   map[string]bool   // directories of relevant result paths
+	spell     map[string]string  // folded prefix -> spelling, for relevant prefixes of both trees
+	resDirs   map[string]bool    // directories of relevant result paths
+	dirsDone  [2]map[string]bool // directories register recorded, for each commit
 	cands     map[string]*candidate
 	links     map[string]*[2]*treeEntry // relevant symlinks: base, result
 	tracked   []treeEntry               // relevant result entries, to verify on disk
@@ -404,7 +443,7 @@ type planState struct {
 }
 
 func newPlan() *planState {
-	return &planState{base: newGitTree(), res: newGitTree(), spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}, targets: map[string]string{}}
+	return &planState{base: newGitTree(), res: newGitTree(), spell: map[string]string{}, resDirs: map[string]bool{}, cands: map[string]*candidate{}, links: map[string]*[2]*treeEntry{}, targets: map[string]string{}, dirsDone: [2]map[string]bool{{}, {}}}
 }
 
 // load streams one commit's listing into the plan.
@@ -418,21 +457,48 @@ func (s *planState) load(ctx context.Context, root, sha string, side int) error 
 }
 
 // register records the spelling of every prefix that leads to or lies under a
-// table match; two spellings of one folded prefix are an error.
-func (s *planState) register(ip instrPath, side int) error {
+// table match; two spellings of one folded prefix are an error. A directory is
+// recorded once for each commit: an entry whose directory was recorded costs
+// one lookup, whatever its depth, and a new directory only the components
+// below its nearest recorded ancestor.
+func (s *planState) register(ip instrPath, path string, side int) error {
 	top := ip.lead
 	if ip.n > 0 {
 		top = len(ip.parts)
 	}
-	spelled, folded := "", ""
+	dirs := min(top, len(ip.parts)-1) // the leading components that are directories
+	dirEnd := dirs - 1                // bytes of path they span, with their separators
+	for _, part := range ip.parts[:dirs] {
+		dirEnd += len(part)
+	}
+	done := s.dirsDone[side]
+	if dirs > 0 && done[path[:dirEnd]] && dirs == top {
+		return nil
+	}
+	start := 0 // components already recorded
+	for k, end := dirs, dirEnd; k > 0 && start == 0; k-- {
+		if done[path[:end]] {
+			start = k
+		}
+		end -= len(ip.parts[k-1]) + 1
+	}
+	folded := strings.Join(ip.fold[:top], "/")
+	spellEnd, foldEnd := -1, -1
 	for k := 0; k < top; k++ {
-		spelled, folded = joinSlash(spelled, ip.parts[k]), joinSlash(folded, ip.fold[k])
-		if prev, ok := s.spell[folded]; ok && prev != spelled {
+		spellEnd, foldEnd = spellEnd+1+len(ip.parts[k]), foldEnd+1+len(ip.fold[k])
+		if k < start {
+			continue
+		}
+		spelled := path[:spellEnd]
+		if prev, ok := s.spell[folded[:foldEnd]]; ok && prev != spelled {
 			return fmt.Errorf("review instructions: %q and %q are one path on a case-insensitive host", prev, spelled)
 		}
-		s.spell[folded] = spelled
-		if side == 1 && k+1 < len(ip.parts) {
-			s.resDirs[spelled] = true
+		s.spell[folded[:foldEnd]] = spelled
+		if k < dirs {
+			done[spelled] = true
+			if side == 1 {
+				s.resDirs[spelled] = true
+			}
 		}
 	}
 	return nil
@@ -456,7 +522,7 @@ func (s *planState) index(t *gitTree, e treeEntry, side int) error {
 	if ip.n == 0 && ip.lead == 0 {
 		return nil
 	}
-	if err := s.register(ip, side); err != nil {
+	if err := s.register(ip, e.path, side); err != nil {
 		return err
 	}
 	if !ip.relevant() {
