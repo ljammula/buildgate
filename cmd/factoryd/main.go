@@ -473,7 +473,7 @@ func printTopLevelHelp(out io.Writer) {
 	fmt.Fprintln(out, "  factoryd serve                              console + API, for watching and approving runs")
 	fmt.Fprintln(out, "  factoryd status <run-id>                    inspect one run's state")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Also: doctor (check setup), approve / reject / retry / cancel (act on a request), stop (stop what quickstart started), logs, inbox.")
+	fmt.Fprintln(out, "Also: doctor (check setup), approve / reject / retry / cancel (act on a request), stop (stop what quickstart started), logs, inbox, stats (is it getting better).")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "See USAGE.md for the full walkthrough, or `factoryd <command> -h` for that command's own flags.")
 }
@@ -635,7 +635,7 @@ func runMain(dp *deps, args []string) error {
 
 // installSubcommand runs the subcommands `make install` calls: the hidden
 // ones only the Makefile uses (through `go run ./cmd/factoryd`) and `setup`,
-// which an operator runs too. `mcp`, `restart` and `memory` are dispatched
+// which an operator runs too. `mcp`, `restart`, `memory` and `stats` are dispatched
 // here as well, so realMain does not grow. handled is false for any other argument list.
 func installSubcommand(dp *deps, args []string) (handled bool, err error) {
 	if len(args) == 0 {
@@ -660,6 +660,8 @@ func installSubcommand(dp *deps, args []string) (handled bool, err error) {
 		return true, mcpMain(dp, os.Stdout, args[1:])
 	case "memory":
 		return true, memoryMain(dp, args[1:])
+	case "stats":
+		return true, statsMain(args[1:])
 	}
 	return false, nil
 }

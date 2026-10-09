@@ -16,6 +16,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd status` | Requests (state, project, age, `ticket i/n`, latest PR URL), then runs. | `-project`, `-state` (runs only), `-n` (default 20), `-json` (`{"requests": [...], "runs": [...]}`), `-data-dir` |
 | `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. | `-n` (default 40), `-f`, `-list`, `-prompt <name>`, `-data-dir`, `-config` |
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. Reuses the same rollup `GET /requests`'s `cost_summary` field is computed from (`api.Server.ComputeCostSummary`), never a separate calculation. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. | `-request <id>` (one request only), `-since YYYY-MM-DD` (requests submitted on/after; default: all), `-json`, `-data-dir`, `-config` |
+| `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by | `-project <name>`, `-since 30d\|YYYY-MM-DD` (tickets whose first run began on/after; default: all), `-bucket <days>` (default 7), `-all` (also count `live-smoke-` tickets), `-json`, `-data-dir`, `-config` |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. | `-config`, `-data-dir` |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. | `-reason` (required, before the id), `-to` (`plan`\|`spec`; quarantined/halted only), `-config`, `-data-dir` |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. | `-reason` (requests only), `-from attempt\|scratch` (default `attempt`; `scratch` rebuilds from the base commit; the API body's `"from"`), `-config`, `-data-dir` |
@@ -1402,6 +1403,49 @@ the project's requests are submitted against: `on`, `off_reason`,
 `first_seen_at`, `last_seen_at`, `request_id`). It collects nothing and writes
 nothing; the console's Memory tab of a project reads it. There is no MCP tool
 for memory.
+
+
+## Is it getting better (`factoryd stats`)
+
+`factoryd stats` and `GET /projects/{project}/trend` (read token; query
+`since`, `until`, `bucket`, `all`, which mean what `-since`, `-bucket` and
+`-all` mean; `until` is exclusive) print one report built from the run records
+of the data dir. The console's **Trend** tab of a project reads the route. The
+route is `/trend` because `GET /projects/{project}/stats` is the release
+figures behind the **Stats** tab. Nothing is stored and no model is called.
+
+A **ticket attempt series** is the finished runs of one ticket in the order
+they were created: its own run, then any retry, corrective round, conformity
+round or PR-review round (a run named `<ticket>-corrective1`,
+`-conformity1`, `-review2`, each possibly with `-fix1`, belongs to
+`<ticket>`). A ticket whose first run is still in progress is not counted.
+A ticket belongs to the bucket its first run began in; buckets are UTC days,
+oldest first, empty ones kept, at most 26 (the newest).
+
+| Field | Definition | Against `scripts/baseline.py` |
+|---|---|---|
+| `tickets` | Series counted | Same |
+| `one_shot`, `one_shot_rate` | Series with one run only, accepted, no override or rescue, at most one recorded round | baseline counts a first run accepted with no override or rescue, whatever followed or however many rounds it took |
+| `accepted`, `accepted_rate` | Series whose last run is accepted | Not in baseline |
+| `rounds_to_green` | Over accepted series that recorded a round: rounds summed across all its runs; `median` (mean of the two middle values for an even count) and nearest-rank `p90` | baseline takes the rounds of each accepted run |
+| `failed_round_pairs` | Consecutive failed rounds within one run | Same |
+| `comparable_pairs`, `same_failure_pairs` | Failed-round pairs whose rounds both recorded a failure signature, and those with equal signatures | baseline also derives a signature from the build report for older records and reports recorded and derived apart; stats counts recorded only |
+| `no_change_pairs` | Failed-round pairs whose second round changed no file | Same |
+| `quarantined_by` | Quarantined runs per failed check, a run once per check; a run with none counts under its reason code in brackets; at most 10, largest first | baseline lists every check |
+| `halted_by` | Halted runs per reason code, else the first line of the triage sentence; at most 10 | baseline lists every reason |
+| `corrective_builds` | `ran`: runs after a series' first; `accepted`: how many of them ended accepted | Not in baseline |
+| `spend` | Relay tokens and micro-USD summed over the runs' attempts, `runs_with_spend`, and cost per accepted series. Not drafting: `factoryd cost` is the full account | Not in baseline |
+| `excluded_runs` | Runs whose ticket (or id) starts with `live-smoke-`; counted only without `-all` / `all=1` | baseline counts every record |
+| `unfinished` | Runs still in progress, left out | Same |
+
+| Flag | Meaning |
+|---|---|
+| `-project <name>` | One project's block, bucket table and lists; without it, one row per project and an overall row |
+| `-since 30d` or `-since 2026-09-01` | Tickets whose first run began on or after that moment |
+| `-bucket <days>` | Days per bucket (1 to 365; default 7) |
+| `-all` | Count `live-smoke-` tickets too |
+| `-json` | The report as JSON: with `-project` the route's body; without it `{"overall": ..., "projects": [...]}` |
+| `-data-dir`, `-config` | As for `factoryd cost` |
 
 
 ## Design guide (`design_guide`, `design_guide_dirs:`)

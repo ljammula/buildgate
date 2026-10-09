@@ -19,6 +19,7 @@ import {
   getProjectMemory,
   getProjectObservations,
   getProjectStats,
+  getProjectTrend,
   listProjects,
 } from "@/api/projects";
 import { queryKeys } from "@/api/queryKeys";
@@ -41,6 +42,7 @@ import type { Handoff } from "@/domain/handoff";
 import type { SavedPrompt } from "@/domain/savedPrompt";
 import { compareTimestamps } from "@/domain/elapsed";
 import type { ProjectMemory } from "@/domain/memory";
+import type { ProjectTrend } from "@/domain/trend";
 import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
@@ -253,6 +255,14 @@ export function useProjectMemory(project: string): UseQueryResult<ProjectMemory>
   return useQuery({
     queryKey: queryKeys.projects.memory(project),
     queryFn: ({ signal }) => getProjectMemory(http, project, signal),
+  });
+}
+
+export function useProjectTrend(project: string): UseQueryResult<ProjectTrend> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.projects.trend(project),
+    queryFn: ({ signal }) => getProjectTrend(http, project, signal),
   });
 }
 

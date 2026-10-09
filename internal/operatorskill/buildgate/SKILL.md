@@ -22,6 +22,8 @@ another profile:
 - `factoryd watch [-no-follow] <id>`
 - `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt the factory sent to a model, which may quote repository content)
 - `factoryd cost [-request <id>] [-json]`
+- `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
+  getting better, per repository and per week (read-only; counts, no model call)
 - `factoryd inbox [-json]`: everything waiting on the operator across every
   profile, oldest first (it ignores the active profile and needs no `-config`)
 - `factoryd memory list -workspace <repo-path> [-json]` and

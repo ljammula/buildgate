@@ -830,6 +830,42 @@ profile whose file is missing is an error naming the fix (`factoryd use
 <name>`), never a fallback. `make install` re-points every profile at the
 fresh images unless `FACTORYD_CONFIG` names some.
 
+## Is it getting better?
+
+`factoryd stats` answers it per repository from the run records of the current
+data dir; the console's **Trend** tab on a project shows the same numbers.
+
+```text
+$ factoryd stats
+PROJECT  TICKETS  ONE-SHOT    ACCEPTED    MEDIAN ROUNDS  TOP QUARANTINE CHECK
+app      8        3/8 (38%)   6/8 (75%)   2              tests_added (3)
+tools    2        2/2 (100%)  2/2 (100%)  1              -
+overall  10       5/10 (50%)  8/10 (80%)  1              tests_added (3)
+
+2 live-smoke run(s) not counted; -all counts them.
+```
+
+```text
+$ factoryd stats -project app -since 30d
+project app: 8 ticket(s) over 11 finished run(s)
+
+one-shot            3/8 (38%)
+accepted            6/8 (75%)
+rounds to green     median 2, p90 4 over 6 accepted ticket(s)
+same failure twice  1/4 (25%) of failed-round pairs that recorded a signature
+...
+
+WEEK OF     TICKETS  ONE-SHOT %  ACCEPTED %  MEDIAN ROUNDS  SAME-FAILURE %
+2026-09-20  3        0/3 (0%)    2/3 (67%)   3              1/2 (50%)
+2026-09-27  5        3/5 (60%)   4/5 (80%)   1              0/2 (0%)
+
+quarantined by:
+  tests_added  3
+```
+
+A rising one-shot share and a falling same-failure share over the weeks is the
+signal. The fields are defined in USAGE_REFERENCE's "Is it getting better".
+
 ## Repository memory
 
 A build that ends without passing may leave notes, one list of them "things

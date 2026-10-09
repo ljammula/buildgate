@@ -1,6 +1,7 @@
 import { type Http } from "@/api/http";
 import { asObject } from "@/domain/decode";
 import { type ProjectMemory, decodeProjectMemory } from "@/domain/memory";
+import { type ProjectTrend, decodeProjectTrend } from "@/domain/trend";
 import { type ObservationReport, decodeObservationReport } from "@/domain/observation";
 import {
   type ProjectCheckResponse,
@@ -98,4 +99,19 @@ export async function getProjectMemory(
     signal,
   );
   return decodeProjectMemory(asObject(json, at), at);
+}
+
+/**
+ * GET /projects/{project}/trend: whether the factory is getting better on one
+ * repository, overall and per bucket of days. Read token; the route changes
+ * nothing and calls no model.
+ */
+export async function getProjectTrend(
+  http: Http,
+  project: string,
+  signal?: AbortSignal,
+): Promise<ProjectTrend> {
+  const at = "GET /projects/{project}/trend";
+  const json = await http.getJson(`/projects/${encodeURIComponent(project)}/trend`, "read", signal);
+  return decodeProjectTrend(asObject(json, at), at);
 }

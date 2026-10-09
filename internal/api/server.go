@@ -695,6 +695,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /projects/{project}/release", s.getProjectRelease)
 	s.mux.HandleFunc("GET /projects/{project}/stats", s.getProjectStats)
 	s.mux.HandleFunc("GET /projects/{project}/observations", s.getProjectObservations)
+	s.mux.HandleFunc("GET /projects/{project}/trend", s.getProjectTrend)
 	s.mux.HandleFunc("GET /projects/{project}/memory", s.getProjectMemory)
 	s.mux.HandleFunc("POST /runs/{id}/override", s.overrideRun)
 	s.mux.HandleFunc("GET /requests", s.listRequests)

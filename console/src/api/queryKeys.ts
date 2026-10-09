@@ -41,6 +41,7 @@ export const queryKeys = {
     stats: (project: string) => ["projects", project, "stats"] as const,
     observations: (project: string) => ["projects", project, "observations"] as const,
     memory: (project: string) => ["projects", project, "memory"] as const,
+    trend: (project: string) => ["projects", project, "trend"] as const,
     release: (project: string) => ["projects", project, "release"] as const,
   },
   ops: {

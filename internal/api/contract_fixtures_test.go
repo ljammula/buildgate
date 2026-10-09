@@ -69,6 +69,7 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /projects/{project}/release", Path: "/projects/app/release", File: "project-release.json"},
 		{Pattern: "GET /projects/{project}/stats", Path: "/projects/app/stats", File: "project-stats.json"},
 		{Pattern: "GET /projects/{project}/observations", Path: "/projects/app/observations", File: "project-observations.json"},
+		{Pattern: "GET /projects/{project}/trend", Path: "/projects/app/trend?since=2026-09-01&until=2026-09-11&all=1", File: "project-trend.json"},
 		{Pattern: "GET /projects/{project}/memory", Path: "/projects/app/memory", File: "project-memory.json"},
 		{Pattern: "GET /queue-run", Path: "/queue-run", File: "queue-run.json"},
 		{Pattern: "GET /daemons", Path: "/daemons", File: "daemons.json"},

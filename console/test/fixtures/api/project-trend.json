@@ -1,0 +1,121 @@
+{
+  "project": "app",
+  "since": "2026-09-01T00:00:00Z",
+  "until": "2026-09-11T00:00:00Z",
+  "bucket_days": 7,
+  "runs": 3,
+  "unfinished": 1,
+  "excluded_runs": 0,
+  "overall": {
+    "tickets": 3,
+    "one_shot": 1,
+    "one_shot_rate": 0.3333,
+    "accepted": 2,
+    "accepted_rate": 0.6667,
+    "rounds_to_green": {
+      "series": 2,
+      "median": 1,
+      "p90": 1
+    },
+    "failed_round_pairs": 2,
+    "comparable_pairs": 2,
+    "same_failure_pairs": 1,
+    "no_change_pairs": 2,
+    "quarantined_by": [
+      {
+        "name": "canonical_verify",
+        "runs": 1
+      },
+      {
+        "name": "tests_added",
+        "runs": 1
+      }
+    ],
+    "halted_by": [],
+    "corrective_builds": {
+      "ran": 0,
+      "accepted": 0
+    },
+    "spend": {
+      "tokens": 478306,
+      "cost_micro_usd": 1500003,
+      "runs_with_spend": 2,
+      "per_accepted_ticket_micro_usd": 750001
+    }
+  },
+  "buckets": [
+    {
+      "start": "2026-08-28T00:00:00Z",
+      "end": "2026-09-04T00:00:00Z",
+      "metrics": {
+        "tickets": 0,
+        "one_shot": 0,
+        "one_shot_rate": null,
+        "accepted": 0,
+        "accepted_rate": null,
+        "rounds_to_green": {
+          "series": 0,
+          "median": 0,
+          "p90": 0
+        },
+        "failed_round_pairs": 0,
+        "comparable_pairs": 0,
+        "same_failure_pairs": 0,
+        "no_change_pairs": 0,
+        "quarantined_by": [],
+        "halted_by": [],
+        "corrective_builds": {
+          "ran": 0,
+          "accepted": 0
+        },
+        "spend": {
+          "tokens": 0,
+          "cost_micro_usd": 0,
+          "runs_with_spend": 0,
+          "per_accepted_ticket_micro_usd": 0
+        }
+      }
+    },
+    {
+      "start": "2026-09-04T00:00:00Z",
+      "end": "2026-09-11T00:00:00Z",
+      "metrics": {
+        "tickets": 3,
+        "one_shot": 1,
+        "one_shot_rate": 0.3333,
+        "accepted": 2,
+        "accepted_rate": 0.6667,
+        "rounds_to_green": {
+          "series": 2,
+          "median": 1,
+          "p90": 1
+        },
+        "failed_round_pairs": 2,
+        "comparable_pairs": 2,
+        "same_failure_pairs": 1,
+        "no_change_pairs": 2,
+        "quarantined_by": [
+          {
+            "name": "canonical_verify",
+            "runs": 1
+          },
+          {
+            "name": "tests_added",
+            "runs": 1
+          }
+        ],
+        "halted_by": [],
+        "corrective_builds": {
+          "ran": 0,
+          "accepted": 0
+        },
+        "spend": {
+          "tokens": 478306,
+          "cost_micro_usd": 1500003,
+          "runs_with_spend": 2,
+          "per_accepted_ticket_micro_usd": 750001
+        }
+      }
+    }
+  ]
+}
