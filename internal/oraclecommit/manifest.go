@@ -323,8 +323,8 @@ func ValidateTargetPath(p string, extraProtected []string) error {
 			return fmt.Errorf("path %q is under .oracle", p)
 		}
 	}
-	if strings.EqualFold(p, projectconfig.FileName) {
-		return fmt.Errorf("path %q is the protected project config", p)
+	if err := projectConfigTargetError(p); err != nil {
+		return err
 	}
 	for _, prot := range extraProtected {
 		if prot == "" {
@@ -353,4 +353,16 @@ func ValidateTargetPath(p string, extraProtected []string) error {
 func HashBytes(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// projectConfigTargetError refuses the repository's own configuration file and
+// everything under its scripts directory (first path component, any case).
+func projectConfigTargetError(p string) error {
+	if strings.EqualFold(p, projectconfig.FileName) {
+		return fmt.Errorf("path %q is the protected project config", p)
+	}
+	if first, _, _ := strings.Cut(p, "/"); strings.EqualFold(first, projectconfig.DirName) {
+		return fmt.Errorf("path %q is under the protected project scripts directory %s", p, projectconfig.DirName)
+	}
+	return nil
 }

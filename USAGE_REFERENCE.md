@@ -535,7 +535,10 @@ command; always writes `preflight_profile: brownfield`); both run the
 `doctor` preflight first and refuse to write on failure (`-skip-doctor`
 bypasses). Read from committed `HEAD` only:
 an uncommitted edit is ignored (logged), so a run can never widen its own
-defaults mid-run; `.factory.yml` is always a protected path.
+defaults mid-run; `.factory.yml` is always a protected path, and so is
+everything under `.factory/` (any letter case): a run that changes anything
+there is refused at release, and an oracle manifest `target_path` under it is
+refused.
 
 ```yaml
 verify_command: "make verify"          # canonical check, same as -verify-command
