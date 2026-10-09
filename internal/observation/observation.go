@@ -381,43 +381,128 @@ func checkObservations(base Observation, r *run.Run, rounds []run.AgentEvidenceR
 // FAILURE_MARKERS: it picks lines for an excerpt, never a verdict.
 var failureLine = regexp.MustCompile(`--- FAIL|\bFAIL(ED|URE|URES)?\b|\b[Ee]rror\b|\bERROR\b|\bpanic:|Traceback \(most recent call last\)|\bAssertionError\b|\bundefined\b|\bcannot \b|No such file|\bnot found\b|\bfatal\b|\*\*\* `)
 
+// tracebackStart is the first line of a Python traceback. The line that
+// says what failed is its last: the first line that is not indented after
+// the frames ("ModuleNotFoundError: ..."), which often holds no word
+// failureLine knows.
+const tracebackStart = "Traceback (most recent call last)"
+
+// excerptLines picks an excerpt's lines from a log's.
+type excerptLines struct {
+	picked []string
+	// frame marks the picked lines that are traceback frames: what a size
+	// cut drops first.
+	frame []bool
+	// detail is how many more indented lines to keep under a failure line.
+	detail int
+	// inTraceback is set from a traceback's first line to its final line;
+	// frames holds the frame lines seen so far.
+	inTraceback bool
+	frames      []string
+}
+
+func indented(line string) bool {
+	return (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) && strings.TrimSpace(line) != ""
+}
+
+func (e *excerptLines) full() bool { return len(e.picked) >= maxExcerptLines }
+
+func (e *excerptLines) pick(line string, frame bool) {
+	e.picked = append(e.picked, strings.TrimRight(line, " \t\r"))
+	e.frame = append(e.frame, frame)
+}
+
+// endTraceback keeps the traceback's last frames, as many as leave room
+// for final, then final: the line that names the exception ("" when the
+// log ends inside the traceback).
+func (e *excerptLines) endTraceback(final string) {
+	room := maxExcerptLines - len(e.picked)
+	if strings.TrimSpace(final) != "" {
+		room--
+	}
+	keep := min(maxDetailLines, len(e.frames), max(room, 0))
+	for _, frame := range e.frames[len(e.frames)-keep:] {
+		e.pick(frame, true)
+	}
+	if strings.TrimSpace(final) != "" {
+		e.pick(final, false)
+	}
+	e.inTraceback, e.frames = false, nil
+}
+
+// add looks at the next line of the log.
+func (e *excerptLines) add(line string) {
+	if e.inTraceback {
+		if indented(line) {
+			e.frames = append(e.frames, line)
+			return
+		}
+		e.endTraceback(line)
+		return
+	}
+	switch {
+	case strings.Contains(line, tracebackStart):
+		// A traceback needs two lines: this one and its final line.
+		if len(e.picked)+2 > maxExcerptLines {
+			e.detail = 0
+			return
+		}
+		e.inTraceback, e.detail = true, 0
+	case failureLine.MatchString(line):
+		e.detail = maxDetailLines
+	case e.detail > 0 && indented(line):
+		e.detail--
+	default:
+		e.detail = 0
+		return
+	}
+	e.pick(line, false)
+}
+
+// text joins the picked lines, cleaned; withFrames false leaves the
+// traceback frames out.
+func (e *excerptLines) text(withFrames bool) string {
+	var lines []string
+	for i, line := range e.picked {
+		if withFrames || !e.frame[i] {
+			lines = append(lines, line)
+		}
+	}
+	return strings.TrimSpace(sanitize.Text(strings.Join(lines, "\n")))
+}
+
 // Excerpt returns the first lines of text that report a failure, each with
 // the few indented lines under it, cleaned and cut to size; the last lines
-// when none does. text is the start of a log, so "the last lines" are the
-// last of that start.
+// when none does. A traceback is kept as its first line, its last few
+// frames and its final line, the one that names the exception; when the
+// excerpt is over size its frames are dropped before anything is cut. text
+// is the start of a log, so "the last lines" are the last of that start.
 func Excerpt(text string) string {
 	// The lines are picked from the raw text and only those are cleaned:
 	// cleaning a whole log to keep a dozen lines is the costly part.
 	// Escape sequences go first: "\x1b[31merror" has no word boundary
 	// before "error".
 	lines := strings.Split(strings.TrimSpace(sanitize.StripANSI(text)), "\n")
-	var picked []string
-	// A failure line, then the indented lines right under it: the
-	// assertion a test runner prints below the test's name.
-	detail := 0
+	var e excerptLines
 	for _, line := range lines {
-		under := detail > 0 && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) && strings.TrimSpace(line) != ""
-		switch {
-		case failureLine.MatchString(line):
-			detail = maxDetailLines
-		case under:
-			detail--
-		default:
-			detail = 0
-			continue
-		}
-		picked = append(picked, strings.TrimRight(line, " \t\r"))
-		if len(picked) == maxExcerptLines {
+		if e.full() && !e.inTraceback {
 			break
 		}
+		e.add(line)
 	}
-	if len(picked) == 0 {
+	if e.inTraceback {
+		e.endTraceback("")
+	}
+	if len(e.picked) == 0 {
 		if len(lines) > maxExcerptLines {
 			lines = lines[len(lines)-maxExcerptLines:]
 		}
-		picked = lines
+		e.picked, e.frame = lines, make([]bool, len(lines))
 	}
-	out := strings.TrimSpace(sanitize.Text(strings.Join(picked, "\n")))
+	out := e.text(true)
+	if len(out) > maxExcerptBytes {
+		out = e.text(false)
+	}
 	if len(out) > maxExcerptBytes {
 		out = strings.ToValidUTF8(out[:maxExcerptBytes], "")
 	}
