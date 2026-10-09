@@ -68,7 +68,7 @@
 58 internal/sandbox/relay.go ReconcileRelayOrphans
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
 44 internal/sessionconfig/routing.go ValidateRouting
-30 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
+28 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
 40 internal/workflow/activities_build.go (*Activities).RunBuildActivity
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
