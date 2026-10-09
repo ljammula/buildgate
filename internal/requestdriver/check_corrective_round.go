@@ -136,24 +136,35 @@ func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, b
 // build is never told about, a handoff the run does not vouch for. An error
 // writing the record is logged and the build goes ahead without it; the
 // record is an aid, never a condition.
-func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string, resumeRunID string) (argv []string, recordOf string) {
+func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string, resumeRunID string) (argv []string, recordOf string, onBranch bool) {
 	lastID := ticket.RunID
 	if resumeRunID != "" {
 		lastID = resumeRunID
 	}
 	if lastID == "" {
-		return args, ""
+		return args, "", false
 	}
 	previous, err := run.Load(dataDir, lastID)
 	// The record of another request's run is never this build's.
 	if err != nil || previous.RequestID != r.ID {
-		return args, ""
+		return args, "", false
 	}
 	dirName, start := "retry", startsFromBase
+	// continues: the rebuild may start on the quarantined attempt's own
+	// branch. Only a retry of that attempt itself: a build that follows an
+	// unfinished one starts where the operator's resume decision says, and
+	// what an unfinished run left on the branch is not known to be whole.
+	//
+	// Nor a build an operator's resume decision starts (PendingResumeVerb):
+	// `resume -from scratch` is a rebuild in a fresh worktree from the
+	// base, also when the step it replaces was a retry lost before its
+	// run existed, whose own choice the move through resume_review dropped.
+	continues := resumeRunID == "" && !r.RetryFromScratch && r.PendingResumeVerb() == ""
 	if previous.State == run.StateHalted && previous.EarlierAttemptOf != "" {
+		continues = false
 		unfinished := previous
 		if previous, err = run.Load(dataDir, unfinished.EarlierAttemptOf); err != nil || previous.RequestID != r.ID {
-			return args, ""
+			return args, "", false
 		}
 		if resumeRunID != "" {
 			// Whether the attempt's commit is under the interrupted
@@ -169,20 +180,40 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	// edited ticket): what it failed on was judged against another task, and
 	// telling the build "the task has not changed" would be false.
 	if !sameSpec(previous, argValueOf(args, "-spec")) {
-		return args, ""
+		return args, "", false
 	}
 	doc, ok := handoffForABuild(dataDir, previous)
 	if !ok {
-		return args, ""
+		return args, "", false
+	}
+	diffBase := diffBaseOf(previous)
+	// Nothing to continue from when the attempt committed nothing or its
+	// branch is not recorded: the rebuild starts from the base as before.
+	continues = continues && previous.Branch != "" && previous.ResultSHA != "" && previous.ResultSHA != diffBase
+	if continues {
+		start = startsOnItsBranch
 	}
 	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-%s", ticket.Index, dirName))
 	path, err := writeRecordFile(dir, doc, start)
 	if err != nil {
 		log.Printf("request %s: ticket %d: the build goes ahead without the record of run %s: %v", r.ID, ticket.Index, previous.ID, err)
-		return args, ""
+		return args, "", false
 	}
 	log.Printf("request %s: ticket %d/%d: the build is given the record of run %s (failed %s)", r.ID, ticket.Index, r.TicketCount, previous.ID, failedCheckNames(doc))
-	return append(args, "-earlier-attempt", path), previous.ID
+	args = append(args, "-earlier-attempt", path)
+	if continues {
+		args = append(args, "-on-branch", previous.Branch, "-diff-base", diffBase)
+	}
+	return args, previous.ID, continues
+}
+
+// diffBaseOf is the commit a run's whole change is measured from: its
+// recorded diff base when it ran on an existing branch, else its own base.
+func diffBaseOf(r *run.Run) string {
+	if r.DiffBaseSHA != "" {
+		return r.DiffBaseSHA
+	}
+	return r.BaseSHA
 }
 
 // The sentence a record opens with, saying where the build that reads it

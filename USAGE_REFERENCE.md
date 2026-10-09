@@ -18,7 +18,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. Reuses the same rollup `GET /requests`'s `cost_summary` field is computed from (`api.Server.ComputeCostSummary`), never a separate calculation. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. | `-request <id>` (one request only), `-since YYYY-MM-DD` (requests submitted on/after; default: all), `-json`, `-data-dir`, `-config` |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. | `-config`, `-data-dir` |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. | `-reason` (required, before the id), `-to` (`plan`\|`spec`; quarantined/halted only), `-config`, `-data-dir` |
-| `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run. Same rules as `POST /requests/{id}/retry`. | `-reason` (requests only), `-config`, `-data-dir` |
+| `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. | `-reason` (requests only), `-from attempt\|scratch` (default `attempt`; `scratch` rebuilds from the base commit; the API body's `"from"`), `-config`, `-data-dir` |
 | `factoryd resume [-from round\|scratch] <request-id>` | The decision for a request in `resume_review` (its step was lost because the `worker` stopped): `-from round` (default) continues a lost build in its kept worktree from the last completed round, or reruns a lost drafting or planning step; `-from scratch` rebuilds the ticket from a fresh worktree (a drafting or planning step simply reruns). For a lost build, `round` first checks that no sandbox container of the lost run is alive and the worktree HEAD equals or descends from the HEAD its round state recorded, and refuses otherwise, naming `-from scratch` and `factoryd cancel`; the check is made again when the build launches. A lost drafting or planning step is refused (either verb) while a container its job launched is still alive; `worker` start removes those of a dead process first. Cancel with `factoryd cancel`. `factoryd retry` refuses a request in `resume_review`. Same rules as `POST /requests/{id}/resume` (body `{"from":"round"\|"scratch","by":"<name>"}`; 409 for another state or a refused check). | `-from` (`round`\|`scratch`, before the id), `-config`, `-data-dir` |
 | `factoryd amend-scope -reason "<text>" <request-id> <file>...` | A human operator widens ONE `quarantined` ticket's approved `Allowed-Files:` scope by hand, re-pinning that ticket spec's approval hash, so `factoryd retry` can rebuild it -- the recovery for a build `diff_scope` quarantined over a file that is a legitimate part of the ticket but that the plan never listed. Refused unless the ticket has no PR yet, every existing approval hash still verifies, and each file is a new, valid, not-already-allowed workspace-relative path. Only that one `Allowed-Files:` line is rewritten; state stays `quarantined`. | `-reason` (required, before the id), `-config`, `-data-dir` |
 | `factoryd cancel <request-id>` | Moves a non-terminal request, or one already `quarantined`/`halted` (dismisses it instead of retrying), to `cancelled`. Refuses `done`. Same rules as `POST /requests/{id}/cancel`. | `-reason`, `-config`, `-data-dir` |
@@ -190,14 +190,25 @@ halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
 
-`factoryd retry <id>` rebuilds the quarantined ticket as an ordinary run from
-the base, and when the quarantined run's handoff is one a build may be given
-(the same rule, review-only failures included) that build also receives it as
-`-earlier-attempt` (`rounds/<ticket>-retry/earlier-attempt.md`), whose first
-sentence says the workspace starts from the base. It is left out when the
-ticket's spec has changed since that run (after `amend-scope` or an edit). A
-retry is not a corrective round: it uses none of that budget and records no
-round.
+**A retry's rebuild.** `factoryd retry <id>` rebuilds the quarantined ticket
+as a fresh run with every gate again. Where it starts and what it is told:
+
+| The ticket's last run | `retry` (`-from attempt`, the default) | `retry -from scratch` |
+|---|---|---|
+| Quarantined, with a handoff a build may be given (the corrective round's rule), built from the ticket's own spec as it is now, and it committed something | On that run's branch, from its commit (`-on-branch`, with the run's diff base); given the record (`rounds/<ticket>-retry/earlier-attempt.md`), which opens by saying the attempt's commit is in the workspace | From the base commit; given the record, which opens by saying the workspace starts from the base |
+| The same, but it committed nothing (verification never passed) or recorded no branch | From the base commit; given the record | The same |
+| Anything else: a failure a build is never told about (`tests_added`, a review with no verdict), a spec changed since (`amend-scope`, an edit), a review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
+
+The gates and the release decision of a rebuild that continues judge the
+ticket's whole change, measured from the diff base, so nothing in the commit
+it continues from escapes them. A build started by `factoryd resume -from
+scratch` always starts from the base. A lost rebuild that was continuing on a
+branch cannot be resumed in its worktree (only `resume -from scratch`).
+
+A retry is not a corrective round: it uses none of that budget and records no
+round. If the rebuild cannot start on the quarantined run's branch (the branch
+is gone, or the repository stays busy), the request halts saying so;
+`retry -from scratch` rebuilds from the base.
 
 A build that was given a record and did not finish passes it on. Its run
 names the quarantined run the record is of (`earlier_attempt_of` in

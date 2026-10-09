@@ -2444,6 +2444,10 @@ type rejectRequestBody struct {
 type retryOrCancelRequestBody struct {
 	By     string `json:"by,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// From is retry's only: "scratch" rebuilds a ticket from the base
+	// commit (request.RetryFromScratch); "" or "attempt" is the default.
+	// Any other value is refused. Cancel ignores it.
+	From string `json:"from,omitempty"`
 }
 
 // resumeRequestBody is POST /requests/{id}/resume's JSON body. From is
@@ -3742,7 +3746,16 @@ func (s *Server) retryRequest(w http.ResponseWriter, r *http.Request) {
 	if by == "" {
 		by = requestAPIPrincipal
 	}
-	loaded, err := request.Retry(s.dataDir, id, by, body.Reason, time.Now(), s.prOpener)
+	retry := request.Retry
+	switch body.From {
+	case "", "attempt":
+	case "scratch":
+		retry = request.RetryFromScratch
+	default:
+		writeError(w, http.StatusBadRequest, `"from" must be "attempt" or "scratch"`)
+		return
+	}
+	loaded, err := retry(s.dataDir, id, by, body.Reason, time.Now(), s.prOpener)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return

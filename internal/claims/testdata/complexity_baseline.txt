@@ -56,8 +56,8 @@
 47 internal/request/approve.go approve
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
-29 internal/request/retry.go Retry
-33 internal/requestdriver/request_driver.go AdvanceBuilding
+29 internal/request/retry.go retry
+30 internal/requestdriver/request_driver.go AdvanceBuilding
 29 internal/requestdriver/request_driver.go AdvancePlanning
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource

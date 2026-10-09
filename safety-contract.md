@@ -407,6 +407,11 @@ requires a new contract review and an updated machine-checkable test.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
+  That rebuild continues on the quarantined run's branch, from its commit,
+  only when it is given the record, and its gates, reviews and release
+  decision then judge the ticket's whole change from that run's diff base;
+  a run it is given no record of is never built on, and `retry -from
+  scratch` and `resume -from scratch` rebuild from the base in every case.
   A build that follows one which was given the record and never finished
   (lost and resumed in its kept worktree, or halted and built again) is
   given the record of that same quarantined run: the unfinished run names
