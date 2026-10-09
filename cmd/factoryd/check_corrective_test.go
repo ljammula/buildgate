@@ -303,8 +303,11 @@ func TestValidateEarlierAttemptFile(t *testing.T) {
 			t.Errorf("validateEarlierAttemptFile(%q) = %v, want an error: %v", path, err, wantErr)
 		}
 	}
-	if err := validateFollowUpRunInputs("not-a-sha", ""); err == nil {
+	if err := validateFollowUpRunInputs("not-a-sha", "", ""); err == nil {
 		t.Error("a malformed -diff-base was accepted")
+	}
+	if err := validateFollowUpRunInputs("", "abc123", ""); err == nil {
+		t.Error("a malformed -instruction-base was accepted")
 	}
 }
 

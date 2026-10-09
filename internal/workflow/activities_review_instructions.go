@@ -6,6 +6,8 @@ import (
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,11 +28,14 @@ import (
 // stubs a mask over an absent path needed (removeReviewStubs).
 
 const (
-	// reviewStubManifestName is the file in the checkpoint directory that
-	// lists the stubs a review launch needs, written before the first stub
-	// is created so a worker that dies mid-review leaves a record the next
-	// Activity attempt, or a resumed build, sweeps.
-	reviewStubManifestName = "review-instruction-stubs.json"
+	// reviewStubDirName is the directory under the data directory that holds
+	// one manifest per worktree, listing the stubs a review launch needs.
+	// It is written before the first stub is created so a worker that dies
+	// mid-review leaves a record that the next Activity attempt, or a build
+	// resumed in a new run, sweeps: the manifest is keyed by the worktree,
+	// not by the run, because a resuming run has another id and another
+	// checkpoint directory.
+	reviewStubDirName = "review-stubs"
 	// ReviewInstructionsFailureMessage is the fixed message of a
 	// ReviewInstructionsFailure. The cause is never in it: it reaches the
 	// operator through the attempt's ReviewInstructionsError only.
@@ -44,10 +49,10 @@ const (
 var reviewFullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // reviewInstructionsFunc prepares the base-commit instruction files for a
-// review of the commit checked out at workDir whose diff base is diffBase
-// (any ref or commit id), under dst. Activities.snapshotReviewInstructions
+// review of the commit checked out at workDir, as the commit instructionBase
+// (any ref or commit id) holds them, under dst. Activities.snapshotReviewInstructions
 // replaces it in tests that have no real base commit.
-type reviewInstructionsFunc func(ctx context.Context, workDir, diffBase, dst string) (sandbox.ReviewInstructionSnapshot, error)
+type reviewInstructionsFunc func(ctx context.Context, workDir, instructionBase, dst string) (sandbox.ReviewInstructionSnapshot, error)
 
 // snapshotFn is the seam's value: nil means the real snapshot.
 func (a *Activities) snapshotFn() reviewInstructionsFunc {
@@ -58,8 +63,9 @@ func (a *Activities) snapshotFn() reviewInstructionsFunc {
 }
 
 // snapshotReviewInstructionsOfWorktree resolves the full commit ids the
-// snapshot requires (HEAD is the result; the diff base may be a ref) and
-// calls sandbox.SnapshotReviewInstructions.
+// snapshot requires (HEAD is the result; the instruction base may be a ref),
+// requires the base to be an ancestor of HEAD and calls
+// sandbox.SnapshotReviewInstructions.
 func snapshotReviewInstructionsOfWorktree(ctx context.Context, workDir, diffBase, dst string) (sandbox.ReviewInstructionSnapshot, error) {
 	resultSHA, err := runner.GitRevParseHEAD(workDir)
 	if err != nil {
@@ -71,6 +77,13 @@ func snapshotReviewInstructionsOfWorktree(ctx context.Context, workDir, diffBase
 	}
 	if !reviewFullSHA.MatchString(resultSHA) || !reviewFullSHA.MatchString(baseSHA) {
 		return sandbox.ReviewInstructionSnapshot{}, fmt.Errorf("the result %q or the base %q is not a full commit id", resultSHA, baseSHA)
+	}
+	ancestor, err := runner.GitIsAncestor(workDir, baseSHA, resultSHA)
+	if err != nil {
+		return sandbox.ReviewInstructionSnapshot{}, err
+	}
+	if !ancestor {
+		return sandbox.ReviewInstructionSnapshot{}, fmt.Errorf("the instruction base %s is not an ancestor of the result %s", baseSHA, resultSHA)
 	}
 	return sandbox.SnapshotReviewInstructions(ctx, workDir, baseSHA, resultSHA, dst)
 }
@@ -99,21 +112,65 @@ type reviewStub struct {
 
 // reviewInstructions is what a review launch carries from its preparation.
 type reviewInstructions struct {
-	Snapshot      sandbox.ReviewInstructionSnapshot
-	Dst           string
-	WorkDir       string
-	CheckpointDir string
+	Snapshot sandbox.ReviewInstructionSnapshot
+	Dst      string
+	WorkDir  string
+	// Manifest is the stub manifest of WorkDir (reviewStubManifestPath), ""
+	// when the Activity has no data directory.
+	Manifest string
+}
+
+// reviewStubManifestPath is where the stubs of a review of workDir are
+// listed: <data dir>/review-stubs/<hex sha256 of the worktree's absolute
+// path>.json, a host-only location keyed by the worktree. dataDir is the
+// run's (input.DataDir, else the Worker's); "" gives "".
+func reviewStubManifestPath(dataDir, workDir string) string {
+	if dataDir == "" || workDir == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(workDir)
+	if err != nil {
+		abs = filepath.Clean(workDir)
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return filepath.Join(dataDir, reviewStubDirName, hex.EncodeToString(sum[:])+".json")
 }
 
 // reviewInstructionsFailure is the error that halts the run before the
 // review launches: a fixed message, the cleaned cause only in the attempt.
 func reviewInstructionsFailure(kind string, cause error) error {
+	return reviewInstructionsFailureOf(kind, cause, nil)
+}
+
+// reviewInstructionsFailureOf is reviewInstructionsFailure for a failure after
+// a launch started: the cleaned cause goes on the last of attempts, or on a
+// new attempt when there is none.
+func reviewInstructionsFailureOf(kind string, cause error, attempts []run.Attempt) error {
 	text := sanitize.Line(cause.Error())
 	if len(text) > maxReviewInstructionsErrorBytes {
 		text = strings.ToValidUTF8(text[:maxReviewInstructionsErrorBytes], "")
 	}
-	attempts := []run.Attempt{{Kind: kind, ExitCode: -1, Role: run.AttemptRoleReview, ReviewInstructionsError: text}}
+	attempts = append([]run.Attempt(nil), attempts...)
+	if len(attempts) == 0 {
+		attempts = []run.Attempt{{Kind: kind, ExitCode: -1, Role: run.AttemptRoleReview}}
+	}
+	attempts[len(attempts)-1].ReviewInstructionsError = text
 	return temporal.NewNonRetryableApplicationError(ReviewInstructionsFailureMessage, ReviewInstructionsFailureType, nil, attempts)
+}
+
+// reviewInstructionsCause is the error among a review launch's runErr and its
+// cleanup's finishErr whose origin is the masks, the stubs or the cleanup
+// (nil otherwise): a mask the launch rejected, or a cleanup that failed after
+// a launch that did not fail otherwise. An unconfirmed container cleanup stays
+// the infrastructure failure it is.
+func reviewInstructionsCause(runErr, finishErr error) error {
+	switch {
+	case runErr != nil && errors.Is(runErr, sandbox.ErrWorkspaceMask) && !errors.Is(runErr, sandbox.ErrCleanupUnconfirmed):
+		return runErr
+	case runErr == nil && finishErr != nil:
+		return finishErr
+	}
+	return nil
 }
 
 // prepareReviewInstructions requires a clean worktree, takes the snapshot
@@ -121,7 +178,7 @@ func reviewInstructionsFailure(kind string, cause error) error {
 // back from the Activity. Stubs already created are removed by the caller
 // through removeReviewStubs, which the manifest makes safe to call whenever.
 func (a *Activities) prepareReviewInstructions(ctx context.Context, input ReviewStepInput, kind, dst string) (reviewInstructions, error) {
-	prep := reviewInstructions{Dst: dst, WorkDir: input.WorkspacePath, CheckpointDir: a.checkpointDirFor(input.RunWorkflowInput)}
+	prep := reviewInstructions{Dst: dst, WorkDir: input.WorkspacePath, Manifest: reviewStubManifestPath(a.dataDirFor(input.RunWorkflowInput), input.WorkspacePath)}
 	clean, err := runner.GitIsClean(input.WorkspacePath)
 	if err != nil {
 		return prep, temporal.NewApplicationErrorWithCause("check the worktree before the review", InfrastructureFailureType, err)
@@ -132,12 +189,12 @@ func (a *Activities) prepareReviewInstructions(ctx context.Context, input Review
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return prep, reviewInstructionsFailure(kind, err)
 	}
-	snap, err := a.snapshotFn()(ctx, input.WorkspacePath, input.effectiveDiffBase(), dst)
+	snap, err := a.snapshotFn()(ctx, input.WorkspacePath, input.instructionBase(), dst)
 	if err != nil {
 		return prep, reviewInstructionsFailure(kind, err)
 	}
 	prep.Snapshot = snap
-	if err := createReviewStubs(input.WorkspacePath, prep.CheckpointDir, snap.Masks); err != nil {
+	if err := createReviewStubs(input.WorkspacePath, prep.Manifest, snap.Masks); err != nil {
 		return prep, reviewInstructionsFailure(kind, err)
 	}
 	return prep, nil
@@ -165,7 +222,7 @@ func (p reviewInstructions) args(args []string) []string {
 // finish removes the stubs and everything under Dst but the diff file. A
 // removal failure is an infrastructure failure of the Activity.
 func (p reviewInstructions) finish(ctx context.Context) error {
-	kept, err := removeReviewStubs(p.WorkDir, p.CheckpointDir)
+	kept, err := removeReviewStubs(p.WorkDir, p.Manifest)
 	if len(kept) > 0 {
 		activity.GetLogger(ctx).Warn("review instruction stubs left in place because they are no longer empty", "paths", kept)
 	}
@@ -233,7 +290,7 @@ func removeAllBut(dir, keep string) error {
 // createReviewStubs writes the manifest, then creates a mountpoint for each
 // mask whose path the result leaves absent. Parents must already be real
 // directories (the snapshot guarantees it); if one is not, nothing is created.
-func createReviewStubs(workDir, checkpointDir string, masks []sandbox.WorkspaceMask) error {
+func createReviewStubs(workDir, manifest string, masks []sandbox.WorkspaceMask) error {
 	var stubs []reviewStub
 	for _, m := range masks {
 		if m.AbsentInWorktree {
@@ -251,7 +308,7 @@ func createReviewStubs(workDir, checkpointDir string, masks []sandbox.WorkspaceM
 			return err
 		}
 	}
-	if err := writeReviewStubManifest(checkpointDir, stubs); err != nil {
+	if err := writeReviewStubManifest(manifest, stubs); err != nil {
 		return err
 	}
 	for _, s := range stubs {
@@ -288,15 +345,17 @@ func requireRealParents(workDir, rel string) error {
 	return nil
 }
 
-func writeReviewStubManifest(checkpointDir string, stubs []reviewStub) error {
+func writeReviewStubManifest(final string, stubs []reviewStub) error {
+	if final == "" {
+		return errors.New("write the review stub manifest: the Activity has no data directory")
+	}
 	data, err := json.Marshal(stubs)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(checkpointDir, 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(final), 0o750); err != nil {
 		return fmt.Errorf("write the review stub manifest: %w", err)
 	}
-	final := filepath.Join(checkpointDir, reviewStubManifestName)
 	tmp := final + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write the review stub manifest: %w", err)
@@ -312,8 +371,10 @@ func writeReviewStubManifest(checkpointDir string, stubs []reviewStub) error {
 // path in HEAD's tree, then deletes the manifest. A path that is anything
 // else is left alone and returned in kept. A missing manifest is not an
 // error.
-func removeReviewStubs(workDir, checkpointDir string) (kept []string, err error) {
-	manifest := filepath.Join(checkpointDir, reviewStubManifestName)
+func removeReviewStubs(workDir, manifest string) (kept []string, err error) {
+	if manifest == "" {
+		return nil, nil
+	}
 	data, err := os.ReadFile(manifest)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -365,6 +426,11 @@ func removeReviewStub(workDir string, s reviewStub) (bool, error) {
 	if tracked {
 		return false, nil
 	}
+	// The parents were real when the stub was created; a review's worker had
+	// the worktree since, so check again at the moment of removal.
+	if err := requireRealParents(workDir, s.Path); err != nil {
+		return false, err
+	}
 	if err := os.Remove(target); err != nil {
 		if info.IsDir() {
 			// A directory that is no longer empty is not a stub.
@@ -389,7 +455,7 @@ func pathInHead(workDir, rel string) (bool, error) {
 // sweepReviewStubs is removeReviewStubs for the top of an Activity that may
 // follow a worker that died mid-review. An error is an infrastructure failure.
 func (a *Activities) sweepReviewStubs(ctx context.Context, input RunWorkflowInput) error {
-	kept, err := removeReviewStubs(input.WorkspacePath, a.checkpointDirFor(input))
+	kept, err := removeReviewStubs(input.WorkspacePath, reviewStubManifestPath(a.dataDirFor(input), input.WorkspacePath))
 	if len(kept) > 0 {
 		activity.GetLogger(ctx).Warn("a review instruction stub from an earlier attempt is not empty and was left in place", "paths", kept)
 	}

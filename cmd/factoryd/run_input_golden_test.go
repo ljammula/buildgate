@@ -71,8 +71,13 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 	if err := os.WriteFile(filepath.Join(oracleDir, "check.sh"), []byte("exit 0\n"), 0o644); err != nil {
 		t.Fatalf("write oracle check: %v", err)
 	}
+	head, err := runGit(t, workspace, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("read the workspace's head: %v", err)
+	}
 	return []string{
 		"-ticket", "001-golden",
+		"-instruction-base", strings.TrimSpace(head),
 		"-run-id", runID,
 		"-workspace", workspace,
 		"-spec", write("spec.md", wellFormedRequestTicketspec),

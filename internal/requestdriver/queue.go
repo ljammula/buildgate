@@ -91,6 +91,12 @@ type QueueEntry struct {
 	// see that field's own doc comment for the retarget-on-merge half of
 	// this mechanism.
 	PRBase string `json:"pr_base,omitempty"`
+	// InstructionBase is the commit whose instruction files this entry's
+	// reviews read (-instruction-base): the commit the request's first
+	// ticket started from, set by ticketQueueEntry for ticket N>1 so a
+	// stacked ticket's review does not take an earlier ticket's unmerged
+	// instruction text as genuine. Empty leaves the run's own diff base.
+	InstructionBase string `json:"instruction_base,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request
 	// execution-role harness pick (request.Request.Harnesses["execution"],

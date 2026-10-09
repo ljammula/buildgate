@@ -24,6 +24,11 @@ func (a *Activities) CommitOraclesActivity(ctx context.Context, input CommitOrac
 		return CommittedOracles{}, temporal.NewApplicationErrorWithCause(msg, InfrastructureFailureType, err)
 	}
 	logDir := a.logDirFor(input.RunWorkflowInput)
+	// A review whose worker died leaves a mountpoint stub in the worktree
+	// this Activity commits into; it goes before anything reads the tree.
+	if err := a.sweepReviewStubs(ctx, input.RunWorkflowInput); err != nil {
+		return CommittedOracles{}, err
+	}
 	snapshotDir, err := filepath.Abs(filepath.Join(logDir, "reference-oracle-commit-snapshot"))
 	if err != nil {
 		return fail("resolve oracle-commit snapshot path", err)

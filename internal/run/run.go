@@ -1242,7 +1242,13 @@ type Run struct {
 	// diff-shape gates were evaluated against BaseSHA itself, same as
 	// before -diff-base existed.
 	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
-	ResultSHA   string `json:"result_sha,omitempty"`
+	// InstructionBaseSHA is set only when -instruction-base named the commit
+	// whose instruction files this run's reviews read (SC-019): a stacked
+	// ticket of a request records the commit the request's first ticket
+	// started from. Empty means the reviews read them as DiffBaseSHA, else
+	// BaseSHA, holds them.
+	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
+	ResultSHA          string `json:"result_sha,omitempty"`
 	// HaltConfirmed is true only once a StateHalted run's real outcome is
 	// positively known: either its own best-effort in-progress-child
 	// termination (or, for a still-queued request, cancellation) actually

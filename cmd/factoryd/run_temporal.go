@@ -68,6 +68,9 @@ type temporalSliceOptions struct {
 	// every caller before this field existed) means no -diff-base override,
 	// unchanged.
 	DiffBase string
+	// InstructionBase carries -instruction-base (r.InstructionBaseSHA) onto
+	// RunWorkflowInput.InstructionBaseSHA. Empty: the review's diff base.
+	InstructionBase string
 	// EarlierAttempt carries -earlier-attempt (an absolute path) onto
 	// RunWorkflowInput.EarlierAttemptPath.
 	EarlierAttempt string
@@ -331,6 +334,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		IsolatedParentDir:  o.Slice.IsolatedParentDir,
 		OnBranch:           o.Slice.OnBranch,
 		DiffBaseSHA:        o.Slice.DiffBase,
+		InstructionBaseSHA: o.Slice.InstructionBase,
 		EarlierAttemptPath: o.Slice.EarlierAttempt,
 		ResumeFrom:         o.Slice.ResumeFrom,
 		// Carried per-execution, not left to Activities' own Worker-static

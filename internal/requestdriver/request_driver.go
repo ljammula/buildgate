@@ -2369,6 +2369,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		IssueRef: r.Source.IssueRef,
 		// PRBase: computed above -- see QueueEntry.PRBase's own doc comment.
 		PRBase: prBase,
+		// InstructionBase: see requestInstructionBase.
+		InstructionBase: requestInstructionBase(dataDir, r, ticket),
 		// RequestTicket: see QueueEntry.RequestTicket's own doc comment --
 		// every ticket built here is a ticketspec-format spec (the ticket's
 		// own file, or its conformity-corrective addendum), never a
@@ -2382,6 +2384,36 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil
+}
+
+// requestInstructionBase is the commit a stacked ticket's reviews read the
+// repository's instruction files from (SC-019): the commit the request's
+// first ticket started from, taken from the run recorded for ticket 1 (its
+// instruction base if it recorded one, else its diff base, else its base).
+// Ticket 1 itself gets "" (its own diff base is that commit). "" is also the
+// answer, with one log line, when ticket 1's run cannot be loaded or records
+// no base: the review then reads its own run's diff base.
+func requestInstructionBase(dataDir string, r *request.Request, ticket request.Ticket) string {
+	if ticket.Index <= 1 || len(r.Tickets) == 0 {
+		return ""
+	}
+	first := r.Tickets[0]
+	if first.RunID == "" {
+		log.Printf("request %s: ticket %d: ticket 1 has no run, so reviews read instruction files as this run's own base holds them", r.ID, ticket.Index)
+		return ""
+	}
+	root, err := run.Load(dataDir, first.RunID)
+	if err != nil {
+		log.Printf("request %s: ticket %d: load ticket 1's run %q for the instruction base, reviews read instruction files as this run's own base holds them: %v", r.ID, ticket.Index, first.RunID, err)
+		return ""
+	}
+	for _, sha := range []string{root.InstructionBaseSHA, diffBaseOf(root)} {
+		if sha != "" {
+			return sha
+		}
+	}
+	log.Printf("request %s: ticket %d: ticket 1's run %q records no base, reviews read instruction files as this run's own base holds them", r.ID, ticket.Index, first.RunID)
+	return ""
 }
 
 // BuildRequestBuildArgs builds the same runMainWithReady argv shape

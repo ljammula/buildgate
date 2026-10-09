@@ -379,12 +379,29 @@ func reviewProgressDetail(err error) string {
 	return ""
 }
 
+// failReviewInstructions ends a review whose masks, stubs or cleanup failed
+// (SC-019): the fixed message and failure type, the cleaned cause on the
+// attempt, and the same durable checkpoint as any other failed review.
+func (a *Activities) failReviewInstructions(ctx context.Context, step reviewstep.Step, checkpoint activityCheckpoint[VerifyActivityResult], path string, stepResult VerifyActivityResult, cause error) (VerifyActivityResult, error) {
+	failure := reviewInstructionsFailureOf(step.Name, cause, stepResult.Attempts)
+	stepResult.Attempts = AttemptsFromError(failure)
+	checkpoint.Result = stepResult
+	checkpoint.Error, checkpoint.ErrorType = ReviewInstructionsFailureMessage, ReviewInstructionsFailureType
+	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
+		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("save %s Activity checkpoint", step.Label), InfrastructureFailureType, saveErr, stepResult.Attempts)
+	}
+	return stepResult, failure
+}
+
 // completeReviewStep turns a review launch's outcome into the Activity's
 // result: the evidence checks, the durable checkpoint and the error type.
 // finishErr is the failure to remove the launch's stubs, which is an
 // infrastructure failure of its own.
 func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInput, step reviewstep.Step, checkpoint activityCheckpoint[VerifyActivityResult], path string, result runner.Result, runErr, finishErr error, attempts []run.Attempt) (VerifyActivityResult, error) {
 	stepResult := VerifyActivityResult{Result: result, Attempts: attempts}
+	if cause := reviewInstructionsCause(runErr, finishErr); cause != nil {
+		return a.failReviewInstructions(ctx, step, checkpoint, path, stepResult, cause)
+	}
 	var err error
 	if runErr == nil {
 		stepResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()

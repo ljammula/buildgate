@@ -1255,7 +1255,7 @@ def format_diff_for_prompt(stat: str, diff_text: str, review_base_sha: str | Non
 	)
 
 
-INSTRUCTIONS_DIFF = prompt_templates.load("review.instructions_diff", ("diff",))
+INSTRUCTIONS_DIFF = prompt_templates.load("review.instructions_diff", ("touched", "diff"))
 # The most of an instructions diff a review prompt carries.
 MAX_INSTRUCTIONS_DIFF_CHARS = 60_000
 
@@ -1270,21 +1270,44 @@ def neutralise_instructions_diff(text: str) -> str:
 	return text.replace("<<<", "< < <").replace(">>>", "> > >")
 
 
+# One file's header in the host's instructions.diff: `=== "<path>" (<what>) ===`
+# at column 0. The path is Go-quoted. Content lines are prefixed with +, -, a
+# space or @ by the host, so a header-shaped line inside a diff is not one.
+INSTRUCTIONS_DIFF_HEADER = re.compile(r'^=== ("(?:[^"\\\n]|\\.)*") \(([^\n]*?)\) ===$', re.MULTILINE)
+
+
 def instructions_diff_block(path: Path | None) -> str:
 	"""The text a review prompt appends after the inline diff for the host's
 	--instructions-diff file: what the build did to the repository's
 	instruction files, which the workspace itself shows as they were before
 	it (SC-019). "" when path is unset or the file is empty, so the prompt is
-	then byte-identical to one without the flag."""
+	then byte-identical to one without the flag.
+
+	The file is read whole. A complete list of the paths it names comes first
+	and is never cut (the host bounds the number of files), then the diff
+	capped at MAX_INSTRUCTIONS_DIFF_CHARS; the paths whose change the cap cut
+	out are named, so a build cannot hide an instruction change behind filler
+	earlier in the file."""
 	if path is None:
 		return ""
 	text = path.read_text(encoding="utf-8", errors="replace")
 	if not text.strip():
 		return ""
+	headers = [(m.start(), m.end() + 1, m.group(1), m.group(2)) for m in INSTRUCTIONS_DIFF_HEADER.finditer(text)]
+	not_shown = []
 	if len(text) > MAX_INSTRUCTIONS_DIFF_CHARS:
 		omitted = len(text) - MAX_INSTRUCTIONS_DIFF_CHARS
+		not_shown = [h for h in headers if h[1] >= MAX_INSTRUCTIONS_DIFF_CHARS]
 		text = text[:MAX_INSTRUCTIONS_DIFF_CHARS] + f"\n[instructions diff truncated here: {omitted:,} more characters not shown]"
-	return "\n\n" + INSTRUCTIONS_DIFF.format(diff=neutralise_instructions_diff(text.rstrip("\n"))).removesuffix("\n")
+	touched = ""
+	if headers:
+		lines = [f"Instruction paths this change touched ({len(headers)}):"]
+		lines += [f"- {quoted} ({what})" for _, _, quoted, what in headers]
+		if not_shown:
+			lines += ["", "Not shown below (the diff was cut):"]
+			lines += [f"- {quoted} ({what})" for _, _, quoted, what in not_shown]
+		touched = neutralise_instructions_diff("\n".join(lines)) + "\n\n"
+	return "\n\n" + INSTRUCTIONS_DIFF.format(touched=touched, diff=neutralise_instructions_diff(text.rstrip("\n"))).removesuffix("\n")
 
 
 def read_acceptance_criteria(path: Path) -> list[str]:

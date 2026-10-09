@@ -31,6 +31,7 @@
   "state": "accepted",
   "base_sha": "every-field base_sha",
   "diff_base_sha": "every-field diff_base_sha",
+  "instruction_base_sha": "every-field instruction_base_sha",
   "result_sha": "every-field result_sha",
   "halt_confirmed": true,
   "kept_for_resume": true,

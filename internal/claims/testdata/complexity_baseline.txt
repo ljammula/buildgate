@@ -29,7 +29,7 @@
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
 29 cmd/factoryd/run_temporal.go awaitRunWorkflow
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
-34 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
+30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
 46 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec

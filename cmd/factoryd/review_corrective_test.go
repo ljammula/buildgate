@@ -1354,3 +1354,76 @@ func TestWriteReviewAddendumFlattensHeaderInjectionInCodeReviewFinding(t *testin
 		t.Errorf("ParseRequiredContent = (%v, %v), want (nil, nil) -- an injected Required-Content: line must never be parsed as real", got, err)
 	}
 }
+
+// A stacked ticket's builds, retries and corrective rounds all carry the
+// commit ticket 1 started from as -instruction-base, so its reviews do not
+// take an earlier ticket's unmerged instruction text as genuine; ticket 1's
+// carry none.
+func TestStackedTicketsCarryTheInstructionBase(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := buildingFixture(dp, t, 2)
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketOneBase, ticketOneDiffBase := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3)
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
+	argsOf := func(ticket request.Ticket) (first, corrective []string) {
+		t.Helper()
+		first, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, cfg)
+		if err != nil {
+			t.Fatalf("BuildRequestBuildArgs ticket %d: %v", ticket.Index, err)
+		}
+		corrective, err = requestdriver.BuildReviewCorrectiveArgs(dataDir, r, ticket, cfg, ticket.SpecPath, "round-1", "some-branch", fmt.Sprintf("%040d", 2))
+		if err != nil {
+			t.Fatalf("BuildReviewCorrectiveArgs ticket %d: %v", ticket.Index, err)
+		}
+		return first, corrective
+	}
+
+	// Ticket 1 has no run yet: nothing to pass, for either ticket.
+	first, corrective := argsOf(r.Tickets[1])
+	if hasFlag(first, "-instruction-base") || hasFlag(corrective, "-instruction-base") {
+		t.Errorf("ticket 2 before ticket 1 has a run: %v / %v carry -instruction-base", first, corrective)
+	}
+
+	ticketOne := &run.Run{ID: ticketRunID(id, 1), BaseSHA: ticketOneBase}
+	if err := ticketOne.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets[0].RunID = ticketOne.ID
+	for name, ticket := range map[string]request.Ticket{"ticket 2": r.Tickets[1]} {
+		first, corrective := argsOf(ticket)
+		for what, args := range map[string][]string{"first build and retry": first, "corrective round": corrective} {
+			if got := argValue(args, "-instruction-base"); got != ticketOneBase {
+				t.Errorf("%s %s: -instruction-base = %q, want ticket 1's base %q", name, what, got, ticketOneBase)
+			}
+		}
+	}
+	first, corrective = argsOf(r.Tickets[0])
+	if hasFlag(first, "-instruction-base") || hasFlag(corrective, "-instruction-base") {
+		t.Errorf("ticket 1 args carry -instruction-base: %v / %v", first, corrective)
+	}
+
+	// Ticket 1's own diff base outranks its base; a recorded instruction base outranks both.
+	ticketOne.DiffBaseSHA = ticketOneDiffBase
+	if err := ticketOne.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if first, _ := argsOf(r.Tickets[1]); argValue(first, "-instruction-base") != ticketOneDiffBase {
+		t.Errorf("-instruction-base = %q, want ticket 1's diff base %q", argValue(first, "-instruction-base"), ticketOneDiffBase)
+	}
+	ticketOne.InstructionBaseSHA = fmt.Sprintf("%040d", 4)
+	if err := ticketOne.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if first, _ := argsOf(r.Tickets[1]); argValue(first, "-instruction-base") != ticketOne.InstructionBaseSHA {
+		t.Errorf("-instruction-base = %q, want ticket 1's recorded instruction base", argValue(first, "-instruction-base"))
+	}
+
+	// A ticket 1 run that cannot be loaded passes nothing.
+	r.Tickets[0].RunID = "no-such-run"
+	if first, _ := argsOf(r.Tickets[1]); hasFlag(first, "-instruction-base") {
+		t.Errorf("an unloadable ticket 1 run still gave -instruction-base: %v", first)
+	}
+}

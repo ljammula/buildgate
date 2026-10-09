@@ -146,7 +146,7 @@ func (f *reviewFixture) run() (VerifyActivityResult, error) {
 }
 
 func (f *reviewFixture) manifest() string {
-	return filepath.Join(f.acts.checkpointDirFor(f.input.RunWorkflowInput), reviewStubManifestName)
+	return reviewStubManifestPath(f.acts.dataDirFor(f.input.RunWorkflowInput), f.repo)
 }
 
 func (f *reviewFixture) requireClean() {
@@ -400,7 +400,7 @@ func TestReviewRetrySweepsLeftoverStub(t *testing.T) {
 		}
 		data, _ := json.Marshal([]reviewStub{{Path: "notes.txt"}, {Path: "empty-tracked.txt"}, {Path: "../escape"}})
 		writeFile(t, f.manifest(), string(data))
-		kept, err := removeReviewStubs(f.repo, f.acts.checkpointDirFor(f.input.RunWorkflowInput))
+		kept, err := removeReviewStubs(f.repo, f.manifest())
 		if err != nil {
 			t.Fatalf("removeReviewStubs: %v", err)
 		}
