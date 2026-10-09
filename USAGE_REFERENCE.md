@@ -1424,6 +1424,7 @@ limits for API-started runs.
 | `sandbox_tmpfs_size` | `1g` |
 | `model_host_concurrency` | `1`. Locks only a single-instance-looking route upstream (loopback, RFC1918, Tailscale, `.local`/`.lan`, non-HTTPS or unparseable). SaaS hosts (`chatgpt.com`, `api.githubcopilot.com`, `api.anthropic.com`) are never locked. `0` disables. |
 | `max_parallel_jobs` | `2`, at least `1` (two builds fit a 4 GiB Docker VM next to Temporal). How many model jobs and builds `factoryd worker` runs at once across all requests. Each build's sandbox takes up to `sandbox_memory`. |
+| `memory.repositories` | Unset: repository memory is off for every repository. A list of `{path, budget_lines, budget_chars}`: `path` is the repository's root, absolute or `~/` (listed once; matched by root path with symlinks resolved, never by directory name); `budget_lines` 5 to 80 (default 40) and `budget_chars` 500 to 6000 (default 3000) bound the section memory keeps in its `AGENTS.md`. A memory action also stops while the project's kill switch is engaged or its `off` marker exists (`<data-dir>/memory/<project>/off`) |
 | `meter_max_request_bytes` | `1048576` |
 | `meter_requests_per_minute` | `60` |
 | `meter_token_budget` | `1000000` |
