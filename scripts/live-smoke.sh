@@ -144,6 +144,66 @@ if [ "${1:-}" = "--list" ]; then
 	exit 0
 fi
 
+# LIVE_SMOKE_JOBS=<n> (default 1) runs up to n fixtures at once: each as its
+# own run of this script on that one fixture, with its own scratch directory
+# and data dir, its output held back and printed whole in fixture order. The
+# fixtures share nothing but the model route, so n is bounded by what the
+# route serves at once: leave it at 1 on a single-instance local model.
+LIVE_SMOKE_JOBS="${LIVE_SMOKE_JOBS:-1}"
+case "$LIVE_SMOKE_JOBS" in '' | *[!0-9]* | 0) echo "live-smoke: LIVE_SMOKE_JOBS must be a positive integer, got '$LIVE_SMOKE_JOBS'" >&2; exit 2 ;; esac
+if [ "$LIVE_SMOKE_JOBS" -gt 1 ]; then
+	mkdir -p "$HOME/buildgate/live-smoke"
+	JOBS_DIR="$(mktemp -d "$HOME/buildgate/live-smoke/jobs.XXXXXX")"
+	trap 'rm -rf "$JOBS_DIR"' EXIT
+	n=0
+	running=0
+	for fixture in $FIXTURES; do
+		[ -z "$fixture" ] && continue
+		if [ -n "${LIVE_SMOKE_ONLY:-}" ]; then
+			case "$(echo "$fixture" | cut -d: -f3)" in *"$LIVE_SMOKE_ONLY"*) ;; *) continue ;; esac
+		fi
+		n=$((n + 1))
+		(
+			# The child's own LIVE_SMOKE_ONLY filter is spent: it gets one fixture.
+			status=0
+			LIVE_SMOKE_JOBS=1 LIVE_SMOKE_ONLY= LIVE_SMOKE_FIXTURES="$fixture" "$0" >"$JOBS_DIR/$n.log" 2>&1 || status=$?
+			echo "$status" >"$JOBS_DIR/$n.exit"
+		) &
+		running=$((running + 1))
+		if [ "$running" -ge "$LIVE_SMOKE_JOBS" ]; then
+			wait
+			running=0
+		fi
+	done
+	wait
+	if [ "$n" -eq 0 ]; then
+		echo "live-smoke: no fixture selected (LIVE_SMOKE_ONLY='${LIVE_SMOKE_ONLY:-}'); see --list" >&2
+		exit 1
+	fi
+	pass=0
+	fail=0
+	results=""
+	i=1
+	while [ "$i" -le "$n" ]; do
+		# Everything but the child's own one-fixture summary.
+		sed '/^=== live-smoke summary: /,$d' "$JOBS_DIR/$i.log"
+		line="$(sed -n '/^=== live-smoke summary: /,$p' "$JOBS_DIR/$i.log" | grep -E '^(PASS|FAIL|SKIP)  ' | head -1 || true)"
+		if [ "$(cat "$JOBS_DIR/$i.exit" 2>/dev/null || echo 1)" = 0 ] && [ -n "$line" ]; then
+			case "$line" in PASS*) pass=$((pass + 1)) ;; esac
+		else
+			fail=$((fail + 1))
+			[ -n "$line" ] || line="FAIL  fixture $i (no summary line; its output is above)"
+		fi
+		results="$results\n$line"
+		i=$((i + 1))
+	done
+	echo ""
+	echo "=== live-smoke summary: $pass passed, $fail failed ==="
+	printf '%b\n' "$results"
+	[ "$fail" -eq 0 ] || exit 1
+	exit 0
+fi
+
 mkdir -p "$HOME/buildgate/live-smoke"
 SCRATCH="$(mktemp -d "$HOME/buildgate/live-smoke/run.XXXXXX")"
 trap 'rm -rf "$SCRATCH"' EXIT
