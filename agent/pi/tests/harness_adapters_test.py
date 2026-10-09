@@ -44,6 +44,21 @@ def message_end(role="assistant", content="hi", **message):
 class InvocationTests(unittest.TestCase):
 	base = dict(prompt="make the change", session_dir=Path("/tmp/session"))
 
+	def test_the_notes_turn_continues_the_pi_session_without_the_repos_skills(self):
+		prompt = build_app.HANDOFF_NOTES_PROMPT
+		with tempfile.TemporaryDirectory() as workspace, clean_env():
+			skill = Path(workspace) / ".agents" / "skills" / "repo-skill"
+			skill.mkdir(parents=True)
+			(skill / "SKILL.md").write_text("---\nname: repo-skill\n---\n")
+			for adapter in (PI, PIFORK):
+				turn = adapter.invocation(Path(workspace), prompt=prompt, session_dir=Path("/tmp/session"), continue_session=True, thinking=None, load_repo_skills=False)
+				round_ = adapter.invocation(Path(workspace), prompt=prompt, session_dir=Path("/tmp/session"), continue_session=True, thinking=None, load_repo_skills=True)
+				self.assertIn("--continue", turn)
+				self.assertEqual(turn[-1], prompt)
+				self.assertNotIn(str(skill), turn)
+				self.assertIn(str(skill), round_)
+				self.assertTrue(adapter.can_continue_session(Path("/tmp/session")))
+
 	def test_pi_argv_is_exactly_the_recorded_shape(self):
 		with clean_env():
 			got = PI.invocation(Path("/tmp/work"), continue_session=False, thinking=None, **self.base)

@@ -418,7 +418,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(runCtx, input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
 	})
 	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
 	result := BuildActivityResult{Result: subResult, Attempts: withInherited(inherited, attempts)}

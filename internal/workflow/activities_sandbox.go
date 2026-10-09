@@ -12,8 +12,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
+
+// BuildDeadlineEnv names the worker environment variable that tells the
+// build script when its launch will be killed, in integer epoch seconds. It
+// lets the script decide whether a last turn fits (the notes turn). Only a
+// build's launch carries it.
+const BuildDeadlineEnv = "FACTORY_BUILD_DEADLINE_EPOCH"
+
+type buildLaunchKey struct{}
+
+// forBuildLaunch marks ctx as the build step's, so its launches carry
+// BuildDeadlineEnv; the reviews, verify and the gates do not.
+func forBuildLaunch(ctx context.Context) context.Context {
+	return context.WithValue(ctx, buildLaunchKey{}, true)
+}
+
+// withBuildDeadline returns env, plus BuildDeadlineEnv set to the end of a
+// launch given timeout when ctx is a build's.
+func withBuildDeadline(ctx context.Context, env []string, timeout time.Duration) []string {
+	if ctx.Value(buildLaunchKey{}) == nil {
+		return env
+	}
+	out := append([]string(nil), env...)
+	return append(out, BuildDeadlineEnv+"="+strconv.FormatInt(time.Now().Add(timeout).Unix(), 10))
+}
 
 func activityLogPath(base string) func(int) string {
 	return func(attempt int) string {
@@ -468,7 +493,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// RepositoryOwnerRunWorkflowID(ownerID, RequestID), a derived,
 		// owner-namespaced string, not the durable run id
 		// ReconcileOrphans' run.Load(dataDir, id) actually looks up.
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: workerEnv, Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input))}
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildDeadline(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input))}
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.
 			prepared, prepareErr := registryProxy.PrepareWorker(s)

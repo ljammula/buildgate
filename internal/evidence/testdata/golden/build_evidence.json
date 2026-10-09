@@ -10,6 +10,11 @@
   "review_verdicts": [],
   "succeeded": true,
   "stopped_reason": "canonical verification passed; advisory review (unavailable: no-review-verdict)",
+  "notes_turn": {
+    "ran": false,
+    "skipped_reason": "not reached",
+    "duration_s": 0.0
+  },
   "rounds": [
     {
       "index": 1,

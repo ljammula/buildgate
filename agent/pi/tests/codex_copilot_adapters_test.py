@@ -183,6 +183,16 @@ class CodexInvocationTests(unittest.TestCase):
 		# Same flags either way: everything after the subcommand matches.
 		self.assertEqual([a for a in cont if a not in ("resume", "--last")], fresh)
 
+	def test_the_notes_turn_resumes_the_last_session_with_the_notes_prompt(self):
+		prompt = build_app.HANDOFF_NOTES_PROMPT
+		with route():
+			got = CODEX.invocation(Path("/work"), prompt=prompt, session_dir=self.session, continue_session=True, thinking=None, load_repo_skills=False)
+		self.assertEqual(got[got.index("codex"):got.index("codex") + 4], ["codex", "exec", "resume", "--last"])
+		self.assertEqual(got[-1], prompt)
+		self.assertTrue(CODEX.can_continue_session(self.session))
+		# The recorded resumed turn parses to the agent's text.
+		self.assertTrue(CODEX.parse(fixture("codex_resume.jsonl")).final_text)
+
 	def test_state_lives_under_the_session_dir_and_key_is_the_placeholder(self):
 		with route(OPENAI_API_KEY="sk-real", CODEX_HOME="/home/x/.codex"):
 			got = self.argv()
@@ -381,6 +391,16 @@ class CopilotInvocationTests(unittest.TestCase):
 		self.assertEqual(self.session_id(first)[0], "--session-id")
 		self.assertEqual(self.session_id(second), ("--resume", self.session_id(first)[1]))
 		self.assertNotIn("--session-id", second)
+
+	def test_the_notes_turn_resumes_the_stored_session_with_the_notes_prompt(self):
+		prompt = build_app.HANDOFF_NOTES_PROMPT
+		with route():
+			first = self.argv()
+			got = COPILOT.invocation(Path("/work"), prompt=prompt, session_dir=self.session, continue_session=True, thinking=None, load_repo_skills=False)
+		self.assertEqual(self.session_id(got), ("--resume", self.session_id(first)[1]))
+		self.assertEqual(got[-2:], ["-p", prompt])
+		self.assertTrue(COPILOT.can_continue_session(self.session))
+		self.assertTrue(COPILOT.parse(fixture("copilot_resume.jsonl")).final_text)
 
 	def test_a_continued_round_without_a_stored_id_starts_fresh(self):
 		with route():

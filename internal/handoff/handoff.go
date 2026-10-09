@@ -108,6 +108,10 @@ type Document struct {
 	// ReviewFindings are the code reviewer's, present when code_review
 	// failed.
 	ReviewFindings []run.CodeReviewFinding `json:"review_findings,omitempty"`
+	// AgentNotes are the build agent's own notes for whoever attempts the
+	// ticket next: its view, not the factory's record. They never decide
+	// Next or a bin, and Markdown puts them last (SC-018).
+	AgentNotes *Notes `json:"agent_notes,omitempty"`
 }
 
 // Build makes the Document for a run that ended quarantined or halted.
@@ -194,6 +198,9 @@ func Build(r *run.Run, dataDir string) Document {
 		}
 	}
 	doc.Next = Next(r.State == run.StateHalted, doc.Checks)
+	if text, ok := evidence.ReadRetainedAgentNotes(runDir); ok {
+		doc.AgentNotes = parseNotes(text)
+	}
 	return doc
 }
 
@@ -465,6 +472,7 @@ func (d Document) Markdown() string {
 	} else {
 		b.WriteString("- It changed no files against the base.\n")
 	}
+	b.WriteString(d.AgentNotes.markdown())
 	out := b.String()
 	if len(out) > maxMarkdownBytes {
 		cut := strings.LastIndex(out[:maxMarkdownBytes], "\n")

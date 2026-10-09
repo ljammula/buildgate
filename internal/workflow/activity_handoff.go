@@ -285,6 +285,12 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 		if _, err := evidence.RetainRoundLogs(input.WorkspacePath, filepath.Join(logDir, evidence.RoundLogsDirName)); err != nil {
 			activity.GetLogger(ctx).Warn("failed to retain every round log before removing the finished build's session", "error", err)
 		}
+		// The agent's notes for the next attempt of the ticket sit in the
+		// same folder. Only the handoff reads the copy (SC-018); a failure
+		// loses the notes, never the step.
+		if _, err := evidence.RetainAgentNotes(input.WorkspacePath, filepath.Join(logDir, evidence.AgentNotesFileName)); err != nil {
+			activity.GetLogger(ctx).Warn("failed to retain the build agent's notes before removing the finished build's session", "error", err)
+		}
 	}
 	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
 		return fmt.Errorf("remove the finished build's harness session before any later step: %w", err)

@@ -194,3 +194,75 @@ func ReadRetainedRoundLog(runDir string, round int, n int64) (name string, data 
 	}
 	return "", nil
 }
+
+// AgentNotesFileName is where RetainAgentNotes puts the notes a build that
+// ended without passing wrote for whoever attempts the ticket next, in the
+// run's own directory (the one holding RoundLogsDirName). The text is the
+// build agent's own: untrusted. Only the handoff reads it (SC-018).
+const AgentNotesFileName = "agent-notes.md"
+
+// agentNotesSource is where build_app.py leaves the notes, relative to the
+// workspace: inside the harness session folder, which is removed from the
+// worktree when the build step returns.
+const agentNotesSource = ".pi-build-session/handoff-notes.md"
+
+// maxAgentNotesBytes bounds the notes file; build_app.py cuts the reply to
+// 6000 characters, so a larger file was not written by it.
+const maxAgentNotesBytes = 16 << 10
+
+// RetainAgentNotes copies the build's notes out of workspace to dstPath
+// (0600) and reports whether it did. No notes file is (false, nil). The
+// source is hostile, as RetainRoundLogs': it is opened through an os.Root on
+// the workspace with no symlink followed, and must be a regular file of at
+// most maxAgentNotesBytes; a larger one retains nothing and is an error.
+func RetainAgentNotes(workspace, dstPath string) (bool, error) {
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer root.Close()
+	opened, err := root.OpenFile(agentNotesSource, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	in, err := checkHostileRegularFile(opened, agentNotesSource, maxAgentNotesBytes)
+	if err != nil {
+		return false, err
+	}
+	defer in.Close()
+	if err := retainOpened(in, agentNotesSource, dstPath); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ReadRetainedAgentNotes returns the notes RetainAgentNotes kept in runDir.
+// The text is untrusted. It is opened through an os.Root on runDir with no
+// symlink followed; nothing readable is ("", false).
+func ReadRetainedAgentNotes(runDir string) (string, bool) {
+	root, err := os.OpenRoot(runDir)
+	if err != nil {
+		return "", false
+	}
+	defer root.Close()
+	opened, err := root.OpenFile(AgentNotesFileName, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", false
+	}
+	defer opened.Close()
+	info, err := opened.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxAgentNotesBytes {
+		return "", false
+	}
+	data, err := io.ReadAll(io.LimitReader(opened, maxAgentNotesBytes))
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
