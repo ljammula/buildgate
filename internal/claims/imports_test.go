@@ -350,6 +350,7 @@ func TestPackageBoundaryRules(t *testing.T) {
 			"buildgate/internal/run":           true,
 			"buildgate/internal/runner":        true,
 			"buildgate/internal/sandbox":       true,
+			"buildgate/internal/sanitize":      true,
 			"buildgate/internal/sessionconfig": true,
 			"buildgate/internal/ticketspec":    true,
 			"buildgate/internal/workflow":      true,

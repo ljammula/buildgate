@@ -150,6 +150,7 @@ func SendBack(dataDir, id, by, reason string, target SendBackTarget, now time.Ti
 		FromState: leftState,
 		ForStage:  stage,
 	})
+	r.DraftHalt = nil
 	r.Tickets = nil
 	r.TicketIndex = 0
 	r.TicketCount = 0

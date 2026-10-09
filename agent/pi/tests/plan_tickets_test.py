@@ -208,7 +208,10 @@ class BuildPromptTests(unittest.TestCase):
 		self.assertIn("<<<BEGIN OPERATOR FEEDBACK>>>", prompt)
 		self.assertIn("split ticket 1 -- it touches two unrelated packages", prompt)
 		self.assertIn("<<<END OPERATOR FEEDBACK>>>", prompt)
-
+		flat = " ".join(prompt.split())
+		self.assertIn("rejection notes from human review", flat)
+		self.assertIn("a section saying the factory refused the previous draft", flat)
+		
 	def test_includes_the_design_guide_before_feedback_and_instructions(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)

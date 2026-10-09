@@ -335,3 +335,57 @@ func TestSendBackPlanAllowed(t *testing.T) {
 		})
 	}
 }
+
+// The factory's note about a refused draft goes when a draft reaches review,
+// and when an operator sends the request back (their feedback drives the redraft).
+func TestDraftHaltNoteClearedWhenTheDraftReachesReview(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		from  State
+		stage State
+		step  func(r *Request) error
+	}{
+		{"spec", StateSpecDrafting, StateSpecDrafting, func(r *Request) error { return r.CompleteSpecDrafting(fixedNow) }},
+		{"plan", StatePlanning, StatePlanning, func(r *Request) error { return r.CompletePlanning(fixedNow) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Request{State: tc.from, DraftHalt: &DraftHalt{Stage: tc.stage, Reason: "missing ## Scope", At: "t"}}
+			if err := tc.step(r); err != nil {
+				t.Fatal(err)
+			}
+			if r.DraftHalt != nil {
+				t.Errorf("DraftHalt = %+v, want cleared once the draft reached review", r.DraftHalt)
+			}
+		})
+	}
+	// A halt and a retry keep it.
+	r := &Request{State: StatePlanning, DraftHalt: &DraftHalt{Stage: StatePlanning, Reason: "wrong verify command", At: "t"}}
+	if err := r.Halt("plan invalid", fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ResumeDrafting(StatePlanning, "alice", "", fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	if r.DraftHalt == nil || r.DraftHalt.Reason != "wrong verify command" {
+		t.Errorf("DraftHalt = %+v, want it kept across halted and retry", r.DraftHalt)
+	}
+	if r.PlanAsHandedOver() || r.SpecAsHandedOver() {
+		t.Error("a draft note must not change the handed-over answers")
+	}
+}
+
+func TestDraftHaltNoteClearedBySendBack(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newQuarantinedRequestWithPlan(t, dataDir, "req-1", StateHalted, true, true)
+	r.DraftHalt = &DraftHalt{Stage: StatePlanning, Reason: "ticket 001.spec.md declares Verify-Command \"make wrong-xyz\"", At: "t"}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SendBack(dataDir, "req-1", "alice", "reword criterion 3", SendBackToSpec, fixedNow)
+	if err != nil {
+		t.Fatalf("SendBack: %v", err)
+	}
+	if got.DraftHalt != nil {
+		t.Errorf("DraftHalt = %+v, want cleared by the send-back", got.DraftHalt)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"buildgate/internal/codereview"
 	"buildgate/internal/consolelink"
@@ -23,6 +24,7 @@ import (
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/sanitize"
 	"buildgate/internal/ticketspec"
 )
 
@@ -148,10 +150,8 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	// across stages. runSpecDraftJob(In) reads this file back at
 	// request.SpecFeedbackPath(dataDir, r.ID) itself -- see its own doc
 	// comment.
-	if feedback := request.SpecFeedback(r); feedback != "" {
-		if err := os.WriteFile(request.SpecFeedbackPath(dataDir, r.ID), []byte(CapFeedback(feedback, MaxFeedbackBytes, "## Spec rejected ")), 0o600); err != nil {
-			return fmt.Errorf("write spec feedback: %w", err)
-		}
+	if err := writeDraftFeedback(request.SpecFeedbackPath(dataDir, r.ID), draftFeedbackText(r, request.StateSpecDrafting, request.SpecFeedback(r), "## Spec rejected ")); err != nil {
+		return err
 	}
 	var (
 		specMD   string
@@ -187,7 +187,7 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 		return HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
 	}
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
+		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
 	// Mechanical backstop for draft_spec.py's own prompt instruction not
 	// to draft a commit-message/subject criterion in the first place --
@@ -212,7 +212,7 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 		// build) instead of HaltRequest reporting the real reason here,
 		// where the actual cause is known.
 		if err := request.ValidateSpecSkeleton(specMD); err != nil {
-			return HaltRequest(dataDir, r, fmt.Sprintf("drafted spec.md has no acceptance criteria left after removing %d commit-message criterion(criteria): %v", removed, err), now)
+			return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md has no acceptance criteria left after removing %d commit-message criterion(criteria): %v", removed, err), now)
 		}
 	}
 	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
@@ -448,17 +448,8 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		// second attempt this also carries the factory-authored
 		// tests_added-infeasibility rejection appended below, exactly the
 		// way a real plan_review rejection's reason would.
-		if feedback := request.PlanFeedback(r); feedback != "" {
-			if err := os.WriteFile(request.PlanFeedbackPath(dataDir, r.ID), []byte(CapFeedback(feedback, MaxFeedbackBytes, "## Plan rejected ")), 0o600); err != nil {
-				return fmt.Errorf("write plan feedback: %w", err)
-			}
-		} else if err := os.Remove(request.PlanFeedbackPath(dataDir, r.ID)); err != nil && !os.IsNotExist(err) {
-			// runPlanTicketsJob reads the file straight from disk whenever it
-			// is non-empty, so a plan-feedback.md left from before a send-back
-			// to spec (which empties PlanFeedback on purpose) would still feed
-			// notes written against the old spec to the new plan drafter
-			// (adversarial review of SendBack, round 2, 2026-09-26).
-			return fmt.Errorf("remove stale plan feedback: %w", err)
+		if err := writeDraftFeedback(request.PlanFeedbackPath(dataDir, r.ID), draftFeedbackText(r, request.StatePlanning, request.PlanFeedback(r), "## Plan rejected ")); err != nil {
+			return err
 		}
 
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
@@ -508,7 +499,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 			// Keep what every attempt spent: `factoryd cost` reads it from
 			// PlanEvidence, and a halted plan's relay spend was real.
 			recordPlanEvidence(r, evidence)
-			return HaltRequest(dataDir, r, validateErr.Error(), now)
+			return haltDraftInvalid(dataDir, r, request.StatePlanning, importsPlan(r), validateErr, validateErr.Error(), now)
 		}
 		_ = os.RemoveAll(ticketsDir)
 		r.Rejections = append(r.Rejections, request.Rejection{
@@ -1892,32 +1883,32 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 			return nil, fmt.Errorf("write ticket %s: %w", ticket.Filename, err)
 		}
 		if err := request.ValidateTicketPlan(ticket.Content); err != nil {
-			return nil, fmt.Errorf("ticket %s: %w", ticket.Filename, err)
+			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		}
 		if passed, reasons := policy.TicketStructureBrownfield(ticket.Content); !passed {
-			return nil, fmt.Errorf("ticket %s: %s", ticket.Filename, strings.Join(reasons, "; "))
+			return nil, contentErr(fmt.Errorf("ticket %s: %s", ticket.Filename, strings.Join(reasons, "; ")))
 		}
 		gotVerify, err := ticketspec.ParseVerifyCommand(ticketPath)
 		if err != nil {
-			return nil, fmt.Errorf("ticket %s: %w", ticket.Filename, err)
+			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		}
 		if gotVerify != verifyCommand {
-			return nil, fmt.Errorf("ticket %s: declares Verify-Command %q, want the configured %q", ticket.Filename, gotVerify, verifyCommand)
+			return nil, contentErr(fmt.Errorf("ticket %s: declares Verify-Command %q, want the configured %q", ticket.Filename, gotVerify, verifyCommand))
 		}
 		allowed, err := ticketspec.ParseAllowedFiles(ticketPath)
 		if err != nil {
-			return nil, fmt.Errorf("ticket %s: %w", ticket.Filename, err)
+			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		} else if len(allowed) == 0 {
-			return nil, fmt.Errorf("ticket %s: missing Allowed-Files", ticket.Filename)
+			return nil, contentErr(fmt.Errorf("ticket %s: missing Allowed-Files", ticket.Filename))
 		}
 		if required, err := ticketspec.ParseRequiredChangedFiles(ticketPath); err != nil {
-			return nil, fmt.Errorf("ticket %s: %w", ticket.Filename, err)
+			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		} else if len(required) == 0 {
-			return nil, fmt.Errorf("ticket %s: missing Required-Changed-Files", ticket.Filename)
+			return nil, contentErr(fmt.Errorf("ticket %s: missing Required-Changed-Files", ticket.Filename))
 		}
 		testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(ticketPath)
 		if err != nil {
-			return nil, fmt.Errorf("ticket %s: %w", ticket.Filename, err)
+			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		}
 		if !policy.TicketTestsAddedFeasible(allowed, testPatterns, testsRequiredOptOut) {
 			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_added gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files and Required-Changed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
@@ -1927,11 +1918,11 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		allowedByTicket = append(allowedByTicket, allowed)
 	}
 	if err := request.ValidatePlanCoverage(criteriaCount, contents); err != nil {
-		return nil, err
+		return nil, contentErr(err)
 	}
 	infeasible = append(infeasible, CriterionFilesFeasible(criteriaTexts, contents, allowedByTicket, workspace)...)
 	if len(infeasible) > 0 {
-		return nil, fmt.Errorf("%s: %w", strings.Join(infeasible, "; "), errPlanInfeasible)
+		return nil, contentErr(fmt.Errorf("%s: %w", strings.Join(infeasible, "; "), errPlanInfeasible))
 	}
 	return requestTickets, nil
 }
@@ -2109,6 +2100,95 @@ func HaltRequest(dataDir string, r *request.Request, reason string, now time.Tim
 	}
 	log.Printf("request %s: %s -> halted (%s)", r.ID, oldState, reason)
 	return notifyTerminalRequest(dataDir, r, reason, now)
+}
+
+// maxDraftHaltNoteBytes caps the reason a refused draft hands to the next one.
+const maxDraftHaltNoteBytes = 2000
+
+var (
+	draftLogPathSuffix = regexp.MustCompile(` \(see [^()]*\)$`)
+	draftHeadingRun    = regexp.MustCompile(`#+ `)
+)
+
+// draftContentError marks a draft refused for its CONTENT by the factory's
+// own checks (as opposed to an I/O or internal error while checking it).
+type draftContentError struct{ err error }
+
+func (e *draftContentError) Error() string { return e.err.Error() }
+func (e *draftContentError) Unwrap() error { return e.err }
+
+func contentErr(err error) error { return &draftContentError{err: err} }
+
+// DraftHaltNote renders a halt reason as the one line a refused draft hands
+// the next one: sanitised (one line; escapes and recognisable secrets gone),
+// without the trailing "(see <log path>)", every run of '#' followed by a
+// space backslash-escaped so no Markdown heading can start in it, cut to
+// maxDraftHaltNoteBytes on a rune boundary.
+func DraftHaltNote(reason string) string {
+	note := draftLogPathSuffix.ReplaceAllString(sanitize.Line(reason), "")
+	note = draftHeadingRun.ReplaceAllStringFunc(note, func(m string) string { return `\` + m })
+	if len(note) > maxDraftHaltNoteBytes {
+		cut := maxDraftHaltNoteBytes
+		for cut > 0 && !utf8.RuneStart(note[cut]) {
+			cut--
+		}
+		note = note[:cut]
+	}
+	return note
+}
+
+// haltDraft halts r because the factory's own checks refused a model-produced
+// draft: the reason is recorded as r.DraftHalt (replacing an earlier one) for
+// the next draft of that stage, then the halt runs with the reason unmodified.
+func haltDraft(dataDir string, r *request.Request, stage request.State, reason string, now time.Time) error {
+	r.DraftHalt = &request.DraftHalt{Stage: stage, Reason: DraftHaltNote(reason), At: now.UTC().Format(time.RFC3339Nano)}
+	return HaltRequest(dataDir, r, reason, now)
+}
+
+// haltDraftInvalid halts for a draft failing validation with err. Only a
+// content refusal (draftContentError) of a draft the model wrote leaves a
+// note; imported is true while the document is the operator's own hand-over
+// (a note would not change SpecAsHandedOver/PlanAsHandedOver, but a plain
+// retry must not send a handed-over document to the model), and an I/O error
+// says nothing about the draft.
+func haltDraftInvalid(dataDir string, r *request.Request, stage request.State, imported bool, err error, reason string, now time.Time) error {
+	var content *draftContentError
+	if imported || !errors.As(err, &content) {
+		return HaltRequest(dataDir, r, reason, now)
+	}
+	return haltDraft(dataDir, r, stage, reason, now)
+}
+
+// draftFeedbackText is the feedback file for the next draft of stage: the
+// operator's feedback capped to MaxFeedbackBytes, then, when the factory
+// refused the previous draft of that stage, its reason in its own section
+// (after the cap, so it neither is evicted nor evicts operator feedback).
+func draftFeedbackText(r *request.Request, stage request.State, operator, heading string) string {
+	text := ""
+	if operator != "" {
+		text = CapFeedback(operator, MaxFeedbackBytes, heading)
+	}
+	if h := r.DraftHalt; h != nil && h.Stage == stage {
+		text += fmt.Sprintf("## Previous draft refused by the factory (%s)\n\n%s\n", h.At, h.Reason)
+	}
+	return text
+}
+
+// writeDraftFeedback writes the feedback file, or removes a stale one when
+// there is no feedback: the drafting job reads the file straight from disk
+// whenever it exists, so a file left from before a send-back (which empties
+// the stage's feedback on purpose) would feed old notes to the new drafter.
+func writeDraftFeedback(path, text string) error {
+	if text == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stale feedback: %w", err)
+		}
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		return fmt.Errorf("write feedback: %w", err)
+	}
+	return nil
 }
 
 // haltRequestAcceptedNoPR is HaltRequest for an accepted ticket with no pull
@@ -2923,6 +3003,18 @@ func PlanReviewOracleNote(dataDir string, r *request.Request) string {
 // stage's own feedback-capping to the spec/plan stages too.
 const MaxFeedbackBytes = 12 * 1024
 
+// lineStartIndex is the index of the first occurrence of heading at the start
+// of s or right after a newline, or -1.
+func lineStartIndex(s, heading string) int {
+	if strings.HasPrefix(s, heading) {
+		return 0
+	}
+	if i := strings.Index(s, "\n"+heading); i >= 0 {
+		return i + 1
+	}
+	return -1
+}
+
 // CapFeedback keeps the NEWEST feedback within max bytes. request.
 // OracleFeedback/SpecFeedback/PlanFeedback all render oldest first, so a
 // head cut would drop the operator's current reason once cumulative
@@ -2937,7 +3029,7 @@ func CapFeedback(feedback string, max int, sectionHeading string) string {
 	}
 	const note = "[older feedback omitted to fit the size limit]\n\n"
 	tail := feedback[len(feedback)-(max-len(note)):]
-	if i := strings.Index(tail, sectionHeading); i >= 0 {
+	if i := lineStartIndex(tail, sectionHeading); i >= 0 {
 		tail = tail[i:]
 	}
 	return note + strings.ToValidUTF8(tail, "")

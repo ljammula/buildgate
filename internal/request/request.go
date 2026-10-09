@@ -500,6 +500,15 @@ type Request struct {
 	// plan_review rejection, or when the factory finds the plan infeasible,
 	// the planning job revises the current tickets with that feedback.
 	PlanImported bool `json:"plan_imported,omitempty"`
+	// DraftHalt is the factory's reason for refusing the latest spec or plan
+	// draft whose CONTENT its own checks rejected; the next draft of that
+	// stage is told it (the driver renders it after the operator feedback,
+	// never through Rejections). Only the latest refused draft is kept.
+	// Lifetime: it survives the halt and a retry; advance clears it on
+	// entering spec_review or plan_review (a draft got through), and SendBack
+	// clears it (the operator's own feedback then drives the redraft). It is
+	// not an input to SpecAsHandedOver/PlanAsHandedOver.
+	DraftHalt *DraftHalt `json:"draft_halt,omitempty"`
 	// OracleDraft records how the oracle drafting stage last ended. Nil for a
 	// request that never ran it.
 	OracleDraft *OracleDraft `json:"oracle_draft,omitempty"`
@@ -905,7 +914,18 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	if to == StatePlanning {
 		r.pruneTicketApprovals()
 	}
+	if to == StateSpecReview || to == StatePlanReview {
+		r.DraftHalt = nil
+	}
 	return nil
+}
+
+// DraftHalt is a refused draft's reason. Stage is StateSpecDrafting or
+// StatePlanning; At is RFC3339Nano.
+type DraftHalt struct {
+	Stage  State  `json:"stage"`
+	Reason string `json:"reason"`
+	At     string `json:"at"`
 }
 
 // StartSpecDrafting moves a request from submitted to spec_drafting.

@@ -372,6 +372,11 @@
     "draft_oracles": true,
     "spec_imported": true,
     "plan_imported": true,
+    "draft_halt": {
+      "stage": "",
+      "reason": "every-field reason",
+      "at": "2026-09-10T09:00:00Z"
+    },
     "oracle_draft": {
       "status": "drafted",
       "detail": "every-field detail",
