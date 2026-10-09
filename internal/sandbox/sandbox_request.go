@@ -243,7 +243,10 @@ func workerWrapperScript(w workerWrapper, reclaimScratch bool) string {
 	if w.Umask == "" {
 		script = append(script, `exec "$@"`)
 	} else {
-		reclaim := "chmod -R g+rwX -- " + workDir + " || true"
+		// stderr dropped: the workspace's .git is mounted read-only, so this
+		// walk always reports it, and that line landed in every step's
+		// captured output, a gate's failing lines included.
+		reclaim := "chmod -R g+rwX -- " + workDir + " 2>/dev/null || true"
 		if reclaimScratch {
 			reclaim += "; chmod -R g+rwX -- " + shSingleQuote(WorkerScratchMount) + " 2>/dev/null || true"
 		}

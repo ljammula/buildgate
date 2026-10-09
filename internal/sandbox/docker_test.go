@@ -434,7 +434,7 @@ func TestDockerCommandWrapsCommandWithUmaskWhenSet(t *testing.T) {
 	s.WorkerUmask = "0002"
 	args := s.DockerCommand("docker")
 	joined := " " + strings.Join(args, " ") + " "
-	const wantScript = `umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' || true; exit $ec`
+	const wantScript = `umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' 2>/dev/null || true; exit $ec`
 	if !strings.Contains(joined, " /bin/sh -c "+wantScript+` -- /bin/sh -c echo ok `) {
 		t.Fatalf("Docker args missing umask-wrapped command: %v", args)
 	}
@@ -462,7 +462,7 @@ func TestDockerCommandReclaimsContainerWorkDirRegardlessOfHostWorkDir(t *testing
 	s.WorkDir = "/host/it's/weird"
 	args := s.DockerCommand("docker")
 	joined := " " + strings.Join(args, " ") + " "
-	const wantScript = `umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' || true; exit $ec`
+	const wantScript = `umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' 2>/dev/null || true; exit $ec`
 	if !strings.Contains(joined, " /bin/sh -c "+wantScript+" ") {
 		t.Fatalf("Docker args missing reclaim-chmod wrapped command targeting the container path: %v", args)
 	}
