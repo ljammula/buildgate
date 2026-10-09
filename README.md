@@ -265,7 +265,7 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 
 ## Status
 
-Latest release tag: **`m7.2`**, cut only after `make live-smoke` passes on
+Latest release tag: **`m8`**, cut only after `make live-smoke` passes on
 that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
 
 | | Area |
