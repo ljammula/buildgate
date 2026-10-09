@@ -339,7 +339,7 @@ func NoteLeftovers(b *run.BaselineVerify, left, allowed []string) {
 		}
 		p = sanitize.Line(p)
 		if len(p) > maxNameLen {
-			p = p[:maxNameLen]
+			p = strings.ToValidUTF8(p[:maxNameLen], "")
 		}
 		if p != "" {
 			b.LeftOutOfScope = append(b.LeftOutOfScope, p)
