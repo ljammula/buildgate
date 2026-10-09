@@ -231,11 +231,11 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 		phaseBudget = time.Until(deadline) / time.Duration(postOracleCommitPhaseCount(input))
 	}
 	runPhase := func(kind, shellCommand, logName string, maxAttempts int, composeSpec *sandbox.ComposeServicesSpec) (VerifyActivityResult, error, error) {
-		if _, err := recordActivityIntent(ctx, checkpointDir, kind, []string{"sh", "-c", shellCommand}); err != nil {
+		command := stepCommand(input.SetupCommands, shellCommand)
+		if _, err := recordActivityIntent(ctx, checkpointDir, kind, command); err != nil {
 			return VerifyActivityResult{}, nil, temporal.NewApplicationErrorWithCause("record post-oracle-commit verify Activity intent", InfrastructureFailureType, err)
 		}
 		logPath := activityLogPath(activityExecutionLogPath(ctx, a.logDirFor(input), logName))
-		command := []string{"sh", "-c", shellCommand}
 		priorAttempts := len(attempts)
 		var phaseAttempts []run.Attempt
 		beforeAttempt := func(attempt int) error {
@@ -247,6 +247,7 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 			recorded := run.Attempt{
 				Kind:        kind,
 				Command:     res.Command,
+				SetupSHA256: run.SetupDigest(input.SetupCommands),
 				StartedAt:   res.StartedAt.Format(time.RFC3339),
 				FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 				ExitCode:    res.ExitCode,
@@ -271,12 +272,12 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 			activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: kind, Elapsed: time.Since(heartbeatStart)})
 		}, func() (runner.Result, error) {
 			if a.hasFakeRunner() {
-				return a.runWithRetriesFn()(phaseCtx, input.WorkspacePath, logPath, maxAttempts, beforeAttempt, afterAttempt, "sh", "-c", shellCommand)
+				return a.runWithRetriesFn()(phaseCtx, input.WorkspacePath, logPath, maxAttempts, beforeAttempt, afterAttempt, command[0], command[1:]...)
 			}
 			// nil relay: neither phase calls a model, exactly as for the
 			// original verify and full-suite gates.
 			return a.runSandboxWithRetries(phaseCtx, input, logPath, maxAttempts, beforeAttempt, afterAttempt,
-				nil, registrySpec, composeSpec, "", "", nil, nil, "sh", "-c", shellCommand)
+				nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
 		})
 		phaseResult := VerifyActivityResult{Result: result, Attempts: phaseAttempts}
 		if runErr != nil {

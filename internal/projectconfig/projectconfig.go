@@ -139,6 +139,9 @@ func validateCommandList(key string, commands []string) error {
 			return fmt.Errorf("%s entry %d is %d bytes, at most %d are allowed", key, n, len(c), maxSetupCommandBytes)
 		case strings.ContainsAny(c, "\x00\n\r"):
 			return fmt.Errorf("%s entry %d must be one line without a NUL byte (one command per entry)", key, n)
+		case strings.HasPrefix(strings.TrimSpace(c), "-"):
+			// sh -c would read it as an option, not a command.
+			return fmt.Errorf("%s entry %d must not begin with '-' (the shell would read it as an option)", key, n)
 		}
 	}
 	return nil

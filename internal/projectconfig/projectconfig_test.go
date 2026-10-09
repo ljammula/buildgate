@@ -541,6 +541,8 @@ func TestLoadRejectsBadSetupOrAutofix(t *testing.T) {
 		"newline in entry": "\n  - \"a\\nb\"\n",
 		"carriage return":  "\n  - \"a\\rb\"\n",
 		"NUL in entry":     "\n  - \"a\\0b\"\n",
+		"leading dash":     "\n  - \"-x\"\n",
+		"dash after space": "\n  - \"  --version\"\n",
 	}
 	for _, key := range []string{"setup", "autofix"} {
 		for name, body := range cases {

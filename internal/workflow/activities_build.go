@@ -73,7 +73,7 @@ func reviewHarnessEnv(input RunWorkflowInput) []string { return harnessEnv(input
 // by the submitting process -- see cmd/factoryd/run_temporal.go) -- empty
 // when roles.execution is unset, which omits --thinking entirely and
 // preserves today's argv byte-for-byte.
-func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string) []string {
+func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string, setup ...string) []string {
 	args := []string{
 		buildAppScript,
 		"--workspace", workspace,
@@ -91,6 +91,9 @@ func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string,
 	}
 	if fastCheckCommand != "" {
 		args = append(args, "--fast-check-command", fastCheckCommand)
+	}
+	for _, c := range setup {
+		args = append(args, "--setup-command", c)
 	}
 	if referenceOracleCommand != "" {
 		// build_app.py's own --reference-oracle-command (Phase 0.5): the
@@ -291,7 +294,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 
 	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
 	// see buildActivityArgs' own doc comment on that parameter for why.
-	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness))
+	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
 	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath, input.BaselineNotePath)
 	args = append(args, resumeFromStateArgs(input)...)
 	buildAppInterpreter := a.buildAppInterpreterFor(input)
@@ -344,6 +347,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 			Kind:                  "build",
 			ResumedFromCheckpoint: resumed.SnapshotSHA,
 			Command:               res.Command,
+			SetupSHA256:           run.SetupDigest(input.SetupCommands),
 			StartedAt:             res.StartedAt.Format(time.RFC3339),
 			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
 			ExitCode:              res.ExitCode,

@@ -69,6 +69,7 @@ func (a *Activities) runReferenceOracleCanary(ctx context.Context, budget time.D
 		*attempts = append(*attempts, run.Attempt{
 			Kind:        oraclecanary.AttemptKind,
 			Command:     res.Command,
+			SetupSHA256: run.SetupDigest(input.SetupCommands),
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -88,10 +89,10 @@ func (a *Activities) runReferenceOracleCanary(ctx context.Context, budget time.D
 		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: oraclecanary.AttemptKind, Elapsed: time.Since(start)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
-			return a.runWithRetriesFn()(runCtx, input.WorkspacePath, logPath, 1, beforeAttempt, afterAttempt, "sh", "-c", input.Command)
+			return a.runWithRetriesFn()(runCtx, input.WorkspacePath, logPath, 1, beforeAttempt, afterAttempt, command[0], command[1:]...)
 		}
 		return a.runSandboxWithRetries(runCtx, input.RunWorkflowInput, logPath, 1, beforeAttempt, afterAttempt,
-			nil, registrySpec, composeSpec, canaryDir, mountPath, nil, nil, "sh", "-c", input.Command)
+			nil, registrySpec, composeSpec, canaryDir, mountPath, nil, nil, command[0], command[1:]...)
 	})
 	if runErr != nil {
 		return run.OracleCanaryEvidence{}, false, runErr

@@ -114,6 +114,11 @@ type Attempt struct {
 	FinishedAt string   `json:"finished_at"`
 	ExitCode   int      `json:"exit_code"`
 	LogPath    string   `json:"log_path"`
+	// SetupSHA256 is SetupDigest of the repository setup commands (`.factory.yml`
+	// setup:) the step ran before its command, empty for a step that ran none.
+	// The step says it ran them, so a reader never infers it from Command,
+	// whose shape depends on the sandbox runtime.
+	SetupSHA256 string `json:"setup_sha256,omitempty"`
 	// ResumedFromCheckpoint is the sha of the snapshot commit
 	// (refs/buildgate/checkpoints/<run>/attempt-<n>) holding the work an
 	// interrupted earlier Temporal attempt of this build left in the

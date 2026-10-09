@@ -447,6 +447,10 @@ optional named gate commented out). Full key reference, named-gate
 semantics, and the restrictions on `sandbox_image`/ceiling keys:
 [USAGE_REFERENCE.md § `.factory.yml` reference](USAGE_REFERENCE.md#factoryyml-reference).
 
+A `setup:` list in the file (code generation, an install) runs before the
+command of every build, verify and gate sandbox, so each sees the same
+prepared tree.
+
 ## New app from scratch
 
 For a brand-new app with no code yet — a different, less common path

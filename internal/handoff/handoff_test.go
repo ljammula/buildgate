@@ -530,3 +530,25 @@ func TestParseNotesOfNothingUsableIsNil(t *testing.T) {
 		}
 	}
 }
+
+// A canonical_verify recorded because the verify did not run the repository's
+// setup commands (a worker older than them) is the operator's: no build can
+// fix it, so it is never handed to one.
+func TestBuildSortsAVerifyThatNeverRanSetupIntoTheOperatorsBin(t *testing.T) {
+	r := &run.Run{ID: "run-s", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{
+		{Check: "canonical_verify", Command: []string{run.SetupNotRunMessage}, ExitCode: -1},
+	}}
+	doc := Build(r, t.TempDir())
+	if len(doc.Checks) != 1 || doc.Checks[0].Bin != BinOperator || doc.Next != BinOperator {
+		t.Fatalf("checks = %+v, next = %q, want the operator bin", doc.Checks, doc.Next)
+	}
+	if !strings.Contains(doc.Checks[0].Finding, "factoryd restart") {
+		t.Errorf("finding = %q, want it to say how to fix it", doc.Checks[0].Finding)
+	}
+	plain := &run.Run{ID: "run-p", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{
+		{Check: "canonical_verify", Command: []string{"sh", "-c", "make verify"}, ExitCode: -1},
+	}}
+	if got := Build(plain, t.TempDir()); got.Next != BinCorrective {
+		t.Errorf("an ordinary failed canonical_verify has Next = %q, want corrective", got.Next)
+	}
+}

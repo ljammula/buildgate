@@ -46,6 +46,13 @@ func canaryGate(t *testing.T, files map[string]string, realExit, canaryExit int)
 // embedded in the mounted canary source.
 func canaryGateWithOutput(t *testing.T, files map[string]string, realExit, canaryExit int, canaryOutput string) (VerifyActivityResult, string, *Activities) {
 	t.Helper()
+	return canaryGateWithSetup(t, files, realExit, canaryExit, canaryOutput, nil)
+}
+
+// canaryGateWithSetup is canaryGateWithOutput for a run whose repository
+// lists setup commands.
+func canaryGateWithSetup(t *testing.T, files map[string]string, realExit, canaryExit int, canaryOutput string, setup []string) (VerifyActivityResult, string, *Activities) {
+	t.Helper()
 	oracleDir := t.TempDir()
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(oracleDir, name), []byte(body), 0o600); err != nil {
@@ -69,6 +76,7 @@ func canaryGateWithOutput(t *testing.T, files map[string]string, realExit, canar
 			DataDir:                  activities.DataDir,
 			ReferenceOracleDir:       oracleDir,
 			ReferenceOracleMountPath: ".oracle",
+			SetupCommands:            setup,
 		},
 		Check: "reference_oracle", OracleCanary: true,
 		Command: "go test -run TestOracleLevel",

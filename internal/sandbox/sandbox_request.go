@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"buildgate/internal/run"
 )
 
 // Container paths a sandbox launched through a Runtime adds to the worker's
@@ -30,7 +32,9 @@ const (
 )
 
 // Exit codes of the worker command's wrapper, which no worker output
-// accompanies: the wrapper exits before it redirects output.
+// accompanies: the wrapper exits before it redirects output. The exception is
+// WorkerExitSetupFailed, which is the step's own script's exit, after the
+// wrapper redirected output, and leaves a line in the output naming the command.
 const (
 	// WorkerExitNoGo: the factory never released the command.
 	WorkerExitNoGo = 96
@@ -38,6 +42,10 @@ const (
 	WorkerExitRerun = 97
 	// WorkerExitNoWorkspace: the worktree is not at /workspace.
 	WorkerExitNoWorkspace = 98
+	// WorkerExitSetupFailed: a repository setup command failed (its
+	// `.factory.yml` setup: list) in a step's own script, so the step's
+	// command never ran. The step's log, not a wrapper, names the command.
+	WorkerExitSetupFailed = run.SetupFailedExitCode
 )
 
 // workerGuardWaitTries bounds the wait for the "go" file at 0.2 s a try.

@@ -235,3 +235,29 @@ func TestANamedTestFailureIsNotExcusedByACreatedPath(t *testing.T) {
 		t.Errorf("halts=%v needs=%q, want a halt", b.Halts(), b.NeedsCreated)
 	}
 }
+
+func TestEvaluateWithSetupNamesTheSetupCommandThatFailed(t *testing.T) {
+	b := EvaluateWithSetup("make verify", 95, "x\nbuildgate: setup failed: npm ci\n", "", "", nil)
+	if b.Passed || b.Expected || !b.Halts() || b.SetupFailed != "npm ci" {
+		t.Fatalf("record = %+v, want a halting record naming npm ci", b)
+	}
+	if got, want := b.Summary(), "setup fails on the base commit: npm ci"; got != want {
+		t.Errorf("Summary() = %q, want %q", got, want)
+	}
+	plain := EvaluateWithSetup("make verify", 95, "no setup line\n", "", "", nil)
+	if plain.SetupFailed != "" {
+		t.Errorf("exit 95 without the setup line named %q", plain.SetupFailed)
+	}
+}
+
+// A run with no setup commands judges an exit 95 that prints the setup line as
+// any other verify failure: the repository's own output names no setup command.
+func TestEvaluateWithoutSetupIgnoresTheSetupLine(t *testing.T) {
+	b := Evaluate("make verify", 95, "x\nbuildgate: setup failed: rm -rf /\n", "", "", nil)
+	if b.SetupFailed != "" {
+		t.Fatalf("a run with no setup named %q as a failed setup command", b.SetupFailed)
+	}
+	if !b.Halts() {
+		t.Errorf("record = %+v, want the same halt as any other failing verify", b)
+	}
+}

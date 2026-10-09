@@ -106,7 +106,8 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 			AmbiguousPriorAttemptType,
 		)
 	}
-	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input), v.kind, []string{"sh", "-c", a.verifyCommandFor(input)}); err != nil {
+	command := stepCommand(input.SetupCommands, a.verifyCommandFor(input))
+	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input), v.kind, command); err != nil {
 		return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("record "+v.label+" Activity intent", InfrastructureFailureType, err)
 	}
 
@@ -117,7 +118,6 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	// attempts (and so this attempt's journal) holds this attempt's own.
 	inherited := a.earlierAttemptsFor(ctx, a.checkpointDirFor(input), v.kind)
 	attempts := []run.Attempt{}
-	command := []string{"sh", "-c", a.verifyCommandFor(input)}
 	beforeAttempt := func(attempt int) error {
 		// RFC3339, not RFC3339Nano — see RunBuildActivity's matching
 		// beforeAttempt comment for why the precision must match
@@ -130,6 +130,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 		attempts = append(attempts, run.Attempt{
 			Kind:        v.kind,
 			Command:     res.Command,
+			SetupSHA256: run.SetupDigest(input.SetupCommands),
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -150,7 +151,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 				a.verifyMaxAttemptsFor(input),
 				beforeAttempt,
 				afterAttempt,
-				"sh", "-c", a.verifyCommandFor(input),
+				command[0], command[1:]...,
 			)
 		}
 		return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), beforeAttempt, afterAttempt,
@@ -158,7 +159,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 			// never gets the relay's network -- it launches with
 			// Network "none" even on a relay-contained run (unless a
 			// registry proxy gives it that proxy's network instead).
-			nil, registrySpec, composeSpec, "", "", nil, nil, "sh", "-c", a.verifyCommandFor(input))
+			nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
 	})
 	verifyResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
 	if runErr == nil {
@@ -292,7 +293,8 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 			AmbiguousPriorAttemptType,
 		)
 	}
-	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input), "full_suite_verify", []string{"sh", "-c", input.FullSuiteCommand}); err != nil {
+	command := stepCommand(input.SetupCommands, input.FullSuiteCommand)
+	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input), "full_suite_verify", command); err != nil {
 		return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("record full-suite verify Activity intent", InfrastructureFailureType, err)
 	}
 
@@ -301,7 +303,6 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	// attempts (and so this attempt's journal) holds this attempt's own.
 	inherited := a.earlierAttemptsFor(ctx, a.checkpointDirFor(input), "full_suite_verify")
 	attempts := []run.Attempt{}
-	command := []string{"sh", "-c", input.FullSuiteCommand}
 	beforeAttempt := func(attempt int) error {
 		// RFC3339, not RFC3339Nano — see RunBuildActivity's matching
 		// beforeAttempt comment for why the precision must match
@@ -314,6 +315,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 		attempts = append(attempts, run.Attempt{
 			Kind:        "full_suite_verify",
 			Command:     res.Command,
+			SetupSHA256: run.SetupDigest(input.SetupCommands),
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -334,13 +336,13 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 				1,
 				beforeAttempt,
 				afterAttempt,
-				"sh", "-c", input.FullSuiteCommand,
+				command[0], command[1:]...,
 			)
 		}
 		return a.runSandboxWithRetries(ctx, input, logPath, 1, beforeAttempt, afterAttempt,
 			// nil, for the same reason canonical verification passes
 			// nil: the full-suite gate never calls a model.
-			nil, registrySpec, composeSpec, "", "", nil, nil, "sh", "-c", input.FullSuiteCommand)
+			nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
 	})
 	fullSuiteResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
 	if runErr == nil {
@@ -465,7 +467,8 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 			AmbiguousPriorAttemptType,
 		)
 	}
-	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.Check, []string{"sh", "-c", input.Command}); err != nil {
+	command := stepCommand(input.SetupCommands, input.Command)
+	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.Check, command); err != nil {
 		return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("record "+input.Check+" gate Activity intent", InfrastructureFailureType, err)
 	}
 
@@ -474,7 +477,6 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	// attempts (and so this attempt's journal) holds this attempt's own.
 	inherited := a.earlierAttemptsFor(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.Check)
 	attempts := []run.Attempt{}
-	command := []string{"sh", "-c", input.Command}
 
 	// Temporal-path counterpart to cmd/factoryd's runGate (PR #151/#152's
 	// review-driven fixes): only for the "reference_oracle" check, and
@@ -561,6 +563,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		attempts = append(attempts, run.Attempt{
 			Kind:                  input.Check,
 			Command:               res.Command,
+			SetupSHA256:           run.SetupDigest(input.SetupCommands),
 			StartedAt:             res.StartedAt.Format(time.RFC3339),
 			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
 			ExitCode:              res.ExitCode,
@@ -582,13 +585,13 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 				1,
 				beforeAttempt,
 				afterAttempt,
-				"sh", "-c", input.Command,
+				command[0], command[1:]...,
 			)
 		}
 		return a.runSandboxWithRetries(gateCtx, input.RunWorkflowInput, logPath, 1, beforeAttempt, afterAttempt,
 			// nil, for the same reason canonical verification passes
 			// nil: a named gate never calls a model.
-			nil, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, nil, nil, "sh", "-c", input.Command)
+			nil, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, nil, nil, command[0], command[1:]...)
 	})
 
 	// Runtime canary: a passing oracle command is only believed when the SAME
@@ -765,7 +768,11 @@ func writeBaselineBuildNote(logDir string, record *run.BaselineVerify) (string, 
 // judgeBaseline builds the baseline record of a finished launch from its
 // log and the ticket's text.
 func (a *Activities) judgeBaseline(input RunWorkflowInput, res VerifyActivityResult, created []string) *run.BaselineVerify {
-	record := baseline.Evaluate(a.verifyCommandFor(input), res.Result.ExitCode, readFileTail(res.Result.LogPath, baselineLogTailBytes), triage.FirstFailureLine(res.Result.LogPath), a.ticketTextFor(input), created)
+	evaluate := baseline.Evaluate
+	if len(input.SetupCommands) > 0 {
+		evaluate = baseline.EvaluateWithSetup
+	}
+	record := evaluate(a.verifyCommandFor(input), res.Result.ExitCode, readFileTail(res.Result.LogPath, baselineLogTailBytes), triage.FirstFailureLine(res.Result.LogPath), a.ticketTextFor(input), created)
 	record.BaseSHA = input.BaseSHA
 	record.LogPath = res.Result.LogPath
 	record.DurationMs = res.DurationMs

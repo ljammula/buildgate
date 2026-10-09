@@ -210,7 +210,9 @@ func Build(r *run.Run, dataDir string) Document {
 //     was unavailable) is BinNever, the bin of the request's
 //     review_unavailable check, which is what such a run becomes;
 //   - a repository gate recorded with exit -1 never ran (the worker did not
-//     know it), which no build can fix: BinOperator.
+//     know it), which no build can fix: BinOperator;
+//   - a canonical_verify recorded because the verify did not run the
+//     repository's setup commands (a worker older than them): BinOperator.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
@@ -219,8 +221,21 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 		return BinNever
 	case policy.IsRepoGate(finding.Check) && finding.ExitCode == -1:
 		return BinOperator
+	case finding.Check == "canonical_verify" && setupNotRun(r):
+		return BinOperator
 	}
 	return BinOf(finding.Check)
+}
+
+// setupNotRun reports whether r recorded the canonical_verify result for a
+// verify that did not run the repository's setup commands.
+func setupNotRun(r *run.Run) bool {
+	for _, g := range r.GateResults {
+		if g.SetupNotRun() {
+			return true
+		}
+	}
+	return false
 }
 
 // hasActionableVerdict reports whether the conformity reviewer flagged any

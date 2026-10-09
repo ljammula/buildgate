@@ -1,12 +1,65 @@
 package run
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// SetupFailedExitCode is the exit status of a step whose repository setup
+// command (`.factory.yml` setup:) failed: the step's own script exits with it
+// and leaves SetupFailedPrefix plus the command as a line of its log.
+const SetupFailedExitCode = 95
+
+// SetupFailedPrefix starts the log line that names the failed setup command.
+const SetupFailedPrefix = "buildgate: setup failed: "
+
+// SetupFailedCommand is the setup command the log names as failed, "" when
+// it names none. A log is the step's output, so the line is accepted only
+// from its own start.
+func SetupFailedCommand(log string) string {
+	for _, line := range strings.Split(log, "\n") {
+		if cmd, ok := strings.CutPrefix(line, SetupFailedPrefix); ok {
+			return strings.TrimSpace(cmd)
+		}
+	}
+	return ""
+}
+
+// SetupDigest is the hex SHA-256 over the setup commands, each prefixed by its
+// length so no two lists share a digest; "" for an empty list. A step records
+// it (Attempt.SetupSHA256) to say which setup commands it ran.
+func SetupDigest(setup []string) string {
+	if len(setup) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	for _, c := range setup {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(c)))
+		h.Write(n[:])
+		h.Write([]byte(c))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// SetupNotRunMessage is the Command of the canonical_verify result recorded,
+// with exit -1, for an accepted run whose verify attempt does not carry the
+// digest of the repository's setup commands: a worker older than `setup:`
+// judged the run. Nothing a build can do changes it, so it is the operator's.
+const SetupNotRunMessage = "buildgate: this worker did not run the repository's setup commands (it predates them): restart the worker with `factoryd restart`"
+
+// SetupNotRun reports whether g is the result recorded for a run whose verify
+// did not run the repository's setup commands (SetupNotRunMessage).
+func (g GateResult) SetupNotRun() bool {
+	return g.Check == "canonical_verify" && !g.Passed && g.ExitCode == -1 && len(g.Command) == 1 && g.Command[0] == SetupNotRunMessage
+}
 
 // BaselineVerifyAttemptKind is Attempt.Kind of the verify command's run on
 // the base commit, before the build's first round.
@@ -50,6 +103,10 @@ type BaselineVerify struct {
 	// FirstError is the log's first recognised error line, for a failure
 	// that named no test (a missing program, a failed install).
 	FirstError string `json:"first_error,omitempty"`
+	// SetupFailed is the repository setup command that failed on the base
+	// commit (exit SetupFailedExitCode): the verify command never ran, and
+	// no change the build makes could pass it.
+	SetupFailed string `json:"setup_failed,omitempty"`
 	// Expected is true when the command failed and the failure is the work
 	// the ticket asks for (it names every failing test, or NeedsCreated is
 	// set), so the build ran and was told about it.
@@ -79,6 +136,9 @@ func (b *BaselineVerify) Summary() string {
 	}
 	if b.Passed {
 		return "passed"
+	}
+	if b.SetupFailed != "" {
+		return "setup fails on the base commit: " + b.SetupFailed
 	}
 	if b.NeedsCreated != "" {
 		return fmt.Sprintf("failed as the ticket expects: the command needs %s, which the ticket creates", b.NeedsCreated)
@@ -119,12 +179,19 @@ func namedAndMore(names []string, count int) string {
 // HaltMessage is why a run halted on its baseline: the failure and what
 // to do about it. RunBaselineVerifyActivity's error carries it.
 func (b *BaselineVerify) HaltMessage() string {
+	if b.SetupFailed != "" {
+		return b.Summary() + ". " + b.HaltAdvice()
+	}
 	return fmt.Sprintf("baseline verify %s. %s", b.Summary(), b.HaltAdvice())
 }
 
 // HaltAdvice is HaltMessage without the failure, which the run's triage
 // sentence already names: Run.HaltError of a run halted on its baseline.
 func (b *BaselineVerify) HaltAdvice() string {
+	if b.SetupFailed != "" {
+		return "No model call was made: a setup: command of the repository's .factory.yml fails on the untouched repository, so no build could pass verification. " +
+			"Fix the command or the sandbox image it runs in."
+	}
 	base := b.BaseSHA
 	if len(base) > 12 {
 		base = base[:12]

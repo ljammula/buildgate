@@ -314,6 +314,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		}
 		stampRouteSkips(result.Attempts, opts.Slice)
 		result = requireRepoGateResults(opts.GateCommands, result)
+		result = requireSetupRan(opts.SetupCommands, result)
 		return applyRunWorkflowResult(r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, ownerTaskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, true)
 	})
 }
