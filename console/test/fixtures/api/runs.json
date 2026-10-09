@@ -572,6 +572,7 @@
         "detail": "every-field detail"
       }
     ],
+    "spec_conformity_stopped_by": "every-field spec_conformity_stopped_by",
     "code_review": {
       "policy": "every-field policy",
       "available": true,
@@ -583,7 +584,8 @@
           "summary": "every-field summary",
           "failure_scenario": "every-field failure_scenario"
         }
-      ]
+      ],
+      "stopped_by": "every-field stopped_by"
     },
     "reference_oracle_dir": "every-field reference_oracle_dir",
     "oracles_not_committed_by_request": true,

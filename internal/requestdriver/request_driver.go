@@ -889,7 +889,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		} else if failedGate(runRecord, "diff_scope") {
 			check = request.QuarantineCheckDiffScope
 		}
-		return quarantineRequestWithCheck(dataDir, r, quarantinedTicketReason(idx, r.TicketCount, reason, check), check, now)
+		return quarantineRequestWithCheck(dataDir, r, quarantinedTicketReason(idx, r.TicketCount, reason, check, runRecord), check, now)
 	case run.StateHalted:
 		if runRecord.KeptForResume {
 			// The worker was lost (heartbeat stopped while this process stayed
@@ -1017,18 +1017,40 @@ func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *ru
 	}
 	check := quarantineCheckFor(roundRun)
 	if check == request.QuarantineCheckReviewUnavailable {
-		reason += " -- the review gave no verdict, so the rebuilt ticket was not judged"
+		reason += " -- " + noVerdictCause(roundRun) + ", so the rebuilt ticket was not judged"
 	}
 	return quarantineRequestWithCheck(dataDir, r, reason, check, now)
+}
+
+// noVerdictCause says why a review gave no verdict, as far as the run
+// records it: the spend meter refusing the reviewer's model calls is named
+// with the settings that govern it, since "no verdict" alone reads as a
+// reviewer fault and sends the operator to the review's thinking level
+// (found live 2026-10-08: a review 1.18M tokens long, cut off by the
+// 1M-token hourly budget, was reported as having timed out or returned
+// nothing).
+func noVerdictCause(runRecord *run.Run) string {
+	code := ""
+	if runRecord != nil {
+		code = runRecord.SpecConformityStoppedBy
+		if runRecord.CodeReview != nil && runRecord.CodeReview.StoppedBy != "" {
+			code = runRecord.CodeReview.StoppedBy
+		}
+	}
+	settings, ok := codereview.StopSettings(code)
+	if !ok {
+		return "the review gave no verdict"
+	}
+	return fmt.Sprintf("the spend meter stopped the review's model calls (%s: %s in the session config; `factoryd cost` shows the spend)", code, settings)
 }
 
 // quarantinedTicketReason is the request's quarantine reason for a ticket
 // whose run was quarantined. A review that gave no verdict is named as
 // that, since the run's own reason ("gate failed: spec_conformity") reads
 // like a defect in the build.
-func quarantinedTicketReason(idx, count int, reason, check string) string {
+func quarantinedTicketReason(idx, count int, reason, check string, runRecord *run.Run) string {
 	if check == request.QuarantineCheckReviewUnavailable {
-		return fmt.Sprintf("ticket %d/%d quarantined: the review gave no verdict, so the build was not judged (%s)", idx, count, reason)
+		return fmt.Sprintf("ticket %d/%d quarantined: %s, so the build was not judged (%s)", idx, count, noVerdictCause(runRecord), reason)
 	}
 	return fmt.Sprintf("ticket %d/%d quarantined: %s", idx, count, reason)
 }
