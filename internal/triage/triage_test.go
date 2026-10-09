@@ -817,7 +817,7 @@ func TestTriageSpecConformity(t *testing.T) {
 		// sentence: Run's own 200-byte cap (proven separately by
 		// TestTriageRunCapsSentenceLength) would otherwise cut this off
 		// mid-word before the assertion below can check it.
-		got := triageSpecConformity(r, dataDir)
+		got := triageSpecConformity(r, dataDir, true)
 		want := "spec_conformity failed: criteria 2, 3 flagged -- approved oracle(s) oracle_002_test.go, oracle_003_test.go may encode the wrong behaviour; re-check before retrying"
 		if got != want {
 			t.Errorf("triageSpecConformity() = %q, want %q", got, want)

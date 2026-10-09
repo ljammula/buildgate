@@ -1471,6 +1471,17 @@ type Run struct {
 	// confidence, and never itself consulted by a policy gate or a later
 	// run's evaluation.
 	Triage string `json:"triage,omitempty"`
+	// HandoffSHA256 is the hash of the run's handoff.json (internal/handoff):
+	// the factory's record of what this attempt left for a later one, its
+	// rounds, each failed check and the bin it is in. Written with the
+	// quarantined or halted state, by the same save, and rewritten when a
+	// later save finds the run stopped in another way. Empty for a run in
+	// any other state, for one recorded before the handoff existed, and
+	// for one stopped by a path that does not build it (an operator's
+	// override through the API, an orphaned sandbox's quarantine). A
+	// reader checks the file against it, and the file's state against the
+	// run's, before using it (handoff.Load).
+	HandoffSHA256 string `json:"handoff_sha256,omitempty"`
 	// HarnessEval is this run's harness/model performance summary — see
 	// HarnessEval's own doc comment for why it is nil whenever the
 	// originating request didn't select a harness/model.

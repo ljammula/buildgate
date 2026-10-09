@@ -54,54 +54,98 @@ func Run(r *run.Run, dataDir string) string {
 // order a human reading the recap would expect to be told about first).
 func triageFailedGate(r *run.Run, dataDir string) string {
 	for _, g := range r.GateResults {
-		if g.Passed {
-			continue
-		}
-		switch g.Check {
-		case "diff_scope":
-			return triageDiffScope(r, dataDir)
-		case "required_files_changed":
-			return triageRequiredFilesChanged(r, dataDir)
-		case "required_content_present":
-			return triageRequiredContentPresent(r, dataDir)
-		case "tests_added":
-			return triageTestsAdded(r)
-		case "spec_conformity":
-			return triageSpecConformity(r, dataDir)
-		case "canonical_verify":
-			if s := triageNoChanges(r); s != "" {
-				return s
-			}
-			// A live run once quarantined with "canonical_verify failed:
-			// exit 1" while diff_scope and required_files_changed also
-			// failed, and the actual cause (a Go compile error) was only
-			// in the verify log -- triageLogGate/extractFailureMarker
-			// above already surface that line when recognized; naming
-			// how many other gates also failed keeps this sentence from
-			// implying canonical_verify was the only problem. Computed
-			// BEFORE triageLogGate, not after, so its length can be
-			// reserved up front: sizing the marker's own %q-quoting
-			// budget from an already-known suffix length is what
-			// guarantees the closing quote and the suffix both survive,
-			// rather than truncating the finished sentence afterward
-			// and risking cutting the quote off entirely.
-			suffix := otherFailingGatesSuffix(r, g.Check)
-			s := triageLogGate(r, g.Check, len(suffix))
-			if s == "" {
-				return ""
-			}
-			// fitTriageSuffix stays as a defensive outer bound (a no-op
-			// once triageLogGate has already reserved enough room, which
-			// it now does for the quoted-marker branch) for the
-			// non-quoted branches -- a bounded test-name marker, or the
-			// bare "exit N" fallback -- where triageLogGate's
-			// suffixReserve isn't itself consulted.
-			return fitTriageSuffix(s, suffix)
-		default:
-			return triageLogGate(r, g.Check, 0)
+		if !g.Passed {
+			return gateSentence(r, dataDir, g, true)
 		}
 	}
 	return ""
+}
+
+// GateFinding is what the factory can say about one failed gate.
+type GateFinding struct {
+	Check    string
+	ExitCode int
+	// Sentence is the same factory-authored sentence Run gives for the
+	// gate, "" when nothing can be said with confidence.
+	Sentence string
+}
+
+// FailedGates returns one finding per failed gate of r, each check once, in
+// the order the gates were recorded: Run's sentence for every failing gate
+// rather than the first, for a reader that is told about all of them (the
+// handoff to a later build attempt). The sentences never name or hint at a
+// reference oracle, and the reference_oracle gate itself gets none: its
+// log's failing line is the oracle's own assertion.
+func FailedGates(r *run.Run, dataDir string) []GateFinding {
+	var out []GateFinding
+	seen := map[string]bool{}
+	for _, g := range r.GateResults {
+		if g.Passed || seen[g.Check] {
+			continue
+		}
+		seen[g.Check] = true
+		finding := GateFinding{Check: g.Check, ExitCode: g.ExitCode}
+		if g.Check != policy.ReferenceOracleGateID {
+			finding.Sentence = truncateTriage(gateSentence(r, dataDir, g, false))
+		}
+		out = append(out, finding)
+	}
+	return out
+}
+
+// gateSentence is the sentence for one failing gate. forOperator is Run's
+// form: a canonical_verify sentence also says how many other gates failed
+// (it stands alone), and a diff_scope or spec_conformity sentence may add
+// the hint that an approved oracle could be the thing that is wrong, naming
+// it. FailedGates lists every gate for a later build attempt, which is not
+// told about the oracle, so it gets neither.
+func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool) string {
+	switch g.Check {
+	case "diff_scope":
+		return triageDiffScope(r, dataDir, forOperator)
+	case "required_files_changed":
+		return triageRequiredFilesChanged(r, dataDir)
+	case "required_content_present":
+		return triageRequiredContentPresent(r, dataDir)
+	case "tests_added":
+		return triageTestsAdded(r)
+	case "spec_conformity":
+		return triageSpecConformity(r, dataDir, forOperator)
+	case "canonical_verify":
+		if s := triageNoChanges(r); s != "" {
+			return s
+		}
+		// A live run once quarantined with "canonical_verify failed:
+		// exit 1" while diff_scope and required_files_changed also
+		// failed, and the actual cause (a Go compile error) was only
+		// in the verify log -- triageLogGate/extractFailureMarker
+		// above already surface that line when recognized; naming
+		// how many other gates also failed keeps this sentence from
+		// implying canonical_verify was the only problem. Computed
+		// BEFORE triageLogGate, not after, so its length can be
+		// reserved up front: sizing the marker's own %q-quoting
+		// budget from an already-known suffix length is what
+		// guarantees the closing quote and the suffix both survive,
+		// rather than truncating the finished sentence afterward
+		// and risking cutting the quote off entirely.
+		suffix := ""
+		if forOperator {
+			suffix = otherFailingGatesSuffix(r, g.Check)
+		}
+		s := triageLogGate(r, g.Check, len(suffix))
+		if s == "" {
+			return ""
+		}
+		// fitTriageSuffix stays as a defensive outer bound (a no-op
+		// once triageLogGate has already reserved enough room, which
+		// it now does for the quoted-marker branch) for the
+		// non-quoted branches -- a bounded test-name marker, or the
+		// bare "exit N" fallback -- where triageLogGate's
+		// suffixReserve isn't itself consulted.
+		return fitTriageSuffix(s, suffix)
+	default:
+		return triageLogGate(r, g.Check, 0)
+	}
 }
 
 // specSnapshotPathFor is the durable, factory-written copy of the
@@ -118,7 +162,7 @@ func specSnapshotPathFor(dataDir, id string) string {
 // run) and the ticket's Allowed-Files (re-read from the durable spec
 // snapshot, since GateResult itself records no detail) -- rather than
 // guessing which changed file was out of scope.
-func triageDiffScope(r *run.Run, dataDir string) string {
+func triageDiffScope(r *run.Run, dataDir string, oracleHint bool) string {
 	allowed, err := ticketspec.ParseAllowedFiles(specSnapshotPathFor(dataDir, r.ID))
 	if err != nil || len(allowed) == 0 {
 		return ""
@@ -128,6 +172,9 @@ func triageDiffScope(r *run.Run, dataDir string) string {
 		return ""
 	}
 	base := fmt.Sprintf("diff_scope: changed %s outside Allowed-Files", strings.Join(violations, ", "))
+	if !oracleHint {
+		return base
+	}
 	if hint := oracleScopeHint(r); hint != "" {
 		return base + " -- " + hint
 	}
@@ -243,7 +290,7 @@ func readConformityVerdicts(r *run.Run, dataDir string) (verdicts []run.ReviewVe
 // culprit). Falls back to the plain log-based sentence (triageLogGate)
 // whenever CONFORMITY_EVIDENCE.json is missing/malformed or nothing was
 // flagged, so this never invents criteria the evidence doesn't support.
-func triageSpecConformity(r *run.Run, dataDir string) string {
+func triageSpecConformity(r *run.Run, dataDir string, oracleHint bool) string {
 	verdicts, ok := readConformityVerdicts(r, dataDir)
 	if !ok {
 		return triageLogGate(r, "spec_conformity", 0)
@@ -262,8 +309,10 @@ func triageSpecConformity(r *run.Run, dataDir string) string {
 		nums = append(nums, criterionNumber(v.Criterion))
 	}
 	base := fmt.Sprintf("spec_conformity failed: criteria %s flagged", strings.Join(nums, ", "))
-	if hint := conformityOracleHint(r, flagged); hint != "" {
-		return base + " -- " + hint
+	if oracleHint {
+		if hint := conformityOracleHint(r, flagged); hint != "" {
+			return base + " -- " + hint
+		}
 	}
 	for _, v := range flagged {
 		detail := strings.TrimSpace(v.Detail)
