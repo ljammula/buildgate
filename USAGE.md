@@ -753,6 +753,11 @@ A profile that sets no `data_dir` uses `~/buildgate/data`, so two such
 profiles share one queue. Give a profile its own absolute `data_dir` to keep
 its requests apart.
 
+Each data dir has its own console. The first `serve` takes `127.0.0.1:8090`;
+a `serve` started by `submit`, `quickstart` or `factoryd console` for another
+data dir while that port is held takes a free loopback port, and the printed
+link names it. `factoryd use` lists each profile's console address.
+
 Resolution order: `-config`, then `FACTORYD_PROFILE`, then `active-profile`,
 then `~/.config/factoryd/config.yml`, then `~/.factory/config.yml`. An active
 profile whose file is missing is an error naming the fix (`factoryd use

@@ -145,10 +145,23 @@ bearer token is always a 403. The token is handled as follows:
   - The token is appended to a printed or opened link only when
     `consoleBaseIsOwnLoopbackServe` confirms the link points at this
     process's own loopback `serve`. A remote `FACTORYD_CONSOLE_URL` gets a
-    link without the token.
+    link without the token. So does a loopback address whose listener
+    `quickstartServeVerifiedOurs` cannot attribute to this data dir
+    (`TestQuickstartPrintAndOpenConsoleLinkOmitsTokenForAnUnverifiedListener`).
   - `quickstart` reuses an already-listening `serve` only after
     `quickstartServeVerifiedOurs` attributes the listener to this session
     (`lsof` plus a same-uid pid check). A bare `/healthz` 200 is not enough.
+    The pids it checks are this data dir's own: its `quickstart-serve.pid`,
+    the pid in the `console-address` record its `serve` wrote (for the
+    address that record names), and the `serve` LaunchAgent's when the
+    service is installed for this data dir
+    (`TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent`).
+  - A listener it cannot attribute (another data dir's `serve` on the
+    default port) never gets the token: this data dir's `serve` is started
+    on a free loopback port, and the token is returned only once that
+    `serve` has recorded itself
+    (`TestQuickstartEnsureServeTakesAFreePortWhenTheDefaultIsHeld`,
+    `TestQuickstartEnsureServeGivesNoTokenUntilItsOwnServeIsRecorded`).
   - `openInBrowser` never puts a token-bearing URL on argv. It opens a
     `0600` redirect file in a fresh `0700` temp dir, then removes it.
   - When the token comes from the stable file, `serve`'s startup log prints
