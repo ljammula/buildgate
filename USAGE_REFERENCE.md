@@ -1322,7 +1322,7 @@ and gate launches are not masked.
 |---|---|
 | Files, by name | `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md` |
 | Folders, with everything in them | `.pi/`, `.codex/`, `.claude/`, `.agents/skills`, `.github/skills`, `.github/instructions`, `.github/agents`, `.github/hooks` |
-| Files, by path | `.github/copilot-instructions.md`, `.mcp.json`, `.vscode/mcp.json` |
+| Files, by path | `.github/copilot-instructions.md`, `.mcp.json`, `.vscode/mcp.json`, `.github/mcp.json` |
 
 | | What the review gets |
 |---|---|
@@ -1354,7 +1354,10 @@ and no handoff or later build is told.
 The list of instruction paths is a table in the code: a harness that loads a
 path not on it is not covered. `make probe-instruction-paths` measures what
 the pinned `pi`, `codex` and `copilot` harnesses load from a workspace (no
-model call, no network) against that table.
+model call, no network) against that table, and `pifork` when
+`scripts/probe_instruction_paths.py --pifork-image <ref>` names an image with
+its launcher. A fork of `pi` that loads
+a path `pi` does not is measured only from the operator's own image.
 
 ## Repository memory (`factoryd memory`)
 

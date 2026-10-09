@@ -44,7 +44,7 @@ var reviewInstructionDirs = []string{".agents/skills", ".github/skills", ".claud
 
 // reviewInstructionFiles are single instruction files, matched in any
 // directory of the workspace like the directories above.
-var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.json", ".vscode/mcp.json"}
+var reviewInstructionFiles = []string{".github/copilot-instructions.md", ".mcp.json", ".vscode/mcp.json", ".github/mcp.json"}
 
 // reviewInstructionBaseNames are instruction files a harness loads from any
 // directory of the workspace (a nested pkg/AGENTS.md counts).
