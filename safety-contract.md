@@ -407,6 +407,12 @@ requires a new contract review and an updated machine-checkable test.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
+  A build that follows one which was given the record and never finished
+  (lost and resumed in its kept worktree, or halted and built again) is
+  given the record of that same quarantined run: the unfinished run names
+  it (`earlier_attempt_of` in its run record), and the record is rendered
+  again from that run's handoff under the same hash, state, request and
+  spec checks, never copied from what the unfinished run was handed.
   A corrective build follows a quarantined ticket run only when the handoff
   sorts every judged failed check as one a build can fix when told about it:
   `canonical_verify`, `full_suite_verify`, the named command gates, a

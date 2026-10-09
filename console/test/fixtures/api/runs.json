@@ -555,6 +555,7 @@
     ],
     "prior_run_id": "every-field prior_run_id",
     "request_id": "req-done",
+    "earlier_attempt_of": "every-field earlier_attempt_of",
     "tests_required_opt_out": "every-field tests_required_opt_out",
     "invalidated_by_run_id": "every-field invalidated_by_run_id",
     "invalidated_at": "2026-09-10T09:00:00Z",

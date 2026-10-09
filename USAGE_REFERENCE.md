@@ -199,6 +199,16 @@ ticket's spec has changed since that run (after `amend-scope` or an edit). A
 retry is not a corrective round: it uses none of that budget and records no
 round.
 
+A build that was given a record and did not finish passes it on. Its run
+names the quarantined run the record is of (`earlier_attempt_of` in
+`run.json`), and the build that follows it is given that run's record again,
+under the same checks:
+
+| The unfinished build | What follows it | Its record |
+|---|---|---|
+| Lost, worktree kept (a retry's rebuild from the base; the worktree of a corrective round, which runs on an existing branch, is never kept) | `factoryd resume` in that worktree | `rounds/<ticket>-resume/earlier-attempt.md`; opens by saying the record is of the attempt before the interrupted build, and whether the interrupted build ran on that attempt's branch |
+| Lost or halted | `factoryd resume -from scratch` or `factoryd retry` | `rounds/<ticket>-retry/earlier-attempt.md`, as for any retry |
+
 **`-on-branch`/`-diff-base`.** Both travel in the workflow input
 (`RunWorkflowInput.OnBranch`/`DiffBaseSHA`): a corrective
 round checks out the quarantined run's own existing branch

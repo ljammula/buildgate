@@ -1364,6 +1364,14 @@ type Run struct {
 	// scan -- falling back to that scan only for a run that predates this
 	// field (see findOwningRequest's own doc comment).
 	RequestID string `json:"request_id,omitempty"`
+	// EarlierAttemptOf is the id of the quarantined run whose record
+	// (its handoff, rendered as text) this run's build was given as
+	// -earlier-attempt, "" when it was given none. Set by the request
+	// driver at the point it starts the run, like RequestID. It names the
+	// source, never the text: a build lost and resumed is given the
+	// record again only by loading that run's handoff afresh, under the
+	// same checks as the first time (SC-018).
+	EarlierAttemptOf string `json:"earlier_attempt_of,omitempty"`
 	// TestsRequiredOptOut is the ticket's declared reason (ticketspec's
 	// "Tests-Required: no -- <reason>") for skipping the tests_added
 	// gate on this run, or "" when the gate ran normally (no opt-out
