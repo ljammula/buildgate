@@ -19,6 +19,10 @@ import (
 	"strings"
 )
 
+// Matching of every table entry is exact-case: the sandbox filesystem is
+// case-sensitive, so agents.md or Agents.md written by a build is a
+// different file there and no harness loads it.
+//
 // reviewInstructionDirs are the directories, relative to a workspace, whose
 // contents a coding-agent harness loads as instructions, skills or agent
 // definitions. A build writes the worktree a review then runs in, so a
@@ -79,7 +83,10 @@ func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, dst strin
 	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
-	untracked, err := reviewGitZ(ctx, workDir, "ls-files", "--others", "--exclude-standard", "-z")
+	if err := refuseSymlinkedTablePaths(workDir); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	untracked, err := listUntrackedInstructionPaths(ctx, workDir)
 	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
@@ -106,7 +113,7 @@ func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, dst strin
 	}
 	sort.Strings(paths)
 	for _, p := range append(append([]string(nil), paths...), candidates...) {
-		if err := refuseSymlink(filepath.Join(workDir, filepath.FromSlash(p)), p); err != nil {
+		if err := refuseSymlink(workDir, p); err != nil {
 			return ReviewInstructionSnapshot{}, err
 		}
 	}
@@ -161,18 +168,55 @@ func reviewInstructionTarget(p string) (target string, dir, ok bool) {
 	return "", false, false
 }
 
-func refuseSymlink(abs, rel string) error {
-	info, err := os.Lstat(abs)
-	if err != nil {
+// refuseSymlink refuses rel when it or any parent component below workDir is
+// a symlink in the working tree: a link at a parent (pkg replaced by a link)
+// makes the file behind it read as unchanged by content. A component that
+// does not exist is fine: the build deleted it and the snapshot restores it.
+func refuseSymlink(workDir, rel string) error {
+	cur := workDir
+	for _, part := range strings.Split(rel, "/") {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil // deleted by the build: the snapshot restores it
+			return nil
 		}
-		return fmt.Errorf("review instructions: inspect %s: %w", rel, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("review instructions: %s is a symlink in the working tree", rel)
+		if err != nil {
+			return fmt.Errorf("review instructions: inspect %s: %w", rel, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("review instructions: %s is a symlink in the working tree (at %s)", rel, strings.TrimPrefix(cur, workDir+"/"))
+		}
 	}
 	return nil
+}
+
+// refuseSymlinkedTablePaths refuses a table directory or file that is a
+// symlink in the working tree whatever git reports for it.
+func refuseSymlinkedTablePaths(workDir string) error {
+	for _, p := range append(append([]string(nil), reviewInstructionDirs...), reviewInstructionFiles...) {
+		if err := refuseSymlink(workDir, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// listUntrackedInstructionPaths lists the files not in the index that match
+// the tables, gitignored ones included: a build can add AGENTS.md or .codex/
+// to .gitignore and write it, and the reviewer's harness loads it all the
+// same. The pathspecs (the table's directories and files, and each base name
+// at any depth) keep the listing to instruction paths, so a large ignored
+// tree such as node_modules does not flood the result.
+func listUntrackedInstructionPaths(ctx context.Context, workDir string) ([]string, error) {
+	specs := append(append([]string(nil), reviewInstructionDirs...), reviewInstructionFiles...)
+	for _, n := range reviewInstructionBaseNames {
+		specs = append(specs, ":(glob)**/"+n)
+	}
+	out, err := reviewGitArgs(ctx, workDir, false, append([]string{"ls-files", "--others", "-z", "--"}, specs...)...)
+	if err != nil {
+		return nil, err
+	}
+	return splitZ(out), nil
 }
 
 // requireDestinationOutside refuses a dst that is, lies inside, or contains
@@ -224,8 +268,18 @@ func pathWithin(root, p string) bool {
 // reviewGit runs git in workDir, an untrusted worktree, with nothing from its
 // configuration that executes a program.
 func reviewGit(ctx context.Context, workDir string, args ...string) ([]byte, error) {
+	return reviewGitArgs(ctx, workDir, true, args...)
+}
+
+// reviewGitArgs is reviewGit with pathspecs literal or, when literal is
+// false, globbed as written.
+func reviewGitArgs(ctx context.Context, workDir string, literal bool, args ...string) ([]byte, error) {
+	pathspecs := "--literal-pathspecs"
+	if !literal {
+		pathspecs = "--glob-pathspecs"
+	}
 	full := append([]string{
-		"--no-pager", "--literal-pathspecs",
+		"--no-pager", pathspecs,
 		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
 		"-c", "core.pager=cat", "-c", "diff.external=", "-c", "core.quotePath=false",
 		"-C", workDir,
@@ -246,13 +300,17 @@ func reviewGitZ(ctx context.Context, workDir string, args ...string) ([]string, 
 	if err != nil {
 		return nil, err
 	}
+	return splitZ(out), nil
+}
+
+func splitZ(out []byte) []string {
 	var paths []string
 	for _, p := range bytes.Split(out, []byte{0}) {
 		if len(p) > 0 {
 			paths = append(paths, string(p))
 		}
 	}
-	return paths, nil
+	return paths
 }
 
 // baseEntry is one tree entry of the base commit below a masked path.

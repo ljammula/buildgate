@@ -335,6 +335,108 @@ func snapshotCase15(t *testing.T) {
 	}
 }
 
+// ignoredAgentsCase: the build writes AGENTS.md and ignores it.
+func ignoredAgentsCase(t *testing.T) {
+	r := newInstructionRepo(t, nil)
+	r.write(".gitignore", "AGENTS.md\n")
+	r.write("AGENTS.md", "hidden steer\n")
+	snap, _ := mustSnap(t, r)
+	wantPaths(t, snap, "AGENTS.md")
+	if got := readFile(t, snap.Masks[0].Source); got != "" {
+		t.Fatalf("snapshot = %q, want empty", got)
+	}
+}
+
+// ignoredCodexCase: the build creates .codex/config.toml and ignores it.
+func ignoredCodexCase(t *testing.T) {
+	r := newInstructionRepo(t, nil)
+	r.write(".gitignore", ".codex/\n")
+	r.write(".codex/config.toml", "hidden = true\n")
+	snap, _ := mustSnap(t, r)
+	wantPaths(t, snap, ".codex")
+	entries, err := os.ReadDir(snap.Masks[0].Source)
+	if !snap.Masks[0].Dir || err != nil || len(entries) != 0 {
+		t.Fatalf("mask = %+v entries = %v err = %v; want an empty Dir mask", snap.Masks[0], entries, err)
+	}
+}
+
+// symlinkedDirCase: the build replaces the .codex directory with a link to
+// a copy of it.
+func symlinkedDirCase(t *testing.T) {
+	r := newInstructionRepo(t, map[string]string{".codex/config.toml": "a = 1\n"})
+	copyDir := filepath.Join(filepath.Dir(r.dir), "copy")
+	if err := os.MkdirAll(copyDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyDir, "config.toml"), []byte("a = 1\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(r.dir, ".codex")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(copyDir, filepath.Join(r.dir, ".codex")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.snapshot(); err == nil || !strings.Contains(err.Error(), ".codex") || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("err = %v, want a symlink refusal naming .codex", err)
+	}
+}
+
+// symlinkedParentCase: the build replaces pkg with a link to a copy holding
+// the same AGENTS.md.
+func symlinkedParentCase(t *testing.T) {
+	r := newInstructionRepo(t, map[string]string{"pkg/AGENTS.md": "same\n"})
+	copyDir := filepath.Join(filepath.Dir(r.dir), "pkgcopy")
+	if err := os.MkdirAll(copyDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copyDir, "AGENTS.md"), []byte("same\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(r.dir, "pkg")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(copyDir, filepath.Join(r.dir, "pkg")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.snapshot(); err == nil || !strings.Contains(err.Error(), "pkg") || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("err = %v, want a symlink refusal naming pkg", err)
+	}
+}
+
+// symlinkSameTextCase: AGENTS.md becomes a link to a file with the same text.
+func symlinkSameTextCase(t *testing.T) {
+	r := newInstructionRepo(t, map[string]string{"AGENTS.md": "same\n"})
+	target := filepath.Join(filepath.Dir(r.dir), "other.md")
+	if err := os.WriteFile(target, []byte("same\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(r.dir, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(r.dir, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.snapshot(); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("err = %v, want a symlink refusal", err)
+	}
+}
+
+func TestReviewInstructionSnapshotIgnoredAndLinkedPaths(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"ignored AGENTS.md", ignoredAgentsCase},
+		{"ignored .codex/config.toml", ignoredCodexCase},
+		{"table dir replaced by a symlink", symlinkedDirCase},
+		{"parent of nested AGENTS.md replaced by a symlink", symlinkedParentCase},
+		{"AGENTS.md replaced by a same-text symlink", symlinkSameTextCase},
+	} {
+		t.Run(c.name, c.run)
+	}
+}
+
 func TestReviewInstructionSnapshot(t *testing.T) {
 	for _, c := range []struct {
 		name string
