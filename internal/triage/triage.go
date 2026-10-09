@@ -165,7 +165,7 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		// and risking cutting the quote off entirely.
 		suffix := ""
 		if forOperator {
-			suffix = otherFailingGatesSuffix(r, g.Check)
+			suffix = passedInsideTheBuildSuffix(r) + otherFailingGatesSuffix(r, g.Check)
 		}
 		s := triageLogGate(r, g.Check, len(suffix))
 		if s == "" {
@@ -553,6 +553,31 @@ func triageLogGate(r *run.Run, check string, suffixReserve int) string {
 	return ""
 }
 
+// passedInsideTheBuildSuffix says, for a failed canonical_verify, that the
+// build's own last run of the same command passed. It states only that
+// fact, in few bytes (the marker ahead of it shares the sentence's limit);
+// USAGE.md's troubleshooting table says what it usually means: the build's
+// container has whatever its rounds left outside the repository (an
+// installed package, a cache, a file under $HOME) and the verify's is
+// fresh, or the test is flaky. Found live 2026-10-08: a verify command missing a test
+// plugin failed round 1, the agent installed the plugin in its container,
+// rounds 2 and 3 passed, and the run quarantined as "canonical_verify
+// failed: exit 1" with nothing saying why a passing build did not verify.
+// "" when the build did not fail that way.
+func passedInsideTheBuildSuffix(r *run.Run) string {
+	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) == 0 {
+		return ""
+	}
+	if a, found := lastAttempt(r, "build"); found && a.ExitCode != 0 {
+		return ""
+	}
+	last := r.AgentEvidence.Rounds[len(r.AgentEvidence.Rounds)-1]
+	if last.VerifyPassed == nil || !*last.VerifyPassed {
+		return ""
+	}
+	return fmt.Sprintf("; it passed inside the build (round %d)", last.Index)
+}
+
 // otherFailingGatesSuffix counts r.GateResults entries other than check
 // that also failed, and returns a "(+N more failing gate(s))" suffix, or
 // "" when check was the only failing gate -- a canonical_verify sentence
@@ -645,6 +670,7 @@ var failureMarkerPatterns = []failureMarkerPattern{
 	{re: regexp.MustCompile(`(?m)^--- FAIL: (\S+)`), runner: "go test"},
 	{re: regexp.MustCompile(`(?m)^FAILED (\S+)`), runner: "pytest"},
 	{re: regexp.MustCompile(`(?m)^_{3,} (.+?) _{3,}\s*$`), runner: "pytest"},
+	{re: regexp.MustCompile(`(?m)^ERROR (\S+\.py\S*)`), runner: "pytest"},
 	{re: regexp.MustCompile(`(?m)^\s*(?:\x{25cf}|\x{2715})\s+(.+?)\s*$`), runner: "jest"},
 	{re: regexp.MustCompile(`(?m)^\d\d:\d\d\s+\+\d+\s+-\d+:\s+(.+?)\s*\[E\]\s*$`), runner: "flutter test"},
 	{re: regexp.MustCompile(`(?m)^test (\S+) \.\.\. FAILED`), runner: "cargo test"},
@@ -672,7 +698,11 @@ var failureMarkerPatterns = []failureMarkerPattern{
 // capture from ANY of these patterns, not just the wholeLine ones,
 // could carry one).
 func extractFailureMarker(logPath string) (marker string, wholeLine bool) {
-	content := readLogTail(logPath)
+	// Colour codes are stripped before matching, not only from the captured
+	// name: a runner that colours its output (pytest under `--color=yes`)
+	// starts a failure line with one, and every pattern is anchored at the
+	// line start.
+	content := sanitize.Text(readLogTail(logPath))
 	if content == "" {
 		return "", false
 	}
