@@ -280,3 +280,38 @@ func TestReadRetainedRoundLogRefusesLinksOutOfTheRunDirectory(t *testing.T) {
 		}
 	}
 }
+
+// A round that passed leaves no failing command's log, only what its setup:
+// and autofix: commands printed. That output is retained too, so the
+// operator can read what they did on the round that was accepted.
+func TestRetainRoundLogsKeepsSetupAndAutofixOutputOfARoundThatPassed(t *testing.T) {
+	workspace, dst := t.TempDir(), filepath.Join(t.TempDir(), RoundLogsDirName)
+	writeRoundLog(t, workspace, "round-1", "setup.log", "round one setup\n")
+	writeRoundLog(t, workspace, "round-1", "verify.log", "round one verify\n")
+	writeRoundLog(t, workspace, "round-2", "setup.log", "round two setup\n")
+	writeRoundLog(t, workspace, "round-2", "autofix.log", "round two autofix\n")
+
+	copied, err := RetainRoundLogs(workspace, dst)
+	if err != nil || copied != 4 {
+		t.Fatalf("RetainRoundLogs = %d, %v, want 4 files and no error", copied, err)
+	}
+	for path, want := range map[string]string{
+		"round-1/setup.log":   "round one setup\n",
+		"round-1/verify.log":  "round one verify\n",
+		"round-2/setup.log":   "round two setup\n",
+		"round-2/autofix.log": "round two autofix\n",
+	} {
+		got, err := os.ReadFile(filepath.Join(dst, path))
+		if err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v, want %q", path, got, err, want)
+		}
+	}
+	// The round's failing output is still the failing command's log, never
+	// the setup or autofix output kept beside it.
+	if name, _ := ReadRetainedRoundLog(filepath.Dir(dst), 1, 100); name != RoundLogName(1, "verify.log") {
+		t.Errorf("round 1's failing log = %q, want its verify.log", name)
+	}
+	if name, data := ReadRetainedRoundLog(filepath.Dir(dst), 2, 100); name != "" || data != nil {
+		t.Errorf("round 2 passed, but its failing log = %q, %q", name, data)
+	}
+}
