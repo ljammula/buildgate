@@ -22,6 +22,7 @@ var nestedInstructions = []nestedInstruction{
 	{".github/instructions/x.instructions.md", ".github/instructions", "x.instructions.md"},
 	{".claude/skills/s/SKILL.md", ".claude", "skills/s/SKILL.md"},
 	{".mcp.json", ".mcp.json", ""},
+	{".github/mcp.json", ".github/mcp.json", ""},
 	{".pi/SYSTEM.md", ".pi", "SYSTEM.md"},
 }
 
@@ -108,6 +109,36 @@ func TestReviewInstructionNestedPathsAddedByTheBuildAreMasked(t *testing.T) {
 			t.Fatalf("Removed = %v; the committed file must stay in the worktree", snap.Removed)
 		}
 	})
+}
+
+// copilot starts the MCP servers of .github/mcp.json once a project is
+// trusted. A build that adds one, at the root or below a directory, leaves the
+// review an empty file there and the added text only in the diff.
+func TestReviewInstructionGithubMCPConfigAddedByTheBuildIsMasked(t *testing.T) {
+	for _, target := range []string{".github/mcp.json", "pkg/.github/mcp.json", "a/b/c/.github/mcp.json"} {
+		t.Run(target, func(t *testing.T) {
+			r := newInstructionRepo(t, map[string]string{".github/workflows/ci.yml": "on: push\n"})
+			r.write(target, `{"mcpServers":{"x":{"command":"sh"}}}`+"\n")
+			snap, dst := r.mustSnap()
+			wantPaths(t, snap, target)
+			want := WorkspaceMask{Source: filepath.Join(dst, "tree", filepath.FromSlash(target)), Target: target}
+			if snap.Masks[0] != want {
+				t.Fatalf("mask = %+v, want %+v", snap.Masks[0], want)
+			}
+			if got := readFile(t, want.Source); got != "" {
+				t.Fatalf("mask holds %q, want an empty file", got)
+			}
+			if diff := readFile(t, snap.DiffPath); !strings.Contains(diff, `=== "`+target+`" (added by the build) ===`) || !strings.Contains(diff, "mcpServers") {
+				t.Fatalf("diff = %q", diff)
+			}
+		})
+	}
+	if n, canon, ok := matchInstructionPath(strings.Split("Pkg/.GitHub/MCP.json", "/")); !ok || n != 3 || canon != "Pkg/.github/mcp.json" {
+		t.Fatalf("Pkg/.GitHub/MCP.json: n = %d, canon = %q, ok = %v", n, canon, ok)
+	}
+	if _, _, ok := matchInstructionPath(strings.Split("pkg/github/mcp.json", "/")); ok {
+		t.Fatal("pkg/github/mcp.json is no instruction path")
+	}
 }
 
 // A build rewrites a nested instruction path the base commit holds: the
