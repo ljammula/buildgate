@@ -204,13 +204,15 @@ func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, dst strin
 	}
 	groups := map[string]*instrGroup{}
 	budget := &instrBudget{}
-	if err := refuseSymlinkedTablePaths(root); err != nil {
+	links := map[string]string{}
+	if err := collectBase(ctx, root, baseSHA, groups, budget, links); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
-	if err := walkWorktree(root, groups, budget); err != nil {
+	checker := &linkChecker{ctx: ctx, root: root, baseSHA: baseSHA, links: links}
+	if err := checker.checkTablePaths(); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
-	if err := collectBase(ctx, root, baseSHA, groups, budget); err != nil {
+	if err := walkWorktree(root, groups, budget, checker); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
 	plans, err := planMasks(ctx, root, baseSHA, groups)
@@ -426,7 +428,7 @@ func materializePlan(ctx context.Context, root, dst string, p instrPlan) error {
 
 // walkWorktree records every instruction-table match below root, skipping
 // only the root .git entry and never following a symlink.
-func walkWorktree(root string, groups map[string]*instrGroup, budget *instrBudget) error {
+func walkWorktree(root string, groups map[string]*instrGroup, budget *instrBudget, checker *linkChecker) error {
 	visited := 0
 	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -449,6 +451,14 @@ func walkWorktree(root string, groups map[string]*instrGroup, budget *instrBudge
 		n, ok := matchInstructionPath(parts)
 		if !ok {
 			return nil
+		}
+		display := strings.Join(parts, "/")
+		if d.Type()&fs.ModeSymlink != 0 {
+			// An unchanged base link is neither masked nor recorded.
+			return checker.check(display, 1)
+		}
+		if _, wasLink := checker.links[display]; wasLink {
+			return fmt.Errorf("review instructions: %s was a symlink at base and is now a file or directory", display)
 		}
 		return recordWorkEntry(groups, budget, parts, n, p, d)
 	})
@@ -521,39 +531,57 @@ func recordWorkEntry(groups map[string]*instrGroup, budget *instrBudget, parts [
 	return g.work.record(spelling, kind, file)
 }
 
-// collectBase reads the base tree and records every instruction-table match.
-func collectBase(ctx context.Context, root, baseSHA string, groups map[string]*instrGroup, budget *instrBudget) error {
+// collectBase reads the base tree: every symlink goes to links (path to blob
+// id), and every instruction-table match is recorded as a base file.
+func collectBase(ctx context.Context, root, baseSHA string, groups map[string]*instrGroup, budget *instrBudget, links map[string]string) error {
 	return scanBaseTree(ctx, root, baseSHA, func(rec string) error {
-		meta, name, ok := strings.Cut(rec, "\t")
-		fields := strings.Fields(meta)
-		if !ok || len(fields) != 4 {
-			return fmt.Errorf("review instructions: unreadable tree entry %q", rec)
-		}
-		parts := strings.Split(name, "/")
-		n, match := matchInstructionPath(parts)
-		if !match {
-			return nil
-		}
-		if fields[0] == "120000" || fields[0] == "160000" || fields[1] != "blob" {
-			return fmt.Errorf("review instructions: base entry %s is a symlink or submodule", strconv.Quote(name))
-		}
-		size, err := strconv.ParseInt(fields[3], 10, 64)
-		if err != nil {
-			return fmt.Errorf("review instructions: unreadable size of %s: %w", strconv.Quote(name), err)
-		}
-		if size > maxReviewInstructionFileBytes {
-			return fmt.Errorf("review instructions: %s is over %d bytes at base", strconv.Quote(name), maxReviewInstructionFileBytes)
-		}
-		if budget.base++; budget.base > maxReviewInstructionFiles {
-			return fmt.Errorf("review instructions: more than %d base files under instruction paths (at %s)", maxReviewInstructionFiles, strconv.Quote(name))
-		}
-		kind := kindDir
-		if len(parts) == n {
-			kind = kindFile
-		}
-		g := groupFor(groups, parts[:n])
-		return g.base.record(strings.Join(parts[:n], "/"), kind, &instrFile{rel: strings.Join(parts[n:], "/"), sha: fields[2], size: size})
+		return recordBaseRecord(rec, groups, budget, links, 0)
 	})
+}
+
+// recordBaseRecord records one `ls-tree -r -l` record. With fixed zero it
+// keeps only instruction-table matches and sets aside symlinks in links; with
+// fixed set, every record belongs to the entry of fixed leading components
+// and a symlink or submodule is an error.
+func recordBaseRecord(rec string, groups map[string]*instrGroup, budget *instrBudget, links map[string]string, fixed int) error {
+	meta, name, ok := strings.Cut(rec, "\t")
+	fields := strings.Fields(meta)
+	if !ok || len(fields) != 4 {
+		return fmt.Errorf("review instructions: unreadable tree entry %q", rec)
+	}
+	parts := strings.Split(name, "/")
+	n, match := fixed, true
+	if fixed == 0 {
+		if fields[0] == "120000" {
+			links[name] = fields[2]
+		}
+		n, match = matchInstructionPath(parts)
+	}
+	if !match {
+		return nil
+	}
+	if fields[0] == "120000" && fixed == 0 {
+		return nil
+	}
+	if fields[0] == "120000" || fields[0] == "160000" || fields[1] != "blob" {
+		return fmt.Errorf("review instructions: base entry %s is a symlink or submodule", strconv.Quote(name))
+	}
+	size, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
+		return fmt.Errorf("review instructions: unreadable size of %s: %w", strconv.Quote(name), err)
+	}
+	if size > maxReviewInstructionFileBytes {
+		return fmt.Errorf("review instructions: %s is over %d bytes at base", strconv.Quote(name), maxReviewInstructionFileBytes)
+	}
+	if budget.base++; budget.base > maxReviewInstructionFiles {
+		return fmt.Errorf("review instructions: more than %d base files under instruction paths (at %s)", maxReviewInstructionFiles, strconv.Quote(name))
+	}
+	kind := kindDir
+	if len(parts) == n {
+		kind = kindFile
+	}
+	g := groupFor(groups, parts[:n])
+	return g.base.record(strings.Join(parts[:n], "/"), kind, &instrFile{rel: strings.Join(parts[n:], "/"), sha: fields[2], size: size})
 }
 
 func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
@@ -568,10 +596,14 @@ func splitNUL(data []byte, atEOF bool) (int, []byte, error) {
 
 // scanBaseTree streams `git ls-tree -r -l` of baseSHA to visit, one record at
 // a time, failing once more than maxReviewInstructionEntries have been read.
-func scanBaseTree(ctx context.Context, root, baseSHA string, visit func(rec string) error) (err error) {
+func scanBaseTree(ctx context.Context, root, baseSHA string, visit func(rec string) error, pathspec ...string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", reviewGitArgs(root, "ls-tree", "-r", "-l", "-z", "--full-tree", baseSHA)...)
+	args := []string{"ls-tree", "-r", "-l", "-z", "--full-tree", baseSHA}
+	if len(pathspec) > 0 {
+		args = append(append(args, "--"), pathspec...)
+	}
+	cmd := exec.CommandContext(ctx, "git", reviewGitArgs(root, args...)...)
 	cmd.Env = reviewGitEnv()
 	stderr := &cappedWriter{max: 4096}
 	cmd.Stderr = stderr
@@ -803,17 +835,6 @@ func refuseSymlink(workDir, rel string) error {
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("review instructions: %s is a symlink in the working tree (at %s)", rel, strings.TrimPrefix(cur, workDir+"/"))
-		}
-	}
-	return nil
-}
-
-// refuseSymlinkedTablePaths refuses a table directory or file that is a
-// symlink in the working tree, or lies below one.
-func refuseSymlinkedTablePaths(workDir string) error {
-	for _, p := range append(append([]string(nil), reviewInstructionDirs...), reviewInstructionFiles...) {
-		if err := refuseSymlink(workDir, p); err != nil {
-			return err
 		}
 	}
 	return nil

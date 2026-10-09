@@ -232,19 +232,12 @@ func snapshotCase8(t *testing.T) {
 // symlink in base content is refused
 func snapshotCase9(t *testing.T) {
 	r := newInstructionRepo(t, nil)
-	if err := os.MkdirAll(filepath.Join(r.dir, ".codex"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("/etc/hosts", filepath.Join(r.dir, ".codex", "link")); err != nil {
-		t.Fatal(err)
-	}
-	r.git("add", "-A")
-	r.git("commit", "-q", "-m", "link")
-	r.base = r.git("rev-parse", "HEAD")
+	commitLinks(t, r, map[string]string{".codex/link": "/etc/hosts"})
 	r.write(".codex/other", "x\n")
-	_, _, err := r.snapshot()
-	if err == nil || !strings.Contains(err.Error(), ".codex/link") {
-		t.Fatalf("err = %v, want a refusal naming .codex/link", err)
+	snap, _ := mustSnap(t, r)
+	wantPaths(t, snap, ".codex")
+	if entries, err := os.ReadDir(snap.Masks[0].Source); err != nil || len(entries) != 0 {
+		t.Fatalf("entries = %v, err = %v; want an empty mask (the unchanged link is not part of it)", entries, err)
 	}
 }
 
