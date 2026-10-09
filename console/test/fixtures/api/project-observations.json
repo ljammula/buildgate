@@ -4,14 +4,19 @@
   "accepted_first_round": 1,
   "counts": {
     "check_failed": 2,
+    "check_fixed": 0,
     "fixed_after_failure": 0,
+    "operator_edit": 1,
     "repeated_failure": 1,
+    "review_comment_accepted": 0,
     "round_changed_nothing": 1,
     "run_halted": 0
   },
   "observations": [
     {
+      "id": "e3fe49b46a1a06a8",
       "kind": "repeated_failure",
+      "source": "run",
       "run_id": "run-quarantined",
       "ticket": "ticket-run-quarantined",
       "at": "2026-09-10T09:40:00Z",
@@ -24,11 +29,14 @@
         "no changes made to the workspace",
         "canonical verification failed"
       ],
+      "signature": "9a41c07be2d3f518",
       "log": "round-logs/round-3/verify.log",
       "excerpt": "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s"
     },
     {
+      "id": "821a7a5c0cd694e3",
       "kind": "round_changed_nothing",
+      "source": "run",
       "run_id": "run-quarantined",
       "ticket": "ticket-run-quarantined",
       "at": "2026-09-10T09:40:00Z",
@@ -41,11 +49,14 @@
         "no changes made to the workspace",
         "canonical verification failed"
       ],
+      "signature": "9a41c07be2d3f518",
       "log": "round-logs/round-3/verify.log",
       "excerpt": "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s"
     },
     {
+      "id": "2a3aedd815ae43b9",
       "kind": "check_failed",
+      "source": "run",
       "run_id": "run-quarantined",
       "ticket": "ticket-run-quarantined",
       "at": "2026-09-10T09:40:00Z",
@@ -56,11 +67,14 @@
       ],
       "check": "canonical_verify",
       "exit_code": 1,
+      "signature": "9a41c07be2d3f518",
       "log": "round-logs/round-3/verify.log",
       "excerpt": "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s"
     },
     {
+      "id": "ab7ec8cfeb7a5dfd",
       "kind": "check_failed",
+      "source": "run",
       "run_id": "run-quarantined",
       "ticket": "ticket-run-quarantined",
       "at": "2026-09-10T09:40:00Z",
@@ -70,8 +84,23 @@
         "canonical verification failed"
       ],
       "check": "tests_added",
+      "signature": "9a41c07be2d3f518",
       "log": "round-logs/round-3/verify.log",
       "excerpt": "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s"
+    },
+    {
+      "id": "e81cd04a91d6df7e",
+      "kind": "operator_edit",
+      "source": "request",
+      "run_id": "",
+      "ticket": "",
+      "at": "2026-09-10T09:08:00Z",
+      "what": "The operator sent the draft back at plan_review.",
+      "request_id": "req-plan-review",
+      "stage": "plan_review",
+      "anchors": [
+        "tickets/001.spec.md ### Steps"
+      ]
     }
   ],
   "truncated": false

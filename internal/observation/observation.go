@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 )
@@ -37,10 +38,26 @@ const (
 	KindCheckFailed = "check_failed"
 	// KindRunHalted: the run halted before it could be judged.
 	KindRunHalted = "run_halted"
+	// KindCheckFixed: a run was quarantined on a check and a later run of
+	// the same ticket, a corrective round or a retry given the record of
+	// the first, was accepted.
+	KindCheckFixed = "check_fixed"
+	// KindReviewCommentAccepted: a pull-request review round of a ticket
+	// was accepted and its commit pushed.
+	KindReviewCommentAccepted = "review_comment_accepted"
+	// KindOperatorEdit: the operator edited a reviewed file, or sent a
+	// draft back, at the spec or plan gate.
+	KindOperatorEdit = "operator_edit"
+)
+
+// Where an observation was derived from.
+const (
+	SourceRun     = "run"
+	SourceRequest = "request"
 )
 
 // Kinds lists every kind, in report order.
-var Kinds = []string{KindFixedAfterFailure, KindRepeatedFailure, KindRoundChangedNothing, KindCheckFailed, KindRunHalted}
+var Kinds = []string{KindFixedAfterFailure, KindRepeatedFailure, KindRoundChangedNothing, KindCheckFailed, KindRunHalted, KindCheckFixed, KindReviewCommentAccepted, KindOperatorEdit}
 
 // noChanges is build_app.py's blocker for a round whose agent turn left the
 // workspace as it found it (round_blockers).
@@ -63,7 +80,14 @@ const (
 
 // Observation is one fact from one run.
 type Observation struct {
-	Kind   string `json:"kind"`
+	// ID is stable across reads: see computeID.
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Source is the record the observation was derived from: SourceRun or
+	// SourceRequest.
+	Source string `json:"source"`
+	// RunID is the run the fact is about; for KindCheckFixed the
+	// quarantined one. Empty for KindOperatorEdit.
 	RunID  string `json:"run_id"`
 	Ticket string `json:"ticket"`
 	// At is the run's last update time, as recorded.
@@ -80,12 +104,36 @@ type Observation struct {
 	// Check and ExitCode are a failed check's (KindCheckFailed).
 	Check    string `json:"check,omitempty"`
 	ExitCode int    `json:"exit_code,omitempty"`
+	// Signature is the failing round's failure signature, when the
+	// observation is about a failed round that recorded one.
+	Signature string `json:"signature,omitempty"`
+	// AcceptedRunID is the run that fixed the check (KindCheckFixed).
+	AcceptedRunID string `json:"accepted_run_id,omitempty"`
+	// Checks are the checks the quarantined run failed, each with the
+	// factory's own sentence about it (KindCheckFixed).
+	Checks []CheckNote `json:"checks,omitempty"`
+	// RequestID and TicketIndex place a request-derived observation.
+	RequestID   string `json:"request_id,omitempty"`
+	TicketIndex int    `json:"ticket_index,omitempty"`
+	// ThreadIDs are the review threads a round answered
+	// (KindReviewCommentAccepted): ids only, never a comment.
+	ThreadIDs []string `json:"thread_ids,omitempty"`
+	// Stage is the review gate of an operator action (KindOperatorEdit).
+	Stage string `json:"stage,omitempty"`
+	// Anchors are the files and sections an operator action touched
+	// (KindOperatorEdit): names, never text.
+	Anchors []string `json:"anchors,omitempty"`
 	// Log names the retained output of the last failed round the
 	// observation names, relative to the run's directory, when the run
 	// kept one.
 	Log string `json:"log,omitempty"`
 	// Excerpt is the lines of that output that report a failure.
 	Excerpt string `json:"excerpt,omitempty"`
+
+	// idRounds and idCheck stand in for Rounds and Check in the ID of
+	// the kinds that have neither.
+	idRounds []int
+	idCheck  string
 
 	// logRound is the round whose saved output illustrates the
 	// observation; 0 when none does.
@@ -114,12 +162,23 @@ type Report struct {
 // run kept none.
 type RoundLog func(runID string, round int) (name, text string)
 
-// FromRuns builds the report for project from runs, which the caller has
-// already narrowed to that project. Runs still in progress are skipped.
-// roundLog may be nil; it is asked only for the observations the report
+// Sources is what a report reads besides the run and request records.
+// Either may be nil.
+type Sources struct {
+	// RoundLog returns a failed round's retained output.
+	RoundLog RoundLog
+	// Sentences returns, for a run, the factory's own sentence about each
+	// of its failed checks, by check name: the sentences the handoff to a
+	// later build attempt carries.
+	Sentences func(r *run.Run) map[string]string
+}
+
+// FromRuns builds the report for project from runs and requests, which the
+// caller has already narrowed to that project. Runs still in progress are
+// skipped. src.RoundLog is asked only for the observations the report
 // lists, one round each, so a long history costs no more reads than a
 // full page.
-func FromRuns(project string, runs []*run.Run, roundLog RoundLog) Report {
+func FromRuns(project string, runs []*run.Run, requests []*request.Request, src Sources) Report {
 	report := Report{Project: project, Counts: map[string]int{}, Observations: []Observation{}}
 	for _, kind := range Kinds {
 		report.Counts[kind] = 0
@@ -130,31 +189,35 @@ func FromRuns(project string, runs []*run.Run, roundLog RoundLog) Report {
 			finished = append(finished, r)
 		}
 	}
-	sort.SliceStable(finished, func(i, j int) bool {
-		a, b := moment(finished[i].UpdatedAt), moment(finished[j].UpdatedAt)
-		if !a.Equal(b) {
-			return a.After(b)
-		}
-		return finished[i].ID > finished[j].ID
-	})
 	report.Runs = len(finished)
+	var all []Observation
 	for _, r := range finished {
 		if acceptedFirstRound(r) {
 			report.AcceptedFirstRound++
 		}
-		for _, o := range FromRun(r) {
-			report.Counts[o.Kind]++
-			if len(report.Observations) >= MaxObservations {
-				report.Truncated = true
-				continue
-			}
-			if roundLog != nil && o.logRound > 0 {
-				if name, text := roundLog(o.RunID, o.logRound); name != "" {
-					o.Log, o.Excerpt = name, Excerpt(text)
-				}
-			}
-			report.Observations = append(report.Observations, o)
+		all = append(all, FromRun(r)...)
+	}
+	all = append(all, fixedChecks(finished, requests, src.Sentences)...)
+	all = append(all, requestObservations(requests)...)
+	sort.SliceStable(all, func(i, j int) bool {
+		a, b := moment(all[i].At), moment(all[j].At)
+		if !a.Equal(b) {
+			return a.After(b)
 		}
+		return all[i].RunID+all[i].RequestID > all[j].RunID+all[j].RequestID
+	})
+	for _, o := range all {
+		report.Counts[o.Kind]++
+		if len(report.Observations) >= MaxObservations {
+			report.Truncated = true
+			continue
+		}
+		if src.RoundLog != nil && o.logRound > 0 {
+			if name, text := src.RoundLog(o.RunID, o.logRound); name != "" {
+				o.Log, o.Excerpt = name, Excerpt(text)
+			}
+		}
+		report.Observations = append(report.Observations, o)
 	}
 	return report
 }
@@ -185,7 +248,7 @@ func acceptedFirstRound(r *run.Run) bool {
 // first, in round order, then its failed checks or its halt. Log and
 // Excerpt are left empty: FromRuns fills them for what it lists.
 func FromRun(r *run.Run) []Observation {
-	base := Observation{RunID: r.ID, Ticket: r.Ticket, At: r.UpdatedAt}
+	base := Observation{Source: SourceRun, RunID: r.ID, Ticket: r.Ticket, At: r.UpdatedAt}
 	var rounds []run.AgentEvidenceRound
 	if r.AgentEvidence != nil {
 		rounds = r.AgentEvidence.Rounds
@@ -200,13 +263,14 @@ func FromRun(r *run.Run) []Observation {
 		o.What = "The run halted: " + firstNonEmpty(r.HaltReasonCode, strings.TrimPrefix(firstLine(r.Triage), "halted: "), "no reason recorded") + "."
 		out = append(out, o)
 	}
-	return out
+	return withIDs(out)
 }
 
 // about returns base as an observation about rd: its blockers, and its
 // round as the one whose saved output illustrates it.
 func about(base Observation, rd run.AgentEvidenceRound) Observation {
 	base.Blockers = rd.Blockers
+	base.Signature = sanitize.Line(rd.FailureSignature)
 	base.logRound = rd.Index
 	return base
 }
