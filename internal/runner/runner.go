@@ -780,7 +780,7 @@ func GitIsClean(dir string) (bool, error) {
 // the real filename — which, fed into a scope check, could wrongly flag
 // (or wrongly clear) an actual path.
 func GitStatusPaths(dir string) ([]string, error) {
-	out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "-z").Output()
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "-z", "--no-renames", "--ignore-submodules=none").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git status --porcelain -z: %w", err)
 	}
@@ -788,11 +788,12 @@ func GitStatusPaths(dir string) ([]string, error) {
 	if trimmed == "" {
 		return []string{}, nil
 	}
-	// Each entry is one NUL-terminated "XY path" token; a rename/copy
-	// entry (X or Y is 'R' or 'C') is followed by one additional
-	// NUL-terminated token holding the old path, which this skips —
-	// GitStatusPaths reports only the current path, matching
-	// GitDiffNameOnly's contract.
+	// Each entry is one NUL-terminated "XY path" token. --no-renames
+	// reports a moved file as a deletion and an addition, so both paths are
+	// listed, as GitDiffNameOnly lists them. Should git still print a
+	// rename/copy entry (X or Y is 'R' or 'C'), the NUL-terminated token
+	// after it is the old path, and it is listed too: a file moved out of a
+	// protected path changed that path.
 	tokens := strings.Split(trimmed, "\x00")
 	paths := []string{}
 	for i := 0; i < len(tokens); i++ {
@@ -802,8 +803,9 @@ func GitStatusPaths(dir string) ([]string, error) {
 		}
 		statusCode, path := entry[:2], entry[3:]
 		paths = append(paths, path)
-		if strings.ContainsAny(statusCode, "RC") {
-			i++ // skip the old-path token that follows a rename/copy
+		if strings.ContainsAny(statusCode, "RC") && i+1 < len(tokens) {
+			i++
+			paths = append(paths, tokens[i])
 		}
 	}
 	return paths, nil
@@ -819,6 +821,13 @@ func GitStatusPaths(dir string) ([]string, error) {
 // quoting would otherwise come back as a quoted/escaped string that
 // doesn't match the real filename, making the recorded inventory useless
 // for reconciling against the actual repository.
+//
+// --no-renames: a moved file is listed under both its old and its new path.
+// With rename detection (git's default) only the new path is listed, and a
+// build that moved `.factory.yml`, a committed oracle or any other protected
+// or out-of-scope file away had not, by this list, touched it.
+// --ignore-submodules=none: a `.gitmodules` the build wrote (`ignore = all`)
+// cannot hide a changed submodule entry. --no-ext-diff as in GitDiff.
 // GitDiff returns the full unified diff text between base and result in
 // dir — content, not just the name/stat evidence GitDiffNameOnly/
 // GitDiffShortStat already provide, for a caller (the API's own diff
@@ -843,7 +852,7 @@ func GitDiff(dir, base, result string) (string, error) {
 }
 
 func GitDiffNameOnly(dir, base, result string) ([]string, error) {
-	out, err := exec.Command("git", "-C", dir, "diff", "--name-only", "-z", base, result).Output()
+	out, err := exec.Command("git", "-C", dir, "diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=none", "--no-ext-diff", base, result).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only %s %s: %w", base, result, err)
 	}

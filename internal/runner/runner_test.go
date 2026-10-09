@@ -1565,3 +1565,82 @@ func initGitRepo(t *testing.T, dir string) {
 	run("add", "-A")
 	run("commit", "-q", "-m", "init")
 }
+
+// A file a build moves away is listed under its old path as well as its new
+// one: with rename detection only the destination was listed, and a moved
+// `.factory.yml` had not, by the inventory, been touched.
+func TestGitDiffNameOnlyListsBothPathsOfARename(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, ".factory.yml"), []byte("verify_command: \"make a-long-enough-line-to-be-detected-as-a-rename\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := GitCommitAll(dir, "add config"); err != nil {
+		t.Fatal(err)
+	}
+	base, err := GitRevParseHEAD(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "mv", ".factory.yml", "old.yml").CombinedOutput(); err != nil {
+		t.Fatalf("git mv: %v: %s", err, out)
+	}
+	staged, err := GitStatusPaths(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(staged)
+	if want := []string{".factory.yml", "old.yml"}; !slices.Equal(staged, want) {
+		t.Errorf("GitStatusPaths of a staged rename = %q, want %q", staged, want)
+	}
+	if err := GitCommitAll(dir, "move config away"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := GitRevParseHEAD(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := GitDiffNameOnly(dir, base, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(files)
+	if want := []string{".factory.yml", "old.yml"}; !slices.Equal(files, want) {
+		t.Errorf("GitDiffNameOnly of a rename = %q, want %q", files, want)
+	}
+}
+
+// A changed submodule entry is listed even when the repository's own
+// .gitmodules asks git to ignore it.
+func TestGitDiffNameOnlyListsASubmoduleItsGitmodulesHides(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	base, err := GitRevParseHEAD(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitmodules"), []byte("[submodule \"tools\"]\n\tpath = tools\n\turl = ./nowhere\n\tignore = all\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", ".gitmodules"}, {"update-index", "--add", "--cacheinfo", "160000," + base + ",tools"}, {"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "add a submodule entry"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	result, err := GitRevParseHEAD(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := GitDiffNameOnly(dir, base, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(files)
+	if want := []string{".gitmodules", "tools"}; !slices.Equal(files, want) {
+		t.Errorf("GitDiffNameOnly = %q, want %q", files, want)
+	}
+}
