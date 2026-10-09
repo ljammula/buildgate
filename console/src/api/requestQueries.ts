@@ -32,6 +32,7 @@ import {
   type CreateRequestOptions,
   type RejectRequestOptions,
   type RequestReasonOptions,
+  type RetryRequestOptions,
   type ResumeRequestOptions,
   type UpdateRequestContentOptions,
   approveRequest,
@@ -379,7 +380,7 @@ export function useRejectRequest(id: string) {
 
 export function useRetryRequest(id: string) {
   const { http } = useApi();
-  return useRequestWrite((options: RequestReasonOptions) => retryRequest(http, id, options));
+  return useRequestWrite((options: RetryRequestOptions) => retryRequest(http, id, options));
 }
 
 export function useResumeRequest(id: string) {

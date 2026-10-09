@@ -271,6 +271,15 @@ export interface RequestReasonOptions {
   readonly by?: string | null;
 }
 
+export interface RetryRequestOptions extends RequestReasonOptions {
+  /**
+   * `factoryd retry -from scratch`: a rebuilt ticket starts from the base
+   * commit, whatever the failed attempt committed. Sent as `from: "scratch"`;
+   * left out, the server's default (`attempt`) applies.
+   */
+  readonly fromScratch?: boolean;
+}
+
 /**
  * POST /requests/{id}/retry: recovers a halted or quarantined request, with
  * the same identity and confirm shape as {@link rejectRequest}. 409 when
@@ -279,11 +288,15 @@ export interface RequestReasonOptions {
 export async function retryRequest(
   http: Http,
   id: string,
-  options: RequestReasonOptions,
+  options: RetryRequestOptions,
   signal?: AbortSignal,
 ): Promise<RequestSummary> {
   const at = "POST /requests/{id}/retry";
-  const body = { reason: options.reason, ...(options.by ? { by: options.by } : {}) };
+  const body = {
+    reason: options.reason,
+    ...(options.by ? { by: options.by } : {}),
+    ...(options.fromScratch === true ? { from: "scratch" } : {}),
+  };
   return decodeRequestSummary(
     asObject(await http.sendJson("POST", `${requestPath(id)}/retry`, "override", body, signal), at),
     at,
