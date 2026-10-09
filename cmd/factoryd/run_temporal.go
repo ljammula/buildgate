@@ -359,6 +359,8 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		SpecAcceptanceCriteria:           o.SpecAcceptanceCriteria,
 		FullSuiteCommand:                 o.FullSuiteCommand,
 		GateCommands:                     o.GateCommands,
+		SetupCommands:                    o.SetupCommands,
+		AutofixCommands:                  o.AutofixCommands,
 		ReferenceOracleDir:               o.ReferenceOracleDir,
 		ReferenceOracleMountPath:         o.ReferenceOracleMountPath,
 		ReferenceOracleInLoopRetry:       o.Slice.ReferenceOracleInLoopRetry,

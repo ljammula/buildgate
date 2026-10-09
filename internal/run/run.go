@@ -1136,6 +1136,9 @@ type Run struct {
 	// this pins exactly which version of the ticket a run was judged
 	// against.
 	SpecSHA256 string `json:"spec_sha256"`
+	// ProjectConfigSHA256 is the SHA-256 of the committed .factory.yml this
+	// run read its commands from, "" when the repository has none.
+	ProjectConfigSHA256 string `json:"project_config_sha256,omitempty"`
 	// ProductSpecSHA256/ContractSHA256 are the hashes of the *project's*
 	// root spec/spec.md and spec/contract.md content at the moment this
 	// run's mandatory project-bootstrap preflight read them — distinct

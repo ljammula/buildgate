@@ -394,23 +394,28 @@ type ticketRun struct {
 	isolatedParentDir                     string
 	isolatedRepoDir                       string
 	productSpecSHA256                     string
-	contractSHA256                        string
-	id                                    string
-	specSnapshotPath                      string
-	verifyCmd                             string
-	ticketVerifyCmd                       string
-	configuredFullSuiteCommand            string
-	effectiveFullSuiteCommand             string
-	allowedFiles                          []string
-	requiredChangedFiles                  []string
-	testsRequiredOptOut                   string
-	specTicketScopeMismatchFields         []string
-	requiredContent                       []string
-	resumeFrom                            *workflow.ResumeFrom
-	r                                     *run.Run
-	onReady                               func(*run.Run)
-	baseSHA                               string
-	priorRunSnapshot                      *run.Run
+	// setup/autofix/projectConfigSHA256 come from the committed
+	// .factory.yml (applyCommittedProjectConfig); carried only, nothing
+	// runs them yet.
+	setup, autofix                []string
+	projectConfigSHA256           string
+	contractSHA256                string
+	id                            string
+	specSnapshotPath              string
+	verifyCmd                     string
+	ticketVerifyCmd               string
+	configuredFullSuiteCommand    string
+	effectiveFullSuiteCommand     string
+	allowedFiles                  []string
+	requiredChangedFiles          []string
+	testsRequiredOptOut           string
+	specTicketScopeMismatchFields []string
+	requiredContent               []string
+	resumeFrom                    *workflow.ResumeFrom
+	r                             *run.Run
+	onReady                       func(*run.Run)
+	baseSHA                       string
+	priorRunSnapshot              *run.Run
 
 	exitFuncs
 }
@@ -744,12 +749,8 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	// the session default would still launch with the higher,
 	// pre-project-config ceiling (found via review round 2).
 	applyFinalRelayCeilings(tr.settings, tr.execSelection, tr.reviewSelection)
-	if !explicitFlags["full-suite-command"] {
-		if cfg, found, err := projectconfig.Load(*tr.workspace); err != nil {
-			return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
-		} else if found && cfg.FullSuiteCommand != "" {
-			*tr.fullSuiteCommand = cfg.FullSuiteCommand
-		}
+	if err := tr.applyCommittedProjectConfig(explicitFlags["full-suite-command"]); err != nil {
+		return err
 	}
 	// The operator-approved verify-command substitution is applied further
 	// down, right after verifyCmd resolves the TICKET's own declared
@@ -1936,6 +1937,8 @@ func (tr *ticketRun) createRunRecord() error {
 		WorkspacePath:  *tr.workspace,
 		SpecPath:       *tr.spec,
 		SpecSHA256:     specSHA256,
+		// SHA-256 of the committed .factory.yml, "" when there is none.
+		ProjectConfigSHA256: tr.projectConfigSHA256,
 		// Recorded now as well as by the adoption Activity: this process
 		// saves its own copy of the record, which would otherwise overwrite
 		// the Activity's write.
@@ -2298,6 +2301,8 @@ func (tr *ticketRun) dispatch() error {
 			FastCheckCommand:         *tr.fastCheckCommand,
 			FullSuiteCommand:         tr.effectiveFullSuiteCommand,
 			GateCommands:             tr.gateCommands,
+			SetupCommands:            tr.setup,
+			AutofixCommands:          tr.autofix,
 			Skills:                   roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
 			ReferenceOracleDir:       *tr.referenceOracleDir,
 			ReferenceOracleMountPath: *tr.referenceOracleMountPath,
@@ -2363,4 +2368,23 @@ func resolvedGateCommands(flags map[string]*string) map[string]string {
 		}
 	}
 	return out
+}
+
+// applyCommittedProjectConfig reads the committed .factory.yml once: it sets
+// the full-suite command (unless a flag did), and records setup, autofix
+// and the file's hash. The values come from the committed file only, never
+// the worktree copy.
+func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
+	cfg, found, err := projectconfig.Load(*tr.workspace)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
+	}
+	if !found {
+		return nil
+	}
+	if !fullSuiteExplicit && cfg.FullSuiteCommand != "" {
+		*tr.fullSuiteCommand = cfg.FullSuiteCommand
+	}
+	tr.setup, tr.autofix, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.SHA256
+	return nil
 }
