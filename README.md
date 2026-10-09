@@ -265,13 +265,13 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 
 ## Status
 
-Latest release tag: **`m8`**, cut only after `make live-smoke` passes on
+Latest release tag: **`m9`**, cut only after `make live-smoke` passes on
 that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
 
 | | Area |
 |---|---|
 | ✅ Works, live-proven | The request pipeline end to end (spec review, plan review, sandboxed build, gates, PR) on several real repos; every build on Temporal; the OpenShell sandbox runtime; `quickstart` onboarding; the operator console; `pi` and `codex` harnesses on every role; compose sidecars (Postgres, Kafka, Redis) |
-| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree |
+| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason) |
 | 🟡 Opt-in or partial | Acceptance oracles (`submit -draft-oracles`, Go and Python); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
 | ⬛ Never, by design | Automatic merge or deploy; a host-execution path |
 
