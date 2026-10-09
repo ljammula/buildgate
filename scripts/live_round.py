@@ -19,6 +19,9 @@ max_review_rounds. Each run appends one line to the results file, and
 It acts on GitHub for real: a branch, a pull request and review comments on
 LIVE_ROUND_REPO's origin. By default it closes the pull request, deletes
 the branch and cancels the request when it ends.
+The pull request is a fixture, never to be merged: once the fixture's change
+is on the repository's default branch the build has nothing to add and the
+run fails before its pull request.
 
     LIVE_ROUND_REPO      local clone of the fixture's repository (required)
     LIVE_ROUND_REVIEWER  gh account that posts the comments (required): logged
@@ -26,7 +29,7 @@ the branch and cancels the request when it ends.
                          repository, listed in the config's pr_trusted_authors,
                          and not the account factoryd pushes with
     LIVE_ROUND_CONFIG    session config or profile name passed as -config
-    LIVE_ROUND_FIXTURE   fixture directory name (default todo-kafka-healthz)
+    LIVE_ROUND_FIXTURE   fixture directory name (default todo-kafka-version)
     LIVE_ROUND_TIMEOUT   minutes to wait for each phase (default 90)
     LIVE_ROUND_KEEP=1    leave the pull request and the request as they end
     LIVE_ROUND_RESULTS_FILE  default ~/buildgate/live-round/results.jsonl
@@ -135,7 +138,7 @@ class Round:
 		self.repo = os.environ.get("LIVE_ROUND_REPO", "")
 		self.reviewer = os.environ.get("LIVE_ROUND_REVIEWER", "")
 		self.config = os.environ.get("LIVE_ROUND_CONFIG", "")
-		self.name = os.environ.get("LIVE_ROUND_FIXTURE", "todo-kafka-healthz")
+		self.name = os.environ.get("LIVE_ROUND_FIXTURE", "todo-kafka-version")
 		self.timeout = 60 * int(os.environ.get("LIVE_ROUND_TIMEOUT", "90"))
 		self.dir = FIXTURES / self.name
 		self.fixture = json.loads((self.dir / "fixture.json").read_text())

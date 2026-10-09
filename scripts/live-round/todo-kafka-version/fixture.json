@@ -1,0 +1,12 @@
+{
+  "repo": "todo-kafka-service",
+  "verify_command": "make test",
+  "preflight_profile": "brownfield",
+  "comments": [
+    {
+      "path": "main.go",
+      "anchor": "\"/version\"",
+      "body": "Set a `Cache-Control: no-store` header on the 200 response of `/version`, and assert it in the handler test."
+    }
+  ]
+}
