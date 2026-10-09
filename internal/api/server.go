@@ -689,6 +689,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs/{id}/release", s.getRunRelease)
 	s.mux.HandleFunc("GET /projects/{project}/release", s.getProjectRelease)
 	s.mux.HandleFunc("GET /projects/{project}/stats", s.getProjectStats)
+	s.mux.HandleFunc("GET /projects/{project}/observations", s.getProjectObservations)
 	s.mux.HandleFunc("POST /runs/{id}/override", s.overrideRun)
 	s.mux.HandleFunc("GET /requests", s.listRequests)
 	s.mux.HandleFunc("POST /requests", s.createRequest)
@@ -784,11 +785,12 @@ func (s *Server) consoleConfig(w http.ResponseWriter, r *http.Request) {
 // including a browser's plain navigation. Only a page route that IS also
 // a real API GET pattern needs disambiguating, which is every entry below.
 var consoleDeepLinkPatterns = map[string]bool{
-	"GET /requests/{id}":              true,
-	"GET /runs":                       true,
-	"GET /runs/{id}":                  true,
-	"GET /projects/{project}/release": true,
-	"GET /projects/{project}/stats":   true,
+	"GET /requests/{id}":                   true,
+	"GET /runs":                            true,
+	"GET /runs/{id}":                       true,
+	"GET /projects/{project}/release":      true,
+	"GET /projects/{project}/stats":        true,
+	"GET /projects/{project}/observations": true,
 }
 
 // wantsHTMLNavigation reports whether r's Accept header's first

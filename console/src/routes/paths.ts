@@ -15,6 +15,7 @@ export type RequestBoardDeepLink =
   | "projectRelease"
   | "runList"
   | "projectStats"
+  | "projectObservations"
   | "ops"
   | "newRequest";
 
@@ -60,6 +61,10 @@ export function runListRoute(): RequestBoardRouteConfig {
 
 export function projectStatsRoute(project: string): RequestBoardRouteConfig {
   return deepLink("projectStats", project);
+}
+
+export function projectObservationsRoute(project: string): RequestBoardRouteConfig {
+  return deepLink("projectObservations", project);
 }
 
 export function opsRoute(): RequestBoardRouteConfig {
@@ -111,6 +116,9 @@ export function parseRoute(input: string | URL): RequestBoardRouteConfig {
   if (segments.length === 3 && segments[0] === "projects" && segments[2] === "stats") {
     return projectStatsRoute(decodeSegment(segmentAt(segments, 1)));
   }
+  if (segments.length === 3 && segments[0] === "projects" && segments[2] === "observations") {
+    return projectObservationsRoute(decodeSegment(segmentAt(segments, 1)));
+  }
   return boardRoute(filtersFromSearchParams(url.searchParams));
 }
 
@@ -127,6 +135,8 @@ export function pathForRoute(route: RequestBoardRouteConfig): string {
       return "/runs";
     case "projectStats":
       return `/projects/${encodeURIComponent(requiredDeepLinkId(route))}/stats`;
+    case "projectObservations":
+      return `/projects/${encodeURIComponent(requiredDeepLinkId(route))}/observations`;
     case "ops":
       return "/ops";
     case "newRequest":
@@ -162,6 +172,10 @@ export function projectReleasePath(project: string): string {
 
 export function projectStatsPath(project: string): string {
   return pathForRoute(projectStatsRoute(project));
+}
+
+export function projectObservationsPath(project: string): string {
+  return pathForRoute(projectObservationsRoute(project));
 }
 
 export function runsPath(): string {
@@ -220,6 +234,7 @@ export const routePatterns = {
   newRun: "/app/runs/new",
   projects: "/app/projects",
   projectStats: "/projects/:project/stats",
+  projectObservations: "/projects/:project/observations",
   projectRelease: "/projects/:project/release",
   ops: "/ops",
 } as const;

@@ -692,6 +692,58 @@ type AgentEvidenceRound struct {
 	AgentNotes       string   `json:"agent_notes,omitempty"`
 }
 
+// Outcome classifies the round as "pass" or "fail (<reason>)" using
+// only fields AgentEvidenceRound actually records, in the same priority
+// order build_app.py's own round_blockers applies (timeout, then the pi
+// invocation itself failing, then a fast check substituting for
+// verification, then verification itself) -- see that function's doc
+// comment in agent/pi/scripts/build_app.py.
+//
+// build_app.py also blocks a round for reasons no outcome field shows: it
+// changed nothing in the workspace, or a required review was not clean. A
+// round that recorded blockers while every outcome field reads clean is
+// therefore "fail (blocked)". Blockers only ever add a failure: an empty
+// list never turns a failing field into a pass, because a round build_app.py
+// built without computing them (a restored or fallback round) carries an
+// empty list too.
+//
+// The console's agentEvidenceRoundOutcome (console/src/domain/run.ts)
+// applies the same rule.
+func (rd AgentEvidenceRound) Outcome() string {
+	outcome := rd.outcomeFromFields()
+	if outcome == "pass" && len(rd.Blockers) > 0 {
+		return "fail (blocked)"
+	}
+	return outcome
+}
+
+func (rd AgentEvidenceRound) outcomeFromFields() string {
+	if rd.AgentTimedOut || rd.VerifyTimedOut {
+		return "fail (timed out)"
+	}
+	if rd.AgentReturnCode != 0 {
+		return "fail (error)"
+	}
+	if rd.FastCheckRan && rd.FastCheckPassed != nil && !*rd.FastCheckPassed {
+		return "fail (verify)"
+	}
+	if rd.VerifyPassed != nil {
+		if *rd.VerifyPassed {
+			return "pass"
+		}
+		return "fail (verify)"
+	}
+	// VerifyPassed nil means no canonical command was resolvable (see its
+	// own doc comment) -- not a positive pass, so still a failure, but
+	// without a more specific reason.
+	return "fail (error)"
+}
+
+// Passed reports whether the round finished clean.
+func (rd AgentEvidenceRound) Passed() bool {
+	return rd.Outcome() == "pass"
+}
+
 // Bounds on a round's feedback fields as recorded. build_app.py writes
 // well inside each (its own checkpoint reader holds the same list and path
 // limits); they exist because BUILD_EVIDENCE.json is a file in the

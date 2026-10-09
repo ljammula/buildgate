@@ -1,6 +1,7 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { readFixtureJson } from "@/test/fixtures";
 import { json, renderApp } from "@/test/render";
 
 import { ProjectListScreen } from "./ProjectListScreen";
@@ -197,4 +198,43 @@ test("switching to release tab shows release content", async () => {
   // Verify that release content is shown after switching tabs.
   expect(await screen.findByText("State")).toBeInTheDocument();
   expect(screen.getByText("incident 42")).toBeInTheDocument();
+});
+
+test("the observations tab shows what the project's runs showed", async () => {
+  const { server } = renderApp(<ProjectListScreen />, {
+    path: "/app/projects",
+    pattern: "/app/projects",
+    server: [
+      {
+        on: "GET /projects",
+        reply: () =>
+          json([
+            {
+              project_path: "/workspaces/app",
+              project: "app",
+              workspace_path: "/workspaces/app",
+              spec_path: "/specs/app-latest.md",
+              repository: "app-repo",
+              run_count: 3,
+              last_run_at: "2026-08-26T12:00:00Z",
+            },
+          ]),
+      },
+      {
+        on: "GET /projects/app/observations",
+        reply: () => json(readFixtureJson("api/project-observations.json")),
+      },
+    ],
+  });
+
+  await screen.findByText("app");
+  await userEvent.click(screen.getByRole("button", { name: "Show details for /workspaces/app" }));
+  // Nothing is read for a tab that is not the selected one.
+  expect(server.sent("GET /projects/app/observations")).toHaveLength(0);
+
+  await userEvent.click(screen.getByRole("tab", { name: "Observations" }));
+  expect(
+    await screen.findByText("Rounds 2 and 3 ended without changing any file."),
+  ).toBeInTheDocument();
+  expect(server.sent("GET /projects/app/observations")).toHaveLength(1);
 });

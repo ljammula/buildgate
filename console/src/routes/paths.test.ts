@@ -3,6 +3,7 @@ import {
   opsRoute,
   parseRoute,
   pathForRoute,
+  projectObservationsPath,
   projectReleaseRoute,
   projectStatsRoute,
   requestDetailRoute,
@@ -71,6 +72,14 @@ test("/projects/{p}/stats parses to a projectStats deep link", () => {
   const config = parseRoute("/projects/checkouts/stats");
   expect(config.deepLink).toBe("projectStats");
   expect(config.deepLinkId).toBe("checkouts");
+});
+
+test("/projects/{p}/observations parses to a projectObservations deep link", () => {
+  const config = parseRoute("/projects/my%20repo/observations");
+  expect(config.deepLink).toBe("projectObservations");
+  expect(config.deepLinkId).toBe("my repo");
+  expect(pathForRoute(config)).toBe("/projects/my%20repo/observations");
+  expect(projectObservationsPath("checkouts")).toBe("/projects/checkouts/observations");
 });
 
 test("these deep links round-trip through pathForRoute", () => {

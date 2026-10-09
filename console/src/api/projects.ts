@@ -1,5 +1,6 @@
 import { type Http } from "@/api/http";
 import { asObject } from "@/domain/decode";
+import { type ObservationReport, decodeObservationReport } from "@/domain/observation";
 import {
   type ProjectCheckResponse,
   type ProjectStats,
@@ -59,4 +60,23 @@ export async function getProjectStats(
     signal,
   );
   return decodeProjectStats(asObject(json, at), at);
+}
+
+/**
+ * GET /projects/{project}/observations: what the project's finished runs say
+ * happened, computed from the run records. Read token, like the runs it is
+ * made from.
+ */
+export async function getProjectObservations(
+  http: Http,
+  project: string,
+  signal?: AbortSignal,
+): Promise<ObservationReport> {
+  const at = "GET /projects/{project}/observations";
+  const json = await http.getJson(
+    `/projects/${encodeURIComponent(project)}/observations`,
+    "read",
+    signal,
+  );
+  return decodeObservationReport(asObject(json, at), at);
 }

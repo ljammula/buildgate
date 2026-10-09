@@ -29,7 +29,7 @@ test/walk/run.sh       # the live walk: a real factoryd, a real browser, every s
 | Contract fixtures        | `go test ./internal/api -run TestConsoleContractFixtures`, then `npm run test` | A Go response shape the decoders cannot read                                                              |
 | Golden vectors           | The Go and Vitest suites                                                       | The server and the console disagreeing on a content hash, a token count or a spec/ticket structure check  |
 | Lint boundaries          | `npm run lint`                                                                 | A layer importing what it may not; HTML from untrusted text; `fetch` or `localStorage` in the wrong layer |
-| Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 36 steps, each write checked against the server's own record    |
+| Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 37 steps, each write checked against the server's own record    |
 
 `scripts/console-walk/run.sh` (repository root) is the second walk: one real request through drafting, review and a build against a model route, driven only from the console (it needs Docker, the OpenShell gateway and Temporal; its header lists them).
 

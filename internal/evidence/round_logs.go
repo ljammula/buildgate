@@ -28,6 +28,12 @@ const roundLogsSource = ".pi-build-session/feedback"
 // the folder is in a workspace the build agent can write.
 var roundLogNames = []string{"fast-check.log", "verify.log", "oracle.log"}
 
+// RoundLogName is where RetainRoundLogs puts a round's log, relative to
+// the run's directory, slash-separated.
+func RoundLogName(round int, log string) string {
+	return path.Join(RoundLogsDirName, fmt.Sprintf("round-%d", round), log)
+}
+
 // A round folder as build_app.py names it: no leading zero, so the number
 // read from the name names the same folder again.
 var roundLogDir = regexp.MustCompile(`^round-([1-9][0-9]{0,2})$`)
@@ -149,4 +155,42 @@ func retainFromRoot(root *os.Root, src, dst string) (int64, error) {
 		return 0, err
 	}
 	return info.Size(), nil
+}
+
+// ReadRetainedRoundLog returns the name, relative to runDir, and the first
+// n bytes of the output RetainRoundLogs kept for a round: the first of the
+// three logs that exists, in the order build_app.py's checks run. No log,
+// or one that cannot be read, is two zero values.
+//
+// The content is a copy of what an untrusted build wrote, so it is data to
+// show, never to act on. The path is opened through an os.Root on runDir
+// with no symlink followed at its end, so nothing outside the run's own
+// directory is read even if a link was planted in it.
+func ReadRetainedRoundLog(runDir string, round int, n int64) (name string, data []byte) {
+	if round < 1 {
+		return "", nil
+	}
+	root, err := os.OpenRoot(runDir)
+	if err != nil {
+		return "", nil
+	}
+	defer root.Close()
+	for _, log := range roundLogNames {
+		name := RoundLogName(round, log)
+		opened, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			continue
+		}
+		info, err := opened.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			opened.Close()
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(opened, n))
+		opened.Close()
+		if err == nil {
+			return name, data
+		}
+	}
+	return "", nil
 }

@@ -50,7 +50,7 @@ func RoundSummary(ev *run.AgentEvidence, costUSD string) string {
 		inTokens += in
 		outTokens += out
 		if i < shown {
-			parts = append(parts, fmt.Sprintf("r%d %s", rd.Index, roundOutcome(rd)))
+			parts = append(parts, fmt.Sprintf("r%d %s", rd.Index, rd.Outcome()))
 		}
 	}
 	if len(ev.Rounds) > shown {
@@ -73,50 +73,6 @@ func RoundSummary(ev *run.AgentEvidence, costUSD string) string {
 		summary = summary[:cut]
 	}
 	return summary
-}
-
-// roundOutcome classifies one round as "pass" or "fail (<reason>)" using
-// only fields AgentEvidenceRound actually records, in the same priority
-// order build_app.py's own round_blockers applies (timeout, then the pi
-// invocation itself failing, then a fast check substituting for
-// verification, then verification itself) -- see that function's doc
-// comment in agent/pi/scripts/build_app.py.
-//
-// build_app.py also blocks a round for reasons no outcome field shows: it
-// changed nothing in the workspace, or a required review was not clean. A
-// round that recorded blockers while every outcome field reads clean is
-// therefore "fail (blocked)". Blockers only ever add a failure: an empty
-// list never turns a failing field into a pass, because a round build_app.py
-// built without computing them (a restored or fallback round) carries an
-// empty list too.
-func roundOutcome(rd run.AgentEvidenceRound) string {
-	outcome := roundOutcomeFromFields(rd)
-	if outcome == "pass" && len(rd.Blockers) > 0 {
-		return "fail (blocked)"
-	}
-	return outcome
-}
-
-func roundOutcomeFromFields(rd run.AgentEvidenceRound) string {
-	if rd.AgentTimedOut || rd.VerifyTimedOut {
-		return "fail (timed out)"
-	}
-	if rd.AgentReturnCode != 0 {
-		return "fail (error)"
-	}
-	if rd.FastCheckRan && rd.FastCheckPassed != nil && !*rd.FastCheckPassed {
-		return "fail (verify)"
-	}
-	if rd.VerifyPassed != nil {
-		if *rd.VerifyPassed {
-			return "pass"
-		}
-		return "fail (verify)"
-	}
-	// VerifyPassed nil means no canonical command was resolvable (see its
-	// own doc comment) -- not a positive pass, so still a failure, but
-	// without a more specific reason.
-	return "fail (error)"
 }
 
 // roundTokens reads rd.Usage's token fields -- tolerating a nil map or

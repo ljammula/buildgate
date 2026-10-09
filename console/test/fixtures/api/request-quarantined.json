@@ -71,7 +71,7 @@
     "runs": 0,
     "total": 0.012,
     "currency": "usd",
-    "complete": true,
+    "complete": false,
     "tokens": 1200,
     "tokens_complete": false,
     "by_model": [
