@@ -24,7 +24,7 @@ port="${WALK_PORT:-18090}"
 export FACTORYD_AUTOSTART=0
 
 mkdir -p "$walk_dir"
-rm -rf "$walk_dir/data" "$walk_dir/workspace" "$walk_dir/shots"
+rm -rf "$walk_dir/data" "$walk_dir/workspace" "$walk_dir/shots" "$walk_dir/config"
 mkdir -p "$walk_dir/shots"
 
 echo "walk: building the console bundle"
@@ -82,7 +82,11 @@ if [ ! -d "$walk_dir/workspace/.git" ]; then
     commit -q --allow-empty -m "walk workspace"
 fi
 
-"$walk_dir/factoryd" serve -addr "127.0.0.1:$port" -data-dir "$walk_dir/data" \
+# Its own empty config directory: with the operator's, a machine that has a
+# stable start token (quickstart, install-service) prints no "#t=" link, and
+# the walk would run under that operator's session config.
+mkdir -p "$walk_dir/config"
+XDG_CONFIG_HOME="$walk_dir/config" "$walk_dir/factoryd" serve -addr "127.0.0.1:$port" -data-dir "$walk_dir/data" \
   >"$walk_dir/serve.log" 2>&1 &
 server_pid=$!
 until curl -sf -o /dev/null "http://127.0.0.1:$port/healthz"; do

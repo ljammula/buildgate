@@ -14,6 +14,7 @@ import {
   reqNumber,
   reqString,
   stringList,
+  stringListOrNull,
   stringOrNull,
   booleanOrNull,
 } from "@/domain/decode";
@@ -239,6 +240,19 @@ export interface AgentEvidenceRound {
   readonly fastCheckPassed: boolean | null;
   readonly durationS: number;
   readonly tokens: number;
+  /**
+   * Why the round did not finish clean: empty for a round that passed, null
+   * for a round recorded by a worker that did not report it.
+   */
+  readonly blockers: readonly string[] | null;
+  /** The files the round's agent turn changed; null when not reported. */
+  readonly changedFiles: readonly string[] | null;
+  /** Two rounds with the same non-empty signature failed the same way. */
+  readonly failureSignature: string;
+  /** Where the failing command's whole output was saved, in the build workspace. */
+  readonly failureLog: string;
+  /** What happened to the agent process when no command failed. */
+  readonly agentNotes: string;
 }
 
 // The per-round token figure: the same definition as usageTotalTokens.
@@ -258,6 +272,11 @@ export function decodeAgentEvidenceRound(o: JsonObject, at: string): AgentEviden
     fastCheckPassed: booleanOrNull(o, "fast_check_passed", at),
     durationS: numberOr(o, "duration_s", at, 0),
     tokens: roundTokens(o.usage),
+    blockers: stringListOrNull(o, "blockers", at),
+    changedFiles: stringListOrNull(o, "changed_files", at),
+    failureSignature: optString(o, "failure_signature", at),
+    failureLog: optString(o, "failure_log", at),
+    agentNotes: optString(o, "agent_notes", at),
   };
 }
 
@@ -266,9 +285,16 @@ export function decodeAgentEvidenceRound(o: JsonObject, at: string): AgentEviden
  * priority order build_app.py's own round_blockers applies (timeout, then the
  * agent invocation itself failing, then a fast check substituting for
  * verification, then verification itself), classified from only the fields
- * the round carries.
+ * the round carries. A round that reported blockers while every such field
+ * reads clean (it changed nothing) is "fail (blocked)"; an empty blocker list
+ * never turns a failing field into a pass.
  */
 export function agentEvidenceRoundOutcome(round: AgentEvidenceRound): string {
+  const outcome = outcomeFromFields(round);
+  return outcome === "pass" && (round.blockers?.length ?? 0) > 0 ? "fail (blocked)" : outcome;
+}
+
+function outcomeFromFields(round: AgentEvidenceRound): string {
   if (round.agentTimedOut || round.verifyTimedOut) return "fail (timed out)";
   if (round.agentReturnCode !== 0) return "fail (error)";
   if (round.fastCheckRan && round.fastCheckPassed === false) return "fail (verify)";

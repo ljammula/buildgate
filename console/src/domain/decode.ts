@@ -160,6 +160,14 @@ export function stringList(o: JsonObject, key: string, at: string): string[] {
   );
 }
 
+/**
+ * A list of strings that keeps "never recorded" apart from "recorded, and
+ * empty": null when absent or null, the list otherwise.
+ */
+export function stringListOrNull(o: JsonObject, key: string, at: string): string[] | null {
+  return absent(o[key]) ? null : stringList(o, key, at);
+}
+
 /** A string-to-string map: empty when absent or null. */
 export function stringMap(o: JsonObject, key: string, at: string): Record<string, string> {
   const value = o[key];

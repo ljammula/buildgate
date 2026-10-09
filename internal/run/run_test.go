@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"buildgate/internal/evidence"
 )
@@ -173,6 +174,106 @@ func TestAgentEvidenceDecodesAgentsMDFields(t *testing.T) {
 	if withoutGuidance.AgentsMDGitBlob != "" {
 		t.Errorf("AgentsMDGitBlob = %q, want empty when the field is absent", withoutGuidance.AgentsMDGitBlob)
 	}
+}
+
+// TestAgentEvidenceRoundFeedbackFields covers the five round-feedback
+// fields: a round that recorded them round-trips them, a round written by a
+// build_app.py without them keeps null lists (never-collected) and writes no
+// empty strings, and a round that passed keeps its empty list.
+func TestAgentEvidenceRoundFeedbackFields(t *testing.T) {
+	raw := []byte(`{"schema_version": 2, "rounds": [
+		{"index": 1, "verify_passed": false, "blockers": ["canonical verification failed"],
+		 "changed_files": ["sum.go"], "failure_signature": "0123456789abcdef",
+		 "failure_log": ".pi-build-session/feedback/verify.log", "agent_notes": "exited 2"},
+		{"index": 2, "verify_passed": true, "blockers": [], "changed_files": [],
+		 "failure_signature": "", "failure_log": "", "agent_notes": ""},
+		{"index": 3, "verify_passed": true}
+	]}`)
+	var ev AgentEvidence
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		t.Fatal(err)
+	}
+	ev.CleanRoundFeedback()
+	first := ev.Rounds[0]
+	if len(first.Blockers) != 1 || first.Blockers[0] != "canonical verification failed" || len(first.ChangedFiles) != 1 || first.ChangedFiles[0] != "sum.go" ||
+		first.FailureSignature != "0123456789abcdef" || first.FailureLog != ".pi-build-session/feedback/verify.log" || first.AgentNotes != "exited 2" {
+		t.Errorf("round 1 = %+v, want its five feedback fields as written", first)
+	}
+	if ev.Rounds[1].Blockers == nil || len(ev.Rounds[1].Blockers) != 0 || ev.Rounds[1].ChangedFiles == nil {
+		t.Errorf("round 2 lists = %#v, %#v, want empty and non-nil", ev.Rounds[1].Blockers, ev.Rounds[1].ChangedFiles)
+	}
+	if ev.Rounds[2].Blockers != nil || ev.Rounds[2].ChangedFiles != nil {
+		t.Errorf("round 3 lists = %#v, %#v, want nil for a round that never recorded them", ev.Rounds[2].Blockers, ev.Rounds[2].ChangedFiles)
+	}
+
+	out, err := json.Marshal(ev.Rounds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields []map[string]json.RawMessage
+	if err := json.Unmarshal(out, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fields[1]["blockers"]) + string(fields[1]["changed_files"]); got != "[][]" {
+		t.Errorf("passed round lists = %s, want [][]", got)
+	}
+	if got := string(fields[2]["blockers"]) + string(fields[2]["changed_files"]); got != "nullnull" {
+		t.Errorf("never-recorded round lists = %s, want nullnull", got)
+	}
+	for _, key := range []string{"failure_signature", "failure_log", "agent_notes"} {
+		if _, ok := fields[2][key]; ok {
+			t.Errorf("never-recorded round carries %q, want it omitted", key)
+		}
+	}
+}
+
+// TestCleanRoundFeedbackBoundsAndCleansAgentText: BUILD_EVIDENCE.json is a
+// file the build agent can write, so what is recorded from it is cut to
+// size and stripped of terminal escapes, control characters and secrets.
+func TestCleanRoundFeedbackBoundsAndCleansAgentText(t *testing.T) {
+	many := make([]string, 500)
+	for i := range many {
+		many[i] = "f.go"
+	}
+	ev := &AgentEvidence{Rounds: []AgentEvidenceRound{{
+		Blockers:         append([]string{"verify\x1b[31m failed\r\nsecond line", strings.Repeat("é", 500)}, many...),
+		ChangedFiles:     many,
+		FailureSignature: strings.Repeat("a", 100),
+		FailureLog:       "logs/\u202everify.log\n" + strings.Repeat("p", 600),
+		AgentNotes:       "line one\nkey Bearer " + strings.Repeat("A", 40) + "\x07\n" + strings.Repeat("n", 9000),
+	}}}
+	ev.CleanRoundFeedback()
+	rd := ev.Rounds[0]
+	if rd.Blockers[0] != "verify failed second line" {
+		t.Errorf("Blockers[0] = %q, want one clean line", rd.Blockers[0])
+	}
+	if len(rd.Blockers) != maxRoundBlockers || utf8.RuneCountInString(rd.Blockers[1]) != maxRoundBlockerLen || !utf8.ValidString(rd.Blockers[1]) {
+		t.Errorf("Blockers: %d entries, entry 1 has %d runes, want %d and %d", len(rd.Blockers), utf8.RuneCountInString(rd.Blockers[1]), maxRoundBlockers, maxRoundBlockerLen)
+	}
+	if len(rd.ChangedFiles) != maxRoundChangedFiles {
+		t.Errorf("ChangedFiles has %d entries, want %d", len(rd.ChangedFiles), maxRoundChangedFiles)
+	}
+	if len(rd.FailureSignature) != maxRoundFailureSignature {
+		t.Errorf("FailureSignature has %d bytes, want %d", len(rd.FailureSignature), maxRoundFailureSignature)
+	}
+	if !strings.HasPrefix(rd.FailureLog, "logs/verify.log ppp") || utf8.RuneCountInString(rd.FailureLog) != maxRoundPathLen {
+		t.Errorf("FailureLog = %.40q (%d runes), want one line without the direction override, %d runes", rd.FailureLog, utf8.RuneCountInString(rd.FailureLog), maxRoundPathLen)
+	}
+	if !strings.HasPrefix(rd.AgentNotes, "line one\nkey Bearer [redacted]\n") || strings.Contains(rd.AgentNotes, "AAAA") || strings.ContainsRune(rd.AgentNotes, '\a') {
+		t.Errorf("AgentNotes = %.80q, want its lines kept and the key and bell removed", rd.AgentNotes)
+	}
+	if utf8.RuneCountInString(rd.AgentNotes) != maxRoundAgentNotesLen {
+		t.Errorf("AgentNotes has %d runes, want %d", utf8.RuneCountInString(rd.AgentNotes), maxRoundAgentNotesLen)
+	}
+
+	emptied := &AgentEvidence{Rounds: []AgentEvidenceRound{{Blockers: []string{"\x1b[31m", " "}, ChangedFiles: nil}}}
+	emptied.CleanRoundFeedback()
+	if got := emptied.Rounds[0]; got.Blockers == nil || len(got.Blockers) != 0 || got.ChangedFiles != nil {
+		t.Errorf("entries of escapes only: Blockers = %#v, ChangedFiles = %#v, want an empty list and nil", got.Blockers, got.ChangedFiles)
+	}
+
+	var none *AgentEvidence
+	none.CleanRoundFeedback()
 }
 
 // TestAgentEvidenceRoundDecodesFastCheckFields locks json.Unmarshal's

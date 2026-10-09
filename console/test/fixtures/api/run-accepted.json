@@ -53,7 +53,11 @@
         "verify_timed_out": false,
         "duration_s": 840,
         "fast_check_ran": true,
-        "fast_check_passed": true
+        "fast_check_passed": true,
+        "blockers": [],
+        "changed_files": [
+          "checkout/idempotency.go"
+        ]
       }
     ],
     "agents_md_used": false,

@@ -17,9 +17,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/meter"
+	"buildgate/internal/sanitize"
 )
 
 type State string
@@ -649,6 +651,86 @@ type AgentEvidenceRound struct {
 	// VerifyPassed's own null-means-"didn't run" convention.
 	FastCheckRan    bool  `json:"fast_check_ran"`
 	FastCheckPassed *bool `json:"fast_check_passed"`
+	// What the next round was told about this one (build_app.py's
+	// round_feedback): why the round did not finish clean, the files its
+	// agent turn changed, an id two rounds share when they failed the same
+	// way, the path inside the build workspace of the failing command's
+	// whole output, and what happened to the agent process when the failure
+	// was not a failing command. Additive, like FastCheckRan above.
+	//
+	// Blockers and ChangedFiles are nil (JSON null) for a round written by
+	// a build_app.py that did not record them, and empty for a round that
+	// passed or changed nothing: the same never-collected/collected-empty
+	// split Run.ChangedFiles keeps. The three strings are "" in both cases.
+	//
+	// All five are agent-reported text from the untrusted workspace,
+	// bounded and cleaned by AgentEvidence.CleanRoundFeedback before they
+	// are recorded. They are for an operator to read; nothing decides on
+	// them, and FailureLog is a name to show, never a path to open.
+	Blockers         []string `json:"blockers"`
+	ChangedFiles     []string `json:"changed_files"`
+	FailureSignature string   `json:"failure_signature,omitempty"`
+	FailureLog       string   `json:"failure_log,omitempty"`
+	AgentNotes       string   `json:"agent_notes,omitempty"`
+}
+
+// Bounds on a round's feedback fields as recorded. build_app.py writes
+// well inside each (its own checkpoint reader holds the same list and path
+// limits); they exist because BUILD_EVIDENCE.json is a file in the
+// workspace the build agent can write, read here up to 10 MiB.
+const (
+	maxRoundBlockers         = 20
+	maxRoundBlockerLen       = 200
+	maxRoundChangedFiles     = 200
+	maxRoundPathLen          = 400
+	maxRoundFailureSignature = 64
+	maxRoundAgentNotesLen    = 8000
+)
+
+// CleanRoundFeedback bounds every round's feedback fields and strips
+// control characters, terminal escapes and recognisable secrets from them
+// (sanitize.Text; single-line fields are also folded to one line). Called
+// once, where BUILD_EVIDENCE.json is read, so the run record, the API and
+// the console never hold the raw text. A nil list stays nil, and a list
+// stays a list when cleaning empties it.
+func (e *AgentEvidence) CleanRoundFeedback() {
+	if e == nil {
+		return
+	}
+	for i := range e.Rounds {
+		rd := &e.Rounds[i]
+		rd.Blockers = cleanLines(rd.Blockers, maxRoundBlockers, maxRoundBlockerLen)
+		rd.ChangedFiles = cleanLines(rd.ChangedFiles, maxRoundChangedFiles, maxRoundPathLen)
+		rd.FailureSignature = clipRunes(sanitize.Line(rd.FailureSignature), maxRoundFailureSignature)
+		rd.FailureLog = clipRunes(sanitize.Line(rd.FailureLog), maxRoundPathLen)
+		rd.AgentNotes = clipRunes(sanitize.Text(rd.AgentNotes), maxRoundAgentNotesLen)
+	}
+}
+
+func cleanLines(in []string, maxItems, maxLen int) []string {
+	if in == nil {
+		return nil
+	}
+	if len(in) > maxItems {
+		in = in[:maxItems]
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		// An entry that was nothing but escapes or control characters is
+		// dropped: it names no blocker and no file.
+		if cleaned := clipRunes(sanitize.Line(s), maxLen); cleaned != "" {
+			out = append(out, cleaned)
+		}
+	}
+	return out
+}
+
+// clipRunes cuts s to at most n runes, never inside one.
+func clipRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 // HarnessEval is a purely descriptive summary of which harness/model

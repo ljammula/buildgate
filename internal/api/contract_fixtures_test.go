@@ -532,7 +532,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	model, provider := "gpt-5.6-luna", "chatgpt-codex"
 	accepted.AgentEvidence = &run.AgentEvidence{
 		SchemaVersion: 1, Generated: stamp(25), ReviewPolicy: "required", Provider: &provider, Model: &model, Succeeded: true, StoppedReason: "accepted",
-		Rounds:         []run.AgentEvidenceRound{{Index: 1, Agent: "pi", Usage: usage(478300), ReviewerOutcome: "pass", VerifyPassed: &passed, DurationS: 840, FastCheckRan: true, FastCheckPassed: &passed}},
+		Rounds:         []run.AgentEvidenceRound{{Index: 1, Agent: "pi", Usage: usage(478300), ReviewerOutcome: "pass", VerifyPassed: &passed, DurationS: 840, FastCheckRan: true, FastCheckPassed: &passed, Blockers: []string{}, ChangedFiles: []string{"checkout/idempotency.go"}}},
 		ReviewVerdicts: []run.ReviewVerdict{{Criterion: "1", Verdict: "met"}, {Criterion: "2", Verdict: "met", Detail: "covered by TestKeyScopedToAccount"}},
 	}
 	accepted.Overrides, accepted.Rescues, accepted.Notifications = []run.Override{}, []run.Rescue{}, []run.NotificationRecord{}
