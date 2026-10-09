@@ -17,6 +17,40 @@
       "agent_returncode": 0,
       "agent_timed_out": false,
       "usage": {
+        "input": 31020,
+        "output": 3410,
+        "cacheRead": 12288,
+        "cacheWrite": 0,
+        "reasoning": 1204,
+        "totalTokens": 46718
+      },
+      "reviewer_outcome": "unavailable",
+      "reviewer_detail": "no-review-verdict",
+      "verify_passed": false,
+      "verify_timed_out": false,
+      "duration_s": 184.7,
+      "fast_check_ran": false,
+      "fast_check_passed": null,
+      "oracle_command": null,
+      "oracle_passed": null,
+      "oracle_output_tail": "",
+      "blockers": [
+        "canonical verification failed"
+      ],
+      "changed_files": [
+        "sum.go",
+        "sum_test.go"
+      ],
+      "failure_signature": "5f2c9d0a71e4b386",
+      "failure_log": ".pi-build-session/feedback/verify.log",
+      "agent_notes": ""
+    },
+    {
+      "index": 2,
+      "agent": "pi",
+      "agent_returncode": 0,
+      "agent_timed_out": false,
+      "usage": {
         "input": 26852,
         "output": 2835,
         "cacheRead": 49664,
@@ -33,7 +67,12 @@
       "fast_check_passed": null,
       "oracle_command": null,
       "oracle_passed": null,
-      "oracle_output_tail": ""
+      "oracle_output_tail": "",
+      "blockers": [],
+      "changed_files": [],
+      "failure_signature": "",
+      "failure_log": "",
+      "agent_notes": ""
     }
   ]
 }

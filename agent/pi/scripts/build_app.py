@@ -2363,6 +2363,15 @@ def write_evidence_json(result: BuildResult) -> Path:
 				"oracle_command": rnd.oracle_command,
 				"oracle_passed": rnd.oracle_passed,
 				"oracle_output_tail": rnd.oracle_output_tail,
+				# Additive, same convention: what the next round was told
+				# about this one (see Round's own fields). blockers is []
+				# for a round that passed, so a reader tells "passed" from
+				# "written by a build_app.py that did not record it".
+				"blockers": rnd.blockers,
+				"changed_files": rnd.changed_files,
+				"failure_signature": rnd.failure_signature,
+				"failure_log": rnd.failure_log,
+				"agent_notes": rnd.agent_notes,
 			}
 			for rnd in result.rounds
 		],

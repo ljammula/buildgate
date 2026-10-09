@@ -53,6 +53,19 @@ func TestRoundSummary(t *testing.T) {
 			want: "1 round · r1 pass · 2.0k tokens",
 		},
 		{
+			// Recorded blockers fail a round whose checks all read clean
+			// (it changed nothing); an empty list never passes a round
+			// whose fields say it failed.
+			name: "recorded blockers add a failure and never remove one",
+			ev: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{
+				{Index: 1, VerifyPassed: boolPtr(true), Blockers: []string{"no changes made to the workspace"}},
+				{Index: 2, VerifyPassed: boolPtr(false), Blockers: []string{"canonical verification failed"}},
+				{Index: 3, VerifyPassed: boolPtr(false), AgentTimedOut: true, Blockers: []string{}},
+				{Index: 4, VerifyPassed: boolPtr(true), Blockers: []string{}},
+			}},
+			want: "4 rounds · r1 fail (blocked) · r2 fail (verify) · r3 fail (timed out) · r4 pass",
+		},
+		{
 			name: "no cost, no tokens",
 			ev: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{
 				{Index: 1, VerifyPassed: boolPtr(true)},

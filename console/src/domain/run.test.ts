@@ -176,6 +176,11 @@ describe("fixtures", () => {
       fastCheckPassed: true,
       durationS: 1.5,
       tokens: 150,
+      blockers: ["every-field blockers"],
+      changedFiles: ["every-field changed_files"],
+      failureSignature: "every-field failure_signature",
+      failureLog: "every-field failure_log",
+      agentNotes: "every-field agent_notes",
     });
   });
 
@@ -391,6 +396,28 @@ describe("derived values", () => {
     expect(outcome({ agent_returncode: 2 })).toBe("fail (error)");
     expect(outcome({ fast_check_ran: true, fast_check_passed: false })).toBe("fail (verify)");
     expect(outcome({ verify_passed: null })).toBe("fail (error)");
+  });
+
+  test("reported blockers add a failure and never remove one", () => {
+    const base = { index: 1, agent_returncode: 0, verify_passed: true };
+    const outcome = (o: Record<string, unknown>) =>
+      agentEvidenceRoundOutcome(decodeAgentEvidenceRound({ ...base, ...o }, "r"));
+    expect(outcome({ blockers: [] })).toBe("pass");
+    expect(outcome({ blockers: ["no changes made to the workspace"] })).toBe("fail (blocked)");
+    expect(outcome({ blockers: ["canonical verification failed"], verify_passed: false })).toBe(
+      "fail (verify)",
+    );
+    expect(outcome({ blockers: null, verify_passed: false })).toBe("fail (verify)");
+    expect(outcome({ blockers: [], verify_passed: false })).toBe("fail (verify)");
+    expect(outcome({ blockers: [], agent_timed_out: true })).toBe("fail (timed out)");
+  });
+
+  test("a round's feedback fields keep never-reported apart from empty", () => {
+    const old = decodeAgentEvidenceRound({ index: 1, blockers: null }, "r");
+    expect([old.blockers, old.changedFiles]).toEqual([null, null]);
+    expect([old.failureSignature, old.failureLog, old.agentNotes]).toEqual(["", "", ""]);
+    const passed = decodeAgentEvidenceRound({ index: 1, blockers: [], changed_files: [] }, "r");
+    expect([passed.blockers, passed.changedFiles]).toEqual([[], []]);
   });
 
   test("a round's tokens use the shared usage total, 0 without a usable figure", () => {

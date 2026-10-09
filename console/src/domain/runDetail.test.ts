@@ -4,8 +4,9 @@ import {
   computeTimeline,
   glyphFor,
   overallGlyph,
+  roundDetailLines,
 } from "@/domain/runDetail";
-import { type ProgressEvent, type Run, decodeRun } from "@/domain/run";
+import { type ProgressEvent, type Run, decodeAgentEvidenceRound, decodeRun } from "@/domain/run";
 
 function exit(kind: string, exitCode: number): string {
   return attemptExitText({ kind, exitCode });
@@ -165,5 +166,41 @@ describe("computeTimeline", () => {
       ["Round 1 of 3", "running", "00:04"],
     ]);
     expect(build?.noteLines).toEqual(["read: main.go"]);
+  });
+});
+
+describe("roundDetailLines", () => {
+  const round = (o: Record<string, unknown>) =>
+    decodeAgentEvidenceRound({ index: 2, verify_passed: false, ...o }, "r");
+
+  test("a round recorded without the feedback fields has no lines", () => {
+    expect(roundDetailLines(round({}), undefined)).toEqual([]);
+  });
+
+  test("names the blockers, the files, a repeated failure and the saved output", () => {
+    const first = round({ index: 1, failure_signature: "5f2c9d0a71e4b386" });
+    const second = round({
+      blockers: ["no changes made to the workspace", "canonical verification failed"],
+      changed_files: [],
+      failure_signature: "5f2c9d0a71e4b386",
+      failure_log: ".pi-build-session/feedback/verify.log",
+    });
+    expect(roundDetailLines(second, first)).toEqual([
+      "Blocked by: no changes made to the workspace; canonical verification failed",
+      "Changed no files",
+      "The same failure as round 1",
+      "Full output saved in the build workspace: .pi-build-session/feedback/verify.log",
+    ]);
+  });
+
+  test("a different or missing signature is not a repeat, and a passed round names its files", () => {
+    const first = round({ index: 1, failure_signature: "aaaa" });
+    expect(roundDetailLines(round({ failure_signature: "bbbb" }), first)).toEqual([]);
+    expect(roundDetailLines(round({ failure_signature: "" }), round({ index: 1 }))).toEqual([]);
+    expect(roundDetailLines(round({ failure_signature: "aaaa" }), undefined)).toEqual([]);
+    const files = Array.from({ length: 11 }, (_, i) => `f${i}.go`);
+    expect(roundDetailLines(round({ blockers: [], changed_files: files }), first)).toEqual([
+      "Changed: f0.go, f1.go, f2.go, f3.go, f4.go, f5.go, f6.go, f7.go and 3 more",
+    ]);
   });
 });

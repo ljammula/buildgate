@@ -1484,6 +1484,40 @@ class WriteEvidenceJSONTests(unittest.TestCase):
 		self.assertIsNone(rnd["usage"])
 		self.assertIsNone(rnd["verify_passed"])
 
+	def test_round_feedback_fields_are_written_for_the_run_record(self):
+		# run.AgentEvidenceRound reads these five: a failed round's as
+		# recorded, a passed round's as an empty list (not omitted, so the
+		# reader tells "passed" from "not recorded") and empty strings.
+		def rnd(index, **feedback):
+			return build_app.Round(
+				index=index, agent="pi", command=["pi"], agent_returncode=0, agent_timed_out=False, usage=None,
+				traces=[], reviewer=build_app.ReviewSignal("unavailable", ""), verify_command="make test",
+				verify_passed=not feedback, verify_timed_out=False, verify_output_tail="", duration_s=1.0, **feedback,
+			)
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			result = build_app.BuildResult(workspace=workspace, spec_path=workspace / "spec.md", rounds=[
+				rnd(
+					1, blockers=["no changes made to the workspace", "canonical verification failed"], changed_files=[],
+					failure_signature="5f2c9d0a71e4b386", failure_log=".pi-build-session/feedback/verify.log",
+					agent_notes="Your previous turn ended without changing any file in the workspace.",
+				),
+				rnd(2),
+			])
+
+			payload = json.loads(build_app.write_evidence_json(result).read_text())
+
+		failed, passed = payload["rounds"]
+		self.assertEqual(failed["blockers"], ["no changes made to the workspace", "canonical verification failed"])
+		self.assertEqual(failed["changed_files"], [])
+		self.assertEqual(failed["failure_signature"], "5f2c9d0a71e4b386")
+		self.assertEqual(failed["failure_log"], ".pi-build-session/feedback/verify.log")
+		self.assertEqual(failed["agent_notes"], "Your previous turn ended without changing any file in the workspace.")
+		self.assertEqual(
+			{k: passed[k] for k in ("blockers", "changed_files", "failure_signature", "failure_log", "agent_notes")},
+			{"blockers": [], "changed_files": [], "failure_signature": "", "failure_log": "", "agent_notes": ""},
+		)
+
 	def test_empty_rounds_writes_an_empty_list_not_an_error(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)

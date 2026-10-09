@@ -43,9 +43,9 @@ How each number is counted:
   A ticket whose first run is unfinished is not in the one-shot rate. A
   ticket submitted again gets a new name and counts as a new ticket.
 - A round failed when its record lists blockers (`blockers`, with
-  `failure_signature`: the names build_app.py's round feedback uses; a run
-  record that predates them has neither). Such a record's blockers are
-  rebuilt from what the run kept: the round's outcome fields, the round-end
+  `failure_signature`: the names build_app.py's round feedback uses). A
+  round with none listed, or from a run record that predates the field, has
+  its blockers rebuilt from what the run kept: the round's outcome fields, the round-end
   line in progress.jsonl (which says whether the round failed and names one
   reason) and BUILD_REPORT.md (model route errors, a stall). The blocker
   names are the build loop's own (agent/pi/scripts/build_app.py,
@@ -296,11 +296,13 @@ def round_signatures(record: Dict[str, Any], report: str, progress: str) -> List
 	for position, rnd in enumerate(run_rounds(record), start=1):
 		index = rnd.get("index") if isinstance(rnd.get("index"), int) else position
 		recorded_blockers = rnd.get("blockers")
-		if isinstance(recorded_blockers, list):
+		# An empty recorded list is not proof of a pass: a round the build
+		# loop restored or built without computing its blockers has one
+		# too. Such a round is read like one that recorded none.
+		if isinstance(recorded_blockers, list) and recorded_blockers:
 			signature = rnd.get("failure_signature")
-			recorded = isinstance(signature, str) and signature != ""
-			usable = recorded and bool(recorded_blockers)
-			out.append((index, bool(recorded_blockers), signature if usable else "", SIGNATURE_RECORDED if usable else "", NO_CHANGES in recorded_blockers))
+			usable = isinstance(signature, str) and signature != ""
+			out.append((index, True, signature if usable else "", SIGNATURE_RECORDED if usable else "", NO_CHANGES in recorded_blockers))
 			continue
 		if kept is None:
 			kept, ends = report_rounds(report), round_ends(progress)

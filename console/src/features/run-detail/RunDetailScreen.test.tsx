@@ -705,6 +705,52 @@ describe("Timeline", () => {
     ).toBeInTheDocument();
   });
 
+  // What each round was told about the one before it: why it was blocked,
+  // what it changed, whether it failed the same way again, where the whole
+  // output is, and what happened to the agent. Agent-reported, so text only.
+  test("a failed round shows its blockers, files, repeat, log and agent notes", async () => {
+    renderRun(
+      withEvidence(acceptedRun(), [
+        evidenceRound({
+          index: 1,
+          verify_passed: false,
+          blockers: ["canonical verification failed"],
+          changed_files: ["sum.go", "sum_test.go"],
+          failure_signature: "5f2c9d0a71e4b386",
+          failure_log: ".pi-build-session/feedback/verify.log",
+        }),
+        evidenceRound({
+          index: 2,
+          verify_passed: false,
+          blockers: ["no changes made to the workspace", "canonical verification failed"],
+          changed_files: [],
+          failure_signature: "5f2c9d0a71e4b386",
+          failure_log: ".pi-build-session/feedback/verify.log",
+          agent_notes: "Your previous turn ended without changing any file.\n<b>done</b>",
+        }),
+        evidenceRound({ index: 3, blockers: [], changed_files: ["sum.go"] }),
+      ]),
+    );
+
+    expect(
+      await screen.findByText("Blocked by: canonical verification failed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Changed: sum.go, sum_test.go")).toBeInTheDocument();
+    expect(screen.getByText("Changed no files")).toBeInTheDocument();
+    expect(screen.getByText("The same failure as round 1")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "Full output saved in the build workspace: .pi-build-session/feedback/verify.log",
+      ),
+    ).toHaveLength(2);
+    expect(screen.getByText(/Round 3 · pass/)).toBeInTheDocument();
+    expect(screen.getByText("Changed: sum.go")).toBeInTheDocument();
+    const notes = screen.getByRole("region", { name: "Round 2: what happened to the agent" });
+    expect(notes).toHaveTextContent("Your previous turn ended without changing any file.");
+    expect(notes).toHaveTextContent("<b>done</b>");
+    expect(notes.querySelector("b")).toBeNull();
+  });
+
   // A round's usage with no totalTokens must still count cacheRead/cacheWrite,
   // not just input/output, so this figure agrees with the cached drafting
   // totals elsewhere in the console (operator demo, 2026-09-26).

@@ -227,6 +227,18 @@ class SameFailure(unittest.TestCase):
 		self.assertEqual(pairs["recorded"], {"same": 2, "different": 1, "same_rate": 0.6667})
 		self.assertEqual(pairs["derived"], {"same": 0, "different": 0, "same_rate": None})
 
+	def test_an_empty_recorded_blocker_list_does_not_pass_a_round_whose_fields_failed(self):
+		rounds = [
+			rnd(1, False, blockers=["canonical verification failed"], failure_signature="aaaa"),
+			rnd(2, False, blockers=[], agent_timed_out=True),
+			rnd(3, True, blockers=[]),
+		]
+		record = run("r", state="quarantined", rounds=rounds)
+		signatures = baseline.round_signatures(record, "", "")
+		self.assertEqual([s[1] for s in signatures], [True, True, False])
+		pairs = pairs_of(record)
+		self.assertEqual((pairs["pairs"], pairs["not_comparable"]), (1, 1))
+
 	def test_a_signature_is_derived_from_the_report_and_ignores_durations(self):
 		rounds = [rnd(1, False), rnd(2, False), rnd(3, False)]
 		text = report({

@@ -2,7 +2,7 @@
 // the attempt card's exit and model lines. Time is a parameter (`now`).
 import { formatTokenCount } from "@/domain/cost";
 import { formatElapsedCompact } from "@/domain/elapsed";
-import type { Attempt, GateResult, ProgressEvent, Run } from "@/domain/run";
+import type { AgentEvidenceRound, Attempt, GateResult, ProgressEvent, Run } from "@/domain/run";
 import { agentEvidenceRoundOutcome, runIsTerminal } from "@/domain/run";
 
 /**
@@ -138,6 +138,17 @@ export interface TimelineSubRow {
    * secondary style (untrusted, display-only).
    */
   readonly factoryAuthored: boolean;
+  /**
+   * What an evidence round reported about itself, one fact per line: what
+   * blocked it, the files it changed, whether it repeated the round before,
+   * where the failing output was saved. The wording is the console's; the
+   * values are agent-reported, so they render as text in the secondary style.
+   */
+  readonly detailLines: readonly string[];
+  /** The round's agent notes (agent-reported text), "" when it has none. */
+  readonly notes: string;
+  /** The accessible name of the notes block. */
+  readonly notesLabel: string;
 }
 
 export interface TimelineRow {
@@ -251,7 +262,14 @@ function row(
 function subRow(
   r: Pick<TimelineSubRow, "label" | "glyph"> & Partial<TimelineSubRow>,
 ): TimelineSubRow {
-  return { durationText: null, factoryAuthored: false, ...r };
+  return {
+    durationText: null,
+    factoryAuthored: false,
+    detailLines: [],
+    notes: "",
+    notesLabel: "",
+    ...r,
+  };
 }
 
 function label(stage: string): string {
@@ -364,8 +382,11 @@ function latestBuildNote(factoryEvents: readonly ProgressEvent[]): string | null
 function evidenceRoundSubRows(run: TimelineRun): readonly TimelineSubRow[] {
   if (!runIsTerminal(run)) return [];
   const rounds = run.agentEvidence?.rounds ?? [];
-  return rounds.map((rd) =>
+  return rounds.map((rd, i) =>
     subRow({
+      detailLines: roundDetailLines(rd, i > 0 ? rounds[i - 1] : undefined),
+      notes: rd.agentNotes,
+      notesLabel: `Round ${rd.index}: what happened to the agent`,
       label: [
         `Round ${rd.index}`,
         agentEvidenceRoundOutcome(rd),
@@ -376,6 +397,44 @@ function evidenceRoundSubRows(run: TimelineRun): readonly TimelineSubRow[] {
       factoryAuthored: true,
     }),
   );
+}
+
+/** How many changed files a round's line names before "and N more". */
+const ROUND_FILES_SHOWN = 8;
+
+/**
+ * The facts a round reported, in the order an operator asks them: why it was
+ * blocked, what it changed, whether that was the previous round's failure
+ * again, and where the whole failing output is. A round recorded without
+ * these fields has no lines.
+ */
+export function roundDetailLines(
+  rd: AgentEvidenceRound,
+  previous: AgentEvidenceRound | undefined,
+): readonly string[] {
+  const lines: string[] = [];
+  if (rd.blockers !== null && rd.blockers.length > 0) {
+    lines.push(`Blocked by: ${rd.blockers.join("; ")}`);
+  }
+  if (rd.changedFiles !== null) {
+    const shown = rd.changedFiles.slice(0, ROUND_FILES_SHOWN).join(", ");
+    const more = rd.changedFiles.length - ROUND_FILES_SHOWN;
+    lines.push(
+      rd.changedFiles.length === 0
+        ? "Changed no files"
+        : `Changed: ${shown}${more > 0 ? ` and ${more} more` : ""}`,
+    );
+  }
+  if (
+    previous !== undefined &&
+    rd.failureSignature !== "" &&
+    rd.failureSignature === previous.failureSignature
+  ) {
+    lines.push(`The same failure as round ${previous.index}`);
+  }
+  if (rd.failureLog !== "")
+    lines.push(`Full output saved in the build workspace: ${rd.failureLog}`);
+  return lines;
 }
 
 interface RoundInfo {

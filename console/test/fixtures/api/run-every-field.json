@@ -135,7 +135,16 @@
         "verify_timed_out": true,
         "duration_s": 1.5,
         "fast_check_ran": true,
-        "fast_check_passed": true
+        "fast_check_passed": true,
+        "blockers": [
+          "every-field blockers"
+        ],
+        "changed_files": [
+          "every-field changed_files"
+        ],
+        "failure_signature": "every-field failure_signature",
+        "failure_log": "every-field failure_log",
+        "agent_notes": "every-field agent_notes"
       }
     ],
     "agents_md_used": true,

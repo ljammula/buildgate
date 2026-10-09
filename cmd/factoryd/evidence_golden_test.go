@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"buildgate/internal/codereview"
@@ -72,14 +73,51 @@ func TestBuildEvidenceGoldenParsesWithLoadAgentEvidence(t *testing.T) {
 			if len(r.AgentEvidence.Rounds) == 0 {
 				t.Fatal("Rounds is empty, want at least one recorded round")
 			}
-			if r.AgentEvidence.Rounds[0].VerifyPassed == nil || !*r.AgentEvidence.Rounds[0].VerifyPassed {
-				t.Error("Rounds[0].VerifyPassed = nil/false, want true")
+			last := r.AgentEvidence.Rounds[len(r.AgentEvidence.Rounds)-1]
+			if last.VerifyPassed == nil || !*last.VerifyPassed {
+				t.Error("the last round's VerifyPassed = nil/false, want true")
+			}
+			if name != "build_evidence.json" {
+				return
+			}
+			// The generated golden's first round failed and carries what
+			// the next round was told about it.
+			first := r.AgentEvidence.Rounds[0]
+			if len(first.Blockers) != 1 || len(first.ChangedFiles) != 2 || first.FailureSignature == "" || first.FailureLog == "" {
+				t.Errorf("Rounds[0] feedback = %+v, want blockers, changed files, a signature and a log", first)
+			}
+			if last.Blockers == nil || len(last.Blockers) != 0 {
+				t.Errorf("the passed round's Blockers = %#v, want empty and non-nil", last.Blockers)
 			}
 		})
 	}
 }
 
-// TestBuildEvidenceUnknownSchemaVersionIsToleratedNotRejected pins
+// TestLoadAgentEvidenceCleansRoundFeedbackBeforeRecording: the evidence file
+// is the build agent's to write, so the text it puts in a round's feedback
+// fields is cut and cleaned on the way into the run record, not later.
+func TestLoadAgentEvidenceCleansRoundFeedbackBeforeRecording(t *testing.T) {
+	workspace := t.TempDir()
+	raw := []byte(`{"schema_version":2,"succeeded":false,"stopped_reason":"x","rounds":[{"index":1,"verify_passed":false,
+		"blockers":["canonical\u001b[2J verification failed"],"changed_files":["a.go"],
+		"failure_log":"logs/\u202everify.log","agent_notes":"Authorization: Bearer abcdef0123456789\u0007"}]}`)
+	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := &run.Run{ID: "run-1"}
+	loadAgentEvidence(r, workspace, t.TempDir(), "run-1")
+	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) != 1 {
+		t.Fatalf("AgentEvidence = %+v, want one round", r.AgentEvidence)
+	}
+	rd := r.AgentEvidence.Rounds[0]
+	if rd.Blockers[0] != "canonical verification failed" || rd.FailureLog != "logs/verify.log" {
+		t.Errorf("Blockers = %q, FailureLog = %q, want the escape and the direction override removed", rd.Blockers, rd.FailureLog)
+	}
+	if strings.Contains(rd.AgentNotes, "abcdef0123456789") || strings.ContainsRune(rd.AgentNotes, '\a') {
+		t.Errorf("AgentNotes = %q, want the credential and the bell removed", rd.AgentNotes)
+	}
+}
+
 // loadAgentEvidence's deliberate exception to "reject an unknown version":
 // BUILD_EVIDENCE.json is best-effort by design (run.AgentEvidence's own
 // doc comment) -- a future schema_version still parses successfully here

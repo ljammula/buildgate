@@ -307,6 +307,7 @@ func loadAgentEvidence(r *run.Run, workspace, dataDir, id string) {
 			default:
 				fmt.Printf("run %s: warning: BUILD_EVIDENCE.json schema_version %d, this factoryd understands %d -- fields may have moved or changed shape since\n", id, agentEvidence.SchemaVersion, run.AgentEvidenceSchemaVersion)
 			}
+			agentEvidence.CleanRoundFeedback()
 			r.AgentEvidence = &agentEvidence
 		}
 	}

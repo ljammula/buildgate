@@ -330,7 +330,12 @@ Real, currently-open gaps.
   is schema-versioned (`run.AgentEvidenceSchemaVersion`) and live-verified
   against the real local model; its read path has the same
   symlink/named-pipe/oversized-file protections as the build report
-  (`evidence.ReadHostileFile`).
+  (`evidence.ReadHostileFile`). The per-round feedback text it carries
+  (blockers, changed files, failure signature, log name, agent notes) is
+  cut to fixed sizes and stripped of terminal escapes, control characters
+  and recognisable secrets before it is recorded
+  (`TestCleanRoundFeedbackBoundsAndCleansAgentText`), and is shown by the
+  console as text only.
 - **UID/GID identity validation never conflates a non-root UID with GID 0.**
   Both the CLI preflight (`validateDefaultSandboxIdentity`) and the sandbox
   launch check `LaunchSpec.Validate` calls (`internal/sandbox/docker.go`'s
