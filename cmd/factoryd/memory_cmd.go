@@ -348,7 +348,7 @@ func (mc *memoryCmd) add(ctx context.Context, args []string) error {
 	}
 	lesson, err := memory.NewLesson(memory.NormaliseNote(args[0]), memory.SourceOperator, mc.stamp())
 	if err != nil {
-		return fmt.Errorf("%w\na line is one plain sentence of at most 120 characters: letters, digits, spaces and . , : ; ( ) ' \" / _ = + - only, with commands quoted in backticks; no address, home path, secret or markup", err)
+		return fmt.Errorf("%w\na line is one plain sentence of at most 120 characters: letters, digits, spaces and . , : ; ( ) ' \" / = + - only, with a command quoted in backticks (where _ is also allowed); no address, path from the root, long token or markup", err)
 	}
 	_, section, err := memorySectionAtHead(ctx, mc.dp, mc.repoRoot)
 	if err != nil {
