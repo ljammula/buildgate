@@ -10,9 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -23,7 +23,14 @@ const (
 	maxCommitDirFiles     = 2000
 	maxCommitDirBlobBytes = 4 << 20
 	maxCommitDirBytes     = 16 << 20
+	// maxCommitDirRecords bounds the tree and blob records of the listing,
+	// whatever they hold: a tree whose subtrees share objects lists
+	// exponentially many paths from a handful of objects.
+	maxCommitDirRecords = 20000
 )
+
+// commitDirTimeout is the deadline of one whole snapshot.
+var commitDirTimeout = 60 * time.Second
 
 var commitObjectIDPattern = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
@@ -61,6 +68,8 @@ func SnapshotCommitDir(ctx context.Context, repoDir, commitSHA, name, dst string
 	if err := validateCommitDirName(name); err != nil {
 		return CommitDirSnapshot{}, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, commitDirTimeout)
+	defer cancel()
 	if !commitObjectIDPattern.MatchString(commitSHA) {
 		return CommitDirSnapshot{}, commitDirRefuse("commit %q is not a full object id", commitSHA)
 	}
@@ -68,7 +77,9 @@ func SnapshotCommitDir(ctx context.Context, repoDir, commitSHA, name, dst string
 		return CommitDirSnapshot{}, fmt.Errorf("%w: %w", ErrCommitDirSnapshot, err)
 	}
 	defer func() {
-		if err != nil && !errors.Is(err, ErrCommitDirSnapshot) {
+		if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("%w: deadline of %v exceeded: %v", ErrCommitDirSnapshot, commitDirTimeout, err)
+		} else if err != nil && !errors.Is(err, ErrCommitDirSnapshot) {
 			err = fmt.Errorf("%w: %w", ErrCommitDirSnapshot, err)
 		}
 	}()
@@ -83,7 +94,7 @@ func SnapshotCommitDir(ctx context.Context, repoDir, commitSHA, name, dst string
 	if err != nil {
 		return CommitDirSnapshot{}, err
 	}
-	return writeCommitDir(ctx, repoDir, tree, name, dst, files)
+	return writeCommitDir(ctx, repoDir, tree, name, dst, files.records, files.files)
 }
 
 func validateCommitDirName(name string) error {
@@ -143,6 +154,8 @@ func parseCommitDirRecord(rec string) (commitDirEntry, error) {
 // scanCommitDirRecords streams ls-tree -z output for the given arguments,
 // handing each parsed record to fn.
 func scanCommitDirRecords(ctx context.Context, repoDir string, fn func(commitDirEntry) error, args ...string) error {
+	ctx, kill := context.WithCancel(ctx)
+	defer kill()
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
@@ -169,6 +182,9 @@ func scanCommitDirRecords(ctx context.Context, repoDir string, fn func(commitDir
 		}
 		return sc.Err()
 	}()
+	if err != nil {
+		kill() // stop reading the rest of the tree: git is killed, not drained
+	}
 	pr.CloseWithError(errors.New("done"))
 	if gerr := <-done; err == nil && gerr != nil {
 		err = gerr
@@ -210,21 +226,31 @@ func findCommitDirTree(ctx context.Context, repoDir, sha, name string) (string, 
 	return hits[0].oid, true, nil
 }
 
-// commitDirLister checks each entry of a recursive listing against every
-// rule that needs no blob, and keeps the regular files.
+// commitDirLister checks each record of a recursive listing (trees included)
+// against every rule that needs no blob, and keeps the records in listing
+// order, which lists a tree before what is in it.
 type commitDirLister struct {
 	prefix   string // the directory's name, shown before each path in a refusal
-	files    []commitDirEntry
+	records  []commitDirEntry
+	files    int
 	total    int64
+	seen     map[string]bool   // exact paths listed
 	siblings map[string]string // parent path + NUL + folded name -> spelling
 }
 
 func (l *commitDirLister) add(e commitDirEntry) error {
-	q := strconv.Quote(l.prefix + "/" + e.path)
-	if err := l.checkNames(e.path); err != nil {
+	shown := l.prefix + "/" + e.path
+	q := strconv.Quote(shown)
+	if len(l.records) >= maxCommitDirRecords {
+		return commitDirRefuse("more than %d entries (at %s)", maxCommitDirRecords, q)
+	}
+	if err := l.checkName(e.path, shown); err != nil {
 		return err
 	}
 	switch {
+	case e.typ == "tree" && e.mode == "040000":
+		l.records = append(l.records, e)
+		return nil
 	case e.mode == "120000":
 		return commitDirRefuse("%s is a symlink", q)
 	case e.typ == "commit" || e.mode == "160000":
@@ -235,49 +261,54 @@ func (l *commitDirLister) add(e commitDirEntry) error {
 		return commitDirRefuse("%s has no size", q)
 	case e.size > maxCommitDirBlobBytes:
 		return commitDirRefuse("%s is %d bytes, over %d", q, e.size, maxCommitDirBlobBytes)
-	case len(l.files) >= maxCommitDirFiles:
+	case l.files >= maxCommitDirFiles:
 		return commitDirRefuse("more than %d files (at %s)", maxCommitDirFiles, q)
 	case l.total+e.size > maxCommitDirBytes:
 		return commitDirRefuse("more than %d bytes in total (at %s)", maxCommitDirBytes, q)
 	}
 	l.total += e.size
-	l.files = append(l.files, e)
+	l.files++
+	l.records = append(l.records, e)
 	return nil
 }
 
-func (l *commitDirLister) checkNames(p string) error {
-	shown := l.prefix + "/" + p
-	parts := strings.Split(p, "/")
-	for i, c := range parts {
-		switch {
-		case c == "" || c == "." || c == "..":
-			return commitDirRefuse("%s has an empty, . or .. component", strconv.Quote(shown))
-		case strings.ContainsAny(c, "\\\n\x00") || !utf8.ValidString(c):
-			return commitDirRefuse("%s has a name with a NUL, newline, backslash or invalid UTF-8", strconv.Quote(shown))
-		case foldName(c) == foldedGit:
-			return commitDirRefuse("%s has a component that folds to .git", strconv.Quote(shown))
-		}
-		key := strings.Join(parts[:i], "/") + "\x00" + foldName(c)
-		if prev, ok := l.siblings[key]; ok && prev != c {
-			return commitDirRefuse("%s and %s fold to the same name", strconv.Quote(strings.Join(append([]string{l.prefix}, append(append([]string{}, parts[:i]...), prev)...), "/")), strconv.Quote(strings.Join(append([]string{l.prefix}, parts[:i+1]...), "/")))
-		}
-		l.siblings[key] = c
+// checkName checks the last component of p (its parents were records before
+// it): a usable name, listed once, and not folding like a sibling.
+func (l *commitDirLister) checkName(p, shown string) error {
+	parent, c := "", p
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		parent, c = p[:i], p[i+1:]
 	}
+	switch {
+	case c == "" || c == "." || c == "..":
+		return commitDirRefuse("%s has an empty, . or .. component", strconv.Quote(shown))
+	case strings.ContainsAny(c, "\\\n\x00") || !utf8.ValidString(c):
+		return commitDirRefuse("%s has a name with a NUL, newline, backslash or invalid UTF-8", strconv.Quote(shown))
+	case foldName(c) == foldedGit:
+		return commitDirRefuse("%s has a component that folds to .git", strconv.Quote(shown))
+	case l.seen[p]:
+		return commitDirRefuse("%s is listed more than once in its tree", strconv.Quote(shown))
+	}
+	l.seen[p] = true
+	key := parent + "\x00" + foldName(c)
+	if prev, ok := l.siblings[key]; ok {
+		return commitDirRefuse("%s and %s fold to the same name", strconv.Quote(l.prefix+"/"+joinSlash(parent, prev)), strconv.Quote(shown))
+	}
+	l.siblings[key] = c
 	return nil
 }
 
-// listCommitDir lists every file below the tree and refuses what must not be
-// snapshotted, before a single blob is read.
-func listCommitDir(ctx context.Context, repoDir, tree, name string) ([]commitDirEntry, error) {
-	l := &commitDirLister{prefix: name, siblings: map[string]string{}}
-	if err := scanCommitDirRecords(ctx, repoDir, l.add, "ls-tree", "-r", "-z", "-l", tree); err != nil {
+// listCommitDir lists every tree and file below the tree and refuses what
+// must not be snapshotted, before a single blob is read.
+func listCommitDir(ctx context.Context, repoDir, tree, name string) (*commitDirLister, error) {
+	l := &commitDirLister{prefix: name, seen: map[string]bool{}, siblings: map[string]string{}}
+	if err := scanCommitDirRecords(ctx, repoDir, l.add, "ls-tree", "-r", "-t", "-z", "-l", tree); err != nil {
 		return nil, err
 	}
-	sort.Slice(l.files, func(i, j int) bool { return l.files[i].path < l.files[j].path })
-	return l.files, nil
+	return l, nil
 }
 
-func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, files []commitDirEntry) (snap CommitDirSnapshot, err error) {
+func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, records []commitDirEntry, nfiles int) (snap CommitDirSnapshot, err error) {
 	root := filepath.Join(dst, name)
 	dstExisted := true
 	if _, serr := os.Lstat(dst); errors.Is(serr, fs.ErrNotExist) {
@@ -295,10 +326,18 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, files 
 			discardCommitDir(root, dst, dstExisted)
 		}
 	}()
-	for _, e := range files {
+	for _, e := range records {
 		out := filepath.Join(root, filepath.FromSlash(e.path))
 		if err := ensureContainedPath(root, out); err != nil {
 			return snap, commitDirRefuse("%v", err)
+		}
+		if e.typ == "tree" {
+			// Mkdir, never MkdirAll: the parent was made from its own record,
+			// so "exists" is two names the filesystem treats as one.
+			if err := os.Mkdir(out, 0o755); err != nil {
+				return snap, commitDirCollision(e.path, err)
+			}
+			continue
 		}
 		if err := writeCommitDirFile(ctx, repoDir, out, e); err != nil {
 			return snap, err
@@ -315,7 +354,7 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, files 
 	if err != nil {
 		return snap, err
 	}
-	return CommitDirSnapshot{Mask: &mask, TreeOID: tree, SHA256: sum, Files: len(files)}, nil
+	return CommitDirSnapshot{Mask: &mask, TreeOID: tree, SHA256: sum, Files: nfiles}, nil
 }
 
 func writeCommitDirFile(ctx context.Context, repoDir, out string, e commitDirEntry) error {
@@ -326,17 +365,33 @@ func writeCommitDirFile(ctx context.Context, repoDir, out string, e commitDirEnt
 	if int64(len(body)) != e.size {
 		return commitDirRefuse("%s read %d bytes, listed %d", strconv.Quote(e.path), len(body), e.size)
 	}
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return err
-	}
-	if err := writeSnapshotFile(out, body, e.exec()); err != nil {
-		return err
-	}
 	mode := os.FileMode(0o444)
 	if e.exec() {
 		mode = 0o555
 	}
+	// O_EXCL: a file that is already there is another name the filesystem
+	// treats as this one.
+	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return commitDirCollision(e.path, err)
+	}
+	_, werr := f.Write(body)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return werr
+	}
 	return os.Chmod(out, mode)
+}
+
+// commitDirCollision is the refusal for a path the destination already holds
+// (two names the filesystem folds together) or cannot create.
+func commitDirCollision(p string, err error) error {
+	if errors.Is(err, fs.ErrExist) {
+		return commitDirRefuse("%s already exists on the destination filesystem: it folds to another name in the same directory", strconv.Quote(p))
+	}
+	return commitDirRefuse("create %s: %v", strconv.Quote(p), err)
 }
 
 // lockCommitDir makes every directory 0555, children before parents.

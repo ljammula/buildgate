@@ -202,9 +202,19 @@ func (ip instrPath) relevant() bool { return ip.n > 0 || (ip.lead > 0 && ip.lead
 // ---- git ----
 
 // reviewGitEnv is the environment of every git call here: no pathspec magic
-// (a name is a literal), no lock, prompt or system configuration.
+// (a name is a literal), no lock, prompt, system or user configuration, no
+// replace refs and no lazy fetch. Every GIT_ variable of the caller's
+// environment is dropped first (GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY,
+// GIT_CONFIG_*, GIT_REPLACE_REF_BASE and the rest redirect or alter a read), so
+// only what is set here reaches git.
 func reviewGitEnv() []string {
-	return append(os.Environ(), "GIT_LITERAL_PATHSPECS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1", "GIT_CONFIG_NOSYSTEM=1")
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "GIT_LITERAL_PATHSPECS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1")
 }
 
 // reviewGitArgs is the argv after "git" for running git in dir with nothing
@@ -215,6 +225,7 @@ func reviewGitArgs(dir string, args ...string) []string {
 		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
 		"-c", "core.pager=cat", "-c", "diff.external=",
 		"-c", "core.attributesFile=/dev/null",
+		"-c", "protocol.allow=never",
 		"-C", dir,
 	}, args...)
 }
