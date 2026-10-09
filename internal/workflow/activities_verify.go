@@ -130,6 +130,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 		attempts = append(attempts, run.Attempt{
 			Kind:        v.kind,
 			Command:     res.Command,
+			SetupSHA256: run.SetupDigest(input.SetupCommands),
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -314,6 +315,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 		attempts = append(attempts, run.Attempt{
 			Kind:        "full_suite_verify",
 			Command:     res.Command,
+			SetupSHA256: run.SetupDigest(input.SetupCommands),
 			StartedAt:   res.StartedAt.Format(time.RFC3339),
 			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 			ExitCode:    res.ExitCode,
@@ -561,6 +563,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		attempts = append(attempts, run.Attempt{
 			Kind:                  input.Check,
 			Command:               res.Command,
+			SetupSHA256:           run.SetupDigest(input.SetupCommands),
 			StartedAt:             res.StartedAt.Format(time.RFC3339),
 			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
 			ExitCode:              res.ExitCode,
@@ -765,7 +768,11 @@ func writeBaselineBuildNote(logDir string, record *run.BaselineVerify) (string, 
 // judgeBaseline builds the baseline record of a finished launch from its
 // log and the ticket's text.
 func (a *Activities) judgeBaseline(input RunWorkflowInput, res VerifyActivityResult, created []string) *run.BaselineVerify {
-	record := baseline.Evaluate(a.verifyCommandFor(input), res.Result.ExitCode, readFileTail(res.Result.LogPath, baselineLogTailBytes), triage.FirstFailureLine(res.Result.LogPath), a.ticketTextFor(input), created)
+	evaluate := baseline.Evaluate
+	if len(input.SetupCommands) > 0 {
+		evaluate = baseline.EvaluateWithSetup
+	}
+	record := evaluate(a.verifyCommandFor(input), res.Result.ExitCode, readFileTail(res.Result.LogPath, baselineLogTailBytes), triage.FirstFailureLine(res.Result.LogPath), a.ticketTextFor(input), created)
 	record.BaseSHA = input.BaseSHA
 	record.LogPath = res.Result.LogPath
 	record.DurationMs = res.DurationMs

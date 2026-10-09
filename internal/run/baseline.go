@@ -1,6 +1,9 @@
 package run
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,6 +30,35 @@ func SetupFailedCommand(log string) string {
 		}
 	}
 	return ""
+}
+
+// SetupDigest is the hex SHA-256 over the setup commands, each prefixed by its
+// length so no two lists share a digest; "" for an empty list. A step records
+// it (Attempt.SetupSHA256) to say which setup commands it ran.
+func SetupDigest(setup []string) string {
+	if len(setup) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	for _, c := range setup {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(c)))
+		h.Write(n[:])
+		h.Write([]byte(c))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// SetupNotRunMessage is the Command of the canonical_verify result recorded,
+// with exit -1, for an accepted run whose verify attempt does not carry the
+// digest of the repository's setup commands: a worker older than `setup:`
+// judged the run. Nothing a build can do changes it, so it is the operator's.
+const SetupNotRunMessage = "buildgate: this worker did not run the repository's setup commands (it predates them): restart the worker with `factoryd restart`"
+
+// SetupNotRun reports whether g is the result recorded for a run whose verify
+// did not run the repository's setup commands (SetupNotRunMessage).
+func (g GateResult) SetupNotRun() bool {
+	return g.Check == "canonical_verify" && !g.Passed && g.ExitCode == -1 && len(g.Command) == 1 && g.Command[0] == SetupNotRunMessage
 }
 
 // BaselineVerifyAttemptKind is Attempt.Kind of the verify command's run on

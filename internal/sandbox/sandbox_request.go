@@ -32,7 +32,9 @@ const (
 )
 
 // Exit codes of the worker command's wrapper, which no worker output
-// accompanies: the wrapper exits before it redirects output.
+// accompanies: the wrapper exits before it redirects output. The exception is
+// WorkerExitSetupFailed, which is the step's own script's exit, after the
+// wrapper redirected output, and leaves a line in the output naming the command.
 const (
 	// WorkerExitNoGo: the factory never released the command.
 	WorkerExitNoGo = 96

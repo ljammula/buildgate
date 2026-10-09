@@ -147,6 +147,9 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 	case "spec_conformity":
 		return triageSpecConformity(r, dataDir, forOperator)
 	case "canonical_verify":
+		if g.SetupNotRun() {
+			return "canonical_verify: " + run.SetupNotRunMessage
+		}
 		if s := triageNoChanges(r); s != "" {
 			return s
 		}
@@ -527,11 +530,12 @@ func triageNoChanges(r *run.Run) string {
 // off entirely. Every other caller (spec_conformity's own fallback, the
 // default case) passes 0.
 func triageLogGate(r *run.Run, check string, suffixReserve int) string {
-	logPath, exitCode, ok := attemptLogForCheck(r, check)
+	attempt, ok := attemptForCheck(r, check)
 	if !ok {
 		return ""
 	}
-	if sentence := setupFailureSentence(check, logPath, exitCode); sentence != "" {
+	logPath, exitCode := attempt.LogPath, attempt.ExitCode
+	if sentence := setupFailureSentence(check, attempt, suffixReserve); sentence != "" {
 		return sentence
 	}
 	if marker, wholeLine := extractFailureMarker(logPath); marker != "" {
@@ -556,18 +560,22 @@ func triageLogGate(r *run.Run, check string, suffixReserve int) string {
 	return ""
 }
 
-// setupFailureSentence words a step that exited run.SetupFailedExitCode: its
-// repository setup command failed, and the step's log names the command. ""
-// for any other exit, or a log that names none.
-func setupFailureSentence(check, logPath string, exitCode int) string {
-	if exitCode != run.SetupFailedExitCode {
+// setupFailureSentence words a step that exited run.SetupFailedExitCode after
+// running the repository's setup commands (its attempt carries their digest):
+// one failed, and the step's log names it. The name is the log's text, so it
+// is quoted as every log-derived sentence quotes. "" for any other step: a
+// step that ran no setup exits 95 for its own reasons, and a line it prints
+// is not the factory's to word.
+func setupFailureSentence(check string, a run.Attempt, suffixReserve int) string {
+	if a.ExitCode != run.SetupFailedExitCode || a.SetupSHA256 == "" {
 		return ""
 	}
-	cmd := run.SetupFailedCommand(readLogTail(logPath))
+	cmd := run.SetupFailedCommand(readLogTail(a.LogPath))
 	if cmd == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s failed: setup failed: %s", check, truncateMarker(sanitize.Line(cmd)))
+	prefix := fmt.Sprintf("%s failed; setup command failed: ", check)
+	return prefix + safeQuote(sanitize.Line(cmd), maxTriageSentenceLen-len(prefix)-suffixReserve)
 }
 
 // passedInsideTheBuildSuffix says, for a failed canonical_verify, that the
@@ -613,7 +621,7 @@ func otherFailingGatesSuffix(r *run.Run, check string) string {
 	return fmt.Sprintf(" (+%d more failing gate%s)", count, progress.Plural(count))
 }
 
-// attemptLogForCheck finds the log evidence for a failing named/canonical
+// attemptForCheck finds the log evidence for a failing named/canonical
 // gate. canonical_verify is special: it fails when either the build or
 // the verify exit code is nonzero (policy.CanonicalVerify), but the
 // gate's own recorded ExitCode is always the verify command's -- so a
@@ -621,21 +629,14 @@ func otherFailingGatesSuffix(r *run.Run, check string) string {
 // attempt's own log otherwise. Every other check's Attempt.Kind is
 // recorded identically to its GateResult.Check (see run_ticket.go's
 // runGate/full-suite/spec-conformity attempt construction).
-func attemptLogForCheck(r *run.Run, check string) (logPath string, exitCode int, ok bool) {
+func attemptForCheck(r *run.Run, check string) (run.Attempt, bool) {
 	if check == "canonical_verify" {
 		if a, found := lastAttempt(r, "build"); found && a.ExitCode != 0 {
-			return a.LogPath, a.ExitCode, true
+			return a, true
 		}
-		if a, found := lastAttempt(r, "verify"); found {
-			return a.LogPath, a.ExitCode, true
-		}
-		return "", 0, false
+		return lastAttempt(r, "verify")
 	}
-	a, found := lastAttempt(r, check)
-	if !found {
-		return "", 0, false
-	}
-	return a.LogPath, a.ExitCode, true
+	return lastAttempt(r, check)
 }
 
 // lastAttempt returns the LAST attempt of the given kind, matching

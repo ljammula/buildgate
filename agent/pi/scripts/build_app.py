@@ -2064,6 +2064,15 @@ def run_build(
 	if resume is None:
 		persist(0, prompt)
 
+	# The repository's setup commands run once before the first agent turn, so
+	# the agent works in a prepared tree; the same helper (timeout, captured
+	# output) reruns them before each round's checks. A failure ends the build
+	# here, without a model call, as a build that did not pass.
+	started_setup_failed, _ = run_setup(workspace, setup_commands or [], session_dir / "feedback" / "setup")
+	if started_setup_failed is not None:
+		result.stopped_reason = SETUP_FAILED_BLOCKER + started_setup_failed[:200]
+		return result
+
 	for round_index in range(first_round, max_rounds + 1):
 		continue_session = round_index > first_round
 		command = adapter.invocation(
@@ -2321,7 +2330,7 @@ def run_build(
 			timed_out = False
 		duration = time.monotonic() - started
 		fingerprint_after = workspace_fingerprint(workspace)
-		_, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
+		sonnet_setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
 			fast_check_command=fast_check_command,
 		)
@@ -2360,6 +2369,8 @@ def run_build(
 		if not timed_out and returncode == 0 and verify_passed is True and sonnet_oracle_passed is not False and not sonnet_no_changes:
 			result.succeeded = True
 			result.stopped_reason = "Sonnet fallback passed canonical verification"
+		elif sonnet_setup_failed is not None:
+			result.stopped_reason = f"Sonnet fallback's {SETUP_FAILED_BLOCKER}{sonnet_setup_failed[:200]}"
 		elif sonnet_no_changes:
 			result.stopped_reason = "Sonnet fallback made no changes to the workspace"
 		elif fast_check_ran and fast_check_passed is False:
@@ -2704,8 +2715,9 @@ def main() -> int:
 		"--setup-command",
 		action="append",
 		default=None,
-		help="A repository setup command (`.factory.yml` setup:), repeatable. Rerun in order "
-		"in the workspace before each round's fast check and verify; one that fails fails the "
+		help="A repository setup command (`.factory.yml` setup:), repeatable. Run in order "
+		"in the workspace once before the first agent turn (a failure ends the build without "
+		"one) and again before each round's fast check and verify; one that fails fails the "
 		"round and the checks are skipped. Omitted (the default) runs nothing extra.",
 	)
 	parser.add_argument(

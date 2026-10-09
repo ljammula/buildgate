@@ -166,6 +166,19 @@ func wordByte(b byte) bool {
 	return b == '_' || b == '/' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= 0x80
 }
 
+// EvaluateWithSetup is Evaluate for a command that ran after the repository's
+// setup commands (`.factory.yml` setup:): an exit of run.SetupFailedExitCode
+// whose log names a setup command is a setup failure, not a verify failure.
+// A command that ran no setup is judged by Evaluate alone, whatever it exits.
+func EvaluateWithSetup(command string, exitCode int, log, firstError, ticket string, created []string) *run.BaselineVerify {
+	if exitCode == run.SetupFailedExitCode {
+		if setup := run.SetupFailedCommand(log); setup != "" {
+			return &run.BaselineVerify{Command: command, ExitCode: exitCode, SetupFailed: sanitize.Line(setup)}
+		}
+	}
+	return Evaluate(command, exitCode, log, firstError, ticket, created)
+}
+
 // Evaluate judges a verify command's run on the base commit: exitCode and
 // log are the command's, firstError the log's first recognised error line
 // (used only when no test was named), ticket the text of the ticket the
@@ -175,12 +188,6 @@ func Evaluate(command string, exitCode int, log, firstError, ticket string, crea
 	b := &run.BaselineVerify{Command: command, ExitCode: exitCode, Passed: exitCode == 0}
 	if b.Passed {
 		return b
-	}
-	if exitCode == run.SetupFailedExitCode {
-		if setup := run.SetupFailedCommand(log); setup != "" {
-			b.SetupFailed = sanitize.Line(setup)
-			return b
-		}
 	}
 	failures := Failures(log)
 	b.FailingCount = len(failures)

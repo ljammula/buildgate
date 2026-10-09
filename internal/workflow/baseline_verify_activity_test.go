@@ -442,6 +442,7 @@ func TestRestoringTheBaseCommitRunsNoHookFromTheWorkspace(t *testing.T) {
 func TestBaselineSetupFailureHaltsNamingTheCommand(t *testing.T) {
 	input := fixtureInput()
 	input.WorkspacePath = baselineRepo(t)
+	input.SetupCommands = []string{"npm ci"}
 	_, err, logDir, launches := runBaselineActivity(t, input, "## Goal\nstrip the mark\n", "buildgate: setup failed: npm ci\n", 95, nil)
 	var appErr *temporal.ApplicationError
 	if !errors.As(err, &appErr) || appErr.Type() != BaselineVerifyFailureType || !appErr.NonRetryable() {
@@ -461,5 +462,20 @@ func TestBaselineSetupFailureHaltsNamingTheCommand(t *testing.T) {
 	}
 	if got := HaltReasonCodeFromError(err); got != run.HaltReasonBaselineVerifyFailed {
 		t.Errorf("halt reason = %q, want %q", got, run.HaltReasonBaselineVerifyFailed)
+	}
+}
+
+// A repository with no setup commands whose verify prints the setup line and
+// exits 95 is judged as any failing verify: its text names no setup command.
+func TestBaselineWithoutSetupIgnoresTheSetupLine(t *testing.T) {
+	input := fixtureInput()
+	input.WorkspacePath = baselineRepo(t)
+	_, err, logDir, _ := runBaselineActivity(t, input, "## Goal\nstrip the mark\n", "buildgate: setup failed: npm ci\n", 95, nil)
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || strings.Contains(appErr.Message(), "setup fails") {
+		t.Fatalf("error = %v, want a halt that does not name a setup failure", err)
+	}
+	if record := loadBaselineRecord(t, logDir); record.SetupFailed != "" {
+		t.Errorf("SetupFailed = %q for a run with no setup", record.SetupFailed)
 	}
 }

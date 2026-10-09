@@ -347,6 +347,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 			Kind:                  "build",
 			ResumedFromCheckpoint: resumed.SnapshotSHA,
 			Command:               res.Command,
+			SetupSHA256:           run.SetupDigest(input.SetupCommands),
 			StartedAt:             res.StartedAt.Format(time.RFC3339),
 			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
 			ExitCode:              res.ExitCode,
@@ -406,7 +407,6 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: "build", Elapsed: time.Since(buildHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
-			wrapped := wrapWithSetup(input.SetupCommands, append([]string{buildAppInterpreter}, args...))
 			return a.runWithRetriesFn()(
 				ctx,
 				input.WorkspacePath,
@@ -414,15 +414,15 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 				a.buildMaxAttemptsFor(input),
 				beforeAttempt,
 				afterAttempt,
-				wrapped[0],
-				wrapped[1:]...,
+				buildAppInterpreter,
+				args...,
 			)
 		}
 		skills, err := a.boundSkills(relayRoleExecution, input.Skills)
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithSetup(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, input.SetupCommands, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
 	})
 	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
 	result := BuildActivityResult{Result: subResult, Attempts: withInherited(inherited, attempts)}

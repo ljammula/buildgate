@@ -247,6 +247,7 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 			recorded := run.Attempt{
 				Kind:        kind,
 				Command:     res.Command,
+				SetupSHA256: run.SetupDigest(input.SetupCommands),
 				StartedAt:   res.StartedAt.Format(time.RFC3339),
 				FinishedAt:  res.FinishedAt.Format(time.RFC3339),
 				ExitCode:    res.ExitCode,

@@ -1255,34 +1255,75 @@ class SetupCommandTests(unittest.TestCase):
 					root, spec, max_rounds=2, timeout_minutes=1,
 					setup_commands=["echo one >> trace", "echo two >> trace"],
 				)
-			self.assertEqual(seen, ["one\ntwo\n", "one\ntwo\none\ntwo\n"])
+			self.assertEqual(seen, ["one\ntwo\n" * 2, "one\ntwo\n" * 3])
 			self.assertTrue((root / ".pi-build-session" / "feedback" / "round-1" / "setup.log").is_file())
 
 	def test_setup_failure_fails_the_round_and_is_fed_back(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
 			result, verification, prompt = self.build(
-				root, setup_commands=["echo started >> trace", "echo oops; exit 7", "echo never >> trace"],
+				root, setup_commands=["echo started >> trace", "[ -e flag ] && { echo oops; exit 7; }; touch flag", "echo never >> trace"],
 				verify_results=[], max_rounds=1,
 			)
 			verification.assert_not_called()
 			self.assertFalse(result.succeeded)
 			rnd = result.rounds[0]
-			self.assertIn("setup command failed: echo oops; exit 7", rnd.blockers)
+			self.assertIn("setup command failed: [ -e flag ] && { echo oops; exit 7; }; touch flag", rnd.blockers)
 			self.assertNotIn("canonical verification failed", rnd.blockers)
 			self.assertIsNone(rnd.verify_passed)
-			self.assertEqual((root / "trace").read_text(), "started\n")
+			self.assertEqual((root / "trace").read_text(), "started\nnever\nstarted\n")
 			self.assertTrue(rnd.failure_log.endswith("feedback/round-1/setup.log"))
 			log = (root / rnd.failure_log).read_text()
 			self.assertIn("oops", log)
-			self.assertIn("$ echo oops; exit 7", log)
+			self.assertIn("$ [ -e flag ] && { echo oops; exit 7; }; touch flag", log)
 			kwargs = prompt.call_args.kwargs
-			self.assertIn("[SETUP] `echo oops; exit 7` failed", kwargs["verify_tail"])
+			self.assertIn("[SETUP] `[ -e flag ] && { echo oops; exit 7; }; touch flag` failed", kwargs["verify_tail"])
 			self.assertEqual(kwargs["blockers"], rnd.blockers)
 			self.assertIsNone(kwargs["verify_command"])
 			text = build_app.corrective_prompt(**kwargs)
-			self.assertIn("[SETUP] `echo oops; exit 7` failed", text)
-			self.assertIn("setup command failed: echo oops; exit 7", text)
+			self.assertIn("[SETUP] `[ -e flag ] && { echo oops; exit 7; }; touch flag` failed", text)
+			self.assertIn("setup command failed: [ -e flag ] && { echo oops; exit 7; }; touch flag", text)
+
+	def test_setup_runs_once_before_the_first_agent_turn(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			at_agent_turn = []
+
+			def agent(*args, **kwargs):
+				at_agent_turn.append((root / "trace").read_text() if (root / "trace").exists() else "")
+				return subprocess.CompletedProcess([], 0, pi_output("clean"), ""), False
+
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", side_effect=lambda *a, **k: ("make verify", True, False, "", False, None)),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=agent),
+			):
+				build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1, setup_commands=["echo one >> trace"])
+			self.assertEqual(at_agent_turn, ["one\n"])
+			self.assertTrue((root / ".pi-build-session" / "feedback" / "setup" / "setup.log").is_file())
+
+	def test_setup_failure_at_start_ends_the_build_without_an_agent_turn(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification") as verification,
+				mock.patch.object(build_app, "run_agent_streaming") as agent,
+			):
+				result = build_app.run_build(root, spec, max_rounds=2, timeout_minutes=1, setup_commands=["echo ran >> trace", "exit 3"])
+			agent.assert_not_called()
+			verification.assert_not_called()
+			self.assertFalse(result.succeeded)
+			self.assertEqual(result.stopped_reason, "setup command failed: exit 3")
+			self.assertEqual(result.rounds, [])
+			build_app.write_report(result)
+			build_app.write_evidence_json(result)
+			self.assertTrue((root / "BUILD_REPORT.md").is_file())
+			self.assertTrue((root / "BUILD_EVIDENCE.json").is_file())
 
 	def test_a_long_failing_setup_command_is_named_in_200_characters(self):
 		blockers, _ = build_app.round_blockers(

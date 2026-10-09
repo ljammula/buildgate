@@ -14,8 +14,10 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"buildgate/internal/codereview"
+	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sandbox/sandboxtest"
 	"buildgate/internal/testfixture"
 )
 
@@ -26,10 +28,6 @@ func TestStepCommandWithoutSetupIsUnchanged(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("stepCommand(%v) = %q, want %q", setup, got, want)
 		}
-	}
-	argv := []string{"python3", "build_app.py", "--workspace", "/w"}
-	if got := wrapWithSetup(nil, argv); !reflect.DeepEqual(got, argv) {
-		t.Errorf("wrapWithSetup(nil) = %q, want the argv unchanged", got)
 	}
 }
 
@@ -48,14 +46,6 @@ func TestStepCommandPassesRepositoryTextAsArgumentsOnly(t *testing.T) {
 	}
 	if strings.Contains(got[2], "touch") || strings.Contains(got[2], "make verify") {
 		t.Errorf("the script element %q holds repository text", got[2])
-	}
-	wrapped := wrapWithSetup([]string{hostile}, []string{"python3", "build_app.py"})
-	wantWrapped := []string{"sh", "-c", wrapScript, "buildgate-setup", "1", hostile, "python3", "build_app.py"}
-	if !reflect.DeepEqual(wrapped, wantWrapped) {
-		t.Errorf("wrapWithSetup = %q, want %q", wrapped, wantWrapped)
-	}
-	if strings.Contains(wrapScript, "touch") || strings.Contains(wrapScript, "python3") {
-		t.Errorf("the wrap script holds repository text")
 	}
 }
 
@@ -94,19 +84,6 @@ func TestStepCommandRunsSetupInOrderAndStopsAtTheFirstFailure(t *testing.T) {
 	code, _, trace = run([]string{"echo one >> trace"}, "echo command >> trace; exit 3")
 	if code != 3 || trace != "one\ncommand\n" {
 		t.Errorf("command exit: %d, trace %q, want 3 and both lines", code, trace)
-	}
-	// The build wrapper has the same semantics for an argv command.
-	dir := t.TempDir()
-	code, _ = execStep(t, dir, wrapWithSetup([]string{"echo one >> trace", "echo two >> trace"}, []string{"sh", "-c", "echo build >> trace; exit 4"}))
-	data, _ := os.ReadFile(filepath.Join(dir, "trace"))
-	if code != 4 || string(data) != "one\ntwo\nbuild\n" {
-		t.Errorf("wrapped build: exit %d, trace %q", code, data)
-	}
-	dir = t.TempDir()
-	code, out = execStep(t, dir, wrapWithSetup([]string{"echo one >> trace", "exit 1", "echo three >> trace"}, []string{"sh", "-c", "echo build >> trace"}))
-	data, _ = os.ReadFile(filepath.Join(dir, "trace"))
-	if code != 95 || string(data) != "one\n" || !strings.Contains(out, "buildgate: setup failed: exit 1") {
-		t.Errorf("wrapped failing setup: exit %d, output %q, trace %q", code, out, data)
 	}
 }
 
@@ -254,7 +231,10 @@ func TestReviewLaunchRunsNoSetup(t *testing.T) {
 	}
 }
 
-func TestBuildLaunchRunsSetupAndPassesItToTheBuildScript(t *testing.T) {
+// The build launch is the plain interpreter and arguments, whatever the
+// setup: the build script runs the setup commands itself (with a timeout and
+// captured output, counted in its time budget), given as --setup-command.
+func TestBuildLaunchIsPlainAndPassesSetupToTheBuildScript(t *testing.T) {
 	a, launches := launchRecorder(t)
 	input := fixtureInput()
 	input.VerifyCommand = "make verify"
@@ -264,19 +244,53 @@ func TestBuildLaunchRunsSetupAndPassesItToTheBuildScript(t *testing.T) {
 		t.Fatalf("%d build launches, want 1", len(*launches))
 	}
 	argv := (*launches)[0]
-	if len(argv) < 7 || !reflect.DeepEqual(argv[:6], []string{"sh", "-c", wrapScript, "buildgate-setup", "1", "echo one"}) {
-		t.Fatalf("build argv %q does not start with the setup wrapper", argv)
+	if len(argv) < 2 || argv[0] == "sh" || strings.Contains(strings.Join(argv, "\x00"), "buildgate-setup") {
+		t.Fatalf("build argv %q is wrapped", argv)
 	}
-	rest := strings.Join(argv[6:], "\x00")
-	if !strings.Contains(rest, "\x00--setup-command\x00echo one") {
-		t.Errorf("the build script's arguments %q lack --setup-command echo one", argv[6:])
+	if !strings.Contains(strings.Join(argv, "\x00"), "\x00--setup-command\x00echo one") {
+		t.Errorf("build argv %q lacks --setup-command echo one", argv)
 	}
 
 	a, launches = launchRecorder(t)
 	input.SetupCommands = nil
 	execActivity(t, a.RunBuildActivity, input)
-	if got := (*launches)[0]; got[0] == "sh" && len(got) > 3 && got[3] == "buildgate-setup" || strings.Contains(strings.Join(got, " "), "--setup-command") {
+	if got := (*launches)[0]; strings.Contains(strings.Join(got, " "), "--setup-command") {
 		t.Errorf("a build without setup commands carries setup: %q", got)
+	}
+}
+
+// Every step that ran setup says so: its attempt carries the digest of the
+// list, whatever argv the runtime recorded for it. Through the sandbox
+// runtime the recorded command is the worker wrapper's, not the step's own.
+func TestVerifyAttemptCarriesTheSetupDigestThroughTheSandboxRuntime(t *testing.T) {
+	setup := []string{"echo one", "make generate"}
+	rt := &sandboxtest.WorkerRuntime{Lines: []string{"ok"}}
+	a, input, _ := runtimeActivities(t, rt)
+	input.VerifyCommand = "make verify"
+	input.SetupCommands = setup
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(a.RunVerifyActivity)
+	val, err := env.ExecuteActivity(a.RunVerifyActivity, input)
+	if err != nil {
+		t.Fatalf("RunVerifyActivity: %v", err)
+	}
+	var res VerifyActivityResult
+	if err := val.Get(&res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Attempts) != 1 {
+		t.Fatalf("attempts = %+v", res.Attempts)
+	}
+	got := res.Attempts[0]
+	if got.SetupSHA256 == "" || got.SetupSHA256 != run.SetupDigest(setup) {
+		t.Errorf("SetupSHA256 = %q, want %q", got.SetupSHA256, run.SetupDigest(setup))
+	}
+	if len(got.Command) < 5 || got.Command[0] != "/bin/sh" || got.Command[3] != "--" {
+		t.Errorf("recorded command %q is not the sandbox wrapper's", got.Command)
+	}
+	if run.SetupDigest(nil) != "" || run.SetupDigest([]string{"a", "b"}) == run.SetupDigest([]string{"ab"}) {
+		t.Errorf("SetupDigest is not empty for no setup or not length-prefixed")
 	}
 }
 
