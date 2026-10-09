@@ -13,6 +13,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
+	"buildgate/internal/evidence"
 	"buildgate/internal/workspace"
 )
 
@@ -175,8 +176,8 @@ type resumeHandoff struct {
 
 // prepareBuildHandoff runs at the top of a retried (or resumed)
 // RunBuildActivity (after the fence and the completed-checkpoint lookup):
-// snapshot the worktree, remove the dead attempt's harness session, and
-// write the handoff note into the Activity's log dir (not the workspace, so
+// snapshot the worktree, keep a copy of the dead attempt's round logs, remove
+// its harness session, and write the handoff note into the Activity's log dir (not the workspace, so
 // it can never be committed). Only the session directory is removed: the
 // round-state file (RoundStateFileName) lives at the worktree root and is
 // kept, it is what a resume continues from.
@@ -195,6 +196,20 @@ func (a *Activities) prepareBuildHandoff(ctx context.Context, input RunWorkflowI
 		fmt.Sprintf("buildgate checkpoint: %s attempt %d", runID, interrupted))
 	if err != nil {
 		return fail("snapshot the interrupted build's work", err)
+	}
+	// The session folder also holds each failed round's whole output
+	// (build_app.py's feedback folder). It is copied into the run's log dir
+	// before the session goes, so what the interrupted attempt's rounds
+	// failed on outlives it. It gets a folder of its own
+	// (round-logs/before-attempt-<n>/, n being the attempt that resumes): the resumed attempt reruns some of
+	// those rounds, and round-logs/round-<n> must hold only what the
+	// attempt that finished saved. Best-effort: a resume does not depend
+	// on it.
+	if logDir := a.logDirFor(input); logDir != "" {
+		dst := filepath.Join(logDir, evidence.RoundLogsDirName, fmt.Sprintf("before-attempt-%d", info.Attempt))
+		if _, err := evidence.RetainRoundLogs(input.WorkspacePath, dst); err != nil {
+			activity.GetLogger(ctx).Warn("failed to retain every round log before removing the interrupted build's session", "error", err)
+		}
 	}
 	if err := os.RemoveAll(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
 		return fail("remove the interrupted build's harness session", err)

@@ -96,6 +96,12 @@ func (o runOptions) checkpointDir() string {
 	return filepath.Join(o.DataDir, "temporal-checkpoints", o.ID)
 }
 
+// runDirOfCheckpointDir is the run directory of the run whose
+// checkpointDir() this is, for a caller that was handed only that.
+func runDirOfCheckpointDir(checkpointDir string) string {
+	return run.Dir(filepath.Dir(filepath.Dir(checkpointDir)), filepath.Base(checkpointDir))
+}
+
 // activities is the Activities value this process's own worker registers for
 // the run: the static fallbacks for fields RunWorkflowInput also carries, and
 // what only the executing worker knows (sandbox limits, credentials).

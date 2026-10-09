@@ -100,6 +100,12 @@ func overrideMain(args []string) error {
 		// an isolated run (see wsisolation.Prepare), so this is a no-op
 		// for every non-isolated run's override, exactly as it should be.
 		if newState == run.StateHalted && r.Branch != "" {
+			// The worktree may be the only place the build's report and
+			// round logs exist (a run kept for resume never had its
+			// evidence collected): copy them out first.
+			if err := run.RetainBuildArtifacts(r.WorkspacePath, run.Dir(*dataDir, r.ID)); err != nil {
+				log.Printf("run %s: before override rollback: %v", r.ID, err)
+			}
 			if err := release.Rollback(r.ProjectPath, r.WorkspacePath, r.Branch); err != nil {
 				log.Printf("run %s: rollback of isolated workspace after override failed: %v", r.ID, err)
 			} else {

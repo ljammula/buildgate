@@ -65,6 +65,29 @@ func TestLoadAgentEvidenceRetainsBuildReport(t *testing.T) {
 	}
 }
 
+// TestLoadAgentEvidenceRetainsRoundLogs: the file a round's failure_log
+// names lives in the worktree's session folder, which does not outlive the
+// run; a copy is kept in the run's own directory.
+func TestLoadAgentEvidenceRetainsRoundLogs(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	dataDir := t.TempDir()
+	roundLog := filepath.Join(workspace, ".pi-build-session", "feedback", "round-1", "verify.log")
+	if err := os.MkdirAll(filepath.Dir(roundLog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(roundLog, []byte("--- FAIL: TestSum\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loadAgentEvidence(&run.Run{ID: "run-1"}, workspace, dataDir, "run-1")
+
+	got, err := os.ReadFile(filepath.Join(run.Dir(dataDir, "run-1"), "round-logs", "round-1", "verify.log"))
+	if err != nil || string(got) != "--- FAIL: TestSum\n" {
+		t.Errorf("retained round log = %q, %v, want the round's verify output", got, err)
+	}
+}
+
 // TestLoadAgentEvidenceToleratesMissingBuildReport covers a build_app.py
 // version that predates BUILD_REPORT.md, or a run that never reached the
 // point of writing one: absence must not be an error, and must not

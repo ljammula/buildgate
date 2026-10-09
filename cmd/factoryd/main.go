@@ -319,6 +319,11 @@ func loadAgentEvidence(r *run.Run, workspace, dataDir, id string) {
 			fmt.Printf("run %s: warning: could not retain %s: %v\n", id, run.AgentReportFileName, err)
 		}
 	}
+	// Each failed round's whole output, which the round's failure_log
+	// names: copied like the report, never read here.
+	if _, err := evidence.RetainRoundLogs(workspace, filepath.Join(run.Dir(dataDir, id), evidence.RoundLogsDirName)); err != nil {
+		fmt.Printf("run %s: warning: could not retain every round log: %v\n", id, err)
+	}
 }
 
 // attachHarnessEval sets r.HarnessEval from the harness its originating

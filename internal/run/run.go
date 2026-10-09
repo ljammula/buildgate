@@ -62,6 +62,24 @@ const (
 	AttemptRoleReview    = "review"
 )
 
+// RetainBuildArtifacts copies what a build left in workspace that removing
+// the worktree would delete into runDir, the run's own directory: the
+// agent's report and each failed round's saved output (evidence.RetainFile
+// and evidence.RetainRoundLogs, byte copies of agent-written files that
+// nothing here reads). A build that left neither is not an error. Call it
+// before every rollback of a run's worktree.
+func RetainBuildArtifacts(workspace, runDir string) error {
+	var errs []error
+	err := evidence.RetainFile(filepath.Join(workspace, AgentReportFileName), filepath.Join(runDir, AgentReportFileName))
+	if err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("retain %s: %w", AgentReportFileName, err))
+	}
+	if _, err := evidence.RetainRoundLogs(workspace, filepath.Join(runDir, evidence.RoundLogsDirName)); err != nil {
+		errs = append(errs, fmt.Errorf("retain round logs: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
 // HaltReasonRelayCeilingExceeded is Run.HaltReasonCode's value when a run
 // halted because its relay crossed its configured absolute
 // TokenCeiling/CostCeilingMicroUSD (see

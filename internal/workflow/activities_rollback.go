@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"buildgate/internal/evidence"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
 	wsisolation "buildgate/internal/workspace"
@@ -66,6 +65,31 @@ func (a *Activities) RollbackIsolatedWorkspaceActivity(ctx context.Context, inpu
 		activity.GetLogger(ctx).Warn("failed to record isolate-workspace-rollback Activity intent; attempting rollback anyway", "error", err)
 	}
 
+	// Retained here, before the worktree is actually removed below, not
+	// left to cmd/factoryd's own loadAgentEvidence (found via a real
+	// GitHub Codex App review of this PR): a run that halts partway
+	// through a Temporal-routed slice -- after build_app.py wrote this
+	// report but before the workflow ever reaches a state
+	// applyRunWorkflowResult's own attributeWorkspaceEvidence branch
+	// covers -- never calls loadAgentEvidence at all, and this Activity's
+	// own deferred rollback (registered unconditionally once
+	// PrepareIsolatedWorkspaceActivity succeeds, per RunWorkflow's own
+	// comment) deletes the one place that report still exists before
+	// returning control to any caller that might have retained it later.
+	// Best-effort and non-fatal, like every other evidence-retention
+	// warning in this codebase: a run whose build never got far enough to
+	// write a report simply has nothing here to retain, which
+	// evidence.RetainFile's own os.IsNotExist return already
+	// distinguishes from a real retention failure.
+	// An OnBranch run (a PR-review round) loses its worktree the same way,
+	// so this comes before both removals. The rounds' saved output goes
+	// with the report (run.RetainBuildArtifacts).
+	if input.LogDir != "" {
+		if err := run.RetainBuildArtifacts(input.WorktreePath, input.LogDir); err != nil {
+			activity.GetLogger(ctx).Warn("failed to retain the build's report and round logs before isolated-workspace rollback", "error", err)
+		}
+	}
+
 	// OnBranch: this run only checked out an existing PR branch (never
 	// created it) — RemoveWorktreeOnly, as cmd/factoryd's rollbackIsolatedWorkspace does,
 	// leaves it untouched. release.Rollback would otherwise `branch -D`
@@ -83,30 +107,6 @@ func (a *Activities) RollbackIsolatedWorkspaceActivity(ctx context.Context, inpu
 			}
 		}
 		return activityErr
-	}
-
-	// Retained here, before the worktree is actually removed below, not
-	// left to cmd/factoryd's own loadAgentEvidence (found via a real
-	// GitHub Codex App review of this PR): a run that halts partway
-	// through a Temporal-routed slice -- after build_app.py wrote this
-	// report but before the workflow ever reaches a state
-	// applyRunWorkflowResult's own attributeWorkspaceEvidence branch
-	// covers -- never calls loadAgentEvidence at all, and this Activity's
-	// own deferred rollback (registered unconditionally once
-	// PrepareIsolatedWorkspaceActivity succeeds, per RunWorkflow's own
-	// comment) deletes the one place that report still exists before
-	// returning control to any caller that might have retained it later.
-	// Best-effort and non-fatal, like every other evidence-retention
-	// warning in this codebase: a run whose build never got far enough to
-	// write a report simply has nothing here to retain, which
-	// evidence.RetainFile's own os.IsNotExist return already
-	// distinguishes from a real retention failure.
-	if input.LogDir != "" {
-		src := filepath.Join(input.WorktreePath, run.AgentReportFileName)
-		dst := filepath.Join(input.LogDir, run.AgentReportFileName)
-		if err := evidence.RetainFile(src, dst); err != nil && !os.IsNotExist(err) {
-			activity.GetLogger(ctx).Warn("failed to retain agent report before isolated-workspace rollback", "error", err)
-		}
 	}
 
 	rollbackErr := release.Rollback(input.RepoDir, input.WorktreePath, input.Branch)
