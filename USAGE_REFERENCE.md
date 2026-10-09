@@ -314,6 +314,18 @@ The same two verbs are on HTTP: `POST
 | `to` | `plan` or `spec`: send a quarantined or halted request back instead |
 | `anchors` | Notes tied to places in the reviewed files: `[{"path": "spec.md", "section": "## Acceptance criteria", "item": 2, "note": "..."}]`. `section` and `item` are optional; each field is put on one line; at most 50. The rejection's reason becomes one line per anchor (`- spec.md, ## Acceptance criteria, number 2: ...`) followed by `reason`, and that text is what the redraft reads. Not accepted with `to` |
 
+## A retried draft
+
+`factoryd retry` on a request halted while drafting its spec or plan runs
+that draft again. What the next draft is told:
+
+| The halt | The next draft is told |
+|---|---|
+| The factory's own checks refused the drafted spec or plan (the spec skeleton, the plan checks) | The factory's reason: one line of at most 2000 bytes, no log path, in a section headed `Previous draft refused by the factory`, after your own feedback in the stage's feedback file. Kept until a draft of that stage reaches review or you send the request back |
+| The draft job failed or timed out (model route, credential, timeout) | Nothing: there is no draft to correct |
+| An infrastructure halt (stale approval hash, missing verify command, budget, oracle materialization) | Nothing |
+| A spec or plan you handed over | Nothing: a retry never sends your document to the model (see below) |
+
 ## Handing over a finished spec and plan (`submit -spec-file`, `-plan-dir`)
 
 ```text
