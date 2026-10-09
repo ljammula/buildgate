@@ -62,6 +62,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -395,6 +396,7 @@ def round_blockers(
 	fast_check_passed: bool | None = None,
 	oracle_passed: bool | None = None,
 	setup_failed: str | None = None,
+	autofix_failed: str | None = None,
 ) -> tuple[list[str], ReviewSignal]:
 	blockers: list[str] = []
 	if no_changes:
@@ -437,6 +439,8 @@ def round_blockers(
 		# substitute for it, so it's checked only once verify itself has
 		# already cleared this round.
 		blockers.append("reference oracle failed")
+	if autofix_failed:
+		blockers.append(autofix_failed)
 	review = review_signal(traces)
 	if review.outcome == "flagged" and review_policy != "advisory":
 		blockers.append("reviewer flagged the current diff")
@@ -874,6 +878,36 @@ SETUP_TIMEOUT_SECONDS = 10 * 60
 SETUP_FAILED_BLOCKER = "setup command failed: "
 
 
+def run_in_own_group(args: list[str], *, cwd: Path, timeout: float, env: dict | None = None) -> tuple[int | None, str]:
+	"""Runs args in its own session, output (stdout and stderr together) in a
+	temporary file so a process it leaves behind cannot hold a pipe open.
+	Returns (exit code, output), the exit code None when it timed out. When
+	it returns, nothing the command started is alive: a timeout kills the
+	whole group, and so does a normal exit (a command that backgrounded work).
+	Raises OSError when it cannot start."""
+	with tempfile.TemporaryFile() as out:
+		proc = subprocess.Popen(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+		try:
+			code: int | None = proc.wait(timeout=timeout)
+		except subprocess.TimeoutExpired:
+			code = None
+		try:
+			os.killpg(proc.pid, signal.SIGKILL)
+		except (ProcessLookupError, PermissionError):
+			pass
+		if code is None:
+			proc.wait()
+		deadline = time.monotonic() + 5
+		while time.monotonic() < deadline:
+			try:
+				os.killpg(proc.pid, 0)
+			except (ProcessLookupError, PermissionError):
+				break
+			time.sleep(0.01)
+		out.seek(0)
+		return code, out.read().decode(errors="replace")
+
+
 def run_setup(workspace: Path, commands: list[str], log_dir: Path | None) -> tuple[str | None, str]:
 	"""Runs the repository's setup commands in order, in the workspace and
 	this process's own environment, before the round's checks. Their
@@ -887,14 +921,16 @@ def run_setup(workspace: Path, commands: list[str], log_dir: Path | None) -> tup
 	for command in commands:
 		output += f"$ {command}\n"
 		try:
-			completed = sh(["sh", "-c", command], cwd=workspace, timeout=SETUP_TIMEOUT_SECONDS)
-		except subprocess.TimeoutExpired as exc:
-			captured = (exc.stdout or b"").decode(errors="ignore") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-			output += f"{captured}\n"
+			code, captured = run_in_own_group(["sh", "-c", command], cwd=workspace, timeout=SETUP_TIMEOUT_SECONDS)
+		except OSError as exc:
+			failed, header = command, f"[SETUP] `{command}` failed; the checks were not run this round."
+			output += f"{exc}\n"
+			break
+		output += f"{captured}\n"
+		if code is None:
 			failed, header = command, f"[SETUP] `{command}` timed out after {SETUP_TIMEOUT_SECONDS // 60} minutes; the checks were not run this round."
 			break
-		output += f"{completed.stdout}\n{completed.stderr}\n"
-		if completed.returncode != 0:
+		if code != 0:
 			failed, header = command, f"[SETUP] `{command}` failed; the checks were not run this round."
 			break
 	log = _feedback_log(log_dir, SETUP_LOG)
@@ -926,20 +962,57 @@ AUTOFIX_TIMEOUT_SECONDS = 5 * 60
 AUTOFIX_REVERTED_LISTED = 20
 
 
+AUTOFIX_UNCHECKED_BLOCKER = "autofix ran but its changes could not be checked against the ticket's files"
+AUTOFIX_SKIPPED_NOTE = "could not list the round's changed files"
+
+
+def list_changed_paths(workspace: Path, base_sha: str | None) -> set[str]:
+	"""The paths that differ from base_sha (HEAD when unknown) or are
+	untracked and not ignored, harness artifacts excluded, or ScopeListingError
+	when any part of that listing failed."""
+	return _changed_names(workspace, base_sha, strict=True)
+
+
+def _git_literal(args: list[str], workspace: Path) -> subprocess.CompletedProcess:
+	"""A git call whose paths are literal (a file named `:x` is not pathspec magic); bytes out."""
+	return subprocess.run(
+		["git", *args], cwd=workspace, capture_output=True, check=False, stdin=subprocess.DEVNULL, timeout=60,
+		env={**os.environ, "GIT_LITERAL_PATHSPECS": "1"},
+	)
+
+
 def _restore_from_base(workspace: Path, base: str, name: str) -> None:
 	"""Puts path `name` back to its content (and file mode) at `base` without
 	any git write: bytes from `git show`, so a binary file comes back
 	identical; a file the base does not have is deleted, and the directories
-	that became empty with it. Raises OSError when it cannot."""
+	that became empty with it. Everything it needs from git is fetched before
+	the worktree is touched; raises OSError (path left as it is) when git
+	fails, or when the base entry is a submodule or a directory."""
 	path = workspace / name
-	tree = subprocess.run(["git", "ls-tree", "-z", base, "--", name], cwd=workspace, capture_output=True, check=False, stdin=subprocess.DEVNULL)
-	entry = tree.stdout.split(b"\0")[0].decode(errors="replace") if tree.returncode == 0 else ""
+	try:
+		tree = _git_literal(["ls-tree", "-z", base, "--", name], workspace)
+	except (subprocess.TimeoutExpired, OSError) as exc:
+		raise OSError(f"git ls-tree: {exc}") from exc
+	if tree.returncode != 0:
+		raise OSError(f"git ls-tree exited {tree.returncode}")
+	entry = tree.stdout.split(b"\0")[0].decode(errors="replace")
 	mode = entry.split(" ", 1)[0] if entry else ""
+	content = b""
+	if mode:
+		if mode not in ("100644", "100755", "120000"):
+			raise OSError(f"base entry has mode {mode}")
+		try:
+			shown = _git_literal(["show", f"{base}:{name}"], workspace)
+		except (subprocess.TimeoutExpired, OSError) as exc:
+			raise OSError(f"git show: {exc}") from exc
+		if shown.returncode != 0:
+			raise OSError(f"git show exited {shown.returncode}")
+		content = shown.stdout
+	if path.is_dir() and not path.is_symlink():
+		raise OSError("path is a directory")
 	if path.is_symlink() or path.is_file():
 		path.unlink()
-	elif path.is_dir():
-		shutil.rmtree(path)
-	if mode not in ("100644", "100755", "120000"):
+	if not mode:
 		parent = path.parent
 		while parent != workspace and workspace in parent.parents:
 			try:
@@ -948,70 +1021,108 @@ def _restore_from_base(workspace: Path, base: str, name: str) -> None:
 				break
 			parent = parent.parent
 		return
-	shown = subprocess.run(["git", "show", f"{base}:{name}"], cwd=workspace, capture_output=True, check=False, stdin=subprocess.DEVNULL)
-	if shown.returncode != 0:
-		raise OSError(f"git show {base}:{name} failed")
 	path.parent.mkdir(parents=True, exist_ok=True)
 	if mode == "120000":
-		os.symlink(shown.stdout.decode(errors="surrogateescape"), path)
+		os.symlink(content.decode(errors="surrogateescape"), path)
 		return
-	path.write_bytes(shown.stdout)
+	path.write_bytes(content)
 	path.chmod(0o755 if mode == "100755" else 0o644)
 
 
 def run_autofix(
-	workspace: Path, commands: list[str], base_sha: str | None, scope: set[str], log_dir: Path | None, env: dict | None = None,
+	workspace: Path, commands: list[str], base_sha: str | None, log_dir: Path | None, env: dict | None = None,
 ) -> dict | None:
 	"""Runs the repository's autofix commands (`.factory.yml` autofix:) in
 	order, in the workspace and the round's environment, after the agent's
 	turn and before the round's checks. Advisory: a command that exits
 	non-zero or times out is recorded, never a failure of the round (many
-	`--fix` tools exit non-zero when they fixed something).
+	`--fix` tools exit non-zero when they fixed something). Each command runs
+	in its own process group and nothing it started is alive when it is done.
 
-	scope is the paths the round's tree differs from the base in (or has
-	untracked, not ignored) before autofix; a path outside it that differs
+	The paths the tree differs from the base in (or has untracked, not
+	ignored) before autofix are its scope; a path outside it that differs
 	afterwards is autofix's doing alone and is put back to the base's content,
-	so a formatter cannot widen the ticket's diff. The combined output and any
-	revert are saved (redacted, bounded) as autofix.log in log_dir. Returns
-	the round's `autofix` evidence record, or None when there are no commands."""
+	so a formatter cannot widen the ticket's diff. The listings are strict:
+	when the first fails autofix does not run (`skipped`); when the second
+	fails nothing is reverted and `scope_check_failed` is set; a path that
+	could not be restored is in `revert_failed`. autofix_blocker() turns the
+	last two into a failed round. The combined output and any revert are saved
+	(redacted, bounded) as autofix.log in log_dir. Returns the round's
+	`autofix` evidence record, or None when there are no commands."""
 	if not commands:
 		return None
-	output, records = "", []
+	record: dict = {
+		"commands": [], "reverted_count": 0, "reverted": [], "revert_failed_count": 0, "revert_failed": [],
+		"scope_check_failed": False,
+	}
+
+	def save(text: str) -> dict:
+		if log_dir is not None:
+			try:
+				log_dir.mkdir(parents=True, exist_ok=True)
+				(log_dir / AUTOFIX_LOG).write_text(redact(text, FAILURE_LOG_LIMIT) + "\n", encoding="utf-8")
+			except OSError:
+				pass
+		return record
+
+	try:
+		scope = list_changed_paths(workspace, base_sha)
+	except ScopeListingError as exc:
+		record["skipped"] = AUTOFIX_SKIPPED_NOTE
+		return save(f"autofix skipped: {AUTOFIX_SKIPPED_NOTE} ({exc})")
+	output = ""
 	for command in commands:
 		output += f"$ {command}\n"
 		started = time.monotonic()
 		exit_code, timed_out = 0, False
 		try:
-			completed = sh(["sh", "-c", command], cwd=workspace, timeout=AUTOFIX_TIMEOUT_SECONDS, env=env)
-			exit_code = completed.returncode
-			output += f"{completed.stdout}\n{completed.stderr}\n"
-		except subprocess.TimeoutExpired as exc:
-			timed_out, exit_code = True, -1
-			captured = exc.stdout.decode(errors="ignore") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-			output += f"{captured}\n[timed out after {AUTOFIX_TIMEOUT_SECONDS // 60} minutes]\n"
+			code, captured = run_in_own_group(["sh", "-c", command], cwd=workspace, timeout=AUTOFIX_TIMEOUT_SECONDS, env=env)
+			output += f"{captured}\n"
+			if code is None:
+				timed_out, exit_code = True, -1
+				output += f"[timed out after {AUTOFIX_TIMEOUT_SECONDS // 60} minutes]\n"
+			else:
+				exit_code = code
 		except OSError as exc:
 			exit_code = 127
 			output += f"{exc}\n"
-		records.append({
+		record["commands"].append({
 			"command": command[:200], "exit_code": exit_code, "timed_out": timed_out,
 			"duration_s": round(time.monotonic() - started, 3),
 		})
-	reverted = sorted(set(changed_file_hashes(workspace, base_sha)) - scope)
+	try:
+		touched = sorted(list_changed_paths(workspace, base_sha) - scope)
+	except ScopeListingError as exc:
+		record["scope_check_failed"] = True
+		return save(output + f"could not check autofix's changes against the ticket's files ({exc}); nothing was reverted\n")
 	base = base_sha or "HEAD"
-	for name in reverted:
+	reverted, failed = [], []
+	for name in touched:
 		try:
 			_restore_from_base(workspace, base, name)
+			reverted.append(name)
 		except OSError as exc:
+			failed.append(name)
 			output += f"could not revert {name}: {exc}\n"
 	if reverted:
 		output += f"reverted {len(reverted)} path(s) the ticket had not changed: {', '.join(reverted[:AUTOFIX_REVERTED_LISTED])}\n"
-	if log_dir is not None:
-		try:
-			log_dir.mkdir(parents=True, exist_ok=True)
-			(log_dir / AUTOFIX_LOG).write_text(redact(output, FAILURE_LOG_LIMIT) + "\n", encoding="utf-8")
-		except OSError:
-			pass
-	return {"commands": records, "reverted_count": len(reverted), "reverted": reverted[:AUTOFIX_REVERTED_LISTED]}
+	record.update(
+		reverted_count=len(reverted), reverted=reverted[:AUTOFIX_REVERTED_LISTED],
+		revert_failed_count=len(failed), revert_failed=failed[:AUTOFIX_REVERTED_LISTED],
+	)
+	return save(output)
+
+
+def autofix_blocker(record: dict | None) -> str | None:
+	"""The one way autofix fails a round: the tree may hold edits outside the
+	ticket's files that nobody could enumerate or put back."""
+	if not record:
+		return None
+	if record.get("scope_check_failed"):
+		return AUTOFIX_UNCHECKED_BLOCKER
+	if record.get("revert_failed"):
+		return "autofix changed files outside the ticket's and could not revert: " + ", ".join(record["revert_failed"][:5])
+	return None
 
 
 def autofix_prompt_note(record: dict | None) -> str:
@@ -1935,6 +2046,7 @@ def round_from_state(item: dict, position: int) -> Round:
 		failure_signature=_typed(item, "failure_signature", (str,), "", cap=64),
 		failure_log=_typed(item, "failure_log", (str,), "", cap=400),
 		agent_notes=_typed(item, "agent_notes", (str,), "", cap=text),
+		autofix=_typed(item, "autofix", (dict, type(None)), None),
 	)
 
 
@@ -1989,12 +2101,12 @@ STUCK_STOP_STREAK = 3
 _FEEDBACK_HASH_MAX_BYTES = 5_000_000
 
 
-def changed_file_hashes(workspace: Path, base_sha: str | None) -> dict[str, str]:
-	"""A content hash per file that differs from base_sha (HEAD when
-	unknown) or is untracked, harness artifacts excluded. Two of these, taken
-	before and after an agent turn, say which files that turn changed
-	(round_changed_files): the "what was already tried" half of what the next
-	round is told. Best effort: a git failure gives {}."""
+class ScopeListingError(Exception):
+	"""A git listing of the changed paths failed, timed out or held a name that
+	is not valid UTF-8, so the set it gave would be short."""
+
+
+def _changed_names(workspace: Path, base_sha: str | None, strict: bool) -> set[str]:
 	names: set[str] = set()
 	for args in (
 		["git", "diff", "--name-only", "-z", base_sha or "HEAD", "--", *_HARNESS_ARTIFACT_PATHSPECS],
@@ -2002,11 +2114,25 @@ def changed_file_hashes(workspace: Path, base_sha: str | None) -> dict[str, str]
 	):
 		try:
 			done = sh(args, cwd=workspace, timeout=60)
-		except (subprocess.TimeoutExpired, OSError, ValueError):
+		except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
 			# ValueError: a file name git printed that is not valid UTF-8.
+			if strict:
+				raise ScopeListingError(f"{args[1]}: {exc!r}") from exc
 			continue
 		if done.returncode == 0:
 			names.update(name for name in done.stdout.split("\0") if name)
+		elif strict:
+			raise ScopeListingError(f"{args[1]} exited {done.returncode}")
+	return names
+
+
+def changed_file_hashes(workspace: Path, base_sha: str | None) -> dict[str, str]:
+	"""A content hash per file that differs from base_sha (HEAD when
+	unknown) or is untracked, harness artifacts excluded. Two of these, taken
+	before and after an agent turn, say which files that turn changed
+	(round_changed_files): the "what was already tried" half of what the next
+	round is told. Best effort: a git failure gives {}."""
+	names = _changed_names(workspace, base_sha, strict=False)
 	hashes: dict[str, str] = {}
 	for name in names:
 		path = workspace / name
@@ -2323,7 +2449,7 @@ def run_build(
 		# Autofix runs after the agent-change snapshots above (its edits are
 		# never the agent's work) and before this round's checks, so they
 		# judge the fixed tree.
-		autofix_record = run_autofix(workspace, autofix_commands or [], review_base_sha, set(hashes_after), feedback_dir, env)
+		autofix_record = run_autofix(workspace, autofix_commands or [], review_base_sha, feedback_dir, env)
 
 		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
@@ -2379,6 +2505,7 @@ def run_build(
 			fast_check_passed=fast_check_passed,
 			oracle_passed=oracle_passed,
 			setup_failed=setup_failed,
+			autofix_failed=autofix_blocker(autofix_record),
 		)
 		if timed_out:
 			round_end_detail = "timed out"
@@ -2550,8 +2677,7 @@ def run_build(
 		sonnet_autofix = None
 		if autofix_commands:
 			sonnet_autofix = run_autofix(
-				workspace, autofix_commands, review_base_sha, set(changed_file_hashes(workspace, review_base_sha)),
-				session_dir / "feedback" / f"round-{len(result.rounds) + 1}", env,
+				workspace, autofix_commands, review_base_sha, session_dir / "feedback" / f"round-{len(result.rounds) + 1}", env,
 			)
 		sonnet_setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
@@ -2590,9 +2716,11 @@ def run_build(
 		sonnet_no_changes = (
 			fingerprint_before is None or fingerprint_after is None or fingerprint_before == fingerprint_after
 		)
-		if not timed_out and returncode == 0 and verify_passed is True and sonnet_oracle_passed is not False and not sonnet_no_changes:
+		if not timed_out and returncode == 0 and verify_passed is True and sonnet_oracle_passed is not False and not sonnet_no_changes and not autofix_blocker(sonnet_autofix):
 			result.succeeded = True
 			result.stopped_reason = "Sonnet fallback passed canonical verification"
+		elif autofix_blocker(sonnet_autofix):
+			result.stopped_reason = f"Sonnet fallback: {autofix_blocker(sonnet_autofix)}"
 		elif sonnet_setup_failed is not None:
 			result.stopped_reason = f"Sonnet fallback's {SETUP_FAILED_BLOCKER}{sonnet_setup_failed[:200]}"
 		elif sonnet_no_changes:

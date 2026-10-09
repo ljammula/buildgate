@@ -1528,7 +1528,141 @@ class AutofixCommandTests(unittest.TestCase):
 		with contextlib.ExitStack() as stack:
 			root, outside, base = self.repo(stack)
 			self.build(root, base, autofix=["true"], sh_log=without, verify=lambda *a, **k: ("make verify", True, False, "", False, None), agent=lambda: (root / "a.txt").write_text("changed\n"))
-		self.assertEqual([a for a in without if a not in argvs[0]], [["sh", "-c", "true"]])
+		# With a command the strict listings add git calls and nothing else changes.
+		self.assertTrue(all(a[0] == "git" for a in without if a not in argvs[0]))
+		self.assertFalse([a for a in without if a[0] != "git"])
+
+	def test_a_timed_out_autofix_leaves_no_process_that_writes_after_the_revert(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			stack.enter_context(mock.patch.object(build_app, "AUTOFIX_TIMEOUT_SECONDS", 1))
+			result = self.build(
+				root, base, autofix=["(sleep 3; echo late > b.txt) & wait; true", "echo fixed > c.txt"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertTrue(result.rounds[0].autofix["commands"][0]["timed_out"])
+			time.sleep(4)
+			self.assertEqual((root / "b.txt").read_text(), "b\n")
+			self.assertFalse((root / "c.txt").exists())
+
+	def test_autofix_that_backgrounds_a_writer_and_exits_leaves_nothing_running(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			self.build(
+				root, base, autofix=["(sleep 2; echo late > b.txt) >/dev/null 2>&1 &"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			time.sleep(3)
+			self.assertEqual((root / "b.txt").read_text(), "b\n")
+
+	def test_setup_leaves_no_process_behind_after_a_timeout_or_a_normal_exit(self):
+		for command, timeout in (("(sleep 2; echo late > late.txt) & wait", 0.5), ("(sleep 2; echo late > late.txt) >/dev/null 2>&1 &", 30)):
+			with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+				root = Path(directory)
+				with mock.patch.object(build_app, "SETUP_TIMEOUT_SECONDS", timeout):
+					build_app.run_setup(root, [command], None)
+				time.sleep(3)
+				self.assertFalse((root / "late.txt").exists())
+
+	def test_a_short_listing_before_autofix_skips_it(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			stack.enter_context(mock.patch.object(build_app, "list_changed_paths", side_effect=build_app.ScopeListingError("boom")))
+			result = self.build(
+				root, base, autofix=["echo fixed > b.txt"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertEqual(result.rounds[0].autofix["skipped"], "could not list the round's changed files")
+			self.assertEqual((root / "b.txt").read_text(), "b\n")
+			self.assertTrue(result.succeeded)
+
+	def test_a_failed_listing_after_autofix_reverts_nothing_and_fails_the_round(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			real = build_app.list_changed_paths
+			calls = []
+
+			def lister(*a, **k):
+				calls.append(1)
+				if len(calls) == 2:
+					raise build_app.ScopeListingError("boom")
+				return real(*a, **k)
+
+			stack.enter_context(mock.patch.object(build_app, "list_changed_paths", side_effect=lister))
+			result = self.build(
+				root, base, autofix=["echo fixed > b.txt"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			rnd = result.rounds[0]
+			self.assertTrue(rnd.autofix["scope_check_failed"])
+			self.assertEqual((root / "b.txt").read_text(), "fixed\n")
+			self.assertIn("autofix ran but its changes could not be checked against the ticket's files", rnd.blockers)
+			self.assertFalse(result.succeeded)
+
+	def test_a_file_named_like_pathspec_magic_is_restored_byte_identical(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			(root / ":x").write_bytes(b"\xff colon\n")
+			subprocess.run(["git", "add", "--", "./:x"], cwd=root, check=True, capture_output=True)
+			subprocess.run(["git", "commit", "-m", "colon"], cwd=root, check=True, capture_output=True)
+			base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True).stdout.strip()
+			result = self.build(
+				root, base, autofix=["echo edited > ./:x"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertEqual((root / ":x").read_bytes(), b"\xff colon\n")
+			self.assertEqual(result.rounds[0].autofix["reverted"], [":x"])
+
+	def test_a_failed_git_show_leaves_the_file_and_fails_the_round(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			real = build_app._git_literal
+
+			def literal(args, workspace):
+				if args[0] == "show":
+					return subprocess.CompletedProcess(args, 128, b"", b"nope")
+				return real(args, workspace)
+
+			stack.enter_context(mock.patch.object(build_app, "_git_literal", side_effect=literal))
+			result = self.build(
+				root, base, autofix=["echo fixed > b.txt"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			rnd = result.rounds[0]
+			self.assertEqual((root / "b.txt").read_text(), "fixed\n")
+			self.assertEqual(rnd.autofix["reverted"], [])
+			self.assertEqual(rnd.autofix["revert_failed"], ["b.txt"])
+			self.assertEqual(rnd.blockers, ["autofix changed files outside the ticket's and could not revert: b.txt"])
+
+	def test_a_submodule_entry_at_the_base_is_left_alone(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			subprocess.run(["git", "update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},mod"], cwd=root, check=True, capture_output=True)
+			subprocess.run(["git", "commit", "-m", "gitlink"], cwd=root, check=True, capture_output=True)
+			base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True).stdout.strip()
+			(root / "mod").mkdir()
+			result = self.build(
+				root, base, autofix=["rmdir mod; echo x > mod"],
+				verify=lambda *a, **k: ("make verify", True, False, "", False, None),
+				agent=lambda: (root / "a.txt").write_text("changed\n"),
+			)
+			self.assertEqual((root / "mod").read_text(), "x\n")
+			self.assertEqual(result.rounds[0].autofix["reverted"], [])
+			self.assertEqual(result.rounds[0].autofix["revert_failed"], ["mod"])
+
+	def test_round_state_keeps_each_rounds_autofix_record(self):
+		with contextlib.ExitStack() as stack:
+			root, outside, base = self.repo(stack)
+			result = self.build(root, base, autofix=["true"], agent=lambda: (root / "a.txt").write_text("changed\n"))
+			state = json.loads((root / build_app.ROUND_STATE_FILE).read_text())
+			rebuilt = build_app.round_from_state(state["rounds"][0], 1)
+			self.assertEqual(rebuilt.autofix, result.rounds[0].autofix)
 
 	def test_evidence_carries_autofix_only_for_rounds_that_ran_it(self):
 		with contextlib.ExitStack() as stack:
