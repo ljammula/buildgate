@@ -1455,3 +1455,37 @@ func TestInstructionBaseUnknownRefusesTheBuild(t *testing.T) {
 	want(r.Tickets[1], empty.ID)
 	want(r.Tickets[0], empty.ID)
 }
+
+// TestARetryAfterARunThatRecordedNoBaseIsAFirstBuild: a ticket's run that
+// halted before it recorded the commit it started from built nothing, so
+// the build that follows it is given no -instruction-base (its own base is
+// the request's) instead of the request being left with no retry that
+// works. A later ticket still refuses: its base is an earlier build's output.
+func TestARetryAfterARunThatRecordedNoBaseIsAFirstBuild(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := buildingFixture(dp, t, 2)
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	halted := &run.Run{ID: ticketRunID(id, 1), State: run.StateHalted}
+	if err := halted.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets[0].RunID = halted.ID
+	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, r.Tickets[0], requestdriver.WorkerConfig{})
+	if err != nil || hasFlag(args, "-instruction-base") {
+		t.Fatalf("ticket 1 after a run with no base: err %v, args carry -instruction-base: %v; want a plain first build", err, hasFlag(args, "-instruction-base"))
+	}
+	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, r.Tickets[1], requestdriver.WorkerConfig{}); err == nil || !strings.Contains(err.Error(), "cannot determine the commit the request started from") {
+		t.Fatalf("ticket 2 with a base-less ticket 1 run: err = %v, want the refusal", err)
+	}
+	// A run that recorded a result but no base is not "nothing built".
+	halted.ResultSHA = fmt.Sprintf("%040d", 7)
+	if err := halted.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, r.Tickets[0], requestdriver.WorkerConfig{}); err == nil {
+		t.Fatal("ticket 1 after a run with a result and no base built without a refusal")
+	}
+}

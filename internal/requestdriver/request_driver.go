@@ -2423,6 +2423,13 @@ func requestInstructionBase(dataDir string, r *request.Request, ticket request.T
 			return sha, nil
 		}
 	}
+	// The ticket's own earlier run halted before it recorded the commit it
+	// started from, so it built and committed nothing: the build that
+	// follows it is a first build, and its own base is the request's.
+	// Refusing here would leave the request with no retry that works.
+	if ticket.Index <= 1 && earlier.ResultSHA == "" {
+		return "", nil
+	}
 	return "", cannot("has no recorded base")
 }
 
