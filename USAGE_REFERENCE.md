@@ -10,12 +10,12 @@ and [`USAGE.md`](USAGE.md). When this page and
 
 | Command | What it does | Key flags |
 |---|---|---|
-| `factoryd submit <workspace> [text]` | Records a request under `<data-dir>/requests/<id>/`, then wakes the request's workflow when a `factoryd worker` is live for the data dir, starts a `worker` and a `serve` when no drainer or console is live (pid and log path printed) and prints `View: <console-link>`; with `FACTORYD_AUTOSTART=0` it starts nothing and warns when no `worker` is draining. Needs a resolvable `Verify-Command` up front. | `-verify-command`, `-preflight-profile` (default: `.factory.yml`); `-full-suite-command` (the `full_suite_verify` gate; default: `.factory.yml`'s `full_suite_command`); `-harness role=name` (repeatable, e.g. `-harness execution=pifork`) picks the coding-agent harness for the `planning` and/or `execution` role, only within that role's own `roles.<role>.allowed_harnesses` -- `review` is never requester-selectable; refused with no `roles:` session config; `-model role=model` (repeatable, e.g. `-model execution=sonnet -model planning=opus`) picks the model for the `planning` and/or `execution` role, but only within that role's own `roles.<role>.allowed` -- `review` is never requester-selectable, and every other per-role setting (routes, thinking) stays factory-owned; refused outright with no `routes:`/`models:`/`roles:` session config at all (see Model routes below); `-draft-oracles` (add the staged oracle step, below); `-no-commit-oracles` (oracles still gate, nothing committed); `-request-file <path>` or `-issue <url>` (via `gh issue view`; exclusive with inline text); `-spec-file <path>` hands over a finished spec in place of the drafted one, and `-plan-dir <dir>` with it the finished tickets (below); `-console-base-url` (or `FACTORYD_CONSOLE_URL`) sets the printed console link, which otherwise points at the console a live `factoryd serve` for the same data dir recorded (never a guessed default port); `-watch` attaches like `factoryd watch`; `-config`, `-data-dir` |
+| `factoryd submit <workspace> [text]` | Records a request under `<data-dir>/requests/<id>/`, then wakes the request's workflow when a `factoryd worker` is live for the data dir, starts a `worker` and a `serve` when no drainer or console is live (pid and log path printed) and prints `View: <console-link>`; with `FACTORYD_AUTOSTART=0` it starts nothing and warns when no `worker` is draining. Needs a resolvable `Verify-Command` up front. | `-verify-command`, `-preflight-profile` (default: `.factory.yml`); `-full-suite-command` (the `full_suite_verify` gate; default: `.factory.yml`'s `full_suite_command`); `-harness role=name` (repeatable, e.g. `-harness execution=pifork`) and `-model role=model` (repeatable, e.g. `-model execution=sonnet -model planning=opus`) pick the harness and the model for the `planning` and/or `execution` role, within `roles.<role>.allowed_harnesses` and `roles.<role>.allowed` (see "Routes and models"); `-draft-oracles` (add the staged oracle step, below); `-no-commit-oracles` (oracles still gate, nothing committed); `-request-file <path>` or `-issue <url>` (via `gh issue view`; exclusive with inline text); `-spec-file <path>` hands over a finished spec in place of the drafted one, and `-plan-dir <dir>` with it the finished tickets (below); `-console-base-url` (or `FACTORYD_CONSOLE_URL`) sets the printed console link, which otherwise points at the console a live `factoryd serve` for the same data dir recorded (never a guessed default port); `-watch` attaches like `factoryd watch`; `-config`, `-data-dir` |
 | `factoryd watch <run-or-request-id>` | Follows a run's progress feed; for a request, follows each ticket's run in turn and prints the `approve`/`retry` hint when it waits on you. Recap on exit. | `-data-dir`, `-no-follow` (print what exists and exit), `-config` |
-| `factoryd worker` | The only request driver. Drives every request of the data dir through Temporal: one `RequestWorkflow` per request (workflow id `factoryd-request-<id>`), started or woken at worker start for every request not `done` or `cancelled`. Model jobs, builds and `pr_review` passes (which can run a corrective build) run on task queue `factoryd-jobs-<id>`, at most `max_parallel_jobs` at once across requests; workflows and light steps (loading state, reminders, halts) on uncapped `factoryd-light-<id>`. `<id>` is the random id in `<data-dir>/worker-queue-id`. Holds the drain lock: a second worker for one data dir refuses to start. A step lost mid-run (worker killed or stopped) puts its request in `resume_review` and waits for `factoryd resume`; a lost `pr_review` pass that only read the PR polls again. The next worker start halts the runs a lost step left (their workflows terminated, containers removed, a lost build's worktree kept) and puts the requests running them in `resume_review`; nothing is rerun on its own and Temporal never retries a lost Activity. While it is live, `submit`, the API's `POST /requests` and every decision (`approve`, `reject` (including send-back), `retry`, `resume`, `amend-scope`, `cancel`, on the CLI and the API) wake the request's workflow (signal-with-start, so a request submitted before the worker started is adopted); a wake that cannot reach Temporal prints one warning and the decision stays saved. Without a live worker nothing is woken: the next worker start reads `request.json` itself. A review wait also rechecks at `-hitl-reminder-interval`. `submit`, `quickstart` and `upgrade` start it. Requests on one repository build concurrently in their own worktrees; only a build that touches the shared checkout holds the repository alone, and stranded worktrees are cleaned when the repository is idle. Known limit: a build that needs the repository alone (a non-isolated build, a repository-owner run, a corrective round on an existing branch), the daemon reclaim and `factoryd reconcile` can wait indefinitely while isolated builds keep overlapping, since the lock has no writer preference; stranded worktrees are cleaned up only when no build holds the repository, and `factoryd reconcile` reports busy then. Writes a liveness heartbeat with its Temporal address, `max_parallel_jobs` as job slots and every request it is running a job for, so `status`, `stop`, `use`, `upgrade` and the console see it; with every slot busy, the other job-state requests show as waiting on the first running one. A build that needs the repository alone, while others hold it, waits for that lock (retrying every 30 s, without holding a job slot) instead of halting the request. Needs Temporal. | `-config`, `-data-dir`, `-skip-doctor`. Image: `-sandbox-image` (also a session-config key). The model route itself (upstream, credential, worker model id/API) is configured entirely through session config's `routes:`/`models:`/`roles:` block, not flags -- see "Model routes" above. `-registry-proxy`, `-registry-proxy-image`, `-egress-ca-bundle`, `-compose-services` (default on). Build: `-build-app-script`, `-build-app-max-attempts`, `-verify-max-attempts`, `-open-pull-request` (default **true** here), `-conformity-policy` (`required` default / `advisory`), `-temporal-address` (default: Temporal at `localhost:7233`, started with Docker if down; `none` is refused; an address is used as given). Request driver: `-draft-spec-script`, `-spec-draft-timeout-minutes` (10), `-plan-tickets-script`, `-plan-tickets-timeout-minutes` (15), `-draft-oracles-script`, `-draft-oracles-timeout-minutes` (15), `-hitl-reminder-interval` (15m, min 1m), `-advance-on` (`accepted` default / `pr_approved`). PR review loop: `-pr-poll-interval` (5m, min 1m), `-pr-trusted-authors` (empty = no comment triggers a round), `-pr-ignore-authors` (wins over trusted), `-max-review-rounds` (3, min 1) | |
+| `factoryd worker` | The only request driver. Drives every request of the data dir through Temporal: one `RequestWorkflow` per request (workflow id `factoryd-request-<id>`), started or woken at worker start for every request not `done` or `cancelled`. Model jobs, builds and `pr_review` passes (which can run a corrective build) run on task queue `factoryd-jobs-<id>`, at most `max_parallel_jobs` at once across requests; workflows and light steps (loading state, reminders, halts) on uncapped `factoryd-light-<id>`. `<id>` is the random id in `<data-dir>/worker-queue-id`. Holds the drain lock: a second worker for one data dir refuses to start. A step lost mid-run (worker killed or stopped) puts its request in `resume_review` and waits for `factoryd resume`; a lost `pr_review` pass that only read the PR polls again. The next worker start halts the runs a lost step left (their workflows terminated, containers removed, a lost build's worktree kept) and puts the requests running them in `resume_review`; nothing is rerun on its own and Temporal never retries a lost Activity. While it is live, `submit`, the API's `POST /requests` and every decision (`approve`, `reject` (including send-back), `retry`, `resume`, `amend-scope`, `cancel`, on the CLI and the API) wake the request's workflow (signal-with-start, so a request submitted before the worker started is adopted); a wake that cannot reach Temporal prints one warning and the decision stays saved. Without a live worker nothing is woken: the next worker start reads `request.json` itself. A review wait also rechecks at `-hitl-reminder-interval`. `submit`, `quickstart` and `upgrade` start it. Requests on one repository build concurrently in their own worktrees; only a build that touches the shared checkout holds the repository alone. Known limit: a build that needs the repository alone (a non-isolated build, a repository-owner run, a corrective round on an existing branch), the daemon reclaim and `factoryd reconcile` can wait indefinitely while isolated builds keep overlapping, since the lock has no writer preference; stranded worktrees are cleaned up only when no build holds the repository, and `factoryd reconcile` reports busy then. Writes a liveness heartbeat with its Temporal address, `max_parallel_jobs` as job slots and every request it is running a job for, so `status`, `stop`, `use`, `upgrade` and the console see it; with every slot busy, the other job-state requests show as waiting on the first running one. A build that needs the repository alone, while others hold it, waits for that lock (retrying every 30 s, without holding a job slot) instead of halting the request. Needs Temporal. | `-config`, `-data-dir`, `-skip-doctor`. Image: `-sandbox-image` (also a session-config key). The model route itself (upstream, credential, worker model id/API) is configured entirely through session config's `routes:`/`models:`/`roles:` block, not flags -- see "Routes and models". `-registry-proxy`, `-registry-proxy-image`, `-egress-ca-bundle`, `-compose-services` (default on). Build: `-build-app-script`, `-build-app-max-attempts`, `-verify-max-attempts`, `-open-pull-request` (default **true** here), `-conformity-policy` (`required` default / `advisory`), `-temporal-address` (default: Temporal at `localhost:7233`, started with Docker if down; `none` is refused; an address is used as given). Request driver: `-draft-spec-script`, `-spec-draft-timeout-minutes` (10), `-plan-tickets-script`, `-plan-tickets-timeout-minutes` (15), `-draft-oracles-script`, `-draft-oracles-timeout-minutes` (15), `-hitl-reminder-interval` (15m, min 1m), `-advance-on` (`accepted` default / `pr_approved`). PR review loop: `-pr-poll-interval` (5m, min 1m), `-pr-trusted-authors` (empty = no comment triggers a round), `-pr-ignore-authors` (wins over trusted), `-max-review-rounds` (3, min 1) | |
 | `factoryd status` | Requests (state, project, age, `ticket i/n`, latest PR URL), then runs. | `-project`, `-state` (runs only), `-n` (default 20), `-json` (`{"requests": [...], "runs": [...]}`), `-data-dir` |
 | `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt, as saved by the build]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. | `-n` (default 40), `-f`, `-list`, `-prompt <name>`, `-data-dir`, `-config` |
-| `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. Reuses the same rollup `GET /requests`'s `cost_summary` field is computed from (`api.Server.ComputeCostSummary`), never a separate calculation. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. | `-request <id>` (one request only), `-since YYYY-MM-DD` (requests submitted on/after; default: all), `-json`, `-data-dir`, `-config` |
+| `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. The same figures as `GET /requests`' `cost_summary`. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. | `-request <id>` (one request only), `-since YYYY-MM-DD` (requests submitted on/after; default: all), `-json`, `-data-dir`, `-config` |
 | `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by | `-project <name>`, `-since 30d\|YYYY-MM-DD` (tickets whose first run began on/after; default: all), `-bucket <days>` (default 7), `-all` (also count `live-smoke-` tickets), `-json`, `-data-dir`, `-config` |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. | `-config`, `-data-dir` |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. | `-reason` (required, before the id), `-to` (`plan`\|`spec`; quarantined/halted only), `-config`, `-data-dir` |
@@ -65,15 +65,13 @@ else `FACTORYD_PROFILE`, else the profile named in
 `~/.config/factoryd/config.yml`, `~/.factory/config.yml` that exists. A
 `-config` value with no path separator and no `.yml` suffix is a profile name
 (`~/.config/factoryd/<name>.yml`); an active profile with no file is an error,
-not a fallback. `doctor`, `daemon` and `serve` share
-one resolver (`loadSettingsForConfig`); `supervise` forwards `-config` to
+not a fallback. `supervise` forwards `-config` to
 each `daemon` child it runs.
 
 ## Gotchas
 
 | Gotcha | Detail |
 |---|---|
-| CI does not run on push | `ci.yml` is effectively manual (its push/schedule triggers are gated off unless a self-hosted runner is enabled). Run `make verify` (and `make live-smoke` for pipeline changes) yourself. |
 | Autostart of dependencies | `worker` and a single-ticket run (Temporal, then the OpenShell gateway and meter when `meter_image` is set), `submit` (`worker` and `serve`), `console` (`serve`) and `doctor -fix` (Temporal, the gateway and meter) start what is missing, show a spinner while waiting, and say in one line why something could not start; Builds run only on Temporal, so a run whose Temporal cannot start halts with one line saying why. Temporal is started from the compose file embedded in the binary, written to `~/.config/factoryd/temporal/docker-compose.yml` (same `buildgate` compose project and volume as `make temporal-up`). When Docker is down and colima provides it, the Temporal start runs `colima start` first, for a VM that `stop -all` stopped or whose docker context is still `colima` after a reboot (log `~/.config/factoryd/temporal/colima-start.log`). `FACTORYD_AUTOSTART=0` turns all of it off, for scripts and CI, and an empty `-temporal-address` is then an error rather than auto-selecting a running Temporal. |
 | Flags must precede positional args | Go's `flag` stops at the first non-flag. `factoryd submit <ws> -issue <url>` ignores `-issue`; write `factoryd submit -issue <url> <ws>`. Same for `reject -reason`, `retry`, `cancel`. |
 | Project id is derived | Basename of the git repo containing the workspace (symlinks resolved): `~/code/payments` is `payments`. `status -project` and `kill-switch -project` filter on it. |
@@ -126,10 +124,7 @@ with `-prior-run <previous run id>`. A ticket's actual `-spec` is not
 spec verbatim plus a `## Acceptance criteria this ticket must satisfy`
 section carrying the full text of every approved-spec criterion the
 ticket's own `### Acceptance criteria covered` numbers name (every
-criterion, if it names none) — the builder used to see only those
-covered-criteria NUMBERS and had to guess field/format/error-code names
-from the ticket's own paraphrase; it now gets the approved spec's exact
-wording. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
+criterion, if it names none). `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
@@ -152,8 +147,8 @@ A ticket that quarantines with its failed gates a subset of
 one of those two carries something actionable (a flagged, non-"clean"
 spec-conformity criterion, or a "high"-severity code-review finding),
 first gets up to `-review-corrective-rounds` (default `1`, `0` disables;
-key `review_corrective_rounds`; the prior key,
-`conformity_corrective_rounds`, is refused outright, not silently ignored)
+key `review_corrective_rounds`; the retired key
+`conformity_corrective_rounds` is refused)
 automatic corrective builds on its own branch before the request
 quarantines: each round's addendum spec is the ticket spec plus a "Spec
 conformity review to address" section (the flagged criteria and the
@@ -162,10 +157,11 @@ review findings to address" section (each blocking finding's file:line,
 severity, summary and failure scenario) when code_review was flagged,
 rebuilt via `-on-branch`/`-diff-base` against the quarantined run's own
 branch/base SHA, through every gate again including a fresh, independent
-review. A code_review failure with no "high" finding (an unavailable
-reviewer, or one that found nothing blocking) is NOT actionable and gets
-no round -- the request quarantines as usual, with the quarantine naming
-`code_review`. Accepted opens the PR and advances exactly like an ordinary
+review. A review that gave no verdict (the reviewer timed out or returned
+nothing parseable) is not actionable and gets no round: the request
+quarantines with check `review_unavailable`, saying the build was not
+judged; otherwise the quarantine names `code_review` when that gate
+failed, else `spec_conformity`. Accepted opens the PR and advances exactly like an ordinary
 first-build acceptance; quarantined or halted again quarantines the
 request as usual. A budget greater than `1` runs up to that many
 *consecutive* rounds, not just one: a round that itself quarantines again
@@ -224,7 +220,7 @@ for the operator to read:
 | Names | `build-round-<n>`, `build-notes`, `build-sonnet-fallback` (the build); `review-conformity`, `review-code`, `review-combined`; `draft-spec`, `draft-spec-example-check`, `draft-plan`, `draft-oracle-c<nnn>`. A name saved twice in one session (a relaunch) gets `-2`, `-3`. Not covered: `goal_pilot.py`, which `factoryd intake` runs outside a run's or request's directory; the factory composes no prompt text there (each prompt is the one line `/spec-plan <input file> <pilot dir>` or `/contract-plan <pilot dir>`), and the model's output is in `<pilot dir>/logs/` |
 | Caps | 2 MiB per prompt (cut, with a last line saying how many bytes), 50 per launch; the host enforces both again, takes only regular files named `[a-z0-9-]{1,64}.md`, and follows no link |
 | Stored | `<session folder>/prompts/<name>.md` in the worktree, copied by the host (through `sanitize.Text`: escapes, control characters and recognisable credentials removed) to `prompts/<launch>-<n>/<name>.md` in the run's directory (`<launch>` is `build`, `spec_conformity`, `code_review` or `review`; `<n>` the Temporal attempt), or in the request's directory (`spec-<n>`, `plan-<n>`, `oracle-<n>`) for a drafting job, then removed from the worktree before any later launch. A launch's prompts folder is also emptied before the launch (a folder left read-only is made removable first; a review or a build whose folder cannot be emptied fails as an infrastructure error and is not launched), so only files written during the launch are copied. No field of `run.json` names them |
-| What a saved prompt proves | A saved prompt is what the build's session folder held when the host copied it; a build can alter its own before that. The script and the coding agent run as one user in one sandbox, and the script has no way to report what it saved that the agent cannot also write (its output file is in a directory the sandbox writes). A review's prompt is saved by a launch that runs no build agent |
+| What a saved prompt proves | A saved prompt is what the build's session folder held when the host copied it; a build can alter its own before that (the script and the coding agent run as one user in one sandbox). A review's prompt is saved by a launch that runs no build agent |
 | Readable by | The operator: `factoryd logs -list` / `-prompt`, `GET /runs/{id}/prompts` (name, attempt, bytes, time) and `GET /runs/{id}/prompts/{attempt}/{name}` (`text/plain`), gated like `GET /runs/{id}`, and the run page's **Prompts as saved by the build**. Not a model, a review, an MCP tool, a pull request, a notification, the progress feed or `run.json`. A prompt may quote repository files, failing output and the record of an earlier attempt |
 
 **A retry's rebuild.** `factoryd retry <id>` rebuilds the quarantined ticket
@@ -257,14 +253,11 @@ under the same checks:
 | Lost, worktree kept (a retry's rebuild from the base; the worktree of a corrective round, which runs on an existing branch, is never kept) | `factoryd resume` in that worktree | `rounds/<ticket>-resume/earlier-attempt.md`; opens by saying the record is of the attempt before the interrupted build, and whether the interrupted build ran on that attempt's branch |
 | Lost or halted | `factoryd resume -from scratch` or `factoryd retry` | `rounds/<ticket>-retry/earlier-attempt.md`, as for any retry |
 
-**`-on-branch`/`-diff-base`.** Both travel in the workflow input
-(`RunWorkflowInput.OnBranch`/`DiffBaseSHA`): a corrective
-round checks out the quarantined run's own existing branch
-(`wsisolation.PrepareOnBranch`) and gates the cumulative diff from
-`-diff-base`, for every ticket in a
-multi-ticket request. The review corrective round and the PR-review
-corrective round (`runCorrectiveRound`) both rely on this.
-`-instruction-base <sha>` (`RunWorkflowInput.InstructionBaseSHA`, recorded on
+**`-on-branch`/`-diff-base`.** A corrective round (review or PR-review)
+checks out the quarantined run's own existing branch and gates the
+cumulative diff from `-diff-base`, for every ticket in a multi-ticket
+request.
+`-instruction-base <sha>` (recorded on
 every run as its `instruction_base_sha`) names the commit whose instruction
 files the run's reviews read. The request driver passes it to every build that
 follows an earlier run of the request (first build of ticket 2 onward, retry,
@@ -275,8 +268,7 @@ records no base, the request halts instead of building. It is a full
 40-character object id and an ancestor of the run's base. Default: a resumed
 run's lost run's value, else the run's diff base, else its base.
 
-**PR review (`pr_review`).** `worker`'s poll loop
-(`internal/requestdriver/pr_review_driver.go`) checks each ticket's PR at most once
+**PR review (`pr_review`).** `worker`'s poll loop checks each ticket's PR at most once
 per `-pr-poll-interval` (`5m` default, min `1m`):
 
 - An unresolved thread from a `-pr-trusted-authors` login (comma-separated
@@ -416,11 +408,9 @@ spec's acceptance criteria and the repo at the base commit (never the new
 implementation) and writes Go/Python tests plus a `MANIFEST.json` mapping
 each criterion to a file and `target_path`; judgement criteria are
 skipped. Drafting is per criterion — one bounded pi pass each, strictly
-sequential, so one hard criterion's timeout doesn't cost the others.
-`oracle_draft_job.go` splits the overall `-draft-oracles-timeout-minutes`
-budget across the criteria found and passes it to
-`draft_acceptance_oracles.py --criterion-timeout-minutes` explicitly, so
-the container deadline and the per-criterion budget always agree. A
+sequential, so one hard criterion's timeout doesn't cost the others; the
+`-draft-oracles-timeout-minutes` budget is split across the criteria
+found. A
 criterion whose pass wrote no manifest entry is salvaged from the model's
 final response text rather than discarded (`salvaged_count` in the
 draft's evidence). (3) At `oracle_review`, read every file, edit
@@ -552,9 +542,8 @@ then `factoryd doctor -fix`.
 
 ## `.factory.yml` reference
 
-Committed at the repo's git top level; `internal/projectconfig.Load`
-reads it and fills in any flag the caller left unset (an explicit flag
-always wins). `factoryd init -write-factory-yml` / `factoryd onboard
+Committed at the repo's git top level; it fills in any flag the caller
+left unset (an explicit flag always wins). `factoryd init -write-factory-yml` / `factoryd onboard
 -write-factory-yml` generate a starting one (detects a real verify
 command; always writes `preflight_profile: brownfield`); both run the
 `doctor` preflight first and refuse to write on failure (`-skip-doctor`
@@ -588,7 +577,7 @@ protected_paths:                       # same as session config's release_protec
   - "go.mod"
   - "README.md"
 token_ceiling: 5000000                 # same as meter_token_ceiling; may only lower the session's effective ceiling, never raise it (a higher value refuses the run/submission)
-cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; may only lower the session's effective ceiling, never raise it (a higher value refuses the run/submission)
+cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; lower-only, like token_ceiling
 # design_guide: go-service             # team design guide for spec drafting and planning; see "Design guide"
 ```
 
@@ -628,7 +617,7 @@ workspace; the command of the step follows only when all passed:
 |---|---|
 | Runs before | The baseline verify; the build (by the build script: once before the first agent turn, and again before each round's fast check and verify, output in the round's `setup.log`, kept for every round in the run's directory as `round-logs/round-<n>/setup.log`, each command with a 10-minute limit); canonical verify; the full suite; each named and repo gate; the oracle canary; the reruns after an oracle commit |
 | Never runs in | Review sandboxes (they hold a model route); drafting and planning jobs |
-| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and its log names the command. When the meter counted no token for the build and nothing was committed, the run reads `the build stopped before its first agent turn: ...`, is sorted for the operator and gets no corrective build, on a first build and on a corrective one; the exit status and the log line alone decide nothing. In the build a setup command gets 10 minutes |
+| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and its log names the command. When the meter counted no token for the build and nothing was committed, the run reads `the build stopped before its first agent turn: ...`, is sorted for the operator and gets no corrective build, on a first build and on a corrective one; the exit status and the log line alone decide nothing |
 | Cost | It runs once per sandbox: a run with N gates runs it at least N+1 more times. Nothing is cached between sandboxes |
 | Network | Whatever the step already has: none for verify and gates beyond the registry proxy and Compose sidecars; in the build, the model route. `setup:` is given to no planner or reviewer; a setup command that fails inside a build round is named, with its output, to that build's own agent |
 | Background processes | A setup command that times out is stopped with everything in its process group. One that returns leaves what it started in the background running for that step. Do not rely on that for services: declare them as Compose services, which every step that needs them gets |
@@ -690,11 +679,7 @@ gate with its own exit code/log/log-SHA-256 — mirroring
 one quarantines the run naming that gate, same as `canonical_verify`. The
 draft PR body lists `pass`/`FAIL`/`not configured` per gate. `doctor`
 checks each configured command's leading executable exists in the
-sandbox image. These five gates, their flags, and their `.factory.yml`
-keys are one compiled-in table (`internal/policy.CommandGates`) rather
-than five independently-maintained lists — adding a 6th command gate
-touches that table, its YAML key (`projectconfig.Config.GateCommands`),
-and this doc, not the run loop or the Temporal wiring.
+sandbox image.
 
 **A failed gate is rerun on the base commit.** A named gate (`lint`,
 `security_audit`, `unit_tests`, `integration_tests`) or a repository gate
@@ -734,26 +719,15 @@ the release decision). Unset falls back to
 `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust); this
 gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
-`tests_added` and it declares no `Tests-Required` opt-out (found live,
-example-app run 3, 2026-09-28: a plan reached approval and a build round ran
-before quarantining on a `tests_added` failure its own `Allowed-Files`
-made structurally unavoidable). A second plan-time check runs alongside
-it: for every approved-spec acceptance criterion, it collects the
-repo-relative file paths the criterion names in backticks and checks
-them against the union of `Allowed-Files` of every ticket that lists the
-criterion as covered, rejecting the plan if a named path is owned by no
-covering ticket (found live, example-app habit-insights request, 2026-09-28: a criterion
-naming three tickets' own files was listed as covered by only one of
-them, whose `Allowed-Files` could never satisfy the part of the
-criterion naming the other two). A criterion covered by no ticket at all
-is left to the existing "unclaimed criterion" check, not this one. On
-either rejection the request driver re-plans automatically, once: it
-records a factory-authored rejection, feeds every infeasibility found
-(both classes, in one message) back to the planner as plan_review-style
-feedback, and re-launches planning before the request ever reaches a
-human. If the redrafted plan is still infeasible by either check, the
-request halts exactly as before -- one automatic retry, never an
-unbounded loop.
+`tests_added` and it declares no `Tests-Required` opt-out. A second
+plan-time check runs alongside it: for every approved-spec acceptance
+criterion, it collects the repo-relative file paths the criterion names in
+backticks and rejects the plan if a named path is in the `Allowed-Files`
+of no ticket that lists the criterion as covered. A criterion covered by
+no ticket at all is left to the "unclaimed criterion" check. On either
+rejection the request driver re-plans once, feeding every infeasibility
+found back to the planner as feedback before the request reaches a human;
+if the redrafted plan is still infeasible, the request halts.
 
 Real correctness coverage is `-conformity-policy`'s
 per-criterion review (default `required`, no `.factory.yml` key) plus the
@@ -780,14 +754,12 @@ section, sanitized and capped at 20.
 When both `-conformity-policy` (via a declared `-spec-acceptance-criteria`)
 and `-code-review-policy` are enabled for the same run, both reviews run
 as ONE combined call (`agent/pi/scripts/combined_review.py`) instead of
-two separate sandboxed sessions over the same diff -- measured live,
-example-app request 2026-09-28, review alone was 50% of that run's whole
-spend.
+two separate sandboxed sessions over the same diff.
 
 | Restriction | Why |
 |---|---|
 | No `sandbox_image` key | The API's `-api-allowed-sandbox-images` allowlist check happens in `serve` before this file is read — a repo-committed image would bypass it. |
-| `token_ceiling`/`cost_ceiling_micro_usd` only tighten | Applied when lower than the session's effective ceiling; equal is a no-op; a higher value refuses the run/submission outright (M3-E1) rather than being silently ignored. |
+| `token_ceiling`/`cost_ceiling_micro_usd` only tighten | Applied when lower than the session's effective ceiling; equal is a no-op; a higher value refuses the run/submission. |
 
 ## Model routes
 
@@ -813,11 +785,8 @@ process environment only; config stores file paths, never token values.
 
 - Under `quickstart -non-interactive`, only a single unambiguous file-based
   login is picked automatically; an inherited `ANTHROPIC_API_KEY` never is.
-- A Copilot model that can't run under the configured worker API (a
-  `/responses`-only model with no `api: openai-responses`, or
-  `policy: disabled`) is refused with the reason (`meter.CopilotModelUsable`).
-- A `chatgpt-codex` route with a leftover `upstream`, `allowed_path_prefix`
-  or `worker_base_path` fails startup naming the key.
+- A Copilot model that can't run under the configured worker API is
+  refused with the reason (see "Model discovery").
 
 ### Route selection in `quickstart`
 
@@ -869,14 +838,11 @@ models:
 
 `quickstart -route anthropic` targets Anthropic's OpenAI-compatible
 endpoint (`https://api.anthropic.com/v1`, Chat Completions-shaped), not
-its native Messages API -- **placeholder, not live-tested**: nothing in
-this repo's own live-validation runs has exercised this endpoint yet.
+its native Messages API -- **placeholder, not live-tested**.
 Takes `-model-id`/`-context-window` like the other routes (defaults
 `claude-sonnet-5`/200000); the credential is `-credential` or
 `ANTHROPIC_API_KEY`. No `credential_header` is set (defaults to
-`X-Api-Key` today -- likely
-wrong for this endpoint's own `Authorization: Bearer` convention;
-revisit once this route is actually live-validated).
+`X-Api-Key`; this endpoint's own convention is `Authorization: Bearer`).
 
 ### GitHub Copilot (`github-copilot`)
 
@@ -919,22 +885,15 @@ roles:
   model-usability checks, `quickstart`) for GPT-5.x/6 models Copilot
   serves only on `/responses` (e.g. `gpt-5.6-luna`).
   Unproven live: the one live build used a chat-completions model.
-- `routes.<r>.upstream` is pinned (`meter.ValidateGitHubCopilotRoute`,
-  called identically from `RoutePolicy.Validate` and `factoryd doctor`, so
-  both refuse the same input): it must be an `https://` URL, carrying no embedded userinfo,
+- `routes.<r>.upstream` is pinned (a launch and `factoryd doctor`
+  refuse the same input): it must be an `https://` URL, carrying no embedded userinfo,
   whose host is `githubcopilot.com` or ends with `.githubcopilot.com`
   (covers the individual/business/enterprise plan hosts) — the Copilot
   bearer token is never sent anywhere else.
 - GHE.com data-residency tenants (`copilot-api.<tenant>.ghe.com`, GitHub's
-  own documented Copilot inference host for that plan) are **refused**,
-  not accepted, even though the host itself is genuine: this repo's own
-  OAuth **token exchange** (`internal/meter`'s `copilotTokenExchangeURL`/
-  `ExchangeGitHubCopilotToken`) is hardcoded to `api.github.com`
-  regardless of `routes.<r>.upstream`, which is the wrong identity domain
-  for a GHE.com tenant's own login — accepting the upstream pin alone
-  would let an operator configure a route whose token exchange
-  authenticates against the wrong domain. Not supported end to end yet;
-  revisit once the token exchange itself is made GHE.com-aware.
+  own documented Copilot inference host for that plan) are **refused**:
+  the OAuth token exchange always goes to `api.github.com`, the wrong
+  identity domain for a GHE.com tenant's login. Not supported end to end.
 
 ### ChatGPT Codex (`chatgpt-codex`)
 
@@ -1013,15 +972,15 @@ roles:
   (Business/Enterprise host) it downgrades to a warning. For
   OpenAI-compatible routes, `doctor` checks from inside the sandbox that
   the upstream lists the configured model.
-- Credential hygiene on every listing call: `ValidateUpstreamScheme` and
-  `CredentialSafeForUpstream` run before any credential is sent (so no
+- Credential hygiene on every listing call: the upstream's scheme and
+  credential safety are checked before any credential is sent (so no
   token goes to a plaintext upstream a real run would refuse); nothing is
   sent when the selected route's `allow_no_credential` is set; redirects are refused;
   userinfo is redacted from printed URLs.
 
 **Weak-model advisory.** `quickstart` and `doctor -list-models` print a
 warning (never a block) for a model on a short, dated list with cited
-evidence. Current entry: `gpt-4.1` (2026-09-25 onboarding walk: could not
+evidence. Current entry: `gpt-4.1` (could not
 finish a small ticket that `gpt-5.6-luna` did first try).
 
 **First real request is still authoritative.** `unsupported_api_for_model`
@@ -1034,7 +993,7 @@ finish a small ticket that `gpt-5.6-luna` did first try).
 routes (an upstream/credential pairing) separate from named models
 (which route(s) a model may reach, in order, never another model), and
 `roles:` picks a model and a Pi thinking level per kind of work.
-`internal/modelrole.SelectRoute` resolves `roles.<role>.model` against
+`roles.<role>.model` is resolved against
 this config at every real launch (bare run, worker, and the Temporal
 Worker's own route-binding check), trying that model's own declared
 routes in order and skipping any whose policy validation, upstream
@@ -1068,8 +1027,7 @@ roles:
   and `codex_auth_file` only to a chatgpt-codex route -- each refused
   outside its own matching mode rather than silently ignored. A
   chatgpt-codex or github-copilot route's own defaulted upstream/path is
-  checked against the same host pin a real launch enforces
-  (`meter.ValidateChatGPTCodexRoute`/`ValidateGitHubCopilotRoute`), so an
+  checked against the same host pin a real launch enforces, so an
   explicit `upstream`/`allowed_path_prefix`/`worker_base_path` override
   the pin would reject at launch time is refused here too, at validation
   time. `billing` is `subscription`, `metered`, or left empty to derive
@@ -1118,12 +1076,8 @@ roles:
   a role with no `roles:` entry uses `pi`, except drafting/review jobs whose
   role is unset, which run as the execution role). A role whose harness needs
   its own worker image (`pifork`) requires an explicit digest-pinned
-  `sandbox_image`; `codex` (Codex CLI) speaks only the Responses API, so its
-  role's model must resolve to an `openai-responses` route, while `copilot`
-  (Copilot CLI, bring-your-own-key) speaks all three apis; both run from the
-  standard worker image with per-session state under the workspace session dir; the retired top-level `engine:` key is refused at load.
-  `factoryd doctor` prints each role's harness on its `roles resolve` row and
-  runs `<binary> --version` in the sandbox image for every harness in use.
+  `sandbox_image`; for `codex` and `copilot` see "Codex and Copilot
+  harnesses"; the retired top-level `engine:` key is refused at load.
 - Any model in `roles.review`'s own `allowed` list resolving to the same
   **backend** as any model in `roles.execution.allowed` -- compared by
   `credential_mode` + `upstream` (both after defaults) + effective id
@@ -1135,10 +1089,7 @@ roles:
   is refused too, naming the key, rather than silently doing nothing.
 - A model's `extra_json` may not set `id`, `api`, or `baseUrl` at all, nor
   `contextWindow`/`reasoning`/`thinkingLevelMap` when the model's own
-  first-class field for that key is also set -- those compose from the
-  model's own first-class fields instead, so a model owns its whole
-  worker-model JSON object rather than layering a session-level default
-  underneath it.
+  first-class field for that key is also set.
 - A `models:` block written without a `routes:` key is refused too
   (there is nothing for a `models:` entry's own `routes:` list to resolve
   against), naming `models:` rather than silently doing nothing.
@@ -1148,13 +1099,8 @@ roles:
 - Every model any role's `model` or `allowed` could resolve to must also
   be launchable, not just schema-valid: the same route-policy checks a
   real launch runs (a worker model `id` must not contain a slash, among
-  others) are checked at config-load time too
-  (`modelrole.ValidateAllowedPolicies`, wired into `validateRoles` and
-  `doctor`'s own `roles resolve` check) -- found live (M3 walk,
-  2026-09-28), an `allowed` model whose `id` was a local filesystem path
-  passed config load, `doctor`, and `submit`, and only failed once a
-  human had already drafted and approved a spec/plan against it and the
-  real build tried to launch.
+  others) are checked at config load and by `doctor`'s `roles resolve`
+  check too.
 
 ### Model prices
 
@@ -1186,11 +1132,10 @@ gpt-5.6-luna:
   model naming its own price, source, and `as_of`, and warns when the
   entry is missing or `as_of` is missing or more than 90 days old (the price itself may
   still be correct; nothing here can prove that from the date alone).
-- A dollar cost budget/ceiling (`meter_cost_budget_micro_usd`,
-  `meter_cost_ceiling_micro_usd`, and the request/monthly cost budgets)
-  is computed from these prices, so correcting a stale price changes how
-  many tokens a dollar budget allows for that model -- a TOKEN
-  budget/ceiling is unaffected either way. The retired per-token session
+- Correcting a stale price changes how many tokens a dollar budget or
+  ceiling (`meter_cost_budget_micro_usd`, `meter_cost_ceiling_micro_usd`,
+  and the request/monthly cost budgets) allows for that model; a token
+  budget or ceiling is unaffected. The retired per-token session
   keys (`relay_cost_per_input_token_micro_usd`/
   `relay_cost_per_output_token_micro_usd`) and the retired per-model keys
   (`models.<m>.cost_per_input_token_micro_usd`/
@@ -1660,20 +1605,15 @@ and the flag-mirroring keys (`sandbox_image`, `meter_image`,
 
 **Release policy.** The bare defaults above (`0` / `0` / empty) make
 `MergePolicyCheck` deny every release. `quickstart` writes a usable policy
-(`25` / `1000` / `"git revert the merge commit on main"`, from
-`sessionconfig.DefaultReleaseMaxFilesChanged` and friends) into a new
+(`25` / `1000` / `"git revert the merge commit on main"`) into a new
 config, `init-config`'s scaffold has the same values, and `quickstart`
 reusing an existing config backfills only the missing keys. `doctor` warns
 (and the console board shows a strip) while all three are deny-all;
 `doctor -fix` can write them.
 
-**Code review default.** A freshly written config (`quickstart` writing a
-NEW config, not reusing an existing one) also sets `code_review_policy:
-required` -- unlike `worker`'s own bare `-code-review-policy` flag,
-which stays off by default for an operator running with no config at all.
-A new factory therefore gets the review-corrective round's code_review
-half (above) working out of the box; an operator who wants it off edits
-`code_review_policy` in the written config.
+**Code review default.** `quickstart` writing a new config (not reusing an
+existing one) also sets `code_review_policy: required`; `worker`'s bare
+`-code-review-policy` flag stays `off` with no config.
 
 ## Temporal: repository owners, daemons, observing
 
@@ -1780,7 +1720,7 @@ factoryd supervise -temporal-address localhost:7233 \
   `-verify-command`, `-conformity-policy`).
 - Sandbox resource knobs (`sandbox_docker`, `sandbox_memory`, etc.) and
   build/verify attempt limits come only from the session config
-  ([`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) config-key table). They are
+  ("Keys with no CLI flag of their own"). They are
   fixed per daemon, whatever a request asks for.
 - A daemon servicing `github-copilot` or `chatgpt-codex` requests needs
   that route's credential source, set in the session config's `routes:`
@@ -1876,9 +1816,9 @@ LIVE_SMOKE_ONLY=oracle LIVE_SMOKE_TEMPORAL=localhost:7233 scripts/live-smoke.sh
   [`containment-matrix.md`](containment-matrix.md).
 - The registry-proxy policy travels in the Workflow input. Whichever
   worker runs the Activity launches one proxy per sandboxed Activity. Its
-  scratch cache (`<data-dir>/scratch/<run-id>/<launch>`, one directory per
-  worker container) is removed when that container exits; `factoryd daemon` also reaps leftovers at startup and on each
-  reclaim scan.
+  scratch cache is removed when the container exits (see Gotchas);
+  `factoryd daemon` also reaps leftovers at startup and on each reclaim
+  scan.
 
 ## Appendix: existing repo without `quickstart`
 
@@ -1899,11 +1839,11 @@ values a run will use).
 
 | Gotcha | What to do |
 |---|---|
-| Writing a ticket by hand | `factoryd ticket-template [-o <path>]` for a skeleton; `factoryd check-ticket <path>` to validate the header lines. Point `-spec` at it. `-ticket-file` is a separate from-scratch format; leave it unset. Both run paths refuse a malformed or near-miss header (`Verify-command:`, `Allowed_Files:`) (`TestPreflightRefusesNearMissTicketHeader`). |
-| Module root is a subdirectory | Point `PROJECT_DIR` (for `make project-sandbox-image`) and `-verify-command` at it. `doctor -workspace <repo>` warns when it finds the manifest one level down (`TestDoctorCheckMonorepoModuleRoot`). |
+| Writing a ticket by hand | `factoryd ticket-template [-o <path>]` for a skeleton; `factoryd check-ticket <path>` to validate the header lines. Point `-spec` at it. `-ticket-file` is a separate from-scratch format; leave it unset. Both run paths refuse a malformed or near-miss header (`Verify-command:`, `Allowed_Files:`). |
+| Module root is a subdirectory | Point `PROJECT_DIR` (for `make project-sandbox-image`) and `-verify-command` at it. `doctor -workspace <repo>` warns when it finds the manifest one level down. |
 | Need a worker image | `make sandbox-image` builds one locally (every image is built from source, never pulled); pass its printed ref as `BASE_IMAGE` to `make project-sandbox-image`. |
 | The project needs another Go or Python version | `make project-sandbox-image` installs it: see Project toolchains below. |
-| Model host only on Tailscale | Use the Tailscale IP or full `*.ts.net` FQDN for the route's own `upstream`; the container may not share the host's resolver. `doctor` resolves the host from inside a sandbox container and fails with `container DNS cannot resolve ...` (`TestDoctorCheckRelayUpstreamHostResolvesInSandbox`). |
+| Model host only on Tailscale | Use the Tailscale IP or full `*.ts.net` FQDN for the route's own `upstream`; the container may not share the host's resolver. `doctor` resolves the host from inside a sandbox container and fails with `container DNS cannot resolve ...`. |
 
 ### Project toolchains
 
