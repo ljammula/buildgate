@@ -30,12 +30,11 @@ func (f *reviewFixture) runWithHeartbeatCount(heartbeats *atomic.Int32) error {
 // The review step heartbeats while the instruction snapshot runs: RunWorkflow
 // gives the step a heartbeat timeout of twice activityHeartbeatInterval, so a
 // snapshot that takes longer than one interval must have been heard from
-// before it returns, and again as it returns, since the launch that follows
-// first heartbeats a whole interval later.
+// before it returns.
 func TestReviewStepHeartbeatsWhileTheInstructionSnapshotRuns(t *testing.T) {
 	f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(repo string) {})
 	var heartbeats atomic.Int32
-	during, atLaunch := int32(-1), int32(-1)
+	during := int32(-1)
 	f.acts.snapshotReviewInstructions = func(ctx context.Context, _, _, _ string) (sandbox.ReviewInstructionSnapshot, error) {
 		select {
 		case <-time.After(activityHeartbeatInterval + 2*time.Second):
@@ -45,15 +44,30 @@ func TestReviewStepHeartbeatsWhileTheInstructionSnapshotRuns(t *testing.T) {
 		during = heartbeats.Load()
 		return sandbox.ReviewInstructionSnapshot{}, nil
 	}
-	f.fakeLaunch(func([]string) { atLaunch = heartbeats.Load() }, nil)
+	f.fakeLaunch(nil, nil)
 	if err := f.runWithHeartbeatCount(&heartbeats); err != nil {
 		t.Fatal(err)
 	}
 	if during < 1 {
 		t.Errorf("%d heartbeats while a snapshot of %v ran, want at least one", during, activityHeartbeatInterval+2*time.Second)
 	}
-	if atLaunch <= during {
-		t.Errorf("%d heartbeats when the launch began, %d when the snapshot returned: want one recorded between them", atLaunch, during)
+}
+
+// A heartbeat is recorded as the snapshot returns, however short it was: the
+// launch that follows first heartbeats a whole interval after it begins, and
+// a snapshot that took most of an interval would leave the step unheard from
+// for close to its heartbeat timeout.
+func TestReviewStepHeartbeatsWhenTheInstructionSnapshotReturns(t *testing.T) {
+	f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(repo string) {})
+	var heartbeats atomic.Int32
+	atLaunch := int32(-1)
+	f.acts.snapshotReviewInstructions = noReviewInstructions
+	f.fakeLaunch(func([]string) { atLaunch = heartbeats.Load() }, nil)
+	if err := f.runWithHeartbeatCount(&heartbeats); err != nil {
+		t.Fatal(err)
+	}
+	if atLaunch < 1 {
+		t.Errorf("%d heartbeats when the launch began, want the one recorded as the snapshot returned", atLaunch)
 	}
 }
 

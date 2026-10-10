@@ -193,7 +193,10 @@ func (a *Activities) prepareReviewInstructions(ctx context.Context, input Review
 	}
 	snap, err := a.snapshotFn()(ctx, input.WorkspacePath, input.instructionBase(), dst)
 	if err != nil {
-		return prep, reviewInstructionsFailure(kind, err)
+		// A snapshot that failed while it was removing untracked instruction
+		// paths returns the ones it removed: they are recorded with the cause.
+		failed := run.Attempt{Kind: kind, ExitCode: -1, Role: run.AttemptRoleReview, ReviewRemovedPaths: cappedCleanPaths(snap.Removed)}
+		return prep, reviewInstructionsFailureOf(kind, err, []run.Attempt{failed})
 	}
 	prep.Snapshot = snap
 	if err := createReviewStubs(input.WorkspacePath, prep.Manifest, snap.Masks); err != nil {

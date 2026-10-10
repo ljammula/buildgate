@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/reviewstep"
+	"buildgate/internal/runner"
 )
 
 // The harness session folders a launch's scripts save prompts in
@@ -62,6 +64,26 @@ func (a *Activities) prepareReviewLaunch(ctx context.Context, input ReviewStepIn
 		return prep, temporal.NewApplicationErrorWithCause("remove the prompts found in the review's session folder before its launch", InfrastructureFailureType, err)
 	}
 	return prep, nil
+}
+
+// prepareReviewLaunchHeartbeating is prepareReviewLaunch under the step's
+// heartbeat: the snapshot may take as long as its own deadline and its
+// removals longer, and the step's heartbeat timeout is two intervals. One more
+// heartbeat is recorded as it returns, because the launch that follows first
+// heartbeats a whole interval after it begins.
+func (a *Activities) prepareReviewLaunchHeartbeating(ctx context.Context, input ReviewStepInput, step reviewstep.Step, dst string) (reviewInstructions, error) {
+	start := time.Now()
+	heartbeat := func() {
+		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(start)})
+	}
+	var prep reviewInstructions
+	_, err := heartbeatWhileRunning(activityHeartbeatInterval, heartbeat, func() (runner.Result, error) {
+		var err error
+		prep, err = a.prepareReviewLaunch(ctx, input, step, dst)
+		return runner.Result{}, err
+	})
+	heartbeat()
+	return prep, err
 }
 
 // clearBeforeBuild removes what a build launch must not find: an earlier

@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/text/cases"
@@ -70,15 +71,15 @@ const (
 	reviewInstructionScratchDir   = "scratch"
 )
 
-// ReviewInstructionTimeout is the deadline of one whole snapshot. The caps
-// above bound what a snapshot keeps, not the work two hostile trees can make
-// of it (a link is one git process, a deep path many comparisons), so every
-// loop whose length the repository decides checks its context and this
-// deadline ends it: a repository too costly to compare gets no review. It is
-// shorter than the commit-directory snapshot's minute because the review step
-// takes the snapshot before its first heartbeat, inside that Activity's
-// heartbeat timeout (internal/workflow checks the two against each other).
-const ReviewInstructionTimeout = 10 * time.Second
+// ReviewInstructionTimeout is the deadline of everything a snapshot does
+// before it changes the worktree, the same minute the commit-directory
+// snapshot has. The caps above bound what a snapshot keeps, not the work two
+// hostile trees can make of it (a deep path is many comparisons, a changed
+// file one git diff), so every loop whose length the repository decides
+// checks its context and this deadline ends it: a repository too costly to
+// compare gets no review. The removals that come last are not under it. The
+// review step heartbeats for as long as the snapshot runs (internal/workflow).
+const ReviewInstructionTimeout = 60 * time.Second
 
 // reviewInstructionTimeout is ReviewInstructionTimeout; a variable so a test
 // can change it.
@@ -317,16 +318,132 @@ func reviewGit(ctx context.Context, dir string, stdout io.Writer, args ...string
 	return nil
 }
 
+// blobReader is one `git cat-file --batch` process that serves every blob a
+// snapshot reads: a request is an object id on its input, the answer a line
+// "<id> blob <size>" and then the bytes. The size is known before a byte of
+// the body is read, so a limit is applied without reading past it. After any
+// error the reader is closed and answers nothing more: every such error ends
+// the snapshot.
+type blobReader struct {
+	cmd    *exec.Cmd
+	in     io.WriteCloser
+	out    *bufio.Reader
+	stderr *cappedWriter
+	err    error // why the reader stopped
+}
+
+func startBlobReader(ctx context.Context, root string) (*blobReader, error) {
+	cmd := HardenedGitCommand(ctx, root, "cat-file", "--batch")
+	b := &blobReader{cmd: cmd, stderr: &cappedWriter{max: 4096}}
+	cmd.Stderr = b.stderr
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git cat-file: %w", err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("git cat-file: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("git cat-file: %w", err)
+	}
+	b.in, b.out = in, bufio.NewReaderSize(out, 64<<10)
+	return b, nil
+}
+
+// close ends the process. It is safe to call twice.
+func (b *blobReader) close() {
+	if b == nil || b.cmd == nil {
+		return
+	}
+	_ = b.in.Close()
+	_ = b.cmd.Process.Kill()
+	_ = b.cmd.Wait()
+	b.cmd = nil
+	if b.err == nil {
+		b.err = errors.New("git cat-file: the reader is closed")
+	}
+}
+
+// fail closes the reader and returns err, which every later request returns.
+func (b *blobReader) fail(err error) error {
+	b.err = err
+	b.close()
+	return err
+}
+
+// size asks for the blob oid and returns its size; the body follows on b.out.
+func (b *blobReader) size(oid string) (int64, error) {
+	if b.err != nil {
+		return 0, b.err
+	}
+	if !fullGitSHAPattern.MatchString(oid) {
+		return 0, b.fail(fmt.Errorf("git cat-file: %q is not an object id", oid))
+	}
+	if _, err := io.WriteString(b.in, oid+"\n"); err != nil {
+		return 0, b.fail(fmt.Errorf("git cat-file: %w: %s", err, strings.TrimSpace(b.stderr.buf.String())))
+	}
+	line, err := b.out.ReadSlice('\n')
+	if err != nil {
+		return 0, b.fail(fmt.Errorf("git cat-file: %w", err))
+	}
+	rest, ok := strings.CutPrefix(strings.TrimSuffix(string(line), "\n"), oid+" blob ")
+	size, perr := strconv.ParseInt(rest, 10, 64)
+	if !ok || perr != nil || size < 0 {
+		return 0, b.fail(fmt.Errorf("git cat-file: object %s is not a blob (%s)", oid, strings.TrimSpace(string(line))))
+	}
+	return size, nil
+}
+
+// body copies the size bytes that follow a size answer to w.
+func (b *blobReader) body(w io.Writer, size int64) error {
+	if _, err := io.CopyN(w, b.out, size); err != nil {
+		return b.fail(fmt.Errorf("git cat-file: %w", err))
+	}
+	if c, err := b.out.ReadByte(); err != nil || c != '\n' {
+		return b.fail(fmt.Errorf("git cat-file: a blob of %d bytes did not end where its size says", size))
+	}
+	return nil
+}
+
+// blobs is the plan's reader, started on the first read.
+func (s *planState) blobs(ctx context.Context, root string) (*blobReader, error) {
+	if s.reader == nil {
+		b, err := startBlobReader(ctx, root)
+		if err != nil {
+			return nil, fmt.Errorf("review instructions: %w", err)
+		}
+		s.reader = b
+	}
+	return s.reader, nil
+}
+
+// closeBlobs ends the plan's reader, if one was started.
+func (s *planState) closeBlobs() {
+	if s != nil {
+		s.reader.close()
+	}
+}
+
 // readBlob reads one blob by object id, at most limit bytes.
-func readBlob(ctx context.Context, root, oid string, limit int) ([]byte, error) {
-	out := &cappedWriter{max: limit}
-	if err := reviewGit(ctx, root, out, "cat-file", "blob", oid); err != nil {
+func (s *planState) readBlob(ctx context.Context, root, oid string, limit int) ([]byte, error) {
+	b, err := s.blobs(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	size, err := b.size(oid)
+	if err != nil {
 		return nil, fmt.Errorf("review instructions: %w", err)
 	}
-	if out.over > 0 {
+	if size > int64(limit) {
+		_ = b.fail(fmt.Errorf("git cat-file: blob %s is over %d bytes", oid, limit))
 		return nil, fmt.Errorf("review instructions: blob %s is over %d bytes", oid, limit)
 	}
-	return out.buf.Bytes(), nil
+	var out bytes.Buffer
+	if err := b.body(&out, size); err != nil {
+		return nil, fmt.Errorf("review instructions: %w", err)
+	}
+	return out.Bytes(), nil
 }
 
 // ---- trees ----
@@ -490,6 +607,7 @@ type planState struct {
 	recDirs   [2]int                    // directories register recorded from each commit, bounded by maxReviewInstructionRecordedDirs
 	keptBytes [2]int                    // bytes of path text kept from each commit, bounded by maxReviewInstructionKeptBytes
 	shas      [2]string                 // the base and result commits
+	reader    *blobReader               // the one git process every blob is read through
 }
 
 func newPlan() *planState {
@@ -772,54 +890,47 @@ func (s *planState) writeBaseEntry(ctx context.Context, root, out string, e tree
 	if !e.isLink() {
 		return s.streamBlob(ctx, root, e.oid, out, e.exec())
 	}
-	body, err := readBlob(ctx, root, e.oid, maxReviewInstructionLinkBytes)
+	body, err := s.readBlob(ctx, root, e.oid, maxReviewInstructionLinkBytes)
 	if err != nil {
 		return err
 	}
 	return os.Symlink(string(body), out)
 }
 
-// fileCapWriter writes the first max bytes to f and counts the rest, which are
-// dropped: the git process behind it is never blocked or killed half way.
-type fileCapWriter struct {
-	f    *os.File
-	max  int64
-	n    int64
-	over int64
-}
-
-func (w *fileCapWriter) Write(p []byte) (int, error) {
-	room := min(max(w.max-w.n, 0), int64(len(p)))
-	if _, err := w.f.Write(p[:room]); err != nil {
-		return 0, err
-	}
-	w.n += room
-	w.over += int64(len(p)) - room
-	return len(p), nil
-}
-
 // streamBlob writes a blob straight from git to dest, never holding it in
-// memory, within the per-blob and the per-snapshot caps.
+// memory, within the per-blob and the per-snapshot caps: a blob over either
+// is refused by its size, before any of it is read.
 func (s *planState) streamBlob(ctx context.Context, root, oid, dest string, exec bool) error {
-	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	b, err := s.blobs(ctx, root)
 	if err != nil {
 		return err
 	}
+	size, err := b.size(oid)
+	if err != nil {
+		return fmt.Errorf("review instructions: %w", err)
+	}
 	left := int64(maxReviewInstructionStagedBytes) - s.staged
-	w := &fileCapWriter{f: f, max: min(int64(maxReviewInstructionBlobBytes), left)}
-	gerr := reviewGit(ctx, root, w, "cat-file", "blob", oid)
+	switch {
+	case size > left && left < maxReviewInstructionBlobBytes:
+		_ = b.fail(errors.New("git cat-file: the snapshot is over its size limit"))
+		return fmt.Errorf("review instructions: snapshot over %d bytes", maxReviewInstructionStagedBytes)
+	case size > maxReviewInstructionBlobBytes:
+		_ = b.fail(errors.New("git cat-file: a blob is over its size limit"))
+		return fmt.Errorf("review instructions: blob %s is over %d bytes", oid, maxReviewInstructionBlobBytes)
+	}
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return b.fail(err) // the body was not read: the reader cannot go on
+	}
+	gerr := b.body(f, size)
 	cerr := f.Close()
-	s.staged += w.n
 	switch {
 	case gerr != nil:
 		return fmt.Errorf("review instructions: %w", gerr)
 	case cerr != nil:
 		return cerr
-	case w.over > 0 && left < maxReviewInstructionBlobBytes:
-		return fmt.Errorf("review instructions: snapshot over %d bytes", maxReviewInstructionStagedBytes)
-	case w.over > 0:
-		return fmt.Errorf("review instructions: blob %s is over %d bytes", oid, maxReviewInstructionBlobBytes)
 	}
+	s.staged += size
 	mode := os.FileMode(0o644)
 	if exec {
 		mode = 0o755
@@ -889,20 +1000,30 @@ func (s *planState) stageDiffs(ctx context.Context, root, dst string, c *candida
 // On any error after dst has been accepted, everything under dst is removed,
 // what an earlier call left there included, so no caller can read a stale or
 // partial snapshot.
+//
+// The order is the invariant: a refusal for cost or for a bound leaves the
+// worktree untouched. Everything that can refuse (both listings, the links,
+// the staged masks, the worktree's checks, the diff file, the hash) runs
+// first, under ReviewInstructionTimeout. The removals are the last step and
+// run under the caller's context alone: once the first is made the snapshot
+// no longer ends for cost. If that step fails or the caller cancels it, the
+// error says how many paths were removed and the returned snapshot holds
+// nothing but those paths in Removed.
 func SnapshotReviewInstructions(parent context.Context, workDir, baseSHA, resultSHA, dst string) (snap ReviewInstructionSnapshot, err error) {
 	if err := requireDestinationOutside(workDir, dst); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
 	ctx, cancel := context.WithTimeout(parent, reviewInstructionTimeout)
 	defer cancel()
+	removing := false // the removals began: nothing after is a refusal for cost
 	defer func() {
 		if err != nil {
 			// The snapshot's own deadline is a refusal: the trees made it slow.
 			// The caller's context having ended is the caller's error.
-			if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if !removing && parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				err = fmt.Errorf("review instructions: the repository is too costly to compare: the snapshot of its instruction paths did not finish in %v (%w)", reviewInstructionTimeout, err)
 			}
-			snap = ReviewInstructionSnapshot{}
+			snap = ReviewInstructionSnapshot{Removed: snap.Removed}
 			if rerr := os.RemoveAll(dst); rerr != nil {
 				err = errors.Join(err, fmt.Errorf("review instructions: clear %s: %w", dst, rerr))
 			}
@@ -925,6 +1046,7 @@ func SnapshotReviewInstructions(parent context.Context, workDir, baseSHA, result
 	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
+	defer plan.closeBlobs()
 	if err := os.RemoveAll(dst); err != nil {
 		return ReviewInstructionSnapshot{}, fmt.Errorf("review instructions: clear %s: %w", dst, err)
 	}
@@ -943,14 +1065,34 @@ func SnapshotReviewInstructions(parent context.Context, workDir, baseSHA, result
 	if len(masks) == 0 && len(removed) == 0 {
 		return ReviewInstructionSnapshot{}, os.RemoveAll(dst)
 	}
-	if err := applyRemovals(root, removed, plan.tracked); err != nil {
+	snap, err = finishSnapshot(ctx, dst, masks, diffs, removed)
+	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
-	return finishSnapshot(ctx, dst, masks, diffs, removed)
+	// The last point at which the deadline can refuse: the worktree is as the
+	// snapshot found it.
+	if err := ctx.Err(); err != nil {
+		return ReviewInstructionSnapshot{}, err
+	}
+	plan.closeBlobs()
+	removing = true
+	snap.Removed, err = applyRemovals(parent, root, removed, plan.tracked)
+	if err != nil {
+		return ReviewInstructionSnapshot{Removed: snap.Removed}, fmt.Errorf("review instructions: after removing %d of %d untracked instruction paths: %w", len(snap.Removed), len(removed), err)
+	}
+	return snap, nil
 }
 
-func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (*planState, []*candidate, error) {
+// planSnapshot reads both commits and returns the plan with the candidates
+// that differ. The caller closes the plan (closeBlobs) when it is done with
+// it; a plan that failed is closed here.
+func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (_ *planState, _ []*candidate, err error) {
 	plan := newPlan()
+	defer func() {
+		if err != nil {
+			plan.closeBlobs()
+		}
+	}()
 	for side, sha := range []string{baseSHA, resultSHA} {
 		if err := plan.load(ctx, root, sha, side); err != nil {
 			return nil, nil, err
@@ -963,16 +1105,16 @@ func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (*planSt
 	if err != nil {
 		return nil, nil, err
 	}
-	return plan, cands, plan.checkMaskParents(root, cands)
+	if err := plan.checkMaskParents(root, cands); err != nil {
+		return nil, nil, err
+	}
+	return plan, cands, nil
 }
 
 func finishSnapshot(ctx context.Context, dst string, masks []WorkspaceMask, diffs []stagedDiff, removed []removal) (ReviewInstructionSnapshot, error) {
 	snap := ReviewInstructionSnapshot{Masks: masks}
 	for _, m := range masks {
 		snap.Paths = append(snap.Paths, m.Target)
-	}
-	for _, r := range removed {
-		snap.Removed = append(snap.Removed, r.path)
 	}
 	if err := writeReviewInstructionDiff(ctx, dst, diffs, removed); err != nil {
 		return ReviewInstructionSnapshot{}, err
@@ -1073,6 +1215,8 @@ func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []stagedD
 	}
 	var out bytes.Buffer
 	listed := 0
+	var batch []rawDiff // git's output for the changed files from section batchAt on
+	batchAt := 0
 	for i, sec := range sections {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1089,10 +1233,14 @@ func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []stagedD
 		}
 		text, over := sec.body, int64(0)
 		if sec.diff != nil {
-			var err error
-			if text, over, err = diffOne(ctx, dst, *sec.diff, min(room, maxReviewInstructionFileDiff)); err != nil {
-				return err
+			if i >= batchAt+len(batch) {
+				batchAt, batch = i, rawDiffs(ctx, dst, diffs[i:min(i+reviewInstructionDiffJobs, len(diffs))])
 			}
+			raw := batch[i-batchAt]
+			if raw.err != nil {
+				return raw.err
+			}
+			text, over = raw.cut(min(room, maxReviewInstructionFileDiff))
 		} else if len(text) > room {
 			text, over = text[:room], int64(len(text)-room)
 		}
@@ -1133,9 +1281,43 @@ func keepHunks(raw []byte) []byte {
 	return out.Bytes()
 }
 
-func diffOne(ctx context.Context, dst string, d stagedDiff, budget int) ([]byte, int64, error) {
+// reviewInstructionDiffJobs is how many changed files are diffed at a time:
+// each is one git process, and a change may hold two thousand.
+const reviewInstructionDiffJobs = 8
+
+// rawDiff is what git printed for one changed file: the first
+// maxReviewInstructionFileDiff bytes, and how many bytes there were in all.
+type rawDiff struct {
+	head  []byte
+	total int64
+	err   error
+}
+
+// cut is the hunks within the first budget bytes of git's output, and the
+// number of bytes after them: what a diff run with that budget returns.
+func (r rawDiff) cut(budget int) ([]byte, int64) {
+	budget = max(budget, 0)
+	return keepHunks(r.head[:min(budget, len(r.head))]), max(r.total-int64(budget), 0)
+}
+
+// rawDiffs diffs each of diffs, all at once, and returns the outputs in order.
+func rawDiffs(ctx context.Context, dst string, diffs []stagedDiff) []rawDiff {
+	out := make([]rawDiff, len(diffs))
+	var wg sync.WaitGroup
+	for i := range diffs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i] = diffOne(ctx, dst, diffs[i])
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+func diffOne(ctx context.Context, dst string, d stagedDiff) rawDiff {
 	if d.resTmp == "" && d.base != nil && d.res != nil || d.base != nil && d.base.isLink() {
-		return nil, 0, nil // mode only, or a link (identical in both trees)
+		return rawDiff{} // mode only, or a link (identical in both trees)
 	}
 	oldPath, newPath := "/dev/null", "/dev/null"
 	if d.baseFile != "" {
@@ -1144,13 +1326,13 @@ func diffOne(ctx context.Context, dst string, d stagedDiff, budget int) ([]byte,
 	if d.resTmp != "" {
 		newPath = d.resTmp
 	}
-	w := &cappedWriter{max: max(budget, 0)}
+	w := &cappedWriter{max: maxReviewInstructionFileDiff}
 	err := reviewGit(ctx, dst, w, "diff", "--no-index", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--", oldPath, newPath)
 	var exit *exec.ExitError
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
-		return nil, 0, fmt.Errorf("review instructions: diff of %s: %w", strconv.Quote(d.path), err)
+		return rawDiff{err: fmt.Errorf("review instructions: diff of %s: %w", strconv.Quote(d.path), err)}
 	}
-	return keepHunks(w.buf.Bytes()), w.over, nil
+	return rawDiff{head: w.buf.Bytes(), total: int64(w.buf.Len()) + w.over}
 }
 
 // ---- the hash ----

@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -53,11 +54,11 @@ func TestApplyRemovalsFailsWhenATrackedEntryIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	removed := []removal{{path: "AGENTS.md", abs: root + "/AGENTS.md"}}
-	err := applyRemovals(root, removed, []treeEntry{{path: "AGENTS.md"}})
-	if err == nil || !strings.Contains(err.Error(), `removed the committed "AGENTS.md"`) {
-		t.Fatalf("err = %v", err)
+	done, err := applyRemovals(context.Background(), root, removed, []treeEntry{{path: "AGENTS.md"}})
+	if err == nil || !strings.Contains(err.Error(), `removed the committed "AGENTS.md"`) || len(done) != 1 || done[0] != "AGENTS.md" {
+		t.Fatalf("done = %v, err = %v", done, err)
 	}
-	if err := applyRemovals(root, nil, nil); err != nil {
+	if _, err := applyRemovals(context.Background(), root, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }

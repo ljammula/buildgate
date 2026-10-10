@@ -230,7 +230,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// A prompt already in this step's session folder was not saved by this
 	// launch: the build agent could have written it. It is removed, or the
 	// step fails.
-	prep, err := a.prepareReviewLaunch(ctx, input, step, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
+	prep, err := a.prepareReviewLaunchHeartbeating(ctx, input, step, filepath.Join(filepath.Dir(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), step.Name+".log")), step.Name+".instructions"))
 	defer func() { _ = prep.finish(ctx) }()
 	if err != nil {
 		return VerifyActivityResult{}, err
