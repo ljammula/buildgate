@@ -4,4 +4,4 @@ What I tried that did not work, and why
 My current hypothesis
 What is left to do, in order
 Things worth knowing about this repository
-Under "My current hypothesis" say what made the earlier rounds fail. Under the last heading put what a later build of this repository should know: commands, generated files, flaky tests and environment quirks. State facts, not instructions. Write "none" under a heading you have nothing for.
+Under "My current hypothesis" say what made the earlier rounds fail. Under the last heading put only what stays true of this repository whatever a later ticket changes: commands, generated files, flaky tests and environment quirks. Nothing about this ticket or this build belongs there: not the files it changed, not what it was asked for, not how its rounds went. State facts, not instructions. Write "none" under a heading you have nothing for.

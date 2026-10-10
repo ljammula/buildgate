@@ -415,6 +415,10 @@ type Settings struct {
 	ImageSourceRoot     string
 	BuildAppMaxAttempts int
 	VerifyMaxAttempts   int
+	// CodeReviewPolicy is the config's code_review_policy, empty when the
+	// file sets none: a single-ticket run with no -code-review-policy
+	// takes it, as a request's ticket build does through the worker.
+	CodeReviewPolicy string
 
 	SandboxDocker    string
 	SandboxUser      string
@@ -660,6 +664,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	str(&s.SandboxTmpfsSize, c.SandboxTmpfsSize)
 	integer(&s.BuildAppMaxAttempts, c.BuildAppMaxAttempts)
 	integer(&s.VerifyMaxAttempts, c.VerifyMaxAttempts)
+	str(&s.CodeReviewPolicy, c.CodeReviewPolicy)
 
 	integer(&s.ModelHostConcurrency, c.ModelHostConcurrency)
 	if c.MaxParallelJobs != nil {

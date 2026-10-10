@@ -386,6 +386,19 @@ def review_signal(traces: list[dict]) -> ReviewSignal:
 	return decisive or ReviewSignal("unavailable", startup_reason or "no-review-verdict")
 
 
+def unchanged_round_is_rechecked(earlier_rounds: list, verify_passed: bool | None, pi_failed: bool, setup_failed: str | None) -> bool:
+	"""Whether a round whose turn changed no file is judged by a second
+	verify run instead of failed as "no changes": only when the turn itself
+	finished, verify passed after it, the round before failed verify, and an
+	earlier round of this build changed files. A flaky or cold-then-warm
+	verify command is then not answered with a needless change. An untouched
+	tree (no round changed anything) stays "no changes": verify passing on
+	it is evidence of nothing."""
+	if pi_failed or setup_failed is not None or verify_passed is not True or not earlier_rounds:
+		return False
+	return earlier_rounds[-1].verify_passed is False and any(rnd.changed_files for rnd in earlier_rounds)
+
+
 def round_blockers(
 	*,
 	verify_passed: bool | None,
@@ -2883,6 +2896,17 @@ def _run_build(
 			# A resumed build whose interrupted attempt already did the work:
 			# round 1 legitimately changes nothing more, and verify passing
 			# on that work is evidence of the work, not of an untouched tree.
+			no_changes = False
+		if no_changes and unchanged_round_is_rechecked(result.rounds, verify_passed, pi_failed, setup_failed):
+			# The work is an earlier round's and its checks failed then and
+			# passed now with nothing changed: one more run says which of
+			# the two the tree is. Passing twice, the round passes; failing,
+			# it is a verify failure with that run's output.
+			print(f"round {round_index} changed no file and verify passed on work that failed it before; running verify once more", file=sys.stderr)
+			setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
+				workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
+				fast_check_command=fast_check_command, log_dir=feedback_dir,
+			)
 			no_changes = False
 		blockers, reviewer = round_blockers(
 			verify_passed=verify_passed,

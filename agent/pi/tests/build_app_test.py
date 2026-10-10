@@ -2481,7 +2481,8 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 				for i in range(rounds)
 			]
 			writes = [lambda: (root / "cache.go").write_text("fixed\n")] + [lambda: None] * (rounds - 1)
-			verify_results = [("make verify", i == rounds - 1, False, "boom", False, None) for i in range(rounds)]
+			# The last round changes no file after a failed one, so its passing verify runs twice.
+			verify_results = [("make verify", i >= rounds - 1, False, "boom", False, None) for i in range(rounds + 1)]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_verification", side_effect=verify_results),

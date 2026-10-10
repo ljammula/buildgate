@@ -225,7 +225,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.buildAppScript = flags.String("build-app-script", "", "path to build_app.py (default: this version's embedded harness copy)")
 	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "total build_app.py attempts allowed for infrastructure failures")
 	f.conformityPolicy = flags.String("conformity-policy", "required", "build_app.py --conformity-policy (required|advisory): governs the per-criterion spec-conformity review -spec-acceptance-criteria enables; meaningless (never consulted) without -spec-acceptance-criteria")
-	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "standalone AI code-review pass (agent/pi/scripts/code_review.py): off (default, never runs), advisory (runs and records findings but never blocks), or required (a high-severity finding quarantines the run). Runs after build, canonical verification, full suite (if run), and any named gates all pass, regardless of the separate spec-conformity review's own outcome")
+	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "standalone AI code-review pass (agent/pi/scripts/code_review.py): off (default, never runs), advisory (runs and records findings but never blocks), or required (a high-severity finding quarantines the run). Runs after build, canonical verification, full suite (if run), and any named gates all pass, regardless of the separate spec-conformity review's own outcome. Without the flag, the session config's code_review_policy applies")
 	f.specAcceptanceCriteria = flags.String("spec-acceptance-criteria", "", "path to a file holding the approved spec's numbered acceptance criteria for this ticket; threaded to build_app.py's own --spec-acceptance-criteria, whose independent reviewer then returns a per-criterion verdict recorded in BUILD_EVIDENCE.json, gated by -conformity-policy")
 	f.maxRounds = flags.Int("max-rounds", requestdriver.DefaultMaxRounds, "build_app.py --max-rounds")
 	f.timeoutMinutes = flags.Int("timeout-minutes", 45, "build_app.py --timeout-minutes")
@@ -698,6 +698,9 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	}
 	if !verifyMaxAttemptsExplicit {
 		*tr.verifyMaxAttempts = tr.settings.VerifyMaxAttempts
+	}
+	if tr.settings.CodeReviewPolicy != "" && !flagsWasVisited(tr.flags, "code-review-policy") {
+		*tr.codeReviewPolicy = tr.settings.CodeReviewPolicy
 	}
 	if err := tr.applyProjectDefaults(); err != nil {
 		return err
