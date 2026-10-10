@@ -39,6 +39,9 @@ interface BodyProps {
 
 function SendBackBody({ request, by, onOpenChange, onDone }: BodyProps) {
   const send = useRejectRequest(request.id);
+  // The stage on screen when the dialog opened, fixed: the server refuses the
+  // send-back (409) if the request has left it or entered it again since.
+  const [seen] = useState({ state: request.state, enteredAt: request.enteredAt });
   const planAllowed = request.canSendBackToPlan;
   const [target, setTarget] = useState<"plan" | "spec">(
     planAllowed && request.quarantineCheck !== "spec_conformity" ? "plan" : "spec",
@@ -50,7 +53,7 @@ function SendBackBody({ request, by, onOpenChange, onDone }: BodyProps) {
       pending={send.isPending}
       error={send.error}
       onOpenChange={onOpenChange}
-      write={(reason) => send.mutateAsync({ reason, by, to: target })}
+      write={(reason) => send.mutateAsync({ reason, by, to: target, seen })}
       onDone={onDone}
     >
       <fieldset className="flex flex-col gap-1.5 text-sm text-fg">

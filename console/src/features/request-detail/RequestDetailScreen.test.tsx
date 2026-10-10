@@ -247,6 +247,9 @@ test("rejecting a request requires a reason and calls the reject endpoint", asyn
   expect(server.sent("POST /requests/req-1/reject")[0]?.body).toEqual({
     reason: "scope is too broad",
     by: "operator",
+    // The stage of the record on the page when Request changes was pressed.
+    expected_state: "spec_review",
+    expected_entered_at: "2026-09-10T09:05:00Z",
   });
 });
 

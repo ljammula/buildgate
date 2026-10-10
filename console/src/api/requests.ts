@@ -138,8 +138,25 @@ export async function approveRequest(
   );
 }
 
+/**
+ * The stage of a request as the operator read it before deciding: its `state`
+ * and when it entered it. Always taken from the record on screen when the
+ * decision was started, never from a fetch made to send it.
+ */
+export interface SeenStage {
+  readonly state: string;
+  readonly enteredAt: string;
+}
+
 export interface RejectRequestOptions {
   readonly reason: string;
+  /**
+   * The stage the operator is rejecting, sent as `expected_state` and
+   * `expected_entered_at`. The server refuses (409) when the request has
+   * since left that stage or entered it again (a redraft), so a rejection
+   * never lands on work the operator did not see.
+   */
+  readonly seen: SeenStage;
   readonly by?: string | null;
   /** "plan" or "spec": send a quarantined or halted request back instead. */
   readonly to?: string | null;
@@ -157,6 +174,10 @@ export interface RejectRequestOptions {
  * instead, routed server-side to internal/request.SendBack rather than
  * Reject (see RequestSummary.canSendBack). Omitted, it is the
  * review-state-only behaviour.
+ *
+ * Both forms name the stage the operator saw (`options.seen`); the server
+ * answers 409, saying which state the request is in now, when it is no
+ * longer that one.
  */
 export async function rejectRequest(
   http: Http,
@@ -167,6 +188,8 @@ export async function rejectRequest(
   const at = "POST /requests/{id}/reject";
   const body = {
     reason: options.reason,
+    expected_state: options.seen.state,
+    expected_entered_at: options.seen.enteredAt,
     ...(options.by ? { by: options.by } : {}),
     ...(options.to ? { to: options.to } : {}),
     ...(options.anchors !== undefined && options.anchors.length > 0

@@ -205,6 +205,9 @@ describe("the halted/quarantined recovery callout", () => {
       reason: "diff_scope: allow the contract test",
       by: "operator",
       to: "plan",
+      // The stage of the record on the page when Send back was pressed.
+      expected_state: "quarantined",
+      expected_entered_at: "2026-09-10T09:05:00Z",
     });
   });
 

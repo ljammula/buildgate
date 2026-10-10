@@ -38,11 +38,13 @@ function sameStage(live: RequestSummary, opened: RequestSummary): boolean {
  * criteria a note can be tied to: those are read from `GET /requests/{id}`,
  * fetched after the press and never older than the card.
  *
- * The rejection is sent with no stage: the server rejects whichever review is
- * current. So the dialog keeps comparing the list's record with the one it
- * was opened on, and once they differ it can no longer send: the request has
- * moved on, or been redrafted, and the operator has not seen that work. What
- * was typed stays on screen to be copied.
+ * The rejection names the stage it is of (`expected_state`,
+ * `expected_entered_at`, from the record the dialog was opened on) and the
+ * server refuses it (409) once the request has left that stage or entered it
+ * again, so it can never land on work the operator did not see, however old
+ * the list is. The dialog still compares the list's record with the one it
+ * was opened on and stops sending once they differ: that says so before the
+ * operator presses send, with what was typed left on screen to be copied.
  *
  * A card never approves. An approval passes a human gate, and the text it
  * approves is on the request page, not on a card: the card links there.

@@ -7,6 +7,7 @@ import {
   newerRequest,
   upsertRequest,
   useApproveRequest,
+  useRejectRequest,
   useOracleFiles,
   useRequest,
   useRequestBoard,
@@ -386,5 +387,67 @@ describe("useRequestDetailEvents", () => {
       expect(detailFetches).toBe(2);
     });
     unmount();
+  });
+});
+
+describe("useRejectRequest", () => {
+  const seen = { state: "spec_review", enteredAt: "2026-09-10T09:05:00Z" };
+  const refused = (status: number) => ({
+    match: (url: string, init: RequestInit) =>
+      url === "/requests/req-spec-review/reject" && init.method === "POST",
+    respond: () =>
+      new Response('{"error": "request req-spec-review is in plan_review now"}', { status }),
+  });
+  const invalidated = (client: ReturnType<typeof harness>["client"]) => ({
+    detail: client.getQueryState(queryKeys.requests.detail("req-spec-review"))?.isInvalidated,
+    list: client.getQueryState(queryKeys.requests.list())?.isInvalidated,
+  });
+
+  test("sends the stage the caller saw", async () => {
+    const { wrapper, calls } = harness([
+      {
+        match: (url) => url === "/requests/req-spec-review/reject",
+        respond: () =>
+          new Response(JSON.stringify(readFixtureJson("api/request-spec-review.json"))),
+      },
+    ]);
+    const { result } = renderHook(() => useRejectRequest("req-spec-review"), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ reason: "too broad", by: "jane", seen });
+    });
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({
+      reason: "too broad",
+      expected_state: "spec_review",
+      expected_entered_at: "2026-09-10T09:05:00Z",
+      by: "jane",
+    });
+  });
+
+  test("a 409 marks the request and the list to be read again, so the page shows the stage it is in now", async () => {
+    const { wrapper, client } = harness([refused(409)]);
+    client.setQueryData(queryKeys.requests.detail("req-spec-review"), base);
+    client.setQueryData(queryKeys.requests.list(), fixture);
+    const { result } = renderHook(() => useRejectRequest("req-spec-review"), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ reason: "too broad", seen }).catch(() => undefined);
+    });
+    await waitFor(() => {
+      expect(result.current.error?.status).toBe(409);
+    });
+    expect(invalidated(client)).toEqual({ detail: true, list: true });
+  });
+
+  test("another refusal leaves both as they are", async () => {
+    const { wrapper, client } = harness([refused(422)]);
+    client.setQueryData(queryKeys.requests.detail("req-spec-review"), base);
+    client.setQueryData(queryKeys.requests.list(), fixture);
+    const { result } = renderHook(() => useRejectRequest("req-spec-review"), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ reason: "too broad", seen }).catch(() => undefined);
+    });
+    await waitFor(() => {
+      expect(result.current.error?.status).toBe(422);
+    });
+    expect(invalidated(client)).toEqual({ detail: false, list: false });
   });
 });

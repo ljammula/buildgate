@@ -183,20 +183,49 @@ describe("writes", () => {
     const by = await sentBy((http) => approveRequest(http, "req-1", { by: "jane" }));
     expect(by.body).toBe('{"by":"jane"}');
 
-    const reject = await sentBy((http) => rejectRequest(http, "req-1", { reason: "scope creep" }));
+    const seen = { state: "spec_review", enteredAt: "2026-09-10T09:05:00Z" };
+    const stage = '"expected_state":"spec_review","expected_entered_at":"2026-09-10T09:05:00Z"';
+    const reject = await sentBy((http) =>
+      rejectRequest(http, "req-1", { reason: "scope creep", seen }),
+    );
     expect(reject.url).toBe("/requests/req-1/reject");
     expect(reject.headers).toEqual(WRITE);
-    expect(reject.body).toBe('{"reason":"scope creep"}');
+    expect(reject.body).toBe(`{"reason":"scope creep",${stage}}`);
 
     const rejectBy = await sentBy((http) =>
-      rejectRequest(http, "req-1", { reason: "scope creep", by: "jane" }),
+      rejectRequest(http, "req-1", { reason: "scope creep", by: "jane", seen }),
     );
-    expect(rejectBy.body).toBe('{"reason":"scope creep","by":"jane"}');
+    expect(rejectBy.body).toBe(`{"reason":"scope creep",${stage},"by":"jane"}`);
+  });
+
+  test("rejectRequest names the stage the operator saw, on a rejection and on a send-back", async () => {
+    const rejection = await sentBy((http) =>
+      rejectRequest(http, "req-1", {
+        reason: "",
+        by: "jane",
+        seen: { state: "plan_review", enteredAt: "2026-09-10T09:30:00.5Z" },
+        anchors: [{ path: "tickets/001.spec.md", section: "Steps", item: 2, note: "split it" }],
+      }),
+    );
+    expect(JSON.parse(rejection.body as string)).toEqual({
+      reason: "",
+      expected_state: "plan_review",
+      expected_entered_at: "2026-09-10T09:30:00.5Z",
+      by: "jane",
+      anchors: [{ path: "tickets/001.spec.md", section: "Steps", item: 2, note: "split it" }],
+    });
 
     const sendBack = await sentBy((http) =>
-      rejectRequest(http, "req-1", { reason: "again", by: "jane", to: "plan" }),
+      rejectRequest(http, "req-1", {
+        reason: "again",
+        by: "jane",
+        to: "plan",
+        seen: { state: "quarantined", enteredAt: "2026-09-10T10:00:00Z" },
+      }),
     );
-    expect(sendBack.body).toBe('{"reason":"again","by":"jane","to":"plan"}');
+    expect(sendBack.body).toBe(
+      '{"reason":"again","expected_state":"quarantined","expected_entered_at":"2026-09-10T10:00:00Z","by":"jane","to":"plan"}',
+    );
   });
 
   test(

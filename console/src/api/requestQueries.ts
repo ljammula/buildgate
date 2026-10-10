@@ -340,10 +340,20 @@ export function useOracleFiles(
  * straight into the cache, and everything under the request (revisions,
  * oracle listings) is refetched, since a state change can alter any of it.
  */
-function useRequestWrite<TInput>(write: (input: TInput) => Promise<RequestSummary>) {
+function useRequestWrite<TInput>(
+  write: (input: TInput) => Promise<RequestSummary>,
+  onError?: (error: ApiError, client: QueryClient) => void,
+) {
   const client = useQueryClient();
   return useMutation<RequestSummary, ApiError, TInput>({
     mutationFn: write,
+    ...(onError === undefined
+      ? {}
+      : {
+          onError: (error) => {
+            onError(error, client);
+          },
+        }),
     onSuccess: (request) => {
       cacheRequest(client, request, true);
       // Everything under the request is stale now. The oracle listings are
@@ -373,9 +383,22 @@ export function useApproveRequest(id: string) {
   return useRequestWrite((options: ApproveRequestOptions) => approveRequest(http, id, options));
 }
 
+/**
+ * Request changes and Send back. The caller passes the stage the operator
+ * saw (`seen`). A 409 means the request is no longer in it: the request's
+ * record and the list are read again, so the page behind the dialog shows
+ * the stage it is in now, while the dialog keeps the error and what was typed.
+ */
 export function useRejectRequest(id: string) {
   const { http } = useApi();
-  return useRequestWrite((options: RejectRequestOptions) => rejectRequest(http, id, options));
+  return useRequestWrite(
+    (options: RejectRequestOptions) => rejectRequest(http, id, options),
+    (error, client) => {
+      if (error.status !== 409) return;
+      void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id), exact: true });
+      void client.invalidateQueries({ queryKey: queryKeys.requests.list(), exact: true });
+    },
+  );
 }
 
 export function useRetryRequest(id: string) {

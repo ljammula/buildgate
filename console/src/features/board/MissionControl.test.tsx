@@ -354,6 +354,9 @@ describe("deciding from a card", () => {
     expect(fake.sent("POST /requests/req-s/reject")[0]?.body).toMatchObject({
       by: "operator",
       reason: "Name the account.",
+      // The stage of the record the dialog was opened on.
+      expected_state: "spec_review",
+      expected_entered_at: "2026-09-10T09:05:00Z",
     });
   });
 
