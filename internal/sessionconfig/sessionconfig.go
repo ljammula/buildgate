@@ -221,7 +221,8 @@ type Config struct {
 	// field), not a daemon-wide Tier-2 setting.
 	ConformityPolicy *string `yaml:"conformity_policy,omitempty"`
 
-	// CodeReviewPolicy mirrors worker's own -code-review-policy flag:
+	// CodeReviewPolicy mirrors the -code-review-policy flag of worker and
+	// of a single-ticket run (Settings.CodeReviewPolicy):
 	// the standalone AI code-review pass's own policy (off|advisory|
 	// required, agent/pi/scripts/code_review.py, internal/codereview).
 	// Like ConformityPolicy above, this is a per-invocation Tier-1 value
@@ -415,6 +416,10 @@ type Settings struct {
 	ImageSourceRoot     string
 	BuildAppMaxAttempts int
 	VerifyMaxAttempts   int
+	// CodeReviewPolicy is the config's code_review_policy, empty when the
+	// file sets none: a single-ticket run with no -code-review-policy
+	// takes it, as a request's ticket build does through the worker.
+	CodeReviewPolicy string
 
 	SandboxDocker    string
 	SandboxUser      string
@@ -660,6 +665,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	str(&s.SandboxTmpfsSize, c.SandboxTmpfsSize)
 	integer(&s.BuildAppMaxAttempts, c.BuildAppMaxAttempts)
 	integer(&s.VerifyMaxAttempts, c.VerifyMaxAttempts)
+	str(&s.CodeReviewPolicy, c.CodeReviewPolicy)
 
 	integer(&s.ModelHostConcurrency, c.ModelHostConcurrency)
 	if c.MaxParallelJobs != nil {

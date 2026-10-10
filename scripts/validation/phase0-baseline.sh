@@ -14,13 +14,10 @@ echo "== agent/pi pytest =="
 python3 -m pytest agent/pi/tests/ -q
 
 echo "== live-gated Go pass (real Docker + Temporal, sequential) =="
-: "${TEMPORAL_ADDRESS:=localhost:7233}"
 : "${DOCKER_SANDBOX_LIVE_ROOT:=$HOME/buildgate/live-root}"
 mkdir -p "$DOCKER_SANDBOX_LIVE_ROOT"
-DOCKER_SANDBOX_LIVE=1 TEMPORAL_ADDRESS="$TEMPORAL_ADDRESS" \
-  DOCKER_SANDBOX_LIVE_ROOT="$DOCKER_SANDBOX_LIVE_ROOT" \
-  go test -race -count=1 -p 1 -timeout 30m \
-  ./cmd/factoryd/ ./internal/sandbox/ ./internal/workflow/ ./internal/workspace/
+# verify-live starts the test Temporal server the live tests dial.
+DOCKER_SANDBOX_LIVE_ROOT="$DOCKER_SANDBOX_LIVE_ROOT" make verify-live
 
 echo "== factoryd doctor =="
 # Under DOCKER_SANDBOX_LIVE_ROOT, not a plain `mktemp -d` (which defaults to

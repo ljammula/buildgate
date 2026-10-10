@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -270,10 +272,11 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 // checkApprovalAgainstExpected compares the files about to be approved
 // (hashes) with what the caller reviewed (expectedSHA256): an oracle file
 // the client did not show when requireOracleShown, then a stale or
-// mismatched artifact set.
+// mismatched artifact set. Of several offending files it names the first in
+// sorted order.
 func checkApprovalAgainstExpected(id string, hashes, expectedSHA256 map[string]string, requireOracleShown bool) error {
 	if requireOracleShown {
-		for relPath := range hashes {
+		for _, relPath := range slices.Sorted(maps.Keys(hashes)) {
 			if !isOracleRelPath(relPath) && !isRequestOracleRelPath(relPath) {
 				continue
 			}
@@ -319,7 +322,8 @@ func checkApprovalAgainstExpected(id string, hashes, expectedSHA256 map[string]s
 		if expectedNonOracle != currentNonOracle {
 			return fmt.Errorf("request %s: expected artifact set does not match the current review (%d expected, %d actually under review) %w (fetch the request again and re-review before approving)", id, expectedNonOracle, currentNonOracle, ErrApprovalStale)
 		}
-		for relPath, current := range hashes {
+		for _, relPath := range slices.Sorted(maps.Keys(hashes)) {
+			current := hashes[relPath]
 			expected, ok := expectedSHA256[relPath]
 			if !ok && isOracleRelPath(relPath) {
 				continue

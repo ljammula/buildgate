@@ -39,8 +39,10 @@ exercised by hand, not just by the existing `DOCKER_SANDBOX_LIVE` tests.
   gated, not absent: `DOCKER_SANDBOX_LIVE=1` (optionally
   `DOCKER_SANDBOX_IMAGE`, `DOCKER_SANDBOX_LIVE_ROOT` — on colima this
   must be under `$HOME` for mount visibility, the trap `factoryd doctor`
-  checks) and `TEMPORAL_ADDRESS=localhost:7233`. Any phase that says
-  "re-run the live test" means with these set.
+  checks), and the test Temporal server `make verify-live` starts for
+  them (`FACTORYD_TEST_TEMPORAL_ADDRESS`; never the operator's
+  `localhost:7233`). Any phase that says "re-run the live test" means
+  with these set.
 - **Throwaway targets only.** A fresh, disposable target repo with its
   own GitHub remote (the request pipeline's `-open-pull-request` default
   opens draft PRs). Nothing here ever runs against a real project's
@@ -76,10 +78,7 @@ otherwise interleave with `cmd/factoryd`'s):
 
 ```sh
 mkdir -p ~/.factoryd-live-root
-DOCKER_SANDBOX_LIVE=1 TEMPORAL_ADDRESS=localhost:7233 \
-  DOCKER_SANDBOX_LIVE_ROOT=~/.factoryd-live-root \
-  go test -race -count=1 -p 1 -timeout 30m \
-  ./cmd/factoryd/ ./internal/sandbox/ ./internal/workflow/ ./internal/workspace/
+DOCKER_SANDBOX_LIVE_ROOT=~/.factoryd-live-root make verify-live
 ```
 
 `internal/claims/*_test.go` structurally validates `safety-contract.md`/

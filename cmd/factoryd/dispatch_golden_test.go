@@ -24,15 +24,13 @@ var dispatchGoldenSubcommands = []string{
 	"worker", "retry", "resume", "amend-scope", "init-config", "install-service",
 	"uninstall-service", "quickstart", "console", "install-skill", "configure-images",
 	"image-inputs-hash", "restart", "project-image-args", "image-reuse", "setup",
-	"mcp", "memory", "stats",
+	"mcp", "memory", "stats", "build-ca-bundle",
 }
 
 // dispatchGoldenUndefinedFlag is the flag no command defines.
 const dispatchGoldenUndefinedFlag = "-zz-not-a-flag"
 
 // dispatchGoldenCases is the argument lists the golden file records.
-// `build-ca-bundle` is absent: it takes no arguments and probes the network,
-// so TestEverySubcommandIsInTheDispatchTable covers it instead.
 func dispatchGoldenCases() [][]string {
 	cases := [][]string{
 		{},
@@ -145,7 +143,7 @@ func TestSubcommandDispatchMatchesGolden(t *testing.T) {
 // TestEverySubcommandIsInTheDispatchTable fails when a subcommand is added
 // to the dispatch table without a golden case, or dropped from it.
 func TestEverySubcommandIsInTheDispatchTable(t *testing.T) {
-	want := map[string]bool{"build-ca-bundle": true, "stage-agent-tests": true, "version": true}
+	want := map[string]bool{"stage-agent-tests": true, "version": true}
 	for _, name := range dispatchGoldenSubcommands {
 		want[name] = true
 	}

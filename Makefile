@@ -48,7 +48,7 @@ verify: fmt-check vet test
 # test (real Docker sandbox) plus every Temporal-live test (real
 # `temporal server`, no self-skip), the same coverage ci.yml's own steps get.
 # Not part of `verify` or CI's default job: needs Docker, several minutes, and
-# (ideally) a running Temporal dev server -- see scripts/verify-live.sh's own
+# the `temporal` CLI (it starts its own test server) -- see scripts/verify-live.sh's own
 # top-of-file comment. Intended for the nightly self-hosted-runner job and for
 # a developer machine with Docker.
 verify-live:
@@ -133,7 +133,7 @@ agent-pi-test:
 # the two toolchains ci.yml doesn't cover yet: the Python harness test suite
 # (agent-pi-test above; it covers both engines) and, when npm is
 # installed, the console's own test suite. Not a Makefile alias for `verify`:
-# it needs Docker and (ideally) Temporal, same prerequisites as verify-live,
+# it needs Docker and the `temporal` CLI, same prerequisites as verify-live,
 # and takes minutes rather than verify's seconds.
 ci: fmt-check vet verify-live agent-pi-test with-spinner-test install-prereqs-test
 	@if command -v npm >/dev/null 2>&1; then \

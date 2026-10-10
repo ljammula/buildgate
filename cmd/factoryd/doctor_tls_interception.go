@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -146,9 +147,23 @@ var buildCAManualStep = "get the proxy's CA as a PEM file (with any public roots
 // Makefile runs when BUILD_CA_BUNDLE is not given: on a network that
 // intercepts TLS it writes the bundle and prints its path on stdout, the
 // value the Makefile then uses; otherwise it prints nothing. What it found
-// goes to stderr. It always succeeds: a machine it cannot read (offline, not
-// a Mac) builds as it did without it.
-func buildCABundleMain(dp *deps, stdout, stderr io.Writer) error {
+// goes to stderr. It takes no flag and no argument, and refuses either with
+// its usage before probing anything. Run as the Makefile runs it, it always
+// succeeds: a machine it cannot read (offline, not a Mac) builds as it did
+// without it.
+func buildCABundleMain(dp *deps, args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("build-ca-bundle", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() {
+		fmt.Fprintln(stderr, "usage: factoryd build-ca-bundle")
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		flags.Usage()
+		return fmt.Errorf("build-ca-bundle takes no arguments, got %q", flags.Arg(0))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	finding := findBuildCA(ctx, dp, true)

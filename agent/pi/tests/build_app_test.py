@@ -1559,6 +1559,36 @@ class AutofixCommandTests(unittest.TestCase):
 			self.assertIn("no changes made to the workspace", rnd.blockers)
 			self.assertEqual(rnd.changed_files, [])
 
+	def unchanged_second_round(self, stack, verify_results, first_turn_changes=True):
+		root, outside, base = self.repo(stack)
+		results = list(verify_results)
+		turns = [(lambda: (root / "a.txt").write_text("changed\n")) if first_turn_changes else (lambda: None), lambda: None]
+		verification = mock.Mock(side_effect=lambda *a, **k: ("make verify", results.pop(0), False, "boom", False, None))
+		result = self.build(root, base, autofix=[], agent=lambda: turns.pop(0)(), verify=verification, max_rounds=2)
+		return result, verification
+
+	def test_a_round_that_changed_nothing_passes_when_verify_passes_twice_on_work_that_failed_before(self):
+		with contextlib.ExitStack() as stack:
+			result, verification = self.unchanged_second_round(stack, [False, True, True])
+			self.assertTrue(result.succeeded, result.stopped_reason)
+			self.assertEqual(result.rounds[1].blockers, [])
+			self.assertEqual(result.rounds[1].changed_files, [])
+			self.assertEqual(verification.call_count, 3)
+
+	def test_a_round_that_changed_nothing_fails_as_a_verify_failure_when_the_second_run_fails(self):
+		with contextlib.ExitStack() as stack:
+			result, verification = self.unchanged_second_round(stack, [False, True, False])
+			self.assertFalse(result.succeeded)
+			self.assertEqual(result.rounds[1].blockers, ["canonical verification failed"])
+			self.assertIs(result.rounds[1].verify_passed, False)
+
+	def test_a_round_that_changed_nothing_is_still_no_changes_when_no_round_changed_anything(self):
+		with contextlib.ExitStack() as stack:
+			result, verification = self.unchanged_second_round(stack, [False, True], first_turn_changes=False)
+			self.assertFalse(result.succeeded)
+			self.assertIn("no changes made to the workspace", result.rounds[1].blockers)
+			self.assertEqual(verification.call_count, 2)
+
 	def test_no_autofix_commands_changes_nothing(self):
 		argvs = []
 		for autofix in (None, []):
@@ -2451,7 +2481,8 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 				for i in range(rounds)
 			]
 			writes = [lambda: (root / "cache.go").write_text("fixed\n")] + [lambda: None] * (rounds - 1)
-			verify_results = [("make verify", i == rounds - 1, False, "boom", False, None) for i in range(rounds)]
+			# The last round changes no file after a failed one, so its passing verify runs twice.
+			verify_results = [("make verify", i >= rounds - 1, False, "boom", False, None) for i in range(rounds + 1)]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_verification", side_effect=verify_results),

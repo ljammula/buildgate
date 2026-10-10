@@ -179,7 +179,7 @@ func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
 	run := func(t *testing.T, dp *deps) (stdout, stderr string) {
 		t.Helper()
 		var out, errOut bytes.Buffer
-		if err := buildCABundleMain(dp, &out, &errOut); err != nil {
+		if err := buildCABundleMain(dp, nil, &out, &errOut); err != nil {
 			t.Fatalf("build-ca-bundle failed: %v", err)
 		}
 		return out.String(), errOut.String()
@@ -218,4 +218,21 @@ func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
 			t.Errorf("stdout = %q, stderr = %q; want no path and the manual step", stdout, stderr)
 		}
 	})
+}
+
+// TestBuildCABundleCommandRefusesArguments: the command takes no flag and no
+// argument, so either is a usage error before anything is probed.
+func TestBuildCABundleCommandRefusesArguments(t *testing.T) {
+	for _, args := range [][]string{{"extra"}, {"-zz-not-a-flag"}, {"-h"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			dp := newTestDeps(t)
+			fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
+				t.Errorf("build-ca-bundle %v probed the network", args)
+				return nil, errors.New("not reached")
+			}
+			if err := subcommands()["build-ca-bundle"](dp, args); err == nil {
+				t.Errorf("build-ca-bundle %v succeeded, want a usage error", args)
+			}
+		})
+	}
 }

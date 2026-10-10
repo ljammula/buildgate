@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -526,8 +527,10 @@ func ValidateRouting(s Settings) error {
 		return nil
 	}
 
-	for name, r := range s.Routes {
-		if err := validateRoute(name, r); err != nil {
+	// Sorted, here and for models: and route_ids below: of several broken
+	// entries the error names the same one on every run.
+	for _, name := range slices.Sorted(maps.Keys(s.Routes)) {
+		if err := validateRoute(name, s.Routes[name]); err != nil {
 			return err
 		}
 	}
@@ -536,7 +539,7 @@ func ValidateRouting(s Settings) error {
 	// operator who defines a broken models: entry they haven't wired to
 	// any role yet must still learn about it now, not the day they
 	// finally reference it.
-	for name := range s.Models {
+	for _, name := range slices.Sorted(maps.Keys(s.Models)) {
 		if _, err := checkRoutingModel(s, "models", name); err != nil {
 			return err
 		}
@@ -577,7 +580,7 @@ func checkRoutingModel(s Settings, context, name string) (Model, error) {
 			return Model{}, fmt.Errorf("models.%s: route %q is not a routes: entry", name, r)
 		}
 	}
-	for r := range model.RouteIDs {
+	for _, r := range slices.Sorted(maps.Keys(model.RouteIDs)) {
 		if !slices.Contains(model.Routes, r) {
 			return Model{}, fmt.Errorf("models.%s: route_ids names %q, which is not in this model's own routes %v", name, r, model.Routes)
 		}

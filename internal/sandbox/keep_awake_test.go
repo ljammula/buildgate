@@ -70,7 +70,11 @@ func TestRunKeepsTheMacAwakeForTheDockerClient(t *testing.T) {
 	dockerPIDFile := filepath.Join(dir, "docker-pid")
 	argsFile := filepath.Join(dir, "caffeinate-args")
 	docker := filepath.Join(dir, "docker-fake")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\necho $$ > "+dockerPIDFile+"\nsleep 1\nexit 0\n"), 0o700); err != nil {
+	// The fake `docker run` of the worker lives until caffeinate has recorded its arguments
+	// (30 s at most): Run stops caffeinate when docker exits, and on a busy
+	// machine that could be before the fake caffeinate had run its first line.
+	waitForArgs := "i=0\nwhile [ ! -s " + argsFile + " ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n"
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\ncase \"$*\" in run*factory-worker-*) ;; *) exit 0 ;; esac\necho $$ > "+dockerPIDFile+"\n"+waitForArgs+"exit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	fake := filepath.Join(dir, "caffeinate")

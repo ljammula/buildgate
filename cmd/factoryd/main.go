@@ -574,8 +574,8 @@ func subcommands() map[string]subcommand {
 		"console":           consoleMain,
 		"install-skill":     withoutDeps(installSkillMain),
 		"configure-images":  withoutDeps(configureImagesMain),
-		"build-ca-bundle": func(dp *deps, _ []string) error {
-			return buildCABundleMain(dp, os.Stdout, os.Stderr)
+		"build-ca-bundle": func(dp *deps, args []string) error {
+			return buildCABundleMain(dp, args, os.Stdout, os.Stderr)
 		},
 		"image-inputs-hash": withoutDeps(imageInputsHashMain),
 		"restart":           restartMain,

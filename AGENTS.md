@@ -122,9 +122,9 @@ Test gotchas that have broken `main` before:
   The run fails if a test is in zero or two shards. On a memory-tight machine,
   `TEST_SHARDS_SEQUENTIAL=1 make verify` runs the shards one after another
   (slower, peak memory of one race binary).
-- `make verify-live` fails loudly without Docker and needs Temporal at
-  `TEMPORAL_ADDRESS` (default `localhost:7233`) or the `temporal` CLI. On
-  colima it roots scratch dirs under `~/buildgate` so the VM can see them.
+- `make verify-live` fails loudly without Docker or the `temporal` CLI: it
+  starts its own test Temporal server (below). On colima it roots scratch
+  dirs under `~/buildgate` so the VM can see them.
 - `make proving-ground` runs the fixtures in
   `scripts/proving-ground/fixtures.json`, each pinned to a `base_ref`, one at
   a time. `PROVING_GROUND_TEMPORAL=<addr>` also runs each through Temporal as
@@ -134,9 +134,12 @@ Test gotchas that have broken `main` before:
   also rejects finding labels such as a capital letter plus a number unless
   the file is in its `ownLabelFiles`.
 - Tests run builds through one test Temporal dev server, never the operator's
-  `:7233` or an ambient `TEMPORAL_ADDRESS`. `scripts/test-sharded.sh` starts
-  it and exports `FACTORYD_TEST_TEMPORAL_ADDRESS`; a bare `go test` starts its
-  own on first use (`sharedTemporalAddress`, `cmd/factoryd/temporal_testserver_test.go`).
+  `:7233` or an ambient `TEMPORAL_ADDRESS`. `scripts/test-sharded.sh` and
+  `scripts/verify-live.sh` start it and export `FACTORYD_TEST_TEMPORAL_ADDRESS`;
+  a bare `go test` of `cmd/factoryd` starts its own on first use
+  (`sharedTemporalAddress`, `cmd/factoryd/temporal_testserver_test.go`), and
+  one of `internal/workflow` skips its live tests unless that variable names
+  a server (`dialTemporal`).
   Both launch it through `scripts/temporal-test-server.sh`, whose stdin is a
   pipe held by the launcher, so the server dies with its owner even on
   SIGKILL. Helpers pass `-temporal-address` explicitly (`factorydCommand`):
@@ -194,7 +197,7 @@ that name an allow-list.
 | `internal/workflow` | The Temporal workflows and activities of a build | No allow-list. Never `cmd`, and never `requestdriver`, which imports it |
 | `internal/meter` | The spend meter the OpenShell supervisor calls for every model request (`cmd/factoryd-meter`): ceilings, sliding windows, pricing, per-format usage parsers, reasoning-effort ranking, each sandbox's usage ledger (`Account`, `Ledger`); also the route host pins and the host-side Copilot model listing and token exchange | Allow-list: its own generated `middlewarepb`. Imports no other buildgate package. `internal/claims/imports_test.go` enforces it |
 | `internal/openshell` | The `sandbox.Runtime` over the OpenShell gateway: turns a `sandbox.SandboxRequest` into the gateway's sandbox spec, workload template and network policy, pushes a route's credential, and reads Docker's view of a sandbox's containers. The only package that imports the OpenShell Go SDK | Allow-list: `sandbox`. Reaches the gateway through the SDK's client interface, plus its own `RouteReadiness` interface for the one call the SDK lacks, and Docker through its own `Containers` interface. Its `Live` tests run only with `OPENSHELL_LIVE=1` against a running gateway |
-| `internal/sandbox/sandboxtest` | A worker-like `sandbox.Runtime` for the tests of packages that launch through one | Allow-list: `sandbox`. Imported by tests only |
+| `internal/sandbox/sandboxtest` | A worker-like `sandbox.Runtime` for the tests of packages that launch through one | Allow-list: `sandbox`. Imported by tests only (`TestSandboxtestIsATestsOnlyPackage`) |
 | `internal/hostcontrol/hostcontroltest` | The fake `docker` and `colima` on disk, a test CA and a worker heartbeat, for the tests of `hostcontrol` and of the commands that call it | Allow-list: `daemonheartbeat`. Never `hostcontrol`, whose in-package tests import it. Imported by tests only |
 | `internal/requestdriver/requestdrivertest` | The request, run and resume fixtures (records on disk, stub runners for the model jobs and the ticket build, stand-ins for the resume checks) for the tests of `requestdriver` and of the commands that call it | Allow-list: `forge`, `handoff`, `release`, `request`, `requestdriver`, `run`, `testfixture`, `workspace`. Never `cmd` or `hostcontrol`. A fixture that needs a `requestdriver.Deps` takes the caller's fake. Imported by tests only (`TestRequestdrivertestIsATestsOnlyPackage`) |
 
