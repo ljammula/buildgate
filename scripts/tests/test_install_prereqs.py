@@ -122,8 +122,23 @@ class InstallPrereqsTest(unittest.TestCase):
         self.install("uname", "#!/bin/sh\necho Darwin\n")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.brew_calls(), ["install terminal-notifier"])
+        self.assertEqual(self.brew_calls(), ["install terminal-notifier", "--prefix"])
         self.assertIn("System Settings -> Notifications -> terminal-notifier", result.stdout)
+
+    def test_a_new_terminal_notifier_is_launched_as_an_application_once(self):
+        self.have(*EVERYTHING)
+        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        self.install("open", '#!/bin/sh\necho "$*" >> "$HOME/open.log"\n')
+        app = self.prefix / "opt" / "terminal-notifier" / "terminal-notifier.app"
+        app.mkdir(parents=True)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        opened = (self.home / "open.log").read_text().splitlines()
+        self.assertEqual(len(opened), 1)
+        self.assertTrue(opened[0].startswith(f"-n {app} --args -title Buildgate"), opened[0])
+        # Already installed: nothing is launched again.
+        result = self.run_script()
+        self.assertEqual(len((self.home / "open.log").read_text().splitlines()), 1)
 
     def test_a_mac_with_terminal_notifier_is_left_alone(self):
         self.have(*EVERYTHING, "terminal-notifier")

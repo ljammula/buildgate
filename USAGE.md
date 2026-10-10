@@ -946,14 +946,16 @@ sent while none answers has no link, and its banner says to run
 an `http://` or `https://` address with no user information, query or
 fragment; any other value is treated as unset.
 
-`make install` installs `terminal-notifier` with Homebrew when it is missing.
-macOS shows nothing from it until you allow it:
+`make install` installs `terminal-notifier` with Homebrew when it is missing
+and launches it once as an application, which is when macOS lists it under
+Notifications and asks to allow it.
 
-1. `factoryd doctor -notify-test` sends one banner and says so if macOS refused it.
-2. System Settings → Notifications → `terminal-notifier`: Allow Notifications on, alert style Banners or Alerts.
-3. Run step 1 again; clicking the banner opens the data directory.
+| A banner's click does nothing, or no banner shows | Cause | Do |
+|---|---|---|
+| The banner is from "Script Editor" | `terminal-notifier` is missing or macOS refuses it, so the plain banner was shown (`factoryd doctor -notify-test` says which) | System Settings → Notifications → `terminal-notifier`: Allow Notifications on, alert style Banners or Alerts |
+| `terminal-notifier` is not in that list | It has only ever been run from a shell | `open -n "$(brew --prefix)/opt/terminal-notifier/terminal-notifier.app" --args -message test`, then choose Allow |
+| `doctor -notify-test` says it was sent, and nothing appears | macOS accepted it and only listed it in Notification Centre: a Focus is on, or the display is mirrored or shared (Screen Sharing included) | Turn the Focus off; System Settings → Notifications → "Allow notifications when mirroring or sharing the display" |
 
-Until then the plain banner is shown, with the same text and no click.
 `factoryd doctor` warns when `terminal-notifier` is missing.
 
 ### Profiles

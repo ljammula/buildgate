@@ -68,10 +68,11 @@ func doctorNotifyTestMain(dataDir string) error {
 		if err != nil {
 			fmt.Printf("terminal-notifier could not show a notification: %s\n", sanitizeFirstLine(out, err))
 			fmt.Println("fix: System Settings -> Notifications -> terminal-notifier -> Allow Notifications, alert style Banners or Alerts. Until then factoryd shows the plain osascript banner, whose click does nothing.")
+			fmt.Println("not in that list? macOS adds it once it has been launched as an application: open -n \"$(brew --prefix)/opt/terminal-notifier/terminal-notifier.app\" --args -message test, then choose Allow.")
 			return nil
 		}
 		fmt.Println("sent a test desktop notification via: terminal-notifier (its click opens the data directory)")
-		fmt.Println("confirm you actually saw a notification banner: macOS can also hide one that was accepted (Focus, alert style None).")
+		fmt.Println("confirm you actually saw a notification banner: macOS also accepts one it then only lists in Notification Centre (a Focus, alert style None, or a display that is mirrored or shared without \"Allow notifications when mirroring or sharing the display\").")
 		return nil
 	}
 	if err := (notify.DesktopNotifier{}).Notify(context.Background(), n); err != nil {
