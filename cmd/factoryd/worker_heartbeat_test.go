@@ -129,9 +129,12 @@ func TestClearActiveRequests(t *testing.T) {
 		t.Errorf("active after clear = %v", got)
 	}
 	dir := t.TempDir()
-	stop, err := startWorkerHeartbeat(context.Background(), dir, "", "", "localhost:7233", 3)
+	stop, err := startWorkerHeartbeat(context.Background(), dir, "", "", "localhost:7233", daemonheartbeat.GitHubLoginUnusable, 3)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dir)); err != nil || hb.GitHubLogin != daemonheartbeat.GitHubLoginUnusable {
+		t.Errorf("heartbeat GitHubLogin = %q (err %v), want what the worker found at startup", hb.GitHubLogin, err)
 	}
 	addActiveRequest("lost-3")
 	clearActiveRequests()

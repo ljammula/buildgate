@@ -73,6 +73,12 @@ func Path(dataDir, id string) string {
 // comment): a supervisor computing "how long since the last heartbeat"
 // needs more than whole-second precision to be meaningful at a short
 // polling interval.
+// The values of Heartbeat.GitHubLogin.
+const (
+	GitHubLoginUsable   = "usable"
+	GitHubLoginUnusable = "unusable"
+)
+
 type Heartbeat struct {
 	Repository string `json:"repository"`
 	TaskQueue  string `json:"task_queue"`
@@ -135,6 +141,14 @@ type Heartbeat struct {
 	// "static", the same convention SandboxDocker's own doc comment uses).
 	RouteCredentialMode string `json:"route_credential_mode,omitempty"`
 	RouteWorkerModel    string `json:"route_worker_model,omitempty"`
+	// GitHubLogin is whether the worker's own session could use the GitHub
+	// login when it started: GitHubLoginUsable, GitHubLoginUnusable, or ""
+	// when it did not check (no gh on its PATH). A worker pushes branches
+	// and opens pull requests as itself, and a session can lack the login
+	// another session of the same user has (an ssh session on a Mac cannot
+	// read the login keychain), so doctor reads the worker's answer here
+	// rather than checking its own session.
+	GitHubLogin string `json:"github_login,omitempty"`
 	// ActiveRequests are the requests the daemon is running a job for right
 	// now (a drafting, planning or build job in flight); empty between jobs.
 	// It lets status and the console say what the other requests are queued

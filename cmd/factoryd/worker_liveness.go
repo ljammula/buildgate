@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"slices"
 	"sync"
 	"syscall"
@@ -111,7 +112,8 @@ func heartbeatRoute(cfg requestdriver.WorkerConfig) (credentialMode, workerModel
 // own doc comment for why these two fields exist and why nothing else
 // route-related is written here. slots is how many jobs the process runs at
 // once (1 for worker); temporalAddress is set only by `factoryd worker`.
-func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress string, slots int) (stop func(), err error) {
+// githubLogin is forge.githubLogin's answer for this process.
+func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin string, slots int) (stop func(), err error) {
 	path := workerHeartbeatPath(dataDir)
 	startedAt := time.Now().Format(time.RFC3339Nano)
 	write := func() error {
@@ -124,6 +126,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			Version:             version,
 			RouteCredentialMode: credentialMode,
 			RouteWorkerModel:    workerModel,
+			GitHubLogin:         githubLogin,
 			ActiveRequests:      currentActiveRequests(),
 			JobSlots:            slots,
 			TemporalAddress:     temporalAddress,
@@ -409,4 +412,46 @@ func runWorkerStaleCheck(dataDir string, now time.Time) {
 		return
 	}
 	notifyWorkerStale(dataDir, requests, now, workerHeartbeatStatusLine(dataDir, now))
+}
+
+// githubLoginTimeout bounds the worker's startup check of its GitHub login.
+const githubLoginTimeout = 15 * time.Second
+
+// githubLogin reports whether this process can use the GitHub login: `gh
+// auth status` by exit status alone, never its output. "" when gh is not on
+// PATH (doctor's own row covers a missing gh).
+func (impl realForge) githubLogin(ctx context.Context) string {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, githubLoginTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "gh", "auth", "status").Run(); err != nil {
+		return daemonheartbeat.GitHubLoginUnusable
+	}
+	return daemonheartbeat.GitHubLoginUsable
+}
+
+// workerGitHubLoginFix is what to do about a worker whose session cannot use
+// the GitHub login.
+const workerGitHubLoginFix = "start the worker from a session that has the login: a desktop terminal, or `factoryd install-service`. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token; if this session should have its own login, run `gh auth login` in it. Then `factoryd retry <id>` opens the pull request of a request that halted on it, with no rebuild"
+
+// doctorWorkerGitHubLoginChecks is the row for a running worker of dataDir
+// whose own session could not use the GitHub login when it started: its
+// builds are accepted and then cannot be pushed. No row when no worker runs,
+// when it did not check, or when its login works: doctor's own gh row covers
+// the session doctor runs in, which can differ from the worker's.
+func doctorWorkerGitHubLoginChecks(dp *deps, dataDir string, now time.Time) []doctorCheck {
+	if dataDir == "" || len(hostcontrol.WorkerPIDs(dp, dataDir, now)) == 0 {
+		return nil
+	}
+	hb, err := daemonheartbeat.Read(workerHeartbeatPath(dataDir))
+	if err != nil || hb.GitHubLogin != daemonheartbeat.GitHubLoginUnusable {
+		return nil
+	}
+	return []doctorCheck{{
+		Name: "worker's GitHub login",
+		Err:  fmt.Errorf("the running worker (pid %d) could not use the GitHub login when it started (`gh auth status` failed in its session): it will build and accept a ticket, then fail to push the branch and open the pull request", hb.PID),
+		Fix:  workerGitHubLoginFix,
+	}}
 }

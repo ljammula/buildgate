@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/daemonheartbeat"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -51,7 +52,11 @@ func workerMain(dp *deps, args []string) error {
 	// The same liveness heartbeat worker writes, so status, stop, use,
 	// upgrade and the console see the worker and the requests it runs.
 	heartbeatMode, heartbeatModel := heartbeatRoute(cfg)
-	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, cfg.Settings.MaxParallelJobs)
+	githubLogin := dp.forge.githubLogin(context.Background())
+	if githubLogin == daemonheartbeat.GitHubLoginUnusable {
+		log.Printf("factoryd worker: this session cannot use the GitHub login (`gh auth status` failed): an accepted ticket's branch cannot be pushed and its pull request cannot be opened. To fix: %s", workerGitHubLoginFix)
+	}
+	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, githubLogin, cfg.Settings.MaxParallelJobs)
 	if err != nil {
 		return err
 	}

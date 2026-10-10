@@ -54,6 +54,7 @@ type fakeForge struct {
 	branchTipFn                   func(ctx context.Context, workspaceDir string, branch string) (string, error)
 	fetchIssueFn                  func(ctx context.Context, issueURL string) (string, string, int, error)
 	gitToplevelFn                 func(dir string) (string, error)
+	githubLoginFn                 func(ctx context.Context) string
 	insideGitWorkTreeFn           func(dir string) bool
 	listReviewCommentsFn          func(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error)
 	markPullRequestReadyFn        func(ctx context.Context, prURL string) error
@@ -76,6 +77,7 @@ func (f *fakeForge) fetchIssue(ctx context.Context, issueURL string) (string, st
 }
 func (f *fakeForge) gitToplevel(dir string) (string, error) { return f.gitToplevelFn(dir) }
 func (f *fakeForge) insideGitWorkTree(dir string) bool      { return f.insideGitWorkTreeFn(dir) }
+func (f *fakeForge) githubLogin(ctx context.Context) string { return f.githubLoginFn(ctx) }
 func (f *fakeForge) listReviewComments(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error) {
 	return f.listReviewCommentsFn(ctx, prURL)
 }
@@ -265,9 +267,11 @@ func newTestDeps(t testing.TB) *deps {
 	}
 	realForge := realForge{dp: dp}
 	dp.forge = &fakeForge{
-		branchTipFn:                   realForge.branchTip,
-		fetchIssueFn:                  realForge.fetchIssue,
-		gitToplevelFn:                 realForge.gitToplevel,
+		branchTipFn:   realForge.branchTip,
+		fetchIssueFn:  realForge.fetchIssue,
+		gitToplevelFn: realForge.gitToplevel,
+		// No test runs gh against the developer's own login.
+		githubLoginFn:                 func(context.Context) string { return "" },
 		insideGitWorkTreeFn:           realForge.insideGitWorkTree,
 		listReviewCommentsFn:          realForge.listReviewComments,
 		markPullRequestReadyFn:        realForge.markPullRequestReady,
