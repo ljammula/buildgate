@@ -14,6 +14,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
+	"buildgate/internal/run"
 )
 
 func TestCapOracleFeedbackKeepsNewestAndValidUTF8(t *testing.T) {
@@ -856,4 +857,2428 @@ func TestCapFeedbackCutsOnlyAtALineStartHeading(t *testing.T) {
 	if !strings.HasPrefix(body, heading+"2026 by alice") {
 		t.Errorf("capped feedback starts %.60q, want the real heading", body)
 	}
+}
+
+// End to end through the driver: >12 KiB of cumulative rejections still hand
+// the drafter the NEWEST reason.
+func TestDriverFeedbackFileCarriesNewestReasonWhenOversize(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	for i := 1; i <= 30; i++ {
+		reason := fmt.Sprintf("reason-%d %s", i, strings.Repeat("x", 1000))
+		r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: "2026-09-20T00:00:00Z", Reason: reason, FromState: request.StateOracleReview})
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var fed string
+	stub := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
+		b, _ := os.ReadFile(in.FeedbackPath)
+		fed = string(b)
+		return request.OracleDraft{Status: request.OracleNoneEligible}, nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), stub, requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fed, "reason-30 ") || len(fed) > requestdriver.MaxFeedbackBytes {
+		t.Errorf("feedback file: len=%d, has newest=%v", len(fed), strings.Contains(fed, "reason-30 "))
+	}
+}
+
+// TestDriveRequestsAdvancesSubmittedToSpecReview covers the full
+// submitted -> spec_drafting -> spec_review move across two
+// driveRequests calls (the worker's loop calls this once per poll
+// iteration -- see its own doc comment), with spec.md ending up as
+// exactly what the (stubbed) spec-drafting job produced.
+func TestDriveRequestsAdvancesSubmittedToSpecReview(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "Add idempotency keys to POST /refunds"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, calls := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0, DurationS: 1.5}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests (1st call): %v", err)
+	}
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateSpecDrafting {
+		t.Fatalf("State after 1st call = %q, want %q", loaded.State, request.StateSpecDrafting)
+	}
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests (2nd call): %v", err)
+	}
+	if *calls != 1 {
+		t.Fatalf("spec-draft runner called %d times, want 1", *calls)
+	}
+	loaded, err = request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateSpecReview {
+		t.Fatalf("State after 2nd call = %q, want %q", loaded.State, request.StateSpecReview)
+	}
+	if loaded.SpecEvidence == nil || loaded.SpecEvidence.DurationS != 1.5 {
+		t.Errorf("SpecEvidence = %+v, want the stubbed evidence recorded on the request", loaded.SpecEvidence)
+	}
+
+	specBytes, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, "req-1"))
+	if err != nil {
+		t.Fatalf("read spec.md: %v", err)
+	}
+	if string(specBytes) != requestdrivertest.CanonicalValidSpec {
+		t.Errorf("spec.md = %q, want the drafted spec verbatim", string(specBytes))
+	}
+}
+
+// TestAdvanceSpecDraftingStampsCompletionAfterJobReturns is a regression
+// test: the spec_review transition's timestamp must reflect when the
+// drafting job actually finished, not when driveRequests started it, so
+// WaitingSince and the "spec drafted" History entry don't over-report the
+// operator's wait.
+func TestAdvanceSpecDraftingStampsCompletionAfterJobReturns(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateSpecDrafting
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	const jobDuration = 50 * time.Millisecond
+	before := time.Now()
+	runner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		time.Sleep(jobDuration)
+		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, err := time.Parse(time.RFC3339Nano, loaded.EnteredAt)
+	if err != nil {
+		t.Fatalf("parse EnteredAt %q: %v", loaded.EnteredAt, err)
+	}
+	if entered.Before(before.Add(jobDuration)) {
+		t.Errorf("EnteredAt = %s, want it stamped after the %s job returned (started at %s)", entered, jobDuration, before)
+	}
+}
+
+// TestAdvanceSpecDraftingAccumulatesSpendAcrossRedraft covers the
+// re-draft accumulation request.JobSpend.Add exists for: a spec_review
+// rejection sends the request back through spec_drafting a second time,
+// which replaces r.SpecEvidence wholesale (advanceSpecDrafting's own
+// `r.SpecEvidence = evidence`) -- without accumulating the first pass's
+// own Spend into the second's before that replacement, a real,
+// already-incurred relay spend from the first attempt would simply
+// vanish from the record the moment the redraft succeeded.
+func TestAdvanceSpecDraftingAccumulatesSpendAcrossRedraft(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateSpecDrafting
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	firstSpend := &request.JobSpend{Role: "planning", Model: "gpt-5.6-luna", InputTokens: 100, OutputTokens: 50, CostMicroUSD: 1000}
+	firstRunner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: firstSpend}, nil
+	}
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, firstRunner, time.Now()); err != nil {
+		t.Fatalf("advanceSpecDrafting (first pass): %v", err)
+	}
+	if r.SpecEvidence == nil || r.SpecEvidence.Spend == nil {
+		t.Fatalf("SpecEvidence.Spend = nil after the first pass, want %+v", firstSpend)
+	}
+	if got := *r.SpecEvidence.Spend; got.InputTokens != 100 || got.OutputTokens != 50 || got.CostMicroUSD != 1000 {
+		t.Fatalf("SpecEvidence.Spend after first pass = %+v, want %+v", got, *firstSpend)
+	}
+
+	if err := r.RejectSpec("operator", "please redo the scope section", time.Now()); err != nil {
+		t.Fatalf("RejectSpec: %v", err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	secondSpend := &request.JobSpend{Role: "planning", Model: "gpt-5.6-luna", InputTokens: 40, OutputTokens: 20, CostMicroUSD: 400, SpendPartial: true}
+	secondRunner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: secondSpend}, nil
+	}
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, secondRunner, time.Now()); err != nil {
+		t.Fatalf("advanceSpecDrafting (second pass): %v", err)
+	}
+
+	if r.SpecEvidence == nil || r.SpecEvidence.Spend == nil {
+		t.Fatal("SpecEvidence.Spend = nil after the redraft, want the two passes summed")
+	}
+	got := *r.SpecEvidence.Spend
+	wantInput, wantOutput, wantCost := int64(140), int64(70), int64(1400)
+	if got.InputTokens != wantInput || got.OutputTokens != wantOutput || got.CostMicroUSD != wantCost {
+		t.Errorf("SpecEvidence.Spend after redraft = %+v, want input=%d output=%d cost=%d (both passes summed)", got, wantInput, wantOutput, wantCost)
+	}
+	if !got.SpendPartial {
+		t.Errorf("SpecEvidence.Spend.SpendPartial = false, want true (sticky once any contributing pass was partial)")
+	}
+}
+
+// TestAdvanceSpecDraftingWritesFeedbackFileFromSpecRejection is a
+// regression test: a spec_review rejection's reason must be written to
+// request.SpecFeedbackPath before
+// the drafting job runs, capped and stage-scoped exactly like
+// advanceOracleDrafting's own oracle-feedback.md (a plan_review or
+// oracle_review rejection recorded on the same request must not leak in).
+func TestAdvanceSpecDraftingWritesFeedbackFileFromSpecRejection(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateSpecDrafting
+	r.Rejections = []request.Rejection{
+		{By: "alice", At: "2026-09-24T00:00:00Z", Reason: "require TypeError; name files test_sub.py/test_div.py", FromState: request.StateSpecReview},
+		{By: "bob", At: "2026-09-23T00:00:00Z", Reason: "unrelated plan reason", FromState: request.StatePlanReview},
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, _ := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	got, err := os.ReadFile(request.SpecFeedbackPath(dataDir, "req-1"))
+	if err != nil {
+		t.Fatalf("read spec-feedback.md: %v", err)
+	}
+	if !strings.Contains(string(got), "require TypeError; name files test_sub.py/test_div.py") {
+		t.Errorf("spec-feedback.md = %q, want the spec_review rejection reason", got)
+	}
+	if strings.Contains(string(got), "unrelated plan reason") {
+		t.Errorf("spec-feedback.md = %q, want no plan_review rejection reason", got)
+	}
+}
+
+// TestAdvanceSpecDraftingWritesNoFeedbackFileWithoutASpecRejection covers
+// the common case: a request in spec_drafting for the first time (no
+// rejections at all) writes no feedback file.
+func TestAdvanceSpecDraftingWritesNoFeedbackFileWithoutASpecRejection(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, _ := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests (1st call): %v", err)
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests (2nd call): %v", err)
+	}
+
+	if _, err := os.Stat(request.SpecFeedbackPath(dataDir, "req-1")); !os.IsNotExist(err) {
+		t.Errorf("spec-feedback.md stat err = %v, want IsNotExist", err)
+	}
+}
+
+// TestRequestFromEachSourceReachesSpecReviewWithValidSpec covers the
+// plan's own "a request from each source (issue URL, text, file) reaches
+// spec_review with a structurally valid spec.md" done-when item.
+func TestRequestFromEachSourceReachesSpecReviewWithValidSpec(t *testing.T) {
+	dp := newFakeDeps(t)
+	sources := []request.Source{
+		{Kind: request.SourceIssue, IssueRef: "org/repo#42"},
+		{Kind: request.SourceText},
+		{Kind: request.SourceFile},
+	}
+	for _, source := range sources {
+		t.Run(string(source.Kind), func(t *testing.T) {
+			dataDir := t.TempDir()
+			id := "req-" + string(source.Kind)
+			if err := request.SaveText(dataDir, id, "some request text"); err != nil {
+				t.Fatal(err)
+			}
+			r := request.New(id, "/repos/app", "app", source, time.Now())
+			r.State = request.StateSpecDrafting
+			if err := r.Save(dataDir); err != nil {
+				t.Fatal(err)
+			}
+
+			runner, _ := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{}, nil)
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+				t.Fatalf("driveRequests: %v", err)
+			}
+
+			loaded, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.State != request.StateSpecReview {
+				t.Fatalf("State = %q, want %q", loaded.State, request.StateSpecReview)
+			}
+			specBytes, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, id))
+			if err != nil {
+				t.Fatalf("read spec.md: %v", err)
+			}
+			if err := request.ValidateSpecSkeleton(string(specBytes)); err != nil {
+				t.Errorf("ValidateSpecSkeleton(spec.md) = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestBuildRequestBuildArgsUsesTicketVerifyCommand covers the plan's own
+// "the ticket's spec becomes -spec" requirement: the ticket's own
+// Verify-Command: line, not anything from the request itself (which has
+// no verify command field at all), is what ends up in the argv. -spec
+// itself now names the ticket's derived build-spec file (sibling
+// <ticket>.build.md, see writeTicketBuildSpecFile), not ticket.SpecPath
+// verbatim -- but its content still carries the ticket's own text,
+// unmodified (this ticket declares no covered criteria and no approved
+// spec.md exists here, so ticketBuildSpecContent appends nothing).
+func TestBuildRequestBuildArgsUsesTicketVerifyCommand(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "001.spec.md")
+	ticketContent := "Verify-Command: pytest\n\n## Goal\n\ndo the thing\n"
+	if err := os.WriteFile(specPath, []byte(ticketContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	ticket := request.Ticket{Index: 3, SpecPath: specPath}
+
+	args, err := requestdriver.BuildRequestBuildArgs(withFirstTicketRun(t, r), r, ticket, requestdriver.WorkerConfig{})
+	if err != nil {
+		t.Fatalf("buildRequestBuildArgs: %v", err)
+	}
+
+	var gotSpec, gotVerify, gotTicket string
+	for i, a := range args {
+		switch a {
+		case "-spec":
+			gotSpec = args[i+1]
+		case "-verify-command":
+			gotVerify = args[i+1]
+		case "-ticket":
+			gotTicket = args[i+1]
+		}
+	}
+	wantSpec := strings.TrimSuffix(specPath, ".spec.md") + ".build.md"
+	if gotSpec != wantSpec {
+		t.Errorf("-spec = %q, want %q (the ticket's own derived build spec)", gotSpec, wantSpec)
+	}
+	gotContent, err := os.ReadFile(gotSpec)
+	if err != nil {
+		t.Fatalf("read build spec: %v", err)
+	}
+	if string(gotContent) != ticketContent {
+		t.Errorf("build spec content = %q, want the ticket spec verbatim %q", gotContent, ticketContent)
+	}
+	if gotVerify != "pytest" {
+		t.Errorf("-verify-command = %q, want %q (parsed from the ticket's own spec)", gotVerify, "pytest")
+	}
+	if gotTicket != "req-1-003" {
+		t.Errorf("-ticket = %q, want %q", gotTicket, "req-1-003")
+	}
+}
+
+// TestBuildRequestBuildArgsEmitsPRBaseForOpenPredecessorPR covers the
+// stacked-PR mechanism's own ticketQueueEntry half: ticket N (N>1) of a
+// multi-ticket request must stack its draft PR on ticket N-1's own branch
+// (-pr-base) while N-1's PR is still open and unmerged, so ticket N's PR
+// shows only its own delta instead of repeating ticket N-1's already-open
+// commits (found live: a Flutter + Go app repo #312 repeating #311) -- but
+// only then: a merged, PR-less, or branch-less predecessor, or ticket 1
+// itself (no predecessor at all), must forward no -pr-base flag.
+func TestBuildRequestBuildArgsEmitsPRBaseForOpenPredecessorPR(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "002.spec.md")
+	if err := os.WriteFile(specPath, []byte("Verify-Command: pytest\n\n## Goal\n\ndo the thing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ticket2 := request.Ticket{Index: 2, SpecPath: specPath}
+
+	cases := []struct {
+		name       string
+		prevTicket request.Ticket
+		wantBase   string
+	}{
+		{"open unmerged predecessor", request.Ticket{Index: 1, Branch: "factoryd/run-1", PRURL: "https://github.com/acme/widgets/pull/1", PRState: "open"}, "factoryd/run-1"},
+		{"merged predecessor", request.Ticket{Index: 1, Branch: "factoryd/run-1", PRURL: "https://github.com/acme/widgets/pull/1", PRState: "merged"}, ""},
+		{"predecessor with no PR yet", request.Ticket{Index: 1, Branch: "factoryd/run-1"}, ""},
+		{"predecessor with no recorded branch", request.Ticket{Index: 1, PRURL: "https://github.com/acme/widgets/pull/1", PRState: "open"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", Tickets: []request.Ticket{c.prevTicket, ticket2}}
+			args, err := requestdriver.BuildRequestBuildArgs(withFirstTicketRun(t, r), r, ticket2, requestdriver.WorkerConfig{})
+			if err != nil {
+				t.Fatalf("buildRequestBuildArgs: %v", err)
+			}
+			if c.wantBase != "" {
+				if !requestdrivertest.ContainsArg(args, "-pr-base", c.wantBase) {
+					t.Errorf("args = %v, want -pr-base %s", args, c.wantBase)
+				}
+				return
+			}
+			for _, a := range args {
+				if a == "-pr-base" {
+					t.Errorf("args = %v, want no -pr-base flag", args)
+				}
+			}
+		})
+	}
+
+	// Ticket 1 has no predecessor at all -- never forwards -pr-base
+	// regardless of what (if anything) follows it in r.Tickets.
+	ticket1 := request.Ticket{Index: 1, SpecPath: specPath}
+	r := &request.Request{ID: "req-2", Workspace: "/repos/app", Project: "app", Tickets: []request.Ticket{ticket1}}
+	args, err := requestdriver.BuildRequestBuildArgs("data", r, ticket1, requestdriver.WorkerConfig{})
+	if err != nil {
+		t.Fatalf("buildRequestBuildArgs: %v", err)
+	}
+	for _, a := range args {
+		if a == "-pr-base" {
+			t.Errorf("args = %v, want no -pr-base flag for ticket 1 (no predecessor)", args)
+		}
+	}
+}
+
+// TestAdvancePlanningUsesRequestVerifyCommandWithoutFactoryYML pins the
+// live bug this guards against: a workspace with no .factory.yml at all,
+// where the operator supplied -verify-command explicitly at submit time.
+// Before r.VerifyCommand existed, planning always re-read .factory.yml
+// fresh and halted with "planning requires verify_command configured in
+// .factory.yml" even though the operator's choice was already known.
+func TestAdvancePlanningUsesRequestVerifyCommandWithoutFactoryYML(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "python3 -m unittest tests/test_product_lab.py")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("python3 -m unittest tests/test_product_lab.py", 1, 2)},
+	}
+	runner, gotVerifyCommand := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if *gotVerifyCommand != "python3 -m unittest tests/test_product_lab.py" {
+		t.Errorf("verifyCommand passed to plan job = %q, want the request's own VerifyCommand", *gotVerifyCommand)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q (Error: %s)", loaded.State, request.StatePlanReview, loaded.Error)
+	}
+}
+
+// TestAdvancePlanningWritesFeedbackFileFromPlanRejection is a regression
+// test: a plan_review rejection's reason must be written to
+// request.PlanFeedbackPath before the plan-drafting job runs, stage-scoped
+// like the spec/oracle stages.
+func TestAdvancePlanningWritesFeedbackFileFromPlanRejection(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "python3 -m unittest tests/test_product_lab.py")
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Rejections = []request.Rejection{
+		{By: "alice", At: "2026-09-24T00:00:00Z", Reason: "split ticket 1 -- it touches two unrelated packages", FromState: request.StatePlanReview},
+		{By: "bob", At: "2026-09-23T00:00:00Z", Reason: "unrelated spec reason", FromState: request.StateSpecReview},
+	}
+	if err := loaded.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("python3 -m unittest tests/test_product_lab.py", 1, 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	got, err := os.ReadFile(request.PlanFeedbackPath(dataDir, id))
+	if err != nil {
+		t.Fatalf("read plan-feedback.md: %v", err)
+	}
+	if !strings.Contains(string(got), "split ticket 1 -- it touches two unrelated packages") {
+		t.Errorf("plan-feedback.md = %q, want the plan_review rejection reason", got)
+	}
+	if strings.Contains(string(got), "unrelated spec reason") {
+		t.Errorf("plan-feedback.md = %q, want no spec_review rejection reason", got)
+	}
+}
+
+// TestAdvancePlanningHaltsWhenNoVerifyCommandAnywhere covers the halt
+// path: neither r.VerifyCommand nor the workspace's .factory.yml supply
+// one.
+func TestAdvancePlanningHaltsWhenNoVerifyCommandAnywhere(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "")
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "verify command") {
+		t.Errorf("Error = %q, want it to mention a verify command", loaded.Error)
+	}
+}
+
+// TestAdvancePlanningSinglePackageYieldsOneTicket covers the plan's own
+// "a single-package spec yields exactly one ticket" done-when item.
+func TestAdvancePlanningSinglePackageYieldsOneTicket(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)},
+	}
+	runner, gotVerifyCommand := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{AgentExitCode: 0, DurationS: 2.5}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if *gotVerifyCommand != "make verify" {
+		t.Errorf("verifyCommand passed to plan job = %q, want %q", *gotVerifyCommand, "make verify")
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StatePlanReview)
+	}
+	if len(loaded.Tickets) != 1 || loaded.TicketCount != 1 {
+		t.Fatalf("Tickets = %+v, TicketCount = %d, want exactly one", loaded.Tickets, loaded.TicketCount)
+	}
+	if loaded.PlanEvidence == nil || loaded.PlanEvidence.DurationS != 2.5 {
+		t.Errorf("PlanEvidence = %+v, want the stubbed evidence recorded on the request", loaded.PlanEvidence)
+	}
+}
+
+// TestAdvancePlanningTwoServiceYieldsTwoTicketsInOrder covers the plan's
+// own "a two-service spec yields two tickets in dependency order" done-
+// when item.
+func TestAdvancePlanningTwoServiceYieldsTwoTicketsInOrder(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)},
+		{Filename: "002.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StatePlanReview)
+	}
+	if len(loaded.Tickets) != 2 {
+		t.Fatalf("Tickets = %+v, want exactly two", loaded.Tickets)
+	}
+	if loaded.Tickets[0].Index != 1 || loaded.Tickets[1].Index != 2 {
+		t.Errorf("Tickets indexes = %d, %d, want 1, 2 in dependency order", loaded.Tickets[0].Index, loaded.Tickets[1].Index)
+	}
+	if !strings.HasSuffix(loaded.Tickets[0].SpecPath, "001.spec.md") || !strings.HasSuffix(loaded.Tickets[1].SpecPath, "002.spec.md") {
+		t.Errorf("Tickets spec paths = %q, %q, want 001.spec.md then 002.spec.md", loaded.Tickets[0].SpecPath, loaded.Tickets[1].SpecPath)
+	}
+}
+
+// TestAdvancePlanningUnclaimedCriteriaHalts covers the plan's own
+// "unclaimed acceptance criteria halt the request" done-when item.
+func TestAdvancePlanningUnclaimedCriteriaHalts(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)}, // criterion 2 never claimed
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "claimed by no ticket") || !strings.Contains(loaded.Error, "2") {
+		t.Errorf("Error = %q, want it to name the unclaimed criterion", loaded.Error)
+	}
+}
+
+// infeasibleTestsAddedTicket mirrors validBrownfieldTicket's shape but
+// declares an Allowed-Files/Required-Changed-Files that names only one
+// concrete, non-test Go file and no Tests-Required opt-out -- the exact
+// live shape (Flutter + Go app run 3, 2026-09-28) that could never pass the
+// tests_added gate no matter what a build round does, since TestsAdded
+// only ever looks at ChangedFiles and a run's diff_scope gate already
+// confines those to Allowed-Files.
+func infeasibleTestsAddedTicket(verifyCommand string, criteria ...int) string {
+	criteriaLines := ""
+	for _, n := range criteria {
+		criteriaLines += fmt.Sprintf("- %d\n", n)
+	}
+	return fmt.Sprintf(`Verify-Command: %s
+Allowed-Files: backend/internal/handler/dispatch_mux.go
+Required-Changed-Files: backend/internal/handler/dispatch_mux.go
+
+## Goal
+
+Wire the new route into the dispatch mux.
+
+## Plan
+
+### Files to touch
+
+- backend/internal/handler/dispatch_mux.go
+
+### Steps
+
+1. Register the new route.
+
+### Tests to add
+
+No separate handler test file; the route will be exercised by another
+ticket's dispatch test.
+
+### Acceptance criteria covered
+
+%s
+## Out of scope
+
+Nothing else.
+`, verifyCommand, criteriaLines)
+}
+
+// TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket covers the live
+// bug (Flutter + Go app run 3, 2026-09-28): a drafted ticket whose own Allowed-Files
+// could never satisfy the tests_added gate must halt planning before the
+// plan ever reaches plan_review -- not be approved, built (burning a real
+// round), and only THEN quarantined on a gate it was structurally unable
+// to pass. See policy.TicketTestsAddedFeasible's own doc comment for the
+// full incident this closes.
+func TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1, 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, "tests_added") {
+		t.Errorf("Error = %q, want it to name the infeasible ticket and the tests_added gate", loaded.Error)
+	}
+}
+
+// sequencedPlanTicketsRunner returns a planTicketsRunner that plays back
+// calls[0], calls[1], ... in order (one entry per launch), for tests
+// exercising advancePlanning's own bounded automatic re-plan. It also
+// records, for each call, the content of plan-feedback.md as it stood
+// the moment that call ran (read from disk before the fake even looks at
+// its own args, mirroring what the real runPlanTicketsJob reads --
+// cmd/factoryd/plan_tickets_job.go), and the total number of calls made.
+func sequencedPlanTicketsRunner(t *testing.T, dataDir string, calls ...func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error)) (runner requestdriver.PlanTicketsRunner, callCount *int, feedbackByCall *[]string) {
+	t.Helper()
+	n := 0
+	var feedbacks []string
+	runner = func(ctx context.Context, dd string, r *request.Request, cfg requestdriver.WorkerConfig, verifyCommand string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+		b, _ := os.ReadFile(request.PlanFeedbackPath(dataDir, r.ID))
+		feedbacks = append(feedbacks, string(b))
+		if n >= len(calls) {
+			t.Fatalf("sequencedPlanTicketsRunner: call %d exceeds the %d scripted calls", n+1, len(calls))
+		}
+		next := calls[n]
+		n++
+		return next()
+	}
+	return runner, &n, &feedbacks
+}
+
+// TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds covers the
+// automatic re-plan (advancePlanning's own bounded retry, see its doc
+// comment and maxPlanningAttempts): a first drafted plan that is
+// tests_added-infeasible must not halt outright -- it triggers exactly
+// one more planning launch, fed the ticket/gate name as plan_review-style
+// feedback, and a feasible second plan reaches plan_review normally.
+func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	infeasible := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1, 2)},
+	}
+	feasible := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)},
+	}
+	runner, callCount, feedbackByCall := sequencedPlanTicketsRunner(t, dataDir,
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return infeasible, &request.PlanEvidence{}, nil
+		},
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return feasible, &request.PlanEvidence{}, nil
+		},
+	)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	if *callCount != 2 {
+		t.Fatalf("planning launches = %d, want exactly 2", *callCount)
+	}
+	if got := (*feedbackByCall)[0]; got != "" {
+		t.Errorf("first launch's plan-feedback.md = %q, want empty (no prior rejection)", got)
+	}
+	second := (*feedbackByCall)[1]
+	if !strings.Contains(second, "001.spec.md") || !strings.Contains(second, "tests_added") {
+		t.Errorf("second launch's plan-feedback.md = %q, want it to name the infeasible ticket and the tests_added gate", second)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q (the second, feasible plan)", loaded.State, request.StatePlanReview)
+	}
+	if loaded.TicketCount != 1 {
+		t.Fatalf("TicketCount = %d, want 1", loaded.TicketCount)
+	}
+	if len(loaded.Rejections) != 1 {
+		t.Fatalf("Rejections = %+v, want exactly one factory-authored rejection", loaded.Rejections)
+	}
+	rej := loaded.Rejections[0]
+	if rej.By != "factoryd" {
+		t.Errorf("Rejections[0].By = %q, want %q", rej.By, "factoryd")
+	}
+	if rej.Stage() != request.StatePlanReview {
+		t.Errorf("Rejections[0].Stage() = %q, want %q (routes into PlanFeedback)", rej.Stage(), request.StatePlanReview)
+	}
+	if !strings.Contains(rej.Reason, "001.spec.md") || !strings.Contains(rej.Reason, "tests_added") {
+		t.Errorf("Rejections[0].Reason = %q, want it to name the infeasible ticket and the tests_added gate", rej.Reason)
+	}
+}
+
+// TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches covers
+// the bound on advancePlanning's automatic re-plan: a second
+// tests_added-infeasible plan halts exactly like today, after exactly two
+// launches -- never a third, unbounded retry.
+func TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	infeasible := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1, 2)},
+	}
+	spent := func() *request.PlanEvidence {
+		return &request.PlanEvidence{Spend: &request.JobSpend{Role: "planning", InputTokens: 100, CostMicroUSD: 1_000_000}}
+	}
+	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir,
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return infeasible, spent(), nil
+		},
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return infeasible, spent(), nil
+		},
+	)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	if *callCount != 2 {
+		t.Fatalf("planning launches = %d, want exactly 2 (bounded, no unbounded loop)", *callCount)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, "tests_added") {
+		t.Errorf("Error = %q, want it to name the infeasible ticket and the tests_added gate", loaded.Error)
+	}
+	if len(loaded.Rejections) != 1 {
+		t.Fatalf("Rejections = %+v, want exactly one factory-authored rejection (from the first, auto-replanned attempt)", loaded.Rejections)
+	}
+	if loaded.Rejections[0].By != "factoryd" {
+		t.Errorf("Rejections[0].By = %q, want %q", loaded.Rejections[0].By, "factoryd")
+	}
+	// Both paid attempts stay on the halted request, so `factoryd cost`
+	// counts them (live, 2026-09-28: plan drafting showed $0.00 after two
+	// paid drafts).
+	if loaded.PlanEvidence == nil || loaded.PlanEvidence.Spend == nil {
+		t.Fatalf("PlanEvidence = %+v, want both attempts' spend recorded on the halted request", loaded.PlanEvidence)
+	}
+	if got := loaded.PlanEvidence.Spend.CostMicroUSD; got != 2_000_000 {
+		t.Errorf("PlanEvidence.Spend.CostMicroUSD = %d, want 2000000 (both attempts)", got)
+	}
+	if got := loaded.PlanEvidence.Spend.InputTokens; got != 200 {
+		t.Errorf("PlanEvidence.Spend.InputTokens = %d, want 200", got)
+	}
+}
+
+// TestCriterionFilesFeasibleAcceptsModuleRelativePath: a criterion naming
+// `cmd/server/main.go` is covered by a ticket allowed to change
+// backend/cmd/server/main.go (live, Flutter + Go app, 2026-09-28: the literal
+// comparison halted a correct plan). A path no covering ticket owns under
+// any prefix is still flagged.
+func TestCriterionFilesFeasibleAcceptsModuleRelativePath(t *testing.T) {
+	criteria := []string{
+		"The route is registered in `cmd/server/main.go`.",
+		"The tool is registered in `internal/mcptools/habit_tools.go`.",
+	}
+	allowed := []string{"backend/cmd/server/main.go", "backend/internal/handler/habit.go"}
+	tickets := []string{habitTicket("make verify", allowed, allowed, 1, 2)}
+
+	reasons := requestdriver.CriterionFilesFeasible(criteria, tickets, [][]string{allowed}, "")
+	if len(reasons) != 1 {
+		t.Fatalf("reasons = %q, want exactly one (criterion 2's habit_tools.go)", reasons)
+	}
+	if !strings.Contains(reasons[0], "criterion 2 names internal/mcptools/habit_tools.go") {
+		t.Errorf("reasons[0] = %q, want it to name criterion 2's uncovered file", reasons[0])
+	}
+}
+
+// habitInsightsCriterionSpec mirrors the live shape (Flutter + Go app
+// habit-insights request, 2026-09-28,
+// data/requests/feature-habit-insights-endpoint-and-mcp-20260928-121607):
+// criterion 1 names files owned by three different tickets, backticked,
+// alongside a `cd backend && ...` verify command (also backticked) that
+// must never be mistaken for a path; criterion 2 is a plain, single-file
+// criterion so both criteria can be satisfied without touching criterion
+// 1's own scenario.
+const habitInsightsCriterionSpec = "# Spec\n\n" +
+	"## Problem\n\nAdd habit insights.\n\n" +
+	"## Scope\n\nHabit insights endpoint and MCP tool.\n\n" +
+	"## Non-goals\n\nNone.\n\n" +
+	"## Affected services and packages\n\nbackend/internal/habit, backend/internal/handler, backend/internal/mcptools\n\n" +
+	"## Acceptance criteria\n\n" +
+	"1. Running `cd backend && go vet ./... && go test ./...` exits successfully, with unit tests covering `backend/internal/habit/insights.go`, `backend/internal/handler/habit.go`, and `backend/internal/mcptools/habit_tools.go`.\n" +
+	"2. The `habit_insights` MCP tool is registered.\n\n" +
+	"## Risks\n\nNone known.\n\n" +
+	"## Open questions\n\nNone.\n"
+
+// habitTicket builds one brownfield ticket for habitInsightsCriterionSpec's
+// own scenario: allowed/required are the ticket's own Allowed-Files/
+// Required-Changed-Files (comma-joined), and criteria is the list of
+// acceptance-criterion numbers it claims.
+func habitTicket(verifyCommand string, allowed, required []string, criteria ...int) string {
+	criteriaLines := ""
+	for _, n := range criteria {
+		criteriaLines += fmt.Sprintf("- %d\n", n)
+	}
+	return fmt.Sprintf(`Verify-Command: %s
+Allowed-Files: %s
+Required-Changed-Files: %s
+
+## Goal
+
+Implement habit insights.
+
+## Plan
+
+### Files to touch
+
+- %s
+
+### Steps
+
+1. Implement it.
+
+### Tests to add
+
+- %s
+
+### Acceptance criteria covered
+
+%s
+## Out of scope
+
+Nothing else.
+`, verifyCommand, strings.Join(allowed, ", "), strings.Join(required, ", "), required[0], allowed[len(allowed)-1], criteriaLines)
+}
+
+// TestAdvancePlanningCriterionFilesInfeasibleAutoReplanSucceeds covers the
+// live bug this closes (see habitInsightsCriterionSpec's own doc
+// comment): criterion 1 names three tickets' own files, but the first
+// drafted plan lists it as covered only by the ticket owning
+// mcptools/habit_tools.go. That must not reach plan_review -- it
+// triggers exactly one automatic re-plan naming criterion 1 and the two
+// uncovered paths (never the backticked verify command, which is not a
+// path), and a second, feasible plan (all three tickets listing
+// criterion 1) reaches plan_review normally.
+func TestAdvancePlanningCriterionFilesInfeasibleAutoReplanSucceeds(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
+	insightsTicket := habitTicket("make verify",
+		[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
+		[]string{"backend/internal/habit/insights.go"}, 2)
+	handlerTicket := habitTicket("make verify",
+		[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
+		[]string{"backend/internal/handler/habit.go"}, 2)
+	mcpTicketCoveringAlone := habitTicket("make verify",
+		[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
+		[]string{"backend/internal/mcptools/habit_tools.go"}, 1)
+	infeasible := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: insightsTicket},
+		{Filename: "002.spec.md", Content: handlerTicket},
+		{Filename: "003.spec.md", Content: mcpTicketCoveringAlone},
+	}
+	mcpTicketCoveringWithOthers := habitTicket("make verify",
+		[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
+		[]string{"backend/internal/mcptools/habit_tools.go"}, 1, 2)
+	feasible := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
+			[]string{"backend/internal/habit/insights.go"}, 1, 2)},
+		{Filename: "002.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
+			[]string{"backend/internal/handler/habit.go"}, 1, 2)},
+		{Filename: "003.spec.md", Content: mcpTicketCoveringWithOthers},
+	}
+	runner, callCount, feedbackByCall := sequencedPlanTicketsRunner(t, dataDir,
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return infeasible, &request.PlanEvidence{}, nil
+		},
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return feasible, &request.PlanEvidence{}, nil
+		},
+	)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	if *callCount != 2 {
+		t.Fatalf("planning launches = %d, want exactly 2", *callCount)
+	}
+	second := (*feedbackByCall)[1]
+	if !strings.Contains(second, "criterion 1 names") {
+		t.Errorf("second launch's plan-feedback.md = %q, want it to name criterion 1", second)
+	}
+	if !strings.Contains(second, "backend/internal/habit/insights.go") || !strings.Contains(second, "backend/internal/handler/habit.go") {
+		t.Errorf("second launch's plan-feedback.md = %q, want it to name both uncovered paths", second)
+	}
+	if strings.Contains(second, "cd backend") {
+		t.Errorf("second launch's plan-feedback.md = %q, must not treat the backticked verify command as a named path", second)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q (the second, feasible plan)", loaded.State, request.StatePlanReview)
+	}
+	if loaded.TicketCount != 3 {
+		t.Fatalf("TicketCount = %d, want 3", loaded.TicketCount)
+	}
+}
+
+// TestAdvancePlanningCriterionFilesFeasibleWhenAllOwningTicketsCoverIt
+// covers the feasible counterpart directly (no re-plan involved): the
+// exact same three-ticket plan as the feasible half above, drafted on
+// the first attempt, reaches plan_review with no factory-authored
+// rejection at all.
+func TestAdvancePlanningCriterionFilesFeasibleWhenAllOwningTicketsCoverIt(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
+			[]string{"backend/internal/habit/insights.go"}, 1, 2)},
+		{Filename: "002.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
+			[]string{"backend/internal/handler/habit.go"}, 1, 2)},
+		{Filename: "003.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
+			[]string{"backend/internal/mcptools/habit_tools.go"}, 1, 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StatePlanReview)
+	}
+	if len(loaded.Rejections) != 0 {
+		t.Fatalf("Rejections = %+v, want none (feasible on the first attempt)", loaded.Rejections)
+	}
+}
+
+// TestAdvancePlanningCriterionFilesFeasibleWithDirectoryAllowedFiles
+// covers matchesAllowed's directory-prefix form (via
+// policy.PathCoveredByAllowed): a ticket declaring
+// "backend/internal/habit/" (trailing slash) as Allowed-Files still
+// covers criterion 1's own "backend/internal/habit/insights.go" without
+// naming the file exactly.
+func TestAdvancePlanningCriterionFilesFeasibleWithDirectoryAllowedFiles(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/habit/", "backend/internal/habit/insights_test.go"},
+			[]string{"backend/internal/habit/insights.go"}, 1, 2)},
+		{Filename: "002.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
+			[]string{"backend/internal/handler/habit.go"}, 1, 2)},
+		{Filename: "003.spec.md", Content: habitTicket("make verify",
+			[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
+			[]string{"backend/internal/mcptools/habit_tools.go"}, 1, 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q (directory Allowed-Files entry covers the named file)", loaded.State, request.StatePlanReview)
+	}
+}
+
+// TestAdvancePlanningCriterionFilesTwiceHaltsAfterTwoLaunches covers the
+// bound on advancePlanning's automatic re-plan for the criterion-paths
+// check specifically (the tests_added-infeasibility bound is pinned
+// separately by TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches):
+// a second criterion-files-infeasible plan halts after exactly two
+// launches, never a third.
+func TestAdvancePlanningCriterionFilesTwiceHaltsAfterTwoLaunches(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
+	insightsTicket := habitTicket("make verify",
+		[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
+		[]string{"backend/internal/habit/insights.go"}, 2)
+	handlerTicket := habitTicket("make verify",
+		[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
+		[]string{"backend/internal/handler/habit.go"}, 2)
+	mcpTicketCoveringAlone := habitTicket("make verify",
+		[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
+		[]string{"backend/internal/mcptools/habit_tools.go"}, 1)
+	infeasible := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: insightsTicket},
+		{Filename: "002.spec.md", Content: handlerTicket},
+		{Filename: "003.spec.md", Content: mcpTicketCoveringAlone},
+	}
+	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir,
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return infeasible, &request.PlanEvidence{}, nil
+		},
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return infeasible, &request.PlanEvidence{}, nil
+		},
+	)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	if *callCount != 2 {
+		t.Fatalf("planning launches = %d, want exactly 2 (bounded, no unbounded loop)", *callCount)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "criterion 1 names") {
+		t.Errorf("Error = %q, want it to name criterion 1", loaded.Error)
+	}
+}
+
+// TestAdvancePlanningCombinesTestsAddedAndCriterionFilesReasons covers
+// #351's own combined-message requirement: a plan that is simultaneously
+// tests_added-infeasible (one ticket) and criterion-files-infeasible (a
+// different criterion, a different ticket) gets exactly one re-plan
+// message naming BOTH infeasibilities, not just the first one found.
+func TestAdvancePlanningCombinesTestsAddedAndCriterionFilesReasons(t *testing.T) {
+	dp := newFakeDeps(t)
+	const combinedSpec = "# Spec\n\n" +
+		"## Problem\n\nRefunds can be double-processed on retry.\n\n" +
+		"## Scope\n\nThe /refunds endpoint only.\n\n" +
+		"## Non-goals\n\nNot touching /charges.\n\n" +
+		"## Affected services and packages\n\ninternal/payments, backend/internal/handler\n\n" +
+		"## Acceptance criteria\n\n" +
+		"1. The route is wired into the dispatch mux.\n" +
+		"2. Unit tests cover `internal/payments/refunds.go`.\n\n" +
+		"## Risks\n\nNone known.\n\n" +
+		"## Open questions\n\nNone.\n"
+	wiringOnlyTicket := infeasibleTestsAddedTicket("make verify", 1)
+	mismatchedTicket := habitTicket("make verify",
+		[]string{"internal/payments/other.go", "internal/payments/other_test.go"},
+		[]string{"internal/payments/other.go"}, 2)
+
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, combinedSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: wiringOnlyTicket},
+		{Filename: "002.spec.md", Content: mismatchedTicket},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Rejections) != 1 {
+		t.Fatalf("Rejections = %+v, want exactly one factory-authored rejection", loaded.Rejections)
+	}
+	reason := loaded.Rejections[0].Reason
+	if !strings.Contains(reason, "tests_added") {
+		t.Errorf("Rejections[0].Reason = %q, want it to name the tests_added infeasibility", reason)
+	}
+	if !strings.Contains(reason, "criterion 2 names") || !strings.Contains(reason, "internal/payments/refunds.go") {
+		t.Errorf("Rejections[0].Reason = %q, want it to name the criterion 2 infeasibility", reason)
+	}
+}
+
+// TestAdvancePlanningHashMismatchHaltsNamingSpec covers the plan's own
+// requirement that verifyApprovedHashes runs before planning: an edit to
+// the approved spec.md after approval must halt, naming spec.md, without
+// ever calling the plan job.
+func TestAdvancePlanningHashMismatchHaltsNamingSpec(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	// Edit spec.md after approval -- the exact post-approval-edit scenario
+	// VerifyApprovedHashes exists to catch.
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(requestdrivertest.TwoCriteriaSpec+"\nedited after approval\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "spec.md") {
+		t.Errorf("Error = %q, want it to name spec.md", loaded.Error)
+	}
+}
+
+// TestRemindDueRequestsSendsImmediateThenEveryInterval is the plan's own
+// required fake-clock test: a request left in spec_review for 31 minutes
+// with a 15m reminder interval produces exactly three notifications --
+// immediate (t+0), t+15m, and t+30m -- never a fourth at t+31m.
+func TestRemindDueRequestsSendsImmediateThenEveryInterval(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, base)
+	r.State = request.StateSpecReview
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// The driver's own immediate reminder on entering spec_review, at t+0.
+	clock := base
+	now := func() time.Time { return clock }
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestdriver.RemindRequest(dataDir, loaded, now())
+	if err := loaded.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	interval := 15 * time.Minute
+	for minute := 1; minute <= 31; minute++ {
+		clock = base.Add(time.Duration(minute) * time.Minute)
+		if err := requestdriver.RemindDueRequests(dataDir, interval, now); err != nil {
+			t.Fatalf("remindDueRequests at t+%dm: %v", minute, err)
+		}
+	}
+
+	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 3 {
+		t.Errorf("notifications.log lines = %d, want 3 (immediate, +15m, +30m)", got)
+	}
+	final, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.NotifyCount != 3 {
+		t.Errorf("NotifyCount = %d, want 3", final.NotifyCount)
+	}
+	if final.WaitingSince != base.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("WaitingSince = %q, want the original entry time %q (must not restart on later reminders)", final.WaitingSince, base.UTC().Format(time.RFC3339Nano))
+	}
+}
+
+// TestRemindDueRequestsStopsAfterApproval is the plan's own "approval
+// stops reminders within one tick" requirement: once Approve has moved
+// the request out of spec_review (clearing its reminder state, see
+// internal/request.Approve), the next remindDueRequests call, even well
+// past the interval, sends nothing.
+func TestRemindDueRequestsStopsAfterApproval(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, base)
+	r.State = request.StateSpecReview
+	if err := os.WriteFile(filepath.Join(request.Dir(dataDir, "req-1"), "spec.md"), []byte("# Spec\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	requestdriver.RemindRequest(dataDir, r, base)
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := request.Approve(dataDir, "req-1", "alice", base.Add(5*time.Minute), nil); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	afterInterval := base.Add(time.Hour)
+	if err := requestdriver.RemindDueRequests(dataDir, 15*time.Minute, func() time.Time { return afterInterval }); err != nil {
+		t.Fatalf("remindDueRequests after approval: %v", err)
+	}
+	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 1 {
+		t.Errorf("notifications.log lines after approval = %d, want 1 (only the pre-approval reminder, none since)", got)
+	}
+}
+
+// TestRemindDueRequestsIsRestartSafe is the plan's own restart-safety
+// requirement: a request whose LastNotifiedAt is only 5 minutes old, read
+// fresh off disk by a brand-new process (simulated here by simply calling
+// remindDueRequests directly, with no prior in-process state at all),
+// sends nothing under a 15m interval -- a restart never re-sends an
+// already-current reminder.
+func TestRemindDueRequestsIsRestartSafe(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, base)
+	r.State = request.StateSpecReview
+	r.WaitingSince = base.UTC().Format(time.RFC3339Nano)
+	r.LastNotifiedAt = base.UTC().Format(time.RFC3339Nano)
+	r.NotifyCount = 1
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	restartNow := base.Add(5 * time.Minute)
+	if err := requestdriver.RemindDueRequests(dataDir, 15*time.Minute, func() time.Time { return restartNow }); err != nil {
+		t.Fatalf("remindDueRequests: %v", err)
+	}
+	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 0 {
+		t.Errorf("notifications.log lines = %d, want 0 (last reminder only 5m old, restart must not re-send)", got)
+	}
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.NotifyCount != 1 {
+		t.Errorf("NotifyCount = %d, want unchanged 1", loaded.NotifyCount)
+	}
+}
+
+// TestAdvanceBuildingQuarantineReportedViaRunnerErrorStillQuarantinesRequest
+// covers the production shape TestAdvanceBuildingQuarantineOfTicket2Leaves...
+// above does not: runMainWithReady (run_ticket.go) returns a non-nil
+// "run quarantined: ..." error for *any* non-Accepted terminal run state,
+// not just a genuine start failure -- so the real ticketRunner a ticket
+// build uses in production returns runErr != nil for an ordinary,
+// correctly-recorded quarantine. Found in review: advanceBuilding used to
+// treat any non-nil runErr as an unconditional haltRequest, without ever
+// consulting the run's own recorded state, making request-level
+// `quarantined` (and its own console callout) unreachable via this path.
+func TestAdvanceBuildingQuarantineReportedViaRunnerErrorStillQuarantinesRequest(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 3)
+	accept := requestdrivertest.AcceptingBuildRunner(t, dataDir)
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		if ticket != requestdrivertest.TicketRunID(id, 2) {
+			return accept(ctx, args, onReady)
+		}
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket, State: run.StateReady})
+		}
+		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_added"}
+		if err := rr.Save(dataDir); err != nil {
+			return err
+		}
+		// Mirrors runMainWithReady's own final lines: it returns a
+		// non-nil error whenever the run's terminal state isn't Accepted,
+		// even though the quarantine above is already durable.
+		return fmt.Errorf("run quarantined: gate failed: tests_added")
+	}
+
+	for i := 1; i <= 2; i++ {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+			t.Fatalf("driveRequests (ticket %d): %v", i, err)
+		}
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateQuarantined {
+		t.Fatalf("State = %q, want %q (runErr != nil must not override the run's own recorded quarantine)", loaded.State, request.StateQuarantined)
+	}
+	if !strings.Contains(loaded.Error, "ticket 2/3") || !strings.Contains(loaded.Error, "quarantined") || !strings.Contains(loaded.Error, "gate failed: tests_added") {
+		t.Errorf("Error = %q, want it to name ticket 2/3, quarantined, and the run's own reason", loaded.Error)
+	}
+	if got := loaded.Tickets[0].RunID; got != requestdrivertest.TicketRunID(id, 1) {
+		t.Errorf("Tickets[0].RunID = %q, want %q (ticket 1 untouched)", got, requestdrivertest.TicketRunID(id, 1))
+	}
+}
+
+// TestAdvanceBuildingHaltedRunWithEmptyRecordFallsBackToRunnerError covers
+// a second Codex review finding on PR #135: a run that halts on a
+// post-onReady infrastructure check (e.g. runMainWithReady's own "capture
+// base SHA" failure) can persist StateHalted without ever populating
+// HaltError/HaltReasonCode/GateResults, leaving statusReason empty. The
+// request's own halted reason must still name the actual cause via
+// runErr, not go silently blank.
+func TestAdvanceBuildingHaltedRunWithEmptyRecordFallsBackToRunnerError(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket, State: run.StateReady})
+		}
+		// A halted record with none of HaltError/HaltReasonCode/
+		// GateResults set -- statusReason returns "" for this.
+		rr := &run.Run{ID: ticket, State: run.StateHalted}
+		if err := rr.Save(dataDir); err != nil {
+			return err
+		}
+		return errors.New("capture base SHA: git rev-parse HEAD: exit status 128")
+	}
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "capture base SHA") {
+		t.Errorf("Error = %q, want it to fall back to runErr's text when the run record itself carries no reason", loaded.Error)
+	}
+}
+
+// TestAdvanceBuildingRunnerErrorWithNoRunIDStillHalts covers the other
+// half of the same fix: when the runner's onReady callback never fires at
+// all -- no run record was ever minted -- runErr is the only signal
+// available, and this must remain a genuine haltRequest, not something
+// that tries (and fails) to load a nonexistent run record.
+func TestAdvanceBuildingRunnerErrorWithNoRunIDStillHalts(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		return errors.New("sandbox image pull failed")
+	}
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	}
+	if !strings.Contains(loaded.Error, "start failed") || !strings.Contains(loaded.Error, "sandbox image pull failed") {
+		t.Errorf("Error = %q, want it to name the start failure", loaded.Error)
+	}
+	if got := loaded.Tickets[0].RunID; got != "" {
+		t.Errorf("Tickets[0].RunID = %q, want empty (run never started)", got)
+	}
+}
+
+// TestStartNextTicketOrFinishPRApprovedMovesToPRReviewAfterEveryTicket
+// covers the plan's own "advance_on: pr_approved moves to pr_review
+// after ticket 1 instead of starting ticket 2" done-when item.
+func TestStartNextTicketOrFinishPRApprovedMovesToPRReviewAfterEveryTicket(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
+	previous := requestdriver.RequestAdvanceOn
+	requestdriver.RequestAdvanceOn = requestdriver.AdvanceOnPRApproved
+	defer func() { requestdriver.RequestAdvanceOn = previous }()
+
+	runner := requestdrivertest.AcceptingBuildRunner(t, dataDir)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePRReview {
+		t.Fatalf("State = %q, want %q (pr_approved moves to pr_review after every ticket, not just the last)", loaded.State, request.StatePRReview)
+	}
+	if loaded.TicketIndex != 1 {
+		t.Errorf("TicketIndex = %d, want unchanged 1 -- advancing it is the PR-review driver's job, once the PR is approved", loaded.TicketIndex)
+	}
+}
+
+// TestAdvanceBuildingHashMismatchHaltsNamingFile covers the plan's own
+// "hash mismatch on entering building halts naming the file" done-when
+// item, mirroring TestAdvancePlanningHashMismatchHaltsNamingSpec for a
+// ticket spec instead of spec.md.
+func TestAdvanceBuildingHashMismatchHaltsNamingFile(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+
+	before, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := before.Tickets[0].SpecPath
+	orig, err := os.ReadFile(ticketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ticketPath, append(orig, []byte("\nedited after approval\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	after, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", after.State, request.StateHalted)
+	}
+	if !strings.Contains(after.Error, filepath.Base(ticketPath)) {
+		t.Errorf("Error = %q, want it to name %s", after.Error, filepath.Base(ticketPath))
+	}
+}
+
+// TestAdvancePlanningSendsImmediatePlanReviewReminder: entering
+// plan_review fires the first reminder at once (durable log entry,
+// NotifyCount 1), the same guarantee spec_review already has.
+func TestAdvancePlanningSendsImmediatePlanReviewReminder(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StatePlanReview)
+	}
+	if loaded.NotifyCount != 1 || loaded.LastNotifiedAt == "" {
+		t.Fatalf("NotifyCount = %d, LastNotifiedAt = %q; want 1 and set", loaded.NotifyCount, loaded.LastNotifiedAt)
+	}
+	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, id); got != 1 {
+		t.Fatalf("notifications.log entries = %d, want 1", got)
+	}
+}
+
+// TestAdvancePlanningHaltDoesNotStartReminders: a halted plan pass must
+// never begin the plan_review reminder cycle.
+func TestAdvancePlanningHaltDoesNotStartReminders(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)}, // criterion 2 unclaimed
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	}
+	if loaded.NotifyCount != 0 || loaded.WaitingSince != "" {
+		t.Fatalf("NotifyCount = %d, WaitingSince = %q; want 0 and empty", loaded.NotifyCount, loaded.WaitingSince)
+	}
+}
+
+// TestBuildRequestBuildArgsWritesCoveredCriteriaFile: a plan-format
+// ticket's build carries -spec-acceptance-criteria pointing at a file
+// holding exactly the spec criteria the ticket claims, verbatim, so the
+// required conformity review judges this ticket's own criteria only.
+func TestBuildRequestBuildArgsWritesCoveredCriteriaFile(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	if err := os.MkdirAll(filepath.Join(request.Dir(dataDir, r.ID), "tickets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	spec := "# Spec\n\n## Problem\n\nx\n\n## Scope\n\nx\n\n## Non-goals\n\nx\n\n## Affected services and packages\n\nx\n\n## Acceptance criteria\n\n1. First thing works.\n2. Second thing works.\n3. Third thing works.\n\n## Risks\n\nx\n\n## Open questions\n\nx\n"
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "002.spec.md")
+	if err := os.WriteFile(ticketPath, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 1, 3)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedFirstTicketRun(t, dataDir, r)
+
+	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{})
+	if err != nil {
+		t.Fatalf("buildRequestBuildArgs: %v", err)
+	}
+	var gotCriteria string
+	for i, a := range args {
+		if a == "-spec-acceptance-criteria" {
+			gotCriteria = args[i+1]
+		}
+	}
+	want := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "002.criteria.md")
+	if gotCriteria != want {
+		t.Fatalf("-spec-acceptance-criteria = %q, want %q", gotCriteria, want)
+	}
+	content, err := os.ReadFile(gotCriteria)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "1. First thing works.\n3. Third thing works.\n" {
+		t.Fatalf("criteria file = %q", content)
+	}
+
+	// A claim outside the spec's own numbering is refused, not silently
+	// dropped: the build would otherwise review against the wrong set.
+	if err := os.WriteFile(ticketPath, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 4)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{}); err == nil {
+		t.Fatal("expected an error for a criterion the spec does not declare")
+	}
+}
+
+// habitInsightsSpec mirrors the live incident's own shape (Flutter + Go app Track
+// M-E1, 2026-09-28, feature-habit-insights-endpoint-and-mcp): an approved
+// spec whose acceptance criteria name exact JSON field names a builder
+// must reproduce verbatim, not paraphrase.
+const habitInsightsSpec = `# Spec
+
+## Problem
+
+Habit insights need a stable JSON contract.
+
+## Scope
+
+The /habits/insights endpoint.
+
+## Non-goals
+
+Not touching /habits itself.
+
+## Affected services and packages
+
+internal/habits
+
+## Acceptance criteria
+
+1. First thing works.
+2. Second thing works.
+3. Third thing works.
+4. Fourth thing works.
+5. Fifth thing works.
+6. Sixth thing works.
+7. Seventh thing works.
+8. The response body includes an integer field named exactly longest_streak.
+9. The response body includes a weekly entries array whose objects each carry an integer field named exactly best_weekday_done_count, and a per-day field named exactly done_count.
+
+## Risks
+
+None known.
+
+## Open questions
+
+None.
+`
+
+// TestBuildRequestBuildArgsBuildSpecCarriesCriteriaText covers the live
+// bug this closes: the file a ticket's build actually receives as -spec
+// used to carry only the "### Acceptance criteria covered" NUMBERS
+// (e.g. "8, 9"), never the approved spec's own exact criteria TEXT --
+// forcing the builder to guess field names it could have read verbatim.
+// -spec must now point at a derived build-spec file containing the
+// ticket's own spec verbatim followed by the exact text of every
+// criterion it covers, in the live case's own shape (covered "8, 9" ->
+// the verbatim text of criteria 8 and 9, naming longest_streak,
+// best_weekday_done_count and done_count exactly).
+func TestBuildRequestBuildArgsBuildSpecCarriesCriteriaText(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	if err := os.MkdirAll(filepath.Join(request.Dir(dataDir, r.ID), "tickets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(habitInsightsSpec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "002.spec.md")
+	if err := os.WriteFile(ticketPath, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 8, 9)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedFirstTicketRun(t, dataDir, r)
+
+	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{})
+	if err != nil {
+		t.Fatalf("buildRequestBuildArgs: %v", err)
+	}
+	gotSpec := requestdrivertest.ArgValue(args, "-spec")
+	wantSpec := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "002.build.md")
+	if gotSpec != wantSpec {
+		t.Fatalf("-spec = %q, want %q", gotSpec, wantSpec)
+	}
+	content, err := os.ReadFile(gotSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(content)
+	if !strings.Contains(got, requestdriver.BuildSpecCriteriaHeading) {
+		t.Errorf("build spec = %q, want the %q heading", got, requestdriver.BuildSpecCriteriaHeading)
+	}
+	if !strings.Contains(got, "longest_streak") {
+		t.Errorf("build spec = %q, want criterion 8's exact field name longest_streak", got)
+	}
+	if !strings.Contains(got, "best_weekday_done_count") || !strings.Contains(got, "done_count") {
+		t.Errorf("build spec = %q, want criterion 9's exact field names", got)
+	}
+	if strings.Contains(got, "Fourth thing works") {
+		t.Errorf("build spec = %q, want only covered criteria (8, 9), not every criterion", got)
+	}
+	if !strings.Contains(got, requestdriver.BuildSpecCriteriaFooter) {
+		t.Errorf("build spec = %q, want the requirements-not-suggestions footer", got)
+	}
+	// The ticket's own header (Verify-Command:) must still be the very
+	// first line, parseable exactly the way ticketspec.ParseVerifyCommand
+	// already parses ticket.SpecPath itself -- the appended section goes
+	// at the end, never disturbing the top.
+	if !strings.HasPrefix(got, "Verify-Command: make verify\n") {
+		t.Errorf("build spec = %q, want Verify-Command: at the very top", got)
+	}
+}
+
+// TestTicketBuildSpecContentListsAllCriteriaWhenNoneDeclared covers the
+// fallback half of the same fix: a ticket that declares no covered
+// criteria at all (the legacy/hand-written format, no "## Plan" section)
+// gets every approved-spec criterion listed in its build spec instead of
+// none -- safer than handing the builder no contract text at all.
+func TestTicketBuildSpecContentListsAllCriteriaWhenNoneDeclared(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	if err := os.MkdirAll(filepath.Join(request.Dir(dataDir, r.ID), "tickets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(requestdrivertest.TwoCriteriaSpec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.spec.md")
+	legacyTicket := "Verify-Command: make verify\n\n## Goal\n\ndo the thing\n"
+	if err := os.WriteFile(ticketPath, []byte(legacyTicket), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, request.Ticket{Index: 1, SpecPath: ticketPath})
+	if err != nil {
+		t.Fatalf("ticketBuildSpecContent: %v", err)
+	}
+	if !strings.Contains(got, "A retried POST /refunds with the same idempotency key returns the original result.") {
+		t.Errorf("build spec = %q, want criterion 1's text", got)
+	}
+	if !strings.Contains(got, "A non-idempotent POST /refunds still processes normally.") {
+		t.Errorf("build spec = %q, want criterion 2's text", got)
+	}
+}
+
+// TestBuildRequestBuildArgsBuildSpecDoesNotDisturbApprovedHashes proves
+// VerifyApprovedHashes -- which hashes exactly the relative paths
+// recorded at plan_review approval time (tickets/NNN.spec.md, never any
+// derived file) -- still passes once a ticket's build has produced its
+// own <NNN>.build.md sibling: the derived file is written beside the
+// approved one, never in place of it, and is never itself hash-recorded.
+func TestBuildRequestBuildArgsBuildSpecDoesNotDisturbApprovedHashes(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	if err := os.MkdirAll(filepath.Join(request.Dir(dataDir, r.ID), "tickets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(requestdrivertest.TwoCriteriaSpec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.spec.md")
+	if err := os.WriteFile(ticketPath, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	specHash, err := request.HashFile(dataDir, r.ID, "spec.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketHash, err := request.HashFile(dataDir, r.ID, filepath.Join("tickets", "001.spec.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ApprovedSHA256 = map[string]string{
+		"spec.md":                               specHash,
+		filepath.Join("tickets", "001.spec.md"): ticketHash,
+	}
+
+	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 1, SpecPath: ticketPath}, requestdriver.WorkerConfig{}); err != nil {
+		t.Fatalf("buildRequestBuildArgs: %v", err)
+	}
+	if err := request.VerifyApprovedHashes(dataDir, r); err != nil {
+		t.Errorf("VerifyApprovedHashes after a build spec was written: %v", err)
+	}
+}
+
+// TestRemindIfDueDoesNotRevertAnApprovalMadeMeanwhile: the reminder ticker
+// re-loads under the request lock, so an approval that landed between
+// List and the reminder's own save is never overwritten by a stale copy
+// (found by adversarial review).
+func TestRemindIfDueDoesNotRevertAnApprovalMadeMeanwhile(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, base)
+	r.State = request.StateSpecReview
+	if err := os.WriteFile(filepath.Join(request.Dir(dataDir, "req-1"), "spec.md"), []byte("# Spec\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the old race: a List-time snapshot says spec_review and a
+	// reminder is due; the operator approves before the ticker acts.
+	if _, err := request.Approve(dataDir, "req-1", "alice", base.Add(time.Minute), nil); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return base.Add(time.Hour) }); err != nil {
+		t.Fatalf("remindIfDue: %v", err)
+	}
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanning {
+		t.Fatalf("State = %q, want planning (the approval must survive the reminder tick)", loaded.State)
+	}
+	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 0 {
+		t.Fatalf("notifications.log lines = %d, want 0 (nothing to remind about after approval)", got)
+	}
+}
+
+// A request parked in pr_review (a human-wait state) must not starve newer
+// requests: driveRequests used to advance only the oldest active request,
+// so one request waiting on PR approval blocked every later submission
+// (found live, 2026-09-19).
+func TestDriveRequestsDoesNotLetAPRReviewRequestStarveNewerOnes(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, oldID := requestdrivertest.BuildingFixture(dp, t, 1)
+	old, err := request.Load(dataDir, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.State = request.StatePRReview
+	old.TicketIndex = 1
+	old.Tickets[0].PRURL = "https://example.invalid/pr/1"
+	old.Tickets[0].PRState = "merged" // nothing left to poll: a step is a no-op
+	if err := old.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	newID := "req-2"
+	if err := request.SaveText(dataDir, newID, "another request"); err != nil {
+		t.Fatal(err)
+	}
+	newer := request.New(newID, t.TempDir(), "app", request.Source{Kind: request.SourceText}, time.Now().Add(time.Minute))
+	if err := newer.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	got, err := request.Load(dataDir, newID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != request.StateSpecDrafting {
+		t.Fatalf("newer request state = %q, want %q: it was starved behind a request awaiting PR review", got.State, request.StateSpecDrafting)
+	}
+}
+
+// cancelRequestForTest cancels id under request.Lock exactly the way
+// cancelRequest (internal/api/server.go) and `factoryd cancel` do, for a
+// test stub runner to call while driveRequests is still holding its own
+// stale in-memory copy of the same request.
+func cancelRequestForTest(t *testing.T, dataDir, id string) {
+	t.Helper()
+	unlock, err := request.Lock(dataDir, id)
+	if err != nil {
+		t.Fatalf("lock request for cancel: %v", err)
+	}
+	defer unlock()
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatalf("load request for cancel: %v", err)
+	}
+	if err := r.Cancel("operator", "changed my mind", time.Now()); err != nil {
+		t.Fatalf("cancel request: %v", err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatalf("save cancelled request: %v", err)
+	}
+}
+
+// TestAdvanceSpecDraftingCancelledDuringJobDoesNotResurrectRequest covers
+// the same cancel-during-job finding above, for the spec-drafting job.
+func TestAdvanceSpecDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateSpecDrafting
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		cancelRequestForTest(t, dataDir, "req-1")
+		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateCancelled {
+		t.Fatalf("State = %q, want %q (a cancel mid-job must survive the job's own save)", loaded.State, request.StateCancelled)
+	}
+}
+
+// TestAdvanceOracleDraftingCancelledDuringJobDoesNotResurrectRequest covers
+// the same cancel-during-job finding above, for the oracle-drafting job.
+func TestAdvanceOracleDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
+	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != request.StateOracleDrafting {
+		t.Fatalf("State after spec approval = %q, want oracle_drafting", got.State)
+	}
+
+	runner := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
+		cancelRequestForTest(t, dataDir, id)
+		return request.OracleDraft{Status: request.OracleNotImplemented}, nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdrivertest.NoOracleScriptCfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
+	if loaded.State != request.StateCancelled {
+		t.Fatalf("State = %q, want %q (a cancel mid-job must survive the job's own save)", loaded.State, request.StateCancelled)
+	}
+}
+
+// TestAdvancePlanningCancelledDuringJobDoesNotResurrectRequest covers
+// the same cancel-during-job finding above, for the plan-drafting job.
+func TestAdvancePlanningCancelledDuringJobDoesNotResurrectRequest(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != request.StatePlanning {
+		t.Fatalf("State after spec approval = %q, want planning", got.State)
+	}
+
+	runner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig, verifyCommand string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+		cancelRequestForTest(t, dataDir, id)
+		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}, &request.PlanEvidence{}, nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
+	if loaded.State != request.StateCancelled {
+		t.Fatalf("State = %q, want %q (a cancel mid-job must survive the job's own save)", loaded.State, request.StateCancelled)
+	}
+}
+
+// TestAdvanceBuildingCancelledDuringJobDoesNotResurrectRequest covers
+// the same cancel-during-job finding above, for a ticket build.
+func TestAdvanceBuildingCancelledDuringJobDoesNotResurrectRequest(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket, State: run.StateReady})
+		}
+		rr := &run.Run{ID: ticket, State: run.StateAccepted, PullRequestURL: "https://github.com/acme/app/pull/" + ticket}
+		if err := rr.Save(dataDir); err != nil {
+			t.Fatalf("save stub run %q: %v", ticket, err)
+		}
+		cancelRequestForTest(t, dataDir, id)
+		return nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
+	if loaded.State != request.StateCancelled {
+		t.Fatalf("State = %q, want %q (a cancel mid-job must survive the job's own save)", loaded.State, request.StateCancelled)
+	}
+}
+
+// TestAdvanceBuildingAcceptedWithoutPRRecordsNoPRState: an accepted run
+// whose PR was never opened must not leave the ticket claiming a "draft"
+// PR -- the console rendered that as a "PR draft" chip next to "accepted ·
+// awaiting PR" (console walk, 2026-09-24).
+// TestAdvanceBuildingStampsCompletionAfterRunReturns is the building-stage
+// counterpart: found live, a request's History read "building -> pr_review
+// | ticket 1/1 accepted" one second after "plan_review -> building", before
+// the ticket's run had even started -- the accepted transition was stamped
+// with the poll's own now, captured before the multi-minute build ran.
+func TestAdvanceBuildingStampsCompletionAfterRunReturns(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	const jobDuration = 50 * time.Millisecond
+	before := time.Now()
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket, State: run.StateReady})
+		}
+		time.Sleep(jobDuration)
+		rr := &run.Run{ID: ticket, State: run.StateAccepted}
+		if err := rr.Save(dataDir); err != nil {
+			t.Fatalf("save stub run %q: %v", ticket, err)
+		}
+		return nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePRReview {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StatePRReview)
+	}
+	last := loaded.History[len(loaded.History)-1]
+	at, err := time.Parse(time.RFC3339Nano, last.At)
+	if err != nil {
+		t.Fatalf("parse History At %q: %v", last.At, err)
+	}
+	if at.Before(before.Add(jobDuration)) {
+		t.Errorf("%s -> %s At = %s, want it stamped after the %s run returned (started at %s)", last.From, last.To, at, jobDuration, before)
+	}
+}
+
+func TestAdvanceBuildingAcceptedWithoutPRRecordsNoPRState(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket, State: run.StateReady})
+		}
+		rr := &run.Run{ID: ticket, State: run.StateAccepted}
+		if err := rr.Save(dataDir); err != nil {
+			t.Fatalf("save stub run %q: %v", ticket, err)
+		}
+		return nil
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk := loaded.Tickets[0]; tk.PRURL != "" || tk.PRState != "" {
+		t.Errorf("Tickets[0] = %+v, want no PR URL and no PR state", tk)
+	}
+}
+
+// A plan-feedback.md left from an earlier planning pass is removed when
+// the request now has no plan feedback -- e.g. after a send-back to spec,
+// which empties PlanFeedback on purpose. runPlanTicketsJob reads the file
+// straight from disk, so leaving it would feed notes written against the
+// old spec to the new plan drafter (adversarial review of SendBack, round
+// 2, 2026-09-26).
+func TestAdvancePlanningRemovesStalePlanFeedbackFile(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "python3 -m unittest tests/test_product_lab.py")
+	stale := request.PlanFeedbackPath(dataDir, id)
+	if err := os.WriteFile(stale, []byte("## Plan rejected\n\nsplit ticket 2 (old spec)\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickets := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("python3 -m unittest tests/test_product_lab.py", 1, 2)},
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale plan-feedback.md still present (err=%v), want removed", err)
+	}
+}
+
+// TestSharedCriterionReviewedOnlyAtLastCoveringTicket: a criterion listed
+// under several tickets is reviewed only at the last one (all its parts
+// exist by then); earlier tickets' build specs still carry its text,
+// marked as shared. Found live (Flutter + Go app habit-insights request,
+// 2026-09-28): ticket 1 of 3 was reviewed against handler and MCP-tool
+// criteria that tickets 2 and 3 build, and quarantined.
+func TestSharedCriterionReviewedOnlyAtLastCoveringTicket(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
+	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(habitInsightsSpec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t1 := filepath.Join(ticketsDir, "001.spec.md")
+	t2 := filepath.Join(ticketsDir, "002.spec.md")
+	if err := os.WriteFile(t1, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 1, 8)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(t2, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 8, 9)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets = []request.Ticket{{Index: 1, SpecPath: t1}, {Index: 2, SpecPath: t2}}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	crit1, err := requestdriver.WriteTicketCriteriaFile(dataDir, r, r.Tickets[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	got1, _ := os.ReadFile(crit1)
+	if strings.Contains(string(got1), "longest_streak") || !strings.HasPrefix(string(got1), "1.") {
+		t.Errorf("ticket 1 criteria = %q, want criterion 1 only (8 is shared with ticket 2, reviewed there)", got1)
+	}
+	crit2, err := requestdriver.WriteTicketCriteriaFile(dataDir, r, r.Tickets[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := os.ReadFile(crit2)
+	if !strings.Contains(string(got2), "longest_streak") || !strings.Contains(string(got2), "best_weekday_done_count") {
+		t.Errorf("ticket 2 criteria = %q, want criteria 8 and 9", got2)
+	}
+
+	spec1, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, r.Tickets[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(spec1, "longest_streak") || !strings.Contains(spec1, "Shared with ticket 2") {
+		t.Errorf("ticket 1 build spec must carry criterion 8's text marked shared with ticket 2; got %q", spec1)
+	}
+}
+
+// readFeedbackRunner is a plan-tickets runner that records the
+// plan-feedback.md the driver wrote before launching it, then returns tickets.
+func readFeedbackRunner(dataDir string, tickets []requestdriver.DraftedTicket, seen *string) requestdriver.PlanTicketsRunner {
+	return func(ctx context.Context, dd string, r *request.Request, cfg requestdriver.WorkerConfig, verifyCommand string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+		b, _ := os.ReadFile(request.PlanFeedbackPath(dataDir, r.ID))
+		*seen = string(b)
+		return tickets, &request.PlanEvidence{}, nil
+	}
+}
+
+// readSpecFeedbackRunner is readFeedbackRunner for the spec drafter.
+func readSpecFeedbackRunner(dataDir string, seen *string) requestdriver.SpecDraftRunner {
+	return func(ctx context.Context, dd string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		b, _ := os.ReadFile(request.SpecFeedbackPath(dataDir, r.ID))
+		*seen = string(b)
+		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{}, nil
+	}
+}
+
+func savedSpecDraftingRequest(t *testing.T) (dataDir string) {
+	t.Helper()
+	dataDir = t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateSpecDrafting
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	return dataDir
+}
+
+func loadHalted(t *testing.T, dataDir, id string) *request.Request {
+	t.Helper()
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateHalted {
+		t.Fatalf("State = %q, want %q (Error: %s)", loaded.State, request.StateHalted, loaded.Error)
+	}
+	return loaded
+}
+
+const malformedSpec = "# Spec\n\n## Problem\n\nx\n"
+
+// haltOnMalformedSpec drives a fresh spec_drafting request to a halt on malformedSpec.
+func haltOnMalformedSpec(t *testing.T, dp *fakeDeps, dataDir string) *request.Request {
+	t.Helper()
+	runner, _ := stubSpecDraftRunner(malformedSpec, &request.SpecEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	return loadHalted(t, dataDir, "req-1")
+}
+
+func TestPlanningHaltReasonReachesTheRetriedPlanner(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	bad := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make wrong-command-xyz", 1, 2)}}
+	badRunner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), badRunner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	halted := loadHalted(t, dataDir, id)
+	rejected := len(halted.Rejections)
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+
+	var seen string
+	good := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), readFeedbackRunner(dataDir, good, &seen), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests after retry: %v", err)
+	}
+	if !strings.HasPrefix(seen, "## Previous draft refused by the factory (") || !strings.Contains(seen, "make wrong-command-xyz") {
+		t.Errorf("plan-feedback.md = %q, want the refused-draft section naming make wrong-command-xyz", seen)
+	}
+	after, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Rejections) != rejected || after.DraftHalt != nil {
+		t.Errorf("Rejections = %d (was %d), DraftHalt = %+v; want rejections unchanged and the note cleared at plan_review", len(after.Rejections), rejected, after.DraftHalt)
+	}
+	if after.State != request.StatePlanReview {
+		t.Errorf("State = %q, want plan_review", after.State)
+	}
+}
+
+func TestSpecDraftingHaltReasonReachesTheRetriedDrafter(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := savedSpecDraftingRequest(t)
+	halted := haltOnMalformedSpec(t, dp, dataDir)
+	if len(halted.Rejections) != 0 {
+		t.Fatalf("Rejections = %+v, want none: a refused draft is not a rejection", halted.Rejections)
+	}
+	if _, err := request.Retry(dataDir, "req-1", "alice", "", time.Now(), nil); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	var seen string
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, readSpecFeedbackRunner(dataDir, &seen), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests after retry: %v", err)
+	}
+	if !strings.HasPrefix(seen, "## Previous draft refused by the factory (") || !strings.Contains(seen, "## Scope") {
+		t.Errorf("spec-feedback.md = %q, want the refused-draft section naming the missing ## Scope heading", seen)
+	}
+	after, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Rejections) != 0 || after.DraftHalt != nil {
+		t.Errorf("Rejections = %+v, DraftHalt = %+v; want none and the note cleared at spec_review", after.Rejections, after.DraftHalt)
+	}
+}
+
+func TestDraftJobFailureLeavesNoDraftNote(t *testing.T) {
+	dp := newFakeDeps(t)
+	for _, text := range []string{"agent exited 2: 401 Unauthorized", "model route error: Connection error.", "draft_spec.py exited 3 (see /some/log)"} {
+		dataDir := savedSpecDraftingRequest(t)
+		runner, _ := stubSpecDraftRunner("", nil, errors.New(text))
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+		if halted := loadHalted(t, dataDir, "req-1"); halted.DraftHalt != nil || len(halted.Rejections) != 0 {
+			t.Errorf("%q: DraftHalt = %+v, Rejections = %+v; want neither", text, halted.DraftHalt, halted.Rejections)
+		}
+	}
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	planRunner, _ := requestdrivertest.StubPlanTicketsRunner(nil, nil, errors.New("agent exited 2: 401 Unauthorized"))
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), planRunner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if halted := loadHalted(t, dataDir, id); halted.DraftHalt != nil {
+		t.Errorf("plan job failure: DraftHalt = %+v, want nil", halted.DraftHalt)
+	}
+}
+
+func TestTicketWriteErrorLeavesNoDraftNote(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	// The drafted ticket's name is a directory path that cannot exist, so
+	// writing it fails with an I/O error, not a content refusal.
+	bad := []requestdriver.DraftedTicket{{Filename: "no-such-dir/001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	halted := loadHalted(t, dataDir, id)
+	if !strings.Contains(halted.Error, "write ticket") {
+		t.Fatalf("Error = %q, want the write failure", halted.Error)
+	}
+	if halted.DraftHalt != nil {
+		t.Errorf("DraftHalt = %+v, want none for an I/O error", halted.DraftHalt)
+	}
+}
+
+func TestInfrastructureHaltLeavesNoDraftNote(t *testing.T) {
+	dp := newFakeDeps(t)
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) (dataDir, id string)
+	}{
+		{"stale approval hash", func(t *testing.T) (string, string) {
+			dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+			if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(requestdrivertest.TwoCriteriaSpec+"\nedited after approval\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return dataDir, id
+		}},
+		{"missing verify command", func(t *testing.T) (string, string) {
+			return requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir, id := tc.setup(t)
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+				t.Fatalf("driveRequests: %v", err)
+			}
+			halted := loadHalted(t, dataDir, id)
+			if halted.DraftHalt != nil || len(halted.Rejections) != 0 {
+				t.Errorf("DraftHalt = %+v, Rejections = %+v; want neither for an infrastructure halt", halted.DraftHalt, halted.Rejections)
+			}
+		})
+	}
+}
+
+func TestImportedPlanHaltStaysHandedOver(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": requestdrivertest.ValidBrownfieldTicket("make something-else", 1, 2)})
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	halted := loadHalted(t, dataDir, id)
+	if halted.DraftHalt != nil || len(halted.Rejections) != 0 {
+		t.Errorf("DraftHalt = %+v, Rejections = %+v; want neither for a halted hand-over", halted.DraftHalt, halted.Rejections)
+	}
+	if !halted.PlanAsHandedOver() {
+		t.Error("PlanAsHandedOver() = false after the halt, want the plan still handed over")
+	}
+}
+
+func TestBuildingHaltLeavesNoDraftNote(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	startFailure := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		return errors.New("sandbox image pull failed")
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), startFailure); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	halted := loadHalted(t, dataDir, id)
+	if halted.DraftHalt != nil || len(halted.Rejections) != 0 {
+		t.Errorf("DraftHalt = %+v, Rejections = %+v; want neither for a building halt", halted.DraftHalt, halted.Rejections)
+	}
+}
+
+func TestDraftHaltNoteReplacesTheEarlierOne(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := savedSpecDraftingRequest(t)
+	haltOnMalformedSpec(t, dp, dataDir)
+	if _, err := request.Retry(dataDir, "req-1", "alice", "", time.Now(), nil); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	second := "# Spec\n\n## Problem\n\ny\n\n## Scope\n\nz\n" // stops before ## Non-goals
+	runner, _ := stubSpecDraftRunner(second, &request.SpecEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	halted := loadHalted(t, dataDir, "req-1")
+	if halted.DraftHalt == nil || !strings.Contains(halted.DraftHalt.Reason, `heading "\## Non-goals"`) || strings.Contains(halted.DraftHalt.Reason, `heading "\## Scope"`) {
+		t.Errorf("DraftHalt = %+v, want only the second draft's reason (missing ## Non-goals)", halted.DraftHalt)
+	}
+}
+
+func TestDraftHaltNoteDoesNotEvictOperatorFeedback(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir := savedSpecDraftingRequest(t)
+	r, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Rejections = []request.Rejection{
+		{By: "alice", At: "2026-09-24T00:00:00Z", Reason: strings.Repeat("old complaint. ", 1000), FromState: request.StateSpecReview},
+		{By: "alice", At: "2026-09-25T00:00:00Z", Reason: "newest complaint: name the retry limit", FromState: request.StateSpecReview},
+	}
+	r.DraftHalt = &request.DraftHalt{Stage: request.StateSpecDrafting, Reason: "refusal reason qrs", At: "2026-09-26T00:00:00Z"}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, readSpecFeedbackRunner(dataDir, &seen), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if !strings.Contains(seen, "newest complaint: name the retry limit") {
+		t.Errorf("feedback lost the newest operator section")
+	}
+	if !strings.HasSuffix(seen, "## Previous draft refused by the factory (2026-09-26T00:00:00Z)\n\nrefusal reason qrs\n") {
+		t.Errorf("feedback tail = %q, want it to end with the refusal section", seen[max(0, len(seen)-120):])
+	}
+	if len(seen) > requestdriver.MaxFeedbackBytes+300 {
+		t.Errorf("feedback is %d bytes, want the operator part capped", len(seen))
+	}
+}
+
+// withFirstTicketRun is seedFirstTicketRun in a fresh data dir, which it
+// returns.
+func withFirstTicketRun(t *testing.T, r *request.Request) string {
+	t.Helper()
+	dataDir := t.TempDir()
+	seedFirstTicketRun(t, dataDir, r)
+	return dataDir
+}
+
+// seedFirstTicketRun gives r a first ticket whose run, saved in dataDir,
+// recorded the commit the request started from: a later ticket's build
+// arguments are refused without one (the reviews' instruction base). A
+// first ticket r already has keeps its other fields.
+func seedFirstTicketRun(t *testing.T, dataDir string, r *request.Request) {
+	t.Helper()
+	first := &run.Run{ID: r.ID + "-001-first", RequestID: r.ID, BaseSHA: fmt.Sprintf("%040d", 1)}
+	if err := first.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Tickets) == 0 {
+		r.Tickets = []request.Ticket{{Index: 1}}
+	}
+	r.Tickets[0].RunID = first.ID
 }

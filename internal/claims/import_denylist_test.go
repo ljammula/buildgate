@@ -80,6 +80,9 @@ var processRunningPackages = map[string]bool{
 	"buildgate/internal/testfixture":     true,
 	"buildgate/internal/workflow":        true,
 	"buildgate/internal/workspace":       true,
+
+	// Test fixtures: git in the test's own temp repository, as testfixture.
+	"buildgate/internal/requestdriver/requestdrivertest": true,
 }
 
 func TestOnlyListedPackagesRunProcesses(t *testing.T) {

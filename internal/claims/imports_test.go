@@ -465,10 +465,13 @@ func TestRequestdrivertestIsATestsOnlyPackage(t *testing.T) {
 	requirePackage(t, g, testPkg)
 	allowed := map[string]bool{
 		"buildgate/internal/forge":         true,
+		"buildgate/internal/handoff":       true,
 		"buildgate/internal/release":       true,
 		"buildgate/internal/request":       true,
 		"buildgate/internal/requestdriver": true,
 		"buildgate/internal/run":           true,
+		"buildgate/internal/testfixture":   true,
+		"buildgate/internal/workspace":     true,
 	}
 	for imp := range buildgateImports(g, testPkg) {
 		if !allowed[imp] {

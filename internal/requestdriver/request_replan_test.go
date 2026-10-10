@@ -1,4 +1,4 @@
-package main
+package requestdriver_test
 
 import (
 	"context"
@@ -17,9 +17,9 @@ import (
 // pinned at approval or mounted at build), and the cleanup must not follow a
 // symlink out of the request's tickets directory.
 func TestAdvancePlanningClearsStaleTicketArtifactsOnReplan(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := newFakeDeps(t)
 	verify := "python3 -m unittest tests/test_product_lab.py"
-	dataDir, id := approvedPlanningFixture(t, twoCriteriaSpec, verify)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, verify)
 
 	ticketsDir := filepath.Join(request.Dir(dataDir, id), "tickets")
 	if err := os.MkdirAll(filepath.Join(ticketsDir, "002.oracle"), 0o750); err != nil {
@@ -40,9 +40,9 @@ func TestAdvancePlanningClearsStaleTicketArtifactsOnReplan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tickets := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: validBrownfieldTicket(verify, 1, 2)}}
-	runner, _ := stubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	tickets := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(verify, 1, 2)}}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 

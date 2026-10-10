@@ -11,6 +11,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 )
 
@@ -79,46 +80,18 @@ func TestReclaimDeadRequestJobsRemovesOnlyADeadOwnersContainers(t *testing.T) {
 	}
 }
 
-// TestRequestResumeRefusalsRefusesADraftingStepWhileItsContainerLives covers
-// the drafting branch of the resume preflight: a container labelled for the
-// request blocks the resume, naming it; none lets it through.
-func TestRequestResumeRefusalsRefusesADraftingStepWhileItsContainerLives(t *testing.T) {
-	dataDir := t.TempDir()
-	seedLostStep(t, dataDir, "req-draft", request.StateSpecDrafting, "")
-	r, err := request.Load(dataDir, "req-draft")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	containers := &fakeJobContainers{IDs: []string{"abc123"}}
-	reasons, err := requestdriver.ResumeGate{Containers: containers}.RequestResumeRefusals(context.Background(), dataDir, "docker", r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(reasons) != 1 || !strings.Contains(reasons[0], "spec_drafting step is still alive") || !strings.Contains(reasons[0], "abc123") {
-		t.Fatalf("reasons = %v, want one naming the live spec_drafting container", reasons)
-	}
-	if len(containers.Asked) != 1 || containers.Asked[0] != "req-draft" {
-		t.Errorf("listed containers of %v, want the request id req-draft", containers.Asked)
-	}
-
-	if reasons, err = (requestdriver.ResumeGate{Containers: &fakeJobContainers{}}).RequestResumeRefusals(context.Background(), dataDir, "docker", r); err != nil || len(reasons) != 0 {
-		t.Fatalf("with no container: reasons = %v, err = %v, want none", reasons, err)
-	}
-}
-
 // TestRequestResumeRefusalsAsksTheSandboxRuntime: with a sandbox runtime, a
 // lost drafting step is not resumed while the runtime still holds one of the
 // job's sandboxes, nor when the runtime cannot be asked, even though Docker
 // shows no container.
 func TestRequestResumeRefusalsAsksTheSandboxRuntime(t *testing.T) {
 	dataDir := t.TempDir()
-	seedLostStep(t, dataDir, "req-1", request.StateSpecDrafting, "")
+	requestdrivertest.SeedLostStep(t, dataDir, "req-1", request.StateSpecDrafting, "")
 	r, err := request.Load(dataDir, "req-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	noContainers := &fakeJobContainers{}
+	noContainers := &requestdrivertest.FakeJobContainers{}
 	var asked [][2]string
 	held := &fakeSandboxes{listByRunFn: func(_ context.Context, dir, runID string) ([]string, error) {
 		asked = append(asked, [2]string{dir, runID})

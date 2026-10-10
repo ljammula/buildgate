@@ -16,6 +16,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 )
 
@@ -69,23 +70,6 @@ func seedOwnedRun(t *testing.T, dataDir, id string, state run.State, ownerPID in
 	}
 }
 
-// fakeReclaimDocker writes a docker stand-in that lists the containers in
-// the returned psFile (one "name<TAB>runid" per line) for every `ps`, logs
-// every invocation to the returned logFile, and succeeds at everything else.
-func fakeReclaimDocker(t *testing.T) (docker, psFile, logFile string) {
-	t.Helper()
-	dir := t.TempDir()
-	docker = filepath.Join(dir, "docker")
-	psFile = filepath.Join(dir, "ps.txt")
-	logFile = filepath.Join(dir, "calls.log")
-	script := "#!/bin/sh\necho \"$*\" >> " + logFile + "\n" +
-		"if [ \"$1\" = ps ]; then cat " + psFile + "; fi\nexit 0\n"
-	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
-	}
-	return docker, psFile, logFile
-}
-
 // TestReclaimDeadOwnerRunsHaltsOnlyDeadOwnerRun proves the worker start
 // reclaim touches exactly the nonterminal run whose owner process is gone:
 // halted with the triage line, its containers rm -f'd (its Temporal
@@ -94,7 +78,7 @@ func fakeReclaimDocker(t *testing.T) (docker, psFile, logFile string) {
 func TestReclaimDeadOwnerRunsHaltsOnlyDeadOwnerRun(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir := t.TempDir()
-	docker, psFile, logFile := fakeReclaimDocker(t)
+	docker, psFile, logFile := requestdrivertest.FakeReclaimDocker(t)
 	stub := &stubWorkflowTerminator{running: map[string]bool{"wf-dead": false, "wf-live": true, "wf-done": false}}
 	orig := fakeTemporalOf(dp).dialTerminatorFn
 	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return stub, func() {}, nil }
@@ -207,7 +191,7 @@ func (errDescribeTerminator) DescribeWorkflowExecution(context.Context, string, 
 // Temporal neither terminates a workflow nor halts its run.
 func TestReclaimDeadOwnerRunsLeavesRunWhenDescribeFails(t *testing.T) {
 	dp := newTestDeps(t)
-	dataDir, reqID := buildingFixture(dp, t, 1)
+	dataDir, reqID := requestdrivertest.BuildingFixture(dp, t, 1)
 	stub := &errDescribeTerminator{}
 	orig := fakeTemporalOf(dp).dialTerminatorFn
 	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return stub, func() {}, nil }
@@ -254,7 +238,7 @@ func seedDriverOwnedRun(t *testing.T, dataDir, reqID, runID, workflowID string) 
 // returned runs, never re-attaching to the lost build.
 func TestReclaimDeadOwnerRunsHaltsRunningWorkflowItsRequestStillBuilds(t *testing.T) {
 	dp := newTestDeps(t)
-	dataDir, reqID := buildingFixture(dp, t, 1)
+	dataDir, reqID := requestdrivertest.BuildingFixture(dp, t, 1)
 	stub := &stubWorkflowTerminator{running: map[string]bool{"wf-w": true}}
 	orig := fakeTemporalOf(dp).dialTerminatorFn
 	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return stub, func() {}, nil }

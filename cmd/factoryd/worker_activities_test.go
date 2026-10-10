@@ -8,6 +8,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
@@ -124,7 +125,7 @@ func TestHaltLostRequestStepEntersResumeReviewOnlyInTheLostState(t *testing.T) {
 // A lost build records the run it was running, which a resume continues.
 func TestHaltLostRequestStepRecordsTheLostBuildRun(t *testing.T) {
 	dp := newTestDeps(t)
-	dataDir, reqID := buildingFixture(dp, t, 1)
+	dataDir, reqID := requestdrivertest.BuildingFixture(dp, t, 1)
 	r, err := request.Load(dataDir, reqID)
 	if err != nil {
 		t.Fatal(err)

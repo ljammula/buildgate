@@ -12,6 +12,7 @@ import (
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/workflow"
 )
 
@@ -155,21 +156,29 @@ func TestCLIVerbsWakeTheWorkflowAfterTheirWrite(t *testing.T) {
 		run     func(dataDir string) error
 	}{
 		{
-			name:    "approve",
-			seed:    func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateSpecReview) },
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateBuilding) },
-			run:     func(d string) error { return approveMain(dp, []string{"-data-dir", d, "req-1"}) },
+			name: "approve",
+			seed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateSpecReview)
+			},
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
+			},
+			run: func(d string) error { return approveMain(dp, []string{"-data-dir", d, "req-1"}) },
 		},
 		{
-			name:    "reject",
-			seed:    func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateSpecReview) },
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateBuilding) },
-			run:     func(d string) error { return rejectMain(dp, []string{"-reason", "too broad", "-data-dir", d, "req-1"}) },
+			name: "reject",
+			seed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateSpecReview)
+			},
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
+			},
+			run: func(d string) error { return rejectMain(dp, []string{"-reason", "too broad", "-data-dir", d, "req-1"}) },
 		},
 		{
 			name: "send-back",
 			seed: func(t *testing.T, d string) {
-				newApprovableDriverRequest(t, d, "req-1", request.StateQuarantined)
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateQuarantined)
 				r, err := request.Load(d, "req-1")
 				if err != nil {
 					t.Fatal(err)
@@ -179,7 +188,9 @@ func TestCLIVerbsWakeTheWorkflowAfterTheirWrite(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateBuilding) },
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
+			},
 			run: func(d string) error {
 				return rejectMain(dp, []string{"-reason", "allow the file", "-to", "plan", "-data-dir", d, "req-1"})
 			},
@@ -194,27 +205,37 @@ func TestCLIVerbsWakeTheWorkflowAfterTheirWrite(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateBuilding) },
-			run:     func(d string) error { return retryMain(dp, []string{"-data-dir", d, "-reason", "again", "req-1"}) },
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
+			},
+			run: func(d string) error { return retryMain(dp, []string{"-data-dir", d, "-reason", "again", "req-1"}) },
 		},
 		{
-			name:    "resume",
-			seed:    func(t *testing.T, d string) { seedLostStep(t, d, "req-1", request.StatePlanning, "") },
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateBuilding) },
+			name: "resume",
+			seed: func(t *testing.T, d string) { requestdrivertest.SeedLostStep(t, d, "req-1", request.StatePlanning, "") },
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
+			},
 			run: func(d string) error {
-				return resumeMainWith(dp, []string{"-data-dir", d, "req-1"}, requestdriver.ResumeGate{Containers: &fakeJobContainers{}})
+				return resumeMainWith(dp, []string{"-data-dir", d, "req-1"}, requestdriver.ResumeGate{Containers: &requestdrivertest.FakeJobContainers{}})
 			},
 		},
 		{
-			name:    "cancel",
-			seed:    func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateSpecReview) },
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateDone) },
-			run:     func(d string) error { return cancelMain(dp, []string{"-data-dir", d, "req-1"}) },
+			name: "cancel",
+			seed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateSpecReview)
+			},
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateDone)
+			},
+			run: func(d string) error { return cancelMain(dp, []string{"-data-dir", d, "req-1"}) },
 		},
 		{
-			name:    "amend-scope",
-			seed:    func(t *testing.T, d string) { newAmendScopeMainFixture(t, d, "req-1") },
-			badSeed: func(t *testing.T, d string) { newApprovableDriverRequest(t, d, "req-1", request.StateBuilding) },
+			name: "amend-scope",
+			seed: func(t *testing.T, d string) { newAmendScopeMainFixture(t, d, "req-1") },
+			badSeed: func(t *testing.T, d string) {
+				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
+			},
 			run: func(d string) error {
 				return amendScopeMain(dp, []string{"-data-dir", d, "-reason", "needs b_test.go", "req-1", "b_test.go"})
 			},
@@ -251,7 +272,7 @@ func TestCLIVerbKeepsItsResultWhenTheWakeFails(t *testing.T) {
 	dp := newTestDeps(t)
 	woken := stubWake(dp, t, errors.New("temporal down"))
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 	if err := approveMain(dp, []string{"-data-dir", dataDir, "req-1"}); err != nil {
 		t.Fatalf("approveMain with a failing waker: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"buildgate/internal/oraclecanary"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/runner"
 )
 
@@ -151,7 +152,7 @@ func TestAutoRedraftKeepsOperatorFeedbackAndAddsCompilerOutput(t *testing.T) {
 			second = string(b)
 		}
 	})
-	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: loadRequest(t, f.dataDir, f.id), Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: feedbackPath}
+	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: requestdrivertest.LoadRequest(t, f.dataDir, f.id), Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: feedbackPath}
 	if _, err := runOracleDraftJob(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}

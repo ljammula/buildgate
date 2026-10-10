@@ -8,7 +8,6 @@ import (
 
 	"buildgate/internal/forge"
 	"buildgate/internal/release"
-	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
@@ -123,32 +122,5 @@ func TestPRPollChecksTheReadyToMergeBar(t *testing.T) {
 				t.Errorf("status summary = %q, want ready-to-merge shown only when ready", summary)
 			}
 		})
-	}
-}
-
-// TestPollTicketPRCancelledDuringPollDoesNotResurrectRequest covers an
-// adversarial-review finding (2026-09-24) for the pr_review poll: a
-// cancel landing while forge.readReviewState's network call is in flight must
-// survive pollTicketPR's own r.Save afterwards -- see stillInState's doc
-// comment (request_driver.go).
-func TestPollTicketPRCancelledDuringPollDoesNotResurrectRequest(t *testing.T) {
-	dp := newTestDeps(t)
-	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN"}, nil)
-	fakeForgeOf(dp).readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
-		cancelRequestForTest(t, dataDir, r.ID)
-		return forge.ReviewState{State: "OPEN"}, nil
-	}
-
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute}, time.Now()); err != nil {
-		t.Fatalf("advancePRReview: %v", err)
-	}
-
-	loaded, err := request.Load(dataDir, r.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.State != request.StateCancelled {
-		t.Fatalf("State = %q, want %q (a cancel mid-poll must survive pollTicketPR's own save)", loaded.State, request.StateCancelled)
 	}
 }

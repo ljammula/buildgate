@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"buildgate/internal/evidence"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 )
 
@@ -21,8 +22,8 @@ import (
 func TestASavedBuildPromptReachesOnlyTheOperatorsReaders(t *testing.T) {
 	const marker = "PROMPT-MARKER-5b1d-earlier-attempt-record"
 	dp := newTestDeps(t)
-	dataDir, id := buildingFixture(dp, t, 1)
-	runID := ticketRunID(id, 1)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runID := requestdrivertest.TicketRunID(id, 1)
 	runDir := run.Dir(dataDir, runID)
 	if err := os.MkdirAll(runDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestASavedBuildPromptReachesOnlyTheOperatorsReaders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rr := quarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
 	rr.Project = "prompts-project"
 	if err := rr.Save(dataDir); err != nil {
 		t.Fatal(err)
