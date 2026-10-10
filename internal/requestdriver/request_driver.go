@@ -18,7 +18,6 @@ import (
 	"unicode/utf8"
 
 	"buildgate/internal/codereview"
-	"buildgate/internal/consolelink"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
 	"buildgate/internal/policy"
@@ -2389,26 +2388,11 @@ func quarantineRequestWithCheck(dataDir string, r *request.Request, reason, chec
 // above, since the state-transition call each makes first is the only
 // part that differs between them.
 func notifyTerminalRequest(dataDir string, r *request.Request, reason string, now time.Time) error {
-	delivered := true
-	n := notify.Notification{
-		RequestID: r.ID,
-		Reason:    reason,
-		State:     run.State(r.State),
-		SentAt:    now.Format(time.RFC3339),
-		Delivered: &delivered,
-		Next:      fmt.Sprintf("factoryd retry %s", r.ID),
-		Link:      consolelink.RequestURL(consolelink.BaseURL("", dataDir), r.ID),
-	}
-	notifyCtx, cancelNotify := context.WithTimeout(context.Background(), 2*time.Second)
-	notifyErr := (notify.LogNotifier{Path: filepath.Join(request.Dir(dataDir, r.ID), "notifications.log")}).Notify(notifyCtx, n)
-	cancelNotify()
-	if notifyErr != nil {
-		delivered = false
-	}
+	n := prepareRequestNotification(dataDir, r, terminalNotice(r, reason), now)
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
-	notify.DispatchExternal(n)
+	notify.DispatchExternal(dataDir, n)
 	return nil
 }
 
@@ -2961,97 +2945,31 @@ func RequestNotificationLogPath(dataDir, id string) string {
 	return filepath.Join(request.Dir(dataDir, id), "notifications.log")
 }
 
-// requestReminderTarget names the file the operator needs to edit to act
-// on r's current review state, for RemindRequest's own reminder text.
-func requestReminderTarget(dataDir string, r *request.Request) string {
-	switch r.State {
-	case request.StatePlanReview:
-		return filepath.Join(request.Dir(dataDir, r.ID), "tickets", "*.spec.md")
-	case request.StateOracleReview:
-		return filepath.Join(request.Dir(dataDir, r.ID), request.RequestOracleDirName)
-	default: // request.StateSpecReview, and any state that ends up here regardless.
-		return RequestSpecPath(dataDir, r.ID)
-	}
-}
-
-// RemindRequest sends one HITL reminder for r: durable-log-first, exactly
-// notify.PrepareHalt's own shape (see its doc comment for why) -- append
-// to r's own notifications.log via notify.LogNotifier first, then fire
-// notify.DispatchExternal (desktop/Slack/Discord) with the same
-// notification, so the reminder is recorded even if the network dispatch
-// that follows fails or hangs.
+// RemindRequest sends one notification that r waits on the operator in a
+// review state: what is asked, and r's own page in the console as its link
+// (reviewNotice, prepareRequestNotification). The notification is appended
+// to r's notifications.log first, then dispatched (desktop, Slack, Discord),
+// so it is on record even if the dispatch fails or hangs.
 //
-// The one function both call sites this WP's design calls for share: the
-// request driver (AdvanceRequest, above -- the immediate reminder on
-// entering a review state) and worker's own ticker
-// (RemindIfDue, below -- the every-interval repeat). Neither checks
-// r.State itself before calling this; that is each caller's own job (see
-// their own doc comments), since what counts as "due" differs between an
-// unconditional first reminder and a ticker's elapsed-time check.
+// Both callers share it: the request driver on entering a review state, and
+// the worker's ticker (RemindIfDue) for every repeat. Neither this function
+// nor its callers' callers check r.State here: what counts as due is the
+// caller's.
 //
-// Sets r.WaitingSince (only if not already set -- an ongoing wait's own
-// clock must not restart on every reminder), r.LastNotifiedAt, and
-// increments r.NotifyCount, but does NOT save r: callers own that, as
-// part of whatever else they are already saving in the same step (the
-// driver's own AdvanceRequest call below; RemindIfDue's own Save
-// per reminder it sends).
+// It sets r.WaitingSince (only when unset: a wait's clock does not restart
+// on a reminder), r.LastNotifiedAt and r.LastAsk, and increments
+// r.NotifyCount. It does not save r: the caller does.
 func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 	ts := now.UTC().Format(time.RFC3339Nano)
 	if r.WaitingSince == "" {
 		r.WaitingSince = ts
 	}
-
-	waitingSince := r.WaitingSince
-	age := "just now"
-	if parsed, err := time.Parse(time.RFC3339Nano, waitingSince); err == nil {
-		age = now.Sub(parsed).Round(time.Minute).String()
+	var waited time.Duration
+	if since, err := time.Parse(time.RFC3339Nano, r.WaitingSince); err == nil {
+		waited = now.Sub(since)
 	}
-
-	reason := fmt.Sprintf(
-		"%s is waiting for you in %s since %s (%s): edit %s then run `factoryd approve %s` (or `factoryd reject -reason ... %s`)",
-		r.ID, r.State, waitingSince, age, requestReminderTarget(dataDir, r), r.ID, r.ID,
-	)
-	next := fmt.Sprintf("factoryd approve %s (or `factoryd reject -reason ... %s`)", r.ID, r.ID)
-	if r.State == request.StateResumeReview {
-		// Nothing to edit or approve: a step was lost, and the three ways on
-		// are the resume verbs (NextAction names the lost state).
-		reason = fmt.Sprintf("%s is waiting for you in %s since %s (%s): %s", r.ID, r.State, waitingSince, age, r.NextAction())
-		next = fmt.Sprintf("factoryd resume %s (or `-from scratch`, or `factoryd cancel %s`)", r.ID, r.ID)
-	}
-	if r.State == request.StatePlanReview {
-		reason += PlanReviewOracleNote(dataDir, r)
-	}
-	if notice := request.OracleReviewNotice(dataDir, r); notice != "" {
-		reason += " -- NOTE: " + notice
-	}
-
-	delivered := true
-	n := notify.Notification{
-		RequestID: r.ID,
-		Reason:    reason,
-		State:     run.State(r.State),
-		SentAt:    ts,
-		Delivered: &delivered,
-		Next:      next,
-		Link:      consolelink.RequestURL(consolelink.BaseURL("", dataDir), r.ID),
-	}
-	// This creates request.Dir(dataDir, r.ID) as a defensive measure only
-	// -- ClaimID already created it at submit time, long before any
-	// review state can be reached -- mirroring notify.PrepareHalt's own
-	// MkdirAll for the same reason: nothing here should depend on that
-	// ordering holding at every future call site forever.
-	if err := os.MkdirAll(request.Dir(dataDir, r.ID), 0o750); err == nil {
-		notifyCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		notifyErr := (notify.LogNotifier{Path: RequestNotificationLogPath(dataDir, r.ID)}).Notify(notifyCtx, n)
-		cancel()
-		if notifyErr != nil {
-			delivered = false
-			n.DeliveryError = notifyErr.Error()
-		}
-	}
-	notify.DispatchExternal(n)
-
-	r.LastNotifiedAt = ts
+	n := prepareRequestNotification(dataDir, r, reviewNotice(dataDir, r, waited), now)
+	notify.DispatchExternal(dataDir, n)
 	r.NotifyCount++
 }
 

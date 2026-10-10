@@ -52,8 +52,8 @@ func (d DiscordNotifier) Notify(ctx context.Context, n Notification) error {
 	if n.Next != "" {
 		content += fmt.Sprintf("\nnext: %s", n.Next)
 	}
-	if n.Link != "" {
-		content += fmt.Sprintf("\n%s", n.Link)
+	if link := channelLink(n); link != "" {
+		content += fmt.Sprintf("\n%s", link)
 	}
 
 	body, err := json.Marshal(discordPayload{

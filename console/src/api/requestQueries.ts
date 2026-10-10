@@ -11,7 +11,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import type { Http } from "@/api/http";
@@ -180,6 +180,39 @@ export function useRequestBoard(): RequestBoard {
   }, [http, client]);
 
   return { query, live, streamError, failedAttempts };
+}
+
+/**
+ * The stream a tab holds while it raises the requests' browser
+ * notifications: `GET /requests/events?notifier=1`, on every screen. The
+ * parameter is what tells the server a tab does the job, so the host's own
+ * banner stands down for as long as this stream is open. Each frame also
+ * refreshes the list cache and is handed to `onRequest`. A stream that ends
+ * for good (a rotated token) is left ended: the list's own polling goes on,
+ * and the host's banner comes back.
+ */
+export function useNotifierStream(active: boolean, onRequest: (request: RequestSummary) => void) {
+  const { http } = useApi();
+  const client = useQueryClient();
+  const handler = useRef(onRequest);
+  useEffect(() => {
+    handler.current = onRequest;
+  }, [onRequest]);
+  useEffect(() => {
+    if (!active) return undefined;
+    return watchRequests(
+      http,
+      {
+        onValue: (request) => {
+          cacheRequest(client, request, false);
+          handler.current(request);
+        },
+        onError: () => undefined,
+      },
+      {},
+      { notifier: true },
+    );
+  }, [active, http, client]);
 }
 
 /**

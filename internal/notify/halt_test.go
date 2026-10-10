@@ -116,7 +116,7 @@ func TestDispatchExternalCallsAllThreeChannels(t *testing.T) {
 		desktopNotifierLookPath = origLookPath
 	}()
 
-	DispatchExternal(Notification{RunID: "run-1", Ticket: "ticket-1", State: run.StateHalted, Reason: "test"})
+	DispatchExternal(t.TempDir(), Notification{RunID: "run-1", Ticket: "ticket-1", State: run.StateHalted, Reason: "test"})
 	// DispatchExternal itself returns immediately (its fan-out runs on a
 	// background goroutine) -- wait for it to finish before asserting.
 	WaitForPendingDispatches(5 * time.Second)
@@ -149,7 +149,7 @@ func TestWaitForPendingDispatchesWaitsForSlowDispatch(t *testing.T) {
 	defer srv.Close()
 	t.Setenv(DiscordWebhookURLsEnvironmentVariable, srv.URL)
 
-	DispatchExternal(Notification{RunID: "run-1"})
+	DispatchExternal(t.TempDir(), Notification{RunID: "run-1"})
 
 	start := time.Now()
 	WaitForPendingDispatches(5 * time.Second)
@@ -176,7 +176,7 @@ func TestWaitForPendingDispatchesReturnsOnTimeout(t *testing.T) {
 	defer srv.Close()
 	t.Setenv(DiscordWebhookURLsEnvironmentVariable, srv.URL)
 
-	DispatchExternal(Notification{RunID: "run-1"})
+	DispatchExternal(t.TempDir(), Notification{RunID: "run-1"})
 
 	start := time.Now()
 	WaitForPendingDispatches(100 * time.Millisecond)
@@ -228,7 +228,7 @@ func TestDispatchExternalRunsChannelsConcurrently(t *testing.T) {
 	t.Setenv(DiscordWebhookURLsEnvironmentVariable, discordSrv.URL)
 	t.Setenv(SlackWebhookURLsEnvironmentVariable, slackSrv.URL)
 
-	DispatchExternal(Notification{RunID: "run-1"})
+	DispatchExternal(t.TempDir(), Notification{RunID: "run-1"})
 
 	select {
 	case <-slackHit:

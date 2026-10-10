@@ -313,9 +313,7 @@ func TestGetRequestIncludesSpecAndTicketContent(t *testing.T) {
 // TestGetRequestIncludesFullPath covers the console-ux full-path finding
 // (2026-09-14): the console only ever rendered a request-relative
 // fragment ("spec.md", "tickets/001.spec.md"), leaving the operator to
-// reconstruct -data-dir/requests/<id>/<fragment> by hand even though
-// requestReminderTarget in internal/requestdriver/request_driver.go already builds
-// and dispatches the real absolute path via reminders. spec_full_path/
+// reconstruct -data-dir/requests/<id>/<fragment> by hand. spec_full_path/
 // full_path close that gap, home-relativized (see homeRelativePath) so
 // the console doesn't have to show the operator's own username.
 func TestGetRequestIncludesFullPath(t *testing.T) {

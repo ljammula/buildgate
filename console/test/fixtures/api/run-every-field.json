@@ -278,7 +278,10 @@
       "delivered": true,
       "delivery_error": "every-field delivery_error",
       "next": "every-field next",
-      "link": "every-field link"
+      "link": "every-field link",
+      "ask": "every-field ask",
+      "subject": "every-field subject",
+      "remote_link": "every-field remote_link"
     }
   ],
   "overrides": [

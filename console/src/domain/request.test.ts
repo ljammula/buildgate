@@ -98,6 +98,22 @@ test("waitingOn/quarantineCheck are null when absent from the JSON", () => {
   expect(r.quarantineCheck).toBeNull();
 });
 
+test("lastNotifiedAt and lastAsk are empty when the server sent neither", () => {
+  const r = request({ state: "spec_review" });
+  expect(r.lastNotifiedAt).toBe("");
+  expect(r.lastAsk).toBe("");
+});
+
+test("lastNotifiedAt and lastAsk parse verbatim when present", () => {
+  const r = request({
+    state: "spec_review",
+    last_notified_at: "2026-10-10T09:00:00.123456789Z",
+    last_ask: "Spec ready for your review",
+  });
+  expect(r.lastNotifiedAt).toBe("2026-10-10T09:00:00.123456789Z");
+  expect(r.lastAsk).toBe("Spec ready for your review");
+});
+
 test("waitingOn/quarantineCheck parse verbatim when present", () => {
   const r = request({
     state: "building",

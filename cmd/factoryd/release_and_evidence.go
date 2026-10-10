@@ -590,7 +590,7 @@ func retryPullRequestOpener(dp *deps, dataDir, runID string) request.PROpenOutco
 		}
 		return request.PROpenOutcome{Err: errors.New(loaded.PROpenError)}
 	}
-	n := notifyAcceptedRun(dataDir, runID, loaded.Ticket, prURL, "")
+	n := notifyAcceptedRun(dataDir, runID, loaded.Ticket, loaded.RequestID, prURL, "")
 	recordAcceptedRunSideEffects(dataDir, loaded, prURL, n, false)
 	return request.PROpenOutcome{PRURL: prURL}
 }
@@ -690,7 +690,7 @@ func pullRequestTitle(r *run.Run, id string) string {
 // attempted and failed (also prURL == "", but prWithheldReason == "" in
 // that case), so a human reading this Reason later can tell "fix the
 // policy flags" apart from "check gh/git creds, maybe retry".
-func notifyAcceptedRun(dataDir, id, ticket, prURL, prWithheldReason string) notify.Notification {
+func notifyAcceptedRun(dataDir, id, ticket, requestID, prURL, prWithheldReason string) notify.Notification {
 	reason := "run accepted"
 	switch {
 	case prURL != "":
@@ -733,8 +733,22 @@ func notifyAcceptedRun(dataDir, id, ticket, prURL, prWithheldReason string) noti
 	// notify.WaitForPendingDispatches before this process exits, so an
 	// exit shortly after this call still gives the goroutine a bounded
 	// chance to actually reach the network.
-	notify.DispatchExternal(n)
+	dispatchRunNotification(dataDir, requestID, n)
 	return n
+}
+
+// dispatchRunNotification sends a run's own notification (halted,
+// quarantined, accepted) to the desktop, Slack and Discord, unless the run
+// is a ticket of request requestID. That run's record and notifications.log
+// keep the notification either way; what reaches the operator is the
+// request's own, sent when the request starts waiting on them, with the
+// request's page as its link: one notification for one event, and none for
+// an outcome the factory goes on from by itself (a corrective round).
+func dispatchRunNotification(dataDir, requestID string, n notify.Notification) {
+	if requestID != "" {
+		return
+	}
+	notify.DispatchExternal(dataDir, n)
 }
 
 // recordAcceptedRunSideEffects persists prURL (when non-empty) and n --

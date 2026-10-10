@@ -293,7 +293,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		// this called DiscordNotifier directly, bypassing Slack/desktop
 		// entirely) dispatches on its own goroutine and returns
 		// immediately.
-		notify.DispatchExternal(n)
+		dispatchRunNotification(dataDir, r.RequestID, n)
 	} else if err := save(r, dataDir); err != nil {
 		rollbackIsolatedWorkspaceOnSaveFailure(r)
 		return err
@@ -359,7 +359,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 				log.Printf("run %s: -open-pull-request set but release decision denies it: %s", id, prWithheldReason)
 			}
 		}
-		n := notifyAcceptedRun(dataDir, id, ticket, prURL, prWithheldReason)
+		n := notifyAcceptedRun(dataDir, id, ticket, r.RequestID, prURL, prWithheldReason)
 		// underRunLock: true for runViaRepositoryOwner's and
 		// reconcileReclaimedRun's own callers, which already hold id's
 		// run.WithLock for this entire call -- recordAcceptedRunSideEffects

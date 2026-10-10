@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,15 +55,16 @@ var Listening = func(addr string) bool {
 	return true
 }
 
-// BaseURL resolves the console base URL: flagValue, then EnvVar, then --
+// BaseURL resolves the console base URL: flagValue, then EnvVar (each only
+// when it is an address and nothing more, addressOnly), then --
 // only when the console is embedded in this binary -- the live address a
 // serve for dataDir recorded (ServeAddress). "" means no console to link
 // to.
 func BaseURL(flagValue, dataDir string) string {
-	if flagValue != "" {
-		return flagValue
+	if base := addressOnly(flagValue); base != "" {
+		return base
 	}
-	if env := os.Getenv(EnvVar); env != "" {
+	if env := EnvBase(); env != "" {
 		return env
 	}
 	if embedded() {
@@ -71,6 +73,25 @@ func BaseURL(flagValue, dataDir string) string {
 		}
 	}
 	return ""
+}
+
+// EnvBase is EnvVar's value when it is usable as a console address, else "":
+// a value that is not is treated as unset, by every caller.
+func EnvBase() string {
+	return addressOnly(os.Getenv(EnvVar))
+}
+
+// addressOnly returns base when it is an http or https console address and
+// nothing more, else "": a base with user information, a query or a fragment
+// would put whatever those hold (a token, in the worst case) into every link
+// built on it, and every link is handed to another program. A path is kept:
+// a console behind a reverse proxy can live under one.
+func addressOnly(base string) string {
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || strings.ContainsAny(base, "?#") {
+		return ""
+	}
+	return base
 }
 
 // addressFile is where `factoryd serve` records the address it serves the
@@ -181,4 +202,77 @@ func join(base, segment, id string) string {
 		return ""
 	}
 	return strings.TrimRight(base, "/") + "/" + segment + "/" + id
+}
+
+// remoteAddressFile is where `factoryd remote-console` records, inside the
+// data dir, the base URL its console is reached at from another machine,
+// and under it the path of the record that makes `serve` accept that host.
+const remoteAddressFile = "console-remote-address"
+
+// RecordRemoteBaseURL records base as dataDir's console address for another
+// machine, good for as long as the file at hostRecord exists: turning the
+// remote console off removes that file, and with it this address, whatever
+// data dir the command was then pointed at.
+func RecordRemoteBaseURL(dataDir, base, hostRecord string) error {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, remoteAddressFile), []byte(base+"\n"+hostRecord+"\n"), 0o640)
+}
+
+// RemoteBaseURL returns the base URL RecordRemoteBaseURL recorded for
+// dataDir. "" when there is none, the host record it names is gone, or it is
+// not an https URL of a host and nothing else. A link built on it carries no
+// token.
+func RemoteBaseURL(dataDir string) string {
+	if dataDir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dataDir, remoteAddressFile))
+	if err != nil {
+		return ""
+	}
+	base, hostRecord, found := strings.Cut(strings.TrimSpace(string(b)), "\n")
+	if !found || !filepath.IsAbs(hostRecord) {
+		return ""
+	}
+	if _, err := os.Stat(hostRecord); err != nil {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" {
+		return ""
+	}
+	return "https://" + u.Host
+}
+
+// tabNotifierFile is the file a serve keeps fresh, inside the data dir it
+// serves, while a console tab on this machine raises the requests'
+// notifications itself.
+const tabNotifierFile = "console-tab-notifier"
+
+// TabNotifierFresh is how long after its last touch the record still counts:
+// a serve that died takes the record with it after this long.
+const TabNotifierFresh = 20 * time.Second
+
+// TouchTabNotifier records that a console tab on this machine is raising
+// dataDir's request notifications now.
+func TouchTabNotifier(dataDir string) error {
+	path := filepath.Join(dataDir, tabNotifierFile)
+	now := time.Now()
+	if err := os.Chtimes(path, now, now); err == nil {
+		return nil
+	}
+	return os.WriteFile(path, nil, 0o640)
+}
+
+// TabNotifierPresent reports whether a console tab on this machine is
+// raising dataDir's request notifications: the record was touched within
+// TabNotifierFresh.
+func TabNotifierPresent(dataDir string) bool {
+	if dataDir == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dataDir, tabNotifierFile))
+	return err == nil && time.Since(info.ModTime()) < TabNotifierFresh
 }

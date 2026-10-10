@@ -438,6 +438,11 @@ func remoteConsoleOn(ctx context.Context, dp *deps, stdout io.Writer, configPath
 		}
 	}
 
+	// Slack and Discord notifications link here while this is on.
+	if err := consolelink.RecordRemoteBaseURL(dataDir, "https://"+next.Host, path); err != nil {
+		fmt.Fprintf(stdout, "Notifications will keep the local console link: %v\n", err)
+	}
+
 	fmt.Fprintf(stdout, "Console:    https://%s/\n", next.Host)
 	fmt.Fprintf(stdout, "Gate token: %s\n", token.token)
 	fmt.Fprintf(stdout, "Expires:    %s (in %s)\n", token.expires.Local().Format(time.RFC3339), time.Until(token.expires).Round(time.Minute))

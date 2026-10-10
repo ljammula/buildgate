@@ -159,6 +159,15 @@ type Ticket struct {
 	// ticket's open pull request is ready to merge. Nil until a poll has
 	// checked it, while a corrective round runs, and once it has merged.
 	MergeReadiness *MergeReadiness `json:"merge_readiness,omitempty"`
+	// NotifiedPR is the last thing the operator was told this pull request
+	// asks of them, and the head it was said of: "review:<sha>" or
+	// "merge:<sha>". It is what keeps a poll from saying it again.
+	NotifiedPR string `json:"notified_pr,omitempty"`
+	// PRNotReadySince is the pull request head that was first checked not
+	// ready to merge and when, "<sha> <RFC 3339 time>": what tells a draft
+	// whose checks are still running from one that needs a person. Empty
+	// once the head is ready to merge.
+	PRNotReadySince string `json:"pr_not_ready_since,omitempty"`
 	// SeenThreadIDs is every review-thread id the PR-review poll has
 	// already acted on (turned into a corrective round) for this
 	// ticket's PR -- forge.NewUnresolvedThreads' own "seen" filter, so a
@@ -354,6 +363,10 @@ type Request struct {
 	WaitingSince   string `json:"waiting_since,omitempty"`
 	LastNotifiedAt string `json:"last_notified_at,omitempty"`
 	NotifyCount    int    `json:"notify_count,omitempty"`
+	// LastAsk is the headline of the last notification sent for this
+	// request, at LastNotifiedAt: what an open console tab shows when it
+	// raises that notification itself.
+	LastAsk string `json:"last_ask,omitempty"`
 
 	// TicketIndex/TicketCount are meaningful only in StateBuilding and
 	// StatePRReview (the request driver's ticket-sequencing policy and
@@ -1769,6 +1782,7 @@ func (r *Request) ClearReminderState() {
 	r.WaitingSince = ""
 	r.LastNotifiedAt = ""
 	r.NotifyCount = 0
+	r.LastAsk = ""
 }
 
 // RunsJob reports whether the request driver runs a job (drafting,

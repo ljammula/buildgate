@@ -370,6 +370,24 @@ describe("watchRequests", () => {
     expect(values[0]!.state).toBe("building");
   });
 
+  test("asks for notifier=1 only when this tab is the notifier", async () => {
+    const { fetch, calls } = recording(() => new Response("server error", { status: 500 }));
+    const handlers = { onValue: () => undefined, onError: () => undefined };
+    const plain = watchRequests(httpWith(fetch), handlers, {}, { notifier: false });
+    const quiet = watchRequests(httpWith(fetch), handlers);
+    const notifier = watchRequests(httpWith(fetch), handlers, {}, { notifier: true });
+    await vi.advanceTimersByTimeAsync(0);
+    plain();
+    quiet();
+    notifier();
+    expect(calls.map((call) => call.url)).toEqual([
+      "/requests/events",
+      "/requests/events",
+      "/requests/events?notifier=1",
+    ]);
+    expect(calls[2]!.init.headers).toEqual(READ);
+  });
+
   test("retries with backoff on a non-2xx response instead of throwing", async () => {
     const { fetch, calls } = recording(() => new Response("server error", { status: 500 }));
     const onError = vi.fn();

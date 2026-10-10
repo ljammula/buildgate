@@ -140,7 +140,7 @@ func TestRemindIfDueRemindsOracleReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"oracle_review", "/oracle", "factoryd approve req-1"} {
+	for _, want := range []string{"oracle_review", "Acceptance tests ready for your review", "factoryd approve req-1"} {
 		if !strings.Contains(string(log), want) {
 			t.Errorf("reminder %s does not contain %q", log, want)
 		}

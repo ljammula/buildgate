@@ -117,6 +117,35 @@ class InstallPrereqsTest(unittest.TestCase):
         self.assertEqual(self.colima_calls(), [])
         self.assertEqual(result.stdout, "")
 
+    def test_a_mac_without_terminal_notifier_gets_it(self):
+        self.have(*EVERYTHING)
+        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.brew_calls(), ["install terminal-notifier"])
+        self.assertIn("System Settings -> Notifications -> terminal-notifier", result.stdout)
+
+    def test_a_mac_with_terminal_notifier_is_left_alone(self):
+        self.have(*EVERYTHING, "terminal-notifier")
+        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+
+    def test_no_terminal_notifier_and_no_homebrew_is_not_a_failure(self):
+        self.have(*EVERYTHING, brew=False)
+        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("desktop notifications will have no click", result.stderr)
+
+    def test_another_system_is_not_given_terminal_notifier(self):
+        self.have(*EVERYTHING)
+        self.install("uname", "#!/bin/sh\necho Linux\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+
     def test_installs_only_what_is_missing(self):
         self.have("python3", "git", "docker", "colima")
         result = self.run_script()

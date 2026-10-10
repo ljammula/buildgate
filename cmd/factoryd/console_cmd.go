@@ -108,7 +108,7 @@ func consoleMain(dp *deps, args []string) error {
 	switch {
 	case !hasConfig:
 		fmt.Println("no session config found -- if `factoryd serve` is running, use the link it printed on its own startup instead")
-	case !recorded && os.Getenv(consolelink.EnvVar) == "":
+	case !recorded && consolelink.EnvBase() == "":
 		fmt.Printf("no running `factoryd serve` recorded for data dir %s -- not attaching the start token to the default address, which another data dir's serve may hold; start `factoryd serve` for this config, or pass the -data-dir your serve uses, and rerun\n", dataDir)
 	case !consoleBaseIsOwnLoopbackServe(base, serveAddr):
 		// The resolved base is a real, operator-set FACTORYD_CONSOLE_URL

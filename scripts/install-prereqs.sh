@@ -10,6 +10,11 @@
 #   docker                  docker           the command is not on PATH
 #   docker buildx           docker-buildx    `docker buildx version` fails
 #   a Docker daemon         colima           neither docker nor colima is on PATH
+#   terminal-notifier       terminal-notifier  macOS, and the command is not on PATH
+#
+# terminal-notifier is what makes a desktop notification's click open the
+# request it is about. It is optional: without Homebrew, or when its install
+# fails, the install goes on and the banner has no click.
 #
 # A machine that already has a docker CLI keeps its own daemon (Docker
 # Desktop, colima, another VM): colima is installed only beside a docker CLI
@@ -74,6 +79,15 @@ if [ -n "$missing" ]; then
 fi
 
 link_buildx
+
+if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && ! have terminal-notifier; then
+	if have brew && brew install terminal-notifier; then
+		echo "Installed terminal-notifier: a notification's click opens the request it is about."
+		echo "macOS shows nothing from it until you allow it: System Settings -> Notifications -> terminal-notifier. 'factoryd doctor -notify-test' sends one banner to check."
+	else
+		echo "terminal-notifier not installed -- desktop notifications will have no click ('brew install terminal-notifier' adds it)" >&2
+	fi
+fi
 
 if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
 	if [ -e "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ]; then

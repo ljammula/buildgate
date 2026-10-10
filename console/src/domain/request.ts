@@ -588,6 +588,13 @@ export interface RequestSummary {
   readonly queuePosition: number | null;
   /** The build under way; null unless the request is building and its run has started. */
   readonly build: RequestBuild | null;
+  /**
+   * RFC3339 time of the last notification the server sent for this request;
+   * empty when none. A later notification always has a later time.
+   */
+  readonly lastNotifiedAt: string;
+  /** One short headline saying what is asked of the operator; empty when none. */
+  readonly lastAsk: string;
 }
 
 /**
@@ -664,6 +671,8 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     quarantineCheck: stringOrNull(o, "quarantine_check", at),
     queuePosition: optNumber(o, "queue_position", at),
     build: optObject(o, "build", at, decodeRequestBuild),
+    lastNotifiedAt: optString(o, "last_notified_at", at),
+    lastAsk: optString(o, "last_ask", at),
   };
 }
 

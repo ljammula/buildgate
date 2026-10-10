@@ -26,6 +26,8 @@ import {
 import { BrandMark } from "@/ui/BrandMark";
 import { Button } from "@/ui/Button";
 import { NavCount } from "@/shared/shell/NavCount";
+import { NotificationToggle } from "@/shared/shell/NotificationToggle";
+import { useBrowserNotifier } from "@/shared/shell/useBrowserNotifier";
 import { useNeedsYouCount } from "@/shared/shell/useNeedsYouCount";
 import { cn } from "@/ui/cn";
 
@@ -88,6 +90,7 @@ export interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const { canWrite } = useApi();
   const needsYou = useNeedsYouCount();
+  const notifier = useBrowserNotifier();
   return (
     <div className="grid min-h-screen grid-cols-[14rem_minmax(0,1fr)] max-md:grid-cols-1">
       <aside className="sticky top-0 flex h-screen flex-col gap-3 border-r border-border bg-surface p-3 max-md:static max-md:h-auto">
@@ -138,28 +141,36 @@ export function AppShell({ children }: AppShellProps) {
             </NavLink>
           ))}
         </nav>
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
-          <span
-            className={cn(
-              "flex items-center gap-1.5 px-1.5 text-xs",
-              canWrite ? "text-fg-subtle" : "text-tone-warning",
-            )}
-            title={
-              canWrite
-                ? "This console can approve, reject and start work."
-                : "This server accepts no writes from this console. Open the link printed by `factoryd serve`, or use the CLI."
-            }
-          >
+        <div className="flex flex-col gap-2 border-t border-border pt-3">
+          <NotificationToggle
+            support={notifier.support}
+            on={notifier.on}
+            onTurnOn={notifier.turnOn}
+            onTurnOff={notifier.turnOff}
+          />
+          <div className="flex items-center justify-between gap-2">
             <span
-              aria-hidden
               className={cn(
-                "size-1.5 rounded-full",
-                canWrite ? "bg-tone-success" : "bg-tone-warning",
+                "flex items-center gap-1.5 px-1.5 text-xs",
+                canWrite ? "text-fg-subtle" : "text-tone-warning",
               )}
-            />
-            {canWrite ? "Read and write" : "Read-only"}
-          </span>
-          <ThemeToggle />
+              title={
+                canWrite
+                  ? "This console can approve, reject and start work."
+                  : "This server accepts no writes from this console. Open the link printed by `factoryd serve`, or use the CLI."
+              }
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "size-1.5 rounded-full",
+                  canWrite ? "bg-tone-success" : "bg-tone-warning",
+                )}
+              />
+              {canWrite ? "Read and write" : "Read-only"}
+            </span>
+            <ThemeToggle />
+          </div>
         </div>
       </aside>
       <main className="min-w-0">{children}</main>

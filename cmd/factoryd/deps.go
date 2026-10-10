@@ -126,6 +126,9 @@ type hostBoundary interface {
 	shippedRootsPEM(ctx context.Context) ([]byte, error)
 	sleep(d time.Duration)
 	spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
+	// terminalNotifierOnPath reports whether terminal-notifier, which gives
+	// a desktop notification its click, is on PATH.
+	terminalNotifierOnPath() bool
 	// tailscale runs the operator's tailscale CLI and returns its output.
 	tailscale(ctx context.Context, args ...string) ([]byte, error)
 	spawnWorker(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
