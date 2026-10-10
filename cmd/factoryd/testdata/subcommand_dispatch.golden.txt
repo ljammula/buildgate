@@ -374,3 +374,9 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage of gate-token:
 stderr:   -config string
 
+$ factoryd remote-console -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of remote-console:
+stderr:   -config string
+

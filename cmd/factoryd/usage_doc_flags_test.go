@@ -57,6 +57,7 @@ var docTrackedCommands = map[string]commandFlagSet{
 	"install-skill":     func() *flag.FlagSet { fs, _ := newInstallSkillFlags(); return fs },
 	"mcp":               func() *flag.FlagSet { fs, _ := newMCPFlags(); return fs },
 	"gate-token":        func() *flag.FlagSet { fs, _ := newGateTokenFlags(); return fs },
+	"remote-console":    func() *flag.FlagSet { fs, _ := newRemoteConsoleFlags(); return fs },
 	"intake":            func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newIntakeFlags(); return fs },
 	"reset-stop-line":   func() *flag.FlagSet { fs, _, _, _, _ := newResetStopLineFlags(); return fs },
 	"kill-switch":       func() *flag.FlagSet { fs, _, _, _, _, _ := newKillSwitchFlags(); return fs },

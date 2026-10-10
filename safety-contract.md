@@ -126,6 +126,16 @@ cancel, create; `internal/api.Server.authorizeRequestWrite`):
   there, behind its own token ([MCP endpoint](#mcp-endpoint)).
 - A request a proxy passed on must name an `-allowed-host`: one whose `Host`
   is the loopback address is refused on every route.
+- An allowed host is an `-allowed-host` value, or the one host in
+  `<config name>.remote-console` beside the session config, which
+  `factoryd remote-console` writes and `serve` reads on each request whose
+  `Host` is not otherwise accepted (`WithAllowedHostSource`). The file gets
+  the token files' checks (not a symlink, a regular file, this user's, mode
+  0600) and must hold exactly its four well-formed lines, the host a
+  lower-case DNS name with an optional port that is not a loopback name;
+  otherwise it allows nothing. Either kind of allowed host is never local.
+  The command writes a gate token before it adds the listener, never uses
+  a Funnel port, and removes on `-off` only what it set up.
 - **Limit:** a forwarder that adds none of those headers (a TCP-level
   forward, an ssh tunnel, a proxy set to rewrite `Host` to the loopback
   address and add nothing) makes its callers local by this test. An ssh

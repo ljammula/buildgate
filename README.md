@@ -108,8 +108,9 @@ and token. Its tools read requests and runs and submit a request; none
 approves, rejects or merges.
 [USAGE.md § Drive Buildgate from an MCP client](USAGE.md#drive-buildgate-from-an-mcp-client).
 
-To approve from another machine, `factoryd gate-token` prints a token you
-paste into the console there, which then has its own credential: it reads and does the
+To approve from another machine on your tailnet, `factoryd remote-console`
+prints an address and a token you paste into the console there, which then
+has its own credential: it reads and does the
 request actions, and cannot override a run.
 [USAGE.md § The console from another machine](USAGE.md#the-console-from-another-machine).
 

@@ -24,7 +24,7 @@ var dispatchGoldenSubcommands = []string{
 	"worker", "retry", "resume", "amend-scope", "init-config", "install-service",
 	"uninstall-service", "quickstart", "console", "install-skill", "configure-images",
 	"image-inputs-hash", "restart", "project-image-args", "image-reuse", "setup",
-	"mcp", "memory", "stats", "build-ca-bundle", "gate-token",
+	"mcp", "memory", "stats", "build-ca-bundle", "gate-token", "remote-console",
 }
 
 // dispatchGoldenUndefinedFlag is the flag no command defines.

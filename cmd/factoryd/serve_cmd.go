@@ -777,6 +777,13 @@ func (sv *serveRun) listenAndServe() error {
 		// The gate token is read from its file beside the config the same
 		// way; with no config there is nowhere for that file to be, so the
 		// gate stays off.
+		// The host `factoryd remote-console` recorded is allowed while its
+		// file exists, read the same way.
+		remotePath := remoteConsolePathFor(configPath)
+		serverOptions = append(serverOptions, api.WithAllowedHostSource(remoteConsoleHostSource(remotePath)))
+		if rc, ok := readRemoteConsole(remotePath); ok {
+			log.Printf("remote console on: Host %s is accepted (file %s; `factoryd remote-console -off` turns it off)", rc.Host, remotePath)
+		}
 		gatePath := gateTokenPathFor(configPath)
 		serverOptions = append(serverOptions, api.WithGateToken(gateTokenSource(gatePath)))
 		if file := readGateFile(gatePath, time.Now()); file.present && file.token != "" {
