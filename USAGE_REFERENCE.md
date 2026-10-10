@@ -723,7 +723,9 @@ reaches `plan_review`, if its own `Allowed-Files` could never satisfy
 plan-time check runs alongside it: for every approved-spec acceptance
 criterion, it collects the repo-relative file paths the criterion names in
 backticks and rejects the plan if a named path is in the `Allowed-Files`
-of no ticket that lists the criterion as covered. A criterion covered by
+of no ticket that lists the criterion as covered. A path named in a
+clause that says it stays as it is (`untouched`, `unchanged`, `not
+modified`, `must not change`, `no changes to`) is not checked. A criterion covered by
 no ticket at all is left to the "unclaimed criterion" check. On either
 rejection the request driver re-plans once, feeding every infeasibility
 found back to the planner as feedback before the request reaches a human;
@@ -754,7 +756,10 @@ section, sanitized and capped at 20.
 When both `-conformity-policy` (via a declared `-spec-acceptance-criteria`)
 and `-code-review-policy` are enabled for the same run, both reviews run
 as ONE combined call (`agent/pi/scripts/combined_review.py`) instead of
-two separate sandboxed sessions over the same diff.
+two separate sandboxed sessions over the same diff. That review attempt's
+`exit_code` is 40 plus 1 when the conformity review did not succeed and
+plus 2 when the code review did not: 40 is both passed, 43 both failed, and
+any other value fails both gates.
 
 | Restriction | Why |
 |---|---|

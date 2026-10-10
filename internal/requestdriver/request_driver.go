@@ -2037,15 +2037,47 @@ func criterionPathCovered(p string, allowed []string) bool {
 	return false
 }
 
+// criterionClauseRE splits a criterion's text into clauses: at a semicolon,
+// and at a full stop that ends a sentence (one followed by white space).
+var criterionClauseRE = regexp.MustCompile(`;|\.\s+`)
+
+// criterionUntouchedRE matches a clause that says what it names does not
+// change.
+var criterionUntouchedRE = regexp.MustCompile(`(?i)\b(untouched|unchanged|unmodified|not\s+(be\s+)?(modified|changed|touched|edited)|(must|may|does|do|shall|should|will)\s+not\s+(be\s+)?(change|modify|touch|edit)|no\s+changes?\s+to)\b`)
+
 // criterionNamedPaths returns the repo-relative file paths criterionText
-// names in backticks, in order, deduplicated -- see looksLikeRepoPath for
-// what counts as a path rather than a command or a bare identifier.
+// names in backticks as files its work changes, in order, deduplicated --
+// see looksLikeRepoPath for what counts as a path rather than a command or
+// a bare identifier. A path named in a clause that says it stays untouched
+// (criterionUntouchedRE) is not one: no ticket has to be allowed to change
+// it, and asking for that would put a file the spec protects into
+// Allowed-Files. Clauses and their wording are read outside the backticks,
+// so a command's own punctuation or words decide nothing.
 func criterionNamedPaths(criterionText, workspace string) []string {
+	spans := criterionNamedPathRE.FindAllStringSubmatchIndex(criterionText, -1)
+	prose := []byte(criterionText)
+	for _, span := range spans {
+		for k := span[2]; k < span[3]; k++ {
+			prose[k] = 'x'
+		}
+	}
+	untouched := func(at int) bool {
+		start, end := 0, len(prose)
+		for _, cut := range criterionClauseRE.FindAllIndex(prose, -1) {
+			if cut[1] <= at {
+				start = cut[1]
+			} else if cut[0] >= at {
+				end = cut[0]
+				break
+			}
+		}
+		return criterionUntouchedRE.Match(prose[start:end])
+	}
 	var paths []string
 	seen := make(map[string]bool)
-	for _, m := range criterionNamedPathRE.FindAllStringSubmatch(criterionText, -1) {
-		token := strings.TrimSpace(m[1])
-		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) {
+	for _, span := range spans {
+		token := strings.TrimSpace(criterionText[span[2]:span[3]])
+		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) || untouched(span[2]) {
 			continue
 		}
 		seen[token] = true
