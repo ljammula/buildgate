@@ -297,9 +297,18 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func reviewGit(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
+// HardenedGitCommand is the git command every host read of a trusted commit
+// runs: git in dir with args, under reviewGitArgs and reviewGitEnv, so no
+// GIT_ variable of the caller, replace ref, configuration or lazy fetch
+// changes which objects are read. The caller sets the output and runs it.
+func HardenedGitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", reviewGitArgs(dir, args...)...)
 	cmd.Env = reviewGitEnv()
+	return cmd
+}
+
+func reviewGit(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
+	cmd := HardenedGitCommand(ctx, dir, args...)
 	stderr := &cappedWriter{max: 4096}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
