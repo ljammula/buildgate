@@ -182,8 +182,8 @@ on a rebuild, because a human chose that retry.
 other than the two reviews alone is followed by a corrective build when its
 handoff sorts every judged failed check as `corrective` (see "What a stopped
 run left behind" in USAGE.md for the bins). A named or repository gate that
-also fails on the base commit is sorted `operator`, so no corrective build
-follows it (see "A failed gate is rerun on the base commit"). The build runs on the
+fails the same way on the base commit is sorted `operator`, so no corrective
+build follows it (see "A failed gate is rerun on the base commit"). The build runs on the
 quarantined run's branch (`-on-branch`/`-diff-base`) with the ticket's own
 build spec, unchanged, and the handoff rendered as text as
 `-earlier-attempt <file>`: a read-only input beside the spec that only the
@@ -194,9 +194,10 @@ on the ticket with kind `corrective`. `-review-corrective-rounds` is one
 budget per ticket build for this round and the review round together; `0`
 disables both. Not eligible: `tests_added` on a committed diff, a review that
 gave no verdict, an unknown check, a repository gate the worker never ran, a
-check whose step a `setup:` command stopped (the build before its first agent
-turn, the verify, a gate: every build of the ticket runs the same commands
-first, so the finding is the operator's), a
+build a `setup:` command stopped before its first agent turn (decided only by
+the factory's own records: the meter counted no token for the build and the
+run's result is the commit it started from; a resumed run, and a setup failure
+in the verify or a gate, are sorted as the failed check they are), a
 halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
@@ -211,7 +212,7 @@ The build agent's own notes for the next attempt (the last section of
 | The turn | One reply in the build's own session, 180 s at most, asked for five fixed headings and no file change or command; `changed_files_during_notes` is set in `notes_turn` when the tree changed anyway. The notes file is written by the script from the reply; anything else at its path is removed before and after the turn |
 | After a pass | The build script records the worktree before the turn and again after it: every path outside `.git` and the session folder, tracked, untracked and ignored, with its kind, permission bits and the SHA-256 of its content or its link target. Equal records keep the reply. Otherwise the reply is removed (`discarded_reason`, `changed_paths` as a count) and the tree is put back where that can be done exactly (files git does not ignore are copied aside first, 32 MiB at most; a changed file with no intact copy is left as it stands, never deleted). A third record equal to the first (`tree_restored: true`) leaves the build passed with no check run again. Only when the tree cannot be shown equal do the build's setup, fast check, verify and oracle run on it as it stands (`reverify_passed`); if they fail, the build ends as not passed with its last round recorded as failed (its `failure_log`, the round state and a second `round end` progress event say so), and no further round runs. The records show the tree at the moment of the last one: a process the turn left running can write afterwards, as after any build round, and the host's verify, gates and reviews of the committed result are the authority. A launch lost after the pass is resumed (`--resume-from-state`; the round state says `passed`, and `notes_turn_started` once the turn began) with no further round and no second turn, its tree checked again only if the turn had started; the host's resume precondition still refuses a state whose completed rounds equal the round budget. The turn is skipped, never run unguarded, when the tree has more than 250,000 entries or 4 GiB of file content or takes over 20 s to record (`workspace too large to record: ...`). `notes_turn` also says `after_pass`, `tree_entries`, `tree_bytes` and `tree_record_s`. Pi is given only its reading tools for this turn and Copilot is denied its shell and write tools; Codex has no such flag. The comparison, not the flag, is the guarantee |
 | Caps | Reply cut to 12,000 bytes of UTF-8 in the session; at most 16 KiB retained; at most 8 items per heading, each one line of at most 300 characters, cleaned like every value from a build; the notes section of the record at most 3000 bytes, last, and the first thing the size cut drops |
-| Stored | `.pi-build-session/handoff-notes.md` in the worktree, copied by the host to `agent-notes.md` in the run's directory before the session folder is removed, and parsed into `agent_notes` in `handoff.json` when the run is saved quarantined or halted. Every item there has its backticks turned into quotes; the fifth heading's items are also kept as written (`repository_as_written`, backticks included, cleaned and capped the same way) for the memory text rule alone, which accepts a command only inside backticks, and that copy is never part of the record a build is given. An accepted run has no `handoff.json`; its `agent-notes.md` stays in the run's directory |
+| Stored | `.pi-build-session/handoff-notes.md` in the worktree, copied by the host to `agent-notes.md` in the run's directory before the session folder is removed, and parsed into `agent_notes` in `handoff.json` when the run is saved quarantined or halted. Every item there has its backticks turned into quotes. The memory list reads the fifth heading's items from `agent-notes.md` itself, as written (backticks included, cleaned and capped the same way), for a quarantined, halted or accepted run, because the memory text rule accepts a command only inside backticks; nothing else reads them as written. An accepted run has no `handoff.json`; its `agent-notes.md` stays in the run's directory |
 | Readable by | The operator (`GET /runs/{id}/handoff`, which the console's run page shows last under **What this attempt left**, as plain text) and a later build of the same ticket (its first prompt). Of an accepted run's notes, only the items under "Things worth knowing about this repository", and only as memory candidates (`factoryd memory list`). Not a review, a planner, a pull request, a notification, the progress feed, a build log, `run.json` or an MCP tool |
 
 **Saved prompts.** The text of each prompt a script hands to a coding agent,
@@ -605,7 +606,7 @@ size budget). No buildgate change or release is needed to add one.
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is judged by |
 | Cost | One sandbox launch per gate per run, two with an oracle commit; with Compose services, each launch brings the services up and down. `doctor` does not check a repo gate's executable against the image, as it does for the five named gates |
 | A gate that did not run | An accepted run with no result for one of the repository's gates is quarantined naming it (a long-lived Worker older than this `factoryd`): `factoryd restart` |
-| A gate that fails on the base commit too | See "A failed gate is rerun on the base commit" under Named gates: the same rule |
+| A gate that fails the same way on the base commit | See "A failed gate is rerun on the base commit" under Named gates: the same rule |
 
 **Setup and autofix commands.** `setup:` and `autofix:` each list shell
 commands for the repository. `setup:` runs in every build, verify and gate
@@ -626,7 +627,7 @@ workspace; the command of the step follows only when all passed:
 |---|---|
 | Runs before | The baseline verify; the build (by the build script: once before the first agent turn, and again before each round's fast check and verify, output in the round's `setup.log`, kept for every round in the run's directory as `round-logs/round-<n>/setup.log`, each command with a 10-minute limit); canonical verify; the full suite; each named and repo gate; the oracle canary; the reruns after an oracle commit |
 | Never runs in | Review sandboxes (they hold a model route); drafting and planning jobs |
-| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and the run reads `build did not start; setup command failed: "<command>"`. A run quarantined by a check whose step a setup command stopped is sorted for the operator and gets no corrective build, on a first build and on a corrective one. In the build a setup command gets 10 minutes |
+| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and its log names the command. When the meter counted no token for the build and nothing was committed, the run reads `the build stopped before its first agent turn: ...`, is sorted for the operator and gets no corrective build, on a first build and on a corrective one; the exit status and the log line alone decide nothing. In the build a setup command gets 10 minutes |
 | Cost | It runs once per sandbox: a run with N gates runs it at least N+1 more times. Nothing is cached between sandboxes |
 | Network | Whatever the step already has: none for verify and gates beyond the registry proxy and Compose sidecars; in the build, the model route. `setup:` is given to no planner or reviewer; a setup command that fails inside a build round is named, with its output, to that build's own agent |
 | Background processes | A setup command that times out is stopped with everything in its process group. One that returns leaves what it started in the background running for that step. Do not rely on that for services: declare them as Compose services, which every step that needs them gets |
@@ -697,19 +698,23 @@ and this doc, not the run loop or the Temporal wiring.
 **A failed gate is rerun on the base commit.** A named gate (`lint`,
 `security_audit`, `unit_tests`, `integration_tests`) or a repository gate
 (`repo-<id>`) that fails on the build's result is run once more on the commit
-the ticket's work started from. A gate that fails there too cannot be fixed by
-a build, so the factory spends none on it.
+the ticket's work started from. A gate that fails there the same way cannot be
+fixed by a build, so the factory spends none on it. A gate that was already
+failing there in another way keeps its corrective build: making that gate pass
+may be what the ticket is for.
 
 | | |
 |---|---|
 | When | Only after the gate failed, inside the gate's own step. A passing gate is never rerun. `reference_oracle`, `canonical_verify` (see the baseline verify) and `full_suite_verify` are not |
-| Which commit | The run's base commit. For a run that continues an earlier run's branch (a corrective build, a PR-review round, a `retry` on the failed attempt's branch): the ticket's own base (`diff_base_sha`), not the commit the round started from |
+| Which commit | The run's `diff_base_sha` when it has one (a corrective build, a PR-review round, a `retry` on the failed attempt's branch: the ticket's own base, not the commit the round started from); else the base commit of a run that made its own branch there. A run that resumed a halted run's worktree, or runs on an existing branch, with no diff base starts from a commit that may already hold the ticket's work: it is not rerun (`not_checked`) |
 | Where | A sandbox like the gate's own (same image, `setup:`, limits, registry proxy, Compose services, `.factory/` read-only from the trusted commit, no model route), on a scratch worktree of that commit under the run's directory (`gate-base/<check>`), removed afterwards. Never on the host, never in the run's worktree |
-| Time | What is left of the gate's own time limit, less one minute; with less than that left it is not started |
+| Time | What is left of the gate's own time limit, less one minute; with less than that left it is not started. Its wait for the repository's git metadata lock (another run creating or removing a worktree) counts against the same limit, and the step heartbeats throughout. A rerun that is slow, blocked or failing ends `not_checked`; it never halts the run or delays a gate result already recorded |
 | Record | `base_check` on the gate's entry in `run.json` `gate_results` (and `GET /runs/{id}`): `outcome`, `base_sha`, `exit_code`, `log_path`, `log_sha256`, `reason`. The gate's own `passed`, `exit_code` and `log_sha256` are the run on the result alone and never change |
-| `outcome: fails` | The handoff sorts the gate `operator`: the run's reason reads `<gate> fails on the base commit <sha> too, so no build can fix it: fix the gate command or the repository. No corrective build is started.` Fix it, then `factoryd retry <id>` |
+| The same failure | The same exit code, and the same lines reporting a failure at the end of the output: the excerpt the handoff shows for a failed gate (terminal colour, trailing space and lines that report no failure, such as a passing package's timing, are left out), compared with durations, hex addresses, timestamps, UUIDs and temporary paths blanked, as the build loop does to tell whether two rounds failed the same way. Plain numbers are kept: another count, line number or value is another failure |
+| `outcome: fails_same` | The handoff sorts the gate `operator`: the run's reason reads `<gate> fails the same way on the base commit <sha>, so no build can fix it: fix the gate command or the repository. No corrective build is started.` Fix it, then `factoryd retry <id>` |
+| `outcome: fails_differently` | The gate was already red on the base commit, with another exit code or other failing lines. Sorted `corrective`; the gate's finding in the handoff, which a later build is given, adds `The gate was already failing on the base commit <sha>, in another way.` |
 | `outcome: passes` | The build's changes (or a flaky command) fail the gate: sorted `corrective`, as a failed gate always was |
-| `outcome: not_checked` | The rerun reached no exit code (`reason`: no base commit on record, the commit could not be checked out, the sandbox could not start, time ran out, the worker stopped during it). Sorted `corrective`, as a failed gate always was |
+| `outcome: not_checked` | The rerun reached no exit code (`reason`: the run's record does not prove where the ticket's work started, the commit could not be checked out, the sandbox could not start, time ran out, the worker stopped during it). Sorted `corrective`, as a failed gate always was |
 | Cost | One more sandbox launch for each failed gate; with Compose services, the services come up and go down once more |
 
 `reference_oracle_command` should run a check the agent didn't author — a
@@ -1414,7 +1419,7 @@ The text rule a line passes (never repaired, for a build agent's note and for
 |---|---|
 | Length | One line, at most 120 characters |
 | Characters outside backticks | Letters, digits, space and `. , : ; ( ) ' " / = + -` |
-| A command | Inside one pair of backticks: letters, digits, space and `. _ / : = -`, not starting with `-`, and no absolute path: no `/` followed by a letter, `.` or `/` at the start of the command or after a space or `=`. A relative path (`./tools/gen.sh`, `tests/x.py`) is accepted |
+| A command | Inside one pair of backticks: letters, digits, space and `. _ / : = -`, not starting with `-`, and no absolute path: no `/` followed by a letter or `.` unless a letter, digit, `.`, `_` or `/` comes right before it (the same rule as outside backticks, so `host:/etc/x`, `-/etc/x` and `.:/var/x` are refused; `//` is refused anywhere). A relative path (`./tools/gen.sh`, `tests/x.py`) is accepted |
 | Refused anywhere | `//` and `www.` (a URL in any form), an e-mail address, `/users/` and `/home/` in any case, an IPv4 or hex-colon address, `::`, an unbroken run of 20 or more of `A-Z a-z 0-9 + / _ -` that holds at least one letter and at least one digit (a hash, a key id, an encoded secret; a long word, a path or a variable name with no digit is accepted), anything secret redaction would change |
 | Refused outside backticks | An absolute path: `/` followed by a letter or `.`, unless a letter, digit, `.`, `_` or `/` comes right before it; a start of `-`, `+` or digits followed by `.` or `)` |
 

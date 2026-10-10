@@ -502,15 +502,21 @@ type GateResult struct {
 
 // The outcomes of a GateBaseCheck.
 const (
-	// GateBaseFails: the gate's command exited non-zero on the base commit
-	// too, so no build of the ticket can make it pass.
-	GateBaseFails = "fails"
+	// GateBaseFailsSame: the gate's command failed on the base commit the
+	// same way as on the result (the same exit code and the same failing
+	// lines of output), so no build of the ticket can make it pass.
+	GateBaseFailsSame = "fails_same"
+	// GateBaseFailsDifferently: the command failed on the base commit too,
+	// with another exit code or other failing lines. The gate was already
+	// red before the ticket's work (which may be what the ticket is for),
+	// and what fails now is not what failed then: a build may still fix it.
+	GateBaseFailsDifferently = "fails_differently"
 	// GateBasePasses: the command exited zero on the base commit; the build
 	// (or a flaky command) is why it failed on the result.
 	GateBasePasses = "passes"
-	// GateBaseNotChecked: the rerun did not reach an exit code. Reason says
-	// why. The gate's failure is then treated as it was before the rerun
-	// existed.
+	// GateBaseNotChecked: the rerun did not reach an exit code, or was not
+	// made. Reason says why. The gate's failure is then treated as it was
+	// before the rerun existed.
 	GateBaseNotChecked = "not_checked"
 )
 
@@ -519,10 +525,14 @@ const (
 // gate's own. It never changes the gate's result: Passed, ExitCode and
 // LogSHA256 of the GateResult are the run on the build's result alone.
 type GateBaseCheck struct {
-	// Outcome is GateBaseFails, GateBasePasses or GateBaseNotChecked.
+	// Outcome is GateBaseFailsSame, GateBaseFailsDifferently, GateBasePasses
+	// or GateBaseNotChecked.
 	Outcome string `json:"outcome"`
 	// BaseSHA is the commit the command was rerun on: the run's diff base
-	// when it continues an earlier run's branch, else its own base commit.
+	// when it names one, else the base commit of a run that made its own
+	// branch there. Empty when the run's record does not prove where the
+	// ticket's work started (a resumed run, or a run on an existing branch,
+	// with no diff base): the rerun is then not made.
 	BaseSHA string `json:"base_sha,omitempty"`
 	// ExitCode is the command's exit code on the base commit; meaningful
 	// only when Outcome is not GateBaseNotChecked.
@@ -534,10 +544,17 @@ type GateBaseCheck struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// FailsOnBase reports whether g is a failed gate whose command also failed on
-// the base commit.
-func (g GateResult) FailsOnBase() bool {
-	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFails
+// FailsSameOnBase reports whether g is a failed gate whose command failed the
+// same way on the base commit: the one outcome that makes a failed command
+// gate the operator's.
+func (g GateResult) FailsSameOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsSame
+}
+
+// FailedDifferentlyOnBase reports whether g is a failed gate that was already
+// failing on the base commit, in another way.
+func (g GateResult) FailedDifferentlyOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsDifferently
 }
 
 // OracleCanaryEvidence records one runtime-canary check of a RUN_COMMAND.txt:
@@ -1244,15 +1261,6 @@ type Run struct {
 	// a repository command sees `.factory/` as this commit holds it
 	// (Attempt.FactoryDirSHA256).
 	ProjectConfigCommitSHA string `json:"project_config_commit_sha,omitempty"`
-	// RepoGateCommands and SetupCommands are the repository's own gates
-	// (.factory.yml `gates:`, keyed by check name) and setup commands
-	// (`setup:`) this run was dispatched with. A result applied by a process
-	// other than the submitter (a reclaim after the submitter died) is
-	// checked against them, as the submitter checks its own: an accepted
-	// result with no result for one of these gates, or whose verify did not
-	// run this setup list, came from a worker older than them.
-	RepoGateCommands map[string]string `json:"repo_gate_commands,omitempty"`
-	SetupCommands    []string          `json:"setup_commands,omitempty"`
 	// ProductSpecSHA256/ContractSHA256 are the hashes of the *project's*
 	// root spec/spec.md and spec/contract.md content at the moment this
 	// run's mandatory project-bootstrap preflight read them — distinct

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/projectconfig"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
@@ -41,12 +42,13 @@ gates:
 	if checks := policy.RepoGateChecks(got); len(checks) != 2 || checks[0] != "repo-licenses" || checks[1] != "repo-no_todo" {
 		t.Errorf("repo gates = %v, want [repo-licenses repo-no_todo]", checks)
 	}
-	// The run record keeps exactly the repository's own, for a reclaim.
-	if kept := repoGateCommands(got); len(kept) != 2 || kept["repo-no_todo"] != want["repo-no_todo"] || kept["repo-licenses"] != want["repo-licenses"] {
-		t.Errorf("repoGateCommands = %v, want the two repo gates", kept)
+	// A reclaim derives the same gates from the file's bytes alone.
+	cfg, _, err := projectconfig.Load(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if kept := repoGateCommands(map[string]string{"lint": "x", "repo-empty": ""}); kept != nil {
-		t.Errorf("repoGateCommands with no repo gate = %v, want nil", kept)
+	if derived := cfg.RepoGateCommands(); len(derived) != 2 || derived["repo-no_todo"] != got["repo-no_todo"] || derived["repo-licenses"] != got["repo-licenses"] {
+		t.Errorf("Config.RepoGateCommands = %v, want the run's two repo gates", derived)
 	}
 	for _, g := range policy.CommandGates {
 		if _, ok := got[g.ID]; !ok {

@@ -166,7 +166,7 @@ export function decodeComposePhase(o: JsonObject, at: string): ComposePhase {
  * own result.
  */
 export interface GateBaseCheck {
-  /** fails, passes or not_checked; the server may add one. */
+  /** fails_same, fails_differently, passes or not_checked; the server may add one. */
   readonly outcome: string;
   readonly baseSha: string;
   /** Why the rerun reached no exit code; set for not_checked. */

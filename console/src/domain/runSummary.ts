@@ -60,8 +60,10 @@ export function gateBaseCheckText(gate: Pick<GateResult, "baseCheck">): string {
   const base =
     check.baseSha === "" ? "the base commit" : `the base commit ${check.baseSha.slice(0, 12)}`;
   switch (check.outcome) {
-    case "fails":
-      return `Also fails on ${base}: no build can fix it. Fix the gate command or the repository.`;
+    case "fails_same":
+      return `Fails the same way on ${base}: no build can fix it. Fix the gate command or the repository.`;
+    case "fails_differently":
+      return `Was already failing on ${base}, in another way: part of this failure predates the build.`;
     case "passes":
       return `Passes on ${base}: the build's changes fail it.`;
     case "not_checked":

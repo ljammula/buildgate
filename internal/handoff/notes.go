@@ -25,26 +25,6 @@ type Notes struct {
 	Hypothesis     []string `json:"hypothesis,omitempty"`
 	LeftToDo       []string `json:"left_to_do,omitempty"`
 	Repository     []string `json:"repository,omitempty"`
-	// RepositoryAsWritten is Repository, item for item, with the agent's
-	// backticks kept instead of turned into quotes: the memory text rule
-	// accepts a command only inside backticks, so it has to judge the item
-	// as written. Only MemoryCandidates reads it. It is never rendered into
-	// the record a build is given (markdown uses Repository).
-	RepositoryAsWritten []string `json:"repository_as_written,omitempty"`
-}
-
-// MemoryCandidates returns the "worth knowing about this repository" items
-// for the memory text rule to judge (memory.CollectFromNotes): as the agent
-// wrote them, backticks included, each still one cleaned, capped line. A
-// record written before RepositoryAsWritten existed gives Repository.
-func (n *Notes) MemoryCandidates() []string {
-	if n == nil {
-		return nil
-	}
-	if len(n.RepositoryAsWritten) == len(n.Repository) {
-		return n.RepositoryAsWritten
-	}
-	return n.Repository
 }
 
 // notesHeadings are the five headings the agent is asked to use, lowercased,
@@ -62,6 +42,12 @@ var notesHeadings = map[string]func(*Notes) *[]string{
 // removed and it has been cleaned like every value from a build. "none" is not
 // an item. It returns nil when every section is empty.
 func parseNotes(text string) *Notes {
+	return parseNotesWith(text, clean)
+}
+
+// parseNotesWith is parseNotes with the cleaning of an item given by the
+// caller.
+func parseNotesWith(text string, cleanItem func(string, int) string) *Notes {
 	var n Notes
 	var section *[]string
 	for _, line := range strings.Split(text, "\n") {
@@ -73,15 +59,11 @@ func parseNotes(text string) *Notes {
 		if section == nil || len(*section) >= maxNoteItems {
 			continue
 		}
-		asWritten := cleanKeepingBackticks(stripBullet(line), maxSentenceLen)
-		item := backticksToQuotes(asWritten)
+		item := cleanItem(stripBullet(line), maxSentenceLen)
 		if item == "" || strings.EqualFold(strings.TrimRight(item, "."), "none") {
 			continue
 		}
 		*section = append(*section, item)
-		if section == &n.Repository {
-			n.RepositoryAsWritten = append(n.RepositoryAsWritten, asWritten)
-		}
 	}
 	if len(n.Did)+len(n.TriedAndFailed)+len(n.Hypothesis)+len(n.LeftToDo)+len(n.Repository) == 0 {
 		return nil
@@ -89,26 +71,29 @@ func parseNotes(text string) *Notes {
 	return &n
 }
 
-// RepositoryNotesOfAcceptedRun returns the items the build agent of an
-// accepted run left under its fifth heading (things worth knowing about the
-// repository), from the notes the host kept in runDir, each cleaned and
-// capped as in a handoff and kept as written for the memory text rule
-// (MemoryCandidates). An accepted run has no handoff (Sync removes it),
-// and a build that failed a round and then passed leaves notes all the same.
-// Only that heading is returned: what the agent did, tried or supposed is for
-// a later attempt of the same ticket, and an accepted ticket has none. The
-// caller decides that the run is accepted. The one reader is the operator's
-// memory list (SC-020), which puts every item through the memory text rule.
-func RepositoryNotesOfAcceptedRun(runDir string) []string {
+// RepositoryNotesAsWritten returns the items a run's build agent left under
+// its fifth heading (things worth knowing about the repository), read from
+// the notes the host kept in runDir (evidence.ReadRetainedAgentNotes: a plain
+// file of the retained size, no link followed). Each item is one line,
+// cleaned and capped as in a handoff, but as the agent wrote it: its
+// backticks are kept, because the memory text rule accepts a command only
+// inside them and has to judge the item itself. The items exist only in the
+// returned list; handoff.json holds the same notes with every backtick turned
+// into a quote. Only that heading is returned: what the agent did, tried or
+// supposed is for a later attempt of the same ticket. The caller decides that
+// the run is finished (quarantined, halted or accepted). The one caller is
+// the operator's memory list (SC-020), which puts every item through the
+// memory text rule.
+func RepositoryNotesAsWritten(runDir string) []string {
 	text, ok := evidence.ReadRetainedAgentNotes(runDir)
 	if !ok {
 		return nil
 	}
-	notes := parseNotes(text)
+	notes := parseNotesWith(text, cleanKeepingBackticks)
 	if notes == nil {
 		return nil
 	}
-	return notes.MemoryCandidates()
+	return notes.Repository
 }
 
 // stripBullet removes one leading list marker: -, *, a bullet or "1.".

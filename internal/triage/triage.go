@@ -75,10 +75,10 @@ type GateFinding struct {
 	// every other gate, and always for the reference oracle, whose output
 	// is the oracle's own assertions.
 	LogTail string
-	// SetupFailed is the repository setup command (`.factory.yml` setup:)
-	// whose failure stopped the gate's own step before its command ran
-	// (SetupFailedCommand), "" when the step got to its command.
-	SetupFailed string
+	// BuildStoppedBySetup is set on canonical_verify when the factory's own
+	// records show the build ended at a failing setup command before its
+	// first agent turn (BuildStoppedBySetup).
+	BuildStoppedBySetup bool
 }
 
 // FailedGates returns one finding per failed gate of r, each check once, in
@@ -95,7 +95,7 @@ func FailedGates(r *run.Run, dataDir string) []GateFinding {
 			continue
 		}
 		seen[g.Check] = true
-		finding := GateFinding{Check: g.Check, ExitCode: g.ExitCode, SetupFailed: SetupFailedCommand(r, g.Check)}
+		finding := GateFinding{Check: g.Check, ExitCode: g.ExitCode, BuildStoppedBySetup: g.Check == "canonical_verify" && BuildStoppedBySetup(r)}
 		if g.Check != policy.ReferenceOracleGateID {
 			finding.Sentence = truncateTriage(gateSentence(r, dataDir, g, false))
 			finding.LogTail = commandGateLogTail(r, g.Check)
@@ -154,9 +154,14 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		if g.SetupNotRun() {
 			return "canonical_verify: " + run.SetupNotRunMessage
 		}
+		if g.ReclaimNotChecked() {
+			// The factory's own words; the reason in it is a host-side
+			// read's error, made one line where it was recorded.
+			return "canonical_verify: " + g.Command[0]
+		}
 		// Ahead of "the agent made no changes": a build stopped by its
 		// setup made none because it never had a turn.
-		if s := canonicalSetupFailure(r, forOperator); s != "" {
+		if s := buildStoppedBySetupSentence(r, forOperator); s != "" {
 			return s
 		}
 		if s := triageNoChanges(r); s != "" {
@@ -191,24 +196,50 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		// suffixReserve isn't itself consulted.
 		return fitTriageSuffix(s, suffix)
 	default:
-		if g.FailsOnBase() {
-			return failsOnBaseSentence(g)
+		if g.FailsSameOnBase() {
+			return failsSameOnBaseSentence(g)
+		}
+		if g.FailedDifferentlyOnBase() {
+			return alreadyFailingOnBase(g.Check, triageLogGate(r, g.Check, len(alreadyFailingOnBaseSuffix(g))), alreadyFailingOnBaseSuffix(g))
 		}
 		return triageLogGate(r, g.Check, 0)
 	}
 }
 
-// failsOnBaseSentence words a command gate that failed on the build's result
-// and, rerun, on the commit the ticket's work started from
-// (run.GateBaseCheck): no build can make it pass, so the sentence tells the
-// operator what to change and that nothing was spent on trying. Every word is
-// the factory's; the check's name and the commit come from the run record.
-func failsOnBaseSentence(g run.GateResult) string {
-	base := g.BaseCheck.BaseSHA
+// shortBaseSHA is the base commit of g's rerun as a sentence names it.
+func shortBaseSHA(g run.GateResult) string {
+	base := sanitize.Line(g.BaseCheck.BaseSHA)
 	if len(base) > 12 {
 		base = base[:12]
 	}
-	return fmt.Sprintf("%s fails on the base commit %s too, so no build can fix it: fix the gate command or the repository. No corrective build is started.", g.Check, base)
+	return base
+}
+
+// failsSameOnBaseSentence words a command gate that failed on the build's
+// result and, rerun, the same way on the commit the ticket's work started
+// from (run.GateBaseFailsSame): no build can make it pass, so the sentence
+// tells the operator what to change and that nothing was spent on trying.
+// Every word is the factory's; the check's name and the commit come from the
+// run record.
+func failsSameOnBaseSentence(g run.GateResult) string {
+	return fmt.Sprintf("%s fails the same way on the base commit %s, so no build can fix it: fix the gate command or the repository. No corrective build is started.", g.Check, shortBaseSHA(g))
+}
+
+// alreadyFailingOnBaseSuffix is the factory's sentence added to the finding
+// of a gate that was already failing on the base commit in another way
+// (run.GateBaseFailsDifferently): part of what fails predates the attempt.
+func alreadyFailingOnBaseSuffix(g run.GateResult) string {
+	return fmt.Sprintf(". The gate was already failing on the base commit %s, in another way.", shortBaseSHA(g))
+}
+
+// alreadyFailingOnBase joins a gate's own sentence and that suffix, which is
+// never cut; with no sentence of its own the gate is simply said to have
+// failed.
+func alreadyFailingOnBase(check, sentence, suffix string) string {
+	if sentence == "" {
+		sentence = check + " failed"
+	}
+	return fitTriageSuffix(sentence, suffix)
 }
 
 // specSnapshotPathFor is the durable, factory-written copy of the
@@ -592,72 +623,76 @@ func triageLogGate(r *run.Run, check string, suffixReserve int) string {
 // step that ran no setup exits 95 for its own reasons, and a line it prints
 // is not the factory's to word.
 func setupFailureSentence(check string, a run.Attempt, suffixReserve int) string {
-	cmd := setupFailedIn(a)
+	if a.ExitCode != run.SetupFailedExitCode || a.SetupSHA256 == "" {
+		return ""
+	}
+	cmd := run.SetupFailedCommand(readLogTail(a.LogPath))
 	if cmd == "" {
 		return ""
 	}
 	prefix := fmt.Sprintf("%s failed; setup command failed: ", check)
-	if a.Kind == "build" {
-		// The build script exits this way only when a setup command fails
-		// before the first agent turn.
-		prefix = "build did not start; setup command failed: "
-	}
 	return prefix + safeQuote(sanitize.Line(cmd), maxTriageSentenceLen-len(prefix)-suffixReserve)
 }
 
-// setupFailedIn is the repository setup command whose failure ended the step
-// a recorded: the step ran the setup list (it carries its digest), exited
-// run.SetupFailedExitCode, and its log names the command. "" otherwise.
-func setupFailedIn(a run.Attempt) string {
-	if a.ExitCode != run.SetupFailedExitCode || a.SetupSHA256 == "" {
-		return ""
+// BuildStoppedBySetup reports whether r's build ended at a failing repository
+// setup command (`.factory.yml` setup:) before its first agent turn, as far
+// as the factory's own records can show it. All of these must hold:
+//
+//   - the run has setup commands and its last build attempt exited
+//     run.SetupFailedExitCode, as the build script does in that case. The
+//     exit status and the line in the log are the sandbox's, so they are
+//     necessary and decide nothing alone;
+//   - the meter counted nothing for any build attempt of the run: each ran
+//     on a metered route, with no input or output token, no cost, no
+//     unsettled request and no ceiling hit (the ledger is kept outside the
+//     sandbox, and a worker reaches a model only through it);
+//   - the run's result is the commit it started from: nothing was committed;
+//   - the run did not adopt a lost run's worktree, whose uncommitted work
+//     an earlier session made.
+//
+// Every build of the ticket from that commit runs the same commands first
+// and ends the same way, so no corrective build answers it
+// (internal/handoff). A setup failure in any other step (the verify, a gate,
+// a rerun after the oracle commit) runs on the build's result and is that
+// step's own failed check.
+func BuildStoppedBySetup(r *run.Run) bool {
+	if r.ResumeSpendCarried != nil || r.BaseSHA == "" || r.ResultSHA != r.BaseSHA {
+		return false
 	}
-	return run.SetupFailedCommand(readLogTail(a.LogPath))
-}
-
-// setupFailedAttempt finds the attempt behind a failed check that a setup
-// command stopped. For canonical_verify that is the build (stopped before
-// its first agent turn) or, failing that, the verify; for any other command
-// check, the check's own last attempt.
-func setupFailedAttempt(r *run.Run, check string) (run.Attempt, bool) {
-	kinds := []string{check}
-	if check == "canonical_verify" {
-		kinds = []string{"build", "verify"}
+	last, found := lastAttempt(r, "build")
+	if !found || last.ExitCode != run.SetupFailedExitCode || last.SetupSHA256 == "" {
+		return false
 	}
-	for _, kind := range kinds {
-		if a, found := lastAttempt(r, kind); found && setupFailedIn(a) != "" {
-			return a, true
+	for _, a := range r.Attempts {
+		if a.Kind == "build" && !meteredAndUnused(a) {
+			return false
 		}
 	}
-	return run.Attempt{}, false
+	return true
 }
 
-// SetupFailedCommand is the repository setup command (`.factory.yml` setup:)
-// that failed in the step of r's failed check, so that the step's own
-// command never ran; "" when the step got to its command. A setup command
-// runs before the first agent turn of every build of the ticket, and a
-// build it stops has no turn in which to change anything: no later build
-// can answer this failure, so it is the operator's (internal/handoff).
-func SetupFailedCommand(r *run.Run, check string) string {
-	a, found := setupFailedAttempt(r, check)
-	if !found {
-		return ""
-	}
-	return sanitize.Line(setupFailedIn(a))
+// meteredAndUnused reports whether a ran on a metered model route and the
+// meter counted no request for it. An attempt that resumed an interrupted
+// one holds that one's work and is never unused.
+func meteredAndUnused(a run.Attempt) bool {
+	metered := a.RelayRoute != "" || a.RelayCredentialMode != ""
+	spent := a.RelayConsumedInputTokens != 0 || a.RelayConsumedOutputTokens != 0 || a.RelayConsumedCostMicroUSD != 0
+	return metered && !spent && !a.RelaySpendPartial && !a.RelayCeilingExceeded && a.ResumedFromCheckpoint == ""
 }
 
-// canonicalSetupFailure is canonical_verify's sentence when a setup command
-// stopped the build or the verify, "" otherwise.
-func canonicalSetupFailure(r *run.Run, forOperator bool) string {
-	a, found := setupFailedAttempt(r, "canonical_verify")
-	if !found {
+// buildStoppedBySetupSentence is canonical_verify's sentence for a run whose
+// build setup stopped (BuildStoppedBySetup), "" for any other run. It holds
+// no text of the build's log, which is where the build script names the
+// command.
+func buildStoppedBySetupSentence(r *run.Run, forOperator bool) string {
+	if !BuildStoppedBySetup(r) {
 		return ""
 	}
-	suffix := ""
-	if forOperator {
-		suffix = otherFailingGatesSuffix(r, "canonical_verify")
+	s := "the build stopped before its first agent turn: a .factory.yml setup: command failed (no model call, no commit); the build log names it"
+	if !forOperator {
+		return s
 	}
-	return fitTriageSuffix(setupFailureSentence("canonical_verify", a, len(suffix)), suffix)
+	return fitTriageSuffix(s, otherFailingGatesSuffix(r, "canonical_verify"))
 }
 
 // passedInsideTheBuildSuffix says, for a failed canonical_verify, that the

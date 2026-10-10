@@ -991,46 +991,64 @@ func TestTriageLogGateNamesTheSetupCommandThatFailed(t *testing.T) {
 	}
 }
 
-// A build stopped by a setup command before its first agent turn exits as a
-// step whose setup failed. The run's sentence says the build did not start
-// and names the command, ahead of "the agent made no changes" and whatever
-// the verify that followed did; a step that ran no setup, or whose log names
-// no command, is not a setup failure.
-func TestASetupFailureAtTheStartOfABuildIsNamedAsOne(t *testing.T) {
+// A build is named as stopped by its setup only on the factory's own records:
+// the meter counted nothing for it and nothing was committed. The sentence
+// holds none of the log's text, and comes ahead of "the agent made no
+// changes". The exit status and the log line alone decide nothing.
+func TestABuildStoppedBySetupIsNamedFromTheFactorysRecords(t *testing.T) {
 	dataDir := t.TempDir()
 	id := "run-setup-start"
-	writeRunFile(t, dataDir, id, "build.log", "Outcome: DID NOT SUCCEED -- setup command failed: make generate\nbuildgate: setup failed: make generate\n")
+	writeRunFile(t, dataDir, id, "build.log", "buildgate: setup failed: WORKER-CHOSEN-TEXT\n")
 	writeRunFile(t, dataDir, id, "verify.log", "FAIL: test_x\n")
 	logOf := func(name string) string { return filepath.Join(run.Dir(dataDir, id), name) }
-	r := &run.Run{
-		ID:           id,
-		State:        run.StateQuarantined,
-		ChangedFiles: []string{},
-		Attempts: []run.Attempt{
-			{Kind: "build", ExitCode: 95, SetupSHA256: "abc", LogPath: logOf("build.log")},
-			{Kind: "verify", ExitCode: 1, SetupSHA256: "abc", LogPath: logOf("verify.log")},
-		},
-		GateResults: []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
+	stopped := func() *run.Run {
+		return &run.Run{
+			ID: id, State: run.StateQuarantined, BaseSHA: "bbbb", ResultSHA: "bbbb",
+			ChangedFiles: []string{},
+			Attempts: []run.Attempt{
+				{Kind: "build", ExitCode: 95, SetupSHA256: "abc", RelayRoute: "route", LogPath: logOf("build.log")},
+				{Kind: "verify", ExitCode: 1, SetupSHA256: "abc", LogPath: logOf("verify.log")},
+			},
+			GateResults: []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
+		}
 	}
-	if got := SetupFailedCommand(r, "canonical_verify"); got != "make generate" {
-		t.Errorf("SetupFailedCommand = %q, want the command", got)
+	r := stopped()
+	if !BuildStoppedBySetup(r) {
+		t.Fatal("BuildStoppedBySetup = false for a build with no metered token and no commit")
 	}
-	if got, want := Run(r, dataDir), `build did not start; setup command failed: "make generate" (+1 more failing gate)`; got != want {
-		t.Errorf("Run() = %q, want %q", got, want)
+	got := Run(r, dataDir)
+	if !strings.HasPrefix(got, "the build stopped before its first agent turn: ") || !strings.HasSuffix(got, " (+1 more failing gate)") || strings.Contains(got, "WORKER-CHOSEN-TEXT") {
+		t.Errorf("Run() = %q", got)
 	}
 	findings := FailedGates(r, dataDir)
-	if len(findings) != 2 || findings[0].SetupFailed != "make generate" || findings[1].SetupFailed != "" {
-		t.Errorf("findings = %+v, want only canonical_verify marked as a setup failure", findings)
+	if len(findings) != 2 || !findings[0].BuildStoppedBySetup || findings[1].BuildStoppedBySetup {
+		t.Errorf("findings = %+v, want only canonical_verify marked", findings)
 	}
 
-	noDigest := *r
-	noDigest.Attempts = []run.Attempt{{Kind: "build", ExitCode: 95, LogPath: logOf("build.log")}}
-	if got := SetupFailedCommand(&noDigest, "canonical_verify"); got != "" {
-		t.Errorf("a build that ran no setup: SetupFailedCommand = %q, want none", got)
-	}
-	unnamed := *r
-	unnamed.Attempts = []run.Attempt{{Kind: "build", ExitCode: 95, SetupSHA256: "abc", LogPath: logOf("verify.log")}}
-	if got := SetupFailedCommand(&unnamed, "canonical_verify"); got != "" {
-		t.Errorf("a log that names no command: SetupFailedCommand = %q, want none", got)
+	for name, change := range map[string]func(*run.Run){
+		"input tokens":      func(r *run.Run) { r.Attempts[0].RelayConsumedInputTokens = 1 },
+		"output tokens":     func(r *run.Run) { r.Attempts[0].RelayConsumedOutputTokens = 1 },
+		"cost":              func(r *run.Run) { r.Attempts[0].RelayConsumedCostMicroUSD = 1 },
+		"unsettled spend":   func(r *run.Run) { r.Attempts[0].RelaySpendPartial = true },
+		"ceiling hit":       func(r *run.Run) { r.Attempts[0].RelayCeilingExceeded = true },
+		"no metered route":  func(r *run.Run) { r.Attempts[0].RelayRoute = "" },
+		"no setup":          func(r *run.Run) { r.Attempts[0].SetupSHA256 = "" },
+		"another exit":      func(r *run.Run) { r.Attempts[0].ExitCode = 1 },
+		"a commit":          func(r *run.Run) { r.ResultSHA = "cccc" },
+		"no recorded base":  func(r *run.Run) { r.BaseSHA, r.ResultSHA = "", "" },
+		"a resumed run":     func(r *run.Run) { r.ResumeSpendCarried = &run.MeterSpend{} },
+		"a resumed attempt": func(r *run.Run) { r.Attempts[0].ResumedFromCheckpoint = "dddd" },
+		"an earlier build try": func(r *run.Run) {
+			r.Attempts = append([]run.Attempt{{Kind: "build", ExitCode: 1, RelayRoute: "route", RelayConsumedInputTokens: 9}}, r.Attempts...)
+		},
+	} {
+		r := stopped()
+		change(r)
+		if BuildStoppedBySetup(r) {
+			t.Errorf("%s: BuildStoppedBySetup = true", name)
+		}
+		if got := Run(r, dataDir); strings.Contains(got, "before its first agent turn") {
+			t.Errorf("%s: Run() = %q", name, got)
+		}
 	}
 }

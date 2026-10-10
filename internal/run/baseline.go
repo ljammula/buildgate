@@ -61,6 +61,21 @@ func (g GateResult) SetupNotRun() bool {
 	return g.Check == "canonical_verify" && !g.Passed && g.ExitCode == -1 && len(g.Command) == 1 && g.Command[0] == SetupNotRunMessage
 }
 
+// ReclaimNotCheckedPrefix starts the Command of the canonical_verify result
+// recorded, with exit -1, for an accepted result that was reclaimed after its
+// submitter died and could not be checked against the repository's
+// .factory.yml as the run was dispatched with it (the commit and hash on the
+// run record): which gates and setup commands the result had to run is then
+// unknown. The reason follows the prefix. Nothing a build can do changes it,
+// so it is the operator's.
+const ReclaimNotCheckedPrefix = "buildgate: reclaimed result not applied: .factory.yml as dispatched could not be checked: "
+
+// ReclaimNotChecked reports whether g is the result recorded for a reclaimed
+// result that could not be checked (ReclaimNotCheckedPrefix).
+func (g GateResult) ReclaimNotChecked() bool {
+	return g.Check == "canonical_verify" && !g.Passed && g.ExitCode == -1 && len(g.Command) == 1 && strings.HasPrefix(g.Command[0], ReclaimNotCheckedPrefix)
+}
+
 // BaselineVerifyAttemptKind is Attempt.Kind of the verify command's run on
 // the base commit, before the build's first round.
 const BaselineVerifyAttemptKind = "baseline_verify"

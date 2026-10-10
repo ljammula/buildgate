@@ -399,3 +399,36 @@ func FuzzValidateReason(f *testing.F) {
 		}
 	})
 }
+
+// Inside a quoted command an absolute path is the same thing it is outside
+// one: a "/" that follows anything but a letter, a digit, ".", "_" or "/".
+func TestAQuotedCommandRefusesAnAbsolutePathAfterAnyNonPathCharacter(t *testing.T) {
+	for _, reason := range []string{
+		"Copy `scp build:/etc/passwd out` first",
+		"Use `docker run -v .:/var/run/docker.sock img` first",
+		"Read `cat x -/etc/shadow` first",
+		"Run `curl http:/example.com` now",
+		"Read `/etc/passwd` first",
+		"Set `GOFLAGS=-modfile=/tmp/go.mod` first",
+		"List `ls //server/share` first",
+	} {
+		if _, err := RenderLine(reason); err == nil {
+			t.Errorf("RenderLine(%q) accepted an absolute path inside a command", reason)
+		}
+	}
+	for _, command := range []string{
+		"make gen", "go test ./...", "python3 -m pytest agent/pi/tests/", "src/pkg/file.go", "cat ../notes/a.txt",
+	} {
+		if err := ValidateCommand(command); err != nil {
+			t.Errorf("ValidateCommand(%q) = %v, want a relative path accepted", command, err)
+		}
+		if _, err := RenderLine("Run `" + command + "` first"); err != nil {
+			t.Errorf("RenderLine with `%s` = %v, want it accepted", command, err)
+		}
+	}
+	// "&" is outside a command's character set, so this one is refused, but
+	// not as an absolute path.
+	if err := ValidateCommand("cd console && npm run check"); err == nil || strings.Contains(err.Error(), "absolute path") {
+		t.Errorf("ValidateCommand(cd console && npm run check) = %v, want the character-set refusal only", err)
+	}
+}

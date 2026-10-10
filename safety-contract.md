@@ -424,8 +424,9 @@ requires a new contract review and an updated machine-checkable test.
   of each failed round (`agent_notes`), leave the worktree with the session:
   the host moves the evidence file to the run directory, where the run
   record is read from, and removes the round-state file, which a finished
-  build no longer needs; either one that cannot be removed fails the build
-  step, so no review works beside it. A build that was lost keeps both for
+  build no longer needs; whatever is at either name is removed, a directory
+  with all it holds and no link followed, and only a removal that fails
+  fails the build step, so no review works beside it. A build that was lost keeps both for
   its resume, and no review follows a lost build.
   A saved prompt is what the build's session folder held when the host
   copied it; a build can alter its own before that, because the build script
@@ -483,16 +484,18 @@ requires a new contract review and an updated machine-checkable test.
   under the fifth heading (things worth knowing about the repository) may
   also be listed to the operator as memory candidates, each only if it
   passes the memory text rule; they still reach no review, no planner and no
-  other ticket's build except under SC-020. That rule accepts a command only
-  inside backticks, so the handoff keeps one more copy of the fifth
-  heading's items for it alone (`repository_as_written`): each item as the
-  agent wrote it, backticks included, one line cleaned and cut like every
-  other value. The rule judges that text and nothing repairs it; the copy is
-  never rendered into the record a build is given, where every note still has
-  its backticks turned into quotes. A run saved accepted has no
-  handoff: of the notes its build left, only the items under the fifth heading
-  are read, cleaned and capped the same way, and only by the operator's memory
-  list; the rest of the file reaches no reader, the handoff route included.
+  other ticket's build except under SC-020. The memory list does not take
+  them from the handoff: for a run saved quarantined, halted or accepted, the
+  items under the fifth heading are read by the operator's memory list from
+  the host's copy of the notes in the run directory (`agent-notes.md`), as
+  written, each one line cleaned and cut like every other value and a
+  candidate only if it passes the memory text rule, which accepts a command
+  only inside backticks and repairs nothing. That file's text has two readers
+  and no other: the build of the handoff, which stores every item with its
+  backticks turned into quotes (and through it the handoff route and a later
+  build's record), and the memory list, which reads the fifth heading alone.
+  A run saved accepted has no handoff, so the rest of its notes reaches no
+  reader, the handoff route included.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
@@ -514,11 +517,16 @@ requires a new contract review and an updated machine-checkable test.
   `required_content_present`, and the two reviews when they gave a verdict.
   `reference_oracle` counts only where the build is already shown the oracle
   (a request's ticket). `tests_added`, a review that gave no verdict, a
-  repository gate that never ran, a check whose step a repository setup
-  command stopped, a named or repository gate that also failed
-  when the factory reran it on the commit the ticket's work started from (no
-  build can make it pass; the rerun is evidence on the gate's result and
-  never changes whether the gate passed) and any check with no bin never do,
+  repository gate that never ran, a build that a repository setup command
+  stopped before its first agent turn (by the meter's count of zero and an
+  unchanged commit, never by the sandbox's exit status or log), a named or
+  repository gate that failed the
+  same way (the same exit code and the same failing lines of output) when
+  the factory reran it on the commit
+  the ticket's work started from (no build can make it pass; the rerun is
+  evidence on the gate's result and never changes whether the gate passed; a gate already failing there in
+  another way stays one a build is told about, with a factory-written
+  sentence saying so) and any check with no bin never do,
   and a halt never does. A check on the diff of an attempt that committed nothing
   (canonical verification never passed) is not judged either way. Such a
   build is a new run on the quarantined run's branch, started after the

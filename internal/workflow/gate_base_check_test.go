@@ -6,13 +6,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
+	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 )
 
@@ -30,6 +35,9 @@ type gateBaseFixture struct {
 	images []string
 	// onBaseLaunch runs when the rerun's launch is created.
 	onBaseLaunch func(scratch string)
+	// resultLines and baseLines are what the gate's command prints on the
+	// result and on the base commit; the runtime's own when nil.
+	resultLines, baseLines []string
 }
 
 func newGateBaseFixture(t *testing.T, resultExit, baseExit int) *gateBaseFixture {
@@ -51,8 +59,14 @@ func newGateBaseFixture(t *testing.T, resultExit, baseExit int) *gateBaseFixture
 		f.launched = append(f.launched, workspace)
 		f.images = append(f.images, req.Image)
 		f.rt.ExitCode = resultExit
+		if f.resultLines != nil {
+			f.rt.Lines = f.resultLines
+		}
 		if f.onScratch(workspace) {
 			f.rt.ExitCode = baseExit
+			if f.baseLines != nil {
+				f.rt.Lines = f.baseLines
+			}
 			if f.onBaseLaunch != nil {
 				f.onBaseLaunch(workspace)
 			}
@@ -119,7 +133,7 @@ func (f *gateBaseFixture) assertRunUntouched() {
 }
 
 // A named gate and a repository gate that fail on the result and on the base
-// commit record "fails": the rerun is a second launch of the same image on a
+// commit record that it fails there: the rerun is a second launch of the same image on a
 // scratch worktree holding the base commit, with `.factory/` read-only from
 // the trusted commit, and the gate's own result is what it was.
 func TestFailedGateIsRerunOnTheBaseCommitAndRecordsThatItFailsThereToo(t *testing.T) {
@@ -144,8 +158,8 @@ func TestFailedGateIsRerunOnTheBaseCommitAndRecordsThatItFailsThereToo(t *testin
 				t.Errorf("attempts = %+v, want the gate's one attempt: the rerun is not an attempt of the gate", res.Attempts)
 			}
 			bc := res.BaseCheck
-			if bc == nil || bc.Outcome != run.GateBaseFails || bc.BaseSHA != f.base || bc.ExitCode != 7 || bc.Reason != "" {
-				t.Fatalf("base check = %+v, want fails with exit 7 on %s", bc, f.base)
+			if bc == nil || bc.Outcome != run.GateBaseFailsDifferently || bc.BaseSHA != f.base || bc.ExitCode != 7 || bc.Reason != "" {
+				t.Fatalf("base check = %+v, want fails_differently (exit 7 against the gate's 3) on %s", bc, f.base)
 			}
 			if bc.LogSHA256 == "" || bc.LogPath == res.Result.LogPath {
 				t.Errorf("base check log %q (hash %q), want a log of its own beside the gate's %q", bc.LogPath, bc.LogSHA256, res.Result.LogPath)
@@ -266,7 +280,7 @@ func TestRetriedGateActivityReturnsTheCheckpointedBaseCheckWithoutRerunning(t *t
 	if len(f.launched) != 2 {
 		t.Errorf("%d launches over two executions, want the first execution's two", len(f.launched))
 	}
-	if first.BaseCheck == nil || second.BaseCheck == nil || *first.BaseCheck != *second.BaseCheck || second.BaseCheck.Outcome != run.GateBaseFails {
+	if first.BaseCheck == nil || second.BaseCheck == nil || *first.BaseCheck != *second.BaseCheck || second.BaseCheck.Outcome != run.GateBaseFailsSame {
 		t.Errorf("base check: first %+v, again %+v; want the same fails record", first.BaseCheck, second.BaseCheck)
 	}
 }
@@ -338,7 +352,7 @@ func TestBaseRerunIsNotStartedWithTooLittleOfTheGatesTimeLimitLeft(t *testing.T)
 	f := newGateBaseFixture(t, 1, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), gateBaseCheckReserve+sandboxAttemptTeardownMargin-time.Second)
 	defer cancel()
-	bc := f.acts.checkGateOnBase(ctx, NamedGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "true"}, []string{"sh", "-c", "true"}, nil)
+	bc := f.acts.checkGateOnBase(ctx, NamedGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "true"}, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil)
 	if bc.Outcome != run.GateBaseNotChecked || !strings.Contains(bc.Reason, "time limit") || bc.BaseSHA != f.base {
 		t.Errorf("base check = %+v, want not_checked for lack of time", bc)
 	}
@@ -346,4 +360,231 @@ func TestBaseRerunIsNotStartedWithTooLittleOfTheGatesTimeLimitLeft(t *testing.T)
 		t.Errorf("%d launch(es), want none", len(f.launched))
 	}
 	f.assertRunUntouched()
+}
+
+// The rerun is made only when the run's record proves which commit the
+// ticket's work started from. A run that adopts a halted run's worktree, or
+// that checks out an existing branch with no diff base, starts from a commit
+// that may already hold the ticket's work (a resumed corrective round starts
+// from the failed attempt's own commit): a gate red there says nothing about
+// the base, so nothing is launched and the gate stays corrective.
+func TestBaseRerunIsNotMadeWhenTheRunsBaseMayAlreadyHoldTheTicketsWork(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		arrange func(f *gateBaseFixture)
+	}{
+		{"a resumed run", func(f *gateBaseFixture) {
+			f.input.BaseSHA = f.result
+			f.input.ResumeFrom = &ResumeFrom{RunID: "lost-run", WorktreePath: f.repo, Branch: "factoryd/t", BaseSHA: f.result}
+		}},
+		{"a run on an existing branch with no diff base", func(f *gateBaseFixture) {
+			f.input.BaseSHA, f.input.OnBranch = f.result, "factoryd/t"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGateBaseFixture(t, 5, 5)
+			tc.arrange(f)
+			res := f.runGate("lint", "")
+			bc := res.BaseCheck
+			if bc == nil || bc.Outcome != run.GateBaseNotChecked || !strings.Contains(bc.Reason, "may already hold the ticket's work") {
+				t.Fatalf("base check = %+v, want not_checked: the run's base may already hold the ticket's work", bc)
+			}
+			if len(f.launched) != 1 {
+				t.Errorf("%d launch(es), want the gate's own only", len(f.launched))
+			}
+			if res.Result.ExitCode != 5 {
+				t.Errorf("the gate's exit code = %d, want 5", res.Result.ExitCode)
+			}
+			f.assertRunUntouched()
+		})
+	}
+}
+
+// A run on an existing branch that names its diff base (a corrective build, a
+// PR-review round, a retry continuing on the failed attempt's commit) is
+// rerun on that diff base: the ticket's own base.
+func TestBaseRerunOfARunOnABranchWithADiffBaseUsesTheDiffBase(t *testing.T) {
+	f := newGateBaseFixture(t, 1, 0)
+	f.input.DiffBaseSHA, f.input.BaseSHA, f.input.OnBranch = f.base, f.result, "factoryd/t"
+	res := f.runGate("lint", "")
+	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base || len(f.launched) != 2 {
+		t.Errorf("base check = %+v after %d launch(es), want passes on the diff base %s", bc, len(f.launched), f.base)
+	}
+}
+
+// holdGitMetadataLock takes the repository's git metadata lock, as another
+// run of the same repository does while it creates or removes a worktree,
+// and returns its release.
+func holdGitMetadataLock(t *testing.T, repo string) (release func()) {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(repo, ".git", "factoryd-git.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release = func() {
+		if !released {
+			released = true
+			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+			_ = lock.Close()
+		}
+	}
+	t.Cleanup(release)
+	return release
+}
+
+// A retried gate Activity returns its checkpointed result before it waits on
+// anything: with the repository's git metadata lock held by another run and a
+// scratch worktree left by the dead attempt, the result still comes back at
+// once, and the leftover is removed without the lock.
+func TestRetriedGateActivityReturnsItsCheckpointWhileTheGitMetadataLockIsHeld(t *testing.T) {
+	f := newGateBaseFixture(t, 2, 2)
+	checkpointDir := t.TempDir()
+	first := f.runGate("lint", checkpointDir)
+	scratch, err := gateBaseWorktreePath(f.acts.LogDir, "lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(scratch), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, f.repo, "worktree", "add", "-q", "--detach", scratch, f.base)
+	release := holdGitMetadataLock(t, f.repo)
+
+	type outcome struct {
+		res VerifyActivityResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := f.tryGate("lint", checkpointDir)
+		done <- outcome{res, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("the retried gate: %v", got.err)
+		}
+		if got.res.Result.ExitCode != 2 || got.res.BaseCheck == nil || first.BaseCheck == nil || *got.res.BaseCheck != *first.BaseCheck {
+			t.Errorf("the retried gate returned %+v (base check %+v), want the checkpointed result with %+v", got.res.Result, got.res.BaseCheck, first.BaseCheck)
+		}
+	case <-time.After(10 * time.Second):
+		release()
+		<-done
+		t.Fatal("the retried gate did not return its checkpointed result while the git metadata lock was held: its sweep waited on the lock before the checkpoint's early return")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Lstat(scratch); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the scratch worktree the dead attempt left is still there, with the lock still held")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	release()
+}
+
+// The rerun's host steps wait on the git metadata lock under the rerun's own
+// deadline and heartbeat while they wait: a lock another run holds for longer
+// than the Activity's heartbeat timeout costs the base check ("not checked"),
+// never the Activity.
+func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *testing.T) {
+	f := newGateBaseFixture(t, 1, 1)
+	release := holdGitMetadataLock(t, f.repo)
+	// Longer than one heartbeat interval, so a wait with no heartbeat shows.
+	wait := activityHeartbeatInterval + 3*time.Second
+
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	var heartbeats atomic.Int32
+	env.SetOnActivityHeartbeatListener(func(*activity.Info, converter.EncodedValues) { heartbeats.Add(1) })
+	env.RegisterActivityWithOptions(func(ctx context.Context, in NamedGateActivityInput) (*run.GateBaseCheck, error) {
+		ctx, cancel := context.WithTimeout(ctx, gateBaseCheckReserve+wait)
+		defer cancel()
+		return f.acts.checkGateOnBase(ctx, in, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil), nil
+	}, activity.RegisterOptions{Name: "checkGateOnBase"})
+	in := f.input
+	in.CheckpointDir = t.TempDir()
+
+	type outcome struct {
+		bc  *run.GateBaseCheck
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		val, err := env.ExecuteActivity("checkGateOnBase", NamedGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "true"})
+		var bc *run.GateBaseCheck
+		if err == nil {
+			err = val.Get(&bc)
+		}
+		done <- outcome{bc, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if got.bc == nil || got.bc.Outcome != run.GateBaseNotChecked || !strings.Contains(got.bc.Reason, "lock") {
+			t.Errorf("base check = %+v, want not_checked naming the lock it waited for", got.bc)
+		}
+	case <-time.After(wait + 10*time.Second):
+		release()
+		<-done
+		t.Errorf("the rerun was still waiting on the git metadata lock %s after its own deadline", 10*time.Second)
+	}
+	if heartbeats.Load() == 0 {
+		t.Errorf("no heartbeat was recorded while the rerun waited %s on the git metadata lock", wait)
+	}
+	if len(f.launched) != 0 {
+		t.Errorf("%d launch(es), want none", len(f.launched))
+	}
+	release()
+	f.assertRunUntouched()
+}
+
+// A gate that is red on the base commit is the operator's only when it fails
+// there the same way as on the result: the same exit code and the same
+// failing lines of output (observation.Excerpt, which the handoff already
+// uses to pick them). A ticket whose job is to turn that gate green fails it
+// differently after a partial fix, and keeps its corrective build.
+func TestBaseRerunTellsTheSameFailureFromADifferentOne(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		resultExit, baseExit  int
+		resultLines, baseLine []string
+		want                  string
+	}{
+		{"the same exit code and the same failing lines", 1, 1,
+			[]string{"=== RUN TestSum", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL"},
+			[]string{"=== RUN TestSum", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL"}, "fails_same"},
+		{"other failing lines: the ticket's partial fix", 1, 1,
+			[]string{"--- FAIL: TestSumOfNegatives", "    sum_test.go:21: got -1, want -3", "FAIL"},
+			[]string{"--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "--- FAIL: TestSumOfNegatives", "    sum_test.go:21: got 0, want -3", "FAIL"}, "fails_differently"},
+		{"the same lines with another exit code", 2, 1,
+			[]string{"--- FAIL: TestSum", "FAIL"}, []string{"--- FAIL: TestSum", "FAIL"}, "fails_differently"},
+		// What the excerpt already leaves out or cleans: terminal colour,
+		// trailing spaces, and lines that report no failure (a passing
+		// package's timing, a progress line).
+		{"a difference the excerpt already normalises", 1, 1,
+			[]string{"ok  \tacme/api\t0.31s", "\x1b[31m--- FAIL: TestSum\x1b[0m   ", "    sum_test.go:9: got 3, want 4", "FAIL", "collected in 12 files"},
+			[]string{"ok  \tacme/api\t0.52s", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL", "collected in 11 files"}, "fails_same"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGateBaseFixture(t, tc.resultExit, tc.baseExit)
+			f.resultLines, f.baseLines = tc.resultLines, tc.baseLine
+			res := f.runGate("lint", "")
+			if bc := res.BaseCheck; bc == nil || bc.Outcome != tc.want || bc.ExitCode != tc.baseExit || bc.BaseSHA != f.base {
+				t.Fatalf("base check = %+v, want %s with exit %d", bc, tc.want, tc.baseExit)
+			}
+			if res.Result.ExitCode != tc.resultExit {
+				t.Errorf("the gate's exit code = %d, want %d", res.Result.ExitCode, tc.resultExit)
+			}
+			f.assertRunUntouched()
+		})
+	}
 }
