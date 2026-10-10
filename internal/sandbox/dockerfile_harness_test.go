@@ -96,3 +96,42 @@ func TestDockerfilesEndInTheSandboxWorkdirOwnedByTheWorkerUser(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkerDockerfilesEndAsTheNonRootWorkerUser pins the user a worker
+// image is left with: the last USER instruction of every stage a worker
+// image is built to (the canonical image's last stage, the project recipe's
+// "toolchains" target and its last stage) is 65532:65532. The OpenShell
+// runtime names no user of its own, so this is the worker's.
+func TestWorkerDockerfilesEndAsTheNonRootWorkerUser(t *testing.T) {
+	const last = ""
+	targets := map[string][]string{
+		"Dockerfile":         {last},
+		"Dockerfile.project": {"toolchains", last},
+	}
+	for name, stages := range targets {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		users := map[string]string{}
+		stage := last
+		for _, line := range strings.Split(string(data), "\n") {
+			fields := strings.Fields(line)
+			switch {
+			case len(fields) >= 2 && fields[0] == "FROM":
+				stage = last
+				if len(fields) == 4 && strings.EqualFold(fields[2], "AS") {
+					stage = fields[3]
+				}
+				users[stage] = ""
+			case len(fields) == 2 && fields[0] == "USER":
+				users[stage] = fields[1]
+			}
+		}
+		for _, target := range stages {
+			if got := users[target]; got != "65532:65532" {
+				t.Errorf("%s stage %q ends as USER %q, want 65532:65532", name, target, got)
+			}
+		}
+	}
+}
