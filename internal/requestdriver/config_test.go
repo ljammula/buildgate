@@ -6,6 +6,7 @@ import (
 
 	"buildgate/internal/release"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
 )
@@ -100,7 +101,7 @@ func TestBuildTicketRunArgsForwardsNoRouteFlag(t *testing.T) {
 func TestBuildTicketRunArgsIncludesPreflightProfileOnlyWhenSet(t *testing.T) {
 	withProfile := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", PreflightProfile: "brownfield"}
 	args := requestdriver.BuildTicketRunArgs("data", withProfile, requestdriver.WorkerConfig{OpenPullRequest: true})
-	if !containsArg(args, "-preflight-profile", "brownfield") {
+	if !requestdrivertest.ContainsArg(args, "-preflight-profile", "brownfield") {
 		t.Errorf("args = %v, want -preflight-profile brownfield", args)
 	}
 
@@ -115,7 +116,7 @@ func TestBuildTicketRunArgsIncludesPreflightProfileOnlyWhenSet(t *testing.T) {
 
 func TestBuildTicketRunArgsIncludesFullSuiteCommandOnlyWhenSet(t *testing.T) {
 	with := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", FullSuiteCommand: "go test ./..."}
-	if args := requestdriver.BuildTicketRunArgs("data", with, requestdriver.WorkerConfig{}); !containsArg(args, "-full-suite-command", "go test ./...") {
+	if args := requestdriver.BuildTicketRunArgs("data", with, requestdriver.WorkerConfig{}); !requestdrivertest.ContainsArg(args, "-full-suite-command", "go test ./...") {
 		t.Errorf("args = %v, want -full-suite-command \"go test ./...\"", args)
 	}
 	without := &requestdriver.QueueEntry{ID: "t2", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
@@ -154,7 +155,7 @@ func TestBuildTicketRunArgsNeverPassesAProjectID(t *testing.T) {
 func TestBuildTicketRunArgsIncludesPRClosesIssueOnlyWhenSet(t *testing.T) {
 	withIssue := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", IssueRef: "acme/widgets#42"}
 	args := requestdriver.BuildTicketRunArgs("data", withIssue, requestdriver.WorkerConfig{})
-	if !containsArg(args, "-pr-closes-issue", "acme/widgets#42") {
+	if !requestdrivertest.ContainsArg(args, "-pr-closes-issue", "acme/widgets#42") {
 		t.Errorf("args = %v, want -pr-closes-issue acme/widgets#42", args)
 	}
 
@@ -174,7 +175,7 @@ func TestBuildTicketRunArgsIncludesPRClosesIssueOnlyWhenSet(t *testing.T) {
 func TestBuildTicketRunArgsIncludesPRBaseOnlyWhenSet(t *testing.T) {
 	withBase := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", PRBase: "factoryd/run-1"}
 	args := requestdriver.BuildTicketRunArgs("data", withBase, requestdriver.WorkerConfig{})
-	if !containsArg(args, "-pr-base", "factoryd/run-1") {
+	if !requestdrivertest.ContainsArg(args, "-pr-base", "factoryd/run-1") {
 		t.Errorf("args = %v, want -pr-base factoryd/run-1", args)
 	}
 
@@ -195,7 +196,7 @@ func TestBuildTicketRunArgsIncludesPRBaseOnlyWhenSet(t *testing.T) {
 func TestBuildTicketRunArgsIncludesSpecAcceptanceCriteriaOnlyWhenSet(t *testing.T) {
 	withCriteria := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", SpecAcceptanceCriteria: "/repo/tickets/001/criteria.md"}
 	args := requestdriver.BuildTicketRunArgs("data", withCriteria, requestdriver.WorkerConfig{})
-	if !containsArg(args, "-spec-acceptance-criteria", "/repo/tickets/001/criteria.md") {
+	if !requestdrivertest.ContainsArg(args, "-spec-acceptance-criteria", "/repo/tickets/001/criteria.md") {
 		t.Errorf("args = %v, want -spec-acceptance-criteria /repo/tickets/001/criteria.md", args)
 	}
 
@@ -261,20 +262,20 @@ func TestBuildTicketRunArgsThreadsSandboxAndRelayConfig(t *testing.T) {
 
 	t.Run("build-app-script and sandbox-image pass through when set", func(t *testing.T) {
 		args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{BuildAppScript: "/harness/build_app.py", SandboxImage: "registry.example/org/img@sha256:deadbeef"})
-		if !containsArg(args, "-build-app-script", "/harness/build_app.py") {
+		if !requestdrivertest.ContainsArg(args, "-build-app-script", "/harness/build_app.py") {
 			t.Errorf("args = %v, want -build-app-script /harness/build_app.py", args)
 		}
-		if !containsArg(args, "-sandbox-image", "registry.example/org/img@sha256:deadbeef") {
+		if !requestdrivertest.ContainsArg(args, "-sandbox-image", "registry.example/org/img@sha256:deadbeef") {
 			t.Errorf("args = %v, want -sandbox-image registry.example/org/img@sha256:deadbeef", args)
 		}
 	})
 
 	t.Run("build-app-max-attempts and verify-max-attempts always pass through", func(t *testing.T) {
 		args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{BuildAppMaxAttempts: 5, VerifyMaxAttempts: 3})
-		if !containsArg(args, "-build-app-max-attempts", "5") {
+		if !requestdrivertest.ContainsArg(args, "-build-app-max-attempts", "5") {
 			t.Errorf("args = %v, want -build-app-max-attempts 5", args)
 		}
-		if !containsArg(args, "-verify-max-attempts", "3") {
+		if !requestdrivertest.ContainsArg(args, "-verify-max-attempts", "3") {
 			t.Errorf("args = %v, want -verify-max-attempts 3", args)
 		}
 	})
@@ -315,7 +316,7 @@ func TestBuildTicketRunArgsThreadsRegistryProxyConfig(t *testing.T) {
 		for _, want := range [][2]string{
 			{"-registry-proxy-image", "registry.example/org/rp@sha256:deadbeef"},
 		} {
-			if !containsArg(args, want[0], want[1]) {
+			if !requestdrivertest.ContainsArg(args, want[0], want[1]) {
 				t.Errorf("args = %v, want %s %s", args, want[0], want[1])
 			}
 		}
@@ -340,7 +341,7 @@ func TestBuildTicketRunArgsForwardsConformityPolicy(t *testing.T) {
 	args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{
 		ConformityPolicy: "advisory", ConformityPolicyExplicit: true,
 	})
-	if !containsArg(args, "-conformity-policy", "advisory") {
+	if !requestdrivertest.ContainsArg(args, "-conformity-policy", "advisory") {
 		t.Errorf("args = %v, want -conformity-policy advisory", args)
 	}
 }
@@ -375,7 +376,7 @@ func TestBuildTicketRunArgsForwardsCodeReviewPolicy(t *testing.T) {
 	args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{
 		CodeReviewPolicy: "required", CodeReviewPolicyExplicit: true,
 	})
-	if !containsArg(args, "-code-review-policy", "required") {
+	if !requestdrivertest.ContainsArg(args, "-code-review-policy", "required") {
 		t.Errorf("args = %v, want -code-review-policy required", args)
 	}
 }
@@ -406,7 +407,7 @@ func TestBuildTicketRunArgsForwardsTemporalAddressWhenExplicit(t *testing.T) {
 	args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{
 		TemporalAddress: "localhost:7233",
 	})
-	if !containsArg(args, "-temporal-address", "localhost:7233") {
+	if !requestdrivertest.ContainsArg(args, "-temporal-address", "localhost:7233") {
 		t.Errorf("args = %v, want -temporal-address localhost:7233", args)
 	}
 }
@@ -418,7 +419,7 @@ func TestBuildTicketRunArgsForwardsTheResolvedTemporalAddress(t *testing.T) {
 	entry := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
 
 	args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{TemporalAddress: "10.0.0.5:7233"})
-	if !containsArg(args, "-temporal-address", "10.0.0.5:7233") {
+	if !requestdrivertest.ContainsArg(args, "-temporal-address", "10.0.0.5:7233") {
 		t.Errorf("args = %v, want -temporal-address 10.0.0.5:7233", args)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 const handoverVerify = "python3 -m unittest tests/test_product_lab.py"
@@ -43,7 +44,7 @@ func TestPlanningTakesHandedOverTicketsWithoutThePlanningJob(t *testing.T) {
 	ticket := validBrownfieldTicket(handoverVerify, 1, 2)
 	dataDir, id := handedOverPlanFixture(t, map[string]string{"001.spec.md": ticket})
 
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -70,7 +71,7 @@ func TestPlanningTakesHandedOverTicketsWithoutThePlanningJob(t *testing.T) {
 func TestPlanningHaltsOnAHandedOverPlanThatFailsValidation(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id := handedOverPlanFixture(t, map[string]string{"001.spec.md": validBrownfieldTicket("make something-else", 1, 2)})
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -96,7 +97,7 @@ func TestPlanningRunsThePlanningJobAfterAPlanRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, gotVerify := stubPlanTicketsRunner([]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: ticket}}, &request.PlanEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), runner, failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)

@@ -12,6 +12,7 @@ import (
 	"buildgate/internal/oraclecanary"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 const materializerOracleBody = "package x\n\nimport \"testing\"\n\nfunc TestOracleX(t *testing.T) {}\n"
@@ -96,7 +97,7 @@ func planTwoTickets(dp *deps, t *testing.T, dataDir string) *request.Request {
 		{Filename: "002.spec.md", Content: validBrownfieldTicket("make verify", 2)},
 	}
 	runner, _ := stubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), runner, failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
 	r, err := request.Load(dataDir, "req-1")

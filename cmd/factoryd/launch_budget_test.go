@@ -11,6 +11,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 )
@@ -138,7 +139,7 @@ func TestAdvancePlanningQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestCostBudgetMicroUSD: 1_000_000}}
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, cfg, failingPlanTicketsRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, cfg, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatalf("advancePlanning: %v", err)
 	}
 	if r.State != request.StateQuarantined {
@@ -189,7 +190,7 @@ func TestAdvanceBuildingQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 1000}}
-	if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -213,7 +214,7 @@ func TestAdvanceBuildingLaunchesWhenUnderBudget(t *testing.T) {
 	runner := acceptingBuildRunner(t, dataDir)
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 1_000_000, RequestCostBudgetMicroUSD: 1_000_000}}
-	if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), runner); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 

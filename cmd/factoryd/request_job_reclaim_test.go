@@ -90,7 +90,7 @@ func TestRequestResumeRefusalsRefusesADraftingStepWhileItsContainerLives(t *test
 		t.Fatal(err)
 	}
 
-	containers := &fakeJobContainers{ids: []string{"abc123"}}
+	containers := &fakeJobContainers{IDs: []string{"abc123"}}
 	reasons, err := requestdriver.ResumeGate{Containers: containers}.RequestResumeRefusals(context.Background(), dataDir, "docker", r)
 	if err != nil {
 		t.Fatal(err)
@@ -98,8 +98,8 @@ func TestRequestResumeRefusalsRefusesADraftingStepWhileItsContainerLives(t *test
 	if len(reasons) != 1 || !strings.Contains(reasons[0], "spec_drafting step is still alive") || !strings.Contains(reasons[0], "abc123") {
 		t.Fatalf("reasons = %v, want one naming the live spec_drafting container", reasons)
 	}
-	if len(containers.asked) != 1 || containers.asked[0] != "req-draft" {
-		t.Errorf("listed containers of %v, want the request id req-draft", containers.asked)
+	if len(containers.Asked) != 1 || containers.Asked[0] != "req-draft" {
+		t.Errorf("listed containers of %v, want the request id req-draft", containers.Asked)
 	}
 
 	if reasons, err = (requestdriver.ResumeGate{Containers: &fakeJobContainers{}}).RequestResumeRefusals(context.Background(), dataDir, "docker", r); err != nil || len(reasons) != 0 {

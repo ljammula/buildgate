@@ -13,6 +13,7 @@ import (
 	"buildgate/internal/handoff"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 )
 
@@ -22,7 +23,7 @@ import (
 func checkQuarantinedBuildRunner(t *testing.T, dataDir, branch, baseSHA, resultSHA string, failedChecks ...string) requestdriver.TicketRunner {
 	t.Helper()
 	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		ticket := argValue(args, "-ticket")
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
 		if onReady != nil {
 			onReady(&run.Run{ID: ticket})
 		}
@@ -72,24 +73,24 @@ func TestAdvanceBuildingCheckCorrectiveRoundGivesTheBuildTheHandoff(t *testing.T
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/7"}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-	if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {
 		t.Fatalf("corrective runner calls = %d, want 1", *calls)
 	}
-	if got := argValue(*lastArgs, "-ticket"); got != id+"-001-corrective1" {
+	if got := requestdrivertest.ArgValue(*lastArgs, "-ticket"); got != id+"-001-corrective1" {
 		t.Errorf("-ticket = %q, want the corrective round's own run id", got)
 	}
-	if got := argValue(*lastArgs, "-on-branch"); got != branch {
+	if got := requestdrivertest.ArgValue(*lastArgs, "-on-branch"); got != branch {
 		t.Errorf("-on-branch = %q, want %q", got, branch)
 	}
-	if got := argValue(*lastArgs, "-diff-base"); got != baseSHA {
+	if got := requestdrivertest.ArgValue(*lastArgs, "-diff-base"); got != baseSHA {
 		t.Errorf("-diff-base = %q, want %q", got, baseSHA)
 	}
 
 	// The record goes to the build as its own input...
-	record, err := os.ReadFile(argValue(*lastArgs, "-earlier-attempt"))
+	record, err := os.ReadFile(requestdrivertest.ArgValue(*lastArgs, "-earlier-attempt"))
 	if err != nil {
 		t.Fatalf("read -earlier-attempt: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestAdvanceBuildingCheckCorrectiveRoundGivesTheBuildTheHandoff(t *testing.T
 		}
 	}
 	// ...and never inside the spec, which the round's reviews are judged against.
-	spec, err := os.ReadFile(argValue(*lastArgs, "-spec"))
+	spec, err := os.ReadFile(requestdrivertest.ArgValue(*lastArgs, "-spec"))
 	if err != nil {
 		t.Fatalf("read -spec: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: tc.budget}
-			if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if got := *calls == 1; got != tc.wantRound {
@@ -203,7 +204,7 @@ func TestCheckCorrectiveRoundIsNotSpentOnAGateThatFailsTheSameWayOnTheBaseCommit
 			dataDir, id := buildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				ticket := argValue(args, "-ticket")
+				ticket := requestdrivertest.ArgValue(args, "-ticket")
 				if onReady != nil {
 					onReady(&run.Run{ID: ticket})
 				}
@@ -220,7 +221,7 @@ func TestCheckCorrectiveRoundIsNotSpentOnAGateThatFailsTheSameWayOnTheBaseCommit
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-			if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if got := *calls == 1; got != tc.wantRound {
@@ -259,7 +260,7 @@ func TestCheckCorrectiveRoundNeedsAHandoffTheRunVouchesFor(t *testing.T) {
 			dataDir, id := buildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				ticket := argValue(args, "-ticket")
+				ticket := requestdrivertest.ArgValue(args, "-ticket")
 				if onReady != nil {
 					onReady(&run.Run{ID: ticket})
 				}
@@ -271,7 +272,7 @@ func TestCheckCorrectiveRoundNeedsAHandoffTheRunVouchesFor(t *testing.T) {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-			if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if *calls != 0 {
@@ -301,7 +302,7 @@ func TestCheckCorrectiveRoundSharesTheBudgetWithTheReviewRound(t *testing.T) {
 			return quarantinedOn(t, dataDir, roundRunID, branch, base, result, "lint")
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-		if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		if *calls != 1 {
@@ -321,7 +322,7 @@ func TestCheckCorrectiveRoundSharesTheBudgetWithTheReviewRound(t *testing.T) {
 			return quarantinedOn(t, dataDir, roundRunID, branch, base, result, "unit_tests")
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
-		if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		if *calls != 2 {
@@ -397,7 +398,7 @@ func TestCheckCorrectiveRoundEligibilityFromTheRunRecord(t *testing.T) {
 			dataDir, id := buildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				ticket := argValue(args, "-ticket")
+				ticket := requestdrivertest.ArgValue(args, "-ticket")
 				if onReady != nil {
 					onReady(&run.Run{ID: ticket})
 				}
@@ -412,14 +413,14 @@ func TestCheckCorrectiveRoundEligibilityFromTheRunRecord(t *testing.T) {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-			if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if got := *calls == 1; got != tc.wantRound {
 				t.Fatalf("corrective round ran = %v, want %v", got, tc.wantRound)
 			}
 			if tc.wantRound {
-				record, err := os.ReadFile(argValue(*lastArgs, "-earlier-attempt"))
+				record, err := os.ReadFile(requestdrivertest.ArgValue(*lastArgs, "-earlier-attempt"))
 				if err != nil || !strings.Contains(string(record), "overflows") || !strings.Contains(string(record), "`lint`") {
 					t.Errorf("the record = %q, %v, want the gate and the reviewer's finding", record, err)
 				}
@@ -446,7 +447,7 @@ func TestCheckCorrectiveRoundKeepsTheDiffScopeCheckOnTheRequest(t *testing.T) {
 				return quarantinedOn(t, dataDir, roundRunID, branch, base, result, checks...)
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: budget}
-			if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			loaded, err := request.Load(dataDir, id)
@@ -507,7 +508,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 0}
 			drive := func() {
 				t.Helper()
-				if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+				if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 					t.Fatalf("driveRequests: %v", err)
 				}
 			}
@@ -516,7 +517,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			if err != nil || quarantined.State != request.StateQuarantined {
 				t.Fatalf("after the first build: %v, %v, want quarantined", quarantined.State, err)
 			}
-			if got := argValue(builds[0], "-earlier-attempt"); got != "" {
+			if got := requestdrivertest.ArgValue(builds[0], "-earlier-attempt"); got != "" {
 				t.Fatalf("the ticket's first build was given a record: %q", got)
 			}
 			if handled, err := retryRequestFrom(dp, dataDir, quarantined, "", tc.fromScratch, time.Now()); err != nil || !handled {
@@ -531,13 +532,13 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			if tc.wantDiffBase != "" {
 				wantBranch = branch
 			}
-			if got := argValue(rebuild, "-on-branch"); got != wantBranch {
+			if got := requestdrivertest.ArgValue(rebuild, "-on-branch"); got != wantBranch {
 				t.Errorf("the rebuild runs -on-branch %q, want %q", got, wantBranch)
 			}
-			if got := argValue(rebuild, "-diff-base"); got != tc.wantDiffBase {
+			if got := requestdrivertest.ArgValue(rebuild, "-diff-base"); got != tc.wantDiffBase {
 				t.Errorf("the rebuild's -diff-base = %q, want %q", got, tc.wantDiffBase)
 			}
-			recordPath := argValue(rebuild, "-earlier-attempt")
+			recordPath := requestdrivertest.ArgValue(rebuild, "-earlier-attempt")
 			if (recordPath != "") != (tc.wantRecord != "") {
 				t.Fatalf("-earlier-attempt = %q, want a record: %v", recordPath, tc.wantRecord != "")
 			}
@@ -573,10 +574,10 @@ func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 	dataDir, id := buildingFixture(dp, t, 1)
 	var builds [][]string
 	buildRunner := quarantinedThenAcceptedBuildRunner(t, dataDir, id, [2]string{fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)}, []string{"lint"}, nil, &builds)
-	cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}}
+	cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{T: t, OK: true}}}
 	drive := func() {
 		t.Helper()
-		if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -606,10 +607,10 @@ func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 	if len(builds) != 2 {
 		t.Fatalf("builds = %d, want the first and the one the resume started", len(builds))
 	}
-	if hasFlag(builds[1], "-on-branch") || hasFlag(builds[1], "-diff-base") {
+	if requestdrivertest.HasFlag(builds[1], "-on-branch") || requestdrivertest.HasFlag(builds[1], "-diff-base") {
 		t.Fatalf("resume -from scratch built on the attempt's branch: %v", builds[1])
 	}
-	assertRecordOf(t, argValue(builds[1], "-earlier-attempt"), "This build starts again from the base commit: none of that attempt's changes are in the workspace", id+"-001")
+	assertRecordOf(t, requestdrivertest.ArgValue(builds[1], "-earlier-attempt"), "This build starts again from the base commit: none of that attempt's changes are in the workspace", id+"-001")
 }
 
 // TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun: ticket 2
@@ -624,14 +625,14 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 	var builds [][]string
 	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		builds = append(builds, args)
-		ticket := argValue(args, "-ticket")
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
 		onReady(&run.Run{ID: ticket})
 		if ticket == id+"-001" || len(builds) > 2 {
 			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, BaseSHA: base, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
 		}
 		rr := quarantinedOn(t, dataDir, ticket, branch2, base, result, "lint")
 		rr.RequestID = id
-		sum, err := evidence.SHA256File(argValue(args, "-spec"))
+		sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -643,7 +644,7 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 	}
 	drive := func() *request.Request {
 		t.Helper()
-		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		r, err := request.Load(dataDir, id)
@@ -659,7 +660,7 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 	if r.State != request.StateQuarantined || len(builds) != 2 {
 		t.Fatalf("state %s after %d builds, want ticket 1 accepted and ticket 2 quarantined", r.State, len(builds))
 	}
-	if got := argValue(builds[1], "-prior-run"); got != id+"-001" {
+	if got := requestdrivertest.ArgValue(builds[1], "-prior-run"); got != id+"-001" {
 		t.Fatalf("ticket 2's first build: -prior-run = %q, want ticket 1's run", got)
 	}
 	if handled, err := retryRequest(dp, dataDir, r, "", time.Now()); err != nil || !handled {
@@ -669,11 +670,11 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 	if len(builds) != 3 {
 		t.Fatalf("builds = %d, want the retry's rebuild", len(builds))
 	}
-	if got := argValue(builds[2], "-on-branch"); got != branch2 {
+	if got := requestdrivertest.ArgValue(builds[2], "-on-branch"); got != branch2 {
 		t.Errorf("-on-branch = %q, want %q", got, branch2)
 	}
-	if hasFlag(builds[2], "-prior-run") {
-		t.Errorf("the rebuild names -prior-run %q beside -on-branch", argValue(builds[2], "-prior-run"))
+	if requestdrivertest.HasFlag(builds[2], "-prior-run") {
+		t.Errorf("the rebuild names -prior-run %q beside -on-branch", requestdrivertest.ArgValue(builds[2], "-prior-run"))
 	}
 }
 
@@ -686,7 +687,7 @@ func quarantinedThenAcceptedBuildRunner(t *testing.T, dataDir, id string, shas [
 	branch := "factoryd/" + id + "-001"
 	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		*builds = append(*builds, args)
-		ticket := argValue(args, "-ticket")
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
 		if onReady != nil {
 			onReady(&run.Run{ID: ticket})
 		}
@@ -695,7 +696,7 @@ func quarantinedThenAcceptedBuildRunner(t *testing.T, dataDir, id string, shas [
 		}
 		rr := quarantinedOn(t, dataDir, ticket, branch, shas[0], shas[1], failed...)
 		rr.RequestID = id
-		sum, err := evidence.SHA256File(argValue(args, "-spec"))
+		sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -765,10 +766,10 @@ func TestABuildThatFollowsAnUnfinishedOneIsGivenTheSameRecord(t *testing.T) {
 				attemptResult = base
 			}
 			buildRunner := quarantinedThenLostBuildRunner(t, dataDir, id, repoDir, [2]string{base, attemptResult}, tc.onAttemptsBranch, &builds, &started)
-			cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}}
+			cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{T: t, OK: true}}}
 			drive := func() *request.Request {
 				t.Helper()
-				if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+				if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 					t.Fatalf("driveRequests: %v", err)
 				}
 				r, err := request.Load(dataDir, id)
@@ -792,8 +793,8 @@ func TestABuildThatFollowsAnUnfinishedOneIsGivenTheSameRecord(t *testing.T) {
 			if lost.State != request.StateResumeReview {
 				t.Fatalf("after the lost rebuild: %s, want resume_review", lost.State)
 			}
-			if argValue(builds[1], "-earlier-attempt") == "" || started[1].EarlierAttemptOf != attemptID {
-				t.Fatalf("the rebuild: -earlier-attempt %q, carries %q, want the record of %s", argValue(builds[1], "-earlier-attempt"), started[1].EarlierAttemptOf, attemptID)
+			if requestdrivertest.ArgValue(builds[1], "-earlier-attempt") == "" || started[1].EarlierAttemptOf != attemptID {
+				t.Fatalf("the rebuild: -earlier-attempt %q, carries %q, want the record of %s", requestdrivertest.ArgValue(builds[1], "-earlier-attempt"), started[1].EarlierAttemptOf, attemptID)
 			}
 			if tc.withdrawn {
 				if err := os.Remove(filepath.Join(run.Dir(dataDir, attemptID), "handoff.json")); err != nil {
@@ -811,17 +812,17 @@ func TestABuildThatFollowsAnUnfinishedOneIsGivenTheSameRecord(t *testing.T) {
 				t.Fatalf("builds = %d, want three", len(builds))
 			}
 			following := builds[2]
-			if got := argValue(following, "-resume-worktree-of"); (got != "") != tc.wantResume {
+			if got := requestdrivertest.ArgValue(following, "-resume-worktree-of"); (got != "") != tc.wantResume {
 				t.Fatalf("-resume-worktree-of = %q, want a resume: %v", got, tc.wantResume)
 			}
-			recordPath := argValue(following, "-earlier-attempt")
+			recordPath := requestdrivertest.ArgValue(following, "-earlier-attempt")
 			if tc.wantOpens == "" {
 				if recordPath != "" || started[2].EarlierAttemptOf != "" {
 					t.Fatalf("-earlier-attempt = %q, carries %q, want no record: the attempt no longer vouches for one", recordPath, started[2].EarlierAttemptOf)
 				}
 				return
 			}
-			if recordPath == argValue(builds[1], "-earlier-attempt") && tc.wantResume {
+			if recordPath == requestdrivertest.ArgValue(builds[1], "-earlier-attempt") && tc.wantResume {
 				t.Errorf("the resumed build was handed the lost build's own record file %q, want one written for it", recordPath)
 			}
 			assertRecordOf(t, recordPath, tc.wantOpens, attemptID)
@@ -845,7 +846,7 @@ func quarantinedThenLostBuildRunner(t *testing.T, dataDir, id, repoDir string, s
 	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		*builds = append(*builds, args)
 		n := len(*builds)
-		runID := fmt.Sprintf("%s-build%d", argValue(args, "-ticket"), n)
+		runID := fmt.Sprintf("%s-build%d", requestdrivertest.ArgValue(args, "-ticket"), n)
 		current := &run.Run{ID: runID}
 		onReady(current)
 		*started = append(*started, current)
@@ -853,7 +854,7 @@ func quarantinedThenLostBuildRunner(t *testing.T, dataDir, id, repoDir string, s
 		case 1:
 			rr := quarantinedOn(t, dataDir, runID, branch, shas[0], shas[1], "lint")
 			rr.RequestID = id
-			sum, err := evidence.SHA256File(argValue(args, "-spec"))
+			sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -904,8 +905,8 @@ func TestALostBuildThatWasGivenNoRecordPassesNoneOn(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id, _ := lostBuildFixture(dp, t, request.ResumeRound)
 	var calls [][]string
-	advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}, capturingBuildRunner(t, dataDir, &calls))
-	if len(calls) != 1 || hasFlag(calls[0], "-earlier-attempt") {
+	advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{T: t, OK: true}}, capturingBuildRunner(t, dataDir, &calls))
+	if len(calls) != 1 || requestdrivertest.HasFlag(calls[0], "-earlier-attempt") {
 		t.Fatalf("calls = %v, want one build with no -earlier-attempt", calls)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 // handedOverRequest saves a request in spec_drafting whose spec the operator
@@ -36,7 +37,7 @@ func handedOverRequest(t *testing.T, dataDir, spec string) *request.Request {
 func TestAdvanceSpecDraftingTakesAHandedOverSpecWithoutTheDraftingJob(t *testing.T) {
 	dataDir := t.TempDir()
 	r := handedOverRequest(t, dataDir, canonicalValidSpec)
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if r.State != request.StateSpecReview {
@@ -64,7 +65,7 @@ func TestAdvanceSpecDraftingHaltsOnAnInvalidOrMissingHandedOverSpec(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			r := handedOverRequest(t, dataDir, spec)
-			if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), time.Now()); err != nil {
+			if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			if r.State != request.StateHalted {

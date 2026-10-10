@@ -8,6 +8,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 // TestAdvancePlanningClearsStaleTicketArtifactsOnReplan: a re-plan that
@@ -41,7 +42,7 @@ func TestAdvancePlanningClearsStaleTicketArtifactsOnReplan(t *testing.T) {
 
 	tickets := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: validBrownfieldTicket(verify, 1, 2)}}
 	runner, _ := stubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), runner, failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 

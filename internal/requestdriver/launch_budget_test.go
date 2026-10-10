@@ -9,6 +9,7 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 )
@@ -137,7 +138,7 @@ func TestAdvanceSpecDraftingQuarantinesWhenRequestBudgetExhausted(t *testing.T) 
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 500}}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, cfg, failingSpecDraftRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, cfg, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatalf("advanceSpecDrafting: %v", err)
 	}
 	if r.State != request.StateQuarantined {
@@ -158,7 +159,7 @@ func TestAdvanceSpecDraftingQuarantinesWhenRequestBudgetExhausted(t *testing.T) 
 // maxReviewRounds has budget left.
 func TestRunCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	dp := newFakeDeps(t)
-	r, dataDir := stubPRReviewTestFixture(t, 1)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	r.PlanEvidence = &request.PlanEvidence{Spend: &request.JobSpend{InputTokens: 5000, At: time.Now()}}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)

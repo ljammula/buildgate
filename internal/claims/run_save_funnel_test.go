@@ -170,6 +170,13 @@ func TestNoDirectRunSaveOutsideRunPackage(t *testing.T) {
 				if filepath.Base(path) == "run" && filepath.Dir(path) == filepath.Join(root, "internal") {
 					return filepath.SkipDir
 				}
+				// requestdrivertest is test fixtures in non-test files (shared by
+				// two test packages, and imported by tests only:
+				// TestRequestdrivertestIsATestsOnlyPackage). Like a _test.go
+				// file, a fixture seeds a run record with Save.
+				if path == filepath.Join(root, "internal", "requestdriver", "requestdrivertest") {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if filepath.Ext(path) != ".go" || isTestFile(path) {

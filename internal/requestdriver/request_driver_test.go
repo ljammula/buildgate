@@ -13,6 +13,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 func TestCapOracleFeedbackKeepsNewestAndValidUTF8(t *testing.T) {
@@ -61,7 +62,7 @@ func TestDriveRequestsIsANoOpWhenNothingIsInADrivenState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -93,7 +94,7 @@ func TestDriveRequestsPicksOldestSubmittedFirst(t *testing.T) {
 		}
 	}
 
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -132,7 +133,7 @@ func TestAdvanceSpecDraftingJobFailureHaltsWithReasonAndNotification(t *testing.
 	}
 
 	runner, _ := stubSpecDraftRunner("", nil, errUnreachableRelay)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -179,7 +180,7 @@ func TestAdvanceSpecDraftingMalformedSkeletonHaltsNamingHeading(t *testing.T) {
 
 	malformed := "# Spec\n\n## Problem\n\nx\n" // missing every later heading
 	runner, _ := stubSpecDraftRunner(malformed, &request.SpecEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -250,7 +251,7 @@ None known.
 None.
 `
 	runner, _ := stubSpecDraftRunner(draft, &request.SpecEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -321,7 +322,7 @@ None known.
 None.
 `
 	runner, _ := stubSpecDraftRunner(draft, &request.SpecEvidence{}, nil)
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -381,7 +382,7 @@ func TestBuildRequestBuildArgsEmitsPrClosesIssueForIssueSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRequestBuildArgs: %v", err)
 	}
-	if !containsArg(args, "-pr-closes-issue", "acme/widgets#42") {
+	if !requestdrivertest.ContainsArg(args, "-pr-closes-issue", "acme/widgets#42") {
 		t.Errorf("args = %v, want -pr-closes-issue acme/widgets#42", args)
 	}
 
@@ -531,7 +532,7 @@ func TestBuildRequestBuildArgsCarriesRequestHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRequestBuildArgs: %v", err)
 	}
-	if !containsArg(args, "-execution-harness", "pifork") {
+	if !requestdrivertest.ContainsArg(args, "-execution-harness", "pifork") {
 		t.Errorf("args = %v, want -execution-harness pifork", args)
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	wsisolation "buildgate/internal/workspace"
 )
@@ -34,34 +35,34 @@ func seedLostStep(t *testing.T, dataDir, id string, state request.State, lostRun
 // fakeJobContainers reports ids as the containers labelled for a request's
 // drafting job, and records the request ids it was asked about.
 type fakeJobContainers struct {
-	ids   []string
-	asked []string
+	IDs   []string
+	Asked []string
 }
 
 func (f *fakeJobContainers) RunContainerIDs(_ context.Context, _, _, runID string) ([]string, error) {
-	f.asked = append(f.asked, runID)
-	return f.ids, nil
+	f.Asked = append(f.Asked, runID)
+	return f.IDs, nil
 }
 
 // fakeResumePreconditions stands in for the Docker and git checks of a
 // resume. It records the run ids it was asked about and the round limit it
 // saw; err, when set, is what the check returns.
 type fakeResumePreconditions struct {
-	t         *testing.T
-	ok        bool
-	reasons   []string
-	err       error
-	asked     []string
-	maxRounds int
+	T         *testing.T
+	OK        bool
+	Reasons   []string
+	Err       error
+	Asked     []string
+	MaxRounds int
 }
 
 func (f *fakeResumePreconditions) CheckResumePreconditions(_ context.Context, _, _, haltedRunID, specSHA256 string, rounds int) (bool, []string, error) {
 	if specSHA256 == "" {
-		f.t.Error("the resume check got no ticket spec hash")
+		f.T.Error("the resume check got no ticket spec hash")
 	}
-	f.asked = append(f.asked, haltedRunID)
-	f.maxRounds = rounds
-	return f.ok, f.reasons, f.err
+	f.Asked = append(f.Asked, haltedRunID)
+	f.MaxRounds = rounds
+	return f.OK, f.Reasons, f.Err
 }
 
 // lostBuildFixture is a two-ticket request in resume_review whose ticket-2
@@ -129,7 +130,7 @@ func capturingBuildRunner(t *testing.T, dataDir string, calls *[][]string) reque
 func TestAdvanceBuildingResumeRoundAdoptsTheLostWorktreeAndKeepsIt(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id, marker := lostBuildFixture(dp, t, request.ResumeRound)
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	var calls [][]string
 
 	got := advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, capturingBuildRunner(t, dataDir, &calls))
@@ -137,14 +138,14 @@ func TestAdvanceBuildingResumeRoundAdoptsTheLostWorktreeAndKeepsIt(t *testing.T)
 	if len(calls) != 1 {
 		t.Fatalf("build runner called %d times, want 1", len(calls))
 	}
-	if v := argValue(calls[0], "-resume-worktree-of"); v != "lost-run" {
+	if v := requestdrivertest.ArgValue(calls[0], "-resume-worktree-of"); v != "lost-run" {
 		t.Errorf("-resume-worktree-of = %q, want the lost run", v)
 	}
-	if hasFlag(calls[0], "-prior-run") {
-		t.Errorf("a resume passed -prior-run (%q); -resume-worktree-of refuses it and the worktree already holds the chain", argValue(calls[0], "-prior-run"))
+	if requestdrivertest.HasFlag(calls[0], "-prior-run") {
+		t.Errorf("a resume passed -prior-run (%q); -resume-worktree-of refuses it and the worktree already holds the chain", requestdrivertest.ArgValue(calls[0], "-prior-run"))
 	}
-	if len(pre.asked) != 1 || (pre.asked)[0] != "lost-run" || pre.maxRounds != requestdriver.DefaultMaxRounds {
-		t.Errorf("preconditions asked %v with max rounds %d, want lost-run with %d", pre.asked, pre.maxRounds, requestdriver.DefaultMaxRounds)
+	if len(pre.Asked) != 1 || (pre.Asked)[0] != "lost-run" || pre.MaxRounds != requestdriver.DefaultMaxRounds {
+		t.Errorf("preconditions asked %v with max rounds %d, want lost-run with %d", pre.Asked, pre.MaxRounds, requestdriver.DefaultMaxRounds)
 	}
 	if _, err := os.Stat(marker.WorktreePath); err != nil {
 		t.Errorf("the kept worktree was cleared before it was adopted: %v", err)
@@ -160,9 +161,9 @@ func TestAdvanceBuildingResumeRoundAdoptsTheLostWorktreeAndKeepsIt(t *testing.T)
 func TestAdvanceBuildingConsumesTheResumeDecisionOnceTheRunStarts(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id, _ := lostBuildFixture(dp, t, request.ResumeRound)
-	gate := requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, ok: true}}
+	gate := requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{T: t, OK: true}}
 	runner := func(_ context.Context, args []string, onReady func(*run.Run)) error {
-		onReady(&run.Run{ID: argValue(args, "-ticket"), State: run.StateReady})
+		onReady(&run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateReady})
 		onDisk, err := request.Load(dataDir, id)
 		if err != nil {
 			t.Fatal(err)
@@ -170,10 +171,10 @@ func TestAdvanceBuildingConsumesTheResumeDecisionOnceTheRunStarts(t *testing.T) 
 		if onDisk.ResumeDecision != nil {
 			t.Errorf("decision %+v still on disk once the run started; a crash now would reuse it for the next build", onDisk.ResumeDecision)
 		}
-		if onDisk.Tickets[1].RunID != argValue(args, "-ticket") {
+		if onDisk.Tickets[1].RunID != requestdrivertest.ArgValue(args, "-ticket") {
 			t.Errorf("ticket run id %q, want the new run", onDisk.Tickets[1].RunID)
 		}
-		return (&run.Run{ID: argValue(args, "-ticket"), State: run.StateHalted, HaltError: "boom"}).Save(dataDir)
+		return (&run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateHalted, HaltError: "boom"}).Save(dataDir)
 	}
 	got := advanceBuildingOnce(dp, t, dataDir, id, gate, runner)
 	if got.State != request.StateHalted {
@@ -181,23 +182,23 @@ func TestAdvanceBuildingConsumesTheResumeDecisionOnceTheRunStarts(t *testing.T) 
 	}
 
 	// A later retry of the same ticket rebuilds: the spent decision is not reused.
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	var calls [][]string
 	advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, capturingBuildRunner(t, dataDir, &calls))
-	if len(calls) != 1 || hasFlag(calls[0], "-resume-worktree-of") || len(pre.asked) != 0 {
-		t.Errorf("rebuild after a consumed decision: calls %v, preconditions asked %v; want a fresh build", calls, pre.asked)
+	if len(calls) != 1 || requestdrivertest.HasFlag(calls[0], "-resume-worktree-of") || len(pre.Asked) != 0 {
+		t.Errorf("rebuild after a consumed decision: calls %v, preconditions asked %v; want a fresh build", calls, pre.Asked)
 	}
 }
 
 func TestAdvanceBuildingRefusedPreconditionsReturnToResumeReviewWithReasons(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id, marker := lostBuildFixture(dp, t, request.ResumeRound)
-	gate := requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, reasons: []string{"1 sandbox container(s) labelled for run lost-run still exist", "the history was rewritten"}}}
+	gate := requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{T: t, Reasons: []string{"1 sandbox container(s) labelled for run lost-run still exist", "the history was rewritten"}}}
 
-	got := advanceBuildingOnce(dp, t, dataDir, id, gate, failingBuildRunner(t))
+	got := advanceBuildingOnce(dp, t, dataDir, id, gate, requestdrivertest.FailingBuildRunner(t))
 
 	if got.State != request.StateResumeReview || got.Resume == nil || got.Resume.Generation != 2 || got.ResumeDecision != nil {
 		t.Fatalf("state %s resume %+v decision %+v, want resume_review at generation 2 with no decision", got.State, got.Resume, got.ResumeDecision)
@@ -224,19 +225,19 @@ func TestAdvanceBuildingRefusedPreconditionsReturnToResumeReviewWithReasons(t *t
 func TestAdvanceBuildingResumeScratchClearsKeptRunsAndBuildsFresh(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id, marker := lostBuildFixture(dp, t, request.ResumeScratch)
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	var calls [][]string
 
 	got := advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, capturingBuildRunner(t, dataDir, &calls))
 
-	if len(calls) != 1 || hasFlag(calls[0], "-resume-worktree-of") {
+	if len(calls) != 1 || requestdrivertest.HasFlag(calls[0], "-resume-worktree-of") {
 		t.Fatalf("calls %v, want one fresh build without -resume-worktree-of", calls)
 	}
-	if argValue(calls[0], "-prior-run") != "prev-run" {
-		t.Errorf("-prior-run = %q, want the chain from ticket 1", argValue(calls[0], "-prior-run"))
+	if requestdrivertest.ArgValue(calls[0], "-prior-run") != "prev-run" {
+		t.Errorf("-prior-run = %q, want the chain from ticket 1", requestdrivertest.ArgValue(calls[0], "-prior-run"))
 	}
-	if len(pre.asked) != 0 {
-		t.Errorf("preconditions asked %v for a scratch rebuild, want none", pre.asked)
+	if len(pre.Asked) != 0 {
+		t.Errorf("preconditions asked %v for a scratch rebuild, want none", pre.Asked)
 	}
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
 		t.Errorf("the lost run's kept worktree survived a rebuild from scratch (stat err = %v)", err)
@@ -262,13 +263,13 @@ func TestAdvanceBuildingIgnoresAResumeDecisionOfAStaleGeneration(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	var calls [][]string
 
 	advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, capturingBuildRunner(t, dataDir, &calls))
 
-	if len(calls) != 1 || hasFlag(calls[0], "-resume-worktree-of") || len(pre.asked) != 0 {
-		t.Errorf("calls %v, preconditions asked %v; want a fresh build for a stale decision", calls, pre.asked)
+	if len(calls) != 1 || requestdrivertest.HasFlag(calls[0], "-resume-worktree-of") || len(pre.Asked) != 0 {
+		t.Errorf("calls %v, preconditions asked %v; want a fresh build for a stale decision", calls, pre.Asked)
 	}
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
 		t.Errorf("a stale decision kept the old worktree (stat err = %v)", err)
@@ -279,7 +280,7 @@ func TestResumeMainDefaultsToRoundAndChecksTheKeptWorktree(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	dataDir, id, _ := lostBuildFixture(dp, t, "")
 
 	if err := resumeMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre}); err != nil {
@@ -289,8 +290,8 @@ func TestResumeMainDefaultsToRoundAndChecksTheKeptWorktree(t *testing.T) {
 	if got.State != request.StateBuilding || got.PendingResumeVerb() != request.ResumeRound {
 		t.Errorf("state %s verb %q, want building with the default round decision", got.State, got.PendingResumeVerb())
 	}
-	if len(pre.asked) != 1 || (pre.asked)[0] != "lost-run" {
-		t.Errorf("preconditions asked %v, want one check of lost-run", pre.asked)
+	if len(pre.Asked) != 1 || (pre.Asked)[0] != "lost-run" {
+		t.Errorf("preconditions asked %v, want one check of lost-run", pre.Asked)
 	}
 	if len(*woken) != 1 || (*woken)[0] != id {
 		t.Errorf("woken %v, want one wake", *woken)
@@ -301,7 +302,7 @@ func TestResumeMainRefusesUpFrontWhenThePreconditionsFail(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
-	pre := &fakeResumePreconditions{t: t, reasons: []string{"a container of the lost run is alive"}}
+	pre := &fakeResumePreconditions{T: t, Reasons: []string{"a container of the lost run is alive"}}
 	dataDir, id, _ := lostBuildFixture(dp, t, "")
 
 	err := resumeMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre})
@@ -325,7 +326,7 @@ func TestResumeMainScratchSkipsThePreconditionsAndRejectsAnUnknownFrom(t *testin
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
-	pre := &fakeResumePreconditions{t: t, reasons: []string{"never consulted"}}
+	pre := &fakeResumePreconditions{T: t, Reasons: []string{"never consulted"}}
 	dataDir, id, _ := lostBuildFixture(dp, t, "")
 
 	if err := resumeMainWith(dp, []string{"-data-dir", dataDir, "-from", "bogus", id}, requestdriver.ResumeGate{Preconditions: pre}); err == nil || !strings.Contains(err.Error(), "-from") {
@@ -335,8 +336,8 @@ func TestResumeMainScratchSkipsThePreconditionsAndRejectsAnUnknownFrom(t *testin
 		t.Fatalf("resumeMain -from scratch: %v", err)
 	}
 	got, _ := request.Load(dataDir, id)
-	if got.PendingResumeVerb() != request.ResumeScratch || len(pre.asked) != 0 || len(*woken) != 1 {
-		t.Errorf("verb %q, asked %v, woken %v; want scratch, no check, one wake", got.PendingResumeVerb(), pre.asked, *woken)
+	if got.PendingResumeVerb() != request.ResumeScratch || len(pre.Asked) != 0 || len(*woken) != 1 {
+		t.Errorf("verb %q, asked %v, woken %v; want scratch, no check, one wake", got.PendingResumeVerb(), pre.Asked, *woken)
 	}
 }
 
@@ -362,7 +363,7 @@ func TestAdvanceBuildingHaltedRunKeptForResumeEntersResumeReview(t *testing.T) {
 	for _, kept := range []bool{true, false} {
 		dataDir, id := buildingFixture(dp, t, 1)
 		runner := func(_ context.Context, args []string, onReady func(*run.Run)) error {
-			rid := argValue(args, "-ticket")
+			rid := requestdrivertest.ArgValue(args, "-ticket")
 			onReady(&run.Run{ID: rid, State: run.StateReady})
 			return (&run.Run{ID: rid, State: run.StateHalted, HaltError: "heartbeat lost", KeptForResume: kept}).Save(dataDir)
 		}
@@ -388,7 +389,7 @@ func TestAdvanceBuildingHaltedRunKeptForResumeEntersResumeReview(t *testing.T) {
 func TestAdvanceBuildingPreconditionCheckErrorReturnsToResumeReview(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id, marker := lostBuildFixture(dp, t, request.ResumeRound)
-	got := advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{t: t, err: errors.New("docker: cannot connect to the daemon")}}, failingBuildRunner(t))
+	got := advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: &fakeResumePreconditions{T: t, Err: errors.New("docker: cannot connect to the daemon")}}, requestdrivertest.FailingBuildRunner(t))
 	if got.State != request.StateResumeReview || got.Resume == nil || len(got.Resume.Refused) != 1 || !strings.Contains(got.Resume.Refused[0], "cannot connect to the daemon") {
 		t.Fatalf("state %s resume %+v, want resume_review naming the error", got.State, got.Resume)
 	}
@@ -440,7 +441,7 @@ func TestResumeRoundWithNoKeptBuildIsRefusedNamingScratch(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	dataDir, id := buildingFixture(dp, t, 1)
 	r, _ := request.Load(dataDir, id)
 	if err := r.EnterResumeReview(request.StateBuilding, "", time.Now()); err != nil {
@@ -453,8 +454,8 @@ func TestResumeRoundWithNoKeptBuildIsRefusedNamingScratch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no kept build to continue; use -from scratch") {
 		t.Fatalf("resumeMain err = %v, want the no-kept-build refusal", err)
 	}
-	if len(*woken) != 0 || len(pre.asked) != 0 {
-		t.Errorf("woken %v asked %v, want neither", *woken, pre.asked)
+	if len(*woken) != 0 || len(pre.Asked) != 0 {
+		t.Errorf("woken %v asked %v, want neither", *woken, pre.Asked)
 	}
 
 	// At the build: a decision that got through anyway returns to resume_review.
@@ -465,7 +466,7 @@ func TestResumeRoundWithNoKeptBuildIsRefusedNamingScratch(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	got := advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, failingBuildRunner(t))
+	got := advanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, requestdrivertest.FailingBuildRunner(t))
 	if got.State != request.StateResumeReview || len(got.Resume.Refused) != 1 || !strings.Contains(got.Resume.Refused[0], "use -from scratch") {
 		t.Errorf("state %s resume %+v, want a refusal naming -from scratch", got.State, got.Resume)
 	}
@@ -476,7 +477,7 @@ func TestResumeMainReapsKeptRunsWhenNoKeptBuildIsContinued(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	stubWake(dp, t, nil)
-	pre := &fakeResumePreconditions{t: t, ok: true}
+	pre := &fakeResumePreconditions{T: t, OK: true}
 	gate := requestdriver.ResumeGate{Preconditions: pre, Containers: &fakeJobContainers{}}
 	for _, from := range []request.State{request.StatePlanning, request.StatePRReview} {
 		dataDir := t.TempDir()
