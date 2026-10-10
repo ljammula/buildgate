@@ -95,12 +95,13 @@ type blobReader struct {
 	in     io.WriteCloser
 	out    *bufio.Reader
 	stderr *cappedWriter
-	err    error // why the reader stopped
+	oids   *regexp.Regexp // the object ids a request may name
+	err    error          // why the reader stopped
 }
 
 func startBlobReader(ctx context.Context, root string) (*blobReader, error) {
 	cmd := HardenedGitCommand(ctx, root, "cat-file", "--batch")
-	b := &blobReader{cmd: cmd, stderr: &cappedWriter{max: 4096}}
+	b := &blobReader{cmd: cmd, stderr: &cappedWriter{max: 4096}, oids: fullGitSHAPattern}
 	cmd.Stderr = b.stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -143,7 +144,7 @@ func (b *blobReader) size(oid string) (int64, error) {
 	if b.err != nil {
 		return 0, b.err
 	}
-	if !fullGitSHAPattern.MatchString(oid) {
+	if !b.oids.MatchString(oid) {
 		return 0, b.fail(fmt.Errorf("git cat-file: %q is not an object id", oid))
 	}
 	if _, err := io.WriteString(b.in, oid+"\n"); err != nil {

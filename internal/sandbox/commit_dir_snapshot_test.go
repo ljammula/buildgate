@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 )
 
 // tf is one entry of a hand-built tree: a blob with a body, or a gitlink or
@@ -365,12 +364,6 @@ func TestCommitDirSnapshotRefusesUnsafeNames(t *testing.T) {
 }
 
 func TestCommitDirSnapshotLimits(t *testing.T) {
-	// The limits are what is tested here, not the deadline: 2000 files take
-	// two git processes each, which under the race detector on a busy
-	// machine has passed the snapshot's own 60 seconds.
-	oldTimeout := commitDirTimeout
-	commitDirTimeout = 10 * time.Minute
-	t.Cleanup(func() { commitDirTimeout = oldTimeout })
 	big := func(n int, fill byte) string { return strings.Repeat(string(fill), n) }
 	t.Run("2001 files", func(t *testing.T) {
 		r := newBareRepo(t)
