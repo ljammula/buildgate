@@ -92,10 +92,11 @@ var (
 	listStart = regexp.MustCompile(`^([-+>]|[0-9]+[.)])`)
 	// absolutePath is the one rule for an absolute path, outside a quoted
 	// command and inside one: a "/" at the start, or after any character
-	// that is not a letter, a digit, ".", "_" or "/", followed by a letter,
-	// a dot or "/". A "/" inside a relative path follows one of those
-	// characters and is not one.
-	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z./]`)
+	// that is not a letter, a digit, ".", "_" or "/", followed by a letter
+	// or a dot. A "/" inside a relative path follows one of those
+	// characters and is not one. "//" is refused apart from it, as part of
+	// a URL (forbiddenPart).
+	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z.]`)
 	// longRun is 20 or more characters with no space from the set keys,
 	// hashes and encoded secrets are written in. One is refused only when
 	// it holds both a letter and a digit (longToken): a long word, a path
