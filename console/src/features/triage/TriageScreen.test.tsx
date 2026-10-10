@@ -356,6 +356,21 @@ test("the focused request's facts are one meta line, and the text under review s
   expect(artifact.textContent).toContain("END-OF-SPEC");
 });
 
+test("the queue says how many wait and in what order, and scrolls in its own box", async () => {
+  const waitingSince = new Date(Date.now() - 45 * 60_000).toISOString();
+  const waiting = (id: string) => ({
+    id,
+    state: "spec_review",
+    enteredAt: waitingSince,
+    waitingSince,
+  });
+  renderApp(<TriageScreen />, { server: triage([waiting("req-a"), waiting("req-b")]) });
+  expect(await screen.findByTestId("triage-count")).toHaveTextContent("2 waiting, oldest first");
+  const list = screen.getByRole("list", { name: "Requests to review" });
+  expect(list).toHaveClass("overflow-y-auto");
+  expect(list).toHaveAttribute("tabindex", "0");
+});
+
 test("a row is the title on one line, then the id, the project and the waiting age, the chip on the right", async () => {
   const waitingSince = new Date(Date.now() - 45 * 60_000).toISOString();
   renderApp(<TriageScreen />, {

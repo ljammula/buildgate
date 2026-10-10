@@ -137,7 +137,7 @@
   --n9: oklch(0.68 0.014 260);
   --n10: oklch(0.77 0.012 260);
   --n11: oklch(0.95 0.005 260);
-  --field: var(--n1);
+  --field: var(--n2);
   /* Not `none`: Tailwind lists this beside its ring shadows, and `none` in a
      list voids the whole declaration. */
   --elev-card: 0 0 #0000;

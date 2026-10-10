@@ -78,7 +78,7 @@ test("run list row shows current stage and last activity", async () => {
   renderApp(<RunListScreen />, {
     server: [{ on: "GET /runs", reply: () => json([waitingRun()]) }, noRequests],
   });
-  expect(await screen.findByText(/build · last activity/)).toBeInTheDocument();
+  expect(await screen.findByText(/Build · last activity/)).toBeInTheDocument();
   expect(screen.queryByTestId("stalled-chip")).not.toBeInTheDocument();
   expect(screen.queryByTestId("waiting-chip")).not.toBeInTheDocument();
 });

@@ -27,8 +27,8 @@ const lightByMedia = parseDeclarations(
 
 // A new theme is one line here, next to its block in styles.css.
 const themes = [
-  ["dark", dark],
-  ["light", light],
+  { name: "dark", scheme: "dark", tokens: dark },
+  { name: "light", scheme: "light", tokens: light },
 ] as const;
 
 // Pairs that fail today, as "<theme>/<pair id>". Empty this list, never grow it:
@@ -41,7 +41,7 @@ interface Pair {
   ratio: (token: (name: string) => Rgba) => number;
 }
 
-function pairsFor(theme: "dark" | "light"): Pair[] {
+function pairsFor(scheme: "dark" | "light"): Pair[] {
   const pairs: Pair[] = [];
   const plain = (id: string, a: string, b: string, min: number) =>
     pairs.push({ id, min, ratio: (t) => contrastRatio(t(a), t(b)) });
@@ -71,7 +71,7 @@ function pairsFor(theme: "dark" | "light"): Pair[] {
   // Dark bars are 1.05: the 0.05 flare term of the WCAG formula compresses
   // ratios near black, so 1.10 between four dark steps would force pure black.
   const separation: [string, string, number][] =
-    theme === "dark"
+    scheme === "dark"
       ? [
           ["surface-sunken", "bg", 1.05],
           ["bg", "surface", 1.05],
@@ -121,11 +121,11 @@ describe("theme tokens", () => {
 
   it("meets the contrast bars except the known failures", () => {
     const failing = new Set<string>();
-    for (const [theme, tokens] of themes) {
-      const value = resolveTokens(theme, semantic, tokens);
+    for (const { name, scheme, tokens } of themes) {
+      const value = resolveTokens(name, semantic, tokens);
       const token = (name: string) => parseOklch(value(name));
-      for (const pair of pairsFor(theme)) {
-        if (pair.ratio(token) < pair.min) failing.add(`${theme}/${pair.id}`);
+      for (const pair of pairsFor(scheme)) {
+        if (pair.ratio(token) < pair.min) failing.add(`${name}/${pair.id}`);
       }
     }
     expect([...failing].sort()).toEqual([...knownFailures].sort());
@@ -142,10 +142,10 @@ describe("theme tokens", () => {
   // Values worth reading by eye when the palette moves.
   it("reports the ratios the design was tuned to", () => {
     const r = (theme: (typeof themes)[number], a: string, b: string) => {
-      const v = resolveTokens(theme[0], semantic, theme[1]);
+      const v = resolveTokens(theme.name, semantic, theme.tokens);
       return contrastRatio(parseOklch(v(a)), parseOklch(v(b)));
     };
-    expect(r(themes[0], "border-control", "field")).toBeCloseTo(3.29, 1);
+    expect(r(themes[0], "border-control", "field")).toBeCloseTo(3.1, 1);
     expect(r(themes[1], "border-control", "field")).toBeCloseTo(3.64, 1);
   });
 });

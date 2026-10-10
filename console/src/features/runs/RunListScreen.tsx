@@ -85,10 +85,10 @@ export function RunListScreen() {
               <EmptyState title="No runs found." />
             ) : (
               <TableFrame>
-                <Table className="min-w-[60rem] table-fixed">
+                <Table className="min-w-[70rem] table-fixed">
                   <TableHead>
                     <TableRow className="hover:bg-transparent">
-                      <TableHeaderCell className="w-[22%]">Run</TableHeaderCell>
+                      <TableHeaderCell className="w-64">Run</TableHeaderCell>
                       <TableHeaderCell className="w-40">Run ID</TableHeaderCell>
                       <TableHeaderCell className="w-36">State</TableHeaderCell>
                       <TableHeaderCell className="w-48">Activity</TableHeaderCell>
@@ -96,7 +96,7 @@ export function RunListScreen() {
                         Elapsed
                       </TableHeaderCell>
                       <TableHeaderCell className="w-44">Created</TableHeaderCell>
-                      <TableHeaderCell className="w-80">Project</TableHeaderCell>
+                      <TableHeaderCell>Project</TableHeaderCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

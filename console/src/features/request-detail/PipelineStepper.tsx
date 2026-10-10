@@ -1,18 +1,10 @@
-import {
-  Ban,
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  CircleDot,
-  Hourglass,
-  type LucideIcon,
-} from "lucide-react";
-
 import type { RequestSummary } from "@/domain/request";
+import { statusForToken, statusIconForToken, type StatusIcon } from "@/domain/status";
 import { DigestedText } from "@/shared/request/DigestedText";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { ElapsedText } from "@/ui/Time";
 import { cn } from "@/ui/cn";
+import { statusIcons } from "@/ui/statusIcons";
 
 import {
   type PipelineStep,
@@ -23,14 +15,30 @@ import {
   stepShowsDetail,
 } from "./requestDetailLogic";
 
-const GLYPHS: Readonly<Record<StepStatus, { icon: LucideIcon; text: string; word: string }>> = {
-  done: { icon: CircleCheck, text: "text-accent", word: "done" },
-  current: { icon: CircleDot, text: "text-accent", word: "current" },
-  pending: { icon: CircleDashed, text: "text-fg-subtle", word: "pending" },
-  failed: { icon: CircleAlert, text: "text-tone-danger", word: "failed" },
-  needsYou: { icon: Hourglass, text: "text-tone-warning", word: "needs you" },
-  stopped: { icon: Ban, text: "text-tone-danger", word: "stopped" },
-};
+/** Step glyphs follow the tone map: green done, amber waits on the operator, teal working, red failed. */
+function glyphFor(
+  status: StepStatus,
+  waitsOnOperator: boolean,
+): { icon: StatusIcon; text: string; word: string } {
+  switch (status) {
+    case "done":
+      return { icon: "circle_check", text: "text-tone-success", word: "done" };
+    case "current":
+      return {
+        icon: "circle_dot",
+        text: waitsOnOperator ? "text-tone-warning" : "text-tone-info",
+        word: "current",
+      };
+    case "pending":
+      return { icon: "circle_dashed", text: "text-fg-subtle", word: "pending" };
+    case "failed":
+      return { icon: "circle_x", text: "text-tone-danger", word: "failed" };
+    case "needsYou":
+      return { icon: "hourglass", text: "text-tone-warning", word: "needs you" };
+    case "stopped":
+      return { icon: "circle_minus", text: "text-tone-danger", word: "stopped" };
+  }
+}
 
 /** When a step happened and, for a person's decision, who made it. */
 function StepWhen({ at, by }: { readonly at: string; readonly by: string }) {
@@ -43,8 +51,8 @@ function StepWhen({ at, by }: { readonly at: string; readonly by: string }) {
 }
 
 function StepView({ step, request }: { step: PipelineStep; request: RequestSummary }) {
-  const glyph = GLYPHS[step.status];
-  const Icon = glyph.icon;
+  const glyph = glyphFor(step.status, statusForToken(request.state) === "needsHuman");
+  const Icon = statusIcons[glyph.icon];
   const emphasize = step.status !== "done" && step.status !== "pending";
   const entry = step.entry;
   const detail = stepShowsDetail(step);
@@ -98,6 +106,7 @@ function StepView({ step, request }: { step: PipelineStep; request: RequestSumma
 export function PipelineStepper({ request }: { readonly request: RequestSummary }) {
   const steps = pipelineSteps(request);
   const outcome = pipelineOutcome(request);
+  const OutcomeIcon = outcome === null ? null : statusIcons[statusIconForToken(outcome.state)];
   return (
     <>
       <ol aria-label="Pipeline steps" className="flex flex-col">
@@ -113,7 +122,9 @@ export function PipelineStepper({ request }: { readonly request: RequestSummary 
           data-state={outcome.state}
           className="border-border mt-1 flex gap-2 border-t pt-2"
         >
-          <Ban aria-hidden="true" className="text-tone-danger mt-0.5 size-4 shrink-0" />
+          {OutcomeIcon === null ? null : (
+            <OutcomeIcon aria-hidden="true" className="text-tone-danger mt-0.5 size-4 shrink-0" />
+          )}
           <div className="min-w-0 text-sm">
             <p className="font-semibold">{outcome.label}</p>
             {outcome.entry === null ? null : (

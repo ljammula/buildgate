@@ -1,4 +1,4 @@
-import { ArrowRight, CircleAlert } from "lucide-react";
+import { ArrowRight, CircleAlert, ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 
 import { useRunRecord } from "@/api/runQueries";
@@ -102,9 +102,10 @@ export function TicketCard({
               href={prHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-accent underline underline-offset-2"
+              className="text-accent inline-flex items-baseline gap-1 hover:underline"
             >
               {ticket.prUrl}
+              <ExternalLink aria-hidden="true" className="size-3.5 shrink-0 self-center" />
             </a>
           ) : (
             <span className="font-mono">{ticket.prUrl}</span>

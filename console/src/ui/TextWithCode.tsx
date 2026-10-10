@@ -38,7 +38,7 @@ export function TextWithCode({ text, className }: TextWithCodeProps) {
           <code
             key={index}
             className={cn(
-              "bg-surface-sunken rounded-sm px-1 font-mono text-[0.92em] whitespace-nowrap",
+              "bg-surface-sunken rounded-sm px-1 font-mono text-[0.92em] break-words",
               className,
             )}
           >

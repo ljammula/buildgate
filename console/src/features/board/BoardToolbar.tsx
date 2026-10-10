@@ -101,18 +101,23 @@ export function BoardToolbar({
           </div>
         </div>
         {allProjects.length > 1 ? (
-          <div role="group" aria-label="Project" className="flex flex-wrap items-center gap-1.5">
-            {allProjects.map((project) => (
-              <FilterChip
-                key={project}
-                pressed={filters.projects.has(project)}
-                onPressedChange={() => {
-                  onToggleProject(project);
-                }}
-              >
-                {project}
-              </FilterChip>
-            ))}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span aria-hidden className="text-fg-muted text-xs">
+              Project:
+            </span>
+            <div role="group" aria-label="Project" className="flex flex-wrap items-center gap-1.5">
+              {allProjects.map((project) => (
+                <FilterChip
+                  key={project}
+                  pressed={filters.projects.has(project)}
+                  onPressedChange={() => {
+                    onToggleProject(project);
+                  }}
+                >
+                  {project}
+                </FilterChip>
+              ))}
+            </div>
           </div>
         ) : null}
         <div className="ml-auto">

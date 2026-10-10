@@ -4,6 +4,7 @@ import { useApi } from "@/api/ApiProvider";
 import type { RequestSummary } from "@/domain/request";
 import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
+import { TextWithCode } from "@/ui/TextWithCode";
 import { REQUEST_VERBS } from "@/domain/status";
 
 import { resumePlan } from "./requestDetailLogic";
@@ -30,14 +31,18 @@ export function ResumeCallout({ request, acting, onResume, onCancel }: ResumeCal
     <Callout data-testid="resume-callout" tone="warning" title={plan.headline}>
       <div className="flex flex-col gap-3">
         {plan.prompt === "" ? null : (
-          <p className="break-words whitespace-pre-wrap">{plan.prompt}</p>
+          <p className="break-words whitespace-pre-wrap">
+            <TextWithCode text={plan.prompt} />
+          </p>
         )}
         {plan.refused.length === 0 ? null : (
           <div>
             <p className="font-semibold">Resume is not possible:</p>
             <ul>
               {plan.refused.map((reason, i) => (
-                <li key={i} className="break-words">{`- ${reason}`}</li>
+                <li key={i} className="break-words">
+                  <TextWithCode text={`- ${reason}`} />
+                </li>
               ))}
             </ul>
           </div>

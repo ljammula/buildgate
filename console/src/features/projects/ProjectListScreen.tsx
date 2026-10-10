@@ -19,7 +19,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from "@/ui/Table";
-import { LocalTimeText } from "@/ui/Time";
+import { RelativeTime } from "@/ui/RelativeTime";
 
 import { ProjectRowDetails } from "./ProjectRowDetails";
 
@@ -97,7 +97,7 @@ export function ProjectListScreen() {
                           {project.runCount} run{project.runCount === 1 ? "" : "s"}
                         </TableCell>
                         <TableCell className="text-xs whitespace-nowrap tabular-nums">
-                          <LocalTimeText value={project.lastRunAt} />
+                          <RelativeTime value={project.lastRunAt} />
                         </TableCell>
                         <TableCell className="text-right">
                           <IconButton
