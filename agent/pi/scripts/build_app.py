@@ -2151,7 +2151,7 @@ def load_round_state(path: Path, max_rounds: int) -> dict:
 		state = json.loads(path.read_text())
 	except (OSError, ValueError) as exc:
 		raise RoundStateError(f"cannot read round state {path}: {exc}") from exc
-	if not isinstance(state, dict) or state.get("version") != ROUND_STATE_VERSION:
+	if not isinstance(state, dict) or type(state.get("version")) is not int or state["version"] != ROUND_STATE_VERSION:
 		raise RoundStateError(f"round state {path}: unsupported version (want {ROUND_STATE_VERSION})")
 	last = state.get("last_completed_round")
 	claims_pass = state.get("passed") is True
@@ -2323,54 +2323,95 @@ def cut_utf8(text: str, limit: int) -> str:
 	return text.encode("utf-8", errors="replace")[:limit].decode("utf-8", errors="ignore")
 
 
-def _clear_notes_path(notes_path: Path) -> None:
-	"""Removes whatever is at the notes path: a file or a link (unlinked,
-	never followed), or a directory with all under it. The session folder is
-	the agent's to write, so what is there is the script's only when the
-	script has just written it."""
-	try:
-		if notes_path.is_dir() and not notes_path.is_symlink():
-			shutil.rmtree(notes_path, ignore_errors=True)
-		else:
-			notes_path.unlink(missing_ok=True)
-	except OSError:
+def _clear_notes_path(notes_path: Path) -> bool:
+	"""Removes whatever is at the notes path and returns whether the path is
+	now free: a file or a link is unlinked (a link is never followed, its
+	target is untouched), a directory is removed with all under it, read-only
+	folders in it made writable first. The session folder is the agent's to
+	write, so what is at the path is the script's only when the script has
+	just written it."""
+	for attempt in (1, 2):
 		try:
-			os.chmod(notes_path.parent, 0o700)
-			notes_path.unlink(missing_ok=True)
+			if notes_path.is_symlink() or not notes_path.is_dir():
+				notes_path.unlink(missing_ok=True)
+			else:
+				shutil.rmtree(notes_path)
 		except OSError:
 			pass
+		if not os.path.lexists(notes_path):
+			return True
+		if attempt == 2:
+			break
+		# Make it removable: the folder that holds it, and every real
+		# directory under it (top down, so each can be listed in turn).
+		try:
+			os.chmod(notes_path.parent, 0o700)
+			if notes_path.is_dir() and not notes_path.is_symlink():
+				os.chmod(notes_path, 0o700)
+				for directory, names, _ in os.walk(notes_path):
+					for name in names:
+						inner = os.path.join(directory, name)
+						if not os.path.islink(inner):
+							os.chmod(inner, 0o700)
+		except OSError:
+			pass
+	return False
+
+
+NOTES_PATH_NOT_CLEARED = "notes path could not be cleared"
+
+
+class NotesFile:
+	"""The one notes file of a launch. `body` is the reply of this launch's
+	notes turn, redacted and cut, or None. Nothing writes the file but
+	settle(), which run_build calls once, on every way out, after the last
+	thing that could let the agent write: so the file exists when the script
+	ends only if this launch's notes turn gave a reply that was kept."""
+
+	def __init__(self, session_dir: Path) -> None:
+		self.path = session_dir / HANDOFF_NOTES_FILE
+		self.body: str | None = None
+
+	def settle(self, result: "BuildResult | None") -> None:
+		body, self.body = self.body, None
+		try:
+			cleared = _clear_notes_path(self.path)
+			if body is None:
+				return
+			if not cleared:
+				raise FileExistsError
+			fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+			with open(fd, "w", encoding="utf-8", errors="replace") as handle:
+				handle.write(body + "\n")
+		except Exception as exc:
+			_clear_notes_path(self.path)
+			if result is not None and body is not None:
+				result.notes_turn["discarded_reason"] = NOTES_PATH_NOT_CLEARED if isinstance(exc, FileExistsError) else f"notes file not written: {type(exc).__name__}"
 
 
 def run_notes_turn(
-	workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None,
+	workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None, notes: NotesFile,
 	*, prompt: str = HANDOFF_NOTES_PROMPT, read_only: bool = False,
 ) -> dict:
 	"""Asks the build agent, once, in its own session, for notes. Returns the
 	record for BUILD_EVIDENCE.json (no text from the reply). The reply goes,
-	redacted and cut, to session_dir/HANDOFF_NOTES_FILE and nowhere else: not
-	printed, not in the progress feed (the event callback is a no-op), not on
-	a round. The notes are an aid: whatever goes wrong inside the turn is
-	recorded by its exception class name alone (a message may hold the
-	reply), and the build goes on.
-
-	The notes file exists afterwards only if this function wrote it from the
-	turn's reply: whatever is at its path is removed before the turn and
-	again after it (a file the agent wrote there itself would skip the
-	redaction and the size cut), and the reply is written to a new file."""
+	redacted and cut, to notes.body, which run_build writes to the session
+	folder's HANDOFF_NOTES_FILE as it ends, and nowhere else: not printed, not
+	in the progress feed (the event callback is a no-op), not on a round. The
+	notes are an aid: whatever goes wrong inside the turn is recorded by its
+	exception class name alone (a message may hold the reply), and the build
+	goes on. A notes path that cannot be cleared skips the turn: its reply
+	could not be kept."""
 	record: dict = {"ran": True, "skipped_reason": "", "duration_s": 0.0}
 	started = _monotonic()
-	notes_path = session_dir / HANDOFF_NOTES_FILE
+	notes.body = None
 	try:
-		_clear_notes_path(notes_path)
-		body = _notes_turn(workspace, session_dir, adapter, env, thinking, record, started, prompt, read_only)
-		_clear_notes_path(notes_path)
-		if body is not None:
-			fd = os.open(notes_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-			with open(fd, "w", encoding="utf-8", errors="replace") as handle:
-				handle.write(body + "\n")
+		if not _clear_notes_path(notes.path):
+			return {"ran": False, "skipped_reason": NOTES_PATH_NOT_CLEARED, "duration_s": 0.0}
+		notes.body = _notes_turn(workspace, session_dir, adapter, env, thinking, record, started, prompt, read_only)
 		return record
 	except Exception as exc:
-		_clear_notes_path(notes_path)
+		notes.body = None
 		record.update(ran=False, skipped_reason=f"notes turn failed: {type(exc).__name__}", duration_s=_monotonic() - started)
 		record.pop("usage", None)
 		return record
@@ -2421,7 +2462,7 @@ def _files_git_does_not_ignore(workspace: Path) -> list[str]:
 	return [os.fsdecode(name) for name in listed.stdout.split(b"\0") if name]
 
 
-def run_notes_turn_after_pass(workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None) -> tuple[dict, bool]:
+def run_notes_turn_after_pass(workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None, notes: NotesFile) -> tuple[dict, bool]:
 	"""The notes turn of a build whose checks have passed. Returns the record
 	for BUILD_EVIDENCE.json and whether the caller must run the build's checks
 	again before it may report the build as passed: true only when the tree
@@ -2434,7 +2475,8 @@ def run_notes_turn_after_pass(workspace: Path, session_dir: Path, adapter, env: 
 	its kind, permission bits and content hash or link target) and again
 	after it. Equal records: the tree at the second record is the tree that
 	passed, and the reply is kept. A difference: the reply is removed and the
-	tree is put back where that can be done exactly (tree_guard.restore); a
+	tree is put back only if every difference can be undone exactly
+	(tree_guard.restore, all or nothing); a
 	third record equal to the first proves it back, and the build stays
 	passed without its checks running again, as on the path where nothing
 	changed. Only when the tree cannot be shown equal (something could not be
@@ -2470,37 +2512,41 @@ def run_notes_turn_after_pass(workspace: Path, session_dir: Path, adapter, env: 
 	except Exception:
 		copies = {}
 	try:
-		record = run_notes_turn(workspace, session_dir, adapter, env, thinking, prompt=HANDOFF_NOTES_PASSED_PROMPT, read_only=True)
+		record = run_notes_turn(workspace, session_dir, adapter, env, thinking, notes, prompt=HANDOFF_NOTES_PASSED_PROMPT, read_only=True)
 		record.update(after_pass=True, tree_entries=len(before.entries), tree_bytes=before.bytes, tree_record_s=round(before.seconds, 3))
-		discarded, changed, restored = _settle_tree_after_notes(workspace, before, copies)
+		discarded, changed, attempted, restored = _settle_tree_after_notes(workspace, before, copies)
 	finally:
 		if backup_dir is not None:
 			shutil.rmtree(backup_dir, ignore_errors=True)
 	if not discarded:
 		return record, False
-	_clear_notes_path(session_dir / HANDOFF_NOTES_FILE)
+	notes.body = None
 	# How many paths, never which: a name is text the turn chose.
-	record.update(discarded_reason=discarded, changed_paths=changed, tree_restored=restored)
+	record.update(discarded_reason=discarded, changed_paths=changed, tree_restore_attempted=attempted, tree_restored=restored)
 	return record, not restored
 
 
-def _settle_tree_after_notes(workspace: Path, before, copies: dict[str, str]) -> tuple[str, int, bool]:
-	"""Compares the workspace with `before`. Returns ("", 0, True) when it is
-	the same tree; otherwise why the reply is discarded, how many paths
-	differed, and whether the tree is, by a fresh record, back to `before`."""
+def _settle_tree_after_notes(workspace: Path, before, copies: dict[str, str]) -> tuple[str, int, bool, bool]:
+	"""Compares the workspace with `before`. Returns ("", 0, False, True) when
+	it is the same tree; otherwise why the reply is discarded, how many paths
+	differed, whether a restore was attempted (it is all or nothing: not at
+	all when any difference cannot be undone exactly, and the tree then stays
+	as the turn left it), and whether the tree is, by a fresh record, back to
+	`before`."""
 	try:
 		after = tree_guard.record(workspace, exclude=NOTES_TREE_EXCLUDE)
 	except Exception:
-		return "the workspace could not be compared after the turn", 0, False
+		return "the workspace could not be compared after the turn", 0, False, False
 	changed = tree_guard.changed_paths(before, after)
 	if not changed:
-		return "", 0, True
+		return "", 0, False, True
+	attempted = restored = False
 	try:
-		tree_guard.restore(workspace, before, after, copies)
-		restored = not tree_guard.changed_paths(before, tree_guard.record(workspace, exclude=NOTES_TREE_EXCLUDE))
+		attempted = tree_guard.restore(workspace, before, after, copies)
+		restored = attempted and not tree_guard.changed_paths(before, tree_guard.record(workspace, exclude=NOTES_TREE_EXCLUDE))
 	except Exception:
 		restored = False
-	return "the turn changed the workspace", len(changed), restored
+	return "the turn changed the workspace", len(changed), attempted, restored
 
 
 def verify_again_after_pass(
@@ -2560,10 +2606,27 @@ def verify_again_after_pass(
 	return False
 
 
-def run_build(
+def run_build(workspace: Path, spec_path: Path, **options) -> BuildResult:
+	"""Runs the build (_run_build, which documents the options) and, on every
+	way out of it (a result, an early return, an error, a kill that reaches
+	Python), settles the launch's notes file: whatever is at its path is
+	removed, and the file is written only from the reply this launch's notes
+	turn gave. No other code writes the file, and this runs after the last
+	agent turn, so nothing an agent left at the path outlives the script."""
+	notes = NotesFile(workspace / ".pi-build-session")
+	result = None
+	try:
+		result = _run_build(workspace, spec_path, notes=notes, **options)
+		return result
+	finally:
+		notes.settle(result)
+
+
+def _run_build(
 	workspace: Path,
 	spec_path: Path,
 	*,
+	notes: NotesFile,
 	max_rounds: int,
 	timeout_minutes: int,
 	thinking: str | None = None,
@@ -2592,10 +2655,7 @@ def run_build(
 	session_dir = workspace / ".pi-build-session"
 	spec_text = spec_path.read_text()
 	# A file from an earlier run of this script is not this build's notes.
-	try:
-		(session_dir / HANDOFF_NOTES_FILE).unlink(missing_ok=True)
-	except OSError:
-		pass
+	_clear_notes_path(notes.path)
 	last_turn: dict | None = None
 	# How long the last round's setup, verify and oracle took: what running
 	# them once more after a notes turn would cost.
@@ -2987,11 +3047,11 @@ def run_build(
 		# (the file is in the tree): a launch lost from here on is resumed
 		# with its tree checked again.
 		persist(result.rounds[-1].index, state_prompt, passed=True, notes_turn_started=True)
-		result.notes_turn, unproven = run_notes_turn_after_pass(workspace, session_dir, adapter, env, thinking)
+		result.notes_turn, unproven = run_notes_turn_after_pass(workspace, session_dir, adapter, env, thinking, notes)
 		if unproven:
 			verify_again("the notes turn changed the workspace")
 	else:
-		result.notes_turn = run_notes_turn(workspace, session_dir, adapter, env, thinking)
+		result.notes_turn = run_notes_turn(workspace, session_dir, adapter, env, thinking, notes)
 
 	# Deliberately does not also require resolve_verify_command(workspace)
 	# to already succeed here: that would make this unreachable in exactly

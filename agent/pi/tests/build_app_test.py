@@ -4476,17 +4476,18 @@ class PlantedNotesFileTests(unittest.TestCase):
 		"workspace too large to record: more than 3 entries": dict(patch=("MAX_ENTRIES", 3)),
 		"under 300 s of the build time budget left": dict(verify=(False, False, False), budget=1000, elapsed=701),
 		"no build time budget": dict(verify=(False, False, False), budget=None),
-		"sonnet fallback enabled": dict(verify=(False, False, False), sonnet=True),
+		# One more verification: the fallback pass runs the checks itself.
+		"sonnet fallback enabled": dict(verify=(False, False, False, False), sonnet=True),
 	}
 
 	def test_a_planted_notes_path_is_gone_after_every_skipped_turn(self):
 		for reason, kwargs in self.SKIPS.items():
 			for shape_name, shape in self.shapes().items():
 				with self.subTest(reason=reason, shape=shape_name):
-					kwargs = dict(kwargs)
-					patch = kwargs.pop("patch", None)
+					options = dict(kwargs)
+					patch = options.pop("patch", None)
 					with mock.patch.object(build_app.tree_guard, patch[0], patch[1]) if patch else contextlib.nullcontext():
-						ran = PassedNotesTurnTests._run(self, during_round=self.plant(shape), **kwargs)
+						ran = PassedNotesTurnTests._run(self, during_round=self.plant(shape), **options)
 					self.assertEqual(ran["result"].notes_turn["skipped_reason"], reason)
 					self.assertFalse(ran["notes_path_exists"], "the planted path survived the skipped turn")
 					self.assertEqual(self.target.read_text(), PLANTED, "a link is unlinked, never followed")
