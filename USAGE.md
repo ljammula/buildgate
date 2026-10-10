@@ -879,8 +879,8 @@ request and you merge its pull request.
 
 ```text
 build ends without passing, or passes after a failed round
-        |  its agent's "worth knowing" notes (kept in the run's handoff,
-        |  or beside an accepted run's record)
+        |  its agent's "worth knowing" notes (the host's copy,
+        |  agent-notes.md in the run's directory)
         v
 factoryd memory list        collects candidates; only you see them
         |
