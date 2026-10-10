@@ -1034,7 +1034,7 @@ on the final commit as usual.
 |---|---|
 | Lid closed or Mac asleep mid-build | The step is lost when its heartbeat stops: the worker puts the request in `resume_review`. An idle Mac does not sleep mid-build (`caffeinate`) |
 | `factoryd stop -force`, `kill -9`, crash, reboot (`worker`) | The request building it enters `resume_review` at the next `worker` start; `factoryd resume <id>` continues it |
-| A build lost with its process (halted as above, or `factoryd` stopped with SIGTERM) | A request's run keeps its worktree and branch, flagged `kept_for_resume`, until a human decides (`resume`, `resume -from scratch`, `cancel`, or `retry` of a halted request reaps it); its containers are still removed. `factoryd -resume-worktree-of <run-id>` starts a run that adopts the kept worktree and continues from its round state |
+| A build lost with its process (halted as above, or `factoryd` stopped with SIGTERM) | A request's run keeps its worktree and branch, flagged `kept_for_resume`, until a human decides (`resume`, `resume -from scratch`, `cancel`, or `retry` of a halted request reaps it); its containers are still removed. `factoryd -resume-worktree-of <run-id>` starts a run that adopts the kept worktree and continues from its round state. A build that had returned before a later step was lost left no round state in the worktree (it is removed, with the build's evidence file moved to the run's directory as `BUILD_EVIDENCE.json`, before any review works there): its resume starts at round 1 on the kept files |
 
 Repository-owner runs (`-repository`), daemons, what to look at in the
 Temporal Web UI and the Activities an oracle adds are in

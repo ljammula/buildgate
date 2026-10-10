@@ -417,6 +417,14 @@ requires a new contract review and an updated machine-checkable test.
   copied to the run directory first, where only the operator's prompts route
   and `factoryd logs -prompt` read them); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it.
+  The build's evidence file (`BUILD_EVIDENCE.json`) and round-state file
+  (`.pi-build-round-state.json`), which hold the build agent's last message
+  of each failed round (`agent_notes`), leave the worktree with the session:
+  the host moves the evidence file to the run directory, where the run
+  record is read from, and removes the round-state file, which a finished
+  build no longer needs; either one that cannot be removed fails the build
+  step, so no review works beside it. A build that was lost keeps both for
+  its resume, and no review follows a lost build.
   A saved prompt is what the build's session folder held when the host
   copied it; a build can alter its own before that, because the build script
   and the coding agent run as one user in one sandbox and the script has no

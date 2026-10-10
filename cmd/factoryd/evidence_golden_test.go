@@ -56,9 +56,7 @@ func TestBuildEvidenceGoldenParsesWithLoadAgentEvidence(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			workspace := t.TempDir()
 			dataDir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), readGolden(t, name), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			writeBuildEvidence(t, dataDir, "run-1", readGolden(t, name))
 			r := &run.Run{ID: "run-1"}
 			loadAgentEvidence(r, workspace, dataDir, "run-1")
 			if r.AgentEvidence == nil {
@@ -97,15 +95,13 @@ func TestBuildEvidenceGoldenParsesWithLoadAgentEvidence(t *testing.T) {
 // is the build agent's to write, so the text it puts in a round's feedback
 // fields is cut and cleaned on the way into the run record, not later.
 func TestLoadAgentEvidenceCleansRoundFeedbackBeforeRecording(t *testing.T) {
-	workspace := t.TempDir()
+	workspace, dataDir := t.TempDir(), t.TempDir()
 	raw := []byte(`{"schema_version":2,"succeeded":false,"stopped_reason":"x","rounds":[{"index":1,"verify_passed":false,
 		"blockers":["canonical\u001b[2J verification failed"],"changed_files":["a.go"],
 		"failure_log":"logs/\u202everify.log","agent_notes":"Authorization: Bearer abcdef0123456789\u0007"}]}`)
-	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeBuildEvidence(t, dataDir, "run-1", raw)
 	r := &run.Run{ID: "run-1"}
-	loadAgentEvidence(r, workspace, t.TempDir(), "run-1")
+	loadAgentEvidence(r, workspace, dataDir, "run-1")
 	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) != 1 {
 		t.Fatalf("AgentEvidence = %+v, want one round", r.AgentEvidence)
 	}
@@ -127,9 +123,7 @@ func TestBuildEvidenceUnknownSchemaVersionIsToleratedNotRejected(t *testing.T) {
 	workspace := t.TempDir()
 	dataDir := t.TempDir()
 	bad := []byte(`{"schema_version":99,"succeeded":true,"stopped_reason":"x","rounds":[]}`)
-	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), bad, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeBuildEvidence(t, dataDir, "run-1", bad)
 	r := &run.Run{ID: "run-1"}
 	out := captureStdout(t, func() { loadAgentEvidence(r, workspace, dataDir, "run-1") })
 	if r.AgentEvidence == nil {

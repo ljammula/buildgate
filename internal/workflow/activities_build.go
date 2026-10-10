@@ -264,7 +264,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 	// serialized turn, so cleanup cannot erase another in-flight run's
 	// BUILD_EVIDENCE.json while that run is still collecting evidence.
 	// A prompt in the build's session folders was not saved by this launch.
-	if err := clearBeforeBuild(input.WorkspacePath); err != nil {
+	if err := clearBeforeBuild(input.WorkspacePath, a.logDirFor(input)); err != nil {
 		return BuildActivityResult{}, err
 	}
 	// Host-side info/exclude installed before the build (as in cmd/factoryd's runMainWithReady): without it the driver

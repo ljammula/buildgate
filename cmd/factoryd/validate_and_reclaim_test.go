@@ -918,6 +918,8 @@ func TestApplyRunWorkflowResultSkipsEvidenceWhenNotAttributable(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
+	// Where the evidence is read from when it is attributable.
+	writeBuildEvidence(t, dataDir, r.ID, []byte(`{"provider":"someone-elses-later-run"}`))
 
 	result := workflow.RunWorkflowResult{State: run.StateAccepted}
 	if err := applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false); err != nil {

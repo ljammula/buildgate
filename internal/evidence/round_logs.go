@@ -285,3 +285,30 @@ func ReadRetainedAgentNotes(runDir string) (string, bool) {
 	}
 	return string(data), true
 }
+
+// BuildEvidenceFileName is the evidence file build_app.py writes at the
+// worktree root when it ends, and the name RetainBuildEvidence keeps it under
+// in the run's own directory. It is a build's own report, never a verdict.
+// Each round of it holds up to 1,500 characters of the build agent's last
+// message (agent_notes), so it does not stay where a review works.
+const BuildEvidenceFileName = "BUILD_EVIDENCE.json"
+
+// RetainBuildEvidence copies the build's evidence file out of workspace to
+// dstPath (0600) and reports whether it did. No evidence file is (false,
+// nil). The source is hostile, as RetainFile's: a link, a special file or one
+// over RetainFile's size limit is not copied and is an error. Whenever
+// nothing is retained, a file already at dstPath (an earlier build's) is
+// removed, so a later reader never takes it for this build's.
+func RetainBuildEvidence(workspace, dstPath string) (bool, error) {
+	err := RetainFile(filepath.Join(workspace, BuildEvidenceFileName), dstPath)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		err = nil
+	}
+	if rmErr := os.Remove(dstPath); rmErr != nil && !os.IsNotExist(rmErr) {
+		err = errors.Join(err, rmErr)
+	}
+	return false, err
+}

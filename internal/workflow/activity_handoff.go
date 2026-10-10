@@ -323,6 +323,29 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
 		return fmt.Errorf("remove the finished build's harness session before any later step: %w", err)
 	}
+	return a.takeRoundNotesOut(ctx, input)
+}
+
+// takeRoundNotesOut removes from the worktree the two files in which a
+// finished build leaves each failed round's agent_notes, the build agent's
+// own last message: the evidence file, moved to the run's log dir (where
+// the run record is read from), and the round-state file, whose next prompt
+// quotes the notes and which nothing reads once the build has returned (a
+// later resume of this worktree starts at round 1 on the kept files, as one
+// with no round state does). A copy that fails loses the evidence, never the
+// step; a file that cannot be removed fails the build step, so no review
+// runs beside it.
+func (a *Activities) takeRoundNotesOut(ctx context.Context, input RunWorkflowInput) error {
+	if logDir := a.logDirFor(input); logDir != "" {
+		if _, err := evidence.RetainBuildEvidence(input.WorkspacePath, filepath.Join(logDir, evidence.BuildEvidenceFileName)); err != nil {
+			activity.GetLogger(ctx).Warn("failed to keep the finished build's evidence file before removing it from the worktree", "error", err)
+		}
+	}
+	for _, name := range []string{evidence.BuildEvidenceFileName, RoundStateFileName} {
+		if err := os.Remove(filepath.Join(input.WorkspacePath, name)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove the finished build's %s from the worktree before any later step: %w", name, err)
+		}
+	}
 	return nil
 }
 

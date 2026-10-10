@@ -64,13 +64,20 @@ func (a *Activities) prepareReviewLaunch(ctx context.Context, input ReviewStepIn
 	return prep, nil
 }
 
-// clearBeforeBuild removes what a build launch must not find in the worktree:
-// an earlier build's evidence file, and any prompt in the session folders the
-// launch saves its own in (not saved by it, so an earlier step or the
-// repository wrote it). A failure is an infrastructure error.
-func clearBeforeBuild(workspace string) error {
-	if err := os.Remove(filepath.Join(workspace, "BUILD_EVIDENCE.json")); err != nil && !os.IsNotExist(err) {
-		return temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+// clearBeforeBuild removes what a build launch must not find: an earlier
+// build's evidence file in the worktree and the host's copy of it in logDir
+// (takeRoundNotesOut), and any prompt in the session folders the launch saves
+// its own in (not saved by it, so an earlier step or the repository wrote
+// it). A failure is an infrastructure error.
+func clearBeforeBuild(workspace, logDir string) error {
+	stale := []string{filepath.Join(workspace, evidence.BuildEvidenceFileName)}
+	if logDir != "" {
+		stale = append(stale, filepath.Join(logDir, evidence.BuildEvidenceFileName))
+	}
+	for _, path := range stale {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+		}
 	}
 	if err := evidence.DropSavedPrompts(workspace, buildPromptSessions); err != nil {
 		return temporal.NewApplicationErrorWithCause("remove the prompts found in the build's session folders before its launch", InfrastructureFailureType, err)

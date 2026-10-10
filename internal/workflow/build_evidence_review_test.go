@@ -138,3 +138,27 @@ func TestALostBuildKeepsItsRoundStateInTheWorktree(t *testing.T) {
 		t.Errorf("a lost build's round state: %v, want it kept for a resume", err)
 	}
 }
+
+// An evidence file the host cannot remove (here a directory with content in
+// its place) fails the build step: no review is launched beside it.
+func TestRunBuildActivityFailsWhenTheEvidenceFileCannotLeaveTheWorktree(t *testing.T) {
+	rt := &sandboxtest.WorkerRuntime{Lines: []string{"ok"}}
+	activities, input, _ := runtimeActivities(t, rt)
+	build := &Activities{
+		LogDir: activities.LogDir,
+		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+			writeFile(t, filepath.Join(input.WorkspacePath, "BUILD_EVIDENCE.json", "inner.json"), roundNotesMarker)
+			return runner.Result{}, nil
+		},
+	}
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(build.RunBuildActivity)
+	_, err := env.ExecuteActivity(build.RunBuildActivity, input)
+	if err == nil || !strings.Contains(err.Error(), "BUILD_EVIDENCE.json from the worktree") {
+		t.Errorf("RunBuildActivity err = %v, want the step to fail on the evidence file it could not remove", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(activities.LogDir, "BUILD_EVIDENCE.json")); !os.IsNotExist(statErr) {
+		t.Errorf("a directory in the evidence file's place was kept (%v)", statErr)
+	}
+}

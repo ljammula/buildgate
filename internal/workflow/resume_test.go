@@ -355,6 +355,12 @@ func runBuildArgs(t *testing.T, repo string, input RunWorkflowInput) []string {
 		LogDir: t.TempDir(),
 		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, args ...string) (runner.Result, error) {
 			got = args
+			// The resume point must still be there when the build launches.
+			if state, ok := argValue(args, "--resume-from-state"); ok {
+				if _, err := os.Stat(state); err != nil {
+					t.Errorf("the round-state file was gone when the build launched: %v", err)
+				}
+			}
 			return runner.Result{}, nil
 		},
 	}
@@ -401,8 +407,10 @@ func TestRunBuildActivityOfAResumedRunPassesTheHandoffAndRoundState(t *testing.T
 	if err != nil || !strings.Contains(string(b), "halted-run") || !strings.Contains(string(b), "partial.go") {
 		t.Errorf("handoff note = %q (err %v), want it to name the halted run and the kept file", b, err)
 	}
-	if _, err := os.Stat(roundState); err != nil {
-		t.Errorf("the handoff deleted the round-state file: %v", err)
+	// The build returned, so the round state it resumed from (and would
+	// have rewritten) has left the worktree before any later step.
+	if _, err := os.Stat(roundState); !os.IsNotExist(err) {
+		t.Errorf("the finished build's round-state file is still in the worktree (stat err = %v)", err)
 	}
 	if _, err := os.Stat(filepath.Join(repo, buildSessionDir)); !os.IsNotExist(err) {
 		t.Errorf("the dead build's harness session survived the handoff (stat err = %v)", err)
