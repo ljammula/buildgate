@@ -45,9 +45,14 @@ func (r *instructionRepo) importTree(branch, dir, tree string) string {
 	return r.git("rev-parse", "refs/heads/"+branch)
 }
 
-// timeSnapshot moves HEAD alone to result and times one snapshot of it.
+// timeSnapshot moves HEAD alone to result and times one snapshot of it. The
+// snapshot's deadline is lifted: the trees timed here are built to be costly,
+// and under the race detector take longer than a review would be given.
 func (r *instructionRepo) timeSnapshot(result string) time.Duration {
 	r.t.Helper()
+	old := reviewInstructionTimeout
+	reviewInstructionTimeout = 5 * time.Minute
+	defer func() { reviewInstructionTimeout = old }()
 	r.git("update-ref", "--no-deref", "HEAD", result)
 	start := time.Now()
 	snap, err := SnapshotReviewInstructions(context.Background(), r.dir, r.base, result, filepath.Join(filepath.Dir(r.dir), "snap"))

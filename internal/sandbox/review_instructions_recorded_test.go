@@ -102,12 +102,28 @@ func (r *instructionRepo) importPaths(branch string, paths []string) string {
 	for _, p := range paths {
 		fmt.Fprintf(&in, "M 100644 :1 %s\n", p)
 	}
+	r.fastImport(&in)
+	return r.git("rev-parse", "refs/heads/"+branch)
+}
+
+// fastImport feeds a stream to git fast-import in the repository.
+func (r *instructionRepo) fastImport(in *bytes.Buffer) {
+	r.t.Helper()
 	cmd := exec.Command("git", "-C", r.dir, "fast-import", "--quiet")
-	cmd.Stdin = &in
+	cmd.Stdin = in
 	if out, err := cmd.CombinedOutput(); err != nil {
 		r.t.Fatalf("git fast-import: %v: %s", err, out)
 	}
-	return r.git("rev-parse", "refs/heads/"+branch)
+}
+
+// gitRaw is git's standard output, untrimmed.
+func (r *instructionRepo) gitRaw(args ...string) string {
+	r.t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", r.dir}, args...)...).Output()
+	if err != nil {
+		r.t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
 }
 
 // The refusal reaches the caller of the snapshot: a real result commit of

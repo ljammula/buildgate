@@ -150,3 +150,16 @@ def test_the_path_list_is_bounded(tmp_path):
 	long.write_text(header("a" * 1000), encoding="utf-8")
 	long_block = build_app.instructions_diff_block(long)
 	assert '- "' + "a" * 299 + "..." in long_block and "a" * 400 not in long_block.split("```diff")[0]
+
+
+def test_paths_the_host_counted_but_did_not_list_are_counted_and_reported(tmp_path):
+	diff = tmp_path / "instructions.diff"
+	diff.write_text(
+		header("AGENTS.md") + "@@ -1 +1 @@\n-a\n+b\n+[9 more instruction paths not listed]\n"
+		+ header(".claude/u1", "untracked, removed before review") + "[7000 more instruction paths not listed]\n",
+		encoding="utf-8",
+	)
+	block = build_app.instructions_diff_block(diff)
+	assert "Instruction paths this change touched (7002):" in block
+	assert "... and 7000 more instruction paths the host's file does not name" in block
+	assert "report that as a finding" in block.split("7000 more instruction paths")[1].split("\n")[0]

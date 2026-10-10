@@ -23,6 +23,14 @@ import (
 // A variable so a test can lower it.
 var maxReviewInstructionWalk = 2000000
 
+// maxReviewInstructionRemovals bounds the untracked instruction paths one
+// snapshot collects for removal: each is kept in memory by its path until the
+// diff file is written, and the walk limit alone would admit two million of
+// them. A directory counts once, whatever it holds. More is a refusal, before
+// anything is removed. The scale of the entries a commit may retain; a
+// variable so a test can lower it.
+var maxReviewInstructionRemovals = 50000
+
 const (
 	// maxReviewInstructionRemovedBody bounds the content of one removed file the
 	// diff file shows, maxReviewInstructionRemovedBodies all of them: past it a
@@ -66,13 +74,25 @@ type diskState struct {
 // nothing: applyRemovals does, once every check has passed.
 func (s *planState) reconcileDisk(ctx context.Context, root string) ([]removal, error) {
 	d := &diskState{planState: s, root: root, dirsOK: map[string]bool{}, bodyLeft: maxReviewInstructionRemovedBodies, kidInfo: map[string][]kidFile{}}
-	d.kids = s.trackedChildren()
+	var err error
+	if d.kids, err = s.trackedChildren(ctx); err != nil {
+		return nil, err
+	}
 	for _, e := range s.tracked {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := d.verify(ctx, e); err != nil {
 			return nil, err
 		}
 	}
-	if err := filepath.WalkDir(root, d.visit); err != nil {
+	err = filepath.WalkDir(root, func(p string, de fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		return d.visit(ctx, p, de, err)
+	})
+	if err != nil {
 		return nil, err
 	}
 	sort.Slice(d.collected, func(i, j int) bool { return d.collected[i].path < d.collected[j].path })
@@ -81,16 +101,26 @@ func (s *planState) reconcileDisk(ctx context.Context, root string) ([]removal, 
 
 // trackedChildren lists, for every directory on the way to a tracked
 // instruction path, the names of the tracked entries directly in it.
-func (s *planState) trackedChildren() map[string][]string {
+func (s *planState) trackedChildren(ctx context.Context) (map[string][]string, error) {
 	seen := map[string]map[string]bool{}
 	for _, e := range s.tracked {
-		parts := strings.Split(e.path, "/")
-		for k := range parts {
-			dir := strings.Join(parts[:k], "/")
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// From the entry up, each name in the directory that holds it. A name
+		// its directory already has was put there by an earlier entry, which
+		// went on to the root: nothing above it is new.
+		for end := len(e.path); end > 0; {
+			start := strings.LastIndexByte(e.path[:end], '/') + 1
+			dir := e.path[:max(start-1, 0)]
 			if seen[dir] == nil {
 				seen[dir] = map[string]bool{}
 			}
-			seen[dir][parts[k]] = true
+			if seen[dir][e.path[start:end]] {
+				break
+			}
+			seen[dir][e.path[start:end]] = true
+			end = start - 1
 		}
 	}
 	out := make(map[string][]string, len(seen))
@@ -100,23 +130,31 @@ func (s *planState) trackedChildren() map[string][]string {
 		}
 		sort.Strings(out[dir])
 	}
-	return out
+	return out, nil
 }
 
 // verify compares the on-disk entry for a result-tree entry with its blob,
 // through real directories only, so a stale git stat cache decides nothing.
 func (d *diskState) verify(ctx context.Context, e treeEntry) error {
 	bad := fmt.Errorf("review instructions: tracked instruction path %s does not match the result commit; if this repository converts files on checkout (working-tree-encoding, ident, a filter such as LFS) for this path, a review of it cannot run", strconv.Quote(e.path))
-	parts := strings.Split(e.path, "/")
-	cur := d.root
-	for i := 0; i < len(parts)-1; i++ {
-		cur = filepath.Join(cur, parts[i])
-		if key := strings.Join(parts[:i+1], "/"); !d.dirsOK[key] {
-			if info, err := os.Lstat(cur); err != nil || !info.IsDir() {
-				return bad
-			}
-			d.dirsOK[key] = true
+	// Every directory above the entry, from the root down, is checked once. A
+	// directory is marked only after those above it, so the nearest marked one
+	// is where the unchecked ones begin.
+	dirEnd := max(strings.LastIndexByte(e.path, '/'), 0) // bytes of e.path that are its directories
+	checked := dirEnd
+	for checked > 0 && !d.dirsOK[e.path[:checked]] {
+		checked = max(strings.LastIndexByte(e.path[:checked], '/'), 0)
+	}
+	for checked < dirEnd {
+		from := checked
+		if from > 0 {
+			from++ // past the separator
 		}
+		checked = from + strings.IndexByte(e.path[from:], '/')
+		if info, err := os.Lstat(filepath.Join(d.root, filepath.FromSlash(e.path[:checked]))); err != nil || !info.IsDir() {
+			return bad
+		}
+		d.dirsOK[e.path[:checked]] = true
 	}
 	abs := filepath.Join(d.root, filepath.FromSlash(e.path))
 	info, err := os.Lstat(abs)
@@ -237,7 +275,7 @@ func (c *byteCounter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (d *diskState) visit(p string, de fs.DirEntry, err error) error {
+func (d *diskState) visit(ctx context.Context, p string, de fs.DirEntry, err error) error {
 	if err != nil {
 		return fmt.Errorf("review instructions: walk %s: %w", p, err)
 	}
@@ -259,14 +297,14 @@ func (d *diskState) visit(p string, de fs.DirEntry, err error) error {
 		return fmt.Errorf("review instructions: the workspace has more than %d entries", maxReviewInstructionWalk)
 	}
 	if de.IsDir() && d.res.gitFold[foldName(rel)] {
-		return d.checkSubmodule(p, rel)
+		return d.checkSubmodule(ctx, p, rel)
 	}
 	ip := classify(rel)
 	if ip.n > 0 {
 		if slices.Contains(ip.parts[:ip.n-1], ".git") {
 			return fmt.Errorf("review instructions: instruction path %s is inside a nested repository's .git: a review cannot verify it", strconv.Quote(rel))
 		}
-		return d.reconcile(p, rel, ip, de)
+		return d.reconcile(ctx, p, rel, ip, de)
 	}
 	return d.checkLeadLink(rel, ip, de)
 }
@@ -291,10 +329,13 @@ func (d *diskState) checkLeadLink(rel string, ip instrPath, de fs.DirEntry) erro
 // path, or a link that would redirect one: a review cannot verify what a
 // submodule's checkout contains. Each entry is classified by its path from
 // the workspace root, as visit classifies an entry outside a submodule.
-func (d *diskState) checkSubmodule(p, rel string) error {
+func (d *diskState) checkSubmodule(ctx context.Context, p, rel string) error {
 	err := filepath.WalkDir(p, func(q string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("review instructions: walk %s: %w", strconv.Quote(rel), err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if q == p {
 			return nil
@@ -323,7 +364,7 @@ func (d *diskState) checkSubmodule(p, rel string) error {
 // holds it (a tracked entry was verified; a tracked directory is descended).
 // Before collecting, it refuses an entry that is the same file as a tracked
 // one under another spelling, whatever the fold says.
-func (d *diskState) reconcile(p, rel string, ip instrPath, de fs.DirEntry) error {
+func (d *diskState) reconcile(ctx context.Context, p, rel string, ip instrPath, de fs.DirEntry) error {
 	if _, ok := d.res.byPath[rel]; ok || (de.IsDir() && d.resDirs[rel]) {
 		return nil
 	}
@@ -336,11 +377,13 @@ func (d *diskState) reconcile(p, rel string, ip instrPath, de fs.DirEntry) error
 	if err := d.ancestorsAreTracked(rel); err != nil {
 		return err
 	}
-	r, err := d.describe(p, rel, de)
+	r, err := d.describe(ctx, p, rel, de)
 	if err != nil {
 		return err
 	}
-	d.collected = append(d.collected, r)
+	if d.collected = append(d.collected, r); len(d.collected) > maxReviewInstructionRemovals {
+		return fmt.Errorf("review instructions: more than %d untracked instruction paths in the workspace: a review cannot list what it would remove", maxReviewInstructionRemovals)
+	}
 	if de.IsDir() {
 		return filepath.SkipDir
 	}
@@ -385,12 +428,11 @@ func (d *diskState) trackedDirs() map[int][]kidFile {
 	d.dirsByLen = map[int][]kidFile{}
 	seen := map[string]bool{}
 	for _, e := range d.tracked {
-		parts := strings.Split(e.path, "/")
-		for k := 1; k < len(parts); k++ {
-			dir := strings.Join(parts[:k], "/")
-			if seen[dir] {
-				continue
-			}
+		// From the entry's directory up; above a directory already seen,
+		// every directory was seen with it.
+		k := strings.Count(e.path, "/")
+		for end := strings.LastIndexByte(e.path, '/'); end > 0 && !seen[e.path[:end]]; end, k = strings.LastIndexByte(e.path[:end], '/'), k-1 {
+			dir := e.path[:end]
 			seen[dir] = true
 			if info, err := os.Lstat(filepath.Join(d.root, filepath.FromSlash(dir))); err == nil {
 				d.dirsByLen[k] = append(d.dirsByLen[k], kidFile{dir, info})
@@ -430,7 +472,7 @@ func (d *diskState) ancestorsAreTracked(rel string) error {
 
 // describe records what is about to be removed; it opens nothing but a
 // regular file, and that only while the bodies kept so far leave room.
-func (d *diskState) describe(p, rel string, de fs.DirEntry) (removal, error) {
+func (d *diskState) describe(ctx context.Context, p, rel string, de fs.DirEntry) (removal, error) {
 	r := removal{path: rel, abs: p}
 	switch t := de.Type(); {
 	case de.IsDir():
@@ -438,6 +480,9 @@ func (d *diskState) describe(p, rel string, de fs.DirEntry) (removal, error) {
 		err := filepath.WalkDir(p, func(_ string, _ fs.DirEntry, err error) error {
 			if n++; err == nil && d.visited+n > maxReviewInstructionWalk {
 				err = fmt.Errorf("the workspace has more than %d entries", maxReviewInstructionWalk)
+			}
+			if err == nil {
+				err = ctx.Err()
 			}
 			return err
 		})
