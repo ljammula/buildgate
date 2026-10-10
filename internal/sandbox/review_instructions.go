@@ -418,23 +418,24 @@ func sameEntries(a, b []treeEntry) bool {
 // later cap applies. A variable so a test can lower it.
 var maxReviewInstructionRetained = 50000
 
-// maxReviewInstructionRecordedDirs and maxReviewInstructionRecordedBytes bound
-// what register keeps from one commit's listing, whatever the shape of its
-// tree. A recorded directory is a map entry in each of three maps (about 200
-// bytes, measured), so the count bounds the entries; a recorded spelling is a
-// slice of its entry's path and of that path folded, which stay in memory
-// whole, so the bytes of both are counted for every entry that records
-// anything. Neither alone is a bound: 20,000 directories 1,500 levels down
-// are 30 million entries under little path text, and a few thousand
-// directories under names of a megabyte are gigabytes of text under few
-// entries. Together a commit's records stay under about 85 MiB. Only
-// directories that lead to or lie under a table match count, not the tree's:
-// 100,000 of them is twice the entries a commit may retain and more
-// directories than the largest public monorepos hold in all, and 64 MiB (the
-// staged-bytes limit) is over 300 bytes of path for each of them.
+// maxReviewInstructionKeptBytes bounds the path text a plan keeps from one
+// commit's listing, whatever the shape of its tree: every path it retains (an
+// entry at an instruction path, a symlink or a submodule anywhere), each
+// folded or respelled copy of one, the path of every entry register records
+// from, every directory prefix it records (the worktree check spells each
+// out again), and every link target with the directories above it. One rule:
+// a byte of path the plan keeps is a byte of this budget, and a commit over it
+// is refused. maxReviewInstructionRecordedDirs bounds the directories register
+// records, each a map entry in three maps (about 200 bytes, measured). Neither
+// alone is a bound: 100,000 one-letter directories are entries under little
+// text, and a few thousand names of a megabyte are gigabytes of text under few
+// entries. Only directories that lead to or lie under a table match count,
+// not the tree's: 100,000 of them is twice the entries a commit may retain and
+// more directories than the largest public monorepos hold in all, and 64 MiB
+// (the staged-bytes limit) is over 600 bytes of path and prefix for each.
 const (
-	maxReviewInstructionRecordedDirs  = 100000
-	maxReviewInstructionRecordedBytes = 64 << 20
+	maxReviewInstructionRecordedDirs = 100000
+	maxReviewInstructionKeptBytes    = 64 << 20
 )
 
 // ---- the plan ----
@@ -459,7 +460,7 @@ type planState struct {
 	retained  int                       // entries kept from the listings, for a test
 	sideKept  [2]int                    // entries kept from each commit's listing, bounded by maxReviewInstructionRetained
 	recDirs   [2]int                    // directories register recorded from each commit, bounded by maxReviewInstructionRecordedDirs
-	recBytes  [2]int                    // bytes of the paths it keeps slices of, bounded by maxReviewInstructionRecordedBytes
+	keptBytes [2]int                    // bytes of path text kept from each commit, bounded by maxReviewInstructionKeptBytes
 	shas      [2]string                 // the base and result commits
 }
 
@@ -477,14 +478,22 @@ func (s *planState) load(ctx context.Context, root, sha string, side int) error 
 	return streamTree(ctx, root, sha, func(e treeEntry) error { return s.index(t, e, side) })
 }
 
+// keep counts n more bytes of path text kept from one commit's listing.
+func (s *planState) keep(side, n int) error {
+	if s.keptBytes[side] += n; s.keptBytes[side] > maxReviewInstructionKeptBytes {
+		return fmt.Errorf("review instructions: more than %d bytes of instruction-path, link or submodule paths in commit %s", maxReviewInstructionKeptBytes, s.shas[side])
+	}
+	return nil
+}
+
 // register records the spelling of every prefix that leads to or lies under a
 // table match; two spellings of one folded prefix are an error. A directory is
 // recorded once for each commit: an entry whose directory was recorded costs
 // one lookup, whatever its depth, and a new directory only the components
 // below its nearest recorded ancestor. What one commit adds is bounded: more
-// than maxReviewInstructionRecordedDirs directories, or more than
-// maxReviewInstructionRecordedBytes of the paths that recorded something, is
-// an error.
+// than maxReviewInstructionRecordedDirs directories is an error, and the path
+// of an entry that records something and every directory recorded count
+// against maxReviewInstructionKeptBytes.
 func (s *planState) register(ip instrPath, path string, side int) error {
 	top := ip.lead
 	if ip.n > 0 {
@@ -507,8 +516,8 @@ func (s *planState) register(ip instrPath, path string, side int) error {
 		end -= len(ip.parts[k-1]) + 1
 	}
 	folded := strings.Join(ip.fold[:top], "/")
-	if s.recBytes[side] += len(path) + len(folded); s.recBytes[side] > maxReviewInstructionRecordedBytes {
-		return fmt.Errorf("review instructions: more than %d bytes of paths that lead to or lie under an instruction path in commit %s", maxReviewInstructionRecordedBytes, s.shas[side])
+	if err := s.keep(side, len(path)+len(folded)); err != nil {
+		return err
 	}
 	spellEnd, foldEnd := -1, -1
 	for k := 0; k < top; k++ {
@@ -525,6 +534,9 @@ func (s *planState) register(ip instrPath, path string, side int) error {
 			if s.recDirs[side]++; s.recDirs[side] > maxReviewInstructionRecordedDirs {
 				return fmt.Errorf("review instructions: more than %d directories that lead to or lie under an instruction path in commit %s", maxReviewInstructionRecordedDirs, s.shas[side])
 			}
+			if err := s.keep(side, len(spelled)); err != nil {
+				return err
+			}
 			done[spelled] = true
 			if side == 1 {
 				s.resDirs[spelled] = true
@@ -536,18 +548,25 @@ func (s *planState) register(ip instrPath, path string, side int) error {
 
 func (s *planState) index(t *gitTree, e treeEntry, side int) error {
 	ip := classify(e.path)
+	kept := 0 // bytes of path text this entry leaves in the plan
 	switch {
 	case e.isLink():
-		t.linkFold[foldName(e.path)] = true
+		fold := foldName(e.path)
+		t.linkFold[fold], kept = true, len(fold)
 	case e.isGitlink():
-		t.gitFold[foldName(e.path)] = true
+		fold := foldName(e.path)
+		t.gitFold[fold], kept = true, len(fold)
 	}
 	if e.isLink() || e.isGitlink() || ip.relevant() {
 		t.byPath[e.path] = e
+		kept += len(e.path)
 		s.retained++
 		if s.sideKept[side]++; s.sideKept[side] > maxReviewInstructionRetained {
 			return fmt.Errorf("review instructions: more than %d instruction-path, link or submodule entries in commit %s", maxReviewInstructionRetained, s.shas[side])
 		}
+	}
+	if err := s.keep(side, kept); err != nil {
+		return err
 	}
 	if ip.n == 0 && ip.lead == 0 {
 		return nil
@@ -580,6 +599,9 @@ func (s *planState) index(t *gitTree, e treeEntry, side int) error {
 	if c == nil {
 		c = &candidate{canon: ip.canon, spelled: strings.Join(ip.parts[:ip.n], "/")}
 		s.cands[key] = c
+		if err := s.keep(side, len(key)+len(c.canon)+len(c.spelled)); err != nil {
+			return err
+		}
 	}
 	if side == 0 {
 		c.base = append(c.base, e)

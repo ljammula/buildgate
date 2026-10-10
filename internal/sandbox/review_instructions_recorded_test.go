@@ -53,10 +53,13 @@ func TestReviewInstructionRecordedDirectoriesBoundMemory(t *testing.T) {
 		path    func(i int) string
 		want    string
 	}{
-		// 1,000 chains of 1,500 directories: 1.5 million directories.
-		{"many deep directories", 1000, func(i int) string { return deepLeadPath(i, 1500) }, "directories that lead to or lie under an instruction path"},
+		// 2,000 chains of 100 directories: 200,000 directories under little text.
+		{"many directories", 2000, func(i int) string { return deepLeadPath(i, 100) }, "directories that lead to or lie under an instruction path"},
+		// 1,000 chains of 1,500 directories: 1.5 million directories, and every
+		// directory's prefix is text the worktree check spells out.
+		{"many deep directories", 1000, func(i int) string { return deepLeadPath(i, 1500) }, "bytes of instruction-path, link or submodule paths in commit"},
 		// 2,000 directories, each under a name of 500,000 bytes: 1 GB of paths.
-		{"long names", 2000, func(i int) string { return fmt.Sprintf("%06d", i) + strings.Repeat("n", 500000) + "/.github/x" }, "bytes of paths that lead to or lie under an instruction path"},
+		{"long names", 2000, func(i int) string { return fmt.Sprintf("%06d", i) + strings.Repeat("n", 500000) + "/.github/x" }, "bytes of instruction-path, link or submodule paths in commit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,12 +81,12 @@ func TestReviewInstructionRecordedDirectoriesBoundMemory(t *testing.T) {
 // The memory a plan keeps without a refusal grows with the directories it
 // records; the measurement behind the limits.
 func TestReviewInstructionRecordedDirectoryCost(t *testing.T) {
-	for _, chains := range []int{20, 40, 60} {
+	for _, chains := range []int{300, 600, 900} {
 		before := heapNow()
-		s, took, refusal := indexUntilRefused(chains, func(i int) string { return deepLeadPath(i, 1500) })
+		s, took, refusal := indexUntilRefused(chains, func(i int) string { return deepLeadPath(i, 100) })
 		kept := int64(heapNow()) - int64(before)
 		if refusal != "" || took != chains {
-			t.Fatalf("%d chains of 1,500 directories: refused after %d: %s", chains, took, refusal)
+			t.Fatalf("%d chains of 100 directories: refused after %d: %s", chains, took, refusal)
 		}
 		t.Logf("%d directories: plan keeps %d KiB (%d bytes a directory)", len(s.resDirs), kept>>10, kept/int64(len(s.resDirs)))
 		runtime.KeepAlive(s)
@@ -107,17 +110,16 @@ func (r *instructionRepo) importPaths(branch string, paths []string) string {
 	return r.git("rev-parse", "refs/heads/"+branch)
 }
 
-// The refusal reaches the caller of the snapshot: a real result commit of 150
-// chains of 1,500 directories (225,000 of them) launches no review, and
-// nothing is left under the destination.
+// The refusal reaches the caller of the snapshot: a real result commit of
+// 1,200 chains of 100 directories (120,000 of them) launches no review.
 func TestReviewInstructionSnapshotRefusesTooManyRecordedDirectories(t *testing.T) {
 	if testing.Short() {
-		t.Skip("imports a commit of 225,000 trees")
+		t.Skip("imports a commit of 120,000 trees")
 	}
 	r := newInstructionRepo(t, nil)
-	paths := make([]string, 150)
+	paths := make([]string, 1200)
 	for i := range paths {
-		paths[i] = deepLeadPath(i, 1500)
+		paths[i] = deepLeadPath(i, 100)
 	}
 	r.result = r.importPaths("deep", paths)
 	r.git("update-ref", "--no-deref", "HEAD", r.result)

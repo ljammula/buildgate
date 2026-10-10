@@ -89,14 +89,32 @@ func (s *planState) checkLinkTarget(link, target string) error {
 	}
 	if _, ok := s.targets[target]; !ok {
 		s.targets[target] = link
+		return s.keepTarget(parts)
 	}
 	return nil
+}
+
+// keepTarget counts a queued link target as register counts a recorded path:
+// its directories against maxReviewInstructionRecordedDirs, and its path and
+// every directory prefix above it, which the worktree check spells out,
+// against maxReviewInstructionKeptBytes of the result commit.
+func (s *planState) keepTarget(parts []string) error {
+	bytes, end := 0, -1
+	for _, p := range parts {
+		end += 1 + len(p)
+		bytes += end
+	}
+	if s.recDirs[1] += len(parts) - 1; s.recDirs[1] > maxReviewInstructionRecordedDirs {
+		return fmt.Errorf("review instructions: more than %d directories that lead to or lie under an instruction path in commit %s", maxReviewInstructionRecordedDirs, s.shas[1])
+	}
+	return s.keep(1, bytes)
 }
 
 // checkFileTargets reads each tree once more, keeping only the queued target
 // paths, and requires every target to be one blob (a regular file) with the
 // same id and mode in both trees. The result's entry is then verified on disk
-// with the table's tracked entries.
+// with the table's tracked entries. What it keeps is one entry and one
+// directory name for each queued target, each as long as the target itself.
 func (s *planState) checkFileTargets(ctx context.Context, root string) error {
 	if len(s.targets) == 0 {
 		return nil
@@ -112,8 +130,8 @@ func (s *planState) checkFileTargets(ctx context.Context, root string) error {
 			}
 			for k := 0; k < len(e.path); k++ {
 				if e.path[k] == '/' {
-					if _, ok := s.targets[e.path[:k]]; ok {
-						dirs[side][e.path[:k]] = true
+					if _, ok := s.targets[e.path[:k]]; ok && !dirs[side][e.path[:k]] {
+						dirs[side][strings.Clone(e.path[:k])] = true // not a slice of the record, which may be a megabyte
 					}
 				}
 			}
