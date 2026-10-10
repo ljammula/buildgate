@@ -554,7 +554,11 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 	// The repo's compose images under a registry the config does not allow
 	// would halt its first build. Say so now, and add the prefixes only on
 	// a yes (offerComposeRegistries); non-interactively it only says so.
-	if settings, settingsErr := loadSettingsForConfig(configPath); settingsErr == nil && settings.ComposeServices {
+	settings, err := loadSettingsForConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if settings.ComposeServices {
 		offerComposeRegistries(p, w, false, !opts.NonInteractive, settings, repoRoot, configPath, "factoryd quickstart")
 	}
 
@@ -593,7 +597,7 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 		}
 	}
 
-	return quickstartSubmitAndWatch(dp, w, repoRoot, dataDir, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, opts.PollInterval, opts.PollTimeout, consoleToken, !opts.NoOpen)
+	return quickstartSubmitAndWatch(dp, w, settings, repoRoot, dataDir, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, opts.PollInterval, opts.PollTimeout, consoleToken, !opts.NoOpen)
 }
 
 // gitToplevel resolves the git repository containing dir, via
@@ -2928,7 +2932,7 @@ func (impl realForge) fetchIssue(ctx context.Context, issueURL string) (title, b
 // "Idempotency" row). Checks quickstartFindInFlightRequest first so a
 // rerun against a repo that already has a request in flight reports that
 // request instead of submitting a second one.
-func quickstartSubmitAndWatch(dp *deps, w io.Writer, repoRoot, dataDir, goal, issue, requestFile, verifyCommand string, verifyCommandExplicit bool, preflightProfile string, preflightProfileExplicit bool, pollInterval, pollTimeout time.Duration, consoleToken string, autoOpen bool) error {
+func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Settings, repoRoot, dataDir, goal, issue, requestFile, verifyCommand string, verifyCommandExplicit bool, preflightProfile string, preflightProfileExplicit bool, pollInterval, pollTimeout time.Duration, consoleToken string, autoOpen bool) error {
 	if inFlight, err := quickstartFindInFlightRequest(dataDir, repoRoot); err != nil {
 		return err
 	} else if inFlight != nil {
@@ -2941,6 +2945,7 @@ func quickstartSubmitAndWatch(dp *deps, w io.Writer, repoRoot, dataDir, goal, is
 	if issue == "" && requestFile == "" {
 		trailingText = []string{goal}
 	}
+	tokenCeiling, costCeilingMicroUSD := settings.EffectiveRelayCeilings()
 	result, err := submitRequest(dp, context.Background(), submitParams{
 		workspaceArg:             repoRoot,
 		requestFile:              requestFile,
@@ -2951,7 +2956,13 @@ func quickstartSubmitAndWatch(dp *deps, w io.Writer, repoRoot, dataDir, goal, is
 		preflightProfile:         preflightProfile,
 		preflightProfileExplicit: preflightProfileExplicit,
 		dataDir:                  dataDir,
-		fetchIssue:               dp.forge.fetchIssue,
+		// The session's settings and ceilings, as `factoryd submit` passes
+		// them: without them a repository's design_guide resolves against
+		// no design_guide_dirs and its ceilings against built-in defaults.
+		sessionTokenCeiling:        int64(tokenCeiling),
+		sessionCostCeilingMicroUSD: costCeilingMicroUSD,
+		settings:                   settings,
+		fetchIssue:                 dp.forge.fetchIssue,
 	})
 	if err != nil {
 		return err
