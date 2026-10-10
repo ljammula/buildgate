@@ -24,7 +24,7 @@ export const columnClass = "w-0 min-w-56 flex-1";
 export const needsYouColumnClass = "w-0 min-w-56 flex-[2]";
 
 /** A column with no card in view: a strip, so the others share its width. */
-export const narrowColumnClass = "w-28 shrink-0";
+export const narrowColumnClass = "w-36 shrink-0";
 
 /** The width class of a column, for its header and for each lane's cell. */
 export function columnWidthClass(column: BoardColumn, narrow: boolean): string {
@@ -121,10 +121,12 @@ export function KanbanLane({
             {...(headed ? {} : { tabIndex: 0 })}
             className={cn(
               columnWidthClass(column, narrow),
-              // A column with no card is a strip: no slab, no height of its own.
-              narrow
-                ? "flex flex-col gap-2 p-2"
-                : "bg-surface-sunken flex min-h-14 flex-col gap-2 rounded-md px-2 py-1.5",
+              // Every column is a panel, so an empty one is still a place; only
+              // one that holds cards is a well.
+              "border-border flex flex-col gap-2 border",
+              // A lone lane's panel hangs from its heading's band.
+              headed ? "rounded-md" : "rounded-b-md border-t-0",
+              narrow ? "p-2" : "bg-surface-sunken min-h-14 px-2 py-1.5",
               // The list is the container its groups' two-across query measures.
               across === 2 && "@container",
               !headed && "overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2",

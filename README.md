@@ -27,6 +27,13 @@ Go orchestration daemon (`factoryd`), a React operator console embedded in
 `factoryd serve`, and vendored build scripts under `agent/` (one set for
 every harness). [Apache 2.0](LICENSE).
 
+Mission Control, the console's home screen, on seeded demo data:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="demo/mission-control-dark.png">
+  <img src="demo/mission-control-light.png" alt="Mission Control: a health strip, a board of requests by who has to act (Needs you, Building, Done), the numbers and the recent moves">
+</picture>
+
 ## Install
 
 Source-only: buildgate's Docker images are built on your machine, never
