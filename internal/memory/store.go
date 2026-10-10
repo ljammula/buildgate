@@ -105,9 +105,6 @@ func OpenReadOnly(dataDir, project string) (*Store, error) {
 	return &Store{dir: filepath.Join(dataDir, "memory", project)}, nil
 }
 
-// Dir is the project's store directory.
-func (s *Store) Dir() string { return s.dir }
-
 // Load reads state.json. A missing file is an empty state.
 func (s *Store) Load() (StoreState, error) {
 	return s.read()
