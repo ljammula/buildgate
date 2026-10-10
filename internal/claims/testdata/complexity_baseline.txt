@@ -62,8 +62,6 @@
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch
 29 internal/sandbox/composeservices_orphans.go ReconcileComposeServicesOrphans
-72 internal/sandbox/docker.go (LaunchSpec).Validate
-63 internal/sandbox/relay.go (RoutePolicy).Validate
 58 internal/sandbox/relay.go ReconcileRelayOrphans
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
 44 internal/sessionconfig/routing.go ValidateRouting

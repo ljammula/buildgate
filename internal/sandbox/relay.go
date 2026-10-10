@@ -472,6 +472,24 @@ func (p RoutePolicy) Spec(credential, githubToken, chatGPTToken, chatGPTAccountI
 // caller holding only the credential-free half (a Temporal Workflow input's
 // RoutePolicy) can reject a bad policy without needing a credential.
 func (p RoutePolicy) Validate() error {
+	for _, check := range []func() error{
+		p.validateFormats,
+		p.validateRouteAndBilling,
+		p.validateAuthModeRoute,
+		p.validateWorkerModel,
+		p.validateBudgets,
+	} {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateFormats is the first group of Validate's rules: the upstream and
+// the fixed-value fields. Validate runs the groups in order, and each group
+// its rules in order, so the first rule a policy breaks is the one reported.
+func (p RoutePolicy) validateFormats() error {
 	if !validRelayUpstream(p.Upstream) {
 		return errors.New("relay upstream must be an absolute HTTP(S) URL without credentials or query data")
 	}
@@ -493,6 +511,11 @@ func (p RoutePolicy) Validate() error {
 	if p.AuthMode != "" && p.AuthMode != meter.CredentialModeStatic && p.AuthMode != meter.CredentialModeGitHubCopilot && p.AuthMode != meter.CredentialModeChatGPTCodex {
 		return fmt.Errorf("relay auth mode must be %q, %q, or %q", meter.CredentialModeStatic, meter.CredentialModeGitHubCopilot, meter.CredentialModeChatGPTCodex)
 	}
+	return nil
+}
+
+// validateRouteAndBilling checks the route name and the billing label.
+func (p RoutePolicy) validateRouteAndBilling() error {
 	if p.Route == "" {
 		return errors.New("relay route is required: routes:/models:/roles: is the only session-config schema")
 	}
@@ -517,6 +540,12 @@ func (p RoutePolicy) Validate() error {
 	if p.Billing == run.BillingSubscription && p.AuthMode != meter.CredentialModeGitHubCopilot && p.AuthMode != meter.CredentialModeChatGPTCodex {
 		return fmt.Errorf("relay billing must not be %q when auth mode is %q: a metered API-key route is never billed to a subscription", run.BillingSubscription, p.AuthMode)
 	}
+	return nil
+}
+
+// validateAuthModeRoute checks what the GitHub Copilot and ChatGPT auth modes require
+// of the route.
+func (p RoutePolicy) validateAuthModeRoute() error {
 	// The worker only ever reaches this relay as an OpenAI-compatible
 	// provider (WorkerModelID) or the default Anthropic-shaped wiring --
 	// GitHub Copilot's own API is OpenAI-compatible, so github-copilot mode
@@ -545,6 +574,12 @@ func (p RoutePolicy) Validate() error {
 	if p.AuthMode == meter.CredentialModeChatGPTCodex && p.WorkerModelID == "" {
 		return errors.New("relay worker model id is required when auth mode is \"chatgpt-codex\": the worker must reach the relay as an OpenAI-compatible provider")
 	}
+	return nil
+}
+
+// validateWorkerModel checks the worker model id and that the usage format matches
+// the API the worker speaks.
+func (p RoutePolicy) validateWorkerModel() error {
 	if strings.ContainsAny(p.WorkerModelID, "\x00\r\n\t") {
 		return errors.New("relay worker model id must not contain a control character")
 	}
@@ -584,6 +619,12 @@ func (p RoutePolicy) Validate() error {
 	if strings.Contains(p.WorkerModelID, "/") {
 		return errors.New("relay worker model id must not contain a slash: pi's own CLI hangs resolving a slash-containing --model value together with an explicit --provider (which this package always sets) -- alias this model to a clean id on the upstream side instead")
 	}
+	return nil
+}
+
+// validateBudgets checks the request limits, the budgets, the prices and the
+// ceilings.
+func (p RoutePolicy) validateBudgets() error {
 	if p.MaxRequestBytes <= 0 {
 		return errors.New("relay maximum request size must be positive")
 	}
