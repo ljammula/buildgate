@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import type { HttpConfig } from "@/api/http";
 import { Console } from "@/app/Console";
@@ -7,8 +8,8 @@ import { type ConsoleSession, startSession } from "@/app/session";
 import { getStoredGateToken, setStoredGateToken } from "@/platform/gateToken";
 
 const gateSentence =
-  "This console needs its gate link. On the host, run factoryd gate-token and open the link it prints.";
-const expiredSentence = "The gate link this browser was using has expired or was replaced.";
+  "This console needs its gate token. On the host, run factoryd gate-token and paste the token it prints here.";
+const expiredSentence = "The gate token this browser was using has expired or was replaced.";
 
 interface Call {
   readonly url: string;
@@ -72,8 +73,8 @@ afterEach(() => {
 test("a server that requires the gate gets the gate screen and no further call", async () => {
   const server = gatedServer(["good"]);
   render(<Console session={await start(server)} />);
-  expect(screen.getByRole("heading", { name: "Gate link needed" })).toBeInTheDocument();
-  expect(screen.getByText(/This console needs its gate link/).textContent).toBe(gateSentence);
+  expect(screen.getByRole("heading", { name: "Gate token needed" })).toBeInTheDocument();
+  expect(screen.getByText(/This console needs its gate token/).textContent).toBe(gateSentence);
   expect(screen.queryByText(expiredSentence)).not.toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -87,7 +88,7 @@ test("a stored token the server refuses is forgotten, and the screen says the li
   expect(session.storedTokenRefused).toBe(true);
   expect(getStoredGateToken()).toBeNull();
   render(<Console session={session} />);
-  expect(screen.getByRole("heading", { name: "Gate link needed" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Gate token needed" })).toBeInTheDocument();
   expect(screen.getByText(expiredSentence)).toBeInTheDocument();
   expect(server.otherCalls()).toEqual([]);
 });
@@ -130,7 +131,7 @@ test("a refused link with nothing stored stores nothing and shows the gate scree
   expect(session.storedTokenRefused).toBe(false);
   expect(server.configCalls()).toHaveLength(1);
   render(<Console session={session} />);
-  expect(screen.getByRole("heading", { name: "Gate link needed" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Gate token needed" })).toBeInTheDocument();
   expect(screen.queryByText(expiredSentence)).not.toBeInTheDocument();
 });
 
@@ -173,7 +174,7 @@ test("a 403 after the token was rotated clears it and shows the gate screen, wit
     ]);
   });
 
-  expect(await screen.findByRole("heading", { name: "Gate link needed" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Gate token needed" })).toBeInTheDocument();
   expect(screen.getByText(expiredSentence)).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
   expect(getStoredGateToken()).toBeNull();
@@ -213,7 +214,7 @@ test("a 403 while the server still accepts the token changes nothing", async () 
   expect(session.gateLost()).toBe(false);
   expect(getStoredGateToken()).toBe("good");
   expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "Gate link needed" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gate token needed" })).not.toBeInTheDocument();
 
   // The answer is not remembered: the next 403 asks again.
   await act(async () => {
@@ -235,4 +236,46 @@ test("no call ever puts the gate token in a URL", async () => {
   });
   expect(server.state.calls.length).toBeGreaterThan(1);
   for (const call of server.state.calls) expect(call.url).not.toMatch(/good|fresh/);
+});
+
+test("a pasted token the server accepts is stored for the tab and the console starts again", async () => {
+  const server = gatedServer(["good"]);
+  const restart = vi.fn();
+  render(<Console session={await start(server)} restart={restart} />);
+  const field = screen.getByLabelText("Gate token");
+  expect(field).toHaveAttribute("type", "password");
+  expect(field).toHaveAttribute("autocomplete", "off");
+  const open = screen.getByRole("button", { name: "Open console" });
+  expect(open).toBeDisabled();
+
+  await userEvent.type(field, "  good  ");
+  await userEvent.click(open);
+  await waitFor(() => {
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+  expect(getStoredGateToken()).toBe("good");
+  expect(window.location.href).not.toContain("good");
+  expect(server.configCalls().at(-1)).toEqual({
+    url: "/console-config.json",
+    authorization: "Bearer good",
+  });
+  expect(server.otherCalls()).toEqual([]);
+
+  // Starting again finds the stored token and opens the app.
+  const session = await start(server);
+  expect(session.config.gate).toBe("accepted");
+  expect(session.http.config.gateToken).toBe("good");
+});
+
+test("a pasted token the server refuses is not stored, and the screen says so", async () => {
+  const server = gatedServer(["good"]);
+  const restart = vi.fn();
+  render(<Console session={await start(server)} restart={restart} />);
+  await userEvent.type(screen.getByLabelText("Gate token"), "stale");
+  await userEvent.click(screen.getByRole("button", { name: "Open console" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("That token was not accepted");
+  expect(restart).not.toHaveBeenCalled();
+  expect(getStoredGateToken()).toBeNull();
+  expect(screen.getByLabelText("Gate token")).toHaveValue("");
+  expect(server.otherCalls()).toEqual([]);
 });

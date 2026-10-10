@@ -455,7 +455,7 @@ name, so limit who can reach the node with a tailnet ACL.
 |---|---|
 | `tailscale serve status` already shows `/` on port 443 | `tailscale serve --bg 8090` would replace it. Use another HTTPS port: `tailscale serve --bg --https=8443 http://127.0.0.1:8090` |
 | The tunnel is on a port other than 443 | The Host header carries the port, so name it: `-allowed-host <machine>.<tailnet>.ts.net:8443`. The bare name is refused with 403 |
-| Approve or reject from the other machine | On the host, `factoryd gate-token` prints a token and the fragment `#gate=<token>`. Open the console under its `-allowed-host` address with that fragment appended, for example `https://<machine>.<tailnet>.ts.net/#gate=<token>`. See [The console from another machine](#the-console-from-another-machine) |
+| Approve or reject from the other machine | On the host, `factoryd gate-token` prints a token. Open the console under its `-allowed-host` address and paste the token into the field it shows. See [The console from another machine](#the-console-from-another-machine) |
 
 ### The console from another machine
 
@@ -464,7 +464,8 @@ host                                   other machine
 ----                                   -------------
 factoryd serve -allowed-host <name>
 <reverse proxy> -> 127.0.0.1:<port>
-factoryd gate-token  -- prints -->     https://<name>/#gate=<token>   (open once per browser tab)
+factoryd gate-token  -- prints -->     the token: open https://<name>/ and paste it
+                                       (once per browser tab)
                                        console reads, approves, rejects, edits, submits
 factoryd gate-token -rotate            the old link stops working at once
 ```
@@ -473,10 +474,11 @@ factoryd gate-token -rotate            the old link stops working at once
 |---|---|
 | What the token allows | Reading, and the request actions: submit, approve, reject, retry, resume, cancel, and editing a spec, ticket or oracle file |
 | What it never allows | Overriding a quarantined run, starting a single-ticket run or a daemon, the release routes, and `/mcp`. Those keep their own tokens, so the console's worker strip and release panels stay empty there |
-| Reads | While a gate token file exists, a console that is not on the host needs the token to read as well. Without it the console shows where to get the link |
+| Reads | While a gate token file exists, a console that is not on the host needs the token to read as well. Without it the console shows a field for the token |
 | On the host itself | `http://127.0.0.1:<port>` reads and writes with no token, gate token or not |
-| Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd gate-token` again and open the new link |
-| In the browser | Kept for the tab only and removed from the address bar. A new tab needs the link again. Treat the link as a password: it can stay in the browser's history |
+| Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd gate-token` again and paste the new token |
+| Handing the token over | Paste it into the "Gate token" field the console shows when it holds none: the token is then never part of a URL. `https://<name>/#gate=<token>` does the same in one step, and that link can stay in the browser's history: treat it as a password |
+| In the browser | Kept for the tab only, never in the address bar. A new tab asks for the token again |
 | Who the history names | The name you give the console, followed by `(gate token)` |
 | Stop it | `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the `-allowed-host` name need no token, and the console there cannot write) |
 | A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing: behind one, run `serve` with `-override-token` (for writes) and `FACTORYD_API_READ_TOKEN` (for reads) |

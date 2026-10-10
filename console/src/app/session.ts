@@ -21,6 +21,13 @@ export interface ConsoleSession {
   readonly gateLost: () => boolean;
   /** Calls `listener` when gateLost turns true. Returns the unsubscribe. */
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * Offers a gate token the operator pasted. It is stored for this tab only
+   * once the server has accepted it; the caller then starts the console
+   * again, which picks it up. Resolves false, storing nothing, for a token
+   * the server refuses or a server that cannot answer.
+   */
+  readonly offerToken: (token: string) => Promise<boolean>;
 }
 
 export interface SessionInputs {
@@ -88,6 +95,13 @@ export async function startSession({
     http,
     config,
     storedTokenRefused,
+    offerToken: async (offered) => {
+      const token = offered.trim();
+      if (token === "") return false;
+      if ((await configFor(token)).gate !== "accepted") return false;
+      setStoredGateToken(token);
+      return true;
+    },
     gateLost: () => lost,
     subscribe: (listener) => {
       listeners.add(listener);
