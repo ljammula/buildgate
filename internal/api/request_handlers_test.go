@@ -2622,32 +2622,35 @@ func TestRetryRequestHandlerFrom(t *testing.T) {
 	}
 }
 
-// TestListRequestsCarriesQueuePositionAndBuildProgress: the board reads each
-// request's place in the queue and the running build's stage from the list,
-// with no call per request. Three requests wait behind the one building, in
-// the order they were submitted.
-func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
+// seedQueueFixture is a data dir whose worker is building req-building
+// (ticket 2 of 3, in its second run) while three requests wait behind it, in
+// the order they were submitted, and one sits at a gate.
+func seedQueueFixture(t *testing.T) string {
+	t.Helper()
 	dataDir := t.TempDir()
 	now := time.Now()
-	save := func(id string, state request.State, offset time.Duration) {
-		t.Helper()
-		if err := request.SaveText(dataDir, id, "text of "+id); err != nil {
+	for i, r := range []struct {
+		id    string
+		state request.State
+	}{
+		{"req-building", request.StateBuilding},
+		{"req-second", request.StatePlanning},
+		{"req-third", request.StateSpecDrafting},
+		{"req-fourth", request.StateBuilding},
+		{"req-review", request.StateSpecReview},
+	} {
+		if err := request.SaveText(dataDir, r.id, "text of "+r.id); err != nil {
 			t.Fatal(err)
 		}
-		r := request.New(id, "/repos/app", "app", request.Source{Kind: request.SourceText}, now.Add(offset))
-		r.State = state
-		if state == request.StateBuilding {
-			r.TicketIndex, r.TicketCount = 2, 3
+		req := request.New(r.id, "/repos/app", "app", request.Source{Kind: request.SourceText}, now.Add(time.Duration(i)*time.Second))
+		req.State = r.state
+		if r.state == request.StateBuilding {
+			req.TicketIndex, req.TicketCount = 2, 3
 		}
-		if err := r.Save(dataDir); err != nil {
+		if err := req.Save(dataDir); err != nil {
 			t.Fatal(err)
 		}
 	}
-	save("req-building", request.StateBuilding, 0)
-	save("req-second", request.StatePlanning, time.Second)
-	save("req-third", request.StateSpecDrafting, 2*time.Second)
-	save("req-fourth", request.StateBuilding, 3*time.Second)
-	save("req-review", request.StateSpecReview, 4*time.Second)
 	// An earlier, finished run of the building request, and its current one.
 	seedRun(t, dataDir, run.Run{ID: "req-building-001-a", RequestID: "req-building", State: run.StateAccepted, HaltConfirmed: true, CreatedAt: now.Add(-time.Hour).UTC().Format(time.RFC3339Nano)})
 	seedRun(t, dataDir, run.Run{ID: "req-building-002-b", RequestID: "req-building", State: run.StateSliceRunning, CreatedAt: now.UTC().Format(time.RFC3339Nano)})
@@ -2663,45 +2666,77 @@ func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
 	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dataDir), daemonheartbeat.Heartbeat{PID: os.Getpid(), StartedAt: stamp, UpdatedAt: stamp, ActiveRequests: []string{"req-building"}, JobSlots: 1}); err != nil {
 		t.Fatal(err)
 	}
+	return dataDir
+}
 
-	server := NewServer(dataDir)
+// queueFixtureRow is what the tests below read of one GET /requests item.
+type queueFixtureRow struct {
+	ID            string             `json:"id"`
+	WaitingOn     string             `json:"waiting_on"`
+	QueuePosition int                `json:"queue_position"`
+	Build         *buildProgressView `json:"build"`
+}
+
+func listQueueFixture(t *testing.T, dataDir string) map[string]queueFixtureRow {
+	t.Helper()
 	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/requests", nil))
-	var got []struct {
-		ID            string             `json:"id"`
-		WaitingOn     string             `json:"waiting_on"`
-		QueuePosition int                `json:"queue_position"`
-		Build         *buildProgressView `json:"build"`
-	}
+	NewServer(dataDir).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/requests", nil))
+	var got []queueFixtureRow
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil || recorder.Code != http.StatusOK {
 		t.Fatalf("GET /requests: %d %v: %s", recorder.Code, err, recorder.Body.String())
 	}
-	positions := map[string]int{}
-	builds := map[string]*buildProgressView{}
+	rows := map[string]queueFixtureRow{}
 	for _, r := range got {
-		positions[r.ID] = r.QueuePosition
-		builds[r.ID] = r.Build
+		rows[r.ID] = r
+	}
+	return rows
+}
+
+// TestListRequestsCarriesQueuePositionAndBuildProgress: the board reads each
+// request's place in the queue from the list, with no call per request: the
+// waiting requests are numbered from 1 in the order they were submitted.
+func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
+	rows := listQueueFixture(t, seedQueueFixture(t))
+	positions := map[string]int{}
+	for id, r := range rows {
+		positions[id] = r.QueuePosition
 		if (r.QueuePosition > 0) != (r.WaitingOn != "") {
-			t.Errorf("%s: queue_position %d with waiting_on %q, want both or neither", r.ID, r.QueuePosition, r.WaitingOn)
+			t.Errorf("%s: queue_position %d with waiting_on %q, want both or neither", id, r.QueuePosition, r.WaitingOn)
 		}
 	}
 	want := map[string]int{"req-building": 0, "req-second": 1, "req-third": 2, "req-fourth": 3, "req-review": 0}
 	if !reflect.DeepEqual(positions, want) {
 		t.Errorf("queue positions = %v, want %v", positions, want)
 	}
-	build := builds["req-building"]
-	if build == nil || build.RunID != "req-building-002-b" || build.Ticket != 2 || build.Tickets != 3 || build.Stage != "build" || build.Round != 2 || build.MaxRounds != 4 || build.Stalled || build.LastProgressAt == "" {
-		t.Errorf("build of the building request = %+v, want its unfinished run at build, round 2 of 4, ticket 2 of 3", build)
+}
+
+// TestListRequestsCarriesTheRunningBuildsStage: a building request whose run
+// has started carries that run's ticket, stage and round; a request that is
+// not building, or whose build has no run yet, carries none.
+func TestListRequestsCarriesTheRunningBuildsStage(t *testing.T) {
+	rows := listQueueFixture(t, seedQueueFixture(t))
+	want := buildProgressView{RunID: "req-building-002-b", Ticket: 2, Tickets: 3, Stage: "build", Round: 2, MaxRounds: 4}
+	build := rows["req-building"].Build
+	if build == nil || build.LastProgressAt == "" {
+		t.Fatalf("build of the building request = %+v, want its unfinished run with a progress time", build)
+	}
+	got := *build
+	got.LastProgressAt = ""
+	if got != want {
+		t.Errorf("build = %+v, want %+v", got, want)
 	}
 	for _, id := range []string{"req-second", "req-fourth", "req-review"} {
-		if builds[id] != nil {
-			t.Errorf("%s: build = %+v, want none (not building, or no run yet)", id, builds[id])
+		if rows[id].Build != nil {
+			t.Errorf("%s: build = %+v, want none (not building, or no run yet)", id, rows[id].Build)
 		}
 	}
+}
 
-	// GET /queue-run says what the worker is on.
-	recorder = httptest.NewRecorder()
-	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/queue-run", nil))
+// TestGetWorkerStatusNamesWhatAnAliveWorkerRuns: GET /queue-run carries the
+// requests the worker runs a job for and its job slots.
+func TestGetWorkerStatusNamesWhatAnAliveWorkerRuns(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	NewServer(seedQueueFixture(t)).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/queue-run", nil))
 	var status WorkerStatus
 	if err := json.Unmarshal(recorder.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
