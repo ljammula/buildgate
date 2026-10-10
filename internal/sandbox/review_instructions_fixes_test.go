@@ -170,6 +170,7 @@ func TestReviewInstructionRetainsOnlyWhatItNeeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer plan.closeBlobs()
 	if len(cands) != 1 || plan.retained >= 100 {
 		t.Fatalf("candidates = %d, retained entries = %d", len(cands), plan.retained)
 	}

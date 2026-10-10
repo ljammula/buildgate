@@ -163,3 +163,11 @@ def test_paths_the_host_counted_but_did_not_list_are_counted_and_reported(tmp_pa
 	assert "Instruction paths this change touched (7002):" in block
 	assert "... and 7000 more instruction paths the host's file does not name" in block
 	assert "report that as a finding" in block.split("7000 more instruction paths")[1].split("\n")[0]
+
+
+def test_a_file_that_holds_only_the_count_line_is_counted_and_reported(tmp_path):
+	diff = tmp_path / "instructions.diff"
+	diff.write_text("[12001 more instruction paths not listed]\n", encoding="utf-8")
+	block = build_app.instructions_diff_block(diff)
+	assert "Instruction paths this change touched (12001):" in block
+	assert "... and 12001 more instruction paths the host's file does not name" in block

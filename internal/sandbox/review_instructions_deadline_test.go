@@ -45,6 +45,7 @@ func snapshotSteps(ctx context.Context, r *instructionRepo) error {
 	if err != nil {
 		return err
 	}
+	defer plan.closeBlobs()
 	_, diffs, err := plan.stage(ctx, r.dir, dst, cands)
 	if err != nil {
 		return err
@@ -275,7 +276,8 @@ func TestReviewInstructionPlansAgreeWithANaiveMatcher(t *testing.T) {
 	planned, masks := 0, 0
 	for it := 0; it < iterations; it++ {
 		bc, rc := refs[fmt.Sprintf("fb%d", it)], refs[fmt.Sprintf("fr%d", it)]
-		_, cands, err := planSnapshot(context.Background(), r.dir, bc, rc)
+		plan, cands, err := planSnapshot(context.Background(), r.dir, bc, rc)
+		plan.closeBlobs()
 		if err != nil {
 			fmt.Fprintf(digest, "%d refused: %s\n", it, strings.ReplaceAll(err.Error(), r.dir, "<work>"))
 			continue
@@ -321,36 +323,33 @@ func TestReviewInstructionPlansAgreeWithANaiveMatcher(t *testing.T) {
 
 // The snapshot's own deadline is a refusal that says the repository is too
 // costly to compare, whatever the caller's deadline; the caller's own
-// cancellation is not. 1,500 links at an instruction path are two git
-// processes each.
+// cancellation is not. A deadline of a millisecond is over before the first
+// listing is read.
 func TestReviewInstructionSnapshotHasItsOwnDeadline(t *testing.T) {
-	if testing.Short() {
-		t.Skip("writes 1,500 symlinks")
-	}
-	links := map[string]string{}
-	for i := 0; i < 1500; i++ {
-		links[fmt.Sprintf(".claude/l%04d", i)] = "keep"
-	}
-	r := newInstructionRepoWithLinks(t, map[string]string{".claude/keep": "k\n"}, links)
-	r.write("main.go", "package main // changed\n")
+	r := newInstructionRepo(t, map[string]string{".claude/keep": "k\n", ".gitignore": "pkg/\n"})
+	r.write("AGENTS.md", "rules\n")
 	r.commit()
+	r.write("pkg/AGENTS.md", "steer\n")
 	dst := filepath.Join(filepath.Dir(r.dir), "snap")
 	old := reviewInstructionTimeout
-	reviewInstructionTimeout = time.Second
+	reviewInstructionTimeout = time.Millisecond
 	t.Cleanup(func() { reviewInstructionTimeout = old })
 
 	start := time.Now()
-	_, err := SnapshotReviewInstructions(context.Background(), r.dir, r.base, r.result, dst)
+	snap, err := SnapshotReviewInstructions(context.Background(), r.dir, r.base, r.result, dst)
 	took := time.Since(start)
-	t.Logf("1,500 links, a deadline of 1s: returned after %v: %.200v", took.Round(time.Millisecond), err)
-	if err == nil || !strings.Contains(err.Error(), "the repository is too costly to compare: the snapshot of its instruction paths did not finish in 1s") {
+	t.Logf("a deadline of 1ms: returned after %v: %.200v", took.Round(time.Millisecond), err)
+	if err == nil || !strings.Contains(err.Error(), "the repository is too costly to compare: the snapshot of its instruction paths did not finish in 1ms") {
 		t.Fatalf("err = %v, want the refusal of a repository too costly to compare", err)
 	}
 	if took > 4*time.Second {
-		t.Errorf("returned %v after a deadline of 1s", took.Round(time.Millisecond))
+		t.Errorf("returned %v after a deadline of 1ms", took.Round(time.Millisecond))
 	}
 	if _, serr := os.Stat(dst); !os.IsNotExist(serr) {
 		t.Errorf("the refused snapshot left %s behind (%v)", dst, serr)
+	}
+	if len(snap.Removed) != 0 || r.gone("pkg/AGENTS.md") {
+		t.Errorf("the refused snapshot removed %v from the worktree", snap.Removed)
 	}
 
 	parent, cancel := context.WithCancel(context.Background())

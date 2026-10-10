@@ -1554,7 +1554,7 @@ INSTRUCTIONS_DIFF_HEADER = re.compile(r'^=== ("(?:[^"\\\n]|\\.)*") \(([^\n]*?)\)
 
 # The last line of the host's file when its bound left paths out: how many.
 # The host writes it at column 0, where no content line starts with "[".
-INSTRUCTIONS_DIFF_NOT_LISTED = re.compile(r"\n\[(\d+) more instruction paths not listed\]\n*\Z")
+INSTRUCTIONS_DIFF_NOT_LISTED = re.compile(r"(?:\A|\n)\[(\d+) more instruction paths not listed\]\n*\Z")
 
 
 # The most entries, and characters, of a path list in the instructions block.

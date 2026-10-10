@@ -29,7 +29,7 @@ func (s *planState) checkLinks(ctx context.Context, root string) error {
 		if pair[0] == nil || pair[1] == nil || *pair[0] != *pair[1] {
 			return fmt.Errorf("review instructions: symlink %s at an instruction path is not the same in both trees", p)
 		}
-		text, err := readBlob(ctx, root, pair[0].oid, maxReviewInstructionLinkBytes)
+		text, err := s.readBlob(ctx, root, pair[0].oid, maxReviewInstructionLinkBytes)
 		if err != nil {
 			return err
 		}

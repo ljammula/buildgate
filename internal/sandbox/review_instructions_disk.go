@@ -163,7 +163,7 @@ func (d *diskState) verify(ctx context.Context, e treeEntry) error {
 		return bad
 	case e.isLink():
 		text, rerr := os.Readlink(abs)
-		blob, berr := readBlob(ctx, d.root, e.oid, maxReviewInstructionLinkBytes)
+		blob, berr := d.readBlob(ctx, d.root, e.oid, maxReviewInstructionLinkBytes)
 		if info.Mode()&os.ModeSymlink == 0 || rerr != nil || berr != nil || text != string(blob) {
 			return bad
 		}
@@ -519,25 +519,33 @@ func (d *diskState) describeFile(r removal, p string, de fs.DirEntry) (removal, 
 	return r, nil
 }
 
-// applyRemovals is pass two: it deletes the collected entries, each only after
-// every directory from the workspace root to its parent is checked again to be
-// a real directory.
-// Last, every verified entry must still exist.
-func applyRemovals(root string, removed []removal, verified []treeEntry) error {
+// applyRemovals is pass two, the last step of a snapshot: it deletes the
+// collected entries, each only after every directory from the workspace root
+// to its parent is checked again to be a real directory. Last, every verified
+// entry must still exist. It returns the paths it removed, in order, with any
+// error: the one whose removal failed is not among them (of a directory that
+// could not be removed whole, some content may be gone). ctx is the caller's:
+// only its cancellation, checked between two removals, ends the step early.
+func applyRemovals(ctx context.Context, root string, removed []removal, verified []treeEntry) ([]string, error) {
+	var done []string
 	for _, r := range removed {
+		if err := ctx.Err(); err != nil {
+			return done, err
+		}
 		if err := requireRealDirs(root, strings.Split(path.Dir(r.path), "/"), false); err != nil {
-			return fmt.Errorf("review instructions: remove %s: %w", strconv.Quote(r.path), err)
+			return done, fmt.Errorf("remove %s: %w", strconv.Quote(r.path), err)
 		}
 		if err := os.RemoveAll(r.abs); err != nil {
-			return fmt.Errorf("review instructions: remove %s: %w", strconv.Quote(r.path), err)
+			return done, fmt.Errorf("remove %s: %w", strconv.Quote(r.path), err)
 		}
+		done = append(done, r.path)
 	}
 	for _, e := range verified {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(e.path))); err != nil {
-			return fmt.Errorf("review instructions: the removal of untracked instruction paths removed the committed %s", strconv.Quote(e.path))
+			return done, fmt.Errorf("the removal of untracked instruction paths removed the committed %s", strconv.Quote(e.path))
 		}
 	}
-	return nil
+	return done, nil
 }
 
 // requireRealDirs checks, by Lstat, that every component of dirs below root
