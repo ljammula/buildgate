@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"buildgate/internal/release"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -91,24 +92,24 @@ func TestReconcileSkipsAKeptWorktreeUntilCleared(t *testing.T) {
 		t.Errorf("an ordinary confirmed-halted worktree should still be reaped (stat err = %v)", err)
 	}
 
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
-		t.Fatalf("clearKeptForResume: %v", err)
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Fatalf("ClearKeptForResume: %v", err)
 	}
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
-		t.Errorf("worktree still exists after clearKeptForResume (stat err = %v)", err)
+		t.Errorf("worktree still exists after ClearKeptForResume (stat err = %v)", err)
 	}
 	if _, err := os.Stat(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); !os.IsNotExist(err) {
-		t.Errorf("isolation marker still exists after clearKeptForResume (stat err = %v)", err)
+		t.Errorf("isolation marker still exists after ClearKeptForResume (stat err = %v)", err)
 	}
 	if out := requestdrivertest.WorktreeGitOut(t, repoDir, "branch", "--list", marker.Branch); out != "" {
-		t.Errorf("branch %s still exists after clearKeptForResume: %q", marker.Branch, out)
+		t.Errorf("branch %s still exists after ClearKeptForResume: %q", marker.Branch, out)
 	}
 	if r, _ := run.Load(dataDir, "kept-run"); r.KeptForResume {
-		t.Error("KeptForResume still set after clearKeptForResume")
+		t.Error("KeptForResume still set after ClearKeptForResume")
 	}
 	// Idempotent: the flag is already clear.
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
-		t.Errorf("second clearKeptForResume: %v", err)
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Errorf("second ClearKeptForResume: %v", err)
 	}
 }
 
@@ -242,8 +243,8 @@ func TestClearKeptForResumeWithNoMarkerStillRemovesTheWorktree(t *testing.T) {
 	if err := os.Remove(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); err != nil {
 		t.Fatal(err)
 	}
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
-		t.Fatalf("clearKeptForResume: %v", err)
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Fatalf("ClearKeptForResume: %v", err)
 	}
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
 		t.Errorf("worktree leaked with no marker (stat err = %v)", err)
@@ -269,7 +270,7 @@ func TestClearKeptForResumeLeavesAWorktreeAnotherRunsMarkerClaims(t *testing.T) 
 	if err := os.Remove(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); err != nil {
 		t.Fatal(err)
 	}
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(marker.WorktreePath); err != nil {

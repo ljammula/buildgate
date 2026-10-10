@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sort"
 	"strconv"
-	"strings"
 
 	"buildgate/internal/requestsubmit"
 	wsisolation "buildgate/internal/workspace"
@@ -145,11 +144,6 @@ func validateSandboxResourceLimitFlags(prefix, memory, cpus, tmpfsSize string) e
 		return fmt.Errorf("%s-tmpfs-size must be a positive value, got %q", prefix, tmpfsSize)
 	}
 	return nil
-}
-
-func pathWithin(parent, candidate string) bool {
-	rel, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(candidate))
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // stringSetsEqual reports whether a and b hold the same strings, ignoring
