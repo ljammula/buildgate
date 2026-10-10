@@ -565,8 +565,8 @@ func TestRequireAgentsFileReadsTheRootFileAtHead(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "setup, test, build and lint commands") || strings.Contains(err.Error(), "\n") {
-				t.Fatalf("RequireAgentsFile = %v, want one line holding %q and the fix", err, c.want)
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), AgentsFilePrompt) || strings.Contains(err.Error(), "\n") {
+				t.Fatalf("RequireAgentsFile = %v, want one line holding %q and the prompt to write the file", err, c.want)
 			}
 		})
 	}

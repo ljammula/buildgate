@@ -119,9 +119,9 @@ request sits in a queue nobody drains.
    asking (step 4) and say so in your report. When some of those files
    exist but fail the check, the repo is part-way through adopting them:
    relay the failures and stop. A failed `AGENTS.md for <repo>` row is never
-   brownfield and has no override: the operator commits an `AGENTS.md` with
-   the repo's setup, test, build and lint commands first; do not write it
-   for them unasked. When the only failures are Docker being unreachable
+   brownfield and has no override: the row prints a prompt for writing the file. Relay it and offer to run it
+   yourself in the repo; write the file only on a yes, show it to the
+   operator, and leave the commit to them unless they ask. When the only failures are Docker being unreachable
    and you run inside an agent sandbox (Codex's default sandbox blocks the
    Docker socket), the sandbox is the likely cause: ask the operator to run
    the same command in their own terminal and tell you the result.

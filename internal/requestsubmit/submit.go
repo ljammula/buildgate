@@ -48,15 +48,21 @@ func GitToplevel(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// AgentsFilePrompt is the prompt every AGENTS.md refusal hands the operator
+// for their own coding agent (Claude Code, Copilot, Codex): buildgate does
+// not write the file, since nothing in it would have been checked by a
+// person.
+const AgentsFilePrompt = "Write " + run.RootInstructionFile + " at the root of this repository for coding agents: its setup, test, build and lint commands (run each one and keep only what works), its layout, and the conventions a change must follow. Keep it short and exact."
+
 // RequireAgentsFile refuses a repository whose root AGENTS.md is missing or
 // holds only whitespace at HEAD: that file is how every harness learns the
 // repository's ways of working, so no request starts without it. It reads git
 // objects, never the working tree, so an uncommitted file does not pass, and
 // only the exact root name counts (not another case, a symlink or a copy in a
-// subdirectory). submit, quickstart and doctor -target-repo share it; no flag
-// or config key turns it off.
+// subdirectory). submit, quickstart, doctor -target-repo and the single-ticket
+// run share it; no flag or config key turns it off.
 func RequireAgentsFile(workspaceAbs string) error {
-	const fix = "commit an " + run.RootInstructionFile + " at the repository root that gives the repo's setup, test, build and lint commands"
+	const fix = "have your coding agent write one at the repository root, review it and commit it. Prompt: \"" + AgentsFilePrompt + "\""
 	git := func(args ...string) ([]byte, error) {
 		return exec.Command("git", append([]string{"-C", workspaceAbs}, args...)...).Output()
 	}

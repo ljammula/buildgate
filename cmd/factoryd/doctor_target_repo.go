@@ -173,7 +173,7 @@ func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 	var checks []doctorCheck
 	if err := requestsubmit.RequireAgentsFile(abs); err != nil {
 		checks = append(checks, doctorCheck{Name: run.RootInstructionFile + " for " + repo, Err: err,
-			Fix: "commit it, then run this again: submit and quickstart refuse the repo until then, and no flag or config key skips the check"})
+			Fix: "run that prompt in the repo with your coding agent, review and commit the file, then run this again: submit, quickstart and a run refuse the repo until then, and no flag or config key skips the check"})
 	} else {
 		checks = append(checks, doctorCheck{Name: run.RootInstructionFile + " for " + repo + ": committed at HEAD"})
 	}

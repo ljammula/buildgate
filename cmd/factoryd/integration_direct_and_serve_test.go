@@ -16,7 +16,9 @@ import (
 
 	"buildgate/internal/api"
 	"buildgate/internal/release"
+	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
+	"buildgate/internal/testfixture"
 	"buildgate/internal/workflow"
 	wsisolation "buildgate/internal/workspace"
 )
@@ -104,6 +106,48 @@ func TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold(t *testing.T) 
 	}
 	if strings.Contains(string(out), "fake_build_app: mode=") {
 		t.Error("factoryd output contains fake_build_app marker, but build_app.py should never have been invoked before an unbootstrapped project's preflight failure")
+	}
+}
+
+// A single-ticket run is refused on a repository with no committed AGENTS.md
+// before the build starts and before a run is recorded, and
+// -skip-project-check does not skip it.
+func TestIntegrationRunIsRefusedWithoutACommittedAgentsFile(t *testing.T) {
+	ws := testfixture.NewGitRepo(t)
+	if err := os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("# AGENTS.md\n\n- Test: `true`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
+	if err != nil {
+		t.Fatalf("abs script path: %v", err)
+	}
+	for _, extra := range [][]string{nil, {"-skip-project-check"}} {
+		dataDir := t.TempDir()
+		cmd := factorydCommand(t, append([]string{
+			"-ticket", "fixture-ticket",
+			"-sandbox-image", fakeSandboxImage,
+			"-workspace", ws,
+			"-spec", specPath,
+			"-build-app-interpreter", "/bin/sh",
+			"-build-app-script", scriptPath,
+			"-verify-command", "true",
+			"-data-dir", dataDir,
+		}, extra...)...)
+		cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "run not started") || !strings.Contains(string(out), "has no AGENTS.md committed at its root") || !strings.Contains(string(out), requestsubmit.AgentsFilePrompt) {
+			t.Fatalf("flags %v: err=%v output = %q, want the AGENTS.md refusal with its prompt", extra, err, out)
+		}
+		if strings.Contains(string(out), "fake_build_app: mode=") {
+			t.Errorf("flags %v: the build started on a repository with no committed AGENTS.md", extra)
+		}
+		if runs, _ := os.ReadDir(filepath.Join(dataDir, "runs")); len(runs) != 0 {
+			t.Errorf("flags %v: a refused run left run records: %v", extra, runs)
+		}
 	}
 }
 
