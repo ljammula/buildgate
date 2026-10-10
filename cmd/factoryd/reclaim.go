@@ -1050,11 +1050,12 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 		// applyRunWorkflowResult's accepted-run side effects must not
 		// take it again.
 		//
-		// requireCurrentWorker first, against the gates and setup list the
-		// record was dispatched with: the submitter that would have run
-		// these guards on its own result is gone, and a worker older than
-		// either is as possible here as there.
-		result = requireCurrentWorker(fresh.RepoGateCommands, fresh.SetupCommands, result)
+		// requireCurrentWorkerAtReclaim first: the submitter that would
+		// have run the stale-worker guards on its own result is gone, so
+		// they run here against .factory.yml at the commit the run was
+		// dispatched from, and an accepted result that cannot be checked
+		// is refused.
+		result = requireCurrentWorkerAtReclaim(ctx, dp, fresh, result)
 		if applyErr := applyRunWorkflowResult(dp, fresh, dataDir, requestID, fresh.Ticket, fresh.WorkspacePath, fresh.BaseSHA, "reclaimed", result, false, nil, forge.GHPullRequestOpener{}, true); applyErr != nil && fresh.State != run.StateQuarantined {
 			return applyErr
 		}

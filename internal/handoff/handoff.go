@@ -221,11 +221,14 @@ func Build(r *run.Run, dataDir string) Document {
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
-//     repository's setup commands (a worker older than them): BinOperator;
-//   - a check whose step was stopped by a failing repository setup command
-//     (triage.SetupFailedCommand): BinOperator. Every build of the ticket
-//     runs the same commands before its first agent turn and ends there
-//     when one fails, so a build started in answer would change nothing;
+//     repository's setup commands (a worker older than them), or because a
+//     reclaimed result could not be checked against the repository's
+//     .factory.yml: BinOperator;
+//   - a canonical_verify of a run whose build ended at a failing repository
+//     setup command before its first agent turn, by the factory's own
+//     records (triage.BuildStoppedBySetup: the meter counted nothing and
+//     nothing was committed): BinOperator. Every build from that commit
+//     runs the same commands first and ends there too;
 //   - a named or repository gate whose command also failed when rerun on the
 //     commit the ticket's work started from (run.GateBaseCheck): no build can
 //     make it pass, so it is the operator's (BinOperator) and no corrective
@@ -243,7 +246,7 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 		return BinOperator
 	case finding.Check == "canonical_verify" && setupNotRun(r):
 		return BinOperator
-	case finding.SetupFailed != "":
+	case finding.BuildStoppedBySetup:
 		return BinOperator
 	}
 	return BinOf(finding.Check)
@@ -261,10 +264,11 @@ func failsOnBase(r *run.Run, check string) bool {
 }
 
 // setupNotRun reports whether r recorded the canonical_verify result for a
-// verify that did not run the repository's setup commands.
+// verify that did not run the repository's setup commands, or for a
+// reclaimed result that could not be checked for it.
 func setupNotRun(r *run.Run) bool {
 	for _, g := range r.GateResults {
-		if g.SetupNotRun() {
+		if g.SetupNotRun() || g.ReclaimNotChecked() {
 			return true
 		}
 	}

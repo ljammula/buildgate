@@ -20,12 +20,6 @@
   "spec_sha256": "every-field spec_sha256",
   "project_config_sha256": "every-field project_config_sha256",
   "project_config_commit_sha": "every-field project_config_commit_sha",
-  "repo_gate_commands": {
-    "every-field key": "every-field repo_gate_commands"
-  },
-  "setup_commands": [
-    "every-field setup_commands"
-  ],
   "product_spec_sha256": "every-field product_spec_sha256",
   "contract_sha256": "every-field contract_sha256",
   "skip_project_check": true,
