@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -54,6 +55,22 @@ type createRequestBody struct {
 	// (sessionconfig.ValidateRequestHarnesses). Review is never
 	// requester-selectable.
 	Harnesses map[string]string `json:"harnesses,omitempty"`
+}
+
+// submitRefusalText is the text of a requestsubmit.Submit error for this
+// caller. An MCP tool call has no flags, so it gets the wording that names
+// none, and for a missing verify command the tool that shows what each
+// workspace resolves.
+func submitRefusalText(err error, mcp bool) string {
+	var refusal *requestsubmit.Refusal
+	if !mcp || !errors.As(err, &refusal) {
+		return err.Error()
+	}
+	text := refusal.WithoutFlags()
+	if errors.Is(err, requestsubmit.ErrNoVerifyCommand) {
+		text += " (list_workspaces shows the verify command each workspace resolves)"
+	}
+	return text
 }
 
 // createRequest serves POST /requests: starts a request from the
@@ -135,7 +152,7 @@ func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) {
 		// -data-dir-inside-workspace, ...), never an internal failure --
 		// 422, mirroring the ticket's own "resolution error text" wording
 		// requirement, not 500.
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeError(w, http.StatusUnprocessableEntity, submitRefusalText(err, mcpCaller(r)))
 		return
 	}
 	// by is not yet a durable field on internal/request.Request (no

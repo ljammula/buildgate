@@ -60,6 +60,38 @@ const AgentsFilePrompt = "Write " + run.RootInstructionFile + " at the root of t
 	"taking each from those files or from what you ran and guessing none. " +
 	"Run the repository's own formatter or linter over the file. Keep it short and exact."
 
+// Refusal is a Submit error whose remedy depends on what the caller can do:
+// `factoryd submit` has flags, an MCP tool call has only the tool's
+// arguments. Error is the wording for a caller with flags; WithoutFlags is
+// the wording for one without, and names no flag.
+type Refusal struct {
+	// Reason says what is wrong, naming no flag.
+	Reason string
+	// FlagRemedy is what a caller with flags can do, "" when nothing.
+	FlagRemedy string
+	// Remedy is what any caller, or the operator for it, can do.
+	Remedy string
+	// Kind is the sentinel errors.Is matches (ErrNoVerifyCommand), or nil.
+	Kind error
+}
+
+// ErrNoVerifyCommand is the Kind of the refusal for a workspace that
+// resolves no verify command.
+var ErrNoVerifyCommand = errors.New("no verify command resolvable")
+
+func (r *Refusal) Error() string {
+	remedy := r.Remedy
+	if r.FlagRemedy != "" {
+		remedy = r.FlagRemedy + ", or " + r.Remedy
+	}
+	return r.Reason + ": " + remedy
+}
+
+// WithoutFlags is the refusal for a caller that cannot pass a flag.
+func (r *Refusal) WithoutFlags() string { return r.Reason + ": " + r.Remedy }
+
+func (r *Refusal) Unwrap() error { return r.Kind }
+
 // RequireAgentsFile refuses a repository whose root AGENTS.md is missing or
 // holds only whitespace at HEAD: that file is how every harness learns the
 // repository's ways of working, so no request starts without it. It reads git
@@ -232,11 +264,11 @@ func pathWithin(parent, candidate string) bool {
 func DataDirInsideWorkspace(workspace, dataDir string) (inside bool, workspaceAbs, dataAbs string, err error) {
 	workspaceAbs, err = canonicalPath(workspace)
 	if err != nil {
-		return false, "", "", fmt.Errorf("resolve -workspace: %w", err)
+		return false, "", "", fmt.Errorf("resolve the workspace: %w", err)
 	}
 	dataAbs, err = canonicalPath(dataDir)
 	if err != nil {
-		return false, "", "", fmt.Errorf("resolve -data-dir: %w", err)
+		return false, "", "", fmt.Errorf("resolve the data dir: %w", err)
 	}
 	return pathWithin(workspaceAbs, dataAbs), workspaceAbs, dataAbs, nil
 }
@@ -313,10 +345,11 @@ func submitProjectBootstrapPreflight(workspaceAbs, preflightProfile string) erro
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf(
-		"project-bootstrap preflight failed, request not submitted (this would halt every ticket's own run-time preflight identically, after spec/plan review already spent human attention on it): %s -- fix these before submitting, or set preflight_profile: brownfield in the workspace's %s (or pass -preflight-profile brownfield / preflight_profile \"brownfield\" on this request) if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention (see `factoryd onboard`)",
-		strings.Join(failures, " | "), projectconfig.FileName,
-	)
+	return &Refusal{
+		Reason:     "project-bootstrap preflight failed, request not submitted (this would halt every ticket's own run-time preflight identically, after spec/plan review already spent human attention on it): " + strings.Join(failures, " | "),
+		FlagRemedy: "pass -preflight-profile brownfield (preflight_profile \"brownfield\" on this request)",
+		Remedy:     "fix these before submitting, or set preflight_profile: brownfield in the workspace's " + projectconfig.FileName + " if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention (see `factoryd onboard`)",
+	}
 }
 
 // ProjectBootstrapFailures returns one line per project-bootstrap check
@@ -648,7 +681,11 @@ func Submit(p Params) (Result, error) {
 	if inside, _, dataAbs, err := DataDirInsideWorkspace(workspaceAbs, p.DataDir); err != nil {
 		return Result{}, err
 	} else if inside {
-		return Result{}, fmt.Errorf("-data-dir (%q, resolving to %q) is inside -workspace %q; Docker containment is unconditional and a later worker will refuse to drain this entry once queued here, with no way to re-home it -- pass -data-dir <path outside -workspace>", p.DataDir, dataAbs, workspaceAbs)
+		return Result{}, &Refusal{
+			Reason:     fmt.Sprintf("the data dir (%q, resolving to %q) is inside the workspace %q; Docker containment is unconditional and a later worker will refuse to drain this entry once queued here, with no way to re-home it", p.DataDir, dataAbs, workspaceAbs),
+			FlagRemedy: "pass -data-dir <path outside -workspace>",
+			Remedy:     "have the operator keep the data dir outside the workspace",
+		}
 	}
 	repositoryRoot := release.RepositoryRoot(workspaceAbs)
 	project := filepath.Base(repositoryRoot)
@@ -694,7 +731,12 @@ func Submit(p Params) (Result, error) {
 		return Result{}, err
 	}
 	if verifyCommand == "" {
-		return Result{}, fmt.Errorf("no verify command resolvable: pass -verify-command, or commit a verify_command in the workspace's %s", projectconfig.FileName)
+		return Result{}, &Refusal{
+			Reason:     ErrNoVerifyCommand.Error(),
+			FlagRemedy: "pass -verify-command",
+			Remedy:     "commit a verify_command in the workspace's " + projectconfig.FileName,
+			Kind:       ErrNoVerifyCommand,
+		}
 	}
 	if err := submitProjectBootstrapPreflight(workspaceAbs, preflightProfile); err != nil {
 		return Result{}, err
