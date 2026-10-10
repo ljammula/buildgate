@@ -2200,11 +2200,18 @@ func (tr *ticketRun) recordAncestorInputs() error {
 	if instructionBase == "" && tr.resumeFrom != nil {
 		instructionBase, descendsFrom = tr.resumeFrom.InstructionBaseSHA, tr.resumeFrom.BaseSHA
 	}
+	// A resumed run takes no -diff-base (ValidateResumeWorktreeFlags): it
+	// carries the lost run's, so the ticket's base is not replaced by the
+	// commit the lost run started from.
+	diffBase, diffDescendsFrom := *tr.diffBase, tr.baseSHA
+	if diffBase == "" && tr.resumeFrom != nil {
+		diffBase, diffDescendsFrom = tr.resumeFrom.DiffBaseSHA, tr.resumeFrom.BaseSHA
+	}
 	for _, in := range []struct {
 		flag, value, base string
 		record            *string
 	}{
-		{"-diff-base", *tr.diffBase, tr.baseSHA, &tr.r.DiffBaseSHA},
+		{"-diff-base", diffBase, diffDescendsFrom, &tr.r.DiffBaseSHA},
 		{"-instruction-base", instructionBase, descendsFrom, &tr.r.InstructionBaseSHA},
 	} {
 		if in.value == "" {

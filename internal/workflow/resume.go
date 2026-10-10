@@ -41,6 +41,12 @@ type ResumeFrom struct {
 	// the resumed run's reviews trust that commit's instruction files, not
 	// the halted attempt's tip.
 	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
+	// DiffBaseSHA is the diff base the halted run recorded, "" when it had
+	// none (a ticket's first build). The resumed run records it as its own,
+	// so its diff gates and every later round of the ticket still measure
+	// from the commit the ticket's work started from, not from the commit
+	// the halted run started from.
+	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
 }
 
 // roundState is the part of build_app.py's round-state file the host reads:
@@ -95,6 +101,7 @@ func NewResumeFrom(halted *run.Run) *ResumeFrom {
 		Branch:             halted.Branch,
 		BaseSHA:            halted.BaseSHA,
 		InstructionBaseSHA: firstNonEmpty(halted.InstructionBaseSHA, halted.DiffBaseSHA, halted.BaseSHA),
+		DiffBaseSHA:        halted.DiffBaseSHA,
 	}
 }
 

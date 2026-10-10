@@ -503,11 +503,13 @@ type GateResult struct {
 // The outcomes of a GateBaseCheck.
 const (
 	// GateBaseFailsSame: the gate's command failed on the base commit the
-	// same way as on the result (the same exit code and the same failing
-	// lines of output), so no build of the ticket can make it pass.
+	// same way as on the result (the same exit code and the same whole
+	// output once run-to-run noise is removed), so no build of the ticket
+	// can make it pass.
 	GateBaseFailsSame = "fails_same"
 	// GateBaseFailsDifferently: the command failed on the base commit too,
-	// with another exit code or other failing lines. The gate was already
+	// with another exit code or other output, or with output that could not
+	// be compared (none, unreadable, too long). The gate was already
 	// red before the ticket's work (which may be what the ticket is for),
 	// and what fails now is not what failed then: a build may still fix it.
 	GateBaseFailsDifferently = "fails_differently"

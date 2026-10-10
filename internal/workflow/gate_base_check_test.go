@@ -549,8 +549,7 @@ func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *test
 
 // A gate that is red on the base commit is the operator's only when it fails
 // there the same way as on the result: the same exit code and the same
-// failing lines of output (observation.Excerpt, which the handoff already
-// uses to pick them). A ticket whose job is to turn that gate green fails it
+// whole output once run-to-run noise is removed. A ticket whose job is to turn that gate green fails it
 // differently after a partial fix, and keeps its corrective build.
 func TestBaseRerunTellsTheSameFailureFromADifferentOne(t *testing.T) {
 	for _, tc := range []struct {
@@ -567,12 +566,16 @@ func TestBaseRerunTellsTheSameFailureFromADifferentOne(t *testing.T) {
 			[]string{"--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "--- FAIL: TestSumOfNegatives", "    sum_test.go:21: got 0, want -3", "FAIL"}, "fails_differently"},
 		{"the same lines with another exit code", 2, 1,
 			[]string{"--- FAIL: TestSum", "FAIL"}, []string{"--- FAIL: TestSum", "FAIL"}, "fails_differently"},
-		// What the excerpt already leaves out or cleans: terminal colour,
-		// trailing spaces, and lines that report no failure (a passing
-		// package's timing, a progress line).
-		{"a difference the excerpt already normalises", 1, 1,
-			[]string{"ok  \tacme/api\t0.31s", "\x1b[31m--- FAIL: TestSum\x1b[0m   ", "    sum_test.go:9: got 3, want 4", "FAIL", "collected in 12 files"},
-			[]string{"ok  \tacme/api\t0.52s", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL", "collected in 11 files"}, "fails_same"},
+		// Terminal colour, trailing spaces and a test line's elapsed time
+		// are not part of the failure.
+		{"a difference that is only run-to-run noise", 1, 1,
+			[]string{"ok  \tacme/api\t0.31s", "\x1b[31m--- FAIL: TestSum (0.01s)\x1b[0m   ", "    sum_test.go:9: got 3, want 4", "FAIL"},
+			[]string{"ok  \tacme/api\t0.52s", "--- FAIL: TestSum (0.07s)", "    sum_test.go:9: got 3, want 4", "FAIL"}, "fails_same"},
+		// A line that reports no failure still counts: the whole output is
+		// compared.
+		{"a difference outside the failing lines", 1, 1,
+			[]string{"--- FAIL: TestSum (0.01s)", "FAIL", "collected 12 files"},
+			[]string{"--- FAIL: TestSum (0.01s)", "FAIL", "collected 11 files"}, "fails_differently"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newGateBaseFixture(t, tc.resultExit, tc.baseExit)
@@ -586,5 +589,17 @@ func TestBaseRerunTellsTheSameFailureFromADifferentOne(t *testing.T) {
 			}
 			f.assertRunUntouched()
 		})
+	}
+}
+
+// A resumed run that carries the lost run's diff base is rerun on it: the
+// ticket's base is known again.
+func TestBaseRerunOfAResumedRunThatCarriesADiffBaseUsesIt(t *testing.T) {
+	f := newGateBaseFixture(t, 1, 0)
+	f.input.DiffBaseSHA, f.input.BaseSHA = f.base, f.result
+	f.input.ResumeFrom = &ResumeFrom{RunID: "lost-run", WorktreePath: f.repo, Branch: "factoryd/t", BaseSHA: f.result}
+	res := f.runGate("lint", "")
+	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base {
+		t.Errorf("base check = %+v, want passes on the carried diff base %s", bc, f.base)
 	}
 }

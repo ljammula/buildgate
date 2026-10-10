@@ -521,7 +521,9 @@ requires a new contract review and an updated machine-checkable test.
   stopped before its first agent turn (by the meter's count of zero and an
   unchanged commit, never by the sandbox's exit status or log), a named or
   repository gate that failed the
-  same way (the same exit code and the same failing lines of output) when
+  same way (the same exit code and the same whole output, after removing
+  elapsed times, addresses and the like; output that is empty or cannot be
+  compared never counts as the same) when
   the factory reran it on the commit
   the ticket's work started from (no build can make it pass; the rerun is
   evidence on the gate's result and never changes whether the gate passed; a gate already failing there in
