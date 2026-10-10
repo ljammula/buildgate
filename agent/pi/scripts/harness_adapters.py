@@ -420,6 +420,10 @@ def sync_skills(skills_dir: Path, root: Path | None = None) -> None:
 		shutil.copytree(skill, target)
 
 
+# Pi's built-in tools that only read (`pi --help`, "Built-in Tool Names").
+READ_ONLY_PI_TOOLS = "read,grep,find,ls"
+
+
 class PiAdapter:
 	"""`pi --print --mode json`."""
 
@@ -453,6 +457,7 @@ class PiAdapter:
 		continue_session: bool,
 		thinking: str | None,
 		load_repo_skills: bool = False,
+		read_only: bool = False,
 	) -> list[str]:
 		args = [
 			self.binary, "--print", "--mode", "json",
@@ -472,6 +477,10 @@ class PiAdapter:
 			args += ["--thinking", thinking]
 		if continue_session:
 			args += ["--continue"]
+		if read_only:
+			# The turn is offered only tools that read. Defence in depth: the
+			# caller compares the tree itself (build_app's notes turn).
+			args += ["--tools", READ_ONLY_PI_TOOLS]
 		# The target repo's skills become system-prompt text, and the worker
 		# can add one mid-run, so only the build turn asks for them. This
 		# closes the skill path only: pi still loads the working tree's
@@ -724,7 +733,11 @@ class CodexAdapter:
 		continue_session: bool,
 		thinking: str | None,
 		load_repo_skills: bool = False,
+		read_only: bool = False,
 	) -> list[str]:
+		# read_only changes nothing here: `codex exec resume` takes no sandbox
+		# mode, and Codex's own sandbox cannot start inside the worker's. The
+		# caller's comparison of the tree is the guarantee for every harness.
 		model_id, base_url, _ = _relay_route(self.name)
 		codex_home = Path(session_dir) / "codex-home"
 		codex_home.mkdir(parents=True, exist_ok=True)
@@ -895,6 +908,7 @@ class CopilotAdapter:
 		continue_session: bool,
 		thinking: str | None,
 		load_repo_skills: bool = False,
+		read_only: bool = False,
 	) -> list[str]:
 		model_id, base_url, api = _relay_route(self.name)
 		api_key = RELAY_API_KEY_PLACEHOLDER
@@ -951,6 +965,10 @@ class CopilotAdapter:
 			"--allow-all-tools", "--no-auto-update", "--output-format", "json",
 			"--resume" if resuming else "--session-id", session_id,
 		]
+		if read_only:
+			# A denied tool is refused whatever --allow-all-tools allows.
+			# Defence in depth: the caller compares the tree itself.
+			args += ["--deny-tool=shell", "--deny-tool=write"]
 		effort = _effort(thinking)
 		if effort is not None:
 			args += ["--reasoning-effort", effort]

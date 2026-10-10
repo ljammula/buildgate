@@ -79,6 +79,13 @@ test("the tiles, the bucket table and the two lists show the report as the CLI p
   expect(rows[0]).toHaveTextContent("2026-09-270----");
   expect(rows[1]).toHaveTextContent("2026-10-0483/8 (38%)6/8 (75%)21/4 (25%)");
   expect(screen.getByRole("columnheader", { name: "Week of" })).toBeInTheDocument();
+  // The chart sits above the table, which still holds every value.
+  const chart = screen.getByRole("img", {
+    name: "One-shot acceptance rate: 38% (3/8 tickets) in the week of 2026-10-04. 1 of 2 periods had no ticket.",
+  });
+  expect(
+    chart.compareDocumentPosition(screen.getByRole("table")) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   const quarantined = screen.getByTestId("trend-quarantined");
   expect(quarantined).toHaveTextContent("tests_added <b>x</b>3");
   expect(quarantined.querySelector("b")).toBeNull();
@@ -91,6 +98,7 @@ test("the contract fixture renders", async () => {
   renderTrend(() => json(readFixtureJson("api/project-trend.json")));
   expect(await screen.findAllByTestId("trend-tile")).toHaveLength(4);
   expect(screen.getAllByTestId("trend-bucket").length).toBeGreaterThan(0);
+  expect(screen.getByRole("img", { name: /^One-shot acceptance rate: / })).toBeInTheDocument();
 });
 
 test("a project with no ticket says when the numbers appear", async () => {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"buildgate/internal/evidence"
 )
 
 const (
@@ -40,6 +42,12 @@ var notesHeadings = map[string]func(*Notes) *[]string{
 // removed and it has been cleaned like every value from a build. "none" is not
 // an item. It returns nil when every section is empty.
 func parseNotes(text string) *Notes {
+	return parseNotesWith(text, clean)
+}
+
+// parseNotesWith is parseNotes with the cleaning of an item given by the
+// caller.
+func parseNotesWith(text string, cleanItem func(string, int) string) *Notes {
 	var n Notes
 	var section *[]string
 	for _, line := range strings.Split(text, "\n") {
@@ -51,7 +59,7 @@ func parseNotes(text string) *Notes {
 		if section == nil || len(*section) >= maxNoteItems {
 			continue
 		}
-		item := clean(stripBullet(line), maxSentenceLen)
+		item := cleanItem(stripBullet(line), maxSentenceLen)
 		if item == "" || strings.EqualFold(strings.TrimRight(item, "."), "none") {
 			continue
 		}
@@ -61,6 +69,31 @@ func parseNotes(text string) *Notes {
 		return nil
 	}
 	return &n
+}
+
+// RepositoryNotesAsWritten returns the items a run's build agent left under
+// its fifth heading (things worth knowing about the repository), read from
+// the notes the host kept in runDir (evidence.ReadRetainedAgentNotes: a plain
+// file of the retained size, no link followed). Each item is one line,
+// cleaned and capped as in a handoff, but as the agent wrote it: its
+// backticks are kept, because the memory text rule accepts a command only
+// inside them and has to judge the item itself. The items exist only in the
+// returned list; handoff.json holds the same notes with every backtick turned
+// into a quote. Only that heading is returned: what the agent did, tried or
+// supposed is for a later attempt of the same ticket. The caller decides that
+// the run is finished (quarantined, halted or accepted). The one caller is
+// the operator's memory list (SC-020), which puts every item through the
+// memory text rule.
+func RepositoryNotesAsWritten(runDir string) []string {
+	text, ok := evidence.ReadRetainedAgentNotes(runDir)
+	if !ok {
+		return nil
+	}
+	notes := parseNotesWith(text, cleanKeepingBackticks)
+	if notes == nil {
+		return nil
+	}
+	return notes.Repository
 }
 
 // stripBullet removes one leading list marker: -, *, a bullet or "1.".

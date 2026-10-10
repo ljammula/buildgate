@@ -531,6 +531,44 @@ func TestParseNotesOfNothingUsableIsNil(t *testing.T) {
 	}
 }
 
+// A finished run's notes give up only the fifth heading, cleaned like every
+// value from a build, and only from a plain file of the retained size.
+func TestRepositoryNotesAsWrittenReadsOnlyTheFifthHeading(t *testing.T) {
+	dir := t.TempDir()
+	if got := RepositoryNotesAsWritten(dir); got != nil {
+		t.Fatalf("no notes file gave %v", got)
+	}
+	notes := "What I did\n- changed sum.go\nMy current hypothesis\n- the cache key\n" +
+		"Things worth knowing about this repository\n- Run `make gen` first\x1b[31m\n- none\n- " + strings.Repeat("x", 600) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, evidence.AgentNotesFileName), []byte(notes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := RepositoryNotesAsWritten(dir)
+	if len(got) != 2 || got[0] != "Run `make gen` first" || len(got[1]) > maxSentenceLen+3 {
+		t.Fatalf("items = %q, want the two cleaned items of the fifth heading, backticks kept for the memory text rule", got)
+	}
+	for _, item := range got {
+		if strings.Contains(item, "sum.go") || strings.Contains(item, "cache key") || strings.ContainsAny(item, "\x1b") {
+			t.Errorf("item %q carries another heading or an uncleaned character", item)
+		}
+	}
+	// A link in the file's place is not read.
+	linked := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, evidence.AgentNotesFileName), filepath.Join(linked, evidence.AgentNotesFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if got := RepositoryNotesAsWritten(linked); got != nil {
+		t.Errorf("a linked notes file gave %v", got)
+	}
+	// Nor a file with no fifth heading.
+	if err := os.WriteFile(filepath.Join(dir, evidence.AgentNotesFileName), []byte("What I did\n- changed sum.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := RepositoryNotesAsWritten(dir); len(got) != 0 {
+		t.Errorf("notes with no fifth heading gave %v", got)
+	}
+}
+
 // A canonical_verify recorded because the verify did not run the repository's
 // setup commands (a worker older than them) is the operator's: no build can
 // fix it, so it is never handed to one.
@@ -550,5 +588,66 @@ func TestBuildSortsAVerifyThatNeverRanSetupIntoTheOperatorsBin(t *testing.T) {
 	}}
 	if got := Build(plain, t.TempDir()); got.Next != BinCorrective {
 		t.Errorf("an ordinary failed canonical_verify has Next = %q, want corrective", got.Next)
+	}
+}
+
+// A named or repository gate that failed the same way on the base commit is
+// the operator's, with a sentence that says what to change. One that was
+// already failing there in another way stays a failure a build is given, and
+// its finding says part of the failure predates the attempt. One that passed
+// there, or whose rerun could not be made, stays corrective with nothing added.
+func TestBuildSortsAGateThatFailsTheSameWayOnTheBaseCommitIntoTheOperatorsBin(t *testing.T) {
+	const base = "0123456789abcdef0123456789abcdef01234567"
+	gate := func(check, outcome string) run.GateResult {
+		return run.GateResult{Check: check, ExitCode: 1, BaseCheck: &run.GateBaseCheck{Outcome: outcome, BaseSHA: base, ExitCode: 1, Reason: "why"}}
+	}
+	const (
+		operatorSentence = "fails the same way on the base commit 0123456789ab"
+		alreadyFailing   = "was already failing on the base commit 0123456789ab"
+	)
+	for _, tc := range []struct {
+		name        string
+		gate        run.GateResult
+		want        Bin
+		wantFinding string
+	}{
+		{"a named gate that fails the same way on the base", gate("lint", "fails_same"), BinOperator, operatorSentence},
+		{"a repository gate that fails the same way on the base", gate("repo-docs", "fails_same"), BinOperator, operatorSentence},
+		{"a gate that was failing on the base in another way", gate("lint", "fails_differently"), BinCorrective, alreadyFailing},
+		{"a gate that passes on the base", gate("lint", "passes"), BinCorrective, ""},
+		{"a gate whose rerun could not be made", gate("repo-docs", "not_checked"), BinCorrective, ""},
+		{"a gate recorded before the rerun existed", run.GateResult{Check: "lint", ExitCode: 1}, BinCorrective, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &run.Run{ID: "run-b", Ticket: "t", State: run.StateQuarantined, BaseSHA: base, GateResults: []run.GateResult{tc.gate}}
+			doc := Build(r, t.TempDir())
+			if len(doc.Checks) != 1 || doc.Checks[0].Bin != tc.want || doc.Next != tc.want {
+				t.Fatalf("checks = %+v, next = %q, want %q", doc.Checks, doc.Next, tc.want)
+			}
+			finding := doc.Checks[0].Finding
+			if tc.wantFinding == "" && strings.Contains(finding, "base commit") {
+				t.Errorf("finding = %q, want nothing about the base commit", finding)
+			}
+			if !strings.Contains(finding, tc.wantFinding) {
+				t.Errorf("finding = %q, want it to say %q", finding, tc.wantFinding)
+			}
+			if tc.want == BinOperator && (!strings.Contains(finding, "fix the gate command or the repository") || !strings.Contains(finding, "No corrective build is started")) {
+				t.Errorf("finding = %q, want it to tell the operator what to change", finding)
+			}
+			if tc.want != BinOperator && strings.Contains(finding, "No corrective build") {
+				t.Errorf("finding = %q says no corrective build is started for a gate a build is given", finding)
+			}
+		})
+	}
+	// One gate the build can fix beside one it cannot: the attempt as a
+	// whole is the operator's, since a corrective build could not pass.
+	r := &run.Run{ID: "run-m", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", "passes"), gate("repo-docs", "fails_same")}}
+	if doc := Build(r, t.TempDir()); doc.Next != BinOperator {
+		t.Errorf("next = %q, want operator", doc.Next)
+	}
+	// The record a later build is given says the gate was already red.
+	r = &run.Run{ID: "run-d", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", "fails_differently")}}
+	if md := Build(r, t.TempDir()).Markdown(); !strings.Contains(md, alreadyFailing) {
+		t.Errorf("the record for a later build does not say the gate was already failing on the base:\n%s", md)
 	}
 }

@@ -118,7 +118,12 @@ docker.go`) still writes the raw line to the build log unchanged and, when
 `outcome` in {`""`, `pass`, `fail`} and a string `detail` are accepted
 (`internal/progress.ParseWorkerLine`); anything else is dropped silently.
 At most 5000 `agent` lines and 500 `round` lines are relayed per launch, budgeted separately so chatty notes cannot starve the round counter. Worker output is untrusted and
-display-only.
+display-only. `source: worker` means "a process in the sandbox wrote this line": the
+build script and the coding agent run as one user and both can write the output
+file the host tails, so the host cannot tell the script's line from one the agent
+appended (safety-contract.md, SC-018). A worker line is never recorded with
+`source: factory`, with its own `ts`, or in a stage other than `round` and `agent`
+(`TestAProgressLineFromTheSandboxIsRecordedAsTheWorkersNeverTheFactorys`).
 
 ## HTTP and server-computed fields
 

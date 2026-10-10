@@ -1,5 +1,8 @@
+import { useState } from "react";
+
 import { useApi } from "@/api/ApiProvider";
 import { useRetryRequest } from "@/api/requestQueries";
+import { Checkbox } from "@/ui/Input";
 
 import type { FlowProps } from "./flowTypes";
 import { OperatorGate } from "./OperatorGate";
@@ -7,8 +10,10 @@ import { ReasonFlow } from "./ReasonFlow";
 
 /**
  * "Retry this request": recovery for a halted or quarantined request.
- * Required reason, then POST `/requests/{id}/retry` with `{ reason, by }`.
- * Renders nothing when closed or when the console cannot write.
+ * Required reason, then POST `/requests/{id}/retry` with `{ reason, by }`,
+ * plus `from: "scratch"` when the operator ticks "Retry from scratch"
+ * (`factoryd retry -from scratch`). Renders nothing when closed or when the
+ * console cannot write.
  */
 export function RetryDialog({ request, open, onOpenChange, onDone }: FlowProps) {
   const { canWrite } = useApi();
@@ -31,6 +36,7 @@ interface BodyProps {
 
 function RetryBody({ requestId, by, onOpenChange, onDone }: BodyProps) {
   const retry = useRetryRequest(requestId);
+  const [fromScratch, setFromScratch] = useState(false);
   return (
     <ReasonFlow
       title="Retry this request"
@@ -38,8 +44,25 @@ function RetryBody({ requestId, by, onOpenChange, onDone }: BodyProps) {
       pending={retry.isPending}
       error={retry.error}
       onOpenChange={onOpenChange}
-      write={(reason) => retry.mutateAsync({ reason, by })}
+      write={(reason) => retry.mutateAsync({ reason, by, fromScratch })}
       onDone={onDone}
-    />
+    >
+      <div className="flex flex-col gap-1 text-sm text-fg">
+        <label className="flex items-center gap-2">
+          <Checkbox
+            checked={fromScratch}
+            aria-describedby="retry-from-scratch-hint"
+            onChange={(event) => {
+              setFromScratch(event.target.checked);
+            }}
+          />
+          Retry from scratch
+        </label>
+        <p id="retry-from-scratch-hint" className="text-xs text-fg-muted">
+          Rebuild the ticket from the base commit instead of continuing from the failed
+          attempt&apos;s commit.
+        </p>
+      </div>
+    </ReasonFlow>
   );
 }

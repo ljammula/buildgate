@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/reviewstep"
+	"buildgate/internal/runner"
 )
 
 // The harness session folders a launch's scripts save prompts in
@@ -64,13 +66,40 @@ func (a *Activities) prepareReviewLaunch(ctx context.Context, input ReviewStepIn
 	return prep, nil
 }
 
-// clearBeforeBuild removes what a build launch must not find in the worktree:
-// an earlier build's evidence file, and any prompt in the session folders the
-// launch saves its own in (not saved by it, so an earlier step or the
-// repository wrote it). A failure is an infrastructure error.
-func clearBeforeBuild(workspace string) error {
-	if err := os.Remove(filepath.Join(workspace, "BUILD_EVIDENCE.json")); err != nil && !os.IsNotExist(err) {
-		return temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+// prepareReviewLaunchHeartbeating is prepareReviewLaunch under the step's
+// heartbeat: the snapshot may take as long as its own deadline and its
+// removals longer, and the step's heartbeat timeout is two intervals. One more
+// heartbeat is recorded as it returns, because the launch that follows first
+// heartbeats a whole interval after it begins.
+func (a *Activities) prepareReviewLaunchHeartbeating(ctx context.Context, input ReviewStepInput, step reviewstep.Step, dst string) (reviewInstructions, error) {
+	start := time.Now()
+	heartbeat := func() {
+		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(start)})
+	}
+	var prep reviewInstructions
+	_, err := heartbeatWhileRunning(activityHeartbeatInterval, heartbeat, func() (runner.Result, error) {
+		var err error
+		prep, err = a.prepareReviewLaunch(ctx, input, step, dst)
+		return runner.Result{}, err
+	})
+	heartbeat()
+	return prep, err
+}
+
+// clearBeforeBuild removes what a build launch must not find: an earlier
+// build's evidence file in the worktree and the host's copy of it in logDir
+// (takeRoundNotesOut), and any prompt in the session folders the launch saves
+// its own in (not saved by it, so an earlier step or the repository wrote
+// it). A failure is an infrastructure error.
+func clearBeforeBuild(workspace, logDir string) error {
+	stale := []string{filepath.Join(workspace, evidence.BuildEvidenceFileName)}
+	if logDir != "" {
+		stale = append(stale, filepath.Join(logDir, evidence.BuildEvidenceFileName))
+	}
+	for _, path := range stale {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return temporal.NewApplicationErrorWithCause("remove stale build evidence", InfrastructureFailureType, err)
+		}
 	}
 	if err := evidence.DropSavedPrompts(workspace, buildPromptSessions); err != nil {
 		return temporal.NewApplicationErrorWithCause("remove the prompts found in the build's session folders before its launch", InfrastructureFailureType, err)

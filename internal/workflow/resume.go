@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"buildgate/internal/evidence"
@@ -41,34 +43,206 @@ type ResumeFrom struct {
 	// the resumed run's reviews trust that commit's instruction files, not
 	// the halted attempt's tip.
 	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
+	// DiffBaseSHA is the diff base the halted run recorded, "" when it had
+	// none (a ticket's first build). The resumed run records it as its own,
+	// so its diff gates and every later round of the ticket still measure
+	// from the commit the ticket's work started from, not from the commit
+	// the halted run started from.
+	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
 }
 
-// roundState is the part of build_app.py's round-state file the host reads:
-// the HEAD it recorded and the rounds it completed.
+// roundState is the part of build_app.py's round-state file the host reads
+// leniently: the HEAD it recorded and the rounds it completed. Whether the
+// state records a pass is read strictly (roundStatePassed).
 type roundState struct {
 	Head               *string `json:"head"`
 	LastCompletedRound int     `json:"last_completed_round"`
 }
 
+// Kinds of JSON value a round-state field may hold, as build_app.py's
+// _typed checks them (a boolean is never an integer there).
+const (
+	jsonString = 1 << iota
+	jsonInt
+	jsonFloat
+	jsonBool
+	jsonNull
+	jsonObject
+	jsonList
+)
+
+// roundRecordFields are the fields build_app.py's round_from_state type-checks
+// in a round record, each with the kinds it accepts. An absent field takes
+// its default there; a present one of another kind refuses the whole file.
+// index, reviewer, turn_errors and the two string lists have rules of their
+// own (roundRecordAccepted).
+var roundRecordFields = map[string]int{
+	"agent": jsonString, "agent_returncode": jsonInt, "agent_timed_out": jsonBool,
+	"usage": jsonObject | jsonNull, "verify_command": jsonString | jsonNull, "verify_passed": jsonBool | jsonNull,
+	"verify_timed_out": jsonBool, "verify_output_tail": jsonString, "duration_s": jsonInt | jsonFloat,
+	"fast_check_ran": jsonBool, "fast_check_passed": jsonBool | jsonNull,
+	"oracle_command": jsonString | jsonNull, "oracle_passed": jsonBool | jsonNull, "oracle_output_tail": jsonString,
+	"failure_signature": jsonString, "failure_log": jsonString, "agent_notes": jsonString, "autofix": jsonObject | jsonNull,
+}
+
+// roundStateMaxPromptBytes is build_app.py's ROUND_STATE_MAX_PROMPT_BYTES.
+const roundStateMaxPromptBytes = 200_000
+
+// jsonKind is the kind of a value decoded with UseNumber into any.
+func jsonKind(v any) int {
+	switch value := v.(type) {
+	case string:
+		return jsonString
+	case bool:
+		return jsonBool
+	case nil:
+		return jsonNull
+	case map[string]any:
+		return jsonObject
+	case []any:
+		return jsonList
+	case json.Number:
+		if strings.ContainsAny(value.String(), ".eE") {
+			return jsonFloat
+		}
+		return jsonInt
+	}
+	return 0
+}
+
+// fieldIs reports whether key is absent from item or holds one of kinds.
+func fieldIs(item map[string]any, key string, kinds int) bool {
+	v, present := item[key]
+	return !present || jsonKind(v)&kinds != 0
+}
+
+// jsonIntEquals reports whether v is a JSON integer equal to want.
+func jsonIntEquals(v any, want int) bool {
+	n, ok := v.(json.Number)
+	if !ok || jsonKind(v) != jsonInt {
+		return false
+	}
+	got, err := strconv.Atoi(n.String())
+	return err == nil && got == want
+}
+
+// stringList returns the strings of item[key] (none when absent) and whether
+// the field is acceptable: absent, or a list of strings.
+func stringList(item map[string]any, key string) (n int, ok bool) {
+	v, present := item[key]
+	if !present {
+		return 0, true
+	}
+	list, isList := v.([]any)
+	if !isList {
+		return 0, false
+	}
+	for _, entry := range list {
+		if _, isString := entry.(string); !isString {
+			return 0, false
+		}
+	}
+	return len(list), true
+}
+
+// roundRecordAccepted is build_app.py's round_from_state for the record at
+// position (from 1): whether the script accepts it, and how many blockers it
+// recorded.
+func roundRecordAccepted(v any, position int) (blockers int, ok bool) {
+	item, isObject := v.(map[string]any)
+	if !isObject {
+		return 0, false
+	}
+	if index, present := item["index"]; present && !jsonIntEquals(index, position) {
+		return 0, false
+	}
+	if !fieldIs(item, "reviewer", jsonObject) || !fieldIs(item, "turn_errors", jsonList) {
+		return 0, false
+	}
+	if reviewer, present := item["reviewer"].(map[string]any); present && (!fieldIs(reviewer, "outcome", jsonString) || !fieldIs(reviewer, "detail", jsonString)) {
+		return 0, false
+	}
+	if errs, present := item["turn_errors"].([]any); present && (len(errs) != 2 || jsonKind(errs[0]) != jsonInt || jsonKind(errs[1]) != jsonInt) {
+		return 0, false
+	}
+	for key, kinds := range roundRecordFields {
+		if !fieldIs(item, key, kinds) {
+			return 0, false
+		}
+	}
+	if _, ok := stringList(item, "changed_files"); !ok {
+		return 0, false
+	}
+	return stringList(item, "blockers")
+}
+
+// roundStatePassed reports whether b is a round state that build_app.py's
+// load_round_state accepts as one whose last round passed, which is the one
+// kind of state it resumes with no round left to run. It follows the script
+// check for check, decoding strictly (exact key spelling, the last of a
+// repeated key, no boolean or fraction for an integer), so the host never
+// starts a resume the script would refuse:
+//
+//   - version is the integer 1, last_completed_round an integer of at least 1
+//   - passed is true
+//   - next_prompt is a non-empty string within the script's size cap
+//   - rounds is a list of exactly last_completed_round records, each one the
+//     script accepts (roundRecordAccepted), the last with no blocker
+//
+// agent/pi/tests/fixtures/over_budget_round_states.json lists states with the
+// script's verdict; both test suites read it.
+func roundStatePassed(b []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.UseNumber()
+	var state map[string]any
+	if err := decoder.Decode(&state); err != nil || state == nil {
+		return false
+	}
+	if !jsonIntEquals(state["version"], 1) || state["passed"] != true {
+		return false
+	}
+	last, isNumber := state["last_completed_round"].(json.Number)
+	lastRound, err := strconv.Atoi(last.String())
+	if !isNumber || jsonKind(last) != jsonInt || err != nil || lastRound < 1 {
+		return false
+	}
+	if prompt, isString := state["next_prompt"].(string); !isString || prompt == "" || len(prompt) > roundStateMaxPromptBytes {
+		return false
+	}
+	rounds, isList := state["rounds"].([]any)
+	if !isList || len(rounds) != lastRound {
+		return false
+	}
+	blockers := 0
+	for i, record := range rounds {
+		var ok bool
+		if blockers, ok = roundRecordAccepted(record, i+1); !ok {
+			return false
+		}
+	}
+	return blockers == 0
+}
+
 // readRoundState reads the round-state file in worktree. found is false when
 // the file does not exist; a file that exists but cannot be parsed is an
-// error. head is "" when the file recorded none.
-func readRoundState(worktree string) (head string, lastRound int, found bool, err error) {
+// error. head is "" when the file recorded none. passed reports a state the
+// build script accepts as one whose last round passed (roundStatePassed).
+func readRoundState(worktree string) (head string, lastRound int, passed, found bool, err error) {
 	b, err := os.ReadFile(filepath.Join(worktree, RoundStateFileName))
 	if errors.Is(err, os.ErrNotExist) {
-		return "", 0, false, nil
+		return "", 0, false, false, nil
 	}
 	if err != nil {
-		return "", 0, true, err
+		return "", 0, false, true, err
 	}
 	var state roundState
 	if err := json.Unmarshal(b, &state); err != nil {
-		return "", 0, true, err
+		return "", 0, false, true, err
 	}
 	if state.Head != nil {
 		head = strings.TrimSpace(*state.Head)
 	}
-	return head, state.LastCompletedRound, true, nil
+	return head, state.LastCompletedRound, roundStatePassed(b), true, nil
 }
 
 // NewResumeFrom builds the resume input for halted, which must already have
@@ -80,6 +254,7 @@ func NewResumeFrom(halted *run.Run) *ResumeFrom {
 		Branch:             halted.Branch,
 		BaseSHA:            halted.BaseSHA,
 		InstructionBaseSHA: firstNonEmpty(halted.InstructionBaseSHA, halted.DiffBaseSHA, halted.BaseSHA),
+		DiffBaseSHA:        halted.DiffBaseSHA,
 	}
 }
 
@@ -125,7 +300,11 @@ func worktreeGit(dir string, args ...string) (string, error) {
 //	(d) specSHA256, when non-empty, equals the halted run's recorded ticket
 //	    spec hash: a resume continues the same ticket, not an edited one
 //	(e) maxRounds, when positive, exceeds the round state's completed rounds:
-//	    build_app.py refuses a resume with no round left
+//	    build_app.py refuses a resume with no round left. A state whose last
+//	    round passed needs none (the launch was lost after the pass, during
+//	    the notes turn or before the script ended) and is not refused: the
+//	    script then runs no round and no notes turn, and checks the tree
+//	    again if the notes turn had started
 func CheckResumePreconditions(ctx context.Context, dataDir, dockerBinary, haltedRunID, specSHA256 string, maxRounds int) (ok bool, reasons []string, err error) {
 	r, err := run.Load(dataDir, haltedRunID)
 	if err != nil {
@@ -159,7 +338,7 @@ func CheckResumePreconditions(ctx context.Context, dataDir, dockerBinary, halted
 		reasons = append(reasons, fmt.Sprintf("the worktree of run %s has no readable HEAD: %v", haltedRunID, headErr))
 		return false, reasons, nil
 	}
-	recorded, lastRound, found, stateErr := readRoundState(worktree)
+	recorded, lastRound, passed, found, stateErr := readRoundState(worktree)
 	recordedWhat := "the HEAD its round state recorded"
 	switch {
 	case stateErr != nil:
@@ -168,7 +347,7 @@ func CheckResumePreconditions(ctx context.Context, dataDir, dockerBinary, halted
 	case !found || recorded == "":
 		recorded, recordedWhat = r.BaseSHA, "the run's base commit (it wrote no round state)"
 	}
-	if maxRounds > 0 && found && lastRound >= maxRounds {
+	if maxRounds > 0 && found && lastRound >= maxRounds && !passed {
 		reasons = append(reasons, fmt.Sprintf("the round state of run %s records %d completed round(s), but the resumed run allows only %d: no round is left to run; rebuild instead", haltedRunID, lastRound, maxRounds))
 	}
 	if recorded == "" {

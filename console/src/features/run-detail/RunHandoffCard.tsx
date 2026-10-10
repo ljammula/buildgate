@@ -2,6 +2,7 @@ import { useRunHandoff } from "@/api/runQueries";
 import { ApiError } from "@/domain/apiError";
 import { HANDOFF_NOT_JUDGED, handoffBinLabel, handoffNextSentence } from "@/domain/handoff";
 import type { Run } from "@/domain/run";
+import { RunHandoffNotes } from "@/features/run-detail/RunHandoffNotes";
 import { EscapedText } from "@/shared/oracle/EscapedText";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -20,7 +21,7 @@ export interface RunHandoffCardProps {
  * It restates the factory's record; it does not say another attempt has been
  * or will be started. A handoff the server will not vouch for (409), or one
  * for a state the run has left, shows nothing. A finding may quote a line of a log, so it is rendered
- * as text.
+ * as text. The build agent's own notes come last, labelled as its view.
  */
 export function RunHandoffCard({ run }: RunHandoffCardProps) {
   const query = useRunHandoff(run.id, run.handoffSha256);
@@ -76,6 +77,7 @@ export function RunHandoffCard({ run }: RunHandoffCardProps) {
                 ))}
               </ul>
             )}
+            <RunHandoffNotes notes={query.data.agentNotes} />
           </div>
         )}
       </Section>

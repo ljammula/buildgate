@@ -255,6 +255,14 @@ describe("writes", () => {
     expect(retry.method).toBe("POST");
     expect(retry.headers).toEqual(WRITE);
     expect(retry.body).toBe('{"reason":"flaky"}');
+    const scratch = await sentBy((http) =>
+      retryRequest(http, "req-1", { reason: "bad start", by: "jane", fromScratch: true }),
+    );
+    expect(scratch.body).toBe('{"reason":"bad start","by":"jane","from":"scratch"}');
+    const attempt = await sentBy((http) =>
+      retryRequest(http, "req-1", { reason: "flaky", fromScratch: false }),
+    );
+    expect(attempt.body).toBe('{"reason":"flaky"}');
 
     const cancel = await sentBy((http) =>
       cancelRequest(http, "req-1", { reason: "obsolete", by: "jane" }),

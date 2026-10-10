@@ -36,16 +36,22 @@ func requireSetupRan(setup []string, result workflow.RunWorkflowResult) workflow
 	if seen {
 		return result
 	}
+	return refuseAccepted(result, run.GateResult{Check: "canonical_verify", Command: []string{run.SetupNotRunMessage}, ExitCode: -1})
+}
+
+// refuseAccepted quarantines result and records refusal, a failed
+// canonical_verify result, in place of the run's own canonical_verify result
+// (added when it has none).
+func refuseAccepted(result workflow.RunWorkflowResult, refusal run.GateResult) workflow.RunWorkflowResult {
 	result.State = run.StateQuarantined
-	notRun := run.GateResult{Check: "canonical_verify", Command: []string{run.SetupNotRunMessage}, ExitCode: -1}
 	gates := append([]run.GateResult(nil), result.GateResults...)
 	for i, g := range gates {
 		if g.Check == "canonical_verify" {
-			gates[i] = notRun
+			gates[i] = refusal
 			result.GateResults = gates
 			return result
 		}
 	}
-	result.GateResults = append(gates, notRun)
+	result.GateResults = append(gates, refusal)
 	return result
 }

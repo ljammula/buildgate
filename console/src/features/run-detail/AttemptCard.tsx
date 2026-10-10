@@ -4,6 +4,7 @@ import { formatElapsedCompact, formatLocalTimestamp, elapsedBetween } from "@/do
 import type { Attempt } from "@/domain/run";
 import { attemptExitText, attemptModelLine } from "@/domain/runDetail";
 import { attemptFailed } from "@/domain/runSummary";
+import { ReviewMaskedPaths } from "@/features/run-detail/ReviewMaskedPaths";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { CompactId } from "@/ui/CompactId";
@@ -19,7 +20,8 @@ export interface AttemptCardProps {
  * the raw `docker run` argv collapsed by default (it is long and rarely what
  * an operator wants first); the log path with an "Open log" action into the
  * run's build-log pane rather than plain text. A failed attempt draws its
- * exit line in the failure colour.
+ * exit line in the failure colour. A review attempt names the instruction
+ * files it read from the base commit.
  */
 export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
   const [commandOpen, setCommandOpen] = useState(false);
@@ -46,6 +48,7 @@ export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
           {` · took ${took}`}
         </p>
         {modelLine !== null ? <p>{modelLine}</p> : null}
+        <ReviewMaskedPaths paths={attempt.reviewMaskedPaths} />
         <div className="flex items-center justify-between gap-3">
           <p className="flex min-w-0 items-center gap-1">
             Log:

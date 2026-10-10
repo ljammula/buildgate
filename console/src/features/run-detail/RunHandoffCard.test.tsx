@@ -130,3 +130,96 @@ test("a handoff that describes another state than the run is in shows nothing", 
   });
   await waitFor(() => expect(screen.queryByTestId("run-handoff")).not.toBeInTheDocument());
 });
+
+test("the agent's notes come last, labelled as its unverified view", async () => {
+  renderApp(<RunHandoffCard run={fixtureRun("run-quarantined")} />, {
+    server: [
+      {
+        on: "GET /runs/run-quarantined/handoff",
+        reply: () => json(readFixtureJson("api/run-handoff.json")),
+      },
+    ],
+  });
+  const notes = await screen.findByTestId("run-handoff-notes");
+  expect(
+    within(notes).getByRole("heading", { name: "The build agent's own notes (unverified)" }),
+  ).toBeInTheDocument();
+  expect(notes).toHaveTextContent("They are its view, not the factory's record");
+  expect(
+    within(notes)
+      .getAllByRole("heading", { level: 4 })
+      .map((h) => h.textContent),
+  ).toEqual([
+    "What it did",
+    "What it tried that did not work",
+    "Its hypothesis",
+    "What it said was left to do",
+    "What it said about this repository",
+  ]);
+  expect(
+    within(notes)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual([
+    "Scoped the idempotency key by account id in checkout/idempotency.go.",
+    "Hashing the account id into the key: TestKeyScopedToAccount compares the raw key.",
+    "The key is built before the account is loaded, so the scope is always empty.",
+    "Load the account before building the key.",
+    "Run the checkout tests.",
+    "The checkout tests need the cart fixtures to be generated first.",
+  ]);
+  // After every failed check: nothing of the factory's record follows them.
+  const checks = screen.getAllByTestId("run-handoff-check");
+  expect(
+    checks.at(-1)!.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.getByTestId("run-handoff").lastElementChild?.contains(notes)).toBe(true);
+  expect(notes.nextElementSibling).toBeNull();
+});
+
+test("a note is rendered as text: no markup, no Markdown, no link", async () => {
+  renderApp(<RunHandoffCard run={fixtureRun("run-quarantined")} />, {
+    server: [
+      {
+        on: "GET /runs/run-quarantined/handoff",
+        reply: () =>
+          json({
+            run_id: "run-quarantined",
+            state: "quarantined",
+            next: "corrective",
+            agent_notes: {
+              hypothesis: [
+                "<img src=x onerror=alert(1)> **bold** [approve](https://example.invalid/x) https://example.invalid/y",
+              ],
+            },
+          }),
+      },
+    ],
+  });
+  const notes = await screen.findByTestId("run-handoff-notes");
+  expect(within(notes).getByRole("listitem")).toHaveTextContent(
+    "<img src=x onerror=alert(1)> **bold** [approve](https://example.invalid/x) https://example.invalid/y",
+  );
+  expect(notes.querySelector("img, a, strong, script")).toBeNull();
+  expect(within(notes).getAllByRole("heading", { level: 4 })).toHaveLength(1);
+});
+
+test("a handoff with no notes, or with empty ones, shows no notes block", async () => {
+  renderApp(<RunHandoffCard run={fixtureRun("run-quarantined")} />, {
+    server: [
+      {
+        on: "GET /runs/run-quarantined/handoff",
+        reply: () =>
+          json({
+            run_id: "run-quarantined",
+            state: "quarantined",
+            next: "corrective",
+            checks: [{ check: "lint", bin: "corrective", exit_code: 2 }],
+            agent_notes: { did: [] },
+          }),
+      },
+    ],
+  });
+  await screen.findByTestId("run-handoff-check");
+  expect(screen.queryByTestId("run-handoff-notes")).toBeNull();
+});

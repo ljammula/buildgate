@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/projectconfig"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
@@ -40,6 +41,14 @@ gates:
 	}
 	if checks := policy.RepoGateChecks(got); len(checks) != 2 || checks[0] != "repo-licenses" || checks[1] != "repo-no_todo" {
 		t.Errorf("repo gates = %v, want [repo-licenses repo-no_todo]", checks)
+	}
+	// A reclaim derives the same gates from the file's bytes alone.
+	cfg, _, err := projectconfig.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if derived := cfg.RepoGateCommands(); len(derived) != 2 || derived["repo-no_todo"] != got["repo-no_todo"] || derived["repo-licenses"] != got["repo-licenses"] {
+		t.Errorf("Config.RepoGateCommands = %v, want the run's two repo gates", derived)
 	}
 	for _, g := range policy.CommandGates {
 		if _, ok := got[g.ID]; !ok {

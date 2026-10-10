@@ -228,8 +228,8 @@ func loadOracleCoverage(r *run.Run, id string) {
 	r.OracleCoveredCriteria = covered
 }
 
-// loadAgentEvidence reads BUILD_EVIDENCE.json from workspace, if present,
-// and attaches it to r.AgentEvidence. Shared by the run setup and
+// loadAgentEvidence reads the host's copy of the build's BUILD_EVIDENCE.json
+// from the run's directory, if present, and attaches it to r.AgentEvidence. Shared by the run setup and
 // runViaTemporal so the durable audit record — the agent's own reported
 // provider/model/rounds/usage, distinct from the gate outcome that
 // decides accept/quarantine — is recorded identically. A missing or unparseable file is logged as
@@ -265,7 +265,12 @@ func loadAgentEvidence(r *run.Run, workspace, dataDir, id string) {
 	// had none of RetainFile's symlink/FIFO/size protections until now --
 	// see ReadHostileFile's own doc comment for the concrete exploit shape
 	// this closes.
-	evidenceBytes, err := evidence.ReadHostileFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), maxAgentEvidenceFileSize)
+	//
+	// Read from the run's own directory, not the workspace: the build step
+	// moves the file there when the build returns (the workflow package's
+	// takeRoundNotesOut), so no review works beside the per-round agent_notes
+	// it holds. The copy is the same untrusted bytes.
+	evidenceBytes, err := evidence.ReadHostileFile(filepath.Join(run.Dir(dataDir, id), evidence.BuildEvidenceFileName), maxAgentEvidenceFileSize)
 	if err != nil {
 		fmt.Printf("run %s: warning: could not read BUILD_EVIDENCE.json: %v\n", id, err)
 	} else {

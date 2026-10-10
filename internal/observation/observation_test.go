@@ -261,3 +261,57 @@ func TestExcerptPicksFailureLinesCleansAndCuts(t *testing.T) {
 		t.Error("empty text gave an excerpt")
 	}
 }
+
+// The line that says what failed in a Python traceback is its last one, the
+// first line that is not indented after the frames. It names no word the
+// failure pattern knows ("ModuleNotFoundError"), and the frames above it
+// are more than an excerpt keeps under one failure line.
+func TestExcerptKeepsTheFinalLineOfATraceback(t *testing.T) {
+	text := "running tests\n" +
+		"Traceback (most recent call last):\n" +
+		"  File \"/usr/lib/python3.12/runpy.py\", line 198, in _run_module_as_main\n" +
+		"    return _run_code(code, main_globals, None,\n" +
+		"  File \"/usr/lib/python3.12/unittest/__main__.py\", line 18, in <module>\n" +
+		"    main(module=None)\n" +
+		"  File \"/workspace/tests/test_app.py\", line 3, in <module>\n" +
+		"    import widgets\n" +
+		"ModuleNotFoundError: No module named 'widgets'\n" +
+		"done\n"
+	got := Excerpt(text)
+	if !strings.HasSuffix(got, "\nModuleNotFoundError: No module named 'widgets'") {
+		t.Errorf("Excerpt = %q, want it to end with the traceback's final line", got)
+	}
+	if !strings.HasPrefix(got, "Traceback (most recent call last):\n") {
+		t.Errorf("Excerpt = %q, want the traceback's first line", got)
+	}
+	// The frames kept are the last ones, nearest the failure.
+	if !strings.Contains(got, "    import widgets\n") || strings.Contains(got, "runpy.py") {
+		t.Errorf("Excerpt = %q, want the innermost frames and not the outermost", got)
+	}
+	if strings.Contains(got, "done") || strings.Contains(got, "running tests") {
+		t.Errorf("Excerpt = %q, want no line outside the traceback", got)
+	}
+
+	// Frames are what the size cap cuts, never the final line.
+	frame := "  File \"" + strings.Repeat("d/", 250) + "x.py\", line 1, in f\n"
+	long := "Traceback (most recent call last):\n" + strings.Repeat(frame, 6) + "ImportError: Start directory is not importable: 'tests'\n"
+	got = Excerpt(long)
+	if len(got) > maxExcerptBytes || !strings.HasSuffix(got, "ImportError: Start directory is not importable: 'tests'") {
+		t.Errorf("long frames: %d bytes, %q, want the final line within the cap", len(got), got)
+	}
+
+	// Many tracebacks: the line cap holds and each kept one has its final line.
+	many := strings.Repeat("Traceback (most recent call last):\n  File \"a.py\", line 1, in f\n    g()\n  File \"a.py\", line 2, in g\n    h()\nKeyError: 'k'\n", 8)
+	got = Excerpt(many)
+	if n := strings.Count(got, "\n") + 1; n > maxExcerptLines {
+		t.Errorf("many tracebacks: %d lines, want at most %d", n, maxExcerptLines)
+	}
+	if strings.Count(got, "Traceback") != strings.Count(got, "KeyError: 'k'") {
+		t.Errorf("many tracebacks: %q, want a final line for every traceback kept", got)
+	}
+
+	// A log cut inside a traceback has no final line; its frames are kept.
+	if got := Excerpt("Traceback (most recent call last):\n  File \"a.py\", line 1, in f\n"); got != "Traceback (most recent call last):\n  File \"a.py\", line 1, in f" {
+		t.Errorf("cut traceback: %q", got)
+	}
+}

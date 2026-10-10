@@ -8,7 +8,6 @@ import (
 	"html"
 	"log"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"buildgate/internal/release"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 )
 
 // A root instruction name is a root-level path that folds to AGENTS.md
@@ -99,8 +99,8 @@ func (impl realHost) blobAtCommit(ctx context.Context, repoDir, commit, path str
 }
 
 func gitObjectOutput(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoDir}, args...)...)
-	cmd.Env = append(cmd.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	// The one hardening of every host read of a trusted commit.
+	cmd := sandbox.HardenedGitCommand(ctx, repoDir, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

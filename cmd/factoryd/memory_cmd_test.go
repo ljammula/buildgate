@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"buildgate/internal/api"
+	"buildgate/internal/handoff"
 	"buildgate/internal/memory"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -111,6 +112,37 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 	return rr
 }
 
+// acceptedRunWithNotes saves an accepted run of the fixture's project whose
+// build failed a round, passed the next and left notesFile: the host copied
+// the notes into the run directory, and an accepted run keeps no handoff.
+func (f *memFix) acceptedRunWithNotes(id, notesFile string) *run.Run {
+	f.t.Helper()
+	runDir := run.Dir(f.data, id)
+	if err := os.MkdirAll(runDir, 0o750); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "agent-notes.md"), []byte(notesFile), 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+	failed, passed := false, true
+	rr := &run.Run{
+		ID: id, Ticket: id, State: run.StateAccepted, Branch: "factoryd/" + id,
+		BaseSHA: strings.Repeat("1", 40), ResultSHA: strings.Repeat("2", 40), ChangedFiles: []string{"sum.go"},
+		Project: f.project, RepositoryRoot: f.root,
+		AgentEvidence: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{
+			{Index: 1, VerifyPassed: &failed, Blockers: []string{"canonical verification failed"}, ChangedFiles: []string{"sum.go"}, FailureSignature: "aaaa"},
+			{Index: 2, VerifyPassed: &passed, ChangedFiles: []string{"sum.go"}},
+		}},
+	}
+	if err := handoff.Sync(rr, f.data); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := rr.Save(f.data); err != nil {
+		f.t.Fatal(err)
+	}
+	return rr
+}
+
 func worthKnowing(items ...string) string {
 	return "Things worth knowing about this repository\n- " + strings.Join(items, "\n- ") + "\n"
 }
@@ -192,7 +224,7 @@ func TestMemoryListCollectsNotesAndShowsTheSection(t *testing.T) {
 	f := newMemFix(t, map[string]string{"AGENTS.md": sectionFile("# Guide\n\n", "", "- A line a person wrote.", "- Use go 1.26.")})
 	f.quarantinedRunWithNotes("run-a", "What I did\n- changed sum.go\n"+worthKnowing(
 		"Run `make gen` before the tests.", "see https://example.com/setup", "Use go 1.26"))
-	f.quarantinedRunWithNotes("run-b", worthKnowing("Run 'make gen' before the tests"))
+	f.quarantinedRunWithNotes("run-b", worthKnowing("Run `make gen` before the tests"))
 	if err := f.cmd().list(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +233,7 @@ func TestMemoryListCollectsNotesAndShowsTheSection(t *testing.T) {
 		"repository memory for " + f.project, "): on\n", "budget: 2 of 40 lines, 40 of 3000 characters",
 		"collected from build agents' notes: 1 new candidate(s), 1 note(s) refused by the text rule",
 		"  - A line a person wrote.\n  - Use go 1.26.\n", "ID SEEN SOURCE STATE LINE",
-		" 2 agent candidate - Run 'make gen' before the tests.",
+		" 2 agent candidate - Run `make gen` before the tests.",
 	} {
 		if !strings.Contains(out, want) && !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
 			t.Errorf("list lacks %q:\n%s", want, out)
@@ -234,8 +266,9 @@ func TestMemoryListCollectsNotesAndShowsTheSection(t *testing.T) {
 	}
 }
 
-// A handoff changed after the run recorded it yields no candidate.
-func TestMemoryListSkipsATamperedHandoff(t *testing.T) {
+// The memory list reads the notes file the host kept, never the handoff: a
+// handoff changed after the run recorded it changes no candidate.
+func TestMemoryListReadsTheNotesFileNotTheHandoff(t *testing.T) {
 	f := newMemFix(t, nil)
 	f.quarantinedRunWithNotes("run-a", worthKnowing("Use go 1.26"))
 	path := filepath.Join(run.Dir(f.data, "run-a"), "handoff.json")
@@ -249,8 +282,48 @@ func TestMemoryListSkipsATamperedHandoff(t *testing.T) {
 	if err := f.cmd().list(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if ls := f.lessons(); len(ls) != 0 {
-		t.Fatalf("a tampered handoff gave candidates: %+v", ls)
+	if ls := f.lessons(); len(ls) != 1 || ls[0].Line != "- Use go 1.26." {
+		t.Fatalf("lessons = %+v, want the one line the notes file holds, whatever the handoff says", ls)
+	}
+}
+
+// A build that failed a round and then passed leaves notes too, and its run
+// is accepted: an accepted run has no handoff, so its "worth knowing" items
+// are read from the notes the host kept in the run directory. Only that
+// heading is read, and only once the run is accepted.
+func TestMemoryListCollectsTheNotesOfAnAcceptedRun(t *testing.T) {
+	f := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n"})
+	accepted := f.acceptedRunWithNotes("run-a", "What I did\n- changed sum.go\n"+worthKnowing(
+		"Run `make gen` before the tests.", "see https://example.com/setup"))
+	if _, err := os.Stat(filepath.Join(run.Dir(f.data, "run-a"), handoff.FileName)); !os.IsNotExist(err) || accepted.HandoffSHA256 != "" {
+		t.Fatalf("the accepted run has a handoff (%v, hash %q): this test would prove nothing new", err, accepted.HandoffSHA256)
+	}
+	// Still being verified: its notes are not a finished run's.
+	verifying := f.acceptedRunWithNotes("run-b", worthKnowing("The linter needs network access"))
+	verifying.State = run.StateVerifying
+	if err := verifying.Save(f.data); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.cmd().list(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := f.out.String()
+	if !strings.Contains(out, "collected from build agents' notes: 1 new candidate(s), 1 note(s) refused by the text rule") {
+		t.Errorf("list did not collect from the accepted run:\n%s", out)
+	}
+	if strings.Contains(out, "example.com") || strings.Contains(out, "changed sum.go") || strings.Contains(out, "linter") {
+		t.Errorf("list shows a refused note, a note of another heading or a note of an unfinished run:\n%s", out)
+	}
+	ls := f.lessons()
+	if len(ls) != 1 || !strings.Contains(ls[0].Line, "make gen") || strings.Join(ls[0].Runs, ",") != "run-a" {
+		t.Fatalf("lessons = %+v, want the one line the accepted run said", ls)
+	}
+	// A second list counts the run once.
+	if err := f.cmd().list(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.out.String(), "collected from") || f.lessons()[0].Seen != 1 {
+		t.Fatalf("second list recounted:\n%s", f.out.String())
 	}
 }
 

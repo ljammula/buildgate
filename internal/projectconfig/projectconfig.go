@@ -303,6 +303,18 @@ func Load(workspaceDir string) (*Config, bool, error) {
 		return nil, false, nil
 	}
 
+	cfg, err := Parse(data)
+	if err != nil {
+		return nil, false, err
+	}
+	return cfg, true, nil
+}
+
+// Parse parses and validates data as the content of a .factory.yml and sets
+// the result's SHA256. Load is Parse of the committed HEAD revision; a
+// caller that holds the file's bytes as another commit has them (read from
+// git objects) parses them here under the same rules.
+func Parse(data []byte) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var cfg Config
@@ -313,14 +325,14 @@ func Load(workspaceDir string) (*Config, bool, error) {
 		// .factory.yml must not have every run/preview fail because of
 		// it (found via Codex review, PR #84). cfg is left at its zero
 		// value, exactly the same as if the field had decoded that way.
-		return nil, false, fmt.Errorf("parse %s: %w", FileName, err)
+		return nil, fmt.Errorf("parse %s: %w", FileName, err)
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, false, fmt.Errorf("%s: %w", FileName, err)
+		return nil, fmt.Errorf("%s: %w", FileName, err)
 	}
 	sum := sha256.Sum256(data)
 	cfg.SHA256 = hex.EncodeToString(sum[:])
-	return &cfg, true, nil
+	return &cfg, nil
 }
 
 // readCommitted returns .factory.yml's content from the git-committed HEAD

@@ -7,6 +7,7 @@ import {
   baselineVerifySummary,
   composeSummary,
   formatGateDuration,
+  gateBaseCheckText,
   gatesSummary,
   runTokensText,
   runVerdictLine,
@@ -130,6 +131,40 @@ describe("block summaries", () => {
       ],
     }).composePhases;
     expect(composeSummary(phases)).toBe("build: redis, kafka · verify: not launched");
+  });
+});
+
+describe("gateBaseCheckText", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const text = (base_check?: Record<string, unknown>) =>
+    gateBaseCheckText(
+      run({ gate_results: [{ ...gate("lint", false), base_check }] }).gateResults[0]!,
+    );
+
+  test("a gate that was not rerun says nothing", () => {
+    expect(text()).toBe("");
+  });
+
+  test("each outcome is said of the base commit", () => {
+    expect(text({ outcome: "fails_same", base_sha: sha, exit_code: 1 })).toBe(
+      "Fails the same way on the base commit 0123456789ab: no build can fix it. Fix the gate command or the repository.",
+    );
+    expect(text({ outcome: "fails_differently", base_sha: sha, exit_code: 2 })).toBe(
+      "Was already failing on the base commit 0123456789ab, in another way: part of this failure predates the build.",
+    );
+    expect(text({ outcome: "passes", base_sha: sha, exit_code: 0 })).toBe(
+      "Passes on the base commit 0123456789ab: the build's changes fail it.",
+    );
+    expect(
+      text({ outcome: "not_checked", base_sha: sha, exit_code: -1, reason: "no time left" }),
+    ).toBe("Not checked on the base commit 0123456789ab: no time left");
+    expect(text({ outcome: "not_checked", exit_code: -1 })).toBe("Not checked on the base commit");
+  });
+
+  test("an outcome this console does not know is shown under its own name", () => {
+    expect(text({ outcome: "skipped", base_sha: sha, exit_code: 0 })).toBe(
+      "On the base commit 0123456789ab: skipped",
+    );
   });
 });
 

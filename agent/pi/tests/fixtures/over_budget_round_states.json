@@ -1,0 +1,359 @@
+{
+  "about": "Round states with no round left to run (last_completed_round >= max_rounds), and whether build_app.py's load_round_state accepts each. The host's resume precondition (internal/workflow) must give the same verdict; both test suites read this file. state is the file's text, kept as a string so key spelling and repeated keys are exact.",
+  "states": [
+    {
+      "name": "passed in the last round, notes turn started",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "passed in round 3 and resumed with 2 rounds allowed",
+      "max_rounds": 2,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "passed, round records with no fields",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{},{},{}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "passed, unknown keys beside the known ones",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"later\":{\"a\":[1]},\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"later\":1}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "passed in round 4 of 4 with 3 allowed",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":4,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]},{\"index\":4}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "passed, the last key of a repeated one counts: true",
+      "max_rounds": 3,
+      "state": "{\"passed\":false,\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "passed, the last key of a repeated one counts: false",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"passed\":false,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the key is spelled Passed",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"Passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the key is spelled PASSED",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"PASSED\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the round keys are spelled Rounds and Blockers",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"Rounds\":[{\"index\":1,\"Blockers\":[\"canonical verification failed\"]},{\"index\":2,\"Blockers\":[\"canonical verification failed\"]},{\"index\":3,\"Blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the round count key is spelled Last_Completed_Round",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"Last_Completed_Round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "passed is the string true",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":\"true\",\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "passed is 1",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":1,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "passed is absent",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the last round's blockers are null",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":null}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "an earlier round's blockers are null",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":null},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the last round recorded a blocker",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[\"canonical verification failed\"]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "a blocker that is not a string",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[1]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the last round has the index of another",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "a round index is 3.0",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3.0,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "a round index is true",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":true,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "a round index is a string",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":\"3\",\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "next_prompt is absent",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "next_prompt is empty",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "next_prompt is a number",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":7,\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "next_prompt is null",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":null,\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "version is 2",
+      "max_rounds": 3,
+      "state": "{\"version\":2,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "version is the string 1",
+      "max_rounds": 3,
+      "state": "{\"version\":\"1\",\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "version is true",
+      "max_rounds": 3,
+      "state": "{\"version\":true,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "version is 1.0",
+      "max_rounds": 3,
+      "state": "{\"version\":1.0,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "version is absent",
+      "max_rounds": 3,
+      "state": "{\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the round count is a string",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":\"3\",\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the round count is 3.0",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3.0,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the round count is true",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":true,\"next_prompt\":\"p\",\"passed\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "fewer round records than rounds",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "more round records than rounds",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]},{\"index\":4,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "no round records",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true}",
+      "script_accepts": false
+    },
+    {
+      "name": "rounds is an object",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":{}}",
+      "script_accepts": false
+    },
+    {
+      "name": "rounds is null",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":null}",
+      "script_accepts": false
+    },
+    {
+      "name": "a round record is a list",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},[],{\"index\":3,\"blockers\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_passed is a string",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"verify_passed\":\"yes\"}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_passed is null",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"verify_passed\":null}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "verify_timed_out is null",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"verify_timed_out\":null}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "turn_errors has one number",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"turn_errors\":[1]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "turn_errors holds a boolean",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"turn_errors\":[1,true]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "turn_errors is two integers",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"turn_errors\":[0,2]}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "reviewer is a string",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"reviewer\":\"clean\"}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the reviewer's outcome is a number",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"reviewer\":{\"outcome\":3}}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "usage is a list",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"usage\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "usage is null and autofix an object",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"usage\":null,\"autofix\":{}}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "changed_files holds a number",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"changed_files\":[1]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "duration_s is a string",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"duration_s\":\"1\"}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "duration_s is true",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"duration_s\":true}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "duration_s is 1.5 and agent_returncode 0",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"duration_s\":1.5,\"agent_returncode\":0}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "agent_returncode is 1.5",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"agent_returncode\":1.5}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "agent is a number",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[],\"agent\":1}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "the state is a list",
+      "max_rounds": 3,
+      "state": "[{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]}]",
+      "script_accepts": false
+    },
+    {
+      "name": "the state is not JSON",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[]}]",
+      "script_accepts": false
+    },
+    {
+      "name": "no pass recorded and no round left",
+      "max_rounds": 3,
+      "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":false,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[\"canonical verification failed\"]}]}",
+      "script_accepts": false
+    }
+  ]
+}

@@ -232,8 +232,9 @@ SPECIFIC = [
 	(".github/copilot-instructions.md", md, "text"), (".github/instructions/probe.instructions.md", instructions_md, "text"),
 	(".github/agents/probe.agent.md", agent_md, "text"), (".github/hooks/probe.json", github_hooks, "exec"),
 	(".mcp.json", mcp_json, "exec"), (".vscode/mcp.json", mcp_json_vscode, "exec"),
+	(".github/mcp.json", mcp_json, "exec"),
 	# Outside the table: shipped by a harness, or conventions of other agents.
-	(".github/mcp.json", mcp_json, "exec"), (".github/lsp.json", lsp_json, "exec"),
+	(".github/lsp.json", lsp_json, "exec"),
 	(".github/extensions/probe/extension.mjs", github_extension, "exec"),
 	(".github/copilot/settings.json", github_settings, "text"), (".github/copilot/settings.local.json", github_settings, "text"),
 	(".github/prompts/probe.prompt.md", command_md, "text"), (".github/chatmodes/probe.chatmode.md", agent_md, "text"),
@@ -399,9 +400,10 @@ FIXTURE_NOTE = ("Instruction paths each harness loads from a workspace, measured
 	"is .github/instructions. source probed means measured; documented means read from the harness documentation. "
 	"trust_gated lists table paths a harness loads only when the project is trusted, which a worker turn never grants. "
 	"uncovered lists paths outside the review snapshot's table that a harness loaded in a worker turn, "
-	"uncovered_trust_gated those it loads only in a trusted project. pifork is built from the pi base and "
-	"carries pi's version and documented paths until an image with its launcher is probed. unprobed lists the table paths "
-	"no probed harness was observed loading.")
+	"uncovered_trust_gated those it loads only in a trusted project. pifork is the operator's own fork of pi, outside "
+	"this repository: it was measured as buildgate launches it, with the pinned pi behind the image contract's launcher, "
+	"so what a fork adds to pi's own loading is not measured. unprobed lists the table paths no probed harness was "
+	"observed loading.")
 
 
 def executed_slugs(out_dir):

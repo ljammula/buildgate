@@ -49,7 +49,7 @@ The trust boundaries are:
 | Model-listing credentials | Factory route-validation code, reused | `doctor -list-models`, `doctorCheckCopilotModelListed`, the Copilot token-exchange client | These host-side calls send only what a launch's route would admit: validated via `sandbox.RoutePolicy.ValidateUpstreamScheme` + `sandbox.CredentialSafeForUpstream` (the same check `RouteSpec.Validate` applies), redirects refused (`meter.NoRedirectCheckRedirect`), no credential over plaintext and none when `routes.<name>.allow_no_credential` is set. |
 | Model routes | Session-config `routes:` and the host-side resolver in the process launching that route's worker | Request model choice; Temporal Workflow input | A route's credential is resolved host-side only for that route's own launch; Workflow input names a route, never a credential source, and the Worker refuses any policy that differs from its own route and role model in any field except a tightened ceiling, then resolves that route's credential itself. The meter policy a sandbox is created with is derived from that same checked policy (`RoutePolicy.MeterConfig`). The route's network policy admits the harnesses' model executables (`harness.ModelBinaries`, the union across harnesses), not one harness's. |
 | Skills | The operator's `skill_dirs:` folders, buildgate's built-in skills, and `roles.<role>.skills` names | Request input; the target repo's own project skills; the worker between rounds | Only a host-side, hashed, read-only snapshot of the role's named skills reaches the worker (SC-016); a same-name repo skill refuses the launch; harness homes stay per-session and get fresh copies each round. Skill content is operator-trusted instruction text, vetted like a dependency. A review launch sees the repository's instruction files as the base commit holds them, read-only, and what the build changed in them only as quoted data (SC-019). |
-| Repository memory | The operator's `memory.repositories` switch (off for every repository not listed) and the project's kill switch; the operator's approval at spec review; the section text the host renders | The build agent's notes; the memory ticket's build; a reviewer's comment on its pull request | A note becomes a candidate line only if it passes a fixed text rule (`memory.ValidateReason`: one line, 120 characters, a fixed character set with no Markdown emphasis, link or list syntax, commands only inside backticks under the command rule, no URL in any form, address, absolute path inside or outside a command, home path, unbroken token of 20 or more characters of `A-Za-z0-9+/_-` that holds both a letter and a digit, or anything redaction would change); a refused note is never repaired or stored. A candidate is collected only from a run recorded against this repository's root. A section line holding a control or format character is not read, and every line is printed with escapes removed. Candidates are shown to the operator only (`factoryd memory list`/`show`, `GET /projects/{project}/memory`). The section reaches the repository only as a request the operator approves and merges (SC-020). No command a note names is ever run by the factory, and nothing is collected, proposed or dropped without a person running the command. A memory request already in flight is stopped at release by the kill switch and by `factoryd memory off`; removing the repository from `memory.repositories` stops new proposals only. |
+| Repository memory | The operator's `memory.repositories` switch (off for every repository not listed) and the project's kill switch; the operator's approval at spec review; the section text the host renders | The build agent's notes; the memory ticket's build; a reviewer's comment on its pull request | A note becomes a candidate line only if it passes a fixed text rule (`memory.ValidateReason`: one line, 120 characters, a fixed character set with no Markdown emphasis, link or list syntax, commands only inside a backtick pair that stands alone, under the command rule, no URL with a scheme (with or without its slashes; a host name written without a scheme is not recognised, and the operator reads every line before approving it), address, absolute path inside or outside a command, `..` path component, home path, unbroken token of 20 or more characters of `A-Za-z0-9+/_-` that holds both a letter and a digit, or anything redaction would change); a refused note is never repaired or stored. A candidate is collected only from a run recorded against this repository's root. A section line holding a control or format character is not read, and every line is printed with escapes removed. Candidates are shown to the operator only (`factoryd memory list`/`show`, `GET /projects/{project}/memory`). The section reaches the repository only as a request the operator approves and merges (SC-020). No command a note names is ever run by the factory, and nothing is collected, proposed or dropped without a person running the command. A memory request already in flight is stopped at release by the kill switch and by `factoryd memory off`; removing the repository from `memory.repositories` stops new proposals only. |
 
 ```text
   +----------+  mTLS   +----------+  Docker  +----------+
@@ -279,7 +279,7 @@ follow it, and no means to pass a gate.
 | T-14 | The sandbox runtime restarts mid-run and starts a worker's command a second time | Host control refuses to stop or restart the gateway while a request or sandbox is active; a per-launch guard lets a worker command run once, and a second start exits before touching the worktree (SC-017) | The step is recorded lost; a lost build keeps its worktree and waits in `resume_review` | partial |
 | T-15 | The gateway, a supervisor or the meter is compromised | OpenShell images pinned by digest; mTLS for gateway clients; sandbox JWT; `factoryd doctor` checks the pinned images, the gateway's TLS and mTLS settings, and both services' health | The operator stops the gateway (`factoryd stop -all`) | partial |
 | T-16 | A build, or the repository it builds, plants text in failing output, a file name or a reviewer's finding, or its own notes, to steer the next attempt or its reviewer | The record of an earlier attempt is built by the factory from the run record; every value from a build or a reviewer is one line, length-capped, cleaned and quoted as data; it goes only to a build's first prompt, never into a spec or a review (SC-018); the hash and state are checked before use | The corrective build is a new run whose result every gate and an independent review judge against the unchanged spec; its record, the handoff it was given and the prompts its launches saved are kept in the run and request directories (a saved prompt is what the session folder held when the host copied it: a build can alter its own, and the host empties the folder before every launch so an earlier step's file is never kept as a later launch's) | partial |
-| T-17 | A build edits, adds or links the repository's instruction files (AGENTS.md-style files, harness folders, project skills, MCP or hook configuration) so the reviewer that reads its worktree is told to pass it | Every model review launches with the base commit's instruction files mounted read-only over the worktree; what the build changed in them reaches the reviewer only as fenced data; instruction-named paths the worktree holds beyond the result commit are removed first; a shape the mask cannot carry halts the run before the review launches (SC-019) | The run halts with `review_instructions_failed`; the cause is in the review attempt's record for the operator and in no handoff, spec or later build | partial; the table of instruction paths is a list, and a harness may load a path that is not on it; the table was measured against the pinned pi, codex and copilot harnesses by a recorded probe (`make probe-instruction-paths`, result in `agent/pi/tests/fixtures/instruction_paths.json`), which found copilot loading `.github/copilot-instructions.md` and `.github/instructions` from the directory of a file it read, so every table entry matches at any depth |
+| T-17 | A build edits, adds or links the repository's instruction files (AGENTS.md-style files, harness folders, project skills, MCP or hook configuration) so the reviewer that reads its worktree is told to pass it | Every model review launches with the base commit's instruction files mounted read-only over the worktree; what the build changed in them reaches the reviewer only as fenced data; instruction-named paths the worktree holds beyond the result commit are removed first; a shape the mask cannot carry halts the run before the review launches (SC-019) | The run halts with `review_instructions_failed`; the cause is in the review attempt's record for the operator and in no handoff, spec or later build | partial; the table of instruction paths is a list, and a harness may load a path that is not on it; the table was measured against the pinned pi, codex and copilot harnesses, and against pifork with the pinned pi behind its launcher (what an operator's own fork adds is not measured), by a recorded probe (`make probe-instruction-paths`, result in `agent/pi/tests/fixtures/instruction_paths.json`), which found copilot loading `.github/copilot-instructions.md` and `.github/instructions` from the directory of a file it read, so every table entry matches at any depth; `.github/mcp.json`, which copilot runs only in a trusted project, is on the table although a worker turn never grants that trust |
 | T-18 | A build edits or replaces a script under `.factory/` that a repository command runs, so a gate judges the build with the build's own script | Every build, verify and gate sandbox mounts `.factory/` read-only from the commit `.factory.yml` was read from; a worktree shape the mount cannot carry halts the run (`factory_dir_failed`) before the sandbox starts | The snapshot's SHA-256 is on each attempt; `.factory/` is a protected path, so a result commit that changes it is refused at release | partial; a script that calls files outside `.factory/` runs the build's copy of them, as `verify_command: make test` does |
 | T-19 | A build plants an instruction in its notes so that it becomes a line of `AGENTS.md` every later agent obeys | The text rule refuses markup, quotes of shell syntax, URLs and anything over one short line; the host renders the line and the whole file; one request changes at most five lines; the operator reads the exact section in the spec at spec review; the release check passes only a byte-equal `AGENTS.md` of mode 100644 under that one name and no other changed file, only while the base still holds the `AGENTS.md` the text was rendered from, and refuses any other run that changes the file of a repository with a memory section or adds the marker text to one without; the memory request's own reviews read the base commit's instructions (SC-019); a reviewer's comment starts no build that rewords a line (SC-020) | A line in force is removed by a memory request (`factoryd memory propose -remove`), or by an ordinary human commit; `factoryd memory off` and the kill switch stop further proposals and the release of a memory request already in flight; the `memory.repositories` switch stops further proposals only | partial; a plausible but wrong line can be approved by a person, and no command a line names is checked |
 | T-20 | A secret, a hostname or a personal path reaches a public repository's `AGENTS.md` through a memory line | The text rule refuses URLs in any form (`//`, `www.`), address-shaped tokens, home paths, absolute paths (outside a quoted command a `/` followed by a letter or `.` unless a letter, digit, `.`, `_` or `/` precedes it; inside one a `/` followed by a letter, `.` or `/` at its start or after a space or `=`), e-mail addresses, any unbroken run of 20 or more characters of `A-Za-z0-9+/_-` that holds at least one letter and at least one digit (key ids, hashes, encoded secrets; a long word, relative path or variable name with no digit passes) and any text secret redaction would change; a repository's candidates, stop marker and proposals are kept under a key of its name and root path, never shared with a repository of the same name, and candidates are collected only from runs recorded against that root; memory is off for a repository until the operator lists it; the operator reads every line at spec review and again on the pull request | The line is removed by a memory request or a human commit; history rewriting is the operator's own action | partial; the rule is pattern-based: a bare internal name, a secret of letters only or digits only, and a path after a character other than a space or `=` inside a command pass it |
@@ -327,7 +327,9 @@ requires a new contract review and an updated machine-checkable test.
   before the command of every build, verify and gate sandbox and never in a
   review sandbox, and the `.factory/` directory of the commit that file was
   read from, mounted read-only in each of those sandboxes (its snapshot
-  SHA-256 on each attempt).
+  SHA-256 on each attempt). A failed gate's rerun on the base commit is one
+  of those gate sandboxes: the same launch path, setup commands and
+  `.factory/` mount, on a scratch worktree, never on the host.
 - **SC-013 — asynchronous quarantine:** every failed or ambiguous policy check
   transitions to halt/quarantine and emits an out-of-band notification without
   waiting for a human response.
@@ -417,11 +419,29 @@ requires a new contract review and an updated machine-checkable test.
   copied to the run directory first, where only the operator's prompts route
   and `factoryd logs -prompt` read them); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it.
+  The build's evidence file (`BUILD_EVIDENCE.json`) and round-state file
+  (`.pi-build-round-state.json`), which hold the build agent's last message
+  of each failed round (`agent_notes`), leave the worktree with the session:
+  the host moves the evidence file to the run directory, where the run
+  record is read from, and removes the round-state file, which a finished
+  build no longer needs; whatever is at either name is removed, a directory
+  with all it holds and no link followed, and only a removal that fails
+  fails the build step, so no review works beside it. A build that was lost keeps both for
+  its resume, and no review follows a lost build.
   A saved prompt is what the build's session folder held when the host
   copied it; a build can alter its own before that, because the build script
   and the coding agent run as one user in one sandbox and the script has no
   channel to the host that the agent cannot also write (its output file sits
-  in a directory the sandbox writes). The operator surfaces label it "as saved
+  in a directory the sandbox writes). No second user can be given to the
+  agent (the sandbox's seccomp filter denies every set-id system call), a
+  child of the same user can open its parent's descriptors through `/proc`,
+  and every directory the host shares with the sandbox is shared with all of
+  its processes. So the host verifies no saved prompt
+  and attributes no line of the output to the script: a `FACTORY_PROGRESS`
+  line is recorded as the worker's (`source: worker`), with the host's time,
+  in the `round` and `agent` stages only, is shown and never read by a gate,
+  a policy or a state transition, and cannot be recorded as one of the
+  factory's own lines. The operator surfaces label a saved prompt "as saved
   by the build", never "sent". Before a build or a review is launched the host
   removes whatever its session's prompts folder holds, making a folder left
   read-only removable first; a folder that cannot be shown gone fails the step
@@ -429,8 +449,37 @@ requires a new contract review and an updated machine-checkable test.
   save and a file an earlier step planted is never kept as a later launch's
   prompt. What the build agent itself chooses to write into the
   workspace is an ordinary part of its diff, judged like the rest.
-  A build that ends without passing is asked once, in its own session, for
-  notes under five fixed headings. The factory copies the reply out of the
+  A build that ends without passing, or that passes after at least one round
+  that did not (never one that passes in its first round), is asked once, in
+  its own session, for notes under five fixed headings. The turn after a pass
+  runs with the harness's tools, so the build script, not the prompt and not a
+  harness flag, keeps the tree: it records the worktree before the turn and
+  again after it (every path outside `.git` and the session folder, tracked,
+  untracked and ignored: kind, permission bits, and the SHA-256 of a file's
+  content or a link's target), and keeps the reply only when the two records
+  are equal. Otherwise it removes the reply and puts the tree back only if
+  every difference can be undone exactly from what it holds (all or nothing:
+  one changed file with no intact copy, and the tree is left as the turn left
+  it, nothing deleted or moved); a third record equal to the first leaves the
+  build passed,
+  and only a tree that cannot be shown equal has the build's own setup,
+  verify and oracle run on it again: if they fail the build ends as not
+  passed, its last round recorded as failed, and no further round runs, so one
+  build runs the turn at most once. A tree too large to record is not given
+  the turn, and a launch lost during the turn is resumed with no further round
+  or turn and its tree checked again. What the records show is the tree at the
+  moment of the last one, no more: a process the turn left running can write
+  afterwards, exactly as after any build round. This is the build script's
+  own claim inside the sandbox, where it and the agent are one user, and the
+  host relies on none of it: it commits the worktree only after the build step
+  has returned, and its own verify, gates and reviews judge that commit
+  exactly as for a build with no notes turn. The notes file exists when the
+  build script ends only if this launch's notes turn gave a reply, which the
+  script wrote redacted and cut: on every way out of the build, after its
+  last agent turn and whether the notes turn ran or was skipped, whatever is
+  at the path (a file, a link, which is never followed, a directory) is
+  removed first, and a path that cannot be cleared skips the turn. The
+  factory copies the reply out of the
   session folder before removing it, splits it into one-line items cleaned and
   capped like every other value, and stores them in the handoff apart from its
   own facts and after them. They are labelled the agent's view, never decide a
@@ -440,7 +489,18 @@ requires a new contract review and an updated machine-checkable test.
   under the fifth heading (things worth knowing about the repository) may
   also be listed to the operator as memory candidates, each only if it
   passes the memory text rule; they still reach no review, no planner and no
-  other ticket's build except under SC-020.
+  other ticket's build except under SC-020. The memory list does not take
+  them from the handoff: for a run saved quarantined, halted or accepted, the
+  items under the fifth heading are read by the operator's memory list from
+  the host's copy of the notes in the run directory (`agent-notes.md`), as
+  written, each one line cleaned and cut like every other value and a
+  candidate only if it passes the memory text rule, which accepts a command
+  only inside backticks and repairs nothing. That file's text has two readers
+  and no other: the build of the handoff, which stores every item with its
+  backticks turned into quotes (and through it the handoff route and a later
+  build's record), and the memory list, which reads the fifth heading alone.
+  A run saved accepted has no handoff, so the rest of its notes reaches no
+  reader, the handoff route included.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
@@ -462,8 +522,19 @@ requires a new contract review and an updated machine-checkable test.
   `required_content_present`, and the two reviews when they gave a verdict.
   `reference_oracle` counts only where the build is already shown the oracle
   (a request's ticket). `tests_added`, a review that gave no verdict, a
-  repository gate that never ran and any check with no bin never do, and a
-  halt never does. A check on the diff of an attempt that committed nothing
+  repository gate that never ran, a build that a repository setup command
+  stopped before its first agent turn (by the meter's count of zero and an
+  unchanged commit, never by the sandbox's exit status or log), a named or
+  repository gate that failed the
+  same way (the same exit code and the same whole output, after removing
+  elapsed times, addresses and the like; output that is empty or cannot be
+  compared never counts as the same) when
+  the factory reran it on the commit
+  the ticket's work started from (no build can make it pass; the rerun is
+  evidence on the gate's result and never changes whether the gate passed; a gate already failing there in
+  another way stays one a build is told about, with a factory-written
+  sentence saying so) and any check with no bin never do,
+  and a halt never does. A check on the diff of an attempt that committed nothing
   (canonical verification never passed) is not judged either way. Such a
   build is a new run on the quarantined run's branch, started after the
   quarantine was recorded and notified (SC-013): every gate runs again on

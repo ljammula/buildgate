@@ -1,5 +1,5 @@
 {
-	"note": "Instruction paths each harness loads from a workspace, measured by scripts/probe_instruction_paths.py against the worker image's pinned versions: a fake model endpoint logged every request of a review turn, a build turn and a turn that reads a file under a subdirectory, and a path counts when its marker reached a request or a hook, MCP server or extension it names ran. A table path is counted wherever it sits in the workspace: pkg/.github/instructions is .github/instructions. source probed means measured; documented means read from the harness documentation. trust_gated lists table paths a harness loads only when the project is trusted, which a worker turn never grants. uncovered lists paths outside the review snapshot's table that a harness loaded in a worker turn, uncovered_trust_gated those it loads only in a trusted project. pifork is built from the pi base and carries pi's version and documented paths until an image with its launcher is probed. unprobed lists the table paths no probed harness was observed loading.",
+	"note": "Instruction paths each harness loads from a workspace, measured by scripts/probe_instruction_paths.py against the worker image's pinned versions: a fake model endpoint logged every request of a review turn, a build turn and a turn that reads a file under a subdirectory, and a path counts when its marker reached a request or a hook, MCP server or extension it names ran. A table path is counted wherever it sits in the workspace: pkg/.github/instructions is .github/instructions. source probed means measured; documented means read from the harness documentation. trust_gated lists table paths a harness loads only when the project is trusted, which a worker turn never grants. uncovered lists paths outside the review snapshot's table that a harness loaded in a worker turn, uncovered_trust_gated those it loads only in a trusted project. pifork is the operator's own fork of pi, outside this repository: it was measured as buildgate launches it, with the pinned pi behind the image contract's launcher, so what a fork adds to pi's own loading is not measured. unprobed lists the table paths no probed harness was observed loading.",
 	"pi": {
 		"version": "0.84.4",
 		"source": "probed",
@@ -18,14 +18,19 @@
 	},
 	"pifork": {
 		"version": "0.84.4",
-		"source": "documented",
+		"source": "probed",
 		"paths": [
-			"AGENTS.md",
-			"CLAUDE.md",
-			".pi",
 			".agents/skills",
-			".pi/skills"
-		]
+			"AGENTS.md",
+			"AGENTS.override.md",
+			"CLAUDE.md"
+		],
+		"trust_gated": [
+			".pi/skills",
+			".pi"
+		],
+		"uncovered": [],
+		"uncovered_trust_gated": []
 	},
 	"codex": {
 		"version": "0.154.0",
@@ -57,20 +62,11 @@
 		],
 		"trust_gated": [
 			".github/hooks",
-			".mcp.json"
+			".mcp.json",
+			".github/mcp.json"
 		],
 		"uncovered": [],
-		"uncovered_trust_gated": [
-			{
-				"path": ".github/mcp.json",
-				"turns": [
-					"control"
-				],
-				"how": [
-					"executed"
-				]
-			}
-		]
+		"uncovered_trust_gated": []
 	},
 	"unprobed": [
 		".pi/skills",
@@ -78,6 +74,7 @@
 		".github/hooks",
 		".mcp.json",
 		".vscode/mcp.json",
+		".github/mcp.json",
 		"CLAUDE.local.md"
 	]
 }

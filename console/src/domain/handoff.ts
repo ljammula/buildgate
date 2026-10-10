@@ -2,6 +2,7 @@ import {
   type JsonObject,
   objectList,
   optBoolean,
+  optObject,
   optNumber,
   optString,
   reqString,
@@ -29,6 +30,20 @@ export interface HandoffCheck {
 }
 
 /**
+ * internal/handoff.Notes: what the build agent itself said for whoever
+ * attempts the ticket next, as one-line items under five fixed headings. It
+ * is the agent's view, not the factory's record, and agent-written: shown as
+ * text, labelled unverified, and read from the handoff route only.
+ */
+export interface HandoffNotes {
+  readonly did: readonly string[];
+  readonly triedAndFailed: readonly string[];
+  readonly hypothesis: readonly string[];
+  readonly leftToDo: readonly string[];
+  readonly repository: readonly string[];
+}
+
+/**
  * internal/handoff.Document, GET /runs/{id}/handoff: what a stopped run left
  * for a later attempt. Only the parts the run page does not already show
  * elsewhere are decoded: its rounds are on the Timeline.
@@ -39,6 +54,18 @@ export interface Handoff {
   /** The most restrictive bin of the failed checks; "operator" for a halt. */
   readonly next: string;
   readonly checks: readonly HandoffCheck[];
+  /** null when the agent left none. */
+  readonly agentNotes: HandoffNotes | null;
+}
+
+function decodeNotes(o: JsonObject, at: string): HandoffNotes {
+  return {
+    did: stringList(o, "did", at),
+    triedAndFailed: stringList(o, "tried_and_failed", at),
+    hypothesis: stringList(o, "hypothesis", at),
+    leftToDo: stringList(o, "left_to_do", at),
+    repository: stringList(o, "repository", at),
+  };
 }
 
 function decodeCheck(o: JsonObject, at: string): HandoffCheck {
@@ -58,7 +85,28 @@ export function decodeHandoff(o: JsonObject, at: string): Handoff {
     state: reqString(o, "state", at),
     next: reqString(o, "next", at),
     checks: objectList(o, "checks", at, decodeCheck),
+    agentNotes: optObject(o, "agent_notes", at, decodeNotes),
   };
+}
+
+export interface HandoffNoteSection {
+  readonly label: string;
+  readonly items: readonly string[];
+}
+
+/**
+ * The notes as the record given to a later build lists them: the same five
+ * labels in the same order, a heading with no item left out.
+ */
+export function handoffNoteSections(notes: HandoffNotes | null): readonly HandoffNoteSection[] {
+  if (notes === null) return [];
+  return [
+    { label: "What it did", items: notes.did },
+    { label: "What it tried that did not work", items: notes.triedAndFailed },
+    { label: "Its hypothesis", items: notes.hypothesis },
+    { label: "What it said was left to do", items: notes.leftToDo },
+    { label: "What it said about this repository", items: notes.repository },
+  ].filter((section) => section.items.length > 0);
 }
 
 /**

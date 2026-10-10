@@ -11,6 +11,7 @@ import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { Section } from "@/ui/PageLayout";
 import { StaleWarning } from "@/ui/StaleWarning";
+import { TrendChart } from "./TrendChart";
 import {
   Table,
   TableBody,
@@ -170,6 +171,7 @@ function TrendBody({ trend }: { readonly trend: ProjectTrend }) {
     <>
       <Tiles trend={trend} />
       <Section title="Over time">
+        <TrendChart trend={trend} />
         <BucketTable trend={trend} />
       </Section>
       <div className="grid gap-4 md:grid-cols-2">
@@ -191,7 +193,7 @@ function TrendBody({ trend }: { readonly trend: ProjectTrend }) {
 
 /**
  * Whether the factory is getting better on one repository: four headline
- * numbers, one row per week and the checks and halt reasons that stopped
+ * numbers, the one-shot rate as a line over one row per week, and the checks and halt reasons that stopped
  * runs. Read only and computed from the run records on each read. A failed
  * refresh keeps the last data under a warning.
  */

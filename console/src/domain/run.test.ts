@@ -140,6 +140,7 @@ describe("fixtures", () => {
     expect(a.relayWorkerModelId).toBe("every-field relay_worker_model_id");
     expect(a.relayReasoningEffort).toBe("every-field relay_reasoning_effort");
     expect(a.relayReasoningEffortAnomaly).toBe(true);
+    expect(a.reviewMaskedPaths).toEqual(["every-field review_masked_paths"]);
 
     const g = r.gateResults[0]!;
     expect(g).toEqual({
@@ -149,6 +150,11 @@ describe("fixtures", () => {
       exitCode: 3,
       durationMs: 3,
       logSha256: "every-field log_sha256",
+      baseCheck: {
+        outcome: "every-field outcome",
+        baseSha: "every-field base_sha",
+        reason: "every-field reason",
+      },
     });
     expect(r.notifications[0]).toEqual({
       runId: "every-field run_id",

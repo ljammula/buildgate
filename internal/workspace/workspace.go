@@ -21,6 +21,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -412,5 +413,52 @@ func AddDetachedWorktree(repoDir, worktreePath, rev string) error {
 	if out, err := gitMutate(repoDir, "worktree", "add", "--detach", worktreePath, rev); err != nil {
 		return fmt.Errorf("git worktree add --detach: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	return nil
+}
+
+// scratchGit runs one git command on repoDir for a scratch worktree: bound by
+// ctx, and with none of the repository's hooks and no file-system monitor,
+// which its configuration could point into a directory a sandbox wrote.
+func scratchGit(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
+	return retryOnGitLock(func() ([]byte, error) {
+		argv := append([]string{"-C", repoDir, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
+		return exec.CommandContext(ctx, "git", argv...).CombinedOutput()
+	})
+}
+
+// AddScratchWorktree is AddDetachedWorktree for a checkout made while a run's
+// sandboxes have had the repository's worktree, by a caller with a deadline:
+// the wait for the git metadata lock and the checkout end when ctx does, and
+// the checkout runs no hook (scratchGit). A registration left for a path that
+// is gone (a scratch worktree removed without the lock) is pruned first.
+// Remove the worktree with RemoveScratchWorktree.
+func AddScratchWorktree(ctx context.Context, repoDir, worktreePath, rev string) error {
+	unlock, err := lockGitMetadataContext(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, _ = scratchGit(ctx, repoDir, "worktree", "prune")
+	if out, err := scratchGit(ctx, repoDir, "worktree", "add", "--detach", worktreePath, rev); err != nil {
+		return fmt.Errorf("git worktree add --detach: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// RemoveScratchWorktree is RemoveWorktreeOnly under ctx: it gives up when ctx
+// ends before the git metadata lock is free, leaving the worktree in place.
+func RemoveScratchWorktree(ctx context.Context, repoDir, worktreePath string) error {
+	unlock, err := lockGitMetadataContext(ctx, repoDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := os.Lstat(worktreePath); err == nil {
+		if out, err := scratchGit(ctx, repoDir, "worktree", "remove", "--force", worktreePath); err != nil {
+			return fmt.Errorf("git worktree remove: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	_, _ = scratchGit(ctx, repoDir, "worktree", "prune")
 	return nil
 }

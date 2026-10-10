@@ -1,5 +1,12 @@
 import { asObject } from "@/domain/decode";
-import { bucketLabel, decodeProjectTrend, medianText, shareText } from "@/domain/trend";
+import {
+  bucketLabel,
+  decodeProjectTrend,
+  medianText,
+  shareText,
+  trendChartSummary,
+  trendPointText,
+} from "@/domain/trend";
 import { readFixtureJson } from "@/test/fixtures";
 
 const at = "GET /projects/{project}/trend";
@@ -49,4 +56,16 @@ test("shares print as the CLI prints them", () => {
   expect(shareText(3, 8)).toBe("3/8 (38%)");
   expect(shareText(0, 0)).toBe("-");
   expect(shareText(4, 4)).toBe("4/4 (100%)");
+});
+
+test("the contract fixture's chart is summed up in words, an empty period counted as a gap", () => {
+  const trend = decodeProjectTrend(asObject(readFixtureJson("api/project-trend.json"), at), at);
+  expect(trend.buckets.map((b) => trendPointText(b, trend.bucketDays))).toEqual([
+    "No ticket in the week of 2026-08-28",
+    "33% (1/3 tickets) in the week of 2026-09-04",
+  ]);
+  expect(trendChartSummary(trend)).toBe(
+    "One-shot acceptance rate: 33% (1/3 tickets) in the week of 2026-09-04. 1 of 2 periods had no ticket.",
+  );
+  expect(trendChartSummary({ ...trend, buckets: [] })).toBe("");
 });

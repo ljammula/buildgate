@@ -54,6 +54,12 @@ export interface Attempt {
    */
   readonly relayReasoningEffort: string;
   readonly relayReasoningEffortAnomaly: boolean;
+  /**
+   * The instruction paths a review attempt read as the base commit holds
+   * them, not as the build left them: at most 64, then one "... and N more"
+   * entry. Empty for any other attempt.
+   */
+  readonly reviewMaskedPaths: readonly string[];
 }
 
 function decodeAttempt(o: JsonObject, at: string): Attempt {
@@ -71,6 +77,7 @@ function decodeAttempt(o: JsonObject, at: string): Attempt {
     relayWorkerModelId: optString(o, "relay_worker_model_id", at),
     relayReasoningEffort: optString(o, "relay_reasoning_effort", at),
     relayReasoningEffortAnomaly: optBoolean(o, "relay_reasoning_effort_anomaly", at),
+    reviewMaskedPaths: stringList(o, "review_masked_paths", at),
   };
 }
 
@@ -153,6 +160,27 @@ export function decodeComposePhase(o: JsonObject, at: string): ComposePhase {
   };
 }
 
+/**
+ * internal/run.GateBaseCheck: what rerunning a failed command gate on the
+ * commit the ticket's work started from showed. It never changes the gate's
+ * own result.
+ */
+export interface GateBaseCheck {
+  /** fails_same, fails_differently, passes or not_checked; the server may add one. */
+  readonly outcome: string;
+  readonly baseSha: string;
+  /** Why the rerun reached no exit code; set for not_checked. */
+  readonly reason: string;
+}
+
+function decodeGateBaseCheck(o: JsonObject, at: string): GateBaseCheck {
+  return {
+    outcome: reqString(o, "outcome", at),
+    baseSha: optString(o, "base_sha", at),
+    reason: optString(o, "reason", at),
+  };
+}
+
 export interface GateResult {
   readonly check: string;
   readonly command: readonly string[];
@@ -160,6 +188,8 @@ export interface GateResult {
   readonly exitCode: number;
   readonly durationMs: number;
   readonly logSha256: string;
+  /** Null for a gate that passed and for a check that is not a command gate. */
+  readonly baseCheck: GateBaseCheck | null;
 }
 
 function decodeGateResult(o: JsonObject, at: string): GateResult {
@@ -170,6 +200,7 @@ function decodeGateResult(o: JsonObject, at: string): GateResult {
     exitCode: reqNumber(o, "exit_code", at),
     durationMs: reqNumber(o, "duration_ms", at),
     logSha256: reqString(o, "log_sha256", at),
+    baseCheck: optObject(o, "base_check", at, decodeGateBaseCheck),
   };
 }
 

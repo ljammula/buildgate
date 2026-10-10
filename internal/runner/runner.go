@@ -766,8 +766,20 @@ func CargoLockDependencyChanges(dir, baseSHA string, changedFiles []string) ([]e
 // GitIsClean reports whether dir has no uncommitted changes (tracked or
 // untracked).
 func GitIsClean(dir string) (bool, error) {
-	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	return GitIsCleanContext(context.Background(), dir)
+}
+
+// GitIsCleanContext is GitIsClean ended by ctx: git status reads files of
+// the worktree (a .gitignore that is a FIFO blocks it for good), so a caller
+// whose worktree a build wrote gives it a deadline.
+func GitIsCleanContext(ctx context.Context, dir string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return false, fmt.Errorf("git status: %w", ctx.Err())
+		}
 		return false, fmt.Errorf("git status: %w", err)
 	}
 	return len(out) == 0, nil

@@ -1049,6 +1049,13 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 		// (see that lock's own acquisition above in this function), so
 		// applyRunWorkflowResult's accepted-run side effects must not
 		// take it again.
+		//
+		// requireCurrentWorkerAtReclaim first: the submitter that would
+		// have run the stale-worker guards on its own result is gone, so
+		// they run here against .factory.yml at the commit the run was
+		// dispatched from, and an accepted result that cannot be checked
+		// is refused.
+		result = requireCurrentWorkerAtReclaim(ctx, dp, fresh, result)
 		if applyErr := applyRunWorkflowResult(dp, fresh, dataDir, requestID, fresh.Ticket, fresh.WorkspacePath, fresh.BaseSHA, "reclaimed", result, false, nil, forge.GHPullRequestOpener{}, true); applyErr != nil && fresh.State != run.StateQuarantined {
 			return applyErr
 		}

@@ -221,9 +221,25 @@ func Build(r *run.Run, dataDir string) Document {
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
-//     repository's setup commands (a worker older than them): BinOperator.
+//     repository's setup commands (a worker older than them), or because a
+//     reclaimed result could not be checked against the repository's
+//     .factory.yml: BinOperator;
+//   - a canonical_verify of a run whose build ended at a failing repository
+//     setup command before its first agent turn, by the factory's own
+//     records (triage.BuildStoppedBySetup: the meter counted nothing and
+//     nothing was committed): BinOperator. Every build from that commit
+//     runs the same commands first and ends there too;
+//   - a named or repository gate whose command failed the same way when rerun
+//     on the commit the ticket's work started from (run.GateBaseFailsSame): no
+//     build can make it pass, so it is the operator's (BinOperator) and no
+//     corrective build is spent on it. A rerun that failed in another way
+//     (the ticket's job may be to fix that gate), that passed, or that could
+//     not be made, leaves the gate where BinOf puts it. The reference oracle
+//     is never rerun.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
+	case failsOnBase(r, finding.Check):
+		return BinOperator
 	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
 		return BinNever
 	case finding.Check == "spec_conformity" && !hasActionableVerdict(r.SpecConformityVerdicts):
@@ -232,15 +248,29 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 		return BinOperator
 	case finding.Check == "canonical_verify" && setupNotRun(r):
 		return BinOperator
+	case finding.BuildStoppedBySetup:
+		return BinOperator
 	}
 	return BinOf(finding.Check)
 }
 
+// failsOnBase reports whether the failed gate triage reported for check (the
+// first failed result of that name) failed the same way on the base commit.
+func failsOnBase(r *run.Run, check string) bool {
+	for _, g := range r.GateResults {
+		if g.Check == check && !g.Passed {
+			return g.FailsSameOnBase()
+		}
+	}
+	return false
+}
+
 // setupNotRun reports whether r recorded the canonical_verify result for a
-// verify that did not run the repository's setup commands.
+// verify that did not run the repository's setup commands, or for a
+// reclaimed result that could not be checked for it.
 func setupNotRun(r *run.Run) bool {
 	for _, g := range r.GateResults {
-		if g.SetupNotRun() {
+		if g.SetupNotRun() || g.ReclaimNotChecked() {
 			return true
 		}
 	}
@@ -295,12 +325,20 @@ func firstNonEmpty(values ...string) string {
 // control characters or recognisable secrets (sanitize.Line), no backticks
 // (Markdown puts names inside them), at most limit runes.
 func clean(s string, limit int) string {
-	s = strings.ReplaceAll(sanitize.Line(s), "`", "'")
+	return backticksToQuotes(cleanKeepingBackticks(s, limit))
+}
+
+// cleanKeepingBackticks is clean without its last step: the value may still
+// hold backticks, so it is never inlined into Markdown.
+func cleanKeepingBackticks(s string, limit int) string {
+	s = sanitize.Line(s)
 	if runes := []rune(s); len(runes) > limit {
 		s = string(runes[:limit]) + "…"
 	}
 	return s
 }
+
+func backticksToQuotes(s string) string { return strings.ReplaceAll(s, "`", "'") }
 
 // cleanList is clean over at most n entries, dropping any that clean to
 // nothing. A nil list stays nil.

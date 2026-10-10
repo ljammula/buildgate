@@ -1364,7 +1364,11 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 		Repository:    repository,
 		State:         run.StateSliceRunning,
 		BaseSHA:       baseSHA,
-		CreatedAt:     time.Now().Format(time.RFC3339Nano),
+		// The commit the submitter read .factory.yml from (the fixture has
+		// none): a reclaim checks the result against it.
+		ProjectConfigCommitSHA: baseSHA,
+		ProjectPath:            ws,
+		CreatedAt:              time.Now().Format(time.RFC3339Nano),
 	}
 	if err := seeded.Save(submitterDataDir); err != nil {
 		t.Fatalf("seed crashed-submitter run.json: %v", err)

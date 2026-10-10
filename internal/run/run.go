@@ -493,6 +493,70 @@ type GateResult struct {
 	// oracle content produced this specific result, independent of
 	// whatever that host directory contains later.
 	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
+	// BaseCheck is what rerunning a failed command gate on the commit the
+	// ticket's work started from showed (see GateBaseCheck). nil for a gate
+	// that passed, for a check that is not a named or repository command
+	// gate, and for a result recorded before the rerun existed.
+	BaseCheck *GateBaseCheck `json:"base_check,omitempty"`
+}
+
+// The outcomes of a GateBaseCheck.
+const (
+	// GateBaseFailsSame: the gate's command failed on the base commit the
+	// same way as on the result (the same exit code and the same whole
+	// output once run-to-run noise is removed), so no build of the ticket
+	// can make it pass.
+	GateBaseFailsSame = "fails_same"
+	// GateBaseFailsDifferently: the command failed on the base commit too,
+	// with another exit code or other output, or with output that could not
+	// be compared (none, unreadable, too long). The gate was already
+	// red before the ticket's work (which may be what the ticket is for),
+	// and what fails now is not what failed then: a build may still fix it.
+	GateBaseFailsDifferently = "fails_differently"
+	// GateBasePasses: the command exited zero on the base commit; the build
+	// (or a flaky command) is why it failed on the result.
+	GateBasePasses = "passes"
+	// GateBaseNotChecked: the rerun did not reach an exit code, or was not
+	// made. Reason says why. The gate's failure is then treated as it was
+	// before the rerun existed.
+	GateBaseNotChecked = "not_checked"
+)
+
+// GateBaseCheck records one rerun of a failed command gate on the commit the
+// ticket's work started from, in a scratch worktree and a sandbox like the
+// gate's own. It never changes the gate's result: Passed, ExitCode and
+// LogSHA256 of the GateResult are the run on the build's result alone.
+type GateBaseCheck struct {
+	// Outcome is GateBaseFailsSame, GateBaseFailsDifferently, GateBasePasses
+	// or GateBaseNotChecked.
+	Outcome string `json:"outcome"`
+	// BaseSHA is the commit the command was rerun on: the run's diff base
+	// when it names one, else the base commit of a run that made its own
+	// branch there. Empty when the run's record does not prove where the
+	// ticket's work started (a resumed run, or a run on an existing branch,
+	// with no diff base): the rerun is then not made.
+	BaseSHA string `json:"base_sha,omitempty"`
+	// ExitCode is the command's exit code on the base commit; meaningful
+	// only when Outcome is not GateBaseNotChecked.
+	ExitCode int `json:"exit_code"`
+	// LogPath and LogSHA256 are the rerun's output and its hash.
+	LogPath   string `json:"log_path,omitempty"`
+	LogSHA256 string `json:"log_sha256,omitempty"`
+	// Reason says why Outcome is GateBaseNotChecked, as one cleaned line.
+	Reason string `json:"reason,omitempty"`
+}
+
+// FailsSameOnBase reports whether g is a failed gate whose command failed the
+// same way on the base commit: the one outcome that makes a failed command
+// gate the operator's.
+func (g GateResult) FailsSameOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsSame
+}
+
+// FailedDifferentlyOnBase reports whether g is a failed gate that was already
+// failing on the base commit, in another way.
+func (g GateResult) FailedDifferentlyOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsDifferently
 }
 
 // OracleCanaryEvidence records one runtime-canary check of a RUN_COMMAND.txt:

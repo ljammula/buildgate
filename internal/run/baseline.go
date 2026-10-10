@@ -61,6 +61,47 @@ func (g GateResult) SetupNotRun() bool {
 	return g.Check == "canonical_verify" && !g.Passed && g.ExitCode == -1 && len(g.Command) == 1 && g.Command[0] == SetupNotRunMessage
 }
 
+// ReclaimNotCheckedPrefix starts the Command of the canonical_verify result
+// recorded, with exit -1, for an accepted result that was reclaimed after its
+// submitter died and could not be checked against the repository's
+// .factory.yml as the run was dispatched with it (the commit and hash on the
+// run record): which gates and setup commands the result had to run is then
+// unknown. ReclaimNotCheckedMessage is the whole Command. Nothing a build can
+// do changes it, so it is the operator's.
+const ReclaimNotCheckedPrefix = "buildgate: reclaim refused, "
+
+// reclaimNotCheckedMaxLen bounds ReclaimNotCheckedMessage without its
+// "buildgate: " so the sentence is never cut where it is shown (triage's
+// sentence limit).
+const reclaimNotCheckedMaxLen = 200
+
+// ReclaimNotCheckedMessage is the Command of that result: a short reason
+// (one of the caller's fixed few, never an error's text), what the operator's
+// checkout must hold, and what applies the result then. repoDir is named
+// whole or, when it would not fit the sentence, by where the run records it;
+// commit "" is a record that names none.
+func ReclaimNotCheckedMessage(reason, repoDir, commit string) string {
+	const next = "start the run again, or factoryd override"
+	if commit == "" {
+		return ReclaimNotCheckedPrefix + reason + " for its .factory.yml: " + next
+	}
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	head := ReclaimNotCheckedPrefix + reason + ": "
+	tail := " must hold commit " + commit + " with the run's .factory.yml; then " + next
+	if repoDir == "" || len(head)-len("buildgate: ")+len(repoDir)+len(tail) > reclaimNotCheckedMaxLen {
+		repoDir = "the run's repository_root"
+	}
+	return head + repoDir + tail
+}
+
+// ReclaimNotChecked reports whether g is the result recorded for a reclaimed
+// result that could not be checked (ReclaimNotCheckedPrefix).
+func (g GateResult) ReclaimNotChecked() bool {
+	return g.Check == "canonical_verify" && !g.Passed && g.ExitCode == -1 && len(g.Command) == 1 && strings.HasPrefix(g.Command[0], ReclaimNotCheckedPrefix)
+}
+
 // BaselineVerifyAttemptKind is Attempt.Kind of the verify command's run on
 // the base commit, before the build's first round.
 const BaselineVerifyAttemptKind = "baseline_verify"

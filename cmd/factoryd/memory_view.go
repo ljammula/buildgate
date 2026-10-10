@@ -214,18 +214,16 @@ func repositoryRunsNewestFirst(dataDir, project, repoRoot string, limit int) []*
 }
 
 // repositoryNotes returns what a finished run's build agent said is worth
-// knowing about the repository, from the run's handoff. The handoff is read
-// only against the hash and state the run record holds, so one changed after
-// the run recorded it yields nothing.
+// knowing about the repository, as the agent wrote it (backticks kept: the
+// memory text rule judges them), from the copy of its notes the host kept in
+// the run directory. A run that is not quarantined, halted or accepted on its
+// record is not finished and gives nothing. A build leaves notes only when
+// it ended without passing, or failed a round before it passed.
 func repositoryNotes(dataDir string, r *run.Run) []string {
-	if r.HandoffSHA256 == "" || r.State != run.StateQuarantined && r.State != run.StateHalted {
+	if r.State != run.StateQuarantined && r.State != run.StateHalted && r.State != run.StateAccepted {
 		return nil
 	}
-	doc, err := handoff.Load(run.Dir(dataDir, r.ID), r.HandoffSHA256, r.State)
-	if err != nil || doc.AgentNotes == nil {
-		return nil
-	}
-	return doc.AgentNotes.Repository
+	return handoff.RepositoryNotesAsWritten(run.Dir(dataDir, r.ID))
 }
 
 // memoryRequestState is Reconcile's view of a request: known when its record

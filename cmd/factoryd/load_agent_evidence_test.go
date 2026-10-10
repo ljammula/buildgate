@@ -96,9 +96,7 @@ func TestLoadAgentEvidenceToleratesMissingBuildReport(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
 	dataDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(`{"succeeded":true}`), 0o644); err != nil {
-		t.Fatalf("write fixture BUILD_EVIDENCE.json: %v", err)
-	}
+	writeBuildEvidence(t, dataDir, "run-1", []byte(`{"succeeded":true}`))
 
 	r := &run.Run{ID: "run-1"}
 	loadAgentEvidence(r, workspace, dataDir, "run-1")
@@ -127,9 +125,7 @@ func TestLoadAgentEvidenceAttachesEvidenceRegardlessOfSchemaVersion(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			workspace := t.TempDir()
 			dataDir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(evidenceJSON), 0o644); err != nil {
-				t.Fatalf("write fixture BUILD_EVIDENCE.json: %v", err)
-			}
+			writeBuildEvidence(t, dataDir, "run-1", []byte(evidenceJSON))
 
 			r := &run.Run{ID: "run-1"}
 			loadAgentEvidence(r, workspace, dataDir, "run-1")
@@ -154,9 +150,7 @@ func TestLoadAgentEvidenceRoundTripsReviewVerdicts(t *testing.T) {
 	const evidenceJSON = `{"schema_version":2,"succeeded":true,"review_verdicts":[` +
 		`{"criterion":"1. Foo","verdict":"clean","detail":""},` +
 		`{"criterion":"2. Bar","verdict":"unavailable","detail":"no-review-verdict"}]}`
-	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(evidenceJSON), 0o644); err != nil {
-		t.Fatalf("write fixture BUILD_EVIDENCE.json: %v", err)
-	}
+	writeBuildEvidence(t, dataDir, "run-1", []byte(evidenceJSON))
 
 	r := &run.Run{ID: "run-1"}
 	loadAgentEvidence(r, workspace, dataDir, "run-1")
@@ -201,9 +195,7 @@ func TestLoadAgentEvidenceIncompatibleFutureSchemaStillNamesTheVersionMismatch(t
 	// array run.AgentEvidence declares -- a real type conflict, not just an
 	// unknown field json.Unmarshal would otherwise silently tolerate.
 	const evidenceJSON = `{"schema_version":3,"succeeded":true,"rounds":{"unexpected":"shape"}}`
-	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(evidenceJSON), 0o644); err != nil {
-		t.Fatalf("write fixture BUILD_EVIDENCE.json: %v", err)
-	}
+	writeBuildEvidence(t, dataDir, "run-1", []byte(evidenceJSON))
 
 	stdout := captureStdout(t, func() {
 		r := &run.Run{ID: "run-1"}
@@ -222,17 +214,29 @@ func TestLoadAgentEvidenceIncompatibleFutureSchemaStillNamesTheVersionMismatch(t
 // evidence from loading: the field is carried by the file, not by the struct.
 func TestLoadAgentEvidenceToleratesTheAutofixRoundField(t *testing.T) {
 	// Not parallel: captureStdout swaps os.Stdout for the whole process.
-	workspace := t.TempDir()
+	workspace, dataDir := t.TempDir(), t.TempDir()
 	body := `{"schema_version": 2, "rounds": [{"index": 1, "agent": "pi", "autofix": {"commands": [{"command": "gofmt -w .", "exit_code": 1, "timed_out": false, "duration_s": 0.2}], "reverted_count": 0, "reverted": []}}]}`
-	if err := os.WriteFile(filepath.Join(workspace, "BUILD_EVIDENCE.json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBuildEvidence(t, dataDir, "run-1", []byte(body))
 	r := &run.Run{ID: "run-1"}
-	out := captureStdout(t, func() { loadAgentEvidence(r, workspace, t.TempDir(), "run-1") })
+	out := captureStdout(t, func() { loadAgentEvidence(r, workspace, dataDir, "run-1") })
 	if strings.Contains(out, "warning") {
 		t.Errorf("loading warned: %q", out)
 	}
 	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) != 1 || r.AgentEvidence.Rounds[0].Index != 1 {
 		t.Errorf("AgentEvidence = %+v, want one round loaded", r.AgentEvidence)
+	}
+}
+
+// writeBuildEvidence puts body where loadAgentEvidence reads a run's build
+// evidence: the host's copy in the run's own directory (the build step moves
+// the file there out of the worktree when the build returns).
+func writeBuildEvidence(t *testing.T, dataDir, id string, body []byte) {
+	t.Helper()
+	dir := run.Dir(dataDir, id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "BUILD_EVIDENCE.json"), body, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

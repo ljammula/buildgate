@@ -14,8 +14,10 @@ import (
 )
 
 // RoundLogsDirName is the directory, inside a run's own directory, that
-// holds the retained copy of each build round's failing-command output:
-// <run dir>/round-logs/round-<n>/<verify|fast-check|oracle>.log.
+// holds the retained copy of each build round's output: the failing
+// command's (<run dir>/round-logs/round-<n>/<verify|fast-check|oracle>.log)
+// and, for every round, passed or failed, what its setup: and autofix:
+// commands printed (setup.log, autofix.log).
 const RoundLogsDirName = "round-logs"
 
 // roundLogsSource is where build_app.py saves that output, relative to the
@@ -27,6 +29,13 @@ const roundLogsSource = ".pi-build-session/feedback"
 // (FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG). Only these names are copied:
 // the folder is in a workspace the build agent can write.
 var roundLogNames = []string{"fast-check.log", "verify.log", "oracle.log"}
+
+// retainedRoundLogNames are the files RetainRoundLogs copies per round: the
+// failing command's logs first, then what the round's setup: and autofix:
+// commands printed (build_app.py's SETUP_LOG, AUTOFIX_LOG), which a round
+// that passed leaves too. ReadRetainedRoundLog reads only roundLogNames: a
+// passing setup's output is never a round's failing output.
+var retainedRoundLogNames = append(append([]string{}, roundLogNames...), "setup.log", "autofix.log")
 
 // RoundLogName is where RetainRoundLogs puts a round's log, relative to
 // the run's directory, slash-separated.
@@ -59,7 +68,8 @@ var maxRetainedRoundLogBytes int64 = 64 << 20
 // through an os.Root on the workspace, so no symlink in it, whenever it was
 // planted, can make this read a file outside the workspace; each file is
 // then opened and checked as RetainFile opens its own (no symlink, a
-// regular file, size-bounded). Only the fixed log names in folders named
+// regular file, size-bounded). Only the fixed log names
+// (retainedRoundLogNames) in folders named
 // round-<n> are looked at. The latest rounds are copied first, and the copy
 // stops at maxRetainedRounds rounds or maxRetainedRoundLogBytes, so what a
 // cap drops is the oldest. A file that cannot be copied is skipped and
@@ -85,7 +95,7 @@ func RetainRoundLogs(workspace, dstDir string) (int, error) {
 	for i := len(rounds) - 1; i >= 0 && withLogs < maxRetainedRounds; i-- {
 		name := fmt.Sprintf("round-%d", rounds[i])
 		before := copied
-		for _, log := range roundLogNames {
+		for _, log := range retainedRoundLogNames {
 			src := path.Join(roundLogsSource, name, log)
 			size, err := retainFromRoot(root, src, filepath.Join(dstDir, name, log))
 			if err != nil {
@@ -195,10 +205,13 @@ func ReadRetainedRoundLog(runDir string, round int, n int64) (name string, data 
 	return "", nil
 }
 
-// AgentNotesFileName is where RetainAgentNotes puts the notes a build that
-// ended without passing wrote for whoever attempts the ticket next, in the
-// run's own directory (the one holding RoundLogsDirName). The text is the
-// build agent's own: untrusted. Only the handoff reads it (SC-018).
+// AgentNotesFileName is where RetainAgentNotes puts the notes a build wrote
+// in its notes turn (one that ended without passing, or passed after a round
+// that did not), in the run's own directory (the one holding
+// RoundLogsDirName). The text is the build agent's own: untrusted. Only
+// internal/handoff reads it: into the handoff of a stopped run (SC-018), and,
+// for an accepted run, its fifth heading for the operator's memory list
+// (SC-020).
 const AgentNotesFileName = "agent-notes.md"
 
 // agentNotesSource is where build_app.py leaves the notes, relative to the
@@ -274,4 +287,31 @@ func ReadRetainedAgentNotes(runDir string) (string, bool) {
 		return "", false
 	}
 	return string(data), true
+}
+
+// BuildEvidenceFileName is the evidence file build_app.py writes at the
+// worktree root when it ends, and the name RetainBuildEvidence keeps it under
+// in the run's own directory. It is a build's own report, never a verdict.
+// Each round of it holds up to 1,500 characters of the build agent's last
+// message (agent_notes), so it does not stay where a review works.
+const BuildEvidenceFileName = "BUILD_EVIDENCE.json"
+
+// RetainBuildEvidence copies the build's evidence file out of workspace to
+// dstPath (0600) and reports whether it did. No evidence file is (false,
+// nil). The source is hostile, as RetainFile's: a link, a special file or one
+// over RetainFile's size limit is not copied and is an error. Whenever
+// nothing is retained, a file already at dstPath (an earlier build's) is
+// removed, so a later reader never takes it for this build's.
+func RetainBuildEvidence(workspace, dstPath string) (bool, error) {
+	err := RetainFile(filepath.Join(workspace, BuildEvidenceFileName), dstPath)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		err = nil
+	}
+	if rmErr := os.Remove(dstPath); rmErr != nil && !os.IsNotExist(rmErr) {
+		err = errors.Join(err, rmErr)
+	}
+	return false, err
 }
