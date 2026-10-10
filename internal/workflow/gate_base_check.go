@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -237,17 +238,43 @@ const gateFailureTailBytes = 256 << 10
 // handoff picks a failed gate's lines with: it drops terminal colour and
 // trailing space and keeps only the lines that report a failure (with the
 // indented lines under each), so a passing package's timing or a progress
-// line never makes two failures differ. A duration or address printed on a
-// failing line itself does make them differ, which leaves the gate a failure
-// a build is given: the side that costs a build, never an operator's time on
-// a gate that was not broken the same way. Two logs with no output at all
-// are the same failure.
+// line never makes two failures differ. What changes from run to run on a
+// failing line itself (volatileText) is blanked before the two are compared.
+// Two logs with no output at all are the same failure.
 func sameGateFailure(onResult, onBase runner.Result) bool {
 	if onResult.ExitCode != onBase.ExitCode {
 		return false
 	}
-	return observation.Excerpt(readFileTail(onResult.LogPath, gateFailureTailBytes)) == observation.Excerpt(readFileTail(onBase.LogPath, gateFailureTailBytes))
+	return gateFailureSignature(onResult.LogPath) == gateFailureSignature(onBase.LogPath)
 }
+
+// gateFailureSignature is what two failures of a gate are compared by: the
+// failing lines of the log's end with volatile text blanked. It is compared
+// only; what is recorded and shown is the log and its excerpt as they are.
+func gateFailureSignature(logPath string) string {
+	lines := strings.Split(observation.Excerpt(readFileTail(logPath, gateFailureTailBytes)), "\n")
+	for i, line := range lines {
+		lines[i] = volatileText.ReplaceAllString(line, "N")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// volatileText matches what changes between two runs of the same failing
+// command without the failure being a different one: hex addresses,
+// durations, timestamps, UUIDs and temporary paths. It mirrors _VOLATILE in
+// agent/pi/scripts/round_feedback.py, which failure_signature blanks to tell
+// whether two build rounds failed the same way; keep the two in step, and
+// blank no more here than there. Plain numbers stay: "got 3, want 9" and
+// "got 8, want 9" are different failures, and so are two line numbers. A
+// looser pattern is the unsafe direction: it would call a failure the build
+// introduced the same as the base's and hand it to the operator. Like the
+// Python, it is applied to one line at a time.
+var volatileText = regexp.MustCompile(
+	`0x[0-9a-fA-F]+` +
+		`|\b\d+(?:\.\d+)?\s?(?:ns|µs|us|ms|s|m|h)\b` +
+		`|\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*` +
+		`|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b` +
+		`|(?:/private)?(?:/tmp|/var/folders|/var/tmp)/\S+`)
 
 // rerunGateOnBase is checkGateOnBase's work.
 func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {

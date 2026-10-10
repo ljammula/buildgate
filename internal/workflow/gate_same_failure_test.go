@@ -28,7 +28,7 @@ func TestSameGateFailureIgnoresRunToRunNoiseAndNothingElse(t *testing.T) {
 		{"another test name", "--- FAIL: TestSum (0.01s)\nFAIL\n", "--- FAIL: TestSumOfNegatives (0.01s)\nFAIL\n", false},
 		{"another file name", "FAILED tests/test_sum.py::test_sum\n1 failed in 0.12s\n", "FAILED tests/test_total.py::test_sum\n1 failed in 0.12s\n", false},
 		{"another assertion message", "--- FAIL: TestSum (0.01s)\n    sum_test.go:9: got 3, want 4\nFAIL\n", "--- FAIL: TestSum (0.01s)\n    sum_test.go:9: got 8, want 4\nFAIL\n", false},
-		{"another number of failures", "FAILED tests/test_sum.py::test_sum\n1 failed, 4 passed in 0.12s\n", "FAILED tests/test_sum.py::test_sum\n2 failed, 3 passed in 0.12s\n", false},
+		{"another number of failures", "FAILED tests/test_sum.py::test_sum\n1 failed, 4 passed in 0.12s\n", "FAILED tests/test_sum.py::test_sum\nFAILED tests/test_sum.py::test_zero\n2 failed, 3 passed in 0.12s\n", false},
 		{"another line and column", "error: unused variable 'x' (src/a.go:4:2)\n", "error: unused variable 'x' (src/a.go:9:2)\n", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
