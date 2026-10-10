@@ -1199,6 +1199,15 @@ type Run struct {
 	// a repository command sees `.factory/` as this commit holds it
 	// (Attempt.FactoryDirSHA256).
 	ProjectConfigCommitSHA string `json:"project_config_commit_sha,omitempty"`
+	// RepoGateCommands and SetupCommands are the repository's own gates
+	// (.factory.yml `gates:`, keyed by check name) and setup commands
+	// (`setup:`) this run was dispatched with. A result applied by a process
+	// other than the submitter (a reclaim after the submitter died) is
+	// checked against them, as the submitter checks its own: an accepted
+	// result with no result for one of these gates, or whose verify did not
+	// run this setup list, came from a worker older than them.
+	RepoGateCommands map[string]string `json:"repo_gate_commands,omitempty"`
+	SetupCommands    []string          `json:"setup_commands,omitempty"`
 	// ProductSpecSHA256/ContractSHA256 are the hashes of the *project's*
 	// root spec/spec.md and spec/contract.md content at the moment this
 	// run's mandatory project-bootstrap preflight read them — distinct

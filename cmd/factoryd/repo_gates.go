@@ -33,3 +33,27 @@ func requireRepoGateResults(gateCommands map[string]string, result workflow.RunW
 	}
 	return result
 }
+
+// repoGateCommands is the repo-defined gates among a run's gate commands,
+// by check name: what the run record keeps (run.Run.RepoGateCommands). nil
+// when the repository defines none.
+func repoGateCommands(gateCommands map[string]string) map[string]string {
+	var out map[string]string
+	for _, check := range policy.RepoGateChecks(gateCommands) {
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[check] = gateCommands[check]
+	}
+	return out
+}
+
+// requireCurrentWorker runs, on a result about to be applied to its run
+// record, every guard against a worker older than what the run was
+// dispatched with: requireRepoGateResults and requireSetupRan. Every path
+// that applies a workflow result calls it first: the submitter with its own
+// options, a reclaim with the lists on the run record.
+func requireCurrentWorker(gateCommands map[string]string, setup []string, result workflow.RunWorkflowResult) workflow.RunWorkflowResult {
+	result = requireRepoGateResults(gateCommands, result)
+	return requireSetupRan(setup, result)
+}

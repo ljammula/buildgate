@@ -41,6 +41,13 @@ gates:
 	if checks := policy.RepoGateChecks(got); len(checks) != 2 || checks[0] != "repo-licenses" || checks[1] != "repo-no_todo" {
 		t.Errorf("repo gates = %v, want [repo-licenses repo-no_todo]", checks)
 	}
+	// The run record keeps exactly the repository's own, for a reclaim.
+	if kept := repoGateCommands(got); len(kept) != 2 || kept["repo-no_todo"] != want["repo-no_todo"] || kept["repo-licenses"] != want["repo-licenses"] {
+		t.Errorf("repoGateCommands = %v, want the two repo gates", kept)
+	}
+	if kept := repoGateCommands(map[string]string{"lint": "x", "repo-empty": ""}); kept != nil {
+		t.Errorf("repoGateCommands with no repo gate = %v, want nil", kept)
+	}
 	for _, g := range policy.CommandGates {
 		if _, ok := got[g.ID]; !ok {
 			t.Errorf("registry gate %s is missing from the resolved commands", g.ID)

@@ -1325,6 +1325,41 @@ class SetupCommandTests(unittest.TestCase):
 			self.assertTrue((root / "BUILD_REPORT.md").is_file())
 			self.assertTrue((root / "BUILD_EVIDENCE.json").is_file())
 
+	def test_main_exits_as_a_failed_setup_step_when_setup_fails_before_the_first_turn(self):
+		# The factory tells a setup failure from a failed build by the step's
+		# exit (95) and the line naming the command, as for verify and gates.
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			argv = ["build_app.py", "--workspace", str(root), "--spec", str(spec), "--setup-command", "echo ran; exit 3"]
+			stderr = io.StringIO()
+			with (
+				mock.patch.object(sys, "argv", argv),
+				mock.patch.object(harness_adapters, "get"),
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_agent_streaming") as agent,
+				contextlib.redirect_stderr(stderr),
+				contextlib.redirect_stdout(io.StringIO()),
+			):
+				code = build_app.main()
+			agent.assert_not_called()
+			self.assertEqual(code, 95)
+			self.assertIn("buildgate: setup failed: echo ran; exit 3\n", stderr.getvalue())
+
+	def test_main_exits_1_for_a_build_that_did_not_pass_for_another_reason(self):
+		argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/spec.md"]
+		result = build_app.BuildResult(workspace=Path("/tmp/work"), spec_path=Path("/tmp/spec.md"))
+		result.stopped_reason = "local round budget (3) exhausted"
+		with (
+			mock.patch.object(build_app, "run_build", return_value=result),
+			mock.patch.object(build_app, "write_report", return_value=Path("/tmp/report.md")),
+			mock.patch.object(build_app, "write_evidence_json", return_value=Path("/tmp/evidence.json")),
+			mock.patch.object(sys, "argv", argv),
+			contextlib.redirect_stdout(io.StringIO()),
+		):
+			self.assertEqual(build_app.main(), 1)
+
 	def test_a_long_failing_setup_command_is_named_in_200_characters(self):
 		blockers, _ = build_app.round_blockers(
 			verify_passed=None, pi_failed=False, pi_timed_out=False, traces=[], review_policy="advisory",
