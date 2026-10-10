@@ -5,12 +5,14 @@ import { render } from "@testing-library/react";
 
 import { BrandMark, brandMarkUrl } from "@/ui/BrandMark";
 
-test("draws the mark the build serves, as decoration beside the written name", () => {
+test("draws the small cut of the mark as decoration, its check following the text colour", () => {
   const { container } = render(<BrandMark className="size-6" />);
-  const img = container.querySelector("img")!;
-  expect(img.getAttribute("src")).toBe(brandMarkUrl);
-  expect(img.getAttribute("alt")).toBe("");
-  expect(img).toHaveAttribute("aria-hidden");
+  const svg = container.querySelector("svg")!;
+  expect(svg).toHaveAttribute("aria-hidden", "true");
+  expect(svg).toHaveClass("size-6", "text-fg");
+  expect(svg.querySelectorAll("rect")).toHaveLength(4);
+  expect(svg.querySelector("g")).toHaveClass("fill-brand");
+  expect(svg.querySelector("path")).toHaveAttribute("stroke", "currentColor");
 });
 
 test("the console's mark is the brand source, byte for byte", () => {

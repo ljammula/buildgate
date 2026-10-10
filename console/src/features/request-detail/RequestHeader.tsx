@@ -15,7 +15,7 @@ import { MemoryBadge } from "@/shared/request/MemoryBadge";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { WaitingBadge } from "@/shared/request/WaitingBadge";
 import { Badge } from "@/ui/Badge";
-import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { CompactId } from "@/ui/CompactId";
 import { PageHeader } from "@/ui/PageLayout";
 import { useNow } from "@/ui/Time";
@@ -66,15 +66,9 @@ export function RequestHeader({ request, refreshing, onRefresh, actions }: Reque
       {...(request === null ? {} : { description: <RequestChips request={request} /> })}
       actions={
         <>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Refresh"
-            disabled={refreshing}
-            onClick={onRefresh}
-          >
+          <IconButton label="Refresh" disabled={refreshing} onClick={onRefresh}>
             <RefreshCw aria-hidden="true" />
-          </Button>
+          </IconButton>
           {actions}
         </>
       }

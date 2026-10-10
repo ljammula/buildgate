@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { RejectionAnchor } from "@/domain/request";
 import { type AnchorTarget, anchorPlace } from "@/domain/reviewAnchors";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { Field, Input, Select } from "@/ui/Input";
 
 export interface AnchoredNotesProps {
@@ -42,16 +43,14 @@ export function AnchoredNotes({ targets, notes, onChange, disabled = false }: An
                 <span className="text-fg-muted font-mono text-xs">{anchorPlace(note)}</span>
                 {`: ${note.note}`}
               </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Remove note ${i + 1}`}
+              <IconButton
+                label={`Remove note ${i + 1}`}
                 onClick={() => {
                   onChange(notes.filter((_, j) => j !== i));
                 }}
               >
                 <X aria-hidden="true" />
-              </Button>
+              </IconButton>
             </li>
           ))}
         </ul>

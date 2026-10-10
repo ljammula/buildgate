@@ -3,6 +3,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDashed,
+  CircleDot,
   Hourglass,
   type LucideIcon,
 } from "lucide-react";
@@ -24,7 +25,7 @@ import {
 
 const GLYPHS: Readonly<Record<StepStatus, { icon: LucideIcon; text: string; word: string }>> = {
   done: { icon: CircleCheck, text: "text-accent", word: "done" },
-  current: { icon: CircleDashed, text: "text-accent", word: "current" },
+  current: { icon: CircleDot, text: "text-accent", word: "current" },
   pending: { icon: CircleDashed, text: "text-fg-subtle", word: "pending" },
   failed: { icon: CircleAlert, text: "text-tone-danger", word: "failed" },
   needsYou: { icon: Hourglass, text: "text-tone-warning", word: "needs you" },

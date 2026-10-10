@@ -7,6 +7,7 @@ import {
   statusForPRState,
   statusForToken,
   statusIcon,
+  statusIconForToken,
   statusTone,
   type Status,
 } from "@/domain/status";
@@ -113,8 +114,13 @@ test(
       expect(statusTone(status, "light")).toBe(statusTone(status, "dark"));
     }
     expect(filled.map((s) => statusTone(s))).toEqual(["warning", "info", "success", "danger"]);
-    expect(filled.map(statusIcon)).toEqual(["priority_high", "autorenew", "check_circle", "error"]);
-    expect(statusIcon("unknown")).toBe("help_outline");
+    expect(filled.map(statusIcon)).toEqual([
+      "circle_alert",
+      "circle_dot",
+      "circle_check",
+      "circle_x",
+    ]);
+    expect(statusIcon("unknown")).toBe("circle_help");
   },
 );
 
@@ -147,4 +153,21 @@ test("each request state has one label and the verbs an operator has there", () 
   ]);
   expect(requestVerbs("building")).toEqual([]);
   expect(requestVerbs("a_state_from_a_newer_server")).toEqual([]);
+});
+
+test("statusIconForToken: the stuck states get the octagon, every other token its status icon", () => {
+  expect(statusIconForToken("halted")).toBe("octagon_pause");
+  expect(statusIconForToken("resume_review")).toBe("octagon_pause");
+  expect(statusIconForToken("quarantined")).toBe("octagon_pause");
+  expect(statusIconForToken("spec_review")).toBe("circle_alert");
+  expect(statusIconForToken("building")).toBe("circle_dot");
+  expect(statusIconForToken("done")).toBe("circle_check");
+  expect(statusIconForToken("cancelled")).toBe("circle_x");
+  expect(statusIconForToken("never_seen")).toBe("circle_help");
+});
+
+test("the kill switch keeps its warning and clear icons", () => {
+  expect(killSwitchDisplay(true).icon).toBe("triangle_alert");
+  expect(killSwitchDisplay(false).icon).toBe("circle_check_big");
+  expect(killSwitchDisplay(null).icon).toBe("circle_help");
 });

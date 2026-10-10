@@ -9,6 +9,7 @@ import {
   setCriterionBody,
 } from "@/domain/structuredEdit";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { Input, Textarea } from "@/ui/Input";
 import { trimSpace } from "@/domain/specSkeleton";
 
@@ -72,37 +73,27 @@ function CriterionRow({
         onKeyDown={onKeyDown}
       />
       <div className="flex shrink-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Move criterion ${n} up`}
+        <IconButton
+          label={`Move criterion ${n} up`}
           disabled={disabled || index === 0}
           onClick={() => {
             onMove(-1);
           }}
         >
           <ArrowUp aria-hidden="true" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Move criterion ${n} down`}
+        </IconButton>
+        <IconButton
+          label={`Move criterion ${n} down`}
           disabled={disabled || index === count - 1}
           onClick={() => {
             onMove(1);
           }}
         >
           <ArrowDown aria-hidden="true" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Remove criterion ${n}`}
-          disabled={disabled}
-          onClick={onRemove}
-        >
+        </IconButton>
+        <IconButton label={`Remove criterion ${n}`} disabled={disabled} onClick={onRemove}>
           <Trash2 aria-hidden="true" />
-        </Button>
+        </IconButton>
       </div>
     </li>
   );

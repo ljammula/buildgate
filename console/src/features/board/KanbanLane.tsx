@@ -156,7 +156,10 @@ export function KanbanLane({
         >
           <ChevronRight
             aria-hidden
-            className={cn("text-fg-subtle size-4 transition-transform", !collapsed && "rotate-90")}
+            className={cn(
+              "text-fg-subtle size-4 transition-transform motion-reduce:transition-none",
+              !collapsed && "rotate-90",
+            )}
           />
           {lane.project} <span className="text-fg-muted font-normal">{`(${lane.count})`}</span>
         </button>

@@ -11,6 +11,7 @@ import {
 } from "@/domain/structuredEdit";
 import { requiredTicketHeadings, trimSpace } from "@/domain/specSkeleton";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { Input, Textarea } from "@/ui/Input";
 
 import { useFieldDraft } from "./useFieldDraft";
@@ -87,37 +88,27 @@ function TicketListRow({
         {problem === null ? null : <p className="text-tone-danger text-xs">{problem}</p>}
       </div>
       <div className="flex shrink-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Move ${singular} ${n} up`}
+        <IconButton
+          label={`Move ${singular} ${n} up`}
           disabled={disabled || index === 0}
           onClick={() => {
             onMove(-1);
           }}
         >
           <ArrowUp aria-hidden="true" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Move ${singular} ${n} down`}
+        </IconButton>
+        <IconButton
+          label={`Move ${singular} ${n} down`}
           disabled={disabled || index === count - 1}
           onClick={() => {
             onMove(1);
           }}
         >
           <ArrowDown aria-hidden="true" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Remove ${singular} ${n}`}
-          disabled={disabled}
-          onClick={onRemove}
-        >
+        </IconButton>
+        <IconButton label={`Remove ${singular} ${n}`} disabled={disabled} onClick={onRemove}>
           <Trash2 aria-hidden="true" />
-        </Button>
+        </IconButton>
       </div>
     </li>
   );

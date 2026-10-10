@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { opsPath, projectReleasePath, projectStatsPath, projectsPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
@@ -38,45 +39,28 @@ export function RunListScreen() {
               title="Project release"
               pathFor={projectReleasePath}
               trigger={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Project release"
-                  title="Project release"
-                >
+                <IconButton label="Project release">
                   <Shield aria-hidden="true" />
-                </Button>
+                </IconButton>
               }
             />
             <ProjectLookupDialog
               title="Project stats"
               pathFor={projectStatsPath}
               trigger={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Project stats"
-                  title="Project stats"
-                >
+                <IconButton label="Project stats">
                   <BarChart3 aria-hidden="true" />
-                </Button>
+                </IconButton>
               }
             />
-            <Button asChild variant="ghost" size="icon" aria-label="Operations" title="Operations">
+            <IconButton asChild label="Operations">
               <Link to={opsPath()}>
                 <LayoutDashboard aria-hidden="true" />
               </Link>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Refresh"
-              title="Refresh"
-              disabled={loading}
-              onClick={() => void refresh()}
-            >
+            </IconButton>
+            <IconButton label="Refresh" disabled={loading} onClick={() => void refresh()}>
               <RefreshCw aria-hidden="true" />
-            </Button>
+            </IconButton>
           </>
         }
       />

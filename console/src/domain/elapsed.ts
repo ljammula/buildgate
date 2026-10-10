@@ -185,7 +185,7 @@ interface StallChipDisplay {
   readonly label: string;
   /** Danger for stalled, warning for waiting. */
   readonly tone: "danger" | "warning";
-  readonly icon: "warning_amber" | "hourglass_top";
+  readonly icon: "triangle_alert" | "hourglass";
 }
 
 /**
@@ -199,7 +199,7 @@ export function stallChipDisplay(
   run: Pick<Run, "stalled" | "waitingReason">,
 ): StallChipDisplay | null {
   if (stallStatus(run) === "stalled") {
-    return { kind: "stalled", label: "stalled", tone: "danger", icon: "warning_amber" };
+    return { kind: "stalled", label: "stalled", tone: "danger", icon: "triangle_alert" };
   }
   const waitingReason = run.waitingReason;
   if (waitingReason !== null && waitingReason !== "") {
@@ -207,7 +207,7 @@ export function stallChipDisplay(
       kind: "waiting",
       label: `waiting: ${waitingReason}`,
       tone: "warning",
-      icon: "hourglass_top",
+      icon: "hourglass",
     };
   }
   return null;

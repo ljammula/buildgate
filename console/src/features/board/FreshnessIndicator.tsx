@@ -1,6 +1,5 @@
-import { CloudOff, Loader2 } from "lucide-react";
+import { CircleDashed, CloudOff } from "lucide-react";
 
-import { cn } from "@/ui/cn";
 import { useNow } from "@/ui/Time";
 
 import { type BoardFreshness, freshnessLabel } from "./boardModel";
@@ -24,7 +23,7 @@ export function FreshnessIndicator({ freshness, lastUpdateAt }: FreshnessIndicat
       ) : freshness === "disconnected" ? (
         <CloudOff aria-hidden className="size-3.5" />
       ) : (
-        <Loader2 aria-hidden className={cn("size-3.5")} />
+        <CircleDashed aria-hidden className="size-3.5" />
       )}
       {freshnessLabel(freshness, lastUpdateAt === 0 ? null : lastUpdateAt, now)}
     </span>

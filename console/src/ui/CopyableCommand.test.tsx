@@ -1,7 +1,12 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render as renderBare, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 
+import { TooltipProvider } from "@/ui/Tooltip";
 import { CopyableCommand } from "@/ui/CopyableCommand";
+
+// IconButton's tooltip needs the provider the app mounts once.
+const render = (ui: ReactElement) => renderBare(ui, { wrapper: TooltipProvider });
 
 test("copies the exact command and the button name becomes Copied", async () => {
   const writeText = vi.fn(() => Promise.resolve());

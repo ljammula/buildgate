@@ -43,6 +43,7 @@
   --color-accent-fg: var(--accent-fg);
   --color-accent-soft: var(--accent-soft);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
 
   /* One triple per domain/status StatusTone: text, soft background, border. */
   --color-tone-warning: var(--tone-warning);
@@ -101,6 +102,8 @@
   --fg-subtle: var(--n9);
   --fg-muted: var(--n10);
   --fg: var(--n11);
+  /* The mark's orange: one fixed colour in every theme. */
+  --brand: #f97316;
 }
 
 :root {

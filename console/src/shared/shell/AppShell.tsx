@@ -25,6 +25,7 @@ import {
 } from "@/routes/paths";
 import { BrandMark } from "@/ui/BrandMark";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { NavCount } from "@/shared/shell/NavCount";
 import { NotificationToggle } from "@/shared/shell/NotificationToggle";
 import { useBrowserNotifier } from "@/shared/shell/useBrowserNotifier";
@@ -64,17 +65,14 @@ function ThemeToggle() {
   const [mode, setMode] = useThemeMode();
   const Icon = themeIcons[mode];
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={themeLabels[mode]}
-      title={themeLabels[mode]}
+    <IconButton
+      label={themeLabels[mode]}
       onClick={() => {
         setMode(nextThemeMode(mode));
       }}
     >
       <Icon aria-hidden />
-    </Button>
+    </IconButton>
   );
 }
 

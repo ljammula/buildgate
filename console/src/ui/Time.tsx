@@ -1,4 +1,3 @@
-import { Hourglass, TriangleAlert } from "lucide-react";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
@@ -12,6 +11,7 @@ import {
 import type { Run } from "@/domain/run";
 import { cn } from "@/ui/cn";
 import { toneClasses } from "@/ui/tone";
+import { statusIcons } from "@/ui/statusIcons";
 
 interface SharedClock {
   now: number;
@@ -115,7 +115,7 @@ export function StallChip({ run }: { run: Pick<Run, "stalled" | "waitingReason">
   const display = stallChipDisplay(run);
   if (display === null) return null;
   const classes = toneClasses[display.tone];
-  const Icon = display.icon === "warning_amber" ? TriangleAlert : Hourglass;
+  const Icon = statusIcons[display.icon];
   return (
     <span
       data-testid={`${display.kind}-chip`}

@@ -44,7 +44,7 @@ describe("stallChipDisplay", () => {
       kind: "stalled",
       label: "stalled",
       tone: "danger",
-      icon: "warning_amber",
+      icon: "triangle_alert",
     });
   });
 
@@ -55,7 +55,7 @@ describe("stallChipDisplay", () => {
       kind: "waiting",
       label: "waiting: behind 1 run(s) on foo/bar",
       tone: "warning",
-      icon: "hourglass_top",
+      icon: "hourglass",
     });
   });
 

@@ -1,14 +1,4 @@
 import {
-  CircleAlert,
-  CircleCheck,
-  CircleCheckBig,
-  CircleHelp,
-  CircleX,
-  RefreshCw,
-  TriangleAlert,
-} from "lucide-react";
-
-import {
   type Brightness,
   type Status,
   type StatusIcon,
@@ -17,34 +7,17 @@ import {
   stateLabel,
   statusForToken,
   statusIcon,
+  statusIconForToken,
   statusTone,
 } from "@/domain/status";
 import { cn } from "@/ui/cn";
+import { statusIcons } from "@/ui/statusIcons";
 import { toneClasses } from "@/ui/tone";
 
 /** The glyph for a domain StatusIcon name. Decorative: the chip's text carries the meaning. */
-function StatusIconGlyph({ icon, className }: { icon: StatusIcon; className?: string }) {
-  const props = { "aria-hidden": true, className: cn("size-3.5 shrink-0", className) };
-  switch (icon) {
-    case "priority_high":
-      return <CircleAlert {...props} />;
-    case "autorenew":
-      return <RefreshCw {...props} />;
-    case "check_circle":
-      return <CircleCheck {...props} />;
-    case "error":
-      return <CircleX {...props} />;
-    case "help_outline":
-      return <CircleHelp {...props} />;
-    case "warning_amber":
-      return <TriangleAlert {...props} />;
-    case "check_circle_outline":
-      return <CircleCheckBig {...props} />;
-    default: {
-      const unreachable: never = icon;
-      return unreachable;
-    }
-  }
+function StatusIconGlyph({ icon }: { icon: StatusIcon }) {
+  const Icon = statusIcons[icon];
+  return <Icon aria-hidden="true" className="size-3.5 shrink-0" />;
 }
 
 interface ChipFrameProps {
@@ -82,16 +55,18 @@ export interface StatusChipProps {
    */
   readonly label: string;
   readonly brightness?: Brightness;
+  /** Overrides the icon of `status`, for a state with a shape of its own (stuck, queued). */
+  readonly icon?: StatusIcon;
 }
 
 /** A pill with the status icon and the operator word for `label`. */
-export function StatusChip({ status, label, brightness = "dark" }: StatusChipProps) {
+export function StatusChip({ status, label, brightness = "dark", icon }: StatusChipProps) {
   const shown = stateLabel(label);
   return (
     <ChipFrame
       tone={statusTone(status, brightness)}
       outlined={status === "unknown"}
-      icon={statusIcon(status)}
+      icon={icon ?? statusIcon(status)}
       text={shown}
       title={shown === label ? undefined : label}
     />
@@ -100,7 +75,9 @@ export function StatusChip({ status, label, brightness = "dark" }: StatusChipPro
 
 /** StatusChip for a raw state token, mapping it to its Status first. */
 export function StatusChipForToken({ token }: { token: string }) {
-  return <StatusChip status={statusForToken(token)} label={token} />;
+  return (
+    <StatusChip status={statusForToken(token)} label={token} icon={statusIconForToken(token)} />
+  );
 }
 
 export interface KillSwitchChipProps {
