@@ -52,14 +52,14 @@ func TestStoreMissingAndRoundTrip(t *testing.T) {
 	if err != nil || len(got.Lessons) != 1 || got.Lessons[0].ID != l.ID || got.CountedRuns[0] != "r1" {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
-	info, _ := os.Stat(filepath.Join(s.Dir(), "state.json"))
+	info, _ := os.Stat(filepath.Join(s.dir, "state.json"))
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", info.Mode())
 	}
-	if m, _ := filepath.Glob(filepath.Join(s.Dir(), "*.tmp")); len(m) != 0 {
+	if m, _ := filepath.Glob(filepath.Join(s.dir, "*.tmp")); len(m) != 0 {
 		t.Fatalf("temp files left: %v", m)
 	}
-	di, _ := os.Stat(s.Dir())
+	di, _ := os.Stat(s.dir)
 	if di.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode %v", di.Mode())
 	}
@@ -72,7 +72,7 @@ func TestStoreRefusesBadFiles(t *testing.T) {
 		"oversize":      `{"schema_version":1,"pad":"` + strings.Repeat("x", MaxStateBytes) + `"}`,
 	} {
 		s := openTest(t)
-		if err := os.WriteFile(filepath.Join(s.Dir(), "state.json"), []byte(content), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(s.dir, "state.json"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.Load(); !errors.Is(err, ErrStore) {
@@ -126,7 +126,7 @@ func TestStoreBounds(t *testing.T) {
 	if !errors.Is(err, ErrStore) {
 		t.Fatalf("201 active: %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(s2.Dir(), "state.json")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(s2.dir, "state.json")); !os.IsNotExist(statErr) {
 		t.Fatal("refused update wrote a file")
 	}
 	err = s2.Update(func(st *StoreState) error {
@@ -168,7 +168,7 @@ func TestStoreFailedUpdateKeepsOldFile(t *testing.T) {
 	if st.CountedRuns[0] != "keep" {
 		t.Fatalf("old file replaced: %v", st.CountedRuns)
 	}
-	if m, _ := filepath.Glob(filepath.Join(s.Dir(), "*.tmp")); len(m) != 0 {
+	if m, _ := filepath.Glob(filepath.Join(s.dir, "*.tmp")); len(m) != 0 {
 		t.Fatalf("temp files left: %v", m)
 	}
 }
@@ -250,7 +250,7 @@ func TestStoreOffMarker(t *testing.T) {
 	if off, _ := s.Off(); !off {
 		t.Fatal("marker missing")
 	}
-	data, _ := os.ReadFile(filepath.Join(s.Dir(), "off"))
+	data, _ := os.ReadFile(filepath.Join(s.dir, "off"))
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 || !strings.Contains(lines[0], ": ") || strings.ContainsAny(lines[0], "\x1b") {
 		t.Fatalf("marker body %q", data)
