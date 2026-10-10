@@ -17,6 +17,7 @@ import (
 
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
+	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 )
 
@@ -132,7 +133,7 @@ func (f *gateBaseFixture) assertRunUntouched() {
 }
 
 // A named gate and a repository gate that fail on the result and on the base
-// commit record "fails": the rerun is a second launch of the same image on a
+// commit record that it fails there: the rerun is a second launch of the same image on a
 // scratch worktree holding the base commit, with `.factory/` read-only from
 // the trusted commit, and the gate's own result is what it was.
 func TestFailedGateIsRerunOnTheBaseCommitAndRecordsThatItFailsThereToo(t *testing.T) {
@@ -157,8 +158,8 @@ func TestFailedGateIsRerunOnTheBaseCommitAndRecordsThatItFailsThereToo(t *testin
 				t.Errorf("attempts = %+v, want the gate's one attempt: the rerun is not an attempt of the gate", res.Attempts)
 			}
 			bc := res.BaseCheck
-			if bc == nil || bc.Outcome != run.GateBaseFails || bc.BaseSHA != f.base || bc.ExitCode != 7 || bc.Reason != "" {
-				t.Fatalf("base check = %+v, want fails with exit 7 on %s", bc, f.base)
+			if bc == nil || bc.Outcome != run.GateBaseFailsDifferently || bc.BaseSHA != f.base || bc.ExitCode != 7 || bc.Reason != "" {
+				t.Fatalf("base check = %+v, want fails_differently (exit 7 against the gate's 3) on %s", bc, f.base)
 			}
 			if bc.LogSHA256 == "" || bc.LogPath == res.Result.LogPath {
 				t.Errorf("base check log %q (hash %q), want a log of its own beside the gate's %q", bc.LogPath, bc.LogSHA256, res.Result.LogPath)
@@ -279,7 +280,7 @@ func TestRetriedGateActivityReturnsTheCheckpointedBaseCheckWithoutRerunning(t *t
 	if len(f.launched) != 2 {
 		t.Errorf("%d launches over two executions, want the first execution's two", len(f.launched))
 	}
-	if first.BaseCheck == nil || second.BaseCheck == nil || *first.BaseCheck != *second.BaseCheck || second.BaseCheck.Outcome != run.GateBaseFails {
+	if first.BaseCheck == nil || second.BaseCheck == nil || *first.BaseCheck != *second.BaseCheck || second.BaseCheck.Outcome != run.GateBaseFailsSame {
 		t.Errorf("base check: first %+v, again %+v; want the same fails record", first.BaseCheck, second.BaseCheck)
 	}
 }
@@ -351,7 +352,7 @@ func TestBaseRerunIsNotStartedWithTooLittleOfTheGatesTimeLimitLeft(t *testing.T)
 	f := newGateBaseFixture(t, 1, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), gateBaseCheckReserve+sandboxAttemptTeardownMargin-time.Second)
 	defer cancel()
-	bc := f.acts.checkGateOnBase(ctx, NamedGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "true"}, []string{"sh", "-c", "true"}, nil)
+	bc := f.acts.checkGateOnBase(ctx, NamedGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "true"}, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil)
 	if bc.Outcome != run.GateBaseNotChecked || !strings.Contains(bc.Reason, "time limit") || bc.BaseSHA != f.base {
 		t.Errorf("base check = %+v, want not_checked for lack of time", bc)
 	}
@@ -505,7 +506,7 @@ func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *test
 	env.RegisterActivityWithOptions(func(ctx context.Context, in NamedGateActivityInput) (*run.GateBaseCheck, error) {
 		ctx, cancel := context.WithTimeout(ctx, gateBaseCheckReserve+wait)
 		defer cancel()
-		return f.acts.checkGateOnBase(ctx, in, []string{"sh", "-c", "true"}, nil), nil
+		return f.acts.checkGateOnBase(ctx, in, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil), nil
 	}, activity.RegisterOptions{Name: "checkGateOnBase"})
 	in := f.input
 	in.CheckpointDir = t.TempDir()

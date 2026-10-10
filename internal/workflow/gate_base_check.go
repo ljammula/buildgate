@@ -12,6 +12,7 @@ import (
 	"go.temporal.io/sdk/activity"
 
 	"buildgate/internal/evidence"
+	"buildgate/internal/observation"
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
@@ -22,9 +23,11 @@ import (
 
 // A named or repository gate that fails on the build's result is rerun once on
 // the commit the ticket's work started from, inside the gate's own Activity
-// (RunNamedGateActivity): a gate that fails there too cannot be fixed by any
-// build, and the handoff sorts it as the operator's instead of spending a
-// corrective build on it (handoff.binFor).
+// (RunNamedGateActivity): a gate that fails there the same way (sameGateFailure)
+// cannot be fixed by any build, and the handoff sorts it as the operator's
+// instead of spending a corrective build on it (handoff.binFor). A gate that
+// was already failing there in another way stays a failure a build is given:
+// turning that gate green may be the ticket's job.
 //
 // The rerun is evidence about the gate, never part of its verdict:
 //
@@ -189,7 +192,7 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 		return gateResult
 	}
 	checked := gateResult
-	checked.BaseCheck = a.checkGateOnBase(ctx, input, command, registrySpec)
+	checked.BaseCheck = a.checkGateOnBase(ctx, input, gateResult.Result, command, registrySpec)
 	checkpoint.Result = checked
 	if err := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); err != nil {
 		activity.GetLogger(ctx).Warn("the base rerun's result could not be saved; the gate keeps its recorded result", "check", input.Check, "error", err.Error())
@@ -204,7 +207,7 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 // host steps (the git metadata lock, the checkout, the removal) included:
 // another run of the repository may hold that lock for longer than the
 // Activity's heartbeat timeout.
-func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
 	started := time.Now()
 	stop := make(chan struct{})
 	defer close(stop)
@@ -220,11 +223,34 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 			}
 		}
 	}()
-	return a.rerunGateOnBase(ctx, input, command, registrySpec)
+	return a.rerunGateOnBase(ctx, input, gate, command, registrySpec)
+}
+
+// gateFailureTailBytes bounds how much of each log's end is read to compare
+// two failures of a gate.
+const gateFailureTailBytes = 256 << 10
+
+// sameGateFailure reports whether a gate's command failed on the base commit
+// (onBase) the same way as on the build's result (onResult): the same exit
+// code, and the same lines reporting a failure at the end of its output.
+// Those lines are observation.Excerpt of the log's end, the function the
+// handoff picks a failed gate's lines with: it drops terminal colour and
+// trailing space and keeps only the lines that report a failure (with the
+// indented lines under each), so a passing package's timing or a progress
+// line never makes two failures differ. A duration or address printed on a
+// failing line itself does make them differ, which leaves the gate a failure
+// a build is given: the side that costs a build, never an operator's time on
+// a gate that was not broken the same way. Two logs with no output at all
+// are the same failure.
+func sameGateFailure(onResult, onBase runner.Result) bool {
+	if onResult.ExitCode != onBase.ExitCode {
+		return false
+	}
+	return observation.Excerpt(readFileTail(onResult.LogPath, gateFailureTailBytes)) == observation.Excerpt(readFileTail(onBase.LogPath, gateFailureTailBytes))
 }
 
 // rerunGateOnBase is checkGateOnBase's work.
-func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
 	base, unknown := gateBaseCommit(input.RunWorkflowInput)
 	if base == "" {
 		return gateBaseNotChecked("", "%s", unknown)
@@ -298,7 +324,10 @@ func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivit
 	}
 	check := &run.GateBaseCheck{Outcome: run.GateBasePasses, BaseSHA: base, ExitCode: result.ExitCode, LogPath: result.LogPath}
 	if result.ExitCode != 0 {
-		check.Outcome = run.GateBaseFails
+		check.Outcome = run.GateBaseFailsDifferently
+		if sameGateFailure(gate, result) {
+			check.Outcome = run.GateBaseFailsSame
+		}
 	}
 	// A log that cannot be hashed leaves the outcome standing without one.
 	check.LogSHA256, _ = evidence.SHA256File(result.LogPath)

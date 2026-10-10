@@ -502,15 +502,21 @@ type GateResult struct {
 
 // The outcomes of a GateBaseCheck.
 const (
-	// GateBaseFails: the gate's command exited non-zero on the base commit
-	// too, so no build of the ticket can make it pass.
-	GateBaseFails = "fails"
+	// GateBaseFailsSame: the gate's command failed on the base commit the
+	// same way as on the result (the same exit code and the same failing
+	// lines of output), so no build of the ticket can make it pass.
+	GateBaseFailsSame = "fails_same"
+	// GateBaseFailsDifferently: the command failed on the base commit too,
+	// with another exit code or other failing lines. The gate was already
+	// red before the ticket's work (which may be what the ticket is for),
+	// and what fails now is not what failed then: a build may still fix it.
+	GateBaseFailsDifferently = "fails_differently"
 	// GateBasePasses: the command exited zero on the base commit; the build
 	// (or a flaky command) is why it failed on the result.
 	GateBasePasses = "passes"
-	// GateBaseNotChecked: the rerun did not reach an exit code. Reason says
-	// why. The gate's failure is then treated as it was before the rerun
-	// existed.
+	// GateBaseNotChecked: the rerun did not reach an exit code, or was not
+	// made. Reason says why. The gate's failure is then treated as it was
+	// before the rerun existed.
 	GateBaseNotChecked = "not_checked"
 )
 
@@ -519,7 +525,8 @@ const (
 // gate's own. It never changes the gate's result: Passed, ExitCode and
 // LogSHA256 of the GateResult are the run on the build's result alone.
 type GateBaseCheck struct {
-	// Outcome is GateBaseFails, GateBasePasses or GateBaseNotChecked.
+	// Outcome is GateBaseFailsSame, GateBaseFailsDifferently, GateBasePasses
+	// or GateBaseNotChecked.
 	Outcome string `json:"outcome"`
 	// BaseSHA is the commit the command was rerun on: the run's diff base
 	// when it names one, else the base commit of a run that made its own
@@ -537,10 +544,17 @@ type GateBaseCheck struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// FailsOnBase reports whether g is a failed gate whose command also failed on
-// the base commit.
-func (g GateResult) FailsOnBase() bool {
-	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFails
+// FailsSameOnBase reports whether g is a failed gate whose command failed the
+// same way on the base commit: the one outcome that makes a failed command
+// gate the operator's.
+func (g GateResult) FailsSameOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsSame
+}
+
+// FailedDifferentlyOnBase reports whether g is a failed gate that was already
+// failing on the base commit, in another way.
+func (g GateResult) FailedDifferentlyOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsDifferently
 }
 
 // OracleCanaryEvidence records one runtime-canary check of a RUN_COMMAND.txt:
