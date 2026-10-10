@@ -10,16 +10,14 @@ import (
 	"time"
 )
 
-// maxLedgerLineBytes bounds the largest single ledger line ReadLedger will
+// maxLedgerLineBytes bounds the largest single ledger line ReadLedgerAll will
 // scan; it matches internal/sandbox's own bound on a relay log line.
 const maxLedgerLineBytes = 4 * 1024 * 1024
 
 // LedgerRecord is one per-event line of the usage ledger: the tokens and cost
 // of ONE response (not a cumulative total), the reasoning effort that request
 // asked for, and the raw cache-hit count behind the weighted input figure.
-// Append writes every field; ReadLedger fills only the four fields crash
-// recovery sums (input_tokens, output_tokens, cost_micro_usd,
-// reasoning_effort).
+// Append writes every field and ReadLedgerAll reads every field back.
 type LedgerRecord struct {
 	TS                string `json:"ts"`
 	InputTokens       int64  `json:"input_tokens"`
@@ -30,7 +28,7 @@ type LedgerRecord struct {
 	// Kind is "" for a usage record (every field above, exactly the line
 	// shape the relay has always written) or one of the event kinds below,
 	// which carry RequestID and the estimate fields instead of usage. A line
-	// with a Kind never counts in ReadLedger's sums.
+	// with a Kind is never a usage record.
 	Kind string `json:"kind,omitempty"`
 	// RequestID links an admit record to its complete record.
 	RequestID string `json:"request_id,omitempty"`
@@ -168,26 +166,16 @@ func (l *Ledger) appendLine(line string) {
 	}
 }
 
-// ReadLedger returns every well-formed ledger line of path, in order. A blank
-// line, and a truncated or corrupt one -- the shape a crash mid-write leaves
-// -- is skipped, never an error and never a stop: every other line was fsync'd
-// before the next was appended, so it stays trustworthy. An error is returned
-// only when the file cannot be opened (the returned slice is then nil) or the
-// scan itself fails (the records read so far are returned with it).
-func ReadLedger(path string) ([]LedgerRecord, error) {
-	return scanLedger(path, false)
-}
-
-// ReadLedgerAll is ReadLedger's full reader: it also returns the event
-// records (admit, complete, ceiling_exceeded) and fills every field of each
-// record, which is what the meter service replays after a restart.
+// ReadLedgerAll returns every well-formed ledger line of path, in order:
+// usage records and event records (admit, complete, ceiling_exceeded), every
+// field filled, which is what the meter service replays after a restart. A
+// blank line, and a truncated or corrupt one -- the shape a crash mid-write
+// leaves -- is skipped, never an error and never a stop: every other line was
+// fsync'd before the next was appended, so it stays trustworthy. An error is
+// returned only when the file cannot be opened (the returned slice is then
+// nil) or the scan itself fails (the records read so far are returned with
+// it).
 func ReadLedgerAll(path string) ([]LedgerRecord, error) {
-	return scanLedger(path, true)
-}
-
-// scanLedger reads path line by line. withEvents false returns usage records
-// only, with the four fields ReadLedger has always filled.
-func scanLedger(path string, withEvents bool) ([]LedgerRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -201,32 +189,10 @@ func scanLedger(path string, withEvents bool) ([]LedgerRecord, error) {
 		if line == "" {
 			continue
 		}
-		if withEvents {
-			var entry LedgerRecord
-			if json.Unmarshal([]byte(line), &entry) == nil {
-				records = append(records, entry)
-			}
-			continue
+		var entry LedgerRecord
+		if json.Unmarshal([]byte(line), &entry) == nil {
+			records = append(records, entry)
 		}
-		var entry struct {
-			InputTokens     int64           `json:"input_tokens"`
-			OutputTokens    int64           `json:"output_tokens"`
-			CostMicroUSD    int64           `json:"cost_micro_usd"`
-			ReasoningEffort string          `json:"reasoning_effort"`
-			Kind            json.RawMessage `json:"kind"`
-		}
-		if jsonErr := json.Unmarshal([]byte(line), &entry); jsonErr != nil {
-			continue
-		}
-		if kind := string(entry.Kind); kind != "" && kind != "null" && kind != `""` {
-			continue
-		}
-		records = append(records, LedgerRecord{
-			InputTokens:     entry.InputTokens,
-			OutputTokens:    entry.OutputTokens,
-			CostMicroUSD:    entry.CostMicroUSD,
-			ReasoningEffort: entry.ReasoningEffort,
-		})
 	}
 	return records, scanner.Err()
 }

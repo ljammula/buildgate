@@ -678,39 +678,6 @@ func TestInvalidSandboxIDAndRequestIDRefused(t *testing.T) {
 	}
 }
 
-func TestReadLedgerSumsIgnoreEventRecords(t *testing.T) {
-	dir := t.TempDir()
-	usageOnly := filepath.Join(dir, "usage.jsonl")
-	mixed := filepath.Join(dir, "mixed.jsonl")
-	usageLines := `{"ts":"a","input_tokens":1,"output_tokens":2,"cost_micro_usd":3,"reasoning_effort":"low"}` + "\n" +
-		`{"ts":"b","input_tokens":10,"output_tokens":20,"cost_micro_usd":30}` + "\n"
-	mixedLines := `{"ts":"a0","kind":"admit","request_id":"r1","estimate_tokens":999,"estimate_output_tokens":500,"estimate_cost_micro_usd":888}` + "\n" +
-		`{"ts":"a","input_tokens":1,"output_tokens":2,"cost_micro_usd":3,"reasoning_effort":"low"}` + "\n" +
-		`{"ts":"a1","kind":"complete","request_id":"r1"}` + "\n" +
-		`{"ts":"x","kind":"ceiling_exceeded","request_id":"r2"}` + "\n" +
-		`{"ts":"b","input_tokens":10,"output_tokens":20,"cost_micro_usd":30}` + "\n"
-	for path, content := range map[string]string{usageOnly: usageLines, mixed: mixedLines} {
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	sum := func(path string) (in, out, cost int64, n int) {
-		records, err := ReadLedger(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, r := range records {
-			in, out, cost = in+r.InputTokens, out+r.OutputTokens, cost+r.CostMicroUSD
-		}
-		return in, out, cost, len(records)
-	}
-	a1, a2, a3, an := sum(usageOnly)
-	b1, b2, b3, bn := sum(mixed)
-	if a1 != b1 || a2 != b2 || a3 != b3 || an != bn || a1 != 11 || a2 != 22 || a3 != 33 {
-		t.Fatalf("usage-only %d/%d/%d (%d records) vs mixed %d/%d/%d (%d records), want identical 11/22/33", a1, a2, a3, an, b1, b2, b3, bn)
-	}
-}
-
 func TestEventRecordsHaveNoUsageFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "l.jsonl")
 	ledger, err := OpenLedger(path, nil)
