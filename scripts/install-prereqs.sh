@@ -14,7 +14,9 @@
 #
 # terminal-notifier is what makes a desktop notification's click open the
 # request it is about. It is optional: without Homebrew, or when its install
-# fails, the install goes on and the banner has no click.
+# fails, the install goes on and the banner has no click. Once installed it is
+# launched as an application one time, which is what makes macOS list it
+# under Notifications and ask to allow it.
 #
 # A machine that already has a docker CLI keeps its own daemon (Docker
 # Desktop, colima, another VM): colima is installed only beside a docker CLI
@@ -83,7 +85,15 @@ link_buildx
 if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && ! have terminal-notifier; then
 	if have brew && brew install terminal-notifier; then
 		echo "Installed terminal-notifier: a notification's click opens the request it is about."
-		echo "macOS shows nothing from it until you allow it: System Settings -> Notifications -> terminal-notifier. 'factoryd doctor -notify-test' sends one banner to check."
+		# macOS lists an application under Notifications, and asks to allow
+		# it, only once it has been launched as an application: running the
+		# command from a shell is refused without a word to the operator.
+		app="$(brew --prefix 2>/dev/null || true)/opt/terminal-notifier/terminal-notifier.app"
+		if [ -d "$app" ] && have open && open -n "$app" --args -title Buildgate -message "Allow notifications from terminal-notifier, so a click opens the request."; then
+			echo "macOS asks once to allow its notifications: choose Allow, or turn it on under System Settings -> Notifications -> terminal-notifier. 'factoryd doctor -notify-test' sends one banner to check."
+		else
+			echo "macOS shows nothing from it until it is allowed: 'factoryd doctor -notify-test' says how."
+		fi
 	else
 		echo "terminal-notifier not installed -- desktop notifications will have no click ('brew install terminal-notifier' adds it)" >&2
 	fi
