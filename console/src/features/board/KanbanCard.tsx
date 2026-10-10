@@ -20,6 +20,8 @@ import { CompactId } from "@/ui/CompactId";
 import { cn } from "@/ui/cn";
 import { StallChip } from "@/ui/Time";
 
+import { RunningMark } from "./RunningMark";
+
 export interface KanbanCardProps {
   readonly request: RequestSummary;
   readonly column: BoardColumn;
@@ -47,6 +49,10 @@ export interface KanbanCardProps {
   readonly onReject: (id: string) => void;
   /** The console may write: only then is Request changes offered. */
   readonly canWrite: boolean;
+  /** The request's state changed, or it appeared, a moment ago: its card is highlighted once. */
+  readonly changed?: boolean;
+  /** The worker runs a healthy job for this request now and the feed is live: the stage line carries a spinner. */
+  readonly running?: boolean;
 }
 
 // What a compact card folds away. It is hidden from the eye only (clipped,
@@ -85,6 +91,8 @@ export const KanbanCard = memo(function KanbanCard({
   rejecting,
   onReject,
   canWrite,
+  changed = false,
+  running = false,
 }: KanbanCardProps) {
   const facts = cardFacts(request, column);
   const age = cardAge(request, column, now);
@@ -103,10 +111,13 @@ export const KanbanCard = memo(function KanbanCard({
     <li
       data-testid={`card-${request.id}`}
       data-density={compact ? "compact" : "full"}
+      data-changed={changed ? "true" : undefined}
       className={cn(
         "group/card border-border bg-surface relative flex shrink-0 flex-col rounded-lg border text-xs transition-colors",
         compact ? "gap-1 p-2" : "gap-1.5 p-3",
         "hover:bg-surface-hover focus-within:bg-surface-hover",
+        // The "look here" tint fades back to the card's own background, once.
+        "data-[changed=true]:animate-card-changed motion-reduce:animate-none",
         column === "needsYou" && "shadow-[inset_2px_0_0_var(--color-tone-warning)]",
       )}
     >
@@ -123,7 +134,11 @@ export const KanbanCard = memo(function KanbanCard({
       </Link>
       {/* A compact card keeps its id and its age on one row. */}
       <div className={cn(compact && "flex flex-wrap items-baseline justify-between gap-x-2")}>
-        <CompactId value={request.id} max={22} copy={false} className="text-fg-subtle" />
+        {/* Beside the id, which every card shows: a folded line would hide it. */}
+        <span className="inline-flex items-center gap-1.5">
+          {running ? <RunningMark /> : null}
+          <CompactId value={request.id} max={22} copy={false} className="text-fg-subtle" />
+        </span>
         {compact ? ageElement : null}
       </div>
       {showProject ? (

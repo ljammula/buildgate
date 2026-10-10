@@ -12,9 +12,12 @@ import { TextWithCode } from "@/ui/TextWithCode";
 import { toneClasses } from "@/ui/tone";
 
 import { sentenceCase } from "./boardModel";
+import { RunningMark } from "./RunningMark";
 
 export interface HealthStripProps {
   readonly health: FactoryHealth;
+  /** The board's feed is connected: only then is a running job drawn as live work. */
+  readonly live: boolean;
   /** queueRunWarning's text, or null: the worker is then a fact; else the alert stands in its place. */
   readonly workerWarning: string | null;
   /** "Check again": re-reads the worker's status; it starts nothing. */
@@ -42,7 +45,7 @@ function requestCount(count: number): string {
  * wait for a worker instead. Every fact is the server's
  * (`GET /queue-run`, the request list); a fact it did not send is left out.
  */
-export function HealthStrip({ health, workerWarning, onRetryWorker }: HealthStripProps) {
+export function HealthStrip({ health, live, workerWarning, onRetryWorker }: HealthStripProps) {
   const { worker, slots } = health;
   return (
     <section
@@ -104,6 +107,7 @@ export function HealthStrip({ health, workerWarning, onRetryWorker }: HealthStri
                     key={`${index} ${job.requestId}`}
                     className="flex flex-wrap items-center gap-x-1.5"
                   >
+                    {live && !job.stalled ? <RunningMark /> : null}
                     <Link
                       to={requestPath(job.requestId)}
                       className="text-fg max-w-64 truncate font-medium hover:underline"

@@ -88,6 +88,24 @@
   /* The raw value is --elev-card: a theme key cannot read its own name. */
   --shadow-card: var(--elev-card);
   --shadow-popover: 0 8px 24px -6px rgb(0 0 0 / 0.35), 0 0 0 1px var(--border);
+
+  /* Motion that carries meaning (README, Visual language). */
+  --animate-overlay-in: overlay-in 120ms ease-out;
+  --animate-card-changed: card-changed 1500ms ease-out;
+
+  /* Opacity only: a dialog is centred with a transform this must not touch. */
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* From the "look here" tint to the card's own background, once. */
+  @keyframes card-changed {
+    from {
+      background-color: var(--accent-soft);
+    }
+  }
 }
 
 :root {

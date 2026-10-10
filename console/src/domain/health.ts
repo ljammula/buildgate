@@ -107,3 +107,18 @@ export function factoryHealth(
     lastTransitionAt: lastTransitionAt(requests),
   };
 }
+
+/**
+ * Whether to draw the "running now" mark for a request: the worker runs a job
+ * for it, that job is not stalled, and the board's feed is live. A stalled
+ * job, or a feed that may be showing old data, is not live work.
+ */
+export function isRunningNow(
+  health: Pick<FactoryHealth, "running">,
+  requestId: string,
+  live: boolean,
+): boolean {
+  if (!live) return false;
+  const job = health.running.find((j) => j.requestId === requestId);
+  return job !== undefined && !job.stalled;
+}

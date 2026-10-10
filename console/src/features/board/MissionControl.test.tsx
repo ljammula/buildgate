@@ -1778,3 +1778,94 @@ describe("an open Request changes dialog and a list that keeps changing", () => 
     expect(fake.requests.filter((r) => r.method !== "GET")).toEqual([]);
   });
 });
+
+describe("live work and changes on the board", () => {
+  const build = (stalled: boolean) => ({
+    run_id: "run-1",
+    ticket: 2,
+    tickets: 2,
+    stage: "build",
+    round: 1,
+    max_rounds: 3,
+    stalled,
+  });
+  const building = (id: string, stalled = false) => ({
+    ...requestJson({ id, state: "building" }),
+    build: build(stalled),
+  });
+  const spinners = (id: string) => card(id).querySelectorAll(".animate-spin");
+
+  test("a card the worker runs now, healthy, on a live feed shows a spinner and says running", async () => {
+    renderApp(<BoardScreen />, {
+      server: server(
+        [building("req-run"), building("req-stuck", true), building("req-wait")],
+        [
+          {
+            on: "GET /queue-run",
+            reply: () =>
+              json({ ...alive, active_requests: ["req-run", "req-stuck"], job_slots: 2 }),
+          },
+        ],
+      ),
+    });
+    const running = await screen.findByTestId("card-req-run");
+    await waitFor(() => {
+      expect(spinners("req-run")).toHaveLength(1);
+    });
+    expect(running).toHaveTextContent("running");
+    expect(spinners("req-stuck")).toHaveLength(0);
+    expect(spinners("req-wait")).toHaveLength(0);
+    // The health strip's entry carries the same mark; the stalled one does not.
+    const list = await screen.findByRole("list", { name: "Running now" });
+    expect(list.querySelectorAll(".animate-spin")).toHaveLength(1);
+  });
+
+  test("no card spins while the feed is not live", async () => {
+    renderApp(<BoardScreen />, {
+      server: server(
+        [building("req-run")],
+        [
+          { on: "GET /requests/events", reply: () => apiErrorResponse(403, "no") },
+          {
+            on: "GET /queue-run",
+            reply: () => json({ ...alive, active_requests: ["req-run"], job_slots: 1 }),
+          },
+        ],
+      ),
+    });
+    await screen.findByTestId("card-req-run");
+    await waitFor(() => {
+      expect(screen.getByTestId("board-freshness")).toHaveTextContent("Disconnected");
+    });
+    expect(document.querySelectorAll(".animate-spin")).toHaveLength(0);
+  });
+
+  test("a card is not marked changed on the first load", async () => {
+    renderApp(<BoardScreen />, { server: server([building("req-run")]) });
+    expect(await screen.findByTestId("card-req-run")).not.toHaveAttribute("data-changed");
+  });
+
+  test("a card whose state changes while the screen is open is marked changed; the others are not", async () => {
+    const rendered = renderApp(<BoardScreen />, {
+      server: server([
+        requestJson({ id: "req-moves", state: "planning" }),
+        requestJson({ id: "req-stays", state: "spec_review" }),
+      ]),
+    });
+    await screen.findByTestId("card-req-moves");
+    // The list's next answer, as the poll would bring it.
+    rendered.server.set("GET /requests", () =>
+      json([
+        requestJson({ id: "req-moves", state: "plan_review" }),
+        requestJson({ id: "req-stays", state: "spec_review" }),
+      ]),
+    );
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("card-req-moves")).toHaveAttribute("data-changed", "true");
+    });
+    expect(screen.getByTestId("card-req-stays")).not.toHaveAttribute("data-changed");
+  });
+});
