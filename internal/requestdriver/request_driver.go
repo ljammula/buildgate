@@ -504,9 +504,9 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		}
 		_ = os.RemoveAll(ticketsDir)
 		r.Rejections = append(r.Rejections, request.Rejection{
-			By:        "factoryd",
+			By:        request.FactoryActor,
 			At:        now.UTC().Format(time.RFC3339Nano),
-			Reason:    validateErr.Error(),
+			Reason:    DraftHaltNote(validateErr.Error()),
 			FromState: request.StatePlanning,
 			ForStage:  request.StatePlanReview,
 		})
@@ -1890,8 +1890,8 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 // AdvancePlanning's one retry loop instead of duplicating it. Every other
 // validation failure this function can return (a bad heading, a missing
 // Allowed-Files/Required-Changed-Files, a Verify-Command drift, an
-// unclaimed acceptance criterion) is not wrapped with it, so
-// AdvancePlanning's errors.Is check only ever matches these two classes.
+// unclaimed acceptance criterion) is not wrapped with it; planRedraftable
+// decides which of those get the same retry.
 var errPlanInfeasible = errors.New("plan is infeasible")
 
 // writeAndValidateDraftedTickets writes each drafted ticket to ticketsDir
@@ -1904,8 +1904,7 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // individually validates that way, it checks that every criterion from 1
 // to criteriaCount is claimed by at least one ticket
 // (request.ValidatePlanCoverage), then runs the two infeasibility checks
-// that get a single automatic re-plan rather than an immediate halt (see
-// errPlanInfeasible): a ticket whose own declared Allowed-Files could
+// (errPlanInfeasible): a ticket whose own declared Allowed-Files could
 // never pass the tests_added gate (policy.TicketTestsAddedFeasible) --
 // found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
 // approved, and burned a full build round before quarantining on a
@@ -2052,18 +2051,24 @@ func criterionPathCovered(p string, allowed []string) bool {
 }
 
 // criterionClauseRE splits a criterion's text into clauses: at a semicolon,
-// and at a full stop that ends a sentence (one followed by white space).
-var criterionClauseRE = regexp.MustCompile(`;|\.\s+`)
+// at a full stop that ends a sentence (one followed by white space), and at
+// the start of a list item on its own line.
+var criterionClauseRE = regexp.MustCompile(`;|\.\s+|\n\s*[-*]\s+`)
 
-// criterionUntouchedRE matches a clause that says what it names does not
-// change.
-var criterionUntouchedRE = regexp.MustCompile(`(?i)\b(untouched|unchanged|unmodified|not\s+(be\s+)?(modified|changed|touched|edited)|(must|may|does|do|shall|should|will)\s+not\s+(be\s+)?(change|modify|touch|edit)|no\s+changes?\s+to)\b`)
+// criterionUntouchedRE matches wording that says what a clause names does
+// not change.
+var criterionUntouchedRE = regexp.MustCompile(`(?i)(\b(untouched|unchanged|unmodified|unaltered|intact|(not|cannot|never)\s+(be\s+)?(modified|changed|touched|edited|altered|change|modify|touch|edit|alter)|without\s+(modifying|changing|touching|editing|altering)|no\s+changes?\s+to|left\s+as\s+(it\s+)?is)|n't\s+(be\s+)?(modified|changed|touched|edited|altered|change|modify|touch|edit|alter))\b`)
+
+// criterionChangeRE matches wording that says something does change, or
+// that limits what an "unchanged" covers. A path with such wording between
+// it and the end of its clause is not taken as untouched.
+var criterionChangeRE = regexp.MustCompile(`(?i)\b(chang\w*|modif\w*|add\w*|gain\w*|return\w*|new|creat\w*|updat\w*|implement\w*|export\w*|contain\w*|register\w*|render\w*|introduc\w*|includ\w*|extend\w*|replac\w*|remov\w*|delet\w*|renam\w*|otherwise|except\w*|other\s+than|apart\s+from|besides|only)\b`)
 
 // criterionNamedPaths returns the repo-relative file paths criterionText
 // names in backticks as files its work changes, in order, deduplicated --
 // see looksLikeRepoPath for what counts as a path rather than a command or
-// a bare identifier. A path named in a clause that says it stays untouched
-// (criterionUntouchedRE) is not one: no ticket has to be allowed to change
+// a bare identifier. A path its clause says stays untouched
+// (criterionPathUntouched) is not one: no ticket has to be allowed to change
 // it, and asking for that would put a file the spec protects into
 // Allowed-Files. Clauses and their wording are read outside the backticks,
 // so a command's own punctuation or words decide nothing.
@@ -2075,29 +2080,64 @@ func criterionNamedPaths(criterionText, workspace string) []string {
 			prose[k] = 'x'
 		}
 	}
-	untouched := func(at int) bool {
-		start, end := 0, len(prose)
-		for _, cut := range criterionClauseRE.FindAllIndex(prose, -1) {
-			if cut[1] <= at {
-				start = cut[1]
-			} else if cut[0] >= at {
-				end = cut[0]
-				break
-			}
-		}
-		return criterionUntouchedRE.Match(prose[start:end])
-	}
 	var paths []string
 	seen := make(map[string]bool)
 	for _, span := range spans {
 		token := strings.TrimSpace(criterionText[span[2]:span[3]])
-		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) || untouched(span[2]) {
+		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) || criterionPathUntouched(prose, span[2], span[3]) {
 			continue
 		}
 		seen[token] = true
 		paths = append(paths, token)
 	}
 	return paths
+}
+
+// criterionPathUntouched reports whether the clause around prose[from:to]
+// (a code span, in a criterion's text with every code span's content
+// blanked) says that file stays as it is. It does when the clause says so
+// after the path with no wording of a change from the path to the clause's
+// end ("`a.md`, the `b` suite and all handlers are untouched"), or says so
+// right before it ("no changes to `a.md`"). Any other clause leaves the
+// path checked: one that also says what changes ("`a.go` returns 404 and
+// existing responses are unchanged", "`a.go` is otherwise unchanged") is
+// about a file some ticket must be allowed to change.
+func criterionPathUntouched(prose []byte, from, to int) bool {
+	start, end := 0, len(prose)
+	for _, cut := range criterionClauseRE.FindAllIndex(prose, -1) {
+		if cut[1] <= from {
+			start = cut[1]
+		} else if cut[0] >= to {
+			end = cut[0]
+			break
+		}
+	}
+	// Blank the untouched wording itself, so "no changes to" is not read as
+	// wording of a change.
+	clause := append([]byte(nil), prose[start:end]...)
+	said := criterionUntouchedRE.FindAllIndex(clause, -1)
+	if len(said) == 0 {
+		return false
+	}
+	for _, m := range said {
+		for k := m[0]; k < m[1]; k++ {
+			clause[k] = ' '
+		}
+	}
+	if criterionChangeRE.Match(clause[to-start:]) {
+		return false
+	}
+	for _, m := range said {
+		if m[0] >= to-start {
+			return true
+		}
+		// Before the path: only when nothing but "the", "file" or a
+		// backtick stands between the wording and the path.
+		if between := strings.Trim(strings.NewReplacer("the", "", "file", "", "`", "").Replace(string(clause[m[1]:from-start])), " \t\n"); between == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // looksLikeRepoPath reports whether token -- one backticked span from an

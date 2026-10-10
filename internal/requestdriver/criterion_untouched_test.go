@@ -23,6 +23,16 @@ func TestCriterionFilesFeasibleSkipsAFileTheCriterionSaysStaysUntouched(t *testi
 		{"`docs/wire.md` must not change; `internal/api/handler.go` returns 404 for an unknown id.", []string{"internal/api/handler.go"}},
 		{"No changes to `backend/go.mod`.", nil},
 		{"`backend/go.mod` gains no new dependency.", []string{"backend/go.mod"}},
+		// A clause that also says what changes keeps its files checked.
+		{"Only `internal/a/a.go` changes, and `spec/contract.md` is untouched.", []string{"internal/a/a.go"}},
+		{"`internal/api/handler.go` returns 404 for an unknown id and existing responses are unchanged.", []string{"internal/api/handler.go"}},
+		{"Existing tests in `internal/a/a_test.go` are unchanged and a new case is added.", []string{"internal/a/a_test.go"}},
+		{"`internal/a/a.go` is otherwise unchanged.", []string{"internal/a/a.go"}},
+		{"No changes to `internal/a/a.go` other than the new method.", []string{"internal/a/a.go"}},
+		{"The work covers:\n   - `internal/a/a.go` with the handler\n   - `docs/wire.md` left as is", []string{"internal/a/a.go"}},
+		// More ways of saying it.
+		{"`docs/wire.md` cannot be modified and `spec/contract.md` isn't touched.", nil},
+		{"The handler is fixed without modifying `docs/wire.md`.", nil},
 		// Wording inside backticks decides nothing.
 		{"Running `go test ./... -run unchanged` passes with `cmd/unchanged/main.go` registered.", []string{"cmd/unchanged/main.go"}},
 		// Untouched in one clause, changed in another: still checked.

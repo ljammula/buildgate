@@ -3069,8 +3069,8 @@ func TestPlanningHaltReasonReachesTheRetriedPlanner(t *testing.T) {
 	}
 	// The first refusal was redrafted once (a factory rejection); the second
 	// halted and left the refused-draft note.
-	if !strings.Contains(seen, "## Previous draft refused by the factory (") || !strings.Contains(seen, "make wrong-command-xyz") {
-		t.Errorf("plan-feedback.md = %q, want the refused-draft section naming make wrong-command-xyz", seen)
+	if !strings.HasPrefix(seen, "## Plan rejected ") || !strings.Contains(seen, " by factoryd\n") || !strings.Contains(seen, "## Previous draft refused by the factory (") || strings.Count(seen, "make wrong-command-xyz") != 2 {
+		t.Errorf("plan-feedback.md = %q, want the factory's rejection of the first draft and the refused-draft note of the second, each naming make wrong-command-xyz", seen)
 	}
 	after, err := request.Load(dataDir, id)
 	if err != nil {

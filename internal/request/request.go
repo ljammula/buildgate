@@ -692,6 +692,10 @@ type Rejection struct {
 	Note    string            `json:"note,omitempty"`
 }
 
+// FactoryActor is the By of a Rejection the factory recorded itself: a
+// drafted plan its own checks refused and had re-planned.
+const FactoryActor = "factoryd"
+
 // Stage is the review stage rej's Reason belongs to -- ForStage when
 // SendBack set it, else FromState. The single routing key stageFeedback
 // (approve.go) files feedback by and SnapshotRevision (revisions.go)
