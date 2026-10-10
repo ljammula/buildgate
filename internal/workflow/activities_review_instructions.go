@@ -175,13 +175,22 @@ func reviewInstructionsCause(runErr, finishErr error) error {
 	return nil
 }
 
+// reviewWorktreeCheckTimeout bounds the git status before a review's
+// snapshot; a variable so a test can shorten it.
+var reviewWorktreeCheckTimeout = sandbox.ReviewInstructionTimeout
+
 // prepareReviewInstructions requires a clean worktree, takes the snapshot
 // and creates the stubs its masks need. An error is returned ready to hand
 // back from the Activity. Stubs already created are removed by the caller
 // through removeReviewStubs, which the manifest makes safe to call whenever.
 func (a *Activities) prepareReviewInstructions(ctx context.Context, input ReviewStepInput, kind, dst string) (reviewInstructions, error) {
 	prep := reviewInstructions{Dst: dst, WorkDir: input.WorkspacePath, Manifest: reviewStubManifestPath(a.dataDirFor(input.RunWorkflowInput), input.WorkspacePath)}
-	clean, err := runner.GitIsClean(input.WorkspacePath)
+	// The check reads the worktree a build wrote, under the snapshot's own
+	// deadline: the step heartbeats through its preparation, so nothing else
+	// would end a git status that blocks.
+	statusCtx, cancel := context.WithTimeout(ctx, reviewWorktreeCheckTimeout)
+	clean, err := runner.GitIsCleanContext(statusCtx, input.WorkspacePath)
+	cancel()
 	if err != nil {
 		return prep, temporal.NewApplicationErrorWithCause("check the worktree before the review", InfrastructureFailureType, err)
 	}
