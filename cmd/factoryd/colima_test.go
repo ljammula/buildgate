@@ -111,15 +111,6 @@ func TestColimaProfileNeedsTheColimaBinary(t *testing.T) {
 	}
 }
 
-func TestColimaProfileArgs(t *testing.T) {
-	if got := strings.Join(hostcontrol.ColimaArgs("stop", "default"), " "); got != "stop" {
-		t.Errorf("default profile args = %q", got)
-	}
-	if got := strings.Join(hostcontrol.ColimaArgs("start", "work"), " "); got != "start --profile work" {
-		t.Errorf("named profile args = %q", got)
-	}
-}
-
 func TestAutostartStartsColimaWhenDockerIsDownThenProceeds(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")

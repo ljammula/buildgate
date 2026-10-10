@@ -226,6 +226,8 @@ Its diff may only remove lines, lower numbers, or rename a moved function.
 
 The tests of `internal/hostcontrol` and `internal/requestdriver` still live in `cmd/factoryd` and call them through exported names.
 
+Of `internal/hostcontrol`'s, the tests that need only a fake `hostcontrol.Deps` are in the package itself, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`); the ones in `cmd/factoryd` are of a command on the way to it, or need a fixture the command tests share (`colimaFake`, `openShellFixture`) or the real `WorkerServiceState` or `ServeStartToken`.
+
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as
 plain-ASCII diagrams in `text` code blocks; paths as `~/`, never a
