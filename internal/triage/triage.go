@@ -154,6 +154,11 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		if g.SetupNotRun() {
 			return "canonical_verify: " + run.SetupNotRunMessage
 		}
+		if g.ReclaimNotChecked() {
+			// The factory's own words; the reason in it is a host-side
+			// read's error, made one line where it was recorded.
+			return "canonical_verify: " + g.Command[0]
+		}
 		// Ahead of "the agent made no changes": a build stopped by its
 		// setup made none because it never had a turn.
 		if s := buildStoppedBySetupSentence(r, forOperator); s != "" {

@@ -221,7 +221,9 @@ func Build(r *run.Run, dataDir string) Document {
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
-//     repository's setup commands (a worker older than them): BinOperator.
+//     repository's setup commands (a worker older than them), or because a
+//     reclaimed result could not be checked against the repository's
+//     .factory.yml: BinOperator.
 //   - a canonical_verify of a run whose build ended at a failing repository
 //     setup command before its first agent turn, by the factory's own
 //     records (triage.BuildStoppedBySetup: the meter counted nothing and
@@ -244,10 +246,11 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 }
 
 // setupNotRun reports whether r recorded the canonical_verify result for a
-// verify that did not run the repository's setup commands.
+// verify that did not run the repository's setup commands, or for a
+// reclaimed result that could not be checked for it.
 func setupNotRun(r *run.Run) bool {
 	for _, g := range r.GateResults {
-		if g.SetupNotRun() {
+		if g.SetupNotRun() || g.ReclaimNotChecked() {
 			return true
 		}
 	}

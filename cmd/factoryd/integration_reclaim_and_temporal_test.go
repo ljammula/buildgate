@@ -134,7 +134,10 @@ func TestIntegrationDaemonReclaimHoldsRepositoryOwnershipAfterSubmitterCrash(t *
 		Repository:    repository,
 		State:         run.StateSliceRunning,
 		BaseSHA:       baseSHA,
-		CreatedAt:     time.Now().Format(time.RFC3339Nano),
+		// The commit the submitter read .factory.yml from (the fixture has
+		// none): a reclaim checks the result against it.
+		ProjectConfigCommitSHA: baseSHA,
+		CreatedAt:              time.Now().Format(time.RFC3339Nano),
 	}
 	if err := seeded.Save(dataDir); err != nil {
 		t.Fatalf("seed crashed-submitter run.json: %v", err)
@@ -1327,7 +1330,11 @@ func TestIntegrationReconcileReclaimedRunSurvivesOwnerIdleRestart(t *testing.T) 
 		Repository:    repository,
 		State:         run.StateSliceRunning,
 		BaseSHA:       baseSHA,
-		CreatedAt:     time.Now().Format(time.RFC3339Nano),
+		// The commit the submitter read .factory.yml from (the fixture has
+		// none): a reclaim checks the result against it.
+		ProjectConfigCommitSHA: baseSHA,
+		ProjectPath:            ws,
+		CreatedAt:              time.Now().Format(time.RFC3339Nano),
 	}
 	if err := seeded.Save(submitterDataDir); err != nil {
 		t.Fatalf("seed crashed-submitter run.json: %v", err)
@@ -1586,7 +1593,11 @@ func TestIntegrationReconcileReclaimedRunNamespacesChildByRepository(t *testing.
 			Repository:    f.repository,
 			State:         run.StateSliceRunning,
 			BaseSHA:       baseSHA,
-			CreatedAt:     time.Now().Format(time.RFC3339Nano),
+			// The commit the submitter read .factory.yml from (the fixture has
+			// none): a reclaim checks the result against it.
+			ProjectConfigCommitSHA: baseSHA,
+			ProjectPath:            f.ws,
+			CreatedAt:              time.Now().Format(time.RFC3339Nano),
 		}
 		if err := seeded.Save(f.submitterDir); err != nil {
 			t.Fatalf("seed crashed-submitter run.json (%s): %v", f.label, err)
