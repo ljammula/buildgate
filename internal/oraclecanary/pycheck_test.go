@@ -483,3 +483,12 @@ func TestCheckPythonOracleParseFailureNamesTheInterpreter(t *testing.T) {
 		t.Fatalf("err = %v, want the parse-failure message to name the interpreter it checked with", err)
 	}
 }
+
+// resetPythonInterpreterCacheForTest clears the cached interpreter choice so
+// a test can inject a fake lookPath and observe a fresh resolution.
+func resetPythonInterpreterCacheForTest() {
+	pythonInterpreterMu.Lock()
+	defer pythonInterpreterMu.Unlock()
+	pythonInterpreterDone = false
+	pythonInterpreterPath, pythonInterpreterErr = "", nil
+}

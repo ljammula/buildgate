@@ -99,15 +99,6 @@ func GoMultiCommand(moduleDir string, files []GoOracleFile) (string, error) {
 		moduleDir, oracleMountPath, table.String()), nil
 }
 
-// PythonCommand runs the mounted oracle with pytest (default collection skips
-// dot-directories, so the path is named explicitly). The default sandbox
-// worker image has no pytest installed (internal/sandbox/Dockerfile), so this
-// is only ever a suggestion for an operator's own project image that has it;
-// the automatic drafter proposes PythonStdlibCommand instead.
-func PythonCommand() string {
-	return "pytest --rootdir . --import-mode=importlib " + oracleMountPath
-}
-
 // PythonStdlibCommand runs every drafted plain-function oracle
 // (test_oracle_*.py under the mount, one or more files) with a small
 // stdlib-only loader: no pytest, no unittest. Matches
@@ -142,16 +133,3 @@ func PythonStdlibCommand() string {
 		"sys.exit(1 if failed or not ran else 0)\n" +
 		"PY"
 }
-
-// VitestCommand runs the mounted oracle with vitest.
-func VitestCommand() string { return "vitest run " + oracleMountPath }
-
-// JestCommand runs the mounted oracle with jest. Jest's haste map may ignore
-// dot-directories; the canary decides whether this works in a given repo.
-func JestCommand() string {
-	return "jest --rootDir . --roots " + oracleMountPath
-}
-
-// DartCommand runs the mounted oracle with flutter test (the default runs
-// only test/).
-func DartCommand() string { return "flutter test " + oracleMountPath + "/" }
