@@ -52,12 +52,18 @@ export function TableRow({ selected = false, className, ...props }: TableRowProp
   );
 }
 
-export function TableHeaderCell({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
+export interface TableHeaderCellProps extends ThHTMLAttributes<HTMLTableCellElement> {
+  /** A column of numbers or dashes: right-aligned, equal-width digits. */
+  readonly numeric?: boolean;
+}
+
+export function TableHeaderCell({ numeric = false, className, ...props }: TableHeaderCellProps) {
   return (
     <th
       scope="col"
       className={cn(
         "h-8 border-b border-border px-3 text-left text-xs font-medium whitespace-nowrap text-fg-muted",
+        numeric && "text-right tabular-nums",
         className,
       )}
       {...props}
@@ -65,6 +71,20 @@ export function TableHeaderCell({ className, ...props }: ThHTMLAttributes<HTMLTa
   );
 }
 
-export function TableCell({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-3 py-2 align-middle text-fg", className)} {...props} />;
+export interface TableCellProps extends TdHTMLAttributes<HTMLTableCellElement> {
+  /** A column of numbers or dashes: right-aligned, equal-width digits. */
+  readonly numeric?: boolean;
+}
+
+export function TableCell({ numeric = false, className, ...props }: TableCellProps) {
+  return (
+    <td
+      className={cn(
+        "px-3 py-2 align-middle text-fg",
+        numeric && "text-right tabular-nums",
+        className,
+      )}
+      {...props}
+    />
+  );
 }

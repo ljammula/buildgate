@@ -22,7 +22,7 @@ export function ProjectOpsCard({ row }: ProjectOpsCardProps) {
   return (
     <Card className="flex flex-col gap-2 p-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-mono text-base font-semibold text-fg">{row.summary.project}</h2>
+        <h2 className="font-mono text-sm font-semibold text-fg">{row.summary.project}</h2>
         <KillSwitchChip engaged={engaged} />
       </div>
       <p className="text-xs">

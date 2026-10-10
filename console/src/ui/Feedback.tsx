@@ -90,8 +90,10 @@ export function Callout({ tone, title, children, className, ...props }: CalloutP
       className={cn(
         "flex gap-2.5 rounded-md border px-3 py-2 text-sm",
         title ? "items-start" : "items-center",
-        classes.soft,
-        classes.border,
+        // Quiet: no tinted fill. A warning or a failure keeps its tone on the
+        // border, so it is not told from a note by a 14px icon alone.
+        "bg-surface",
+        tone === "warning" || tone === "danger" ? classes.border : "border-border",
         className,
       )}
       {...props}

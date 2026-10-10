@@ -69,3 +69,23 @@ export function blockAfter(css: string, selector: string): string {
   const open = css.indexOf("{", start);
   return css.slice(open + 1, css.indexOf("}", open));
 }
+
+/**
+ * Every token of a theme by name, with `var(--x)` references resolved: the
+ * semantic names point at ramp steps, and a theme's values are the plain
+ * `:root` rule overlaid with that theme's own block.
+ */
+export function resolveTokens(
+  theme: string,
+  ...layers: ReadonlyMap<string, string>[]
+): (name: string) => string {
+  const merged = new Map<string, string>();
+  for (const layer of layers) for (const [k, v] of layer) merged.set(k, v);
+  const resolve = (name: string, depth: number): string => {
+    const value = merged.get(name);
+    if (value === undefined || depth > 8) throw new Error(`missing token ${name} in ${theme}`);
+    const ref = /^var\(--([\w-]+)\)$/.exec(value);
+    return ref === null ? value : resolve(ref[1] as string, depth + 1);
+  };
+  return (name) => resolve(name, 0);
+}

@@ -6,6 +6,11 @@
 // WIDTHxHEIGHT (default 1440x900); with more than one, the file names carry
 // the width: <theme>-<width>-<route>.png. For looking at the design; the walk
 // (walk.mjs) is what checks behaviour.
+//
+// WALK_VISION=<deficiency> (for example deuteranopia; any value of CDP's
+// Emulation.setEmulatedVisionDeficiency) photographs the screens as that
+// vision sees them, and prefixes the file names with it, so a state that
+// colour alone tells apart shows up.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -49,6 +54,7 @@ const viewports = (process.env.WALK_VIEWPORTS ?? "1440x900").split(",").map((v) 
   return { width, height };
 });
 
+const vision = process.env.WALK_VISION ?? "";
 const channel = process.env.WALK_BROWSER_CHANNEL;
 const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: true });
 const problems = [];
@@ -56,6 +62,10 @@ for (const viewport of viewports)
   for (const theme of ["dark", "light"]) {
     const context = await browser.newContext({ viewport, colorScheme: theme });
     const page = await context.newPage();
+    if (vision !== "") {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Emulation.setEmulatedVisionDeficiency", { type: vision });
+    }
     page.on("pageerror", (error) => problems.push(`${page.url()} uncaught: ${error.message}`));
     page.on("response", (response) => {
       if (response.status() >= 400) problems.push(`${response.status()} ${response.url()}`);
@@ -76,7 +86,7 @@ for (const viewport of viewports)
       await page.screenshot({
         path: path.join(
           shots,
-          `${theme}-${viewports.length > 1 ? `${viewport.width}-` : ""}${name}.png`,
+          `${vision === "" ? "" : `${vision}-`}${theme}-${viewports.length > 1 ? `${viewport.width}-` : ""}${name}.png`,
         ),
         fullPage: true,
       });

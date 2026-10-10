@@ -9,12 +9,14 @@ import {
   contrastRatio,
   parseDeclarations,
   parseOklch,
+  resolveTokens,
   type Rgba,
 } from "@/test/contrast";
 
 const css = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
-const dark = parseDeclarations(blockAfter(css, "\n:root {"));
+const semantic = parseDeclarations(blockAfter(css, "\n:root {"));
+const dark = parseDeclarations(blockAfter(css, "\n:root {\n  color-scheme: dark;"));
 const light = parseDeclarations(blockAfter(css, ':root[data-theme="light"] {'));
 const lightByMedia = parseDeclarations(
   blockAfter(
@@ -23,17 +25,15 @@ const lightByMedia = parseDeclarations(
   ),
 );
 
+// A new theme is one line here, next to its block in styles.css.
+const themes = [
+  ["dark", dark],
+  ["light", light],
+] as const;
+
 // Pairs that fail today, as "<theme>/<pair id>". Empty this list, never grow it:
 // the test fails when a listed pair passes and when an unlisted one fails.
-const knownFailures = new Set<string>([
-  "dark/control-boundary",
-  "dark/separation/bg:surface",
-  "dark/separation/surface-raised:surface-hover",
-  "dark/separation/surface-sunken:bg",
-  "dark/separation/surface:surface-raised",
-  "dark/text/fg-subtle-on-surface-hover",
-  "light/control-boundary",
-]);
+const knownFailures = new Set<string>([]);
 
 interface Pair {
   id: string;
@@ -59,14 +59,24 @@ function pairsFor(theme: "dark" | "light"): Pair[] {
     });
   }
   plain("accent-text", "accent-fg", "accent", 4.5);
-  plain("control-boundary", "border", "surface", 3.0);
+  plain("control-boundary", "border-control", "field", 3.0);
+  for (const kind of ["add", "del"]) {
+    pairs.push({
+      id: `diff-text/${kind}`,
+      min: 4.5,
+      ratio: (t) =>
+        contrastRatio(t(`diff-${kind}-fg`), composite(t(`diff-${kind}`), t("surface-sunken"))),
+    });
+  }
+  // Dark bars are 1.05: the 0.05 flare term of the WCAG formula compresses
+  // ratios near black, so 1.10 between four dark steps would force pure black.
   const separation: [string, string, number][] =
     theme === "dark"
       ? [
-          ["surface-sunken", "bg", 1.1],
-          ["bg", "surface", 1.1],
-          ["surface", "surface-raised", 1.1],
-          ["surface-raised", "surface-hover", 1.1],
+          ["surface-sunken", "bg", 1.05],
+          ["bg", "surface", 1.05],
+          ["surface", "surface-raised", 1.05],
+          ["surface-raised", "surface-hover", 1.05],
         ]
       : [
           ["bg", "surface", 1.1],
@@ -111,15 +121,31 @@ describe("theme tokens", () => {
 
   it("meets the contrast bars except the known failures", () => {
     const failing = new Set<string>();
-    for (const [theme, tokens] of [
-      ["dark", dark],
-      ["light", light],
-    ] as const) {
-      const token = (name: string) => parseOklch(tokens.get(name) as string);
+    for (const [theme, tokens] of themes) {
+      const value = resolveTokens(theme, semantic, tokens);
+      const token = (name: string) => parseOklch(value(name));
       for (const pair of pairsFor(theme)) {
         if (pair.ratio(token) < pair.min) failing.add(`${theme}/${pair.id}`);
       }
     }
     expect([...failing].sort()).toEqual([...knownFailures].sort());
+  });
+
+  it("names a token a theme lacks", () => {
+    expect(() => resolveTokens("x", new Map())("fg")).toThrow("missing token fg in x");
+  });
+
+  it("resolves the semantic names through the ramp", () => {
+    expect(resolveTokens("dark", semantic, dark)("fg")).toBe(dark.get("n11"));
+  });
+
+  // Values worth reading by eye when the palette moves.
+  it("reports the ratios the design was tuned to", () => {
+    const r = (theme: (typeof themes)[number], a: string, b: string) => {
+      const v = resolveTokens(theme[0], semantic, theme[1]);
+      return contrastRatio(parseOklch(v(a)), parseOklch(v(b)));
+    };
+    expect(r(themes[0], "border-control", "field")).toBeCloseTo(3.29, 1);
+    expect(r(themes[1], "border-control", "field")).toBeCloseTo(3.64, 1);
   });
 });

@@ -47,13 +47,25 @@ function NumbersTable({
         <TableHead>
           <TableRow className="hover:bg-transparent">
             <TableHeaderCell scope="col">Project</TableHeaderCell>
-            <TableHeaderCell scope="col">Tickets</TableHeaderCell>
-            <TableHeaderCell scope="col">One-shot</TableHeaderCell>
-            <TableHeaderCell scope="col">Accepted</TableHeaderCell>
-            <TableHeaderCell scope="col">Median rounds</TableHeaderCell>
+            <TableHeaderCell scope="col" numeric>
+              Tickets
+            </TableHeaderCell>
+            <TableHeaderCell scope="col" numeric>
+              One-shot
+            </TableHeaderCell>
+            <TableHeaderCell scope="col" numeric>
+              Accepted
+            </TableHeaderCell>
+            <TableHeaderCell scope="col" numeric>
+              Median rounds
+            </TableHeaderCell>
             <TableHeaderCell scope="col">Top quarantine check</TableHeaderCell>
-            <TableHeaderCell scope="col">Spend</TableHeaderCell>
-            <TableHeaderCell scope="col">Cost / accepted ticket</TableHeaderCell>
+            <TableHeaderCell scope="col" numeric>
+              Spend
+            </TableHeaderCell>
+            <TableHeaderCell scope="col" numeric>
+              Cost / accepted ticket
+            </TableHeaderCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -63,16 +75,20 @@ function NumbersTable({
               <TableHeaderCell scope="row" className="text-fg border-b-0 text-sm">
                 {row.label}
               </TableHeaderCell>
-              <TableCell>{row.tickets}</TableCell>
-              <TableCell>{row.oneShot}</TableCell>
-              <TableCell>{row.accepted}</TableCell>
-              <TableCell>{row.medianRounds}</TableCell>
+              <TableCell numeric>{row.tickets}</TableCell>
+              <TableCell numeric>{row.oneShot}</TableCell>
+              <TableCell numeric>{row.accepted}</TableCell>
+              <TableCell numeric>{row.medianRounds}</TableCell>
               {/* A check name is text a run recorded: never markup. */}
               <TableCell className="font-mono text-xs">
                 {escapeInvisible(row.topQuarantine)}
               </TableCell>
-              <TableCell className="font-mono text-xs">{row.spend}</TableCell>
-              <TableCell className="font-mono text-xs">{row.costPerAccepted}</TableCell>
+              <TableCell numeric className="font-mono text-xs">
+                {row.spend}
+              </TableCell>
+              <TableCell numeric className="font-mono text-xs">
+                {row.costPerAccepted}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

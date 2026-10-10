@@ -1,10 +1,20 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. Components use only the semantic names below (bg-surface,
- * text-fg-muted, border-border, text-tone-danger ...), never a raw palette
- * colour and never a `dark:` variant: the theme is switched by redefining
- * the variables, so a component is written once.
+ * Design tokens, in three layers. Components use only the Tailwind names of
+ * layer 3 (bg-surface, text-fg-muted, border-border, text-tone-danger ...),
+ * never a raw palette colour and never a `dark:` variant: the theme is
+ * switched by redefining the ramp, so a component is written once.
+ *
+ *   1. Ramp: per theme, eleven neutral steps (--n1 darkest in dark, lightest
+ *      in light ... --n11), the text-control fill, the accent, tone and diff
+ *      values and the card shadow. The only thing a theme block defines.
+ *   2. Semantic: the role names (--surface, --border, --fg ...), defined once
+ *      in a plain :root rule that points at ramp steps. No theme repeats them.
+ *   3. Tailwind: the @theme names below, which read layers 1 and 2.
+ *
+ * A new theme is one block of ramp values here plus one entry in the theme
+ * list of app/tokens.test.ts, which checks its contrast.
  *
  * The theme is `data-theme="light" | "dark"` on <html>, set by
  * platform/themeStore; with no attribute the operating system's preference
@@ -23,6 +33,8 @@
   --color-surface-hover: var(--surface-hover);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-border-control: var(--border-control);
+  --color-field: var(--field);
   --color-fg: var(--fg);
   --color-fg-muted: var(--fg-muted);
   --color-fg-subtle: var(--fg-subtle);
@@ -60,21 +72,54 @@
   --radius-md: 6px;
   --radius-lg: 8px;
 
+  /* Pixels, so the 14px root that spacing uses does not shrink text. */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 20px;
+  --text-lg--line-height: 28px;
+  --text-xl: 24px;
+  --text-xl--line-height: 32px;
+
+  /* The raw value is --elev-card: a theme key cannot read its own name. */
+  --shadow-card: var(--elev-card);
   --shadow-popover: 0 8px 24px -6px rgb(0 0 0 / 0.35), 0 0 0 1px var(--border);
 }
 
 :root {
+  --surface-sunken: var(--n1);
+  --bg: var(--n2);
+  --surface: var(--n3);
+  --surface-raised: var(--n4);
+  --surface-hover: var(--n5);
+  --border: var(--n6);
+  --border-strong: var(--n7);
+  --border-control: var(--n8);
+  --fg-subtle: var(--n9);
+  --fg-muted: var(--n10);
+  --fg: var(--n11);
+}
+
+:root {
   color-scheme: dark;
-  --bg: oklch(0.155 0.008 260);
-  --surface: oklch(0.19 0.009 260);
-  --surface-raised: oklch(0.225 0.01 260);
-  --surface-sunken: oklch(0.135 0.008 260);
-  --surface-hover: oklch(0.25 0.012 260);
-  --border: oklch(0.29 0.012 260);
-  --border-strong: oklch(0.38 0.014 260);
-  --fg: oklch(0.95 0.005 260);
-  --fg-muted: oklch(0.74 0.012 260);
-  --fg-subtle: oklch(0.62 0.014 260);
+  --n1: oklch(0.1 0.008 260);
+  --n2: oklch(0.16 0.008 260);
+  --n3: oklch(0.2 0.009 260);
+  --n4: oklch(0.235 0.01 260);
+  --n5: oklch(0.27 0.012 260);
+  --n6: oklch(0.3 0.012 260);
+  --n7: oklch(0.4 0.014 260);
+  --n8: oklch(0.49 0.014 260);
+  --n9: oklch(0.68 0.014 260);
+  --n10: oklch(0.77 0.012 260);
+  --n11: oklch(0.95 0.005 260);
+  --field: var(--n1);
+  /* Not `none`: Tailwind lists this beside its ring shadows, and `none` in a
+     list voids the whole declaration. */
+  --elev-card: 0 0 #0000;
   --accent: oklch(0.7 0.15 255);
   --accent-hover: oklch(0.76 0.14 255);
   --accent-fg: oklch(0.16 0.02 255);
@@ -84,18 +129,18 @@
   --tone-warning: oklch(0.83 0.15 80);
   --tone-warning-soft: oklch(0.83 0.15 80 / 0.1);
   --tone-warning-border: oklch(0.83 0.15 80 / 0.35);
-  --tone-info: oklch(0.76 0.12 240);
-  --tone-info-soft: oklch(0.76 0.12 240 / 0.12);
-  --tone-info-border: oklch(0.76 0.12 240 / 0.35);
-  --tone-success: oklch(0.78 0.16 150);
-  --tone-success-soft: oklch(0.78 0.16 150 / 0.12);
-  --tone-success-border: oklch(0.78 0.16 150 / 0.35);
+  --tone-info: oklch(0.74 0.11 195);
+  --tone-info-soft: oklch(0.74 0.11 195 / 0.12);
+  --tone-info-border: oklch(0.74 0.11 195 / 0.35);
+  --tone-success: oklch(0.8 0.16 150);
+  --tone-success-soft: oklch(0.8 0.16 150 / 0.12);
+  --tone-success-border: oklch(0.8 0.16 150 / 0.35);
   --tone-danger: oklch(0.72 0.18 25);
   --tone-danger-soft: oklch(0.72 0.18 25 / 0.1);
   --tone-danger-border: oklch(0.72 0.18 25 / 0.4);
-  --tone-neutral: oklch(0.74 0.012 260);
-  --tone-neutral-soft: oklch(0.74 0.012 260 / 0.1);
-  --tone-neutral-border: oklch(0.74 0.012 260 / 0.28);
+  --tone-neutral: var(--n10);
+  --tone-neutral-soft: oklch(0.77 0.012 260 / 0.1);
+  --tone-neutral-border: oklch(0.77 0.012 260 / 0.28);
 
   --diff-add: oklch(0.78 0.16 150 / 0.13);
   --diff-add-fg: oklch(0.84 0.14 150);
@@ -106,38 +151,39 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: oklch(0.962 0.004 260);
-  --surface: oklch(1 0 0);
-  --surface-raised: oklch(1 0 0);
-  --surface-sunken: oklch(0.94 0.005 260);
-  --surface-hover: oklch(0.94 0.006 260);
-  --border: oklch(0.87 0.007 260);
-  --border-strong: oklch(0.76 0.01 260);
-  --fg: oklch(0.22 0.012 260);
-  --fg-muted: oklch(0.44 0.014 260);
-  --fg-subtle: oklch(0.52 0.013 260);
+  --n1: oklch(0.945 0.005 260);
+  --n2: oklch(0.958 0.004 260);
+  --n3: oklch(1 0 0);
+  --n4: oklch(1 0 0);
+  --n5: oklch(0.968 0.006 260);
+  --n6: oklch(0.87 0.007 260);
+  --n7: oklch(0.76 0.01 260);
+  --n8: oklch(0.62 0.012 260);
+  --n9: oklch(0.51 0.013 260);
+  --n10: oklch(0.44 0.014 260);
+  --n11: oklch(0.22 0.012 260);
+  --field: var(--n3);
+  --elev-card: 0 1px 2px rgb(0 0 0 / 0.05);
   --accent: oklch(0.52 0.19 258);
   --accent-hover: oklch(0.46 0.19 258);
   --accent-fg: oklch(0.99 0 0);
   --accent-soft: oklch(0.52 0.19 258 / 0.1);
   --ring: oklch(0.52 0.19 258 / 0.5);
-
   --tone-warning: oklch(0.5 0.13 70);
   --tone-warning-soft: oklch(0.8 0.15 80 / 0.2);
   --tone-warning-border: oklch(0.6 0.14 75 / 0.45);
-  --tone-info: oklch(0.47 0.15 250);
-  --tone-info-soft: oklch(0.6 0.15 250 / 0.12);
-  --tone-info-border: oklch(0.5 0.15 250 / 0.4);
+  --tone-info: oklch(0.43 0.09 205);
+  --tone-info-soft: oklch(0.6 0.1 200 / 0.12);
+  --tone-info-border: oklch(0.5 0.1 200 / 0.4);
   --tone-success: oklch(0.45 0.13 150);
   --tone-success-soft: oklch(0.65 0.16 150 / 0.15);
   --tone-success-border: oklch(0.5 0.14 150 / 0.4);
   --tone-danger: oklch(0.5 0.19 27);
   --tone-danger-soft: oklch(0.62 0.2 27 / 0.12);
   --tone-danger-border: oklch(0.52 0.19 27 / 0.42);
-  --tone-neutral: oklch(0.44 0.014 260);
+  --tone-neutral: var(--n10);
   --tone-neutral-soft: oklch(0.5 0.014 260 / 0.09);
   --tone-neutral-border: oklch(0.5 0.014 260 / 0.3);
-
   --diff-add: oklch(0.65 0.16 150 / 0.16);
   --diff-add-fg: oklch(0.38 0.12 150);
   --diff-del: oklch(0.62 0.2 27 / 0.13);
@@ -149,16 +195,19 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-    --bg: oklch(0.962 0.004 260);
-    --surface: oklch(1 0 0);
-    --surface-raised: oklch(1 0 0);
-    --surface-sunken: oklch(0.94 0.005 260);
-    --surface-hover: oklch(0.94 0.006 260);
-    --border: oklch(0.87 0.007 260);
-    --border-strong: oklch(0.76 0.01 260);
-    --fg: oklch(0.22 0.012 260);
-    --fg-muted: oklch(0.44 0.014 260);
-    --fg-subtle: oklch(0.52 0.013 260);
+    --n1: oklch(0.945 0.005 260);
+    --n2: oklch(0.958 0.004 260);
+    --n3: oklch(1 0 0);
+    --n4: oklch(1 0 0);
+    --n5: oklch(0.968 0.006 260);
+    --n6: oklch(0.87 0.007 260);
+    --n7: oklch(0.76 0.01 260);
+    --n8: oklch(0.62 0.012 260);
+    --n9: oklch(0.51 0.013 260);
+    --n10: oklch(0.44 0.014 260);
+    --n11: oklch(0.22 0.012 260);
+    --field: var(--n3);
+    --elev-card: 0 1px 2px rgb(0 0 0 / 0.05);
     --accent: oklch(0.52 0.19 258);
     --accent-hover: oklch(0.46 0.19 258);
     --accent-fg: oklch(0.99 0 0);
@@ -167,16 +216,16 @@
     --tone-warning: oklch(0.5 0.13 70);
     --tone-warning-soft: oklch(0.8 0.15 80 / 0.2);
     --tone-warning-border: oklch(0.6 0.14 75 / 0.45);
-    --tone-info: oklch(0.47 0.15 250);
-    --tone-info-soft: oklch(0.6 0.15 250 / 0.12);
-    --tone-info-border: oklch(0.5 0.15 250 / 0.4);
+    --tone-info: oklch(0.43 0.09 205);
+    --tone-info-soft: oklch(0.6 0.1 200 / 0.12);
+    --tone-info-border: oklch(0.5 0.1 200 / 0.4);
     --tone-success: oklch(0.45 0.13 150);
     --tone-success-soft: oklch(0.65 0.16 150 / 0.15);
     --tone-success-border: oklch(0.5 0.14 150 / 0.4);
     --tone-danger: oklch(0.5 0.19 27);
     --tone-danger-soft: oklch(0.62 0.2 27 / 0.12);
     --tone-danger-border: oklch(0.52 0.19 27 / 0.42);
-    --tone-neutral: oklch(0.44 0.014 260);
+    --tone-neutral: var(--n10);
     --tone-neutral-soft: oklch(0.5 0.014 260 / 0.09);
     --tone-neutral-border: oklch(0.5 0.014 260 / 0.3);
     --diff-add: oklch(0.65 0.16 150 / 0.16);
@@ -200,6 +249,8 @@
     background: var(--bg);
     color: var(--fg);
     min-height: 100vh;
+    font-size: 13px;
+    line-height: 20px;
   }
 
   code,
