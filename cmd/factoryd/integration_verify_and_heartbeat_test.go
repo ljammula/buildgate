@@ -959,12 +959,6 @@ func TestIntegrationTemporalRelativeDataDirResolvesCheckpointDir(t *testing.T) {
 	}
 }
 
-// TestIntegrationTemporalRoutesThroughRealServer is real-server proof that
-// -temporal-address actually routes execution through
-// internal/workflow.RunWorkflow, not just that the flag is accepted. It
-// skips when no Temporal server is reachable at the default address (or
-// $TEMPORAL_ADDRESS), matching internal/workflow's own live-test skip
-// convention, so ordinary verification does not require a running server.
 // TestIntegrationTemporalRepositoryOwnerRoutesRun is a smoke test proving
 // -repository actually routes a run through
 // internal/workflow.RepositoryOwnerWorkflow (runViaRepositoryOwner), not
