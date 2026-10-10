@@ -11,10 +11,8 @@
 # Two go test passes, not one, and deliberately not `go test -v ./...`:
 #
 #   1. `go test -race ./...` with no -v, both env vars set. DOCKER_SANDBOX_LIVE
-#      and TEMPORAL_ADDRESS are read by the tests themselves (t.Skip when
-#      unset/unreachable; cmd/factoryd's end-to-end ticket tests ignore
-#      TEMPORAL_ADDRESS and run their own leak-proof test server, see
-#      scripts/temporal-test-server.sh), so this sweeps up every live test in the module
+#      and FACTORYD_TEST_TEMPORAL_ADDRESS are read by the tests themselves
+#      (t.Skip when unset), so this sweeps up every live test in the module
 #      automatically, including one added after this script was last touched
 #      -- no hand-picked -run list to fall out of sync. Its exit code is the
 #      authoritative pass/fail signal.
@@ -39,19 +37,31 @@
 # already logged in to pull any private image the live tests need, or local
 # images built via `make local-images`.
 #
+# Temporal: the tests run through one test Temporal dev server this script
+# starts on a free loopback port (scripts/temporal-test-server.sh, which
+# cannot outlive this script) and exports as FACTORYD_TEST_TEMPORAL_ADDRESS,
+# as scripts/test-sharded.sh does. The operator's localhost:7233 and an
+# ambient TEMPORAL_ADDRESS are never used. Needs the `temporal` CLI.
+#
 # Usage: scripts/verify-live.sh
-# Env:
-#   TEMPORAL_ADDRESS   Temporal server address (default localhost:7233).
-#                       If unreachable and the `temporal` CLI is on PATH, a
-#                       throwaway dev server is started and torn down after.
 # Exit code: 0 iff every live test ran and passed; nonzero otherwise
-# (including "Docker unavailable" and "no reachable/startable Temporal").
+# (including "Docker unavailable" and "no temporal CLI").
 
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="$(mktemp -t verify-live-log.XXXXXX)"
-trap 'rm -f "$LOG"' EXIT
+TEMPORAL_TMP="$(mktemp -d -t verify-live-temporal.XXXXXX)"
+temporal_pid=""
+# Closing the lifeline (fd 9) is what stops the test Temporal server.
+cleanup_temporal() {
+	{ exec 9>&-; } 2>/dev/null || true
+	if [ -n "$temporal_pid" ]; then
+		wait "$temporal_pid" 2>/dev/null || true
+	fi
+	rm -rf "$TEMPORAL_TMP"
+}
+trap 'cleanup_temporal; rm -f "$LOG"' EXIT
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
 	echo "verify-live: Docker is not available (checked 'docker info') -- the live tests need a real Docker daemon" >&2
@@ -70,50 +80,31 @@ fi
 export DOCKER_SANDBOX_LIVE_ROOT="${DOCKER_SANDBOX_LIVE_ROOT:-$HOME/buildgate/verify-live}"
 mkdir -p "$DOCKER_SANDBOX_LIVE_ROOT"
 
-ADDR="${TEMPORAL_ADDRESS:-localhost:7233}"
-STARTED_TEMPORAL=0
-
-temporal_reachable() {
-	if command -v temporal >/dev/null 2>&1; then
-		temporal operator cluster health --address "$ADDR" >/dev/null 2>&1
-	else
-		host="$(echo "$ADDR" | cut -d: -f1)"
-		port="$(echo "$ADDR" | cut -d: -f2)"
-		python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex((sys.argv[1], int(sys.argv[2])))==0 else 1)" "$host" "$port"
-	fi
-}
-
-if ! temporal_reachable; then
-	if command -v temporal >/dev/null 2>&1; then
-		echo "verify-live: starting a throwaway Temporal dev server on $ADDR..."
-		port="$(echo "$ADDR" | cut -d: -f2)"
-		nohup temporal server start-dev --headless --port "$port" --log-level warn >"$REPO_ROOT/.verify-live-temporal.log" 2>&1 &
-		disown
-		STARTED_TEMPORAL=1
-		ok=0
-		for _ in $(seq 1 30); do
-			if temporal_reachable; then
-				ok=1
-				break
-			fi
-			sleep 1
-		done
-		if [ "$ok" -ne 1 ]; then
-			echo "verify-live: Temporal dev server did not become healthy within 30s -- see $REPO_ROOT/.verify-live-temporal.log" >&2
-			exit 1
-		fi
-	else
-		echo "verify-live: no Temporal server reachable at $ADDR, and no 'temporal' CLI on PATH to start one -- run 'make temporal-up' or install the Temporal CLI" >&2
-		exit 1
-	fi
+if ! command -v temporal >/dev/null 2>&1; then
+	echo "verify-live: no 'temporal' CLI on PATH to start the test Temporal server -- install the Temporal CLI" >&2
+	exit 1
 fi
-
-cleanup_temporal() {
-	if [ "$STARTED_TEMPORAL" = 1 ] && command -v temporal >/dev/null 2>&1; then
-		pkill -f "temporal server start-dev.*--port ${ADDR#*:}" >/dev/null 2>&1 || true
+port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+ADDR="127.0.0.1:$port"
+mkfifo "$TEMPORAL_TMP/lifeline"
+sh "$REPO_ROOT/scripts/temporal-test-server.sh" factoryd-test-temporal "$port" "$TEMPORAL_TMP/temporal.log" <"$TEMPORAL_TMP/lifeline" &
+temporal_pid=$!
+exec 9>"$TEMPORAL_TMP/lifeline"
+ok=0
+for _ in $(seq 1 150); do
+	if temporal operator cluster health --address "$ADDR" >/dev/null 2>&1; then
+		ok=1
+		break
 	fi
-}
-trap 'cleanup_temporal; rm -f "$LOG"' EXIT
+	sleep 0.2
+done
+if [ "$ok" -ne 1 ]; then
+	echo "verify-live: test Temporal server at $ADDR did not become healthy within 30s:" >&2
+	cat "$TEMPORAL_TMP/temporal.log" >&2
+	exit 1
+fi
+export FACTORYD_TEST_TEMPORAL_ADDRESS="$ADDR"
+echo "verify-live: test Temporal server at $ADDR"
 
 # -p 1: one test package at a time. Live tests in cmd/factoryd,
 # internal/sandbox and internal/workflow share one Docker daemon and its
@@ -123,13 +114,13 @@ trap 'cleanup_temporal; rm -f "$LOG"' EXIT
 # alone). Real
 # factoryd runs are serialized the same way.
 status=0
-echo "verify-live: pass 1/2 -- go test -race <all non-data packages> (DOCKER_SANDBOX_LIVE=1, TEMPORAL_ADDRESS=$ADDR)"
+echo "verify-live: pass 1/2 -- go test -race <all non-data packages> (DOCKER_SANDBOX_LIVE=1, FACTORYD_TEST_TEMPORAL_ADDRESS=$ADDR)"
 (
 	cd "$REPO_ROOT"
 	# Scoped away from gitignored data/, same as the Makefile's GO_PACKAGES:
 	# run artifacts there are not this module's source.
 	# shellcheck disable=SC2046 -- deliberate word-split package list
-	TEMPORAL_ADDRESS="$ADDR" DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -p 1 $(go list ./... | grep -v /data/)
+	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -p 1 $(go list ./... | grep -v /data/)
 ) >"$LOG" 2>&1 || status=1
 tail -100 "$LOG"
 if [ "$status" -ne 0 ]; then
@@ -144,15 +135,16 @@ echo "verify-live: pass 2/2 -- -v -run '$RUN' over $PKGS (false-green skip guard
 (
 	cd "$REPO_ROOT"
 	# shellcheck disable=SC2086 -- PKGS is a deliberate word-split package list
-	TEMPORAL_ADDRESS="$ADDR" DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1 -v" go test -race -p 1 -run "$RUN" $PKGS
+	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1 -v" go test -race -p 1 -run "$RUN" $PKGS
 ) >"$LOG" 2>&1 || status=1
 grep -E '^(--- (PASS|FAIL|SKIP)|ok|FAIL)' "$LOG" || true
 
 # Same anchored phrase as ci.yml's own false-green guard: a live Temporal
-# test silently t.Skip-ing (server died mid-run) must fail this script
-# explicitly rather than pass on an exit code a silent skip never affects.
+# test silently t.Skip-ing (no test server address reached it) must fail this
+# script explicitly rather than pass on an exit code a silent skip never
+# affects.
 if grep -qE "Temporal (Service|server) at \S+ is unreachable:" "$LOG"; then
-	echo "verify-live: one or more live Temporal tests skipped (the dev server became unreachable mid-run) -- failing explicitly, see the log above" >&2
+	echo "verify-live: one or more live Temporal tests skipped (no test Temporal server reached them) -- failing explicitly, see the log above" >&2
 	status=1
 fi
 

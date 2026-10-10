@@ -122,9 +122,9 @@ Test gotchas that have broken `main` before:
   The run fails if a test is in zero or two shards. On a memory-tight machine,
   `TEST_SHARDS_SEQUENTIAL=1 make verify` runs the shards one after another
   (slower, peak memory of one race binary).
-- `make verify-live` fails loudly without Docker and needs Temporal at
-  `TEMPORAL_ADDRESS` (default `localhost:7233`) or the `temporal` CLI. On
-  colima it roots scratch dirs under `~/buildgate` so the VM can see them.
+- `make verify-live` fails loudly without Docker or the `temporal` CLI: it
+  starts its own test Temporal server (below). On colima it roots scratch
+  dirs under `~/buildgate` so the VM can see them.
 - `make proving-ground` runs the fixtures in
   `scripts/proving-ground/fixtures.json`, each pinned to a `base_ref`, one at
   a time. `PROVING_GROUND_TEMPORAL=<addr>` also runs each through Temporal as
@@ -134,9 +134,12 @@ Test gotchas that have broken `main` before:
   also rejects finding labels such as a capital letter plus a number unless
   the file is in its `ownLabelFiles`.
 - Tests run builds through one test Temporal dev server, never the operator's
-  `:7233` or an ambient `TEMPORAL_ADDRESS`. `scripts/test-sharded.sh` starts
-  it and exports `FACTORYD_TEST_TEMPORAL_ADDRESS`; a bare `go test` starts its
-  own on first use (`sharedTemporalAddress`, `cmd/factoryd/temporal_testserver_test.go`).
+  `:7233` or an ambient `TEMPORAL_ADDRESS`. `scripts/test-sharded.sh` and
+  `scripts/verify-live.sh` start it and export `FACTORYD_TEST_TEMPORAL_ADDRESS`;
+  a bare `go test` of `cmd/factoryd` starts its own on first use
+  (`sharedTemporalAddress`, `cmd/factoryd/temporal_testserver_test.go`), and
+  one of `internal/workflow` skips its live tests unless that variable names
+  a server (`dialTemporal`).
   Both launch it through `scripts/temporal-test-server.sh`, whose stdin is a
   pipe held by the launcher, so the server dies with its owner even on
   SIGKILL. Helpers pass `-temporal-address` explicitly (`factorydCommand`):

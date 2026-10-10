@@ -6,7 +6,7 @@
 #
 # Usage:
 #   docker compose -f docker-compose.temporal.yml up -d
-#   TEMPORAL_ADDRESS=localhost:7233 go test ./internal/workflow/... -run TestTemporalLive -v
+#   FACTORYD_TEST_TEMPORAL_ADDRESS=localhost:7233 go test ./internal/workflow/... -run TestTemporalLive -v
 #   Web UI: http://localhost:8233
 #   docker compose -f docker-compose.temporal.yml down        # stop, keep data
 #   docker compose -f docker-compose.temporal.yml down -v     # stop, wipe data
