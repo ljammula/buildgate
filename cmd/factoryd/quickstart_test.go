@@ -234,6 +234,33 @@ func TestQuickstartValidateRequestSourceRejectsUnreadableRequestFile(t *testing.
 
 // ---- quickstartSubmitAndWatch (-issue/-request-file plumbing) -----------
 
+// TestQuickstartSubmitAndWatchResolvesTheDesignGuideFromTheSessionSettings:
+// a repository whose .factory.yml names a design_guide is submitted, since
+// the session's design_guide_dirs reach the submission. Quickstart passed no
+// settings, and refused such a repository as having no design_guide_dirs.
+func TestQuickstartSubmitAndWatchResolvesTheDesignGuideFromTheSessionSettings(t *testing.T) {
+	dp := newTestDeps(t)
+	workspace := t.TempDir()
+	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
+preflight_profile: brownfield
+design_guide: go-service
+`)
+	dataDir := t.TempDir()
+
+	var buf bytes.Buffer
+	err := quickstartSubmitAndWatch(dp, &buf, designGuideSettings(t), workspace, dataDir, "Reading-time endpoint", "", "", "", false, "", false, time.Millisecond, time.Millisecond, "", false)
+	if err != nil {
+		t.Fatalf("quickstartSubmitAndWatch: %v", err)
+	}
+	requests, err := request.List(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("len(requests) = %d, want 1", len(requests))
+	}
+}
+
 // TestQuickstartSubmitAndWatchRequestFileReachesRequest covers -request-file
 // text reaching the submitted request, the same way
 // TestSubmitMainWritesRequest proves it for plain `factoryd submit`.
@@ -250,7 +277,7 @@ preflight_profile: brownfield
 	}
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, workspace, dataDir, "", "", reqFile, "", false, "", false, time.Millisecond, time.Millisecond, "", false)
+	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "", reqFile, "", false, "", false, time.Millisecond, time.Millisecond, "", false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
@@ -292,7 +319,7 @@ preflight_profile: brownfield
 	defer func() { fakeForgeOf(dp).fetchIssueFn = orig }()
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, workspace, dataDir, "", "https://github.com/acme/widgets/issues/42", "", "", false, "", false, time.Millisecond, time.Millisecond, "", false)
+	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "https://github.com/acme/widgets/issues/42", "", "", false, "", false, time.Millisecond, time.Millisecond, "", false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
