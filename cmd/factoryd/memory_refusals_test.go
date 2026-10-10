@@ -241,3 +241,28 @@ func TestMemoryCandidateKeepsABacktickedCommandAndRefusesHostileOnes(t *testing.
 		}
 	}
 }
+
+// Every value the build agent wrote reaches handoff.json with its backticks
+// turned into quotes, the notes' fifth heading included: the memory list
+// reads the candidates it judges as written from the host's copy of the
+// notes, never from the handoff.
+func TestHandoffJSONHoldsNoBacktickFromTheNotes(t *testing.T) {
+	f := newMemFix(t, nil)
+	rr := f.quarantinedRunWithNotes("run-ticks", "What I did\n- ran `make gen`\n"+worthKnowing("Run `make gen` before the tests"))
+	raw, err := os.ReadFile(filepath.Join(run.Dir(f.data, rr.ID), handoff.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "`") || strings.Contains(string(raw), "as_written") {
+		t.Errorf("handoff.json holds a backtick or a second copy of the notes:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "Run 'make gen' before the tests") {
+		t.Errorf("handoff.json lacks the note with its backticks turned into quotes:\n%s", raw)
+	}
+	if err := f.cmd().list(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ls := f.lessons(); len(ls) != 1 || ls[0].Line != "- Run `make gen` before the tests." {
+		t.Errorf("lessons = %+v, want the candidate as written", ls)
+	}
+}
