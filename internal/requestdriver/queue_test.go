@@ -1,4 +1,4 @@
-package main
+package requestdriver_test
 
 import (
 	"reflect"
