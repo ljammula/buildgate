@@ -2,6 +2,7 @@ package requestsubmit
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,7 @@ func TestSubmitWritesRequest(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 
+	testfixture.CommitAgentsFile(t, workspace)
 	result, err := Submit(Params{
 		WorkspaceArg: workspace,
 		DataDir:      dataDir,
@@ -67,6 +69,7 @@ func TestSubmitUsesIDTextForRequestIDWhenSet(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 
+	testfixture.CommitAgentsFile(t, workspace)
 	result, err := Submit(Params{
 		WorkspaceArg:             workspace,
 		DataDir:                  dataDir,
@@ -96,6 +99,7 @@ func TestSubmitRejectsMissingVerifyCommand(t *testing.T) {
 	workspace := t.TempDir()
 	dataDir := t.TempDir()
 
+	testfixture.CommitAgentsFile(t, workspace)
 	_, err := Submit(Params{
 		WorkspaceArg: workspace,
 		DataDir:      dataDir,
@@ -118,6 +122,7 @@ func TestSubmitRejectsDataDirInsideWorkspace(t *testing.T) {
 	}
 	dataDir := filepath.Join(workspace, "data")
 
+	testfixture.CommitAgentsFile(t, workspace)
 	_, err := Submit(Params{
 		WorkspaceArg: workspace,
 		DataDir:      dataDir,
@@ -147,6 +152,7 @@ func TestSubmitSubstitutesFullSuiteForEveryCaller(t *testing.T) {
 				t.Fatal(err)
 			}
 			dataDir := t.TempDir()
+			testfixture.CommitAgentsFile(t, workspace)
 			result, err := Submit(Params{
 				WorkspaceArg:     workspace,
 				DataDir:          dataDir,
@@ -218,6 +224,7 @@ func TestSubmitRejectsIncompleteBootstrapUnderStrictProfile(t *testing.T) {
 // reject a genuinely conforming repo.
 func TestSubmitAcceptsConformingRepoUnderStrictProfile(t *testing.T) {
 	workspace := testfixture.NewGitRepo(t)
+	testfixture.CommitAgentsFile(t, workspace)
 	dataDir := t.TempDir()
 
 	result, err := Submit(Params{
@@ -251,6 +258,7 @@ func TestSubmitBrownfieldRepoWithoutArtifactsStillSubmits(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 
+	testfixture.CommitAgentsFile(t, workspace)
 	result, err := Submit(Params{
 		WorkspaceArg: workspace,
 		DataDir:      dataDir,
@@ -348,6 +356,7 @@ func TestSubmitRefusesLooserRepoTokenCeilingThanSession(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 
+	testfixture.CommitAgentsFile(t, workspace)
 	_, err := Submit(Params{
 		WorkspaceArg:        workspace,
 		DataDir:             dataDir,
@@ -382,6 +391,7 @@ func TestSubmitRefusesAnUnresolvableDesignGuide(t *testing.T) {
 		PreflightProfileExplicit: true,
 		Settings:                 sessionconfig.Settings{DesignGuideDirs: []string{guides}},
 	}
+	testfixture.CommitAgentsFile(t, workspace)
 	_, err := Submit(params)
 	if err == nil || !strings.Contains(err.Error(), `names design_guide "go-service"`) {
 		t.Fatalf("err = %v, want a refusal naming the guide", err)
@@ -418,6 +428,7 @@ func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 		PreflightProfileExplicit: true,
 		ImportedSpec:             strings.Replace(handedOverSpec, "## Risks", "## Risk", 1),
 	}
+	testfixture.CommitAgentsFile(t, workspace)
 	if _, err := Submit(params); err == nil || !strings.Contains(err.Error(), `-spec-file: spec is missing required heading "## Risks"`) {
 		t.Fatalf("err = %v, want a refusal naming the missing heading", err)
 	}
@@ -468,6 +479,7 @@ func TestSubmitStoresAHandedOverPlanAndRefusesAMalformedOne(t *testing.T) {
 		"criterion not covered": {params(handedOverSpec, ImportedTicket{"001.spec.md", strings.Replace(handedOverTicket, "- 1\n\n## Out", "- 2\n\n## Out", 1)}), "-plan-dir:"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			testfixture.CommitAgentsFile(t, workspace)
 			_, err := Submit(tc.params)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one containing %q", err, tc.want)
@@ -490,5 +502,117 @@ func TestSubmitStoresAHandedOverPlanAndRefusesAMalformedOne(t *testing.T) {
 	stored, err := os.ReadFile(filepath.Join(request.ImportedTicketsDir(p.DataDir, result.ID), "001.spec.md"))
 	if !req.SpecImported || !req.PlanImported || err != nil || string(stored) != handedOverTicket {
 		t.Fatalf("SpecImported %v, PlanImported %v, stored ticket matches %v (%v)", req.SpecImported, req.PlanImported, string(stored) == handedOverTicket, err)
+	}
+}
+
+// agentsRepo is a repository with one commit of files, and extra written to
+// its working tree afterwards without a commit.
+func agentsRepo(t *testing.T, committed, uncommitted map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write := func(files map[string]string) {
+		t.Helper()
+		for name, content := range files {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	git("init", "-q", "-b", "main")
+	write(committed)
+	git("add", "-A")
+	git("commit", "-q", "--allow-empty", "-m", "files")
+	write(uncommitted)
+	return dir
+}
+
+func TestRequireAgentsFileReadsTheRootFileAtHead(t *testing.T) {
+	const written = "# AGENTS.md\n\n- Test: `make test`\n"
+	cases := map[string]struct {
+		committed, uncommitted map[string]string
+		want                   string // "" accepts
+	}{
+		"committed":                {committed: map[string]string{"AGENTS.md": written}},
+		"committed, then emptied":  {committed: map[string]string{"AGENTS.md": written}, uncommitted: map[string]string{"AGENTS.md": ""}},
+		"missing":                  {committed: map[string]string{"main.go": "package main\n"}, want: "has no AGENTS.md committed at its root"},
+		"only in the working tree": {committed: map[string]string{"main.go": "package main\n"}, uncommitted: map[string]string{"AGENTS.md": written}, want: "has no AGENTS.md committed at its root"},
+		"empty":                    {committed: map[string]string{"AGENTS.md": ""}, want: "is empty"},
+		"whitespace only":          {committed: map[string]string{"AGENTS.md": " \n\t\n"}, want: "is empty"},
+		"a byte-order mark only":   {committed: map[string]string{"AGENTS.md": "\ufeff\n"}, want: "is empty"},
+		"empty at HEAD, written in the working tree": {committed: map[string]string{"AGENTS.md": "\n"}, uncommitted: map[string]string{"AGENTS.md": written}, want: "is empty"},
+		"another letter case":                        {committed: map[string]string{"agents.md": written}, want: "has no AGENTS.md committed at its root"},
+		"only in a subdirectory":                     {committed: map[string]string{"docs/AGENTS.md": written}, want: "has no AGENTS.md committed at its root"},
+		"another instruction file":                   {committed: map[string]string{"CLAUDE.md": written}, want: "has no AGENTS.md committed at its root"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := RequireAgentsFile(agentsRepo(t, c.committed, c.uncommitted))
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("RequireAgentsFile = %v, want accepted", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "setup, test, build and lint commands") || strings.Contains(err.Error(), "\n") {
+				t.Fatalf("RequireAgentsFile = %v, want one line holding %q and the fix", err, c.want)
+			}
+		})
+	}
+}
+
+func TestRequireAgentsFileRefusesALinkAndADirectoryWithoutCommits(t *testing.T) {
+	linked := agentsRepo(t, map[string]string{"docs/guide.md": "# Guide\n"}, nil)
+	if err := os.Symlink("docs/guide.md", filepath.Join(linked, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "link"}} {
+		if out, err := exec.Command("git", append([]string{"-C", linked}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if err := RequireAgentsFile(linked); err == nil || !strings.Contains(err.Error(), "is not a regular file") {
+		t.Errorf("a symlink named AGENTS.md: %v, want refused as not a regular file", err)
+	}
+
+	plain := t.TempDir()
+	if err := os.WriteFile(filepath.Join(plain, "AGENTS.md"), []byte("# AGENTS.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireAgentsFile(plain); err == nil || !strings.Contains(err.Error(), "not a git checkout with a commit at HEAD") {
+		t.Errorf("a directory outside git: %v, want refused", err)
+	}
+}
+
+// The refusal comes before the request exists: no request id is claimed and
+// no document saved, whatever flags the request carries.
+func TestSubmitRefusesARepositoryWithoutAgentsFileBeforeRecording(t *testing.T) {
+	workspace := agentsRepo(t, map[string]string{".factory.yml": "verify_command: \"make test\"\npreflight_profile: brownfield\n"}, map[string]string{"AGENTS.md": "# AGENTS.md\n"})
+	dataDir := t.TempDir()
+	_, err := Submit(Params{
+		WorkspaceArg: workspace, DataDir: dataDir, RequestText: "Add idempotency keys",
+		Source:        request.Source{Kind: request.SourceText},
+		VerifyCommand: "make test", VerifyCommandExplicit: true,
+		PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "request not submitted") || !strings.Contains(err.Error(), "has no AGENTS.md committed at its root") {
+		t.Fatalf("Submit = %v, want the AGENTS.md refusal", err)
+	}
+	if requests, err := request.List(dataDir); err != nil || len(requests) != 0 {
+		t.Fatalf("requests after a refused submit = %v (%v), want none", requests, err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "requests")); !os.IsNotExist(err) {
+		t.Fatalf("a refused submit left a requests directory (stat: %v)", err)
 	}
 }

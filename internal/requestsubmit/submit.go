@@ -25,6 +25,7 @@ import (
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
+	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/workspace"
 )
@@ -45,6 +46,54 @@ func GitToplevel(dir string) (string, error) {
 		return "", fmt.Errorf("not a git repository: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// RequireAgentsFile refuses a repository whose root AGENTS.md is missing or
+// holds only whitespace at HEAD: that file is how every harness learns the
+// repository's ways of working, so no request starts without it. It reads git
+// objects, never the working tree, so an uncommitted file does not pass, and
+// only the exact root name counts (not another case, a symlink or a copy in a
+// subdirectory). submit, quickstart and doctor -target-repo share it; no flag
+// or config key turns it off.
+func RequireAgentsFile(workspaceAbs string) error {
+	const fix = "commit an " + run.RootInstructionFile + " at the repository root that gives the repo's setup, test, build and lint commands"
+	git := func(args ...string) ([]byte, error) {
+		return exec.Command("git", append([]string{"-C", workspaceAbs}, args...)...).Output()
+	}
+	if _, err := git("rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		// git's own first line when it has one (a repository it refuses to
+		// read says why there); a checkout with no commit prints nothing.
+		reason := ""
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			reason, _, _ = strings.Cut(strings.TrimSpace(string(exit.Stderr)), "\n")
+		}
+		if reason != "" {
+			reason = " (git: " + reason + ")"
+		}
+		return fmt.Errorf("%s is not a git checkout with a commit at HEAD%s, so it has no committed %s: %s", workspaceAbs, reason, run.RootInstructionFile, fix)
+	}
+	out, err := git("ls-tree", "--full-tree", "-z", "HEAD", "--", run.RootInstructionFile)
+	if err != nil {
+		return fmt.Errorf("read %s at HEAD of %s: %w", run.RootInstructionFile, workspaceAbs, err)
+	}
+	meta, name, _ := strings.Cut(strings.TrimSuffix(string(out), "\x00"), "\t")
+	fields := strings.Fields(meta) // mode type object
+	if name != run.RootInstructionFile || len(fields) != 3 {
+		return fmt.Errorf("%s has no %s committed at its root (read from git at HEAD, not the working tree): %s", workspaceAbs, run.RootInstructionFile, fix)
+	}
+	if fields[0] != "100644" && fields[0] != "100755" {
+		return fmt.Errorf("%s at HEAD of %s is not a regular file: %s", run.RootInstructionFile, workspaceAbs, fix)
+	}
+	blob, err := git("cat-file", "blob", fields[2])
+	if err != nil {
+		return fmt.Errorf("read %s at HEAD of %s: %w", run.RootInstructionFile, workspaceAbs, err)
+	}
+	// A byte-order mark is all some editors save for an empty file.
+	if strings.TrimSpace(strings.TrimPrefix(string(blob), "\ufeff")) == "" {
+		return fmt.Errorf("%s at HEAD of %s is empty: %s", run.RootInstructionFile, workspaceAbs, fix)
+	}
+	return nil
 }
 
 // Params holds every already-resolved input Submit needs. Unlike
@@ -637,6 +686,10 @@ func Submit(p Params) (Result, error) {
 	}
 	if err := submitProjectBootstrapPreflight(workspaceAbs, preflightProfile); err != nil {
 		return Result{}, err
+	}
+
+	if err := RequireAgentsFile(workspaceAbs); err != nil {
+		return Result{}, fmt.Errorf("request not submitted: %w", err)
 	}
 
 	id, err := claimRequestID(p, requestText)

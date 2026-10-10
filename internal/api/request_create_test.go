@@ -1,6 +1,7 @@
 package api
 
 import (
+	"buildgate/internal/testfixture"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,7 @@ func initGitWorkspace(t *testing.T, name string) string {
 	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
+	testfixture.CommitAgentsFile(t, dir)
 	return dir
 }
 
@@ -54,6 +56,11 @@ func writeCreateTestFactoryYML(t *testing.T, workspace, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write .factory.yml: %v", err)
+	}
+	// A repository reads its .factory.yml from HEAD once it has a commit;
+	// a test's plain directory stays one.
+	if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil {
+		testfixture.CommitAgentsFile(t, workspace)
 	}
 }
 
@@ -208,6 +215,37 @@ func TestCreateRequestRejectsNonGitRoot(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}
+
+// A listed repository with no committed AGENTS.md is refused with submit's own
+// line and records nothing: the console and the MCP tool cannot start a
+// request `factoryd submit` would refuse.
+func TestCreateRequestRefusesARepositoryWithoutAgentsFile(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "app")
+	if out, err := exec.Command("git", "init", "-q", "-b", "main", workspace).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "files"}} {
+		if out, err := exec.Command("git", append([]string{"-C", workspace}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}))
+	body := `{"workspace":` + jsonString(workspace) + `,"text":"Add idempotency keys"}`
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests", "test-token", body))
+
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "has no AGENTS.md committed at its root") {
+		t.Fatalf("status = %d, want %d naming the missing AGENTS.md: %s", recorder.Code, http.StatusUnprocessableEntity, recorder.Body.String())
+	}
+	if requests, err := request.List(dataDir); err != nil || len(requests) != 0 {
+		t.Fatalf("requests after a refused create = %v (%v), want none", requests, err)
 	}
 }
 

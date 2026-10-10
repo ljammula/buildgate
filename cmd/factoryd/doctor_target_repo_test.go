@@ -177,10 +177,13 @@ func commitFiles(t *testing.T, files map[string]string) string {
 func TestDoctorTargetRepoFailsWhereSubmitWouldRefuse(t *testing.T) {
 	repo := commitFiles(t, map[string]string{"add.py": "def add(a, b):\n    return a + b\n"})
 	checks := doctorTargetRepoSubmitChecks(repo)
-	if len(checks) != 2 {
-		t.Fatalf("want a verify check and a preflight check, got %+v", checks)
+	if len(checks) != 3 {
+		t.Fatalf("want an AGENTS.md check, a verify check and a preflight check, got %+v", checks)
 	}
-	verify, preflight := checks[0], checks[1]
+	agents, verify, preflight := checks[0], checks[1], checks[2]
+	if agents.Err == nil || agents.Advisory || !strings.Contains(agents.Err.Error(), "has no AGENTS.md committed at its root") || !strings.Contains(agents.Err.Error(), "setup, test, build and lint commands") {
+		t.Errorf("AGENTS.md check = %+v, want a FAIL saying what is missing and how to fix it", agents)
+	}
 	if verify.Err == nil || !verify.Advisory || !strings.Contains(verify.Fix, "-verify-command") {
 		t.Errorf("verify check = %+v, want an advisory warning pointing at -verify-command", verify)
 	}
@@ -195,11 +198,33 @@ func TestDoctorTargetRepoFailsWhereSubmitWouldRefuse(t *testing.T) {
 func TestDoctorTargetRepoPassesABrownfieldRepoWithAVerifyCommand(t *testing.T) {
 	repo := commitFiles(t, map[string]string{
 		"add.py":       "def add(a, b):\n    return a + b\n",
+		"AGENTS.md":    "# AGENTS.md\n\n- Test: `python3 -m unittest`\n",
 		".factory.yml": "verify_command: \"python3 -m unittest\"\npreflight_profile: brownfield\n",
 	})
 	for _, c := range doctorTargetRepoSubmitChecks(repo) {
 		if c.Err != nil {
 			t.Errorf("check %q failed: %v", c.Name, c.Err)
 		}
+	}
+}
+
+// An AGENTS.md that is empty at HEAD fails the row even when the working tree
+// holds a written one: doctor reads what submit reads.
+func TestDoctorTargetRepoFailsAnAgentsFileEmptyAtHead(t *testing.T) {
+	repo := commitFiles(t, map[string]string{
+		"AGENTS.md":    "\n  \n",
+		".factory.yml": "verify_command: \"python3 -m unittest\"\npreflight_profile: brownfield\n",
+	})
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# AGENTS.md\n\n- Test: `python3 -m unittest`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var failed []string
+	for _, c := range doctorTargetRepoSubmitChecks(repo) {
+		if c.Err != nil && !c.Advisory {
+			failed = append(failed, c.Name+": "+c.Err.Error())
+		}
+	}
+	if len(failed) != 1 || !strings.Contains(failed[0], "AGENTS.md at HEAD of") || !strings.Contains(failed[0], "is empty") {
+		t.Fatalf("failed checks = %q, want only the empty AGENTS.md", failed)
 	}
 }

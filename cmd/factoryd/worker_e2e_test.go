@@ -13,6 +13,7 @@ import (
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/testfixture"
 )
 
 // workerEndToEndArgs is the `factoryd worker` argv the end-to-end test starts,
@@ -60,6 +61,7 @@ func workerEndToEndArgs(t *testing.T, dataDir string) (args, env []string, confi
 func TestWorkerEndToEndRequestReachesAcceptedRun(t *testing.T) {
 	address := sharedTemporalAddress(t)
 	ws := newFixtureRepo(t)
+	testfixture.CommitAgentsFile(t, ws)
 	dataDir := t.TempDir()
 	workerArgs, env, configPath := workerEndToEndArgs(t, dataDir)
 

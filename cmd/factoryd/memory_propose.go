@@ -12,6 +12,7 @@ import (
 	"buildgate/internal/memory"
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/request"
+	"buildgate/internal/requestsubmit"
 )
 
 // expectedFileHeading is the last section of a memory request's spec and of
@@ -189,6 +190,12 @@ func (mc *memoryCmd) propose(ctx context.Context, ids []string) (string, error) 
 	} else if active != "" {
 		return "", fmt.Errorf("memory request %s for this repository is still open: one memory change at a time. Finish it (approve and merge) or `factoryd cancel %s` first", active, active)
 	}
+	// A memory request is a request like any other: it does not create the
+	// AGENTS.md no request starts without. Refused here, before the store
+	// changes or a request id is claimed, on the check submit runs.
+	if err := requestsubmit.RequireAgentsFile(mc.repoRoot); err != nil {
+		return "", err
+	}
 	file, section, err := memorySectionAtHead(ctx, mc.dp, mc.repoRoot)
 	if err != nil {
 		return "", err
@@ -203,18 +210,15 @@ func (mc *memoryCmd) propose(ctx context.Context, ids []string) (string, error) 
 		return "", err
 	}
 	expected := section.Render(lines)
-	if file != nil && string(expected) == string(file) {
+	if string(expected) == string(file) {
 		return "", errors.New("nothing to change: every line named is already in the section")
 	}
-	proposal := memory.Proposal{BaseBlobSHA256: "", Expected: string(expected)}
+	proposal := memory.Proposal{BaseBlobSHA256: memory.HashHex(file), Expected: string(expected)}
 	changes := proposalChanges(picked, remove)
-	if file != nil {
-		proposal.BaseBlobSHA256 = memory.HashHex(file)
-	}
 	for _, l := range picked {
 		proposal.LessonIDs = append(proposal.LessonIDs, l.ID)
 	}
-	requestID, err := mc.submitMemoryRequest(ctx, proposal, changes, verify, file != nil)
+	requestID, err := mc.submitMemoryRequest(ctx, proposal, changes, verify)
 	if err != nil {
 		return "", err
 	}
@@ -241,7 +245,7 @@ func (mc *memoryCmd) propose(ctx context.Context, ids []string) (string, error) 
 // list of changes under it and submits the request through the entry point
 // `factoryd submit -spec-file -plan-dir` uses. A failed submit leaves no
 // proposal, no list and no claimed id.
-func (mc *memoryCmd) submitMemoryRequest(ctx context.Context, proposal memory.Proposal, changes []memory.Change, verify string, fileExists bool) (string, error) {
+func (mc *memoryCmd) submitMemoryRequest(ctx context.Context, proposal memory.Proposal, changes []memory.Change, verify string) (string, error) {
 	requestID, err := request.ClaimID(mc.dataDir, request.GenerateID("memory "+mc.project, mc.now))
 	if err != nil {
 		return "", fmt.Errorf("claim a request id: %w", err)
@@ -269,7 +273,7 @@ func (mc *memoryCmd) submitMemoryRequest(ctx context.Context, proposal memory.Pr
 		undo()
 		return "", err
 	}
-	docs := memoryRequestDocuments(proposal, changes, verify, fileExists)
+	docs := memoryRequestDocuments(proposal, changes, verify)
 	scratch, err := os.MkdirTemp("", "factoryd-memory-request-")
 	if err != nil {
 		undo()

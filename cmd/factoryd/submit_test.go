@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"buildgate/internal/request"
+	"buildgate/internal/testfixture"
 )
 
 // writeFakeGH writes a fake `gh` executable at dir/fake-gh that prints
@@ -34,7 +35,7 @@ func writeFakeGH(t *testing.T, dir, script string) string {
 func TestSubmitMainWritesRequest(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -93,6 +94,7 @@ func TestSubmitMainRecordsExplicitVerifyCommandFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	dataDir := t.TempDir()
+	testfixture.CommitAgentsFile(t, workspace)
 
 	// -preflight-profile brownfield: this fixture workspace has no
 	// spec/spec.md/contract.md/ARCHITECTURE.md, unrelated to what this
@@ -122,7 +124,7 @@ func TestSubmitMainRecordsExplicitVerifyCommandFlag(t *testing.T) {
 func TestSubmitMainRecordsExplicitPreflightProfileFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 `)
 	dataDir := t.TempDir()
 
@@ -150,7 +152,7 @@ func TestSubmitMainRecordsExplicitPreflightProfileFlag(t *testing.T) {
 func TestSubmitMainRecordsFullSuiteCommandFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -177,7 +179,7 @@ preflight_profile: brownfield
 func TestSubmitDefaultsFullSuiteToVerifyCommand(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -207,7 +209,7 @@ preflight_profile: brownfield
 func TestSubmitFullSuiteCommandNoneOptsOut(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -237,7 +239,7 @@ func TestSubmitMainRecordsNoCommitOraclesFlag(t *testing.T) {
 		want bool
 	}{{[]string{"-no-commit-oracles"}, true}, {nil, false}} {
 		workspace := t.TempDir()
-		writeTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+		writeTestSubmitRepo(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
 		dataDir := t.TempDir()
 		args := append(append([]string{}, tc.args...), "-data-dir", dataDir, workspace, "Add a new func")
 		if err := submitMain(dp, args); err != nil {
@@ -259,7 +261,7 @@ func TestSubmitMainRecordsNoCommitOraclesFlag(t *testing.T) {
 func TestSubmitMainRecordsDraftOraclesFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	for _, tc := range []struct {
@@ -306,7 +308,7 @@ func routesModeConfigWithAllowedSonnet(t *testing.T) string {
 func TestSubmitMainModelFlagAcceptsAllowedChoice(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
@@ -558,7 +560,7 @@ func TestSubmitMainRequestFileAndInlineTextAreMutuallyExclusive(t *testing.T) {
 func TestSubmitMainRequestFile(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -835,7 +837,7 @@ func TestSubmitMainIssueBeforeWorkspaceReachesFetchPath(t *testing.T) {
 	t.Setenv("PATH", ghDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -885,7 +887,7 @@ func TestSubmitMainIssueRequestIDSlugsTitleOnly(t *testing.T) {
 	t.Setenv("PATH", ghDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -921,7 +923,7 @@ func TestSubmitMainRecordsProjectAsWorkspaceBasename(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeTestFactoryYML(t, workspace, `verify_command: "true"
+	writeTestSubmitRepo(t, workspace, `verify_command: "true"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -947,7 +949,7 @@ preflight_profile: brownfield
 func TestSubmitMainHarnessFlagAcceptsAllowedChoice(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)

@@ -292,7 +292,7 @@ func TestSubmitMainWakesTheWorkflowOnce(t *testing.T) {
 	dp := newTestDeps(t)
 	woken := stubWake(dp, t, nil)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeTestSubmitRepo(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
 	dataDir := t.TempDir()
 
 	if err := submitMain(dp, []string{"-data-dir", dataDir, workspace, "Add idempotency keys to POST /refunds"}); err != nil {

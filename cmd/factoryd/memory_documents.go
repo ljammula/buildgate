@@ -125,14 +125,10 @@ func fileEnding(expected string) string {
 // memoryRequestDocuments writes a memory request's spec and ticket around the
 // expected AGENTS.md. The expected text is the last section of each, in a
 // fence its content cannot close; every other word is the factory's.
-func memoryRequestDocuments(p memory.Proposal, changes []memory.Change, verifyCommand string, fileExists bool) memoryDocuments {
+func memoryRequestDocuments(p memory.Proposal, changes []memory.Change, verifyCommand string) memoryDocuments {
 	added, removed := splitChanges(changes)
-	action := "Replace the file `AGENTS.md` at the repository root"
-	if !fileExists {
-		action = "The repository has no `AGENTS.md`. Create it at the repository root"
-	}
-	exact := fmt.Sprintf("%s so that it is exactly the text in the fenced block under \"%s\" at the end of this document, byte for byte. %s. It is %d bytes and its SHA-256 is `%s`.",
-		action, strings.TrimPrefix(expectedFileHeading, "## "), fileEnding(p.Expected), len(p.Expected), memory.HashHex([]byte(p.Expected)))
+	exact := fmt.Sprintf("Replace the file `AGENTS.md` at the repository root so that it is exactly the text in the fenced block under \"%s\" at the end of this document, byte for byte. %s. It is %d bytes and its SHA-256 is `%s`.",
+		strings.TrimPrefix(expectedFileHeading, "## "), fileEnding(p.Expected), len(p.Expected), memory.HashHex([]byte(p.Expected)))
 	expectedSection := expectedFileHeading + "\n\n" + fencedVerbatim(p.Expected)
 
 	var criteria, covered strings.Builder

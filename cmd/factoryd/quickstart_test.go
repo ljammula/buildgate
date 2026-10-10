@@ -240,7 +240,7 @@ func TestQuickstartValidateRequestSourceRejectsUnreadableRequestFile(t *testing.
 func TestQuickstartSubmitAndWatchRequestFileReachesRequest(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -280,7 +280,7 @@ preflight_profile: brownfield
 func TestQuickstartSubmitAndWatchIssueReachesRequest(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
@@ -2769,5 +2769,26 @@ func TestQuickstartEnsureDaemonSkipsMatchingLaunchdServiceWhenRestartNotNeeded(t
 	}
 	if !strings.Contains(out.String(), "skipping") {
 		t.Errorf("output = %q, want the plain skip message", out.String())
+	}
+}
+
+// quickstart refuses a repository without a committed AGENTS.md right after it
+// resolves the repository: it prints nothing more, so no image, config,
+// daemon or submit step ran. An AGENTS.md only in the working tree is not one.
+func TestQuickstartRefusesARepositoryWithoutAgentsFileBeforeAnySetup(t *testing.T) {
+	repo := commitFiles(t, map[string]string{"add.py": "def add(a, b):\n    return a + b\n"})
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# AGENTS.md\n\n- Test: `python3 -m unittest`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var out bytes.Buffer
+	err := runQuickstart(newTestDeps(t), &quickstartOptions{NonInteractive: true, Goal: "Add multiply"}, repo, strings.NewReader(""), &out)
+	if err == nil || !strings.Contains(err.Error(), "has no AGENTS.md committed at its root") || !strings.Contains(err.Error(), "setup, test, build and lint commands") {
+		t.Fatalf("runQuickstart = %v, want the AGENTS.md refusal and its fix", err)
+	}
+	if lines := strings.Split(strings.TrimSpace(out.String()), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "Repository: ") {
+		t.Fatalf("quickstart printed more than the repository line before refusing:\n%s", out.String())
 	}
 }

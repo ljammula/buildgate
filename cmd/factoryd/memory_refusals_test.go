@@ -71,7 +71,7 @@ func TestMemorySurfacesPrintNoControlCharacter(t *testing.T) {
 		t.Fatalf("view = %+v", view)
 	}
 	changes := []memory.Change{{Line: "- added " + memoryEscape + "line.", Source: memory.SourceAgent, Runs: []string{"run-1"}}, {Remove: true, Line: "- removed " + memoryEscape + "line."}}
-	docs := memoryRequestDocuments(memory.Proposal{Expected: "# Guide\n"}, changes, "make test", true)
+	docs := memoryRequestDocuments(memory.Proposal{Expected: "# Guide\n"}, changes, "make test")
 	for name, text := range map[string]string{"spec": docs.spec, "ticket": docs.ticket, "request": docs.requestText, "pull request": memoryPullRequestSection(changes)} {
 		if strings.Contains(text, "\x1b") {
 			t.Errorf("%s holds an escape character:\n%q", name, text)

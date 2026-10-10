@@ -54,6 +54,7 @@ waiting at its first review gate:
 - It starts Temporal, the OpenShell gateway and meter, a worker and the console, then prints the exact `factoryd approve` command.
 - With a ChatGPT/Codex login (`codex login`) it picks that route and `gpt-5.6-luna` itself. Add `-route chatgpt-codex -harness codex` to run the Codex CLI as the coding agent too.
 - `-issue <github issue url>` submits from an issue instead of inline text.
+- The repo needs an `AGENTS.md` committed at its root (its setup, test, build and lint commands, for the coding agent). `quickstart` refuses a repo without one before it sets anything up.
 - Keep the repo under `$HOME`: the sandbox gateway sees only your home directory, and the Docker VM does not share `/tmp`.
 - `factoryd serve` hosts the console; open the URL its startup log prints.
 
@@ -122,6 +123,7 @@ approves, rejects or merges.
 | `quickstart` fails `the repository ... is outside your home directory`, or `mount visibility (repository reachable inside a container)` | The gateway sees only your home directory, and the Docker VM must also share the repository's path (`/tmp` is neither) | Clone or move the repo under `$HOME`; if it still fails, add it to your VM's mounts (USAGE.md, "Data directory and colima") |
 | A request halts "the meter does not answer" / "sandbox runtime ... run `factoryd doctor -fix`" | The OpenShell gateway/meter is down (reboot, colima restart) or the config lost `meter_image` | `factoryd doctor -fix`; `worker` starts them too unless `FACTORYD_AUTOSTART=0` |
 | A request halts `model route error: Connection error.` on a network that re-signs TLS | The gateway was started before the proxy's CA was recorded, so the sandbox's supervisor refuses the model upstream | `factoryd doctor -fix`, then `factoryd retry <id>` (USAGE.md, Troubleshooting) |
+| `quickstart` fails `<repo> has no AGENTS.md committed at its root` or `AGENTS.md at HEAD of <repo> is empty` | The repo's root `AGENTS.md` is missing, empty or not committed | Commit an `AGENTS.md` with the repo's setup, test, build and lint commands, then run `quickstart` again |
 | Stop what is running / drop a request | | `factoryd stop`; `factoryd cancel <request-id>` |
 
 ### Uninstall
