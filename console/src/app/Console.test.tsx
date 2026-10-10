@@ -243,13 +243,14 @@ test("a pasted token the server accepts is stored for the tab and the console st
   const restart = vi.fn();
   render(<Console session={await start(server)} restart={restart} />);
   const field = screen.getByLabelText("Gate token");
-  expect(field).toHaveAttribute("type", "password");
+  // Not a password field: a browser offers to save one, and a saved token
+  // would outlive the tab.
+  expect(field).toHaveAttribute("type", "text");
   expect(field).toHaveAttribute("autocomplete", "off");
   const open = screen.getByRole("button", { name: "Open console" });
   expect(open).toBeDisabled();
 
-  await userEvent.type(field, "  good  ");
-  await userEvent.click(open);
+  await userEvent.type(field, "  good  {Enter}");
   await waitFor(() => {
     expect(restart).toHaveBeenCalledTimes(1);
   });
@@ -274,8 +275,52 @@ test("a pasted token the server refuses is not stored, and the screen says so", 
   await userEvent.type(screen.getByLabelText("Gate token"), "stale");
   await userEvent.click(screen.getByRole("button", { name: "Open console" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("That token was not accepted");
+  expect(server.configCalls().at(-1)?.authorization).toBe("Bearer stale");
   expect(restart).not.toHaveBeenCalled();
   expect(getStoredGateToken()).toBeNull();
   expect(screen.getByLabelText("Gate token")).toHaveValue("");
   expect(server.otherCalls()).toEqual([]);
+});
+
+test("a server that does not answer leaves the pasted token in the field and does not call it refused", async () => {
+  const server = gatedServer(["good"]);
+  const restart = vi.fn();
+  render(<Console session={await start(server)} restart={restart} />);
+  // From here the config route fails, as it does behind a proxy that is down.
+  const answering = server.fetch;
+  server.fetch = () => Promise.reject(new TypeError("network"));
+  await userEvent.type(screen.getByLabelText("Gate token"), "good{Enter}");
+  expect(await screen.findByRole("alert")).toHaveTextContent("The server did not answer");
+  expect(screen.getByLabelText("Gate token")).toHaveValue("good");
+  expect(getStoredGateToken()).toBeNull();
+  expect(restart).not.toHaveBeenCalled();
+  // The same token, once the server answers again.
+  server.fetch = answering;
+  await userEvent.click(screen.getByRole("button", { name: "Open console" }));
+  await waitFor(() => {
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+  expect(getStoredGateToken()).toBe("good");
+});
+
+test("after the gate is lost mid-session, the new token can be pasted", async () => {
+  setStoredGateToken("good");
+  const server = gatedServer(["good"]);
+  const session = await start(server);
+  const restart = vi.fn();
+  render(<Console session={session} restart={restart} />);
+  server.state.accepted = new Set(["rotated"]);
+  await act(async () => {
+    await refused(session, "/runs");
+  });
+  server.state.refuse = (url) => url === "/runs";
+  await act(async () => {
+    await refused(session, "/runs");
+  });
+  await screen.findByRole("heading", { name: "Gate token needed" });
+  await userEvent.type(screen.getByLabelText("Gate token"), "rotated{Enter}");
+  await waitFor(() => {
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+  expect(getStoredGateToken()).toBe("rotated");
 });

@@ -467,7 +467,7 @@ factoryd serve -allowed-host <name>
 factoryd gate-token  -- prints -->     the token: open https://<name>/ and paste it
                                        (once per browser tab)
                                        console reads, approves, rejects, edits, submits
-factoryd gate-token -rotate            the old link stops working at once
+factoryd gate-token -rotate            the old token stops working at once
 ```
 
 | Topic | What happens |

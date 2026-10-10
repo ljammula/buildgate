@@ -24,11 +24,19 @@ export interface ConsoleSession {
   /**
    * Offers a gate token the operator pasted. It is stored for this tab only
    * once the server has accepted it; the caller then starts the console
-   * again, which picks it up. Resolves false, storing nothing, for a token
-   * the server refuses or a server that cannot answer.
+   * again, which picks it up. Never throws, and stores nothing unless it
+   * resolves "accepted".
    */
-  readonly offerToken: (token: string) => Promise<boolean>;
+  readonly offerToken: (token: string) => Promise<TokenOffer>;
 }
+
+/**
+ * What became of a pasted gate token: the server accepted it and it is
+ * stored; the server refused it; the server did not answer as a gated
+ * console (unreachable, or its gate was turned off meanwhile), which says
+ * nothing about the token; or this browser would not keep it for the tab.
+ */
+export type TokenOffer = "accepted" | "refused" | "no-answer" | "not-kept";
 
 export interface SessionInputs {
   /** The gate token the address bar carried (captureGateTokenFromLocation), not yet trusted. */
@@ -97,10 +105,14 @@ export async function startSession({
     storedTokenRefused,
     offerToken: async (offered) => {
       const token = offered.trim();
-      if (token === "") return false;
-      if ((await configFor(token)).gate !== "accepted") return false;
+      if (token === "") return "refused";
+      const answer = (await configFor(token)).gate;
+      if (answer === "off") return "no-answer";
+      if (answer !== "accepted") return "refused";
       setStoredGateToken(token);
-      return true;
+      // Storage that is blocked drops the write without a word; starting
+      // again would then show this screen once more, with no reason.
+      return getStoredGateToken() === token ? "accepted" : "not-kept";
     },
     gateLost: () => lost,
     subscribe: (listener) => {

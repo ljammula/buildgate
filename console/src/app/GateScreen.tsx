@@ -1,44 +1,55 @@
-import { type SyntheticEvent, useId, useState } from "react";
+import { type SyntheticEvent, useState } from "react";
 
+import type { TokenOffer } from "@/app/session";
 import { Button } from "@/ui/Button";
 import { Card, CardBody, CardHeader } from "@/ui/Card";
-import { Input } from "@/ui/Input";
+import { Field, Input } from "@/ui/Input";
 
 export interface GateScreenProps {
   /** The gate token this browser held was refused: say so, or the operator pastes the same one. */
   readonly tokenRefused: boolean;
-  /** Offers the pasted token to the server; true once it is accepted and stored. */
-  readonly offerToken: (token: string) => Promise<boolean>;
-  /** Called once a pasted token was accepted: start the console again with it. */
+  /** Offers the pasted token to the server (ConsoleSession.offerToken). */
+  readonly offerToken: (token: string) => Promise<TokenOffer>;
+  /** Called once a pasted token was accepted and stored: start the console again with it. */
   readonly onAccepted: () => void;
 }
+
+const problems: Record<Exclude<TokenOffer, "accepted">, string> = {
+  refused:
+    "That token was not accepted. It may have expired or been replaced: run factoryd gate-token on the host again.",
+  "no-answer":
+    "The server did not answer. The token was not checked: try again, or reload the page.",
+  "not-kept":
+    "The server accepted the token, but this browser will not keep it for the tab (its storage is blocked). Allow site data for this address and try again.",
+};
 
 /**
  * Shown instead of the app when the server needs a gate token this browser
  * does not hold. The operator pastes the token here, so it never has to be
- * part of a URL. The field is a password field: the token is not shown, and
- * the browser is told not to offer to remember it. Nothing here calls the
- * server until the token is offered: every other route would refuse.
+ * part of a URL. The field is a text field masked with CSS, not a password
+ * field: a browser offers to save what a password field held, and a saved
+ * token would outlive the tab. Nothing here calls the server until the token
+ * is offered: every other route would refuse.
  */
 export function GateScreen({ tokenRefused, offerToken, onAccepted }: GateScreenProps) {
-  const fieldId = useId();
   const [token, setToken] = useState("");
   const [checking, setChecking] = useState(false);
-  const [refused, setRefused] = useState(false);
+  const [problem, setProblem] = useState<Exclude<TokenOffer, "accepted"> | null>(null);
 
   const submit = (event: SyntheticEvent) => {
     event.preventDefault();
     if (checking || token.trim() === "") return;
     setChecking(true);
-    setRefused(false);
-    void offerToken(token).then((accepted) => {
+    setProblem(null);
+    void offerToken(token).then((offer) => {
       setChecking(false);
-      if (accepted) {
+      if (offer === "accepted") {
         onAccepted();
         return;
       }
-      setToken("");
-      setRefused(true);
+      // A refused token is cleared; one that was never checked is kept.
+      if (offer === "refused") setToken("");
+      setProblem(offer);
     });
   };
 
@@ -59,32 +70,30 @@ export function GateScreen({ tokenRefused, offerToken, onAccepted }: GateScreenP
               The gate token this browser was using has expired or was replaced.
             </p>
           ) : null}
-          <form className="flex flex-col gap-2" onSubmit={submit}>
-            <label className="text-xs font-medium text-fg-muted" htmlFor={fieldId}>
-              Gate token
-            </label>
-            <div className="flex gap-2">
+          <form className="flex items-end gap-2" onSubmit={submit}>
+            <Field
+              label="Gate token"
+              className="grow"
+              error={problem ? <span role="alert">{problems[problem]}</span> : undefined}
+            >
               <Input
-                id={fieldId}
-                type="password"
+                type="text"
+                name="gate-token"
                 autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
                 spellCheck={false}
+                autoFocus
+                className="[-webkit-text-security:disc]"
                 value={token}
-                aria-invalid={refused}
                 onChange={(event) => {
                   setToken(event.target.value);
                 }}
               />
-              <Button type="submit" variant="primary" disabled={checking || token.trim() === ""}>
-                {checking ? "Checking" : "Open console"}
-              </Button>
-            </div>
-            {refused ? (
-              <p role="alert" className="text-fg-muted">
-                That token was not accepted. It may have expired or been replaced: run{" "}
-                <code className="font-mono text-xs">factoryd gate-token</code> again.
-              </p>
-            ) : null}
+            </Field>
+            <Button type="submit" variant="primary" disabled={checking || token.trim() === ""}>
+              {checking ? "Checking" : "Open console"}
+            </Button>
           </form>
         </CardBody>
       </Card>
