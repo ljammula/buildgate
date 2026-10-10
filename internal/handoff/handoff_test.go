@@ -544,8 +544,8 @@ func TestRepositoryNotesOfAcceptedRunReadsOnlyTheFifthHeading(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := RepositoryNotesOfAcceptedRun(dir)
-	if len(got) != 2 || got[0] != "Run 'make gen' first" || len(got[1]) > maxSentenceLen+3 {
-		t.Fatalf("items = %q, want the two cleaned items of the fifth heading", got)
+	if len(got) != 2 || got[0] != "Run `make gen` first" || len(got[1]) > maxSentenceLen+3 {
+		t.Fatalf("items = %q, want the two cleaned items of the fifth heading, backticks kept for the memory text rule", got)
 	}
 	for _, item := range got {
 		if strings.Contains(item, "sum.go") || strings.Contains(item, "cache key") || strings.ContainsAny(item, "\x1b`") {
