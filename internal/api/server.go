@@ -2217,6 +2217,20 @@ type overrideRequest struct {
 	State  string `json:"state"`
 }
 
+// decodeOverrideRequest reads POST /runs/{id}/override's body. problem is the
+// refusal, "" when the body is usable. A name that carries the gate token's
+// suffix is refused: only the server writes that text, on a request write the
+// gate token authorized, and an override is never one.
+func decodeOverrideRequest(r *http.Request) (req overrideRequest, problem string) {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return req, "decode request body"
+	}
+	if strings.Contains(req.By, strings.TrimSpace(gateViaSuffix)) {
+		return req, badPrincipal
+	}
+	return req, ""
+}
+
 // overrideRun lets an operator move a quarantined run to a terminal state
 // (accepted or halted) over HTTP — the execution/override endpoint the
 // plan doc's Phase 1 status previously called out as missing, so a future
@@ -2234,9 +2248,9 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req overrideRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "decode request body")
+	req, problem := decodeOverrideRequest(r)
+	if problem != "" {
+		writeError(w, http.StatusBadRequest, problem)
 		return
 	}
 
@@ -2248,13 +2262,6 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		newState = run.StateHalted
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("state must be %q or %q", run.StateAccepted, run.StateHalted))
-		return
-	}
-
-	if strings.Contains(req.By, strings.TrimSpace(gateViaSuffix)) {
-		// Only the server writes that text, on a request write the gate
-		// token authorized; an override is never one.
-		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
 
