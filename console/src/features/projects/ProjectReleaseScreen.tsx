@@ -18,7 +18,10 @@ export function ProjectReleaseScreen() {
   const load = useLoadProject(project, projectReleasePath, () => undefined);
   return (
     <>
-      <PageHeader title="Project release" />
+      <PageHeader
+        title={project === "" ? "Project release" : project}
+        {...(project === "" ? {} : { description: "Release" })}
+      />
       <PageBody>
         {project === "" ? (
           <ProjectIdForm initial="" loading={false} onLoad={load} />

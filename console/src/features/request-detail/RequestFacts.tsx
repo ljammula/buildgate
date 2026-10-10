@@ -3,10 +3,10 @@ import { formatUsageFigure, formatUsageLines } from "@/domain/cost";
 import type { RequestSummary } from "@/domain/request";
 import { requestAwaitingPullRequest } from "@/domain/request";
 import { DigestedText } from "@/shared/request/DigestedText";
-import { CompactId } from "@/ui/CompactId";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Disclosure } from "@/ui/Disclosure";
 import { RelativeTime } from "@/ui/RelativeTime";
+import { ShortPath } from "@/ui/ShortPath";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 
 import { Panel } from "./Panel";
@@ -30,11 +30,10 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
     <Panel title="Request">
       <DescriptionList labelWidth="sm">
         <DescriptionItem label="Workspace">
-          <CompactId
-            value={request.workspace}
-            max={22}
-            label="workspace path"
-            className="text-xs"
+          <ShortPath
+            path={request.workspace}
+            copyLabel="workspace path"
+            className="break-words whitespace-normal"
           />
         </DescriptionItem>
         <DescriptionItem label="Updated">

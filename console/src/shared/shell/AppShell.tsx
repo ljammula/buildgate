@@ -10,7 +10,7 @@ import {
   Sun,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
-import { Link, NavLink } from "react-router";
+import { Link, matchPath, useLocation } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
 import { nextThemeMode, useThemeMode } from "@/platform/theme";
@@ -38,13 +38,15 @@ interface NavItem {
   readonly icon: ComponentType<{ className?: string }>;
   /** Match the path exactly: "/" would otherwise match every page. */
   readonly end?: boolean;
+  /** Other path patterns that belong to this item (a project's stats page is under Projects). */
+  readonly also?: readonly string[];
 }
 
 const navItems: readonly NavItem[] = [
   { to: boardPath(), label: "Mission Control", icon: LayoutDashboard, end: true },
   { to: triagePath(), label: "Triage", icon: ListChecks },
   { to: runsPath(), label: "Runs", icon: Activity },
-  { to: projectsPath(), label: "Projects", icon: FolderGit2 },
+  { to: projectsPath(), label: "Projects", icon: FolderGit2, also: ["/projects/*"] },
   { to: opsPath(), label: "Ops", icon: ServerCog },
 ];
 
@@ -89,6 +91,7 @@ export function AppShell({ children }: AppShellProps) {
   const { canWrite } = useApi();
   const needsYou = useNeedsYouCount();
   const notifier = useBrowserNotifier();
+  const { pathname } = useLocation();
   return (
     <div className="grid min-h-screen grid-cols-[14rem_minmax(0,1fr)] max-md:grid-cols-1">
       <aside className="sticky top-0 flex h-screen flex-col gap-3 border-r border-border bg-surface p-3 max-md:static max-md:h-auto">
@@ -114,30 +117,29 @@ export function AppShell({ children }: AppShellProps) {
               : `${needsYou} ${needsYou === 1 ? "request needs" : "requests need"} you.`}
         </p>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 max-md:flex-row">
-          {navItems.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end ?? false}
-              className={({ isActive }) =>
-                cn(
+          {navItems.map(({ to, label, icon: Icon, end, also }) => {
+            const isActive = [to, ...(also ?? [])].some(
+              (path) => matchPath({ path, end: end ?? false }, pathname) !== null,
+            );
+            return (
+              <Link
+                key={to}
+                to={to}
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
                   "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg",
                   isActive && "bg-surface-hover font-medium text-fg",
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon
-                    aria-hidden
-                    className={cn("size-4", isActive ? "text-accent" : "text-fg-subtle")}
-                  />
-                  {label}
-                  {to === triagePath() ? <NavCount count={needsYou} /> : null}
-                </>
-              )}
-            </NavLink>
-          ))}
+                )}
+              >
+                <Icon
+                  aria-hidden
+                  className={cn("size-4", isActive ? "text-accent" : "text-fg-subtle")}
+                />
+                {label}
+                {to === triagePath() ? <NavCount count={needsYou} /> : null}
+              </Link>
+            );
+          })}
         </nav>
         <div className="flex flex-col gap-2 border-t border-border pt-3">
           <NotificationToggle

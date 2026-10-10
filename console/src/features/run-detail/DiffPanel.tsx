@@ -6,7 +6,6 @@ import { Button } from "@/ui/Button";
 import { DiffView } from "@/ui/DiffView";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
-import { Section } from "@/ui/PageLayout";
 
 /**
  * The full unified diff between a run's base and result SHAs: real
@@ -53,5 +52,5 @@ export function DiffPanel({ runId }: { runId: string }) {
   } else {
     content = <Spinner label="Loading diff" />;
   }
-  return <Section title={`Diff — ${runId}`}>{content}</Section>;
+  return <div className="flex flex-col gap-3">{content}</div>;
 }

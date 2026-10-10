@@ -16,7 +16,7 @@ test("project list renders known projects and prefills a run", async () => {
         reply: () =>
           json([
             {
-              project_path: "/workspaces/app",
+              project_path: "/home/kanna/workspaces/app",
               project: "app",
               workspace_path: "/workspaces/app",
               spec_path: "/specs/app-latest.md",
@@ -29,7 +29,16 @@ test("project list renders known projects and prefills a run", async () => {
     ],
   });
 
-  const row = await screen.findByRole("link", { name: "/workspaces/app" });
+  const row = await screen.findByRole("link", { name: "…/workspaces/app" });
+  // Each heading is true: the first column is a path, the second is the project id.
+  expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+    "Workspace",
+    "Project",
+    "Runs",
+    "Last run",
+    "Details",
+  ]);
+  expect(row).toHaveAttribute("title", "/home/kanna/workspaces/app");
   expect(screen.getByText("app")).toBeInTheDocument();
   expect(screen.getByText("3 runs")).toBeInTheDocument();
 

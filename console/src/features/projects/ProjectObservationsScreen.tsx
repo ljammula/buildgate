@@ -16,7 +16,10 @@ export function ProjectObservationsScreen() {
   const load = useLoadProject(project, projectObservationsPath, () => undefined);
   return (
     <>
-      <PageHeader title="Project observations" />
+      <PageHeader
+        title={project === "" ? "Project observations" : project}
+        {...(project === "" ? {} : { description: "Observations" })}
+      />
       <PageBody>
         {project === "" ? (
           <ProjectIdForm initial="" loading={false} onLoad={load} />

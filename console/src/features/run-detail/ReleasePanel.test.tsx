@@ -161,3 +161,20 @@ test("a failed release fetch is reported, not shown as allowed", async () => {
   expect(screen.getByText(/the token changes every restart/)).toBeInTheDocument();
   expect(screen.queryByText("Allowed")).not.toBeInTheDocument();
 });
+
+test("no heading repeats the Release tab, and the decision is the first one", async () => {
+  renderRelease(fakeServer([{ on: route, reply: json(allowedRelease) }]));
+  await screen.findByText("Allowed");
+  expect(screen.getAllByRole("heading").map((h) => h.textContent)).toEqual([
+    "Release decision",
+    "Project kill switch",
+  ]);
+});
+
+test("the evaluation time is the exact local time with its offset, never the raw ISO string", async () => {
+  renderRelease(fakeServer([{ on: route, reply: json(allowedRelease) }]));
+  await screen.findByText("Allowed");
+  expect(screen.queryByText(/\d{4}-\d\d-\d\dT/)).not.toBeInTheDocument();
+  const evaluated = screen.getByText(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/);
+  expect(evaluated).toHaveAttribute("dateTime", "2026-09-03T10:05:00Z");
+});

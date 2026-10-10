@@ -62,7 +62,9 @@ export function ReleaseDetails({ release }: { release: ReleaseView }) {
               <DescriptionItem label="Run ID" mono>
                 {decision.runId}
               </DescriptionItem>
-              <DescriptionItem label="Evaluated">{decision.evaluatedAt}</DescriptionItem>
+              <DescriptionItem label="Evaluated">
+                <LocalTimeText value={decision.evaluatedAt} />
+              </DescriptionItem>
               {decision.reasons.length === 0 ? (
                 <DescriptionItem label="Reasons">None recorded</DescriptionItem>
               ) : (

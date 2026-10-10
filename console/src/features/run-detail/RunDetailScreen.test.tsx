@@ -118,7 +118,7 @@ test("run detail lists the compose services each phase launched", async () => {
 test("run detail omits the compose section without compose data", async () => {
   renderRun(acceptedRun());
 
-  await screen.findByText("ticket-accepted");
+  await screen.findByRole("heading", { level: 1, name: "ticket-accepted" });
   expect(screen.queryByRole("heading", { name: "Compose services" })).not.toBeInTheDocument();
 });
 
@@ -203,7 +203,9 @@ test("quarantined run detail screen keeps retrying rather than showing disconnec
     routes: [{ on: "GET /runs/run-quarantined/events", reply: new Response("", { status: 500 }) }],
   });
 
-  expect(await screen.findByText("ticket-quarantined")).toBeInTheDocument();
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "ticket-quarantined" }),
+  ).toBeInTheDocument();
   await waitFor(() => {
     expect(server.sent("GET /runs/run-quarantined/events").length).toBeGreaterThan(0);
   });
@@ -229,7 +231,9 @@ test("a permanent stream failure is shown as Live updates: Disconnected", async 
 test("accepted run detail screen does not attempt to watch further updates", async () => {
   renderRun(acceptedRun());
 
-  expect(await screen.findByText("ticket-accepted")).toBeInTheDocument();
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "ticket-accepted" }),
+  ).toBeInTheDocument();
   expect(screen.queryByText(/Live updates/)).not.toBeInTheDocument();
 });
 
@@ -320,7 +324,7 @@ test("quarantined run override button is disabled without an override token even
 test("the override section only appears for a quarantined run", async () => {
   renderRun(acceptedRun());
 
-  await screen.findByText("ticket-accepted");
+  await screen.findByRole("heading", { level: 1, name: "ticket-accepted" });
   expect(screen.queryByRole("heading", { name: "Operator override" })).not.toBeInTheDocument();
 });
 
@@ -372,7 +376,7 @@ test("a shared diff link lands on the diff view, and Overview returns to the run
 test("the diff view is not offered when no diff snapshot exists", async () => {
   renderRun({ ...acceptedRun(), diff_available: false });
 
-  await screen.findByText("ticket-accepted");
+  await screen.findByRole("heading", { level: 1, name: "ticket-accepted" });
   expect(screen.queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
 });
 
@@ -934,17 +938,32 @@ describe("request linkage", () => {
     );
 
     const link = await screen.findByRole("link", { name: "Open request" });
-    expect(await screen.findByText("Add the widget")).toBeInTheDocument();
+    // The request's title is the page's h1; the ticket id moves to the chip row.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Add the widget" }),
+    ).toBeInTheDocument();
 
     await userEvent.click(link);
     expect(await screen.findByText("Navigated to /requests/request-1")).toBeInTheDocument();
     expect(location()).toBe("/requests/request-1");
   });
 
+  test("the header is the request page's shape: way back, ticket id, run id, state", async () => {
+    renderRun({ ...acceptedRun(), request_id: "request-1" });
+
+    const back = await screen.findByRole("link", { name: "Back to Runs" });
+    const header = screen.getByRole("banner");
+    expect(back).toHaveAttribute("href", "/runs");
+    // No title yet (the request is not answered): the ticket id stands in.
+    expect(within(header).getByRole("heading", { level: 1 })).toHaveTextContent("ticket-accepted");
+    expect(within(header).getByRole("button", { name: "Copy run id" })).toBeInTheDocument();
+    expect(within(header).getByText("Accepted")).toBeInTheDocument();
+  });
+
   test("open-request link is absent when the run has no requestId", async () => {
     renderRun(acceptedRun());
 
-    await screen.findByText("ticket-accepted");
+    await screen.findByRole("heading", { level: 1, name: "ticket-accepted" });
     expect(screen.queryByRole("link", { name: "Open request" })).not.toBeInTheDocument();
   });
 
@@ -1001,14 +1020,14 @@ describe("Temporal UI link", () => {
   test("is absent when temporalWorkflowId is empty", async () => {
     renderRun(acceptedRun(), { config: { temporalUiUrl: "http://temporal.test" } });
 
-    await screen.findByText("ticket-accepted");
+    await screen.findByRole("heading", { level: 1, name: "ticket-accepted" });
     expect(screen.queryByRole("link", { name: "Open in Temporal UI" })).not.toBeInTheDocument();
   });
 
   test("is absent when the server advertises no Temporal UI", async () => {
     renderRun({ ...acceptedRun(), temporal_workflow_id: "wf-123" });
 
-    await screen.findByText("ticket-accepted");
+    await screen.findByRole("heading", { level: 1, name: "ticket-accepted" });
     expect(screen.queryByRole("link", { name: "Open in Temporal UI" })).not.toBeInTheDocument();
   });
 });

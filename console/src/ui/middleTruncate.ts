@@ -1,2 +1,2 @@
-// The pure function lives in domain/; this path keeps existing imports working.
-export { headTruncate, middleTruncate } from "@/domain/middleTruncate";
+// The pure functions live in domain/; this path keeps existing imports working.
+export { headTruncate, middleTruncate, shortPath } from "@/domain/middleTruncate";

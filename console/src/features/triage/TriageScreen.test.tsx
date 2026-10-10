@@ -313,7 +313,9 @@ test("the decision bar is a sticky footer that holds Approve, Reject and the key
   expect(bar).toHaveClass("sticky", "bottom-0");
   expect(within(bar).getByRole("button", { name: "Approve (a)" })).toBeInTheDocument();
   expect(within(bar).getByRole("button", { name: "Request changes (r)" })).toBeInTheDocument();
-  expect(within(bar).getByText(/j\/k move/)).toBeInTheDocument();
+  const hint = within(bar).getByText(/^Keyboard:/);
+  expect(hint).toHaveTextContent("Keyboard: j/k move · a approve · r request changes");
+  expect([...hint.querySelectorAll("kbd")].map((k) => k.textContent)).toEqual(["j", "k", "a", "r"]);
 });
 
 test("the focused request's facts are one meta line, and the text under review stays whole", async () => {
@@ -352,4 +354,30 @@ test("the focused request's facts are one meta line, and the text under review s
   expect(screen.queryByText(/^Project:/)).not.toBeInTheDocument();
   const artifact = await screen.findByTestId("triage-artifact-content");
   expect(artifact.textContent).toContain("END-OF-SPEC");
+});
+
+test("a row is the title on one line, then the id, the project and the waiting age, the chip on the right", async () => {
+  const waitingSince = new Date(Date.now() - 45 * 60_000).toISOString();
+  renderApp(<TriageScreen />, {
+    server: triage([
+      {
+        id: "req-long",
+        state: "plan_review",
+        title: "A very long title ".repeat(12).trim(),
+        project: "checkouts",
+        enteredAt: waitingSince,
+        waitingSince,
+      },
+    ]),
+  });
+  const rowEl = await screen.findByTestId("triage-row-req-long");
+  const title = within(rowEl).getByText(/^A very long title/);
+  expect(title).toHaveClass("truncate");
+  expect(title).toHaveAttribute("title", title.textContent);
+  expect(within(rowEl).getByText("req-long")).toHaveClass("font-mono");
+  expect(within(rowEl).getByText("checkouts")).toBeInTheDocument();
+  const age = within(rowEl).getByText("for 45m");
+  expect(age.tagName).toBe("TIME");
+  expect(age).toHaveClass("text-fg-muted", "tabular-nums");
+  expect(age.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/);
 });

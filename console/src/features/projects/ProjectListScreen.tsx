@@ -3,6 +3,7 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router";
 
 import { useProjects } from "@/api/runQueries";
+import { shortPath } from "@/domain/middleTruncate";
 import { newRunPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -59,8 +60,8 @@ export function ProjectListScreen() {
             <Table className="table-fixed">
               <TableHead>
                 <TableRow className="hover:bg-transparent">
-                  <TableHeaderCell>Project</TableHeaderCell>
-                  <TableHeaderCell className="w-56">Kill-switch id</TableHeaderCell>
+                  <TableHeaderCell>Workspace</TableHeaderCell>
+                  <TableHeaderCell className="w-56">Project</TableHeaderCell>
                   <TableHeaderCell className="w-24">Runs</TableHeaderCell>
                   <TableHeaderCell className="w-44">Last run</TableHeaderCell>
                   <TableHeaderCell className="w-32">
@@ -86,7 +87,7 @@ export function ProjectListScreen() {
                             to={`${newRunPath()}?${quickFill.toString()}`}
                             className="block truncate text-accent hover:underline"
                           >
-                            {project.projectPath}
+                            {shortPath(project.projectPath)}
                           </Link>
                         </TableCell>
                         <TableCell className="truncate font-mono text-xs" title={project.project}>

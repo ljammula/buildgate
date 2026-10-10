@@ -13,11 +13,13 @@ export function TicketsSection({ request }: { readonly request: RequestSummary }
   if (tickets.length === 0) return null;
   return (
     <Panel title="Tickets" testId="tickets-section">
-      {tickets.map((ticket) => (
-        // Keyed by index: a retry landing a new runId under the same ticket
-        // must update this card, not be matched to a neighbour's.
-        <TicketCard key={ticket.index} ticket={ticket} live={request.state === "building"} />
-      ))}
+      <div className="divide-border divide-y">
+        {tickets.map((ticket) => (
+          // Keyed by index: a retry landing a new runId under the same ticket
+          // must update this row, not be matched to a neighbour's.
+          <TicketCard key={ticket.index} ticket={ticket} live={request.state === "building"} />
+        ))}
+      </div>
     </Panel>
   );
 }

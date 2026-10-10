@@ -50,16 +50,23 @@ export function showsNextBanner(request: RequestSummary): boolean {
   );
 }
 
-const RUN_PHASE_STATES: ReadonlySet<string> = new Set([
+const TICKETS_FIRST_STATES: ReadonlySet<string> = new Set([
   "building",
   "pr_review",
   "halted",
   "quarantined",
+  "done",
+  "cancelled",
+  "resume_review",
 ]);
 
-/** Once tickets are building (or stopped), their runs are what the operator follows. */
+/**
+ * Outside the three review states the tickets' runs are what the operator
+ * follows, so the Tickets section comes before the plan files. In a review
+ * state the text under review stays first.
+ */
 export function ticketsLeadContent(request: RequestSummary): boolean {
-  return request.tickets.length > 0 && RUN_PHASE_STATES.has(request.state);
+  return request.tickets.length > 0 && TICKETS_FIRST_STATES.has(request.state);
 }
 
 /**

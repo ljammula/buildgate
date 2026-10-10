@@ -144,3 +144,26 @@ test("a halted run and a quarantine cause each bring their block back", async ()
   expect(await screen.findByText("Halted")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Quarantined by cause" })).toBeInTheDocument();
 });
+
+test("the project id is the page title, with Stats as its section, and the facts sit in a card", async () => {
+  renderStats("checkouts", () =>
+    json({
+      project: "checkouts",
+      total_runs: 5,
+      accepted: 4,
+      accepted_via_override: 1,
+      override_rate_percent: 25,
+      quarantined_by_cause: {},
+      halted: 0,
+      median_accepted_tokens: null,
+    }),
+  );
+  expect(await screen.findByRole("heading", { level: 1, name: "checkouts" })).toBeInTheDocument();
+  const header = screen.getByRole("banner");
+  expect(header).toHaveTextContent("Stats");
+  const facts = (await screen.findByText("Total runs")).closest("dl");
+  expect(facts?.parentElement).toHaveClass("border", "rounded-lg");
+  // The Project id field and its Load button stay.
+  expect(screen.getByLabelText("Project id")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument();
+});

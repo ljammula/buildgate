@@ -38,14 +38,11 @@ export function RunRow({ run, request }: RunRowProps) {
         {request === null ? null : <div className="text-xs text-fg-muted">Ticket {run.ticket}</div>}
         <StallChip run={run} />
       </TableCell>
+      <TableCell className="truncate font-mono text-xs" title={run.id}>
+        {run.id}
+      </TableCell>
       <TableCell>
         <StatusChipForToken token={run.state} />
-      </TableCell>
-      <TableCell>
-        <ShortPath path={run.projectPath} />
-      </TableCell>
-      <TableCell className="font-mono text-xs tabular-nums">
-        <ElapsedText since={run.createdAt} until={terminal ? run.updatedAt : null} />
       </TableCell>
       <TableCell className="text-xs text-fg-muted">
         {terminal ? null : (
@@ -56,11 +53,14 @@ export function RunRow({ run, request }: RunRowProps) {
           </span>
         )}
       </TableCell>
+      <TableCell numeric className="font-mono text-xs">
+        <ElapsedText since={run.createdAt} until={terminal ? run.updatedAt : null} />
+      </TableCell>
       <TableCell className="text-xs whitespace-nowrap tabular-nums">
         <RelativeTime value={run.createdAt} />
       </TableCell>
-      <TableCell className="truncate font-mono text-xs" title={run.id}>
-        {run.id}
+      <TableCell>
+        <ShortPath path={run.projectPath} />
       </TableCell>
     </TableRow>
   );

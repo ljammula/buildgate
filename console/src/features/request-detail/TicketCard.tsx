@@ -10,7 +10,6 @@ import { EscapedText } from "@/shared/oracle/EscapedText";
 import { runPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";
-import { Card, CardBody } from "@/ui/Card";
 import { Spinner } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StatusChip, StatusChipForToken } from "@/ui/StatusChip";
@@ -59,71 +58,72 @@ export function TicketCard({
   const prHref = safeHttpUrl(ticket.prUrl);
   const stop = run.data === undefined ? null : runStop(run.data);
   return (
-    <Card data-testid={`ticket-card-${ticket.index}`}>
-      <CardBody className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold">{`Ticket ${ticket.index}`}</h3>
-        <div className="flex flex-wrap items-center gap-2">
-          {run.data !== undefined ? (
-            <>
-              <StatusChipForToken token={run.data.state} />
-              <StallChip run={run.data} />
-            </>
-          ) : run.isFetching && ticket.runId !== "" ? (
-            <Spinner label="Loading the ticket's run" />
-          ) : run.isError ? (
-            <CircleAlert
-              aria-label="Could not load the ticket's run"
-              className="text-tone-danger size-4"
-            />
-          ) : null}
-          {ticket.prState !== "" && ticket.prUrl !== "" ? (
-            <PrStateChip prState={ticket.prState} />
-          ) : null}
-        </div>
-        {run.data === undefined || runIsTerminalForDisplay(run.data) ? null : (
-          <RunActivity run={run.data} />
-        )}
-        {stop === null || stop.cause === "" ? null : (
-          <p
-            data-testid={`ticket-stop-cause-${ticket.index}`}
-            className="font-mono text-xs break-words whitespace-pre-wrap"
-          >
-            {/* Why this ticket's run stopped, here where the request names
+    <div
+      data-testid={`ticket-card-${ticket.index}`}
+      className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0"
+    >
+      <h3 className="text-sm font-semibold">{`Ticket ${ticket.index}`}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        {run.data !== undefined ? (
+          <>
+            <StatusChipForToken token={run.data.state} />
+            <StallChip run={run.data} />
+          </>
+        ) : run.isFetching && ticket.runId !== "" ? (
+          <Spinner label="Loading the ticket's run" />
+        ) : run.isError ? (
+          <CircleAlert
+            aria-label="Could not load the ticket's run"
+            className="text-tone-danger size-4"
+          />
+        ) : null}
+        {ticket.prState !== "" && ticket.prUrl !== "" ? (
+          <PrStateChip prState={ticket.prState} />
+        ) : null}
+      </div>
+      {run.data === undefined || runIsTerminalForDisplay(run.data) ? null : (
+        <RunActivity run={run.data} />
+      )}
+      {stop === null || stop.cause === "" ? null : (
+        <p
+          data-testid={`ticket-stop-cause-${ticket.index}`}
+          className="font-mono text-xs break-words whitespace-pre-wrap"
+        >
+          {/* Why this ticket's run stopped, here where the request names
                 only the stage: the run's own cause usually names the fix. */}
-            <EscapedText text={stop.cause} />
-          </p>
-        )}
-        {ticket.prUrl === "" ? null : (
-          <p className="text-sm break-all">
-            PR:{" "}
-            {prHref !== null ? (
-              <a
-                href={prHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent underline underline-offset-2"
-              >
-                {ticket.prUrl}
-              </a>
-            ) : (
-              <span className="font-mono">{ticket.prUrl}</span>
-            )}
-          </p>
-        )}
-        <MergeReadinessLine ticket={ticket} />
-        <ReviewRounds ticket={ticket} />
-        {ticket.runId === "" ? null : (
-          <div>
-            <Button asChild size="sm">
-              <Link to={runPath(ticket.runId)}>
-                View run
-                <ArrowRight aria-hidden="true" />
-              </Link>
-            </Button>
-          </div>
-        )}
-      </CardBody>
-    </Card>
+          <EscapedText text={stop.cause} />
+        </p>
+      )}
+      {ticket.prUrl === "" ? null : (
+        <p className="text-sm break-all">
+          PR:{" "}
+          {prHref !== null ? (
+            <a
+              href={prHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent underline underline-offset-2"
+            >
+              {ticket.prUrl}
+            </a>
+          ) : (
+            <span className="font-mono">{ticket.prUrl}</span>
+          )}
+        </p>
+      )}
+      <MergeReadinessLine ticket={ticket} />
+      <ReviewRounds ticket={ticket} />
+      {ticket.runId === "" ? null : (
+        <div>
+          <Button asChild size="sm">
+            <Link to={runPath(ticket.runId)}>
+              View run
+              <ArrowRight aria-hidden="true" />
+            </Link>
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
