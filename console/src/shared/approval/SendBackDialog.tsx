@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import { useRejectRequest } from "@/api/requestQueries";
@@ -18,13 +18,33 @@ import { ReasonFlow } from "./ReasonFlow";
  * usually needs rewording. Renders nothing when closed or when the console
  * cannot write.
  */
-export function SendBackDialog({ request, open, onOpenChange, onDone }: FlowProps) {
+export interface SendBackDialogProps extends FlowProps {
+  /**
+   * Set when the request is no longer in the stage this dialog was opened on:
+   * the send-back cannot be sent, and what was typed stays visible.
+   */
+  readonly blocked?: ReactNode;
+}
+
+export function SendBackDialog({
+  request,
+  open,
+  onOpenChange,
+  onDone,
+  blocked,
+}: SendBackDialogProps) {
   const { canWrite } = useApi();
   if (!open || !canWrite) return null;
   return (
     <OperatorGate onOpenChange={onOpenChange}>
       {(by) => (
-        <SendBackBody request={request} by={by} onOpenChange={onOpenChange} onDone={onDone} />
+        <SendBackBody
+          request={request}
+          by={by}
+          onOpenChange={onOpenChange}
+          onDone={onDone}
+          blocked={blocked}
+        />
       )}
     </OperatorGate>
   );
@@ -35,9 +55,10 @@ interface BodyProps {
   readonly by: string;
   readonly onOpenChange: (open: boolean) => void;
   readonly onDone: FlowProps["onDone"];
+  readonly blocked: ReactNode;
 }
 
-function SendBackBody({ request, by, onOpenChange, onDone }: BodyProps) {
+function SendBackBody({ request, by, onOpenChange, onDone, blocked }: BodyProps) {
   const send = useRejectRequest(request.id);
   // The stage on screen when the dialog opened, fixed: the server refuses the
   // send-back (409) if the request has left it or entered it again since.
@@ -50,6 +71,7 @@ function SendBackBody({ request, by, onOpenChange, onDone }: BodyProps) {
     <ReasonFlow
       title="Send back"
       confirmLabel="Send back"
+      blocked={blocked}
       pending={send.isPending}
       error={send.error}
       onOpenChange={onOpenChange}

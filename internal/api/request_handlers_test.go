@@ -2889,13 +2889,22 @@ func TestRejectRequestRefusesADecisionMadeOnAnotherStage(t *testing.T) {
 	}
 	untouched(dataDir, request.StateSpecReview)
 
-	// A send-back made on a quarantine that has since been retried.
+	// A send-back made on a quarantine the request has since left and come
+	// back to: the same state, entered again. Only the entry time tells them
+	// apart, and without the check this send-back would be applied.
 	dataDir = t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StateQuarantined, false)
-	sendBack := seenBody(t, dataDir, "req-1", `{"reason":"allow the file","to":"spec"}`)
-	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecDrafting, false)
-	if got := post(dataDir, sendBack); got.Code != http.StatusConflict {
-		t.Errorf("a send-back made on a quarantine since retried = %d %s, want 409", got.Code, got.Body.String())
+	quarantined, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier, _ := json.Marshal(map[string]string{"reason": "allow the file", "to": "spec", "expected_state": string(quarantined.State), "expected_entered_at": "2020-01-01T00:00:00Z"})
+	if got := post(dataDir, string(earlier)); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "read it again") {
+		t.Errorf("a send-back made on an earlier quarantine = %d %s, want 409 saying to read it again", got.Code, got.Body.String())
+	}
+	untouched(dataDir, request.StateQuarantined)
+	if got := post(dataDir, seenBody(t, dataDir, "req-1", `{"reason":"allow the file","to":"spec"}`)); got.Code != http.StatusOK {
+		t.Errorf("a send-back made on the quarantine it is in = %d %s, want 200", got.Code, got.Body.String())
 	}
 
 	// And the stage as read: accepted.

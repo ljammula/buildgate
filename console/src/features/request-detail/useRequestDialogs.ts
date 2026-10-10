@@ -9,6 +9,12 @@ export type DialogKind =
 
 interface ActiveDialog {
   readonly kind: DialogKind;
+  /**
+   * The request exactly as the page showed it when the operator pressed the
+   * button. Request changes and Send back work from this record and name its
+   * stage, whatever arrives while the name prompt or the dialog is up.
+   */
+  readonly record: RequestSummary;
   /** The approval's `expected_sha256` override; null derives it from the shown request. */
   readonly expected: Record<string, string> | null;
   /** Resolves the oracle panel's pending approve once the dialog is gone. */
@@ -59,12 +65,13 @@ export function useRequestDialogs(request: RequestSummary): RequestDialogs {
       if (ticketOracle === null || !ticketOracle.complete) return;
       setActive({
         kind: "approve",
+        record: request,
         expected: { ...expectedSha256For(request), ...ticketOracle.hashes },
         settle: null,
       });
       return;
     }
-    setActive({ kind: "approve", expected: null, settle: null });
+    setActive({ kind: "approve", record: request, expected: null, settle: null });
   }
 
   return {
@@ -72,7 +79,7 @@ export function useRequestDialogs(request: RequestSummary): RequestDialogs {
     acting: active !== null,
     open: (kind) => {
       finished.current = false;
-      setActive({ kind, expected: null, settle: null });
+      setActive({ kind, record: request, expected: null, settle: null });
     },
     openApprove,
     approveOracle: (expectedSha256) => {
@@ -80,6 +87,7 @@ export function useRequestDialogs(request: RequestSummary): RequestDialogs {
       return new Promise<void>((resolve) => {
         setActive({
           kind: "approve",
+          record: request,
           expected: expectedSha256,
           settle: () => {
             resolve();

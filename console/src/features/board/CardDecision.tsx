@@ -4,6 +4,7 @@ import { useRequest } from "@/api/requestQueries";
 import { compareTimestamps } from "@/domain/elapsed";
 import { type RequestSummary, requestShortTitle } from "@/domain/request";
 import { stateLabel } from "@/domain/status";
+import { movedOnNotice } from "@/shared/approval/movedOn";
 import { RejectDialog } from "@/shared/approval/RejectDialog";
 import { Button } from "@/ui/Button";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -17,15 +18,6 @@ export interface CardDecisionProps {
    */
   readonly request: RequestSummary;
   readonly onClose: () => void;
-}
-
-/**
- * Whether the request the list now holds is still the one the dialog was
- * opened on: the same state, entered at the same instant. A redraft that
- * comes back to the same review state has a new `enteredAt`.
- */
-function sameStage(live: RequestSummary, opened: RequestSummary): boolean {
-  return live.state === opened.state && compareTimestamps(live.enteredAt, opened.enteredAt) === 0;
 }
 
 /**
@@ -93,13 +85,7 @@ export function CardDecision({ request, onClose }: CardDecisionProps) {
       <RejectDialog
         open
         request={opened}
-        blocked={
-          sameStage(request, opened)
-            ? undefined
-            : request.state === opened.state
-              ? `This request has moved on: it was redrafted and is in ${stateLabel(request.state)} again, with text you have not seen here. Nothing can be sent from this dialog. Copy what you typed, close it and open the request.`
-              : `This request has moved on to ${stateLabel(request.state)}. Nothing can be sent from this dialog. Copy what you typed, close it and open the request.`
-        }
+        blocked={movedOnNotice(request, opened)}
         onOpenChange={(open) => {
           if (!open) onClose();
         }}

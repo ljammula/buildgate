@@ -149,8 +149,11 @@ the stage it was made on: the request's `state` and `entered_at` as the
 caller read them (`request.Seen`). It is applied only while the request is
 still in that stage, checked under the request lock, and refused with 409
 otherwise, so a decision written for one draft cannot land on the stage or
-the redraft that followed. An approval is bound the same way by the hashes
-of the files it approves.
+the redraft that followed. It binds the stage, not the text: an edit made
+in place while the request stays in that stage does not change `entered_at`.
+An approval is bound to text instead, by the hashes of the files it
+approves: always for oracle files, and for a spec or plan when the caller
+sends them.
 
 Start-class routes (`POST /runs`, daemon lifecycle, and the `GET` release
 and stats routes; `authorizeStart`) get no relaxation. A missing or wrong
