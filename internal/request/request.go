@@ -163,6 +163,11 @@ type Ticket struct {
 	// asks of them, and the head it was said of: "review:<sha>" or
 	// "merge:<sha>". It is what keeps a poll from saying it again.
 	NotifiedPR string `json:"notified_pr,omitempty"`
+	// PRNotReadySince is the pull request head that was first checked not
+	// ready to merge and when, "<sha> <RFC 3339 time>": what tells a draft
+	// whose checks are still running from one that needs a person. Empty
+	// once the head is ready to merge.
+	PRNotReadySince string `json:"pr_not_ready_since,omitempty"`
 	// SeenThreadIDs is every review-thread id the PR-review poll has
 	// already acted on (turned into a corrective round) for this
 	// ticket's PR -- forge.NewUnresolvedThreads' own "seen" filter, so a

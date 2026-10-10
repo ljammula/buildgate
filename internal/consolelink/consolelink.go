@@ -61,10 +61,10 @@ var Listening = func(addr string) bool {
 // to.
 func BaseURL(flagValue, dataDir string) string {
 	if flagValue != "" {
-		return flagValue
+		return addressOnly(flagValue)
 	}
 	if env := os.Getenv(EnvVar); env != "" {
-		return env
+		return addressOnly(env)
 	}
 	if embedded() {
 		if addr := ServeAddress(dataDir); addr != "" {
@@ -72,6 +72,18 @@ func BaseURL(flagValue, dataDir string) string {
 		}
 	}
 	return ""
+}
+
+// addressOnly returns base when it is a console address and nothing more,
+// else "": a base with user information, a query or a fragment would put
+// whatever those hold (a token, in the worst case) into every link built on
+// it, and every link is handed to another program.
+func addressOnly(base string) string {
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return ""
+	}
+	return base
 }
 
 // addressFile is where `factoryd serve` records the address it serves the

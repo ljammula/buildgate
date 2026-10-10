@@ -10,9 +10,11 @@ import {
   getNotificationsPreference,
   holdNotifierLock,
   notificationSupport,
+  recordWatching,
   requestNotificationPermission,
   setNotificationsPreference,
   showNotification,
+  watchingSince,
 } from "@/platform/browserNotifications";
 import { requestPath } from "@/routes/paths";
 
@@ -58,19 +60,21 @@ export function useBrowserNotifier(): BrowserNotifier {
   const navigate = useNavigate();
   const { data } = useRequests(needsYouPollMs);
   const seen = useRef<SeenNotifications>(new Map());
+  const [since] = useState(() => watchingSince(Date.now()));
   // The list the shell polls and the notifier stream's frames both pass
   // through here; `seen` is what keeps one ask from being raised twice.
   const consider = useCallback(
     (request: RequestSummary) => {
-      const attention = attend(seen.current, request);
+      const attention = attend(seen.current, request, since);
       seen.current = attention.seen;
+      recordWatching(Date.now());
       if (attention.raise && active) {
         showNotification(notificationContent(request), () => {
           void navigate(requestPath(request.id));
         });
       }
     },
-    [active, navigate],
+    [active, navigate, since],
   );
   useEffect(() => {
     data?.forEach(consider);

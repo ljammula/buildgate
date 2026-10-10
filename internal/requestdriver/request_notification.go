@@ -135,13 +135,27 @@ const (
 	pullRequestAskMerge  = "merge"
 )
 
+// pullRequestDraftGrace is how long a pull request the factory has not
+// marked ready may stay not ready to merge before the operator is told.
+// Checks still running clear by themselves within it; what outlasts it
+// (failing checks, a thread that blocks the ready flip, a denied release
+// decision, a head the factory did not build) needs a person.
+const pullRequestDraftGrace = 10 * time.Minute
+
 // notifyPullRequestWaiting tells the operator, once, that ticket's pull
-// request waits on them: when it is ready to merge (its MergeReadiness
-// check passed), or ready for review and not yet ready to merge. For one
-// head it sends at most one of each, and never "review" after "merge": a
-// thread the operator opens on a pull request they were told to merge is
-// not news to them. It records what it sent on ticket and r; the caller
-// saves r.
+// request waits on them:
+//
+//   - "merge", when its MergeReadiness check passed;
+//   - "review", when it is not ready to merge and either the factory marked
+//     it ready (what is missing will not come by itself), or it has stayed
+//     not ready for pullRequestDraftGrace on this head.
+//
+// A pull request stacked on another waits for that one, which has its own
+// notification. For one head it sends at most one of each, and never
+// "review" after "merge": a thread the operator opens on a pull request
+// they were told to merge is not news to them. It records what it sent, and
+// since when the head has not been ready, on ticket and r; the caller saves
+// r.
 func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) {
 	mr := ticket.MergeReadiness
 	if mr == nil || ticket.PRURL == "" {
@@ -150,17 +164,23 @@ func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *reques
 	var notice requestNotice
 	var ask string
 	switch {
-	case mr.Ready && (ticket.PRState == "ready" || ticket.PRState == "approved"):
+	case mr.Ready:
+		ticket.PRNotReadySince = ""
 		ask = pullRequestAskMerge
 		notice = requestNotice{
 			Ask:    "Pull request ready to merge",
 			Detail: fmt.Sprintf("%s: checks pass, no review thread is open, and the last code review of the whole diff is clean. The factory never merges.", ticket.PRURL),
 		}
-	case ticket.PRState == "ready":
+	case ticket.PRState == "stacked":
+		return
+	case ticket.PRState == "ready" || notReadyFor(ticket, mr.HeadSHA, now) >= pullRequestDraftGrace:
 		ask = pullRequestAskReview
 		notice = requestNotice{
 			Ask:    "Pull request ready for your review",
-			Detail: fmt.Sprintf("%s is not ready to merge yet: %s.", ticket.PRURL, strings.Join(mr.Blockers, "; ")),
+			Detail: fmt.Sprintf("%s is not ready to merge: %s.", ticket.PRURL, strings.Join(mr.Blockers, "; ")),
+		}
+		if ticket.PRState != "ready" {
+			notice.Ask = "Pull request not ready: needs you"
 		}
 	default:
 		return
@@ -176,4 +196,17 @@ func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *reques
 	n := prepareRequestNotification(dataDir, r, notice, now)
 	ticket.NotifiedPR = sent
 	notify.DispatchExternal(dataDir, n)
+}
+
+// notReadyFor is how long ticket's pull request has been checked not ready
+// to merge on head, counting from the first such check: it records that
+// check's time on ticket ("<head> <time>") and starts again on a new head.
+func notReadyFor(ticket *request.Ticket, head string, now time.Time) time.Duration {
+	if recorded, since, ok := strings.Cut(ticket.PRNotReadySince, " "); ok && recorded == head {
+		if at, err := time.Parse(time.RFC3339Nano, since); err == nil {
+			return now.Sub(at)
+		}
+	}
+	ticket.PRNotReadySince = head + " " + now.UTC().Format(time.RFC3339Nano)
+	return 0
 }

@@ -22,15 +22,25 @@ function isLater(candidate: string, recorded: string): boolean {
 
 /**
  * Decides whether `request` raises a notification, and returns the map to
- * keep. A request seen for the first time (the list load, a first frame) only
- * records its time: what was announced before this tab looked is not news.
- * An empty time raises nothing and keeps the recorded one, so a server that
- * clears it and sets it later is still compared against the old value.
+ * keep. `watchingSince` is the time (ms) from which this tab has been
+ * looking: a request seen for the first time raises only when it was notified
+ * after that (one submitted and notified between two looks, or notified
+ * while the page reloaded); what was announced before this tab looked is not
+ * news. An empty time raises nothing and keeps the recorded one, so a server
+ * that clears it and sets it later is still compared against the old value.
  */
-export function attend(seen: SeenNotifications, request: RequestSummary): Attention {
+export function attend(
+  seen: SeenNotifications,
+  request: RequestSummary,
+  watchingSince: number,
+): Attention {
   const recorded = seen.get(request.id);
   if (recorded === undefined) {
-    return { seen: new Map(seen).set(request.id, request.lastNotifiedAt), raise: false };
+    const at = Date.parse(request.lastNotifiedAt);
+    return {
+      seen: new Map(seen).set(request.id, request.lastNotifiedAt),
+      raise: !Number.isNaN(at) && at > watchingSince,
+    };
   }
   if (request.lastNotifiedAt === "") return { seen, raise: false };
   if (recorded !== "" && !isLater(request.lastNotifiedAt, recorded)) {

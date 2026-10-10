@@ -523,10 +523,14 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 		checks = append(checks, c)
 	}
 	if runtime.GOOS == "darwin" && os.Getenv(notify.DesktopNotificationsEnvironmentVariable) != "0" {
-		_, err := exec.LookPath("terminal-notifier")
-		checks = append(checks, doctorCheckNotificationClick(err == nil))
+		checks = append(checks, doctorCheckNotificationClick(dp.host.terminalNotifierOnPath()))
 	}
 	return checks, nil
+}
+
+func (realHost) terminalNotifierOnPath() bool {
+	_, err := exec.LookPath("terminal-notifier")
+	return err == nil
 }
 
 // doctorCheckNotificationClick reports whether a desktop notification's

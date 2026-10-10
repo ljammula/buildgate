@@ -116,7 +116,7 @@ func TestAPullRequestNotifiesOncePerAskAndNeverReviewAfterMerge(t *testing.T) {
 	dataDir := t.TempDir()
 	r := notifiedRequest(t, dataDir, request.StatePRReview)
 	ticket := &request.Ticket{Index: 1, PRURL: "https://github.com/acme/widgets/pull/7", PRState: "draft"}
-	now := time.Now()
+	now := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
 	asks := func() []string {
 		var out []string
 		for _, n := range loggedNotifications(t, dataDir) {
@@ -131,8 +131,10 @@ func TestAPullRequestNotifiesOncePerAskAndNeverReviewAfterMerge(t *testing.T) {
 	}
 
 	poll("draft", false, "aaa", "it is still a draft")
+	now = now.Add(pullRequestDraftGrace - time.Second)
+	poll("draft", false, "aaa", "it is still a draft")
 	if got := asks(); len(got) != 0 {
-		t.Fatalf("a draft pull request notified: %v", got)
+		t.Fatalf("a draft pull request notified within the grace: %v", got)
 	}
 	poll("ready", false, "aaa", "its checks are pending or failing")
 	poll("ready", false, "aaa", "its checks are pending or failing")
@@ -199,5 +201,37 @@ func TestNotificationTextIsOneLineOfPlainText(t *testing.T) {
 	}
 	if strings.ContainsAny(n.Reason, "\n\x1b\x07") || !strings.Contains(n.Reason, "verify failed:") || !strings.Contains(n.Reason, "exit 1") {
 		t.Errorf("reason = %q, want one line with no control characters", n.Reason)
+	}
+}
+
+// A pull request the factory never marks ready (failing checks, a thread
+// that blocks the flip, a denied decision) must not wait in silence: no run
+// of a request sends its own notification.
+func TestADraftPullRequestThatStaysNotReadyNotifiesOnceAfterTheGrace(t *testing.T) {
+	dataDir := t.TempDir()
+	r := notifiedRequest(t, dataDir, request.StatePRReview)
+	ticket := &request.Ticket{Index: 1, PRURL: "https://github.com/acme/widgets/pull/7", PRState: "draft"}
+	start := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
+	poll := func(at time.Time, state, head string) {
+		ticket.PRState = state
+		ticket.MergeReadiness = &request.MergeReadiness{HeadSHA: head, Blockers: []string{"its checks are pending or failing"}}
+		notifyPullRequestWaiting(dataDir, r, ticket, at)
+	}
+	poll(start, "draft", "aaa")
+	poll(start.Add(pullRequestDraftGrace-time.Second), "draft", "aaa")
+	if got := loggedNotifications(t, dataDir); len(got) != 0 {
+		t.Fatalf("notified within the grace: %+v", got)
+	}
+	poll(start.Add(pullRequestDraftGrace), "draft", "aaa")
+	poll(start.Add(2*pullRequestDraftGrace), "draft", "aaa")
+	got := loggedNotifications(t, dataDir)
+	if len(got) != 1 || got[0].Ask != "Pull request not ready: needs you" || !strings.Contains(got[0].Reason, "its checks are pending or failing") {
+		t.Fatalf("after the grace: %+v", got)
+	}
+	// A new head starts the grace again; a stacked pull request never notifies.
+	poll(start.Add(3*pullRequestDraftGrace), "draft", "bbb")
+	poll(start.Add(9*pullRequestDraftGrace), "stacked", "ccc")
+	if got := loggedNotifications(t, dataDir); len(got) != 1 {
+		t.Fatalf("a new head, then a stacked pull request, notified at once: %+v", got)
 	}
 }

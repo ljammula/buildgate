@@ -1627,13 +1627,11 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 	return path, nil
 }
 
-// notifyRoundOutcome dispatches one best-effort notification for a
-// non-accepted round outcome -- the request's own state does not change
-// (it stays in pr_review), so this does not go through HaltRequest/
-// RemindRequest's own save-then-notify shape; it only appends to the
-// request's own durable notification log and fans out, exactly the way
-// RemindRequest's own network dispatch does, and returns without touching
-// r or ticket -- the caller (RunCorrectiveRound) owns saving both.
+// notifyRoundOutcome sends one notification for a PR-review round that was
+// not accepted. The request's state does not change (it stays in
+// pr_review); the notification is appended to the request's log, recorded on
+// r (LastNotifiedAt, LastAsk) and dispatched. The caller
+// (RunCorrectiveRound) saves r and ticket.
 func notifyRoundOutcome(dataDir string, r *request.Request, ticket *request.Ticket, roundIndex int, outcome request.RoundOutcome, errText string, now time.Time) {
 	detail := fmt.Sprintf("Ticket %d/%d: corrective review round %d was %s; pull request %s needs attention", ticket.Index, r.TicketCount, roundIndex, outcome, ticket.PRURL)
 	if errText != "" {

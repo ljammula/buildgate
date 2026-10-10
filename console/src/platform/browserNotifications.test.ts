@@ -2,9 +2,11 @@ import {
   getNotificationsPreference,
   holdNotifierLock,
   notificationSupport,
+  recordWatching,
   requestNotificationPermission,
   setNotificationsPreference,
   showNotification,
+  watchingSince,
 } from "@/platform/browserNotifications";
 
 interface FakeNotification {
@@ -202,5 +204,28 @@ describe("the preference", () => {
     expect(() => {
       setNotificationsPreference(true);
     }).not.toThrow();
+  });
+});
+
+describe("watchingSince", () => {
+  afterEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  test("is now for a tab that has not looked before", () => {
+    expect(watchingSince(5_000_000)).toBe(5_000_000);
+  });
+
+  test("is the last look across a reload, and now again after a long gap", () => {
+    recordWatching(5_000_000);
+    expect(watchingSince(5_030_000)).toBe(5_000_000);
+    expect(watchingSince(5_000_000 + 3 * 60 * 1000)).toBe(5_000_000 + 3 * 60 * 1000);
+  });
+
+  test("ignores a stored time that is not a past time", () => {
+    window.sessionStorage.setItem("factoryNotifierWatching", "soon");
+    expect(watchingSince(5_000_000)).toBe(5_000_000);
+    recordWatching(9_000_000);
+    expect(watchingSince(5_000_000)).toBe(5_000_000);
   });
 });

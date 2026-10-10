@@ -148,3 +148,16 @@ func TestSlackAndDiscordLinkToTheRemoteConsoleWhenOneIsRecorded(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalNotifierTextCannotBeReadAsAnOption(t *testing.T) {
+	for in, want := range map[string]string{
+		"-sound default":    `\-sound default`,
+		"[ci] fix the gate": `\[ci] fix the gate`,
+		"Add a coupon":      "Add a coupon",
+		"":                  "",
+	} {
+		if got := terminalNotifierText(in); got != want {
+			t.Errorf("terminalNotifierText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

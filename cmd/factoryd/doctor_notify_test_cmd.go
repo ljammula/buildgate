@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
 
 	"buildgate/internal/notify"
@@ -65,7 +64,7 @@ func doctorNotifyTestMain(dataDir string) error {
 		// Sent here, not through DesktopNotifier, which falls back to
 		// osascript without a word: this command exists to say which
 		// mechanism works.
-		out, err := exec.Command("terminal-notifier", "-title", "factoryd", "-message", n.Reason, "-execute", "open "+shellQuoteForNotifyTest(dataDir)).CombinedOutput()
+		out, err := notify.ShowClickableTest(context.Background(), n.Reason, dataDir)
 		if err != nil {
 			fmt.Printf("terminal-notifier could not show a notification: %s\n", sanitizeFirstLine(out, err))
 			fmt.Println("fix: System Settings -> Notifications -> terminal-notifier -> Allow Notifications, alert style Banners or Alerts. Until then factoryd shows the plain osascript banner, whose click does nothing.")
@@ -82,10 +81,4 @@ func doctorNotifyTestMain(dataDir string) error {
 	fmt.Printf("sent a test desktop notification via: %s\n", mechanism)
 	fmt.Println("confirm you actually saw a notification banner -- this command has no way to detect delivery itself.")
 	return nil
-}
-
-// shellQuoteForNotifyTest single-quotes s for terminal-notifier's -execute,
-// which runs its value through `sh -c`.
-func shellQuoteForNotifyTest(s string) string {
-	return `'` + strings.ReplaceAll(s, `'`, `'"'"'`) + `'`
 }

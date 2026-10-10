@@ -235,6 +235,7 @@
         ]
       },
       "notified_pr": "every-field notified_pr",
+      "pr_not_ready_since": "2026-09-10T09:00:00Z",
       "seen_thread_ids": [
         "every-field seen_thread_ids"
       ],

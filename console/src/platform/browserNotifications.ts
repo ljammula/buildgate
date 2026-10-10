@@ -118,3 +118,33 @@ export function setNotificationsPreference(on: boolean): void {
     // Storage may throw in private browsing mode.
   }
 }
+
+const watchingKey = "factoryNotifierWatching";
+const watchingGapMs = 2 * 60 * 1000;
+
+/**
+ * The time (ms) from which this tab has been looking at the requests: now,
+ * or, after a reload, when it last looked before it, so what was notified
+ * while the page loaded is still news. A gap longer than two minutes is a
+ * new look.
+ */
+export function watchingSince(now: number): number {
+  try {
+    const stored = Number(window.sessionStorage.getItem(watchingKey));
+    if (Number.isFinite(stored) && stored > 0 && stored <= now && now - stored < watchingGapMs) {
+      return stored;
+    }
+  } catch {
+    // No storage: this look starts now.
+  }
+  return now;
+}
+
+/** Records that this tab looked at the requests at `now`. */
+export function recordWatching(now: number): void {
+  try {
+    window.sessionStorage.setItem(watchingKey, String(now));
+  } catch {
+    // Storage may throw in private browsing mode.
+  }
+}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // DesktopNotificationsEnvironmentVariable names the environment variable
@@ -131,31 +132,8 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 		target = n.RunDir
 	}
 	if target != "" {
-		if clickPath, err := desktopClickNotifierLookPath(); err == nil {
-			// terminal-notifier itself runs -execute's value through
-			// `sh -c`, so target -- an operator-configured -data-dir
-			// joined with a run/ticket ID, or a console URL -- must be
-			// shell-quoted here, not just passed as a literal argv
-			// element the way -title/-subtitle/-message safely are.
-			args := []string{
-				"-title", title,
-				"-subtitle", subtitle,
-				"-message", message,
-				"-execute", "open " + shellQuoteSingle(target),
-			}
-			if n.RequestID != "" {
-				// One banner per request: a later one replaces the earlier.
-				args = append(args, "-group", "buildgate-"+n.RequestID)
-			}
-			if icon := desktopIconPath(); icon != "" {
-				args = append(args, "-contentImage", icon)
-			}
-			// terminal-notifier exits non-zero when macOS does not allow
-			// its notifications: the osascript banner below is then the
-			// one the operator sees.
-			if exec.CommandContext(ctx, clickPath, args...).Run() == nil {
-				return nil
-			}
+		if _, err := showClickable(ctx, n, target); err == nil {
+			return nil
 		}
 	}
 
@@ -175,6 +153,62 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 		escapeAppleScriptString(message), escapeAppleScriptString(title), escapeAppleScriptString(subtitle))
 	_ = exec.CommandContext(ctx, path, "-e", script).Run()
 	return nil
+}
+
+// clickableTimeout bounds terminal-notifier, so that one that hangs leaves
+// the osascript banner time to be shown within the caller's own deadline.
+const clickableTimeout = 3 * time.Second
+
+// showClickable shows n through terminal-notifier with target as what its
+// click opens, and returns terminal-notifier's output and error: not on
+// PATH, or a non-zero exit, which is how it reports that macOS does not
+// allow its notifications.
+func showClickable(ctx context.Context, n Notification, target string) ([]byte, error) {
+	clickPath, err := desktopClickNotifierLookPath()
+	if err != nil {
+		return nil, err
+	}
+	title, subtitle, message := desktopText(n)
+	// terminal-notifier itself runs -execute's value through `sh -c`, so
+	// target -- an operator-configured -data-dir joined with a run/ticket
+	// ID, or a console URL -- must be shell-quoted here, not just passed as
+	// a literal argv element the way the text arguments are.
+	args := []string{
+		"-title", terminalNotifierText(title),
+		"-subtitle", terminalNotifierText(subtitle),
+		"-message", terminalNotifierText(message),
+		"-execute", "open " + shellQuoteSingle(target),
+	}
+	if n.RequestID != "" {
+		// One banner per request: a later one replaces the earlier.
+		args = append(args, "-group", "buildgate-"+n.RequestID)
+	}
+	if icon := desktopIconPath(); icon != "" {
+		args = append(args, "-contentImage", icon)
+	}
+	ctx, cancel := context.WithTimeout(ctx, clickableTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, clickPath, args...).CombinedOutput()
+}
+
+// ShowClickableTest sends one notification through terminal-notifier alone,
+// with dir as what its click opens, and returns terminal-notifier's own
+// output and error. `factoryd doctor -notify-test` uses it to say whether
+// macOS allows terminal-notifier's banners, which DesktopNotifier.Notify,
+// falling back to osascript without a word, cannot.
+func ShowClickableTest(ctx context.Context, message, dir string) ([]byte, error) {
+	return showClickable(ctx, Notification{Reason: message}, dir)
+}
+
+// terminalNotifierText makes s safe as the value of a terminal-notifier text
+// option: one that begins with "-" would be read as an option, and
+// terminal-notifier asks for a leading bracket to be escaped with a
+// backslash.
+func terminalNotifierText(s string) string {
+	if s != "" && strings.ContainsRune("-[({<", rune(s[0])) {
+		return `\` + s
+	}
+	return s
 }
 
 // desktopText is a banner's three lines. A request's notification leads

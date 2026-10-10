@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"go.temporal.io/sdk/activity"
@@ -33,6 +34,10 @@ type requestActivities struct {
 	planRunner   requestdriver.PlanTicketsRunner
 	oracleRunner requestdriver.OracleDraftRunner
 	buildRunner  requestdriver.TicketRunner
+
+	// consoleStart guards consoleStartedAt, when ensureConsole last tried.
+	consoleStart     sync.Mutex
+	consoleStartedAt time.Time
 }
 
 func (a *requestActivities) registerLight(w temporalworker.Worker) {
@@ -190,15 +195,27 @@ func heartbeatUntilDone(ctx context.Context, interval time.Duration) func() {
 	return func() { close(done) }
 }
 
+// consoleStartEvery is the least time between two attempts to start the
+// console: a `serve` that cannot start, or one the operator stopped, is not
+// started again on every step.
+const consoleStartEvery = 5 * time.Minute
+
 // ensureConsole starts this data dir's `serve` when none answers, so that
-// the notification a step ends in has a page to link to. It does nothing
-// under FACTORYD_AUTOSTART=0 or without a session config; a notification
-// then has no link and says to run `factoryd console`.
+// the notification a step ends in has a page to link to: one attempt at a
+// time, and at most one every consoleStartEvery. It does nothing under
+// FACTORYD_AUTOSTART=0 or without a session config; a notification then has
+// no link and says to run `factoryd console`.
 func (a *requestActivities) ensureConsole() {
 	if consolelink.ServeAddress(a.dataDir) != "" || !hostcontrol.AutostartEnabled() || a.cfg.SessionConfigPath == "" {
 		return
 	}
-	binaryPath, err := os.Executable()
+	a.consoleStart.Lock()
+	defer a.consoleStart.Unlock()
+	if consolelink.ServeAddress(a.dataDir) != "" || (!a.consoleStartedAt.IsZero() && time.Since(a.consoleStartedAt) < consoleStartEvery) {
+		return
+	}
+	a.consoleStartedAt = time.Now()
+	binaryPath, err := a.dp.host.executable()
 	if err != nil {
 		return
 	}

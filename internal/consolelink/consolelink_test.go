@@ -172,3 +172,24 @@ func TestTabNotifierIsPresentOnlyWhileFresh(t *testing.T) {
 		t.Error("a touch of an old record did not refresh it")
 	}
 }
+
+func TestBaseURLRefusesABaseThatCarriesMoreThanAnAddress(t *testing.T) {
+	for _, base := range []string{
+		"https://console.example/#gate=secret",
+		"https://console.example/?t=secret",
+		"https://user:secret@console.example",
+		"console.example",
+	} {
+		t.Setenv(EnvVar, base)
+		if got := BaseURL("", t.TempDir()); got != "" {
+			t.Errorf("BaseURL with %s=%q = %q, want none", EnvVar, base, got)
+		}
+		if got := BaseURL(base, t.TempDir()); got != "" {
+			t.Errorf("BaseURL(%q) = %q, want none", base, got)
+		}
+	}
+	t.Setenv(EnvVar, "https://console.example/base/")
+	if got := RequestURL(BaseURL("", t.TempDir()), "req-1"); got != "https://console.example/base/requests/req-1" {
+		t.Errorf("a base with a path: %q", got)
+	}
+}

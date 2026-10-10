@@ -129,6 +129,7 @@ type fakeHost struct {
 	runUpgradeCommandFn  func(c upgradeCmd) ([]byte, error)
 	serveHealthzOKFn     func(addr string) bool
 	tailscaleFn          func(ctx context.Context, args ...string) ([]byte, error)
+	terminalNotifierFn   func() bool
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
 	shippedRootsPEMFn    func(ctx context.Context) ([]byte, error)
 	sleepFn              func(d time.Duration)
@@ -160,6 +161,7 @@ func (f *fakeHost) pidLooksLikeWorker(pid int) bool                { return f.pi
 func (f *fakeHost) processUID(pid int) (int, bool)                 { return f.processUIDFn(pid) }
 func (f *fakeHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) { return f.runUpgradeCommandFn(c) }
 func (f *fakeHost) serveHealthzOK(addr string) bool                { return f.serveHealthzOKFn(addr) }
+func (f *fakeHost) terminalNotifierOnPath() bool                   { return f.terminalNotifierFn() }
 func (f *fakeHost) tailscale(ctx context.Context, args ...string) ([]byte, error) {
 	return f.tailscaleFn(ctx, args...)
 }
@@ -311,6 +313,8 @@ func newTestDeps(t testing.TB) *deps {
 		processUIDFn:         realHost.processUID,
 		runUpgradeCommandFn:  realHost.runUpgradeCommand,
 		serveHealthzOKFn:     realHost.serveHealthzOK,
+		// The same answer on every machine the tests run on.
+		terminalNotifierFn: func() bool { return true },
 		// No test touches the developer's own tailnet.
 		tailscaleFn: func(context.Context, ...string) ([]byte, error) {
 			return nil, errors.New("test host: no tailscale")
