@@ -181,20 +181,22 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 	}
 }
 
-// A gate that failed on the build's result and on the base commit is not
-// handed to a corrective build, which could not make it pass: the request
-// quarantines with the run's sentence telling the operator what to change. The
-// same gate with a rerun that passed, or that could not be made, gets its
-// round as before.
-func TestCheckCorrectiveRoundIsNotSpentOnAGateThatAlsoFailsOnTheBaseCommit(t *testing.T) {
+// A gate that failed the same way on the build's result and on the base commit
+// is not handed to a corrective build, which could not make it pass: the
+// request quarantines with the run's sentence telling the operator what to
+// change. The same gate when it was failing on the base in another way (the
+// ticket's job may be to fix it), when the rerun passed, or when it could not
+// be made, gets its round as before.
+func TestCheckCorrectiveRoundIsNotSpentOnAGateThatFailsTheSameWayOnTheBaseCommit(t *testing.T) {
 	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
 	for _, tc := range []struct {
 		outcome   string
 		wantRound bool
 	}{
-		{run.GateBaseFails, false},
-		{run.GateBasePasses, true},
-		{run.GateBaseNotChecked, true},
+		{"fails_same", false},
+		{"fails_differently", true},
+		{"passes", true},
+		{"not_checked", true},
 	} {
 		t.Run(tc.outcome, func(t *testing.T) {
 			dp := newTestDeps(t)

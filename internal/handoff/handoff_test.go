@@ -553,24 +553,32 @@ func TestBuildSortsAVerifyThatNeverRanSetupIntoTheOperatorsBin(t *testing.T) {
 	}
 }
 
-// A named or repository gate that also failed on the base commit is the
-// operator's, with a sentence that says what to change; one that passed
-// there, or whose rerun could not be made, stays a failure a build is given.
-func TestBuildSortsAGateThatAlsoFailsOnTheBaseCommitIntoTheOperatorsBin(t *testing.T) {
+// A named or repository gate that failed the same way on the base commit is
+// the operator's, with a sentence that says what to change. One that was
+// already failing there in another way stays a failure a build is given, and
+// its finding says part of the failure predates the attempt. One that passed
+// there, or whose rerun could not be made, stays corrective with nothing added.
+func TestBuildSortsAGateThatFailsTheSameWayOnTheBaseCommitIntoTheOperatorsBin(t *testing.T) {
 	const base = "0123456789abcdef0123456789abcdef01234567"
 	gate := func(check, outcome string) run.GateResult {
-		return run.GateResult{Check: check, ExitCode: 1, BaseCheck: &run.GateBaseCheck{Outcome: outcome, BaseSHA: base, Reason: "why"}}
+		return run.GateResult{Check: check, ExitCode: 1, BaseCheck: &run.GateBaseCheck{Outcome: outcome, BaseSHA: base, ExitCode: 1, Reason: "why"}}
 	}
+	const (
+		operatorSentence = "fails the same way on the base commit 0123456789ab"
+		alreadyFailing   = "was already failing on the base commit 0123456789ab"
+	)
 	for _, tc := range []struct {
-		name string
-		gate run.GateResult
-		want Bin
+		name        string
+		gate        run.GateResult
+		want        Bin
+		wantFinding string
 	}{
-		{"a named gate that fails on the base", gate("lint", run.GateBaseFails), BinOperator},
-		{"a repository gate that fails on the base", gate("repo-docs", run.GateBaseFails), BinOperator},
-		{"a gate that passes on the base", gate("lint", run.GateBasePasses), BinCorrective},
-		{"a gate whose rerun could not be made", gate("repo-docs", run.GateBaseNotChecked), BinCorrective},
-		{"a gate recorded before the rerun existed", run.GateResult{Check: "lint", ExitCode: 1}, BinCorrective},
+		{"a named gate that fails the same way on the base", gate("lint", "fails_same"), BinOperator, operatorSentence},
+		{"a repository gate that fails the same way on the base", gate("repo-docs", "fails_same"), BinOperator, operatorSentence},
+		{"a gate that was failing on the base in another way", gate("lint", "fails_differently"), BinCorrective, alreadyFailing},
+		{"a gate that passes on the base", gate("lint", "passes"), BinCorrective, ""},
+		{"a gate whose rerun could not be made", gate("repo-docs", "not_checked"), BinCorrective, ""},
+		{"a gate recorded before the rerun existed", run.GateResult{Check: "lint", ExitCode: 1}, BinCorrective, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &run.Run{ID: "run-b", Ticket: "t", State: run.StateQuarantined, BaseSHA: base, GateResults: []run.GateResult{tc.gate}}
@@ -579,16 +587,29 @@ func TestBuildSortsAGateThatAlsoFailsOnTheBaseCommitIntoTheOperatorsBin(t *testi
 				t.Fatalf("checks = %+v, next = %q, want %q", doc.Checks, doc.Next, tc.want)
 			}
 			finding := doc.Checks[0].Finding
-			saysSo := strings.Contains(finding, "fails on the base commit 0123456789ab too") && strings.Contains(finding, "fix the gate command or the repository") && strings.Contains(finding, "No corrective build is started")
-			if saysSo != (tc.want == BinOperator) {
-				t.Errorf("finding = %q; it tells the operator about the base commit = %v, want %v", finding, saysSo, tc.want == BinOperator)
+			if tc.wantFinding == "" && strings.Contains(finding, "base commit") {
+				t.Errorf("finding = %q, want nothing about the base commit", finding)
+			}
+			if !strings.Contains(finding, tc.wantFinding) {
+				t.Errorf("finding = %q, want it to say %q", finding, tc.wantFinding)
+			}
+			if tc.want == BinOperator && (!strings.Contains(finding, "fix the gate command or the repository") || !strings.Contains(finding, "No corrective build is started")) {
+				t.Errorf("finding = %q, want it to tell the operator what to change", finding)
+			}
+			if tc.want != BinOperator && strings.Contains(finding, "No corrective build") {
+				t.Errorf("finding = %q says no corrective build is started for a gate a build is given", finding)
 			}
 		})
 	}
 	// One gate the build can fix beside one it cannot: the attempt as a
 	// whole is the operator's, since a corrective build could not pass.
-	r := &run.Run{ID: "run-m", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", run.GateBasePasses), gate("repo-docs", run.GateBaseFails)}}
+	r := &run.Run{ID: "run-m", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", "passes"), gate("repo-docs", "fails_same")}}
 	if doc := Build(r, t.TempDir()); doc.Next != BinOperator {
 		t.Errorf("next = %q, want operator", doc.Next)
+	}
+	// The record a later build is given says the gate was already red.
+	r = &run.Run{ID: "run-d", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", "fails_differently")}}
+	if md := Build(r, t.TempDir()).Markdown(); !strings.Contains(md, alreadyFailing) {
+		t.Errorf("the record for a later build does not say the gate was already failing on the base:\n%s", md)
 	}
 }

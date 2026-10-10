@@ -81,11 +81,11 @@ func assertNoGateBaseWorktreeLeft(t *testing.T, ws, dataDir, runID string) {
 	}
 }
 
-// A repository gate that fails on the build's result and on the commit the
-// build started from cannot be fixed by a build: the gate result records it,
+// A repository gate that fails the same way on the build's result and on the
+// commit the build started from cannot be fixed by a build: the gate result records it,
 // the handoff sorts it as the operator's with a sentence that says so, and
 // what the failures allow next is therefore not a corrective build.
-func TestIntegrationGateThatAlsoFailsOnTheBaseCommitIsTheOperators(t *testing.T) {
+func TestIntegrationGateThatFailsTheSameWayOnTheBaseCommitIsTheOperators(t *testing.T) {
 	ws, base := gateBaseFixture(t, "false")
 	dataDir := t.TempDir()
 	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil, nil, dataDir)
@@ -101,8 +101,8 @@ func TestIntegrationGateThatAlsoFailsOnTheBaseCommitIsTheOperators(t *testing.T)
 	}
 
 	baseCheck := recordedBaseCheck(t, dataDir, r.ID, "repo-house_rule")
-	if baseCheck["outcome"] != "fails" || baseCheck["base_sha"] != base {
-		t.Errorf("base_check = %v, want outcome fails on base_sha %s", baseCheck, base)
+	if baseCheck["outcome"] != "fails_same" || baseCheck["base_sha"] != base {
+		t.Errorf("base_check = %v, want outcome fails_same on base_sha %s", baseCheck, base)
 	}
 
 	doc, check := handoffCheck(t, dataDir, r, "repo-house_rule")
@@ -112,7 +112,7 @@ func TestIntegrationGateThatAlsoFailsOnTheBaseCommitIsTheOperators(t *testing.T)
 	if doc.Next != handoff.BinOperator {
 		t.Errorf("next = %q, want %q: a corrective build would be started for a gate no build can fix", doc.Next, handoff.BinOperator)
 	}
-	for _, want := range []string{"fails on the base commit " + base[:12], "fix the gate command or the repository", "No corrective build is started"} {
+	for _, want := range []string{"fails the same way on the base commit " + base[:12], "fix the gate command or the repository", "No corrective build is started"} {
 		if !strings.Contains(check.Finding, want) {
 			t.Errorf("the finding lacks %q: %q", want, check.Finding)
 		}
@@ -222,4 +222,31 @@ func TestIntegrationGateBaseRerunIsNotMadeOnABranchWithNoDiffBase(t *testing.T) 
 	if doc, check := handoffCheck(t, dataDir, second, "repo-house_rule"); check.Bin != handoff.BinCorrective || doc.Next != handoff.BinCorrective {
 		t.Errorf("repo-house_rule is sorted %q, next %q; want both %q: a corrective build was denied for a failure the ticket's own work introduced", check.Bin, doc.Next, handoff.BinCorrective)
 	}
+}
+
+// A gate that is already red on the base commit and fails with other failing
+// lines on the result (a ticket whose job is to turn it green, after a
+// partial fix) keeps its corrective build, and the finding a later build is
+// given says the gate was failing before the attempt.
+func TestIntegrationGateRedOnTheBaseThatFailsDifferentlyOnTheResultStaysCorrective(t *testing.T) {
+	// The build adds a line to content.txt, so the failing line differs.
+	ws, base := gateBaseFixture(t, `echo "FAIL: content.txt has $(grep -c . content.txt) line(s), want 3"; exit 1`)
+	dataDir := t.TempDir()
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil, nil, dataDir)
+
+	if r.State != run.StateQuarantined {
+		t.Fatalf("state = %q, want %q (gates: %+v)", r.State, run.StateQuarantined, r.GateResults)
+	}
+	baseCheck := recordedBaseCheck(t, dataDir, r.ID, "repo-house_rule")
+	if baseCheck["outcome"] != "fails_differently" || baseCheck["base_sha"] != base {
+		t.Errorf("base_check = %v, want outcome fails_differently on base_sha %s", baseCheck, base)
+	}
+	doc, check := handoffCheck(t, dataDir, r, "repo-house_rule")
+	if check.Bin != handoff.BinCorrective || doc.Next != handoff.BinCorrective {
+		t.Errorf("repo-house_rule is sorted %q, next %q; want both %q: the ticket's partial fix lost its corrective build", check.Bin, doc.Next, handoff.BinCorrective)
+	}
+	if want := "was already failing on the base commit " + base[:12]; !strings.Contains(check.Finding, want) {
+		t.Errorf("the finding lacks %q: %q", want, check.Finding)
+	}
+	assertNoGateBaseWorktreeLeft(t, ws, dataDir, r.ID)
 }

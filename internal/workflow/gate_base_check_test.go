@@ -34,6 +34,9 @@ type gateBaseFixture struct {
 	images []string
 	// onBaseLaunch runs when the rerun's launch is created.
 	onBaseLaunch func(scratch string)
+	// resultLines and baseLines are what the gate's command prints on the
+	// result and on the base commit; the runtime's own when nil.
+	resultLines, baseLines []string
 }
 
 func newGateBaseFixture(t *testing.T, resultExit, baseExit int) *gateBaseFixture {
@@ -55,8 +58,14 @@ func newGateBaseFixture(t *testing.T, resultExit, baseExit int) *gateBaseFixture
 		f.launched = append(f.launched, workspace)
 		f.images = append(f.images, req.Image)
 		f.rt.ExitCode = resultExit
+		if f.resultLines != nil {
+			f.rt.Lines = f.resultLines
+		}
 		if f.onScratch(workspace) {
 			f.rt.ExitCode = baseExit
+			if f.baseLines != nil {
+				f.rt.Lines = f.baseLines
+			}
 			if f.onBaseLaunch != nil {
 				f.onBaseLaunch(workspace)
 			}
@@ -535,4 +544,46 @@ func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *test
 	}
 	release()
 	f.assertRunUntouched()
+}
+
+// A gate that is red on the base commit is the operator's only when it fails
+// there the same way as on the result: the same exit code and the same
+// failing lines of output (observation.Excerpt, which the handoff already
+// uses to pick them). A ticket whose job is to turn that gate green fails it
+// differently after a partial fix, and keeps its corrective build.
+func TestBaseRerunTellsTheSameFailureFromADifferentOne(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		resultExit, baseExit  int
+		resultLines, baseLine []string
+		want                  string
+	}{
+		{"the same exit code and the same failing lines", 1, 1,
+			[]string{"=== RUN TestSum", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL"},
+			[]string{"=== RUN TestSum", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL"}, "fails_same"},
+		{"other failing lines: the ticket's partial fix", 1, 1,
+			[]string{"--- FAIL: TestSumOfNegatives", "    sum_test.go:21: got -1, want -3", "FAIL"},
+			[]string{"--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "--- FAIL: TestSumOfNegatives", "    sum_test.go:21: got 0, want -3", "FAIL"}, "fails_differently"},
+		{"the same lines with another exit code", 2, 1,
+			[]string{"--- FAIL: TestSum", "FAIL"}, []string{"--- FAIL: TestSum", "FAIL"}, "fails_differently"},
+		// What the excerpt already leaves out or cleans: terminal colour,
+		// trailing spaces, and lines that report no failure (a passing
+		// package's timing, a progress line).
+		{"a difference the excerpt already normalises", 1, 1,
+			[]string{"ok  \tacme/api\t0.31s", "\x1b[31m--- FAIL: TestSum\x1b[0m   ", "    sum_test.go:9: got 3, want 4", "FAIL", "collected in 12 files"},
+			[]string{"ok  \tacme/api\t0.52s", "--- FAIL: TestSum", "    sum_test.go:9: got 3, want 4", "FAIL", "collected in 11 files"}, "fails_same"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGateBaseFixture(t, tc.resultExit, tc.baseExit)
+			f.resultLines, f.baseLines = tc.resultLines, tc.baseLine
+			res := f.runGate("lint", "")
+			if bc := res.BaseCheck; bc == nil || bc.Outcome != tc.want || bc.ExitCode != tc.baseExit || bc.BaseSHA != f.base {
+				t.Fatalf("base check = %+v, want %s with exit %d", bc, tc.want, tc.baseExit)
+			}
+			if res.Result.ExitCode != tc.resultExit {
+				t.Errorf("the gate's exit code = %d, want %d", res.Result.ExitCode, tc.resultExit)
+			}
+			f.assertRunUntouched()
+		})
+	}
 }
