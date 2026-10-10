@@ -66,9 +66,35 @@ func (g GateResult) SetupNotRun() bool {
 // submitter died and could not be checked against the repository's
 // .factory.yml as the run was dispatched with it (the commit and hash on the
 // run record): which gates and setup commands the result had to run is then
-// unknown. The reason follows the prefix. Nothing a build can do changes it,
-// so it is the operator's.
-const ReclaimNotCheckedPrefix = "buildgate: reclaimed result not applied: .factory.yml as dispatched could not be checked: "
+// unknown. ReclaimNotCheckedMessage is the whole Command. Nothing a build can
+// do changes it, so it is the operator's.
+const ReclaimNotCheckedPrefix = "buildgate: reclaim refused, "
+
+// reclaimNotCheckedMaxLen bounds ReclaimNotCheckedMessage without its
+// "buildgate: " so the sentence is never cut where it is shown (triage's
+// sentence limit).
+const reclaimNotCheckedMaxLen = 200
+
+// ReclaimNotCheckedMessage is the Command of that result: a short reason
+// (one of the caller's fixed few, never an error's text), what the operator's
+// checkout must hold, and what applies the result then. repoDir is named
+// whole or, when it would not fit the sentence, by where the run records it;
+// commit "" is a record that names none.
+func ReclaimNotCheckedMessage(reason, repoDir, commit string) string {
+	const next = "start the run again, or factoryd override"
+	if commit == "" {
+		return ReclaimNotCheckedPrefix + reason + " for its .factory.yml: " + next
+	}
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	head := ReclaimNotCheckedPrefix + reason + ": "
+	tail := " must hold commit " + commit + " with the run's .factory.yml; then " + next
+	if repoDir == "" || len(head)-len("buildgate: ")+len(repoDir)+len(tail) > reclaimNotCheckedMaxLen {
+		repoDir = "the run's repository_root"
+	}
+	return head + repoDir + tail
+}
 
 // ReclaimNotChecked reports whether g is the result recorded for a reclaimed
 // result that could not be checked (ReclaimNotCheckedPrefix).
