@@ -6,9 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 
 	"buildgate/internal/policy"
@@ -396,4 +400,139 @@ func TestBaseRerunOfARunOnABranchWithADiffBaseUsesTheDiffBase(t *testing.T) {
 	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base || len(f.launched) != 2 {
 		t.Errorf("base check = %+v after %d launch(es), want passes on the diff base %s", bc, len(f.launched), f.base)
 	}
+}
+
+// holdGitMetadataLock takes the repository's git metadata lock, as another
+// run of the same repository does while it creates or removes a worktree,
+// and returns its release.
+func holdGitMetadataLock(t *testing.T, repo string) (release func()) {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(repo, ".git", "factoryd-git.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release = func() {
+		if !released {
+			released = true
+			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+			_ = lock.Close()
+		}
+	}
+	t.Cleanup(release)
+	return release
+}
+
+// A retried gate Activity returns its checkpointed result before it waits on
+// anything: with the repository's git metadata lock held by another run and a
+// scratch worktree left by the dead attempt, the result still comes back at
+// once, and the leftover is removed without the lock.
+func TestRetriedGateActivityReturnsItsCheckpointWhileTheGitMetadataLockIsHeld(t *testing.T) {
+	f := newGateBaseFixture(t, 2, 2)
+	checkpointDir := t.TempDir()
+	first := f.runGate("lint", checkpointDir)
+	scratch, err := gateBaseWorktreePath(f.acts.LogDir, "lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(scratch), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, f.repo, "worktree", "add", "-q", "--detach", scratch, f.base)
+	release := holdGitMetadataLock(t, f.repo)
+
+	type outcome struct {
+		res VerifyActivityResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := f.tryGate("lint", checkpointDir)
+		done <- outcome{res, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("the retried gate: %v", got.err)
+		}
+		if got.res.Result.ExitCode != 2 || got.res.BaseCheck == nil || first.BaseCheck == nil || *got.res.BaseCheck != *first.BaseCheck {
+			t.Errorf("the retried gate returned %+v (base check %+v), want the checkpointed result with %+v", got.res.Result, got.res.BaseCheck, first.BaseCheck)
+		}
+	case <-time.After(10 * time.Second):
+		release()
+		<-done
+		t.Fatal("the retried gate did not return its checkpointed result while the git metadata lock was held: its sweep waited on the lock before the checkpoint's early return")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Lstat(scratch); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the scratch worktree the dead attempt left is still there, with the lock still held")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	release()
+}
+
+// The rerun's host steps wait on the git metadata lock under the rerun's own
+// deadline and heartbeat while they wait: a lock another run holds for longer
+// than the Activity's heartbeat timeout costs the base check ("not checked"),
+// never the Activity.
+func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *testing.T) {
+	f := newGateBaseFixture(t, 1, 1)
+	release := holdGitMetadataLock(t, f.repo)
+	// Longer than one heartbeat interval, so a wait with no heartbeat shows.
+	wait := activityHeartbeatInterval + 3*time.Second
+
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	var heartbeats atomic.Int32
+	env.SetOnActivityHeartbeatListener(func(*activity.Info, converter.EncodedValues) { heartbeats.Add(1) })
+	env.RegisterActivityWithOptions(func(ctx context.Context, in NamedGateActivityInput) (*run.GateBaseCheck, error) {
+		ctx, cancel := context.WithTimeout(ctx, gateBaseCheckReserve+wait)
+		defer cancel()
+		return f.acts.checkGateOnBase(ctx, in, []string{"sh", "-c", "true"}, nil), nil
+	}, activity.RegisterOptions{Name: "checkGateOnBase"})
+	in := f.input
+	in.CheckpointDir = t.TempDir()
+
+	type outcome struct {
+		bc  *run.GateBaseCheck
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		val, err := env.ExecuteActivity("checkGateOnBase", NamedGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "true"})
+		var bc *run.GateBaseCheck
+		if err == nil {
+			err = val.Get(&bc)
+		}
+		done <- outcome{bc, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if got.bc == nil || got.bc.Outcome != run.GateBaseNotChecked || !strings.Contains(got.bc.Reason, "lock") {
+			t.Errorf("base check = %+v, want not_checked naming the lock it waited for", got.bc)
+		}
+	case <-time.After(wait + 10*time.Second):
+		release()
+		<-done
+		t.Errorf("the rerun was still waiting on the git metadata lock %s after its own deadline", 10*time.Second)
+	}
+	if heartbeats.Load() == 0 {
+		t.Errorf("no heartbeat was recorded while the rerun waited %s on the git metadata lock", wait)
+	}
+	if len(f.launched) != 0 {
+		t.Errorf("%d launch(es), want none", len(f.launched))
+	}
+	release()
+	f.assertRunUntouched()
 }
