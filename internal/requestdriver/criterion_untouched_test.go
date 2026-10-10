@@ -1,6 +1,8 @@
 package requestdriver_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,6 +50,59 @@ func TestCriterionFilesFeasibleSkipsAFileTheCriterionSaysStaysUntouched(t *testi
 		for i, path := range tc.flagged {
 			if !strings.Contains(reasons[i], "names "+path+" ") {
 				t.Errorf("criterion %q: reasons[%d] = %q, want it to name %s", tc.criterion, i, reasons[i], path)
+			}
+		}
+	}
+}
+
+// TestCriterionFilesFeasibleReadsAQualifiedIdentifierAsCode: a criterion that
+// names `internal/domain.Calculate` names a function of a package, not a
+// file, so no ticket has to list it in Allowed-Files. A real file beside it
+// is still checked.
+func TestCriterionFilesFeasibleReadsAQualifiedIdentifierAsCode(t *testing.T) {
+	workspace := t.TempDir()
+	for _, dir := range []string{"internal/domain", "web/app", "docs"} {
+		if err := os.MkdirAll(filepath.Join(workspace, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "docs/NOTES.MD"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	allowed := []string{"internal/domain/domain.go"}
+	tickets := []string{habitTicket("make verify", allowed, allowed, 1)}
+	cases := []struct {
+		criterion string
+		flagged   []string
+	}{
+		{"`internal/domain.Calculate` returns an error for a negative operand, and `internal/domain/errors.go` exports it.", []string{"internal/domain/errors.go"}},
+		{"`internal/domain.Operation.Valid` is true for the new token.", nil},
+		{"`internal/domain.calculate` is unexported.", nil},
+		{"`internal/handler/calc.go` maps the error.", []string{"internal/handler/calc.go"}},
+		// A real file whose extension is upper case is still a file.
+		{"`docs/NOTES.MD` gains a line.", []string{"docs/NOTES.MD"}},
+	}
+	for _, withWorkspace := range []bool{true, false} {
+		for _, tc := range cases {
+			dir := ""
+			if withWorkspace {
+				dir = workspace
+			}
+			// With no workspace to look in, only the spelling decides:
+			// the lower-case identifier and the upper-case extension
+			// cannot be told from their opposites.
+			if !withWorkspace && (strings.Contains(tc.criterion, "domain.calculate") || strings.Contains(tc.criterion, "NOTES.MD")) {
+				continue
+			}
+			reasons := requestdriver.CriterionFilesFeasible([]string{tc.criterion}, tickets, [][]string{allowed}, dir)
+			if len(reasons) != len(tc.flagged) {
+				t.Errorf("workspace %v, criterion %q: reasons = %q, want %v", withWorkspace, tc.criterion, reasons, tc.flagged)
+				continue
+			}
+			for i, p := range tc.flagged {
+				if !strings.Contains(reasons[i], "names "+p+" ") {
+					t.Errorf("criterion %q: reasons[%d] = %q, want it to name %s", tc.criterion, i, reasons[i], p)
+				}
 			}
 		}
 	}
