@@ -22,7 +22,7 @@ export interface TriageOtherDetailProps {
 export function TriageOtherDetail({ request, now }: TriageOtherDetailProps) {
   return (
     <div className="border-border flex min-w-0 flex-col gap-3 rounded-lg border p-4">
-      <h2 className="text-fg text-base font-semibold">
+      <h2 className="text-fg text-sm font-semibold">
         {request.title !== "" ? request.title : request.id}
       </h2>
       <RequestStatusUnit request={request} now={now}>

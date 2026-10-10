@@ -40,7 +40,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
         data-testid="timeline-status-strip"
         className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border pb-3 text-sm text-fg-muted"
       >
-        <span className="text-base font-semibold text-fg">{strip.label}</span>
+        <span className="text-sm font-semibold text-fg">{strip.label}</span>
         {strip.round !== null ? <span>{strip.round}</span> : null}
         <span className="tabular-nums">Elapsed {strip.elapsed}</span>
         {strip.lastActivity !== null ? (

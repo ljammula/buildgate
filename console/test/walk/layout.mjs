@@ -7,8 +7,9 @@
 //
 //   a  1440x900  top of the column headers <= 240, top of the first card <= 300
 //   b  1280x800  fewest characters of a title (of 40 or more) the card shows >= 28
-//   c  1280x800 and 960x900  elements that overflow sideways without being a
-//      scroll container or a deliberate truncation: 0
+//   c  1280x800, 960x900 and 700x900, on /, /runs, /triage and
+//      /requests/req-plan-review: elements that overflow sideways without
+//      being a scroll container or a deliberate truncation: 0
 import { chromium } from "playwright";
 
 const [base, token] = process.argv.slice(2);
@@ -120,20 +121,30 @@ const overflowing = () =>
     }
     return { found, scanned: document.querySelectorAll("body *").length };
   });
-for (const [width, height] of [
-  [1280, 800],
-  [960, 900],
-]) {
-  await openBoard(width, height);
-  const { found, scanned } = await overflowing();
-  // A page that did not render has nothing to overflow: that is not a pass.
-  report(
-    `unintended-overflow@${width}x${height}`,
-    `${found.length} of ${scanned} elements`,
-    "0",
-    found.length === 0 && scanned > 50,
-  );
-  for (const line of found.slice(0, 10)) console.log(`  ${line}`);
+for (const route of ["/", "/runs", "/triage", "/requests/req-plan-review"]) {
+  for (const [width, height] of [
+    [1280, 800],
+    [960, 900],
+    [700, 900],
+  ]) {
+    if (route === "/") await openBoard(width, height);
+    else {
+      await page.setViewportSize({ width, height });
+      await page.goto(`${base}${route}`);
+      await page.locator("h1").first().waitFor({ timeout: 10000 });
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(600);
+    }
+    const { found, scanned } = await overflowing();
+    // A page that did not render has nothing to overflow: that is not a pass.
+    report(
+      `unintended-overflow ${route}@${width}x${height}`,
+      `${found.length} of ${scanned} elements`,
+      "0",
+      found.length === 0 && scanned > 50,
+    );
+    for (const line of found.slice(0, 10)) console.log(`  ${line}`);
+  }
 }
 
 await browser.close();

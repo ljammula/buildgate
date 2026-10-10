@@ -12,7 +12,7 @@ import {
 import { cn } from "@/ui/cn";
 
 const controlBase =
-  "w-full rounded-md border border-border bg-surface-sunken px-2.5 text-sm text-fg placeholder:text-fg-subtle transition-colors hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-tone-danger-border";
+  "w-full rounded-md border border-border-control bg-field px-2.5 text-sm text-fg placeholder:text-fg-subtle transition-colors hover:border-fg-subtle disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-tone-danger-border";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   readonly ref?: Ref<HTMLInputElement>;
@@ -53,7 +53,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
   return (
     <input
       type="checkbox"
-      className={cn("size-4 shrink-0 rounded-sm border-border accent-accent", className)}
+      className={cn("size-4 shrink-0 rounded-sm border-border-control accent-accent", className)}
       {...props}
     />
   );

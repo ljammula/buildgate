@@ -5,15 +5,16 @@ import type { ButtonHTMLAttributes, Ref } from "react";
 import { cn } from "@/ui/cn";
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors select-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:text-fg-subtle [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        primary: "bg-accent text-accent-fg hover:bg-accent-hover",
-        secondary: "border border-border bg-surface-raised text-fg hover:bg-surface-hover",
+        primary: "bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-surface-hover",
+        secondary:
+          "border border-border-strong bg-surface-raised text-fg hover:bg-surface-hover disabled:border-border",
         ghost: "text-fg-muted hover:bg-surface-hover hover:text-fg",
         danger:
-          "border border-tone-danger-border bg-tone-danger-soft text-tone-danger hover:bg-tone-danger hover:text-bg",
+          "border border-tone-danger-border bg-tone-danger-soft text-tone-danger hover:bg-tone-danger hover:text-bg disabled:border-border disabled:bg-surface-hover",
         link: "h-auto px-0 text-accent underline-offset-4 hover:underline",
       },
       size: {

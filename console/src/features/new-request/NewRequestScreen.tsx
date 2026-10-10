@@ -55,7 +55,7 @@ export function NewRequestScreen() {
             }}
           >
             <div className="border-b border-border px-4 py-3">
-              <h2 className="text-base font-semibold text-fg">Start a request</h2>
+              <h2 className="text-sm font-semibold text-fg">Start a request</h2>
             </div>
             <div className="flex flex-col gap-4 border-b border-border p-4">
               {workspaces.isPending ? <Spinner label="Loading workspaces" /> : null}

@@ -9,7 +9,12 @@ interface DivProps extends HTMLAttributes<HTMLDivElement> {
 export type CardProps = DivProps;
 
 export function Card({ className, ...props }: CardProps) {
-  return <div className={cn("rounded-lg border border-border bg-surface", className)} {...props} />;
+  return (
+    <div
+      className={cn("rounded-lg border border-border bg-surface shadow-card", className)}
+      {...props}
+    />
+  );
 }
 
 export type CardHeaderProps = DivProps;
@@ -32,7 +37,7 @@ export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
 }
 
 export function CardTitle({ as: Heading = "h2", className, ...props }: CardTitleProps) {
-  return <Heading className={cn("text-base font-semibold text-fg", className)} {...props} />;
+  return <Heading className={cn("text-sm font-semibold text-fg", className)} {...props} />;
 }
 
 export type CardBodyProps = DivProps;

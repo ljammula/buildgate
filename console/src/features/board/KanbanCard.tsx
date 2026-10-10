@@ -116,7 +116,8 @@ export const KanbanCard = memo(function KanbanCard({
         </span>
       ) : null}
       {column === "needsYou" ? (
-        <div>
+        // A long label ("Accepted · awaiting PR") in a narrow lane is clipped, never wider than the card.
+        <div className="truncate">
           <RequestStageChip
             state={request.state}
             awaitingPullRequest={requestAwaitingPullRequest(request)}
