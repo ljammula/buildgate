@@ -27,9 +27,13 @@ func deepLeadPath(i, depth int) string {
 // indexUntilRefused feeds one commit's listing to a plan and returns the
 // plan, the number of entries it took and the refusal ("" when it took all).
 func indexUntilRefused(entries int, path func(i int) string) (*planState, int, string) {
+	return indexModeUntilRefused("100644", entries, path)
+}
+
+func indexModeUntilRefused(mode string, entries int, path func(i int) string) (*planState, int, string) {
 	s := newPlan()
 	for i := 0; i < entries; i++ {
-		e := treeEntry{path: path(i), mode: "100644", oid: strings.Repeat("0", 40)}
+		e := treeEntry{path: path(i), mode: mode, oid: strings.Repeat("0", 40)}
 		if err := s.index(s.res, e, 1); err != nil {
 			return s, i, err.Error()
 		}
@@ -132,4 +136,60 @@ func TestReviewInstructionSnapshotTakesAWideRepository(t *testing.T) {
 	if len(s.resDirs) != 1+200+2*20000 {
 		t.Fatalf("recorded %d directories, want %d", len(s.resDirs), 1+200+2*20000)
 	}
+}
+
+// Every path a plan keeps from a listing is under the one byte limit, not
+// only the directories register records: a symlink or a submodule anywhere in
+// the tree is kept by its path, and a path of very many directories is copied
+// once for each of them when the worktree is checked.
+func TestReviewInstructionEveryKeptPathIsUnderTheByteLimit(t *testing.T) {
+	const boundBytes = 256 << 20
+	longName := func(i int) string { return fmt.Sprintf("src/%06d", i) + strings.Repeat("n", 500000) }
+	cases := []struct {
+		name, mode string
+		entries    int
+		path       func(i int) string
+	}{
+		// 2,000 entries outside every instruction path, 1 GB of paths.
+		{"symlinks under long names", "120000", 2000, longName},
+		{"submodules under long names", "160000", 2000, longName},
+		// One file 99,000 directories down: under the directory limit, and
+		// 10 GB of directory prefixes once each is spelled out.
+		{"one path of 99,000 directories", "100644", 1, func(int) string { return strings.Repeat("a/", 99000) + "AGENTS.md" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := heapNow()
+			s, took, refusal := indexModeUntilRefused(tc.mode, tc.entries, tc.path)
+			kept := int64(heapNow()) - int64(before)
+			t.Logf("took %d of %d entries, plan keeps %d MiB; refusal: %q", took, tc.entries, kept>>20, refusal)
+			if !strings.Contains(refusal, "bytes of instruction-path, link or submodule paths in commit") {
+				t.Errorf("refusal = %q, want the byte limit", refusal)
+			}
+			if kept > boundBytes {
+				t.Errorf("the plan keeps %d MiB, over the bound of %d MiB", kept>>20, boundBytes>>20)
+			}
+			runtime.KeepAlive(s)
+		})
+	}
+}
+
+// A link at an instruction path may name a file anywhere, and the plan keeps
+// that file's path and checks every directory above it: 50,000 targets of
+// 4,000 bytes each are under the same byte limit.
+func TestReviewInstructionLinkTargetsAreUnderTheByteLimit(t *testing.T) {
+	s := newPlan()
+	deep := strings.Repeat(strings.Repeat("n", 1300)+"/", 3) + "f"
+	for i := 0; i < 50000; i++ {
+		err := s.checkLinkTarget(fmt.Sprintf(".claude/l%05d", i), fmt.Sprintf("t%05d/", i)+deep)
+		if err == nil {
+			continue
+		}
+		t.Logf("refused after %d targets: %v", i, err)
+		if !strings.Contains(err.Error(), "bytes of instruction-path, link or submodule paths in commit") {
+			t.Fatalf("err = %v, want the byte limit", err)
+		}
+		return
+	}
+	t.Fatalf("the plan queued all %d link targets of %d bytes each", len(s.targets), len(deep)+7)
 }
