@@ -14,6 +14,8 @@ export interface RequestJsonOptions {
   readonly tickets?: readonly Record<string, unknown>[];
   readonly rejections?: readonly Record<string, unknown>[];
   readonly costSummary?: Record<string, unknown>;
+  readonly lastNotifiedAt?: string;
+  readonly lastAsk?: string;
 }
 
 export function requestJson(o: RequestJsonOptions): Record<string, unknown> {
@@ -33,6 +35,8 @@ export function requestJson(o: RequestJsonOptions): Record<string, unknown> {
     tickets: o.tickets ?? [],
     rejections: o.rejections ?? [],
     ...(o.costSummary === undefined ? {} : { cost_summary: o.costSummary }),
+    ...(o.lastNotifiedAt === undefined ? {} : { last_notified_at: o.lastNotifiedAt }),
+    ...(o.lastAsk === undefined ? {} : { last_ask: o.lastAsk }),
   };
 }
 

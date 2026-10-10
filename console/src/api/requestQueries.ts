@@ -25,6 +25,7 @@ import {
   getRequestTicketOracleFile,
   putRequestOracleRunCommand,
 } from "@/api/oracle";
+import { useIsNotifier } from "@/api/notifierContext";
 import { requestListRefreshMs } from "@/api/polling";
 import { isOracleKey, isUnderRequest, queryKeys } from "@/api/queryKeys";
 import {
@@ -151,6 +152,7 @@ export function useRequestBoard(): RequestBoard {
   const [live, setLive] = useState(false);
   const [streamError, setStreamError] = useState<ApiError | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
+  const notifier = useIsNotifier();
 
   const query = useQuery({
     ...requestListOptions(http),
@@ -158,26 +160,31 @@ export function useRequestBoard(): RequestBoard {
   });
 
   useEffect(() => {
-    const unsubscribe = watchRequests(http, {
-      onValue: (request) => {
-        cacheRequest(client, request, false);
+    const unsubscribe = watchRequests(
+      http,
+      {
+        onValue: (request) => {
+          cacheRequest(client, request, false);
+        },
+        onError: (error) => {
+          setLive(false);
+          setStreamError(error);
+        },
+        onConnectionChange: (connected) => {
+          setLive(connected);
+          // A stream that opens again has recovered: the error banner goes.
+          if (connected) setStreamError(null);
+          setFailedAttempts((count) => (connected ? 0 : count + 1));
+        },
       },
-      onError: (error) => {
-        setLive(false);
-        setStreamError(error);
-      },
-      onConnectionChange: (connected) => {
-        setLive(connected);
-        // A stream that opens again has recovered: the error banner goes.
-        if (connected) setStreamError(null);
-        setFailedAttempts((count) => (connected ? 0 : count + 1));
-      },
-    });
+      {},
+      { notifier },
+    );
     return () => {
       unsubscribe();
       setLive(false);
     };
-  }, [http, client]);
+  }, [http, client, notifier]);
 
   return { query, live, streamError, failedAttempts };
 }
@@ -211,19 +218,25 @@ export function useRequest(id: string): UseQueryResult<RequestSummary> {
 export function useRequestDetailEvents(id: string): void {
   const { http } = useApi();
   const client = useQueryClient();
+  const notifier = useIsNotifier();
   useEffect(() => {
-    const unsubscribe = watchRequests(http, {
-      onValue: (event) => {
-        if (event.id !== id) return;
-        const current = client.getQueryData<RequestSummary>(queryKeys.requests.detail(id));
-        if (current?.updatedAt === event.updatedAt && current.state === event.state) return;
-        void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id), exact: true });
+    const unsubscribe = watchRequests(
+      http,
+      {
+        onValue: (event) => {
+          if (event.id !== id) return;
+          const current = client.getQueryData<RequestSummary>(queryKeys.requests.detail(id));
+          if (current?.updatedAt === event.updatedAt && current.state === event.state) return;
+          void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id), exact: true });
+        },
+        onError: () => undefined,
+        onConnectionChange: () => undefined,
       },
-      onError: () => undefined,
-      onConnectionChange: () => undefined,
-    });
+      {},
+      { notifier },
+    );
     return unsubscribe;
-  }, [http, client, id]);
+  }, [http, client, id, notifier]);
 }
 
 export function useRequestRevisions(id: string, enabled = true): UseQueryResult<RevisionSummary[]> {

@@ -413,6 +413,11 @@ export interface WatchRequestsHandlers {
   onConnectionChange?(live: boolean): void;
 }
 
+export interface WatchOptions {
+  /** This tab raises browser notifications: the server then holds back the host's banner. */
+  readonly notifier?: boolean;
+}
+
 export interface WatchBackoff {
   readonly initialBackoffMs?: number;
   readonly maxBackoffMs?: number;
@@ -423,7 +428,8 @@ export interface WatchBackoff {
  * gated, the token sent as a header, never in the URL. There is no terminal
  * state, so a dropped connection or a 5xx is retried with backoff
  * indefinitely (like a native EventSource) until the returned function is
- * called or a 4xx (a rotated token) ends it through `onError`. After
+ * called or a 4xx (a rotated token) ends it through `onError`. `notifier`
+ * appends `?notifier=1`; flipping it means opening the stream again. After
  * unsubscribing nothing more is delivered, and the connection is released
  * even if it was still connecting.
  */
@@ -431,12 +437,13 @@ export function watchRequests(
   http: Http,
   handlers: WatchRequestsHandlers,
   backoff: WatchBackoff = {},
+  options: WatchOptions = {},
 ): () => void {
   const at = "GET /requests/events";
   return watchSse<RequestSummary>(
     http,
     {
-      path: "/requests/events",
+      path: options.notifier === true ? "/requests/events?notifier=1" : "/requests/events",
       token: "read",
       parseFrame: (frame) => decodeRequestSummary(asObject(parseSseFrame(frame, "state"), at), at),
       onOpen: () => handlers.onConnectionChange?.(true),
