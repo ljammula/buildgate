@@ -452,6 +452,72 @@ func TestResumePreconditionsRefuseARoundStateWithNoRoundLeft(t *testing.T) {
 	}
 }
 
+// A build that passed in its last round and whose launch was then lost (during
+// the notes turn that follows such a pass) has a round state with no round
+// left, and none is needed: the build script runs no round for a state that
+// records the pass. Its kept worktree is adopted and the resumed build is
+// launched as any resume is. A state that claims a pass its last round does
+// not show is refused as before.
+func TestResumeOfABuildThatPassedInItsLastRoundIsNotRefused(t *testing.T) {
+	const passed = `{"version":1,"last_completed_round":3,"next_prompt":"p","passed":true,"notes_turn_started":true,` +
+		`"rounds":[{"index":1,"blockers":["canonical verification failed"]},{"index":2,"blockers":["canonical verification failed"]},{"index":3,"blockers":[]}]}`
+	dataDir, repoDir, base, prepared := preparedHaltedRun(t, "halted-run")
+	state := filepath.Join(prepared.WorktreePath, RoundStateFileName)
+	docker := noContainersDocker(t)
+	for name, body := range map[string]string{
+		"the last round recorded a blocker": strings.Replace(passed, `{"index":3,"blockers":[]}`, `{"index":3,"blockers":["canonical verification failed"]}`, 1),
+		"fewer round records than rounds":   strings.Replace(passed, `,{"index":3,"blockers":[]}`, ``, 1),
+		"no round records":                  `{"version":1,"last_completed_round":3,"passed":true}`,
+		"passed is not true":                strings.Replace(passed, `"passed":true`, `"passed":"true"`, 1),
+	} {
+		writeFile(t, state, body)
+		ok, reasons, err := CheckResumePreconditions(context.Background(), dataDir, docker, "halted-run", "", 3)
+		if name == "passed is not true" {
+			if err != nil || ok {
+				t.Errorf("%s: ok=%v reasons=%v err=%v; want a refusal", name, ok, reasons, err)
+			}
+			continue
+		}
+		if err != nil || ok || !strings.Contains(strings.Join(reasons, "|"), "no round is left") {
+			t.Errorf("%s: ok=%v reasons=%v err=%v; want a no-round-left refusal", name, ok, reasons, err)
+		}
+	}
+
+	writeFile(t, state, passed)
+	for _, maxRounds := range []int{3, 2} {
+		if ok, reasons, err := CheckResumePreconditions(context.Background(), dataDir, docker, "halted-run", "", maxRounds); err != nil || !ok {
+			t.Fatalf("a state that passed in round 3, with %d rounds allowed: ok=%v reasons=%v err=%v; want it resumable", maxRounds, ok, reasons, err)
+		}
+	}
+	in := resumeInput(repoDir, dataDir, base, prepared)
+	in.MaxRounds = 3
+	adopted, err := runPrepare(t, &Activities{CheckpointDir: t.TempDir(), SandboxDocker: docker}, in)
+	if err != nil || adopted.WorktreePath != prepared.WorktreePath {
+		t.Fatalf("adoption = %+v, %v; want the kept worktree adopted", adopted, err)
+	}
+	// The resumed build is launched as any resume: from the round state, with
+	// the handoff note of the lost attempt.
+	input := fixtureInput()
+	input.BaseSHA = base
+	input.RunID = "resumed-run"
+	input.MaxRounds = 3
+	input.ResumeFrom = &ResumeFrom{RunID: "halted-run", BaseSHA: base}
+	args := runBuildArgs(t, prepared.WorktreePath, input)
+	if got, ok := argValue(args, "--resume-from-state"); !ok || got != state {
+		t.Errorf("--resume-from-state = %q (present %v), want %s; argv %v", got, ok, state, args)
+	}
+	if got, _ := argValue(args, "--max-rounds"); got != "3" {
+		t.Errorf("--max-rounds = %q, want 3", got)
+	}
+	note, ok := argValue(args, "--handoff")
+	if !ok {
+		t.Fatalf("the resumed build was passed no --handoff: %v", args)
+	}
+	if b, err := os.ReadFile(note); err != nil || !strings.Contains(string(b), "halted-run") {
+		t.Errorf("handoff note = %q (err %v), want it to name the halted run", b, err)
+	}
+}
+
 func TestSpendCarriedChargesTheHaltedRunsRecordedCarryToo(t *testing.T) {
 	dataDir := t.TempDir()
 	saveRunRecord(t, dataDir, &run.Run{ID: "B", State: run.StateHalted, ResumeSpendCarried: &run.MeterSpend{Tokens: 90, CostMicroUSD: 5}})
