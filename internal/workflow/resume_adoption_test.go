@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -515,6 +516,43 @@ func TestResumeOfABuildThatPassedInItsLastRoundIsNotRefused(t *testing.T) {
 	}
 	if b, err := os.ReadFile(note); err != nil || !strings.Contains(string(b), "halted-run") {
 		t.Errorf("handoff note = %q (err %v), want it to name the halted run", b, err)
+	}
+}
+
+// The host admits a round state with no round left exactly when the build
+// script will: every state of the shared table gets, from the resume
+// precondition, the verdict build_app.py's load_round_state gives it
+// (agent/pi/tests/build_app_test.py reads the same file).
+func TestResumePreconditionAgreesWithTheBuildScriptOnOverBudgetRoundStates(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "agent", "pi", "tests", "fixtures", "over_budget_round_states.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table struct {
+		States []struct {
+			Name          string `json:"name"`
+			MaxRounds     int    `json:"max_rounds"`
+			State         string `json:"state"`
+			ScriptAccepts bool   `json:"script_accepts"`
+		} `json:"states"`
+	}
+	if err := json.Unmarshal(raw, &table); err != nil {
+		t.Fatal(err)
+	}
+	if len(table.States) < 40 {
+		t.Fatalf("the table holds %d states: did its shape change?", len(table.States))
+	}
+	dataDir, _, _, prepared := preparedHaltedRun(t, "halted-run")
+	docker := noContainersDocker(t)
+	for _, row := range table.States {
+		writeFile(t, filepath.Join(prepared.WorktreePath, RoundStateFileName), row.State)
+		ok, reasons, err := CheckResumePreconditions(context.Background(), dataDir, docker, "halted-run", "", row.MaxRounds)
+		if err != nil {
+			t.Fatalf("%s: %v", row.Name, err)
+		}
+		if ok != row.ScriptAccepts {
+			t.Errorf("%s: the host says resumable=%v (%v), the build script accepts=%v\n%s", row.Name, ok, reasons, row.ScriptAccepts, row.State)
+		}
 	}
 }
 

@@ -148,8 +148,13 @@ class RestoreTests(unittest.TestCase):
 		copies = tree_guard.backup(self.root, before, copy, Path(self._backup.name), max_bytes=max_bytes)
 		change(self.root)
 		after = self.record()
-		tree_guard.restore(self.root, before, after, copies)
+		self.attempted = tree_guard.restore(self.root, before, after, copies)
+		self.after_turn = after
 		return tree_guard.changed_paths(before, self.record())
+
+	def assert_left_as_the_turn_left_it(self):
+		self.assertIs(self.attempted, False)
+		self.assertEqual(tree_guard.changed_paths(self.after_turn, self.record()), [])
 
 	def test_changes_are_put_back_exactly(self):
 		def many(root):
@@ -174,9 +179,28 @@ class RestoreTests(unittest.TestCase):
 
 	def test_a_file_that_was_not_copied_stays_changed(self):
 		left = self.put_back(lambda r: ((r / "a.txt").write_text("changed\n"), (r / "run.sh").write_text("x")), copy=("run.sh",))
-		self.assertEqual(left, ["a.txt"])
-		# Left as the turn left it: never deleted for want of a copy.
+		# All or nothing: one file cannot be put back, so none is touched.
+		self.assertEqual(left, ["a.txt", "run.sh"])
 		self.assertEqual((self.root / "a.txt").read_text(), "changed\n")
+		self.assert_left_as_the_turn_left_it()
+
+	def test_a_renamed_file_with_no_copy_keeps_its_content_under_the_new_name(self):
+		left = self.put_back(lambda r: (r / "dir" / "sub" / "b.bin").rename(r / "b2.bin"), copy=("a.txt",))
+		self.assertEqual(left, ["b2.bin", "dir/sub/b.bin"])
+		self.assertEqual((self.root / "b2.bin").stat().st_size, 1_400_000)
+		self.assert_left_as_the_turn_left_it()
+
+	def test_a_renamed_directory_with_no_copies_is_left_whole_under_the_new_name(self):
+		left = self.put_back(lambda r: (r / "dir").rename(r / "moved"), copy=("a.txt",))
+		self.assertEqual((self.root / "moved" / "sub" / "b.bin").stat().st_size, 1_400_000)
+		self.assertFalse((self.root / "dir").exists(), "no empty directories are made under the old name")
+		self.assertEqual(len(left), 8)
+		self.assert_left_as_the_turn_left_it()
+
+	def test_a_restore_that_can_undo_everything_says_so(self):
+		left = self.put_back(lambda r: ((r / "a.txt").write_text("changed\n"), (r / "added").write_text("x"), (r / "dir" / "empty").rmdir()))
+		self.assertEqual(left, [])
+		self.assertIs(self.attempted, True)
 
 	def test_a_file_past_the_copy_bound_is_left_as_changed_not_deleted(self):
 		def change(root):
@@ -185,6 +209,7 @@ class RestoreTests(unittest.TestCase):
 
 		left = self.put_back(change, max_bytes=100)
 		self.assertEqual(left, ["dir/sub/b.bin"])
+		self.assert_left_as_the_turn_left_it()
 		self.assertEqual((self.root / "dir" / "sub" / "b.bin").stat().st_size, 1_400_001)
 
 	def test_a_file_with_no_copy_that_became_something_else_is_left_whole(self):
@@ -200,10 +225,10 @@ class RestoreTests(unittest.TestCase):
 		self.assertEqual((self.root / "a.txt" / "inner").read_text(), "kept\n")
 		self.assertTrue(os.path.islink(self.root / "run.sh"))
 
-	def test_a_deleted_file_with_no_copy_stays_deleted_and_an_added_one_goes(self):
+	def test_a_deleted_file_with_no_copy_stops_the_whole_restore(self):
 		left = self.put_back(lambda r: ((r / "a.txt").unlink(), (r / "added").write_text("x")), copy=())
-		self.assertEqual(left, ["a.txt"])
-		self.assertFalse((self.root / "added").exists())
+		self.assertEqual(left, ["a.txt", "added"])
+		self.assert_left_as_the_turn_left_it()
 
 	def test_the_copy_stops_at_its_byte_bound(self):
 		before = self.record()
@@ -230,9 +255,21 @@ class RestoreTests(unittest.TestCase):
 		(self.root / "dir" / "sub" / "b.bin").unlink()
 		os.chmod(self.root / "dir" / "sub", 0o500)
 		self.addCleanup(os.chmod, self.root / "dir" / "sub", 0o755)
-		tree_guard.restore(self.root, before, self.record(), {})
+		copies = {}
+		after = self.record()
+		self.assertIs(tree_guard.restore(self.root, before, after, copies), False)
+		self.assertEqual(tree_guard.changed_paths(after, self.record()), [])
 		os.chmod(self.root / "dir" / "sub", 0o755)
-		self.assertEqual(tree_guard.changed_paths(before, self.record()), ["dir/sub/b.bin"])
+
+	def test_an_attempted_restore_that_fails_part_way_raises_nothing(self):
+		before = self.record()
+		(self.root / "dir" / "sub" / "added").write_text("x")
+		os.chmod(self.root / "dir" / "sub", 0o500)
+		self.addCleanup(os.chmod, self.root / "dir" / "sub", 0o755)
+		after = self.record()
+		with mock.patch.object(tree_guard.os, "chmod", side_effect=PermissionError("x")):
+			self.assertIs(tree_guard.restore(self.root, before, after, {}), True)
+		self.assertNotEqual(tree_guard.changed_paths(before, self.record()), [])
 
 
 if __name__ == "__main__":

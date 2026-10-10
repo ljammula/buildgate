@@ -21,8 +21,8 @@ never followed. Times, owners and extended attributes are not recorded.
 or MAX_SECONDS, so the caller can skip the turn instead of running it
 unguarded. `backup` copies chosen regular files aside, up to a byte bound, and
 `restore` uses those copies, each only while it still hashes to the recorded
-content; a changed file it cannot recreate exactly is left as it stands, never
-deleted. Neither is trusted: the caller records the tree again after a restore
+content, and is all or nothing: if any difference cannot be undone exactly,
+the tree is left as it stands. Neither is trusted: the caller records the tree again after a restore
 and compares.
 """
 from __future__ import annotations
@@ -179,22 +179,25 @@ def _remove(path: str) -> None:
 		os.unlink(path)
 
 
-def restore(root: Path, before: Record, after: Record, copies: dict[str, str]) -> None:
-	"""Moves the tree `after` describes back towards `before`, touching a
-	path only when what was there before can be made again exactly.
+def restore(root: Path, before: Record, after: Record, copies: dict[str, str]) -> bool:
+	"""Moves the tree `after` describes back to `before`, all or nothing.
+	Returns whether it was attempted.
 
-	A changed path is removed when it was absent before, or when `before`
-	holds what is needed to recreate it: a directory, a link (its text), or a
-	regular file with a copy whose content still hashes to the recorded
-	digest. A file that changed and has no such copy (it was never copied, it
-	was past the byte bound, or the copy is no longer the recorded content)
-	is left exactly as it stands, with everything under it, as is a fifo,
-	socket or device: deleting it would lose the only content there is.
-	Removals go deepest first (a link is unlinked, never followed), then
-	directories, links and copied files are created shallowest first, then
-	permission bits are set. Every step is attempted and no failure is
-	raised: what could not be put back shows when the caller records the tree
-	again."""
+	Nothing is touched unless every difference can be undone exactly from
+	what the guard holds: each changed or missing path of `before` must be a
+	directory, a link (its text is recorded), a path whose permission bits
+	alone changed, or a regular file with a copy that still hashes to the
+	recorded digest. One path that cannot be made again (a file never copied
+	or past the byte bound, a copy that is no longer the recorded content, a
+	fifo, socket or device) and the tree is left exactly as it stands, and
+	False is returned: a partial restore could delete the only copy of a
+	file's content, for instance one the turn renamed.
+
+	When attempted: added and changed paths are removed deepest first (a
+	link is unlinked, never followed), directories, links and copied files
+	are created shallowest first, then permission bits are set. Every step is
+	tried and no failure is raised: what could not be put back shows when the
+	caller records the tree again."""
 	base = os.fspath(root)
 	changed = changed_paths(before, after)
 
@@ -213,21 +216,15 @@ def restore(root: Path, before: Record, after: Record, copies: dict[str, str]) -
 		except OSError:
 			return False
 
-	# Paths that stay as the turn left them, and so does all below them.
-	kept = {n for n in changed if n in before.entries and n in after.entries and not same_but_for_bits(n) and not recreatable(n)}
+	if not all(same_but_for_bits(n) or recreatable(n) for n in changed if n in before.entries):
+		return False
 
-	def under_kept(name: str) -> bool:
-		parts = name.split("/")
-		return any("/".join(parts[:i]) in kept for i in range(1, len(parts) + 1))
-
-	to_remove = [n for n in changed if n in after.entries and not same_but_for_bits(n) and not under_kept(n)]
-	for name in sorted(to_remove, key=lambda n: (-n.count("/"), n)):
+	for name in sorted((n for n in changed if n in after.entries and not same_but_for_bits(n)), key=lambda n: (-n.count("/"), n)):
 		try:
 			_remove(os.path.join(base, name))
 		except OSError:
 			pass
-	to_create = [n for n in changed if n in before.entries and not same_but_for_bits(n) and not under_kept(n)]
-	for name in sorted(to_create, key=lambda n: (n.count("/"), n)):
+	for name in sorted((n for n in changed if n in before.entries and not same_but_for_bits(n)), key=lambda n: (n.count("/"), n)):
 		kind, bits, detail = before.entries[name]
 		path = os.path.join(base, name)
 		try:
@@ -235,13 +232,13 @@ def restore(root: Path, before: Record, after: Record, copies: dict[str, str]) -
 				os.mkdir(path, 0o700)
 			elif kind == "l":
 				os.symlink(detail, path)
-			elif kind == "f" and recreatable(name):
+			else:
 				_copy(copies[name], path, bits)
 		except OSError:
 			pass
 	# Bits last, deepest first: a directory may have to stay writable until
 	# what is inside it is back.
-	for name in sorted((n for n in changed if n in before.entries and not under_kept(n)), key=lambda n: (-n.count("/"), n)):
+	for name in sorted((n for n in changed if n in before.entries), key=lambda n: (-n.count("/"), n)):
 		kind, bits, _ = before.entries[name]
 		path = os.path.join(base, name)
 		try:
@@ -249,3 +246,4 @@ def restore(root: Path, before: Record, after: Record, copies: dict[str, str]) -
 				os.chmod(path, bits)
 		except OSError:
 			pass
+	return True
