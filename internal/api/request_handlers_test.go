@@ -9,12 +9,16 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/progress"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/stats"
 )
 
 // seedApprovableRequestTicket is the same well-formed plan ticket
@@ -2615,5 +2619,135 @@ func TestRetryRequestHandlerFrom(t *testing.T) {
 				t.Errorf("saved state %s, from scratch %v; want %s, %v", saved.State, saved.RetryFromScratch, want.state, want.fromScratch)
 			}
 		})
+	}
+}
+
+// TestListRequestsCarriesQueuePositionAndBuildProgress: the board reads each
+// request's place in the queue and the running build's stage from the list,
+// with no call per request. Three requests wait behind the one building, in
+// the order they were submitted.
+func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now()
+	save := func(id string, state request.State, offset time.Duration) {
+		t.Helper()
+		if err := request.SaveText(dataDir, id, "text of "+id); err != nil {
+			t.Fatal(err)
+		}
+		r := request.New(id, "/repos/app", "app", request.Source{Kind: request.SourceText}, now.Add(offset))
+		r.State = state
+		if state == request.StateBuilding {
+			r.TicketIndex, r.TicketCount = 2, 3
+		}
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("req-building", request.StateBuilding, 0)
+	save("req-second", request.StatePlanning, time.Second)
+	save("req-third", request.StateSpecDrafting, 2*time.Second)
+	save("req-fourth", request.StateBuilding, 3*time.Second)
+	save("req-review", request.StateSpecReview, 4*time.Second)
+	// An earlier, finished run of the building request, and its current one.
+	seedRun(t, dataDir, run.Run{ID: "req-building-001-a", RequestID: "req-building", State: run.StateAccepted, HaltConfirmed: true, CreatedAt: now.Add(-time.Hour).UTC().Format(time.RFC3339Nano)})
+	seedRun(t, dataDir, run.Run{ID: "req-building-002-b", RequestID: "req-building", State: run.StateSliceRunning, CreatedAt: now.UTC().Format(time.RFC3339Nano)})
+	for _, e := range []progress.Event{
+		{Source: "factory", Stage: "build", Event: "start"},
+		{Source: "worker", Stage: "round", Event: "start", Round: 2, MaxRounds: 4},
+	} {
+		if err := progress.Append(progress.Path(dataDir, "req-building-002-b"), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp := now.Format(time.RFC3339Nano)
+	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dataDir), daemonheartbeat.Heartbeat{PID: os.Getpid(), StartedAt: stamp, UpdatedAt: stamp, ActiveRequests: []string{"req-building"}, JobSlots: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(dataDir)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/requests", nil))
+	var got []struct {
+		ID            string             `json:"id"`
+		WaitingOn     string             `json:"waiting_on"`
+		QueuePosition int                `json:"queue_position"`
+		Build         *buildProgressView `json:"build"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil || recorder.Code != http.StatusOK {
+		t.Fatalf("GET /requests: %d %v: %s", recorder.Code, err, recorder.Body.String())
+	}
+	positions := map[string]int{}
+	builds := map[string]*buildProgressView{}
+	for _, r := range got {
+		positions[r.ID] = r.QueuePosition
+		builds[r.ID] = r.Build
+		if (r.QueuePosition > 0) != (r.WaitingOn != "") {
+			t.Errorf("%s: queue_position %d with waiting_on %q, want both or neither", r.ID, r.QueuePosition, r.WaitingOn)
+		}
+	}
+	want := map[string]int{"req-building": 0, "req-second": 1, "req-third": 2, "req-fourth": 3, "req-review": 0}
+	if !reflect.DeepEqual(positions, want) {
+		t.Errorf("queue positions = %v, want %v", positions, want)
+	}
+	build := builds["req-building"]
+	if build == nil || build.RunID != "req-building-002-b" || build.Ticket != 2 || build.Tickets != 3 || build.Stage != "build" || build.Round != 2 || build.MaxRounds != 4 || build.Stalled || build.LastProgressAt == "" {
+		t.Errorf("build of the building request = %+v, want its unfinished run at build, round 2 of 4, ticket 2 of 3", build)
+	}
+	for _, id := range []string{"req-second", "req-fourth", "req-review"} {
+		if builds[id] != nil {
+			t.Errorf("%s: build = %+v, want none (not building, or no run yet)", id, builds[id])
+		}
+	}
+
+	// GET /queue-run says what the worker is on.
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/queue-run", nil))
+	var status WorkerStatus
+	if err := json.Unmarshal(recorder.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "alive" || !reflect.DeepEqual(status.ActiveRequests, []string{"req-building"}) || status.JobSlots != 1 {
+		t.Errorf("worker status = %+v, want alive on req-building with 1 slot", status)
+	}
+}
+
+// TestGetStatsReportsEveryProjectAndTheirSum: GET /stats is a read route
+// with one report per project and one over all of them.
+func TestGetStatsReportsEveryProjectAndTheirSum(t *testing.T) {
+	dataDir := t.TempDir()
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, r := range []run.Run{
+		{ID: "alpha-001", Ticket: "alpha-001", Project: "alpha", State: run.StateAccepted},
+		{ID: "alpha-002", Ticket: "alpha-002", Project: "alpha", State: run.StateQuarantined},
+		{ID: "beta-001", Ticket: "beta-001", Project: "beta", State: run.StateAccepted},
+		{ID: stats.SmokePrefix + "x-1", Ticket: stats.SmokePrefix + "x-1", Project: "beta", State: run.StateAccepted},
+	} {
+		r.CreatedAt = at
+		seedRun(t, dataDir, r)
+	}
+	get := func(server *Server, path, token string) (int, statsOverview) {
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, requestActionFor(t, http.MethodGet, path, token, ""))
+		var overview statsOverview
+		_ = json.Unmarshal(recorder.Body.Bytes(), &overview)
+		return recorder.Code, overview
+	}
+	code, overview := get(NewServer(dataDir), "/stats", "")
+	if code != http.StatusOK || overview.Overall.Overall.Tickets != 3 || overview.Overall.Overall.Accepted != 2 {
+		t.Fatalf("GET /stats = %d, overall %+v; want 3 tickets, 2 accepted (the live-smoke ticket left out)", code, overview.Overall.Overall)
+	}
+	if len(overview.Projects) != 2 || overview.Projects[0].Project != "alpha" || overview.Projects[0].Overall.Tickets != 2 || overview.Projects[1].Project != "beta" || overview.Projects[1].Overall.Tickets != 1 {
+		t.Errorf("projects = %+v, want alpha with 2 tickets then beta with 1", overview.Projects)
+	}
+	if _, all := get(NewServer(dataDir), "/stats?all=1", ""); all.Overall.Overall.Tickets != 4 {
+		t.Errorf("all=1: %d tickets, want 4", all.Overall.Overall.Tickets)
+	}
+	// Gated like every read.
+	gated := NewServer(dataDir, WithReadToken("read-token"))
+	if code, _ := get(gated, "/stats", ""); code != http.StatusForbidden {
+		t.Errorf("GET /stats with a read token set and none sent = %d, want 403", code)
+	}
+	if code, _ := get(gated, "/stats", "read-token"); code != http.StatusOK {
+		t.Errorf("GET /stats with the read token = %d, want 200", code)
 	}
 }

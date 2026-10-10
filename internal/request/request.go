@@ -1843,3 +1843,17 @@ func WaitingOn(requests []*Request, active []string, slots int) map[string]strin
 	}
 	return waiting
 }
+
+// QueuePositions numbers the requests WaitingOn says are waiting, from 1, in
+// the order the daemon will take them: List's order, oldest submitted first.
+// A request absent from the map is not waiting.
+func QueuePositions(requests []*Request, active []string, slots int) map[string]int {
+	waiting := WaitingOn(requests, active, slots)
+	positions := make(map[string]int, len(waiting))
+	for _, r := range requests {
+		if _, queued := waiting[r.ID]; queued {
+			positions[r.ID] = len(positions) + 1
+		}
+	}
+	return positions
+}

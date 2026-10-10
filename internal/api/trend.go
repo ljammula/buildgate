@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -61,4 +62,50 @@ func (s *Server) getProjectTrend(w http.ResponseWriter, r *http.Request) {
 		opts.ExcludeTicketPrefixes = []string{stats.SmokePrefix}
 	}
 	writeJSON(w, http.StatusOK, stats.Compute(runs, opts))
+}
+
+// statsOverview is GET /stats' JSON shape: one report per project, by name,
+// and one over every project's runs. `factoryd stats` with no project prints
+// the same.
+type statsOverview struct {
+	Overall  stats.Report   `json:"overall"`
+	Projects []stats.Report `json:"projects"`
+}
+
+// getStats serves GET /stats: the numbers of every repository in this data
+// dir and of all of them together, with no buckets and the live-smoke
+// tickets left out (all=1 counts them). Computed from the run records on
+// each read, like GET /projects/{project}/trend, and gated like it.
+func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeRead(r) {
+		writeError(w, http.StatusForbidden, "read endpoint is not authorized")
+		return
+	}
+	loaded, err := run.LoadAll(s.dataDir)
+	if err != nil {
+		log.Printf("stats: read runs: %v", err)
+		writeError(w, http.StatusInternalServerError, "read runs")
+		return
+	}
+	opts := stats.Options{Now: time.Now()}
+	if all := r.URL.Query().Get("all"); all == "" || all == "0" || all == "false" {
+		opts.ExcludeTicketPrefixes = []string{stats.SmokePrefix}
+	}
+	byProject := map[string][]*run.Run{}
+	for _, rec := range loaded {
+		name := release.ProjectOf(rec)
+		byProject[name] = append(byProject[name], rec)
+	}
+	names := make([]string, 0, len(byProject))
+	for name := range byProject {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	overview := statsOverview{Overall: stats.Compute(loaded, opts), Projects: []stats.Report{}}
+	for _, name := range names {
+		project := opts
+		project.Project = name
+		overview.Projects = append(overview.Projects, stats.Compute(byProject[name], project))
+	}
+	writeJSON(w, http.StatusOK, overview)
 }
