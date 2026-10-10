@@ -8,7 +8,11 @@
 # It needs Go, Node and Playwright's Chromium (`npx playwright install
 # chromium`), or WALK_BROWSER_CHANNEL=chrome for an installed Google Chrome.
 # WALK_SCRIPT picks what drives the browser: walk.mjs (default) or shots.mjs,
-# which only photographs every screen in both themes. It starts nothing but its own
+# which only photographs every screen in both themes (at the sizes in
+# WALK_VIEWPORTS), or layout.mjs, which measures the board against the bars in
+# its header and exits 1 when one fails. WALK_SEED=dense adds twenty more
+# requests in two projects (seed-dense.mjs); the default seed is what walk.mjs
+# is written against. It starts nothing but its own
 # `factoryd serve` on WALK_PORT (default 18090) with FACTORYD_AUTOSTART=0, and
 # stops it on exit. Everything it writes is under WALK_DIR (default
 # ~/buildgate/console-browser-walk): the data directory, the workspace, the
@@ -75,6 +79,9 @@ for id in req-spec-review req-halted; do
   sed -i '' "s/\"id\": \"$id\"/\"id\": \"$id-b\"/; s#requests/$id/#requests/$id-b/#g" \
     "$walk_dir/data/requests/$id-b/request.json"
 done
+if [ "${WALK_SEED:-}" = dense ]; then
+  node "$root/console/test/walk/seed-dense.mjs" "$walk_dir"
+fi
 # New request needs a workspace that is a git repository with an AGENTS.md
 # committed at its root.
 if [ ! -d "$walk_dir/workspace/.git" ]; then
