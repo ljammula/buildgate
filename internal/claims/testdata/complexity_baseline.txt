@@ -30,7 +30,6 @@
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
-40 cmd/factoryd/status.go statusMain
 30 cmd/factoryd/watch.go printRunRecap
 30 cmd/factoryd/watch.go watchRequest
 27 cmd/factoryd/worker_config.go loadWorkerConfig
@@ -38,7 +37,6 @@
 34 internal/api/server.go (*Server).computeCostSummary
 29 internal/api/server.go (*Server).streamRunLog
 26 internal/claims/imports_test.go TestPackageBoundaryRules
-32 internal/composeservices/parse.go parseOneService
 43 internal/composeservices/synthesize.go Synthesize
 30 internal/composeservices/synthesize_test.go TestSynthesizeRoundTripsThroughRealComposeCLI
 26 internal/composeservices/todoservice_live_test.go TestParseFileAgainstTodoServiceLive
@@ -56,7 +54,6 @@
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch
 29 internal/sandbox/composeservices_orphans.go ReconcileComposeServicesOrphans
-58 internal/sandbox/relay.go ReconcileRelayOrphans
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
 28 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
 39 internal/workflow/activities_build.go (*Activities).RunBuildActivity
@@ -65,7 +62,6 @@
 35 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
 93 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
 38 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
-50 internal/workflow/activity_records.go RecoverAttemptsFromCheckpointDir
 43 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
 56 internal/workflow/repository_owner_workflow.go RepositoryOwnerWorkflow
 27 internal/workflow/resume.go (*Activities).adoptLocked

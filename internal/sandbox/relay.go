@@ -923,17 +923,67 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 		dockerBinary = "docker"
 	}
 	label := dataDirLabel(dataDir)
+	rc := &relayReconcile{ctx: ctx, dockerBinary: dockerBinary, dataDir: dataDir, label: label, present: map[string]bool{}}
+	parsed, err := rc.listContainers()
+	if err != nil {
+		return nil, err
+	}
+	rc.reconcileContainers(parsed)
+	rc.reconcileNetworks()
+	if len(rc.staleContainers) > 0 || len(rc.staleNetworks) > 0 {
+		if rc.waitOutStalenessDebounce() {
+			rc.reclaimStaleContainers()
+			rc.reclaimStaleNetworks()
+		}
+	}
+	return rc.removed, errors.Join(rc.errs...)
+}
 
-	// One list call per label, unioned by dockerListEitherLabel -- extended,
-	// not duplicated, so the registry proxy added by
-	// internal/sandbox/registryproxy.go is reconciled by this exact same
-	// pass, never a second copy of this logic. See that function's own doc
-	// comment for why this can't be one `docker ps` call with both filters.
-	// ctx itself (not a pre-shrunk child) is passed through: each label's
-	// own call gets its own fresh 15s via perCallTimeout, not a shared slice
-	// of one combined deadline -- see dockerListEitherLabel's own comment.
-	out, err := dockerListEitherLabel(ctx, dockerBinary, []string{"ps", "-a"},
-		label,
+// relayOrphan is a relay or registry-proxy container, or one of their
+// networks, that ReconcileRelayOrphans found.
+type relayOrphan struct {
+	name, runID   string
+	sharedNetwork bool
+}
+
+// relayReconcile is one ReconcileRelayOrphans pass: what it removed, what
+// failed, every container name it listed (present) and the containers and
+// networks of non-terminal runs whose owner looks dead.
+type relayReconcile struct {
+	ctx                          context.Context
+	dockerBinary, dataDir, label string
+
+	removed         []string
+	errs            []error
+	present         map[string]bool
+	staleContainers []relayOrphan
+	staleNetworks   []relayOrphan
+}
+
+// listContainers lists this data directory's relay and registry-proxy
+// containers, shared-network ones first.
+//
+// Parse every listed container first, then process shared-network
+// containers (a registry-proxy attached to its run's relay network via
+// RegistryProxySpec.ExistingInternalNetwork) before any relay that owns
+// that same network (found via review): dockerListEitherLabel's own
+// per-label listing has no ordering guarantee between the two labels,
+// so a crashed run with both a relay and a registry-proxy sharing one
+// network could see the relay processed first. Removing the relay
+// container's own network then fails while the proxy is still attached
+// to it, and because present[name] is set for every container this scan
+// ever saw (including ones later removed), the orphan-network retry
+// pass below (which skips any network whose derived container name is
+// still in present) wrongly treats that failed removal as already
+// accounted for -- leaking the network until a later pass happens to
+// see the container gone from a fresh `docker ps`. Removing every
+// shared-network container first means its relay's own network has no
+// other attachment left by the time the relay itself is torn down, so
+// the network removal that matters succeeds in this same pass instead
+// of depending on a subsequent one.
+func (rc *relayReconcile) listContainers() ([]relayOrphan, error) {
+	out, err := dockerListEitherLabel(rc.ctx, rc.dockerBinary, []string{"ps", "-a"},
+		rc.label,
 		func(p string) string {
 			return `{{.Names}}\t{{.Label "` + p + `run"}}\t{{.Label "` + p + `registryproxy-shared-network"}}`
 		},
@@ -950,52 +1000,30 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 	// container, and every standalone registry-proxy container, carries no
 	// such label at all, so this is false for them exactly as before this
 	// field existed.
-	type container struct {
-		name, runID   string
-		sharedNetwork bool
-	}
-	var removed []string
-	var errs []error
-	var staleCandidates []container
-	present := map[string]bool{}
-
-	// Parse every listed container first, then process shared-network
-	// containers (a registry-proxy attached to its run's relay network via
-	// RegistryProxySpec.ExistingInternalNetwork) before any relay that owns
-	// that same network (found via review): dockerListEitherLabel's own
-	// per-label listing has no ordering guarantee between the two labels,
-	// so a crashed run with both a relay and a registry-proxy sharing one
-	// network could see the relay processed first. Removing the relay
-	// container's own network then fails while the proxy is still attached
-	// to it, and because present[name] is set for every container this scan
-	// ever saw (including ones later removed), the orphan-network retry
-	// pass below (which skips any network whose derived container name is
-	// still in present) wrongly treats that failed removal as already
-	// accounted for -- leaking the network until a later pass happens to
-	// see the container gone from a fresh `docker ps`. Removing every
-	// shared-network container first means its relay's own network has no
-	// other attachment left by the time the relay itself is torn down, so
-	// the network removal that matters succeeds in this same pass instead
-	// of depending on a subsequent one.
-	var parsed []container
+	var parsed []relayOrphan
 	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
 		fields := strings.SplitN(line, "\t", 3)
 		name := fields[0]
-		present[name] = true
+		rc.present[name] = true
 		var runID string
 		if len(fields) >= 2 {
 			runID = fields[1]
 		}
 		sharedNetwork := len(fields) >= 3 && fields[2] == "true"
-		parsed = append(parsed, container{name: name, runID: runID, sharedNetwork: sharedNetwork})
+		parsed = append(parsed, relayOrphan{name: name, runID: runID, sharedNetwork: sharedNetwork})
 	}
 	sort.SliceStable(parsed, func(i, j int) bool {
 		return parsed[i].sharedNetwork && !parsed[j].sharedNetwork
 	})
+	return parsed, nil
+}
 
+// reconcileContainers removes the containers of terminal runs and collects
+// those of non-terminal runs with a stale owner heartbeat.
+func (rc *relayReconcile) reconcileContainers(parsed []relayOrphan) {
 	for _, c := range parsed {
 		name, runID, sharedNetwork := c.name, c.runID, c.sharedNetwork
 		// Same rationale as ReconcileOrphans: run.ValidID, not just a
@@ -1004,50 +1032,54 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 		if runID == "" || !run.ValidID(runID) {
 			continue
 		}
-		record, loadErr := run.Load(dataDir, runID)
+		record, loadErr := run.Load(rc.dataDir, runID)
 		if loadErr != nil {
 			// Recorded, not silently skipped (found via review): this
 			// container is the one actually holding the relay's
 			// credentials, so an operator scanning errs for exactly that
 			// signal deserves to see why nothing here reclaimed it.
-			errs = append(errs, fmt.Errorf("load run %q for orphaned relay %q: %w", runID, name, loadErr))
+			rc.errs = append(rc.errs, fmt.Errorf("load run %q for orphaned relay %q: %w", runID, name, loadErr))
 			continue
 		}
 		terminal := record.State == run.StateAccepted ||
 			record.State == run.StateQuarantined ||
 			(record.State == run.StateHalted && record.HaltConfirmed)
 		if !terminal {
-			if !ownerHeartbeatStale(dataDir, runID) {
+			if !ownerHeartbeatStale(rc.dataDir, runID) {
 				continue
 			}
-			staleCandidates = append(staleCandidates, container{name: name, runID: runID, sharedNetwork: sharedNetwork})
+			rc.staleContainers = append(rc.staleContainers, relayOrphan{name: name, runID: runID, sharedNetwork: sharedNetwork})
 			continue
 		}
-		containerRemoved, networkRemoved, removeErr := removeRelayContainerAndNetwork(ctx, dockerBinary, name, sharedNetwork)
+		containerRemoved, networkRemoved, removeErr := removeRelayContainerAndNetwork(rc.ctx, rc.dockerBinary, name, sharedNetwork)
 		if removeErr != nil {
-			errs = append(errs, fmt.Errorf("reconcile orphaned relay %q (run %q): %w", name, runID, removeErr))
+			rc.errs = append(rc.errs, fmt.Errorf("reconcile orphaned relay %q (run %q): %w", name, runID, removeErr))
 			if containerRemoved {
-				// present[name] stays true (set above) even though the
+				// rc.present[name] stays true (set above) even though the
 				// container is gone: its paired network's own removal is
 				// what failed, and the orphan-network pass below must still
 				// treat this network as already accounted for here rather
 				// than parsing its own stale confirmation.
-				removed = append(removed, name)
+				rc.removed = append(rc.removed, name)
 			}
 			continue
 		}
-		// present[name] stays true (set above) regardless of whether
+		// rc.present[name] stays true (set above) regardless of whether
 		// networkRemoved is non-empty: even a registry-proxy container that
 		// owned no network of its own (shared a relay's) still had its
 		// container name registered in present above, and the orphan-
 		// network pass below keys strictly off network names, never this
 		// map, so leaving it true here is a no-op for that case either way.
-		removed = append(removed, name)
+		rc.removed = append(rc.removed, name)
 		if networkRemoved != "" {
-			removed = append(removed, networkRemoved)
+			rc.removed = append(rc.removed, networkRemoved)
 		}
 	}
+}
 
+// reconcileNetworks removes the networks of terminal runs whose container is
+// gone and collects those of non-terminal runs with a stale owner heartbeat.
+func (rc *relayReconcile) reconcileNetworks() {
 	// A relay network with no container of the matching name in the
 	// listing above needs the exact same terminal/stale run-record check a
 	// container gets, not unconditional removal (found via review): between
@@ -1071,22 +1103,20 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 	// Same relay-OR-registryproxy union as the container listing above, and
 	// the same reason a single `docker network ls` filtering on both labels
 	// can't express it -- see dockerListEitherLabel's own doc comment.
-	netOut, netErr := dockerListEitherLabel(ctx, dockerBinary, []string{"network", "ls"},
-		label,
+	netOut, netErr := dockerListEitherLabel(rc.ctx, rc.dockerBinary, []string{"network", "ls"},
+		rc.label,
 		func(p string) string { return `{{.Name}}\t{{.Label "` + p + `run"}}` },
 		[]string{"relay", "registryproxy"}, 15*time.Second)
-	type networkOrphan struct{ name, runID string }
-	var staleNetworkCandidates []networkOrphan
 	if netErr != nil {
 		// Recorded, not returned immediately (found via review, GitHub
 		// Codex App, PR #42, seventh round -- a consequence of moving this
-		// listing ahead of the shared debounce below): staleCandidates
+		// listing ahead of the shared debounce below): rc.staleContainers
 		// (container) may already hold real work from the listing above,
 		// and a failure to list *networks* must not cost that already-
 		// gathered container reconciliation, which the shared debounce
-		// block below still processes regardless of staleNetworkCandidates
+		// block below still processes regardless of rc.staleNetworks
 		// staying empty here.
-		errs = append(errs, fmt.Errorf("list relay networks: %w", netErr))
+		rc.errs = append(rc.errs, fmt.Errorf("list relay networks: %w", netErr))
 	}
 	// netErr == nil only: cmd.Output() can return a partially-read,
 	// truncated stdout alongside a non-nil error (found via review) --
@@ -1116,7 +1146,7 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 			default:
 				continue
 			}
-			if present[containerName] {
+			if rc.present[containerName] {
 				continue
 			}
 			var runID string
@@ -1126,7 +1156,7 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 			if runID == "" || !run.ValidID(runID) {
 				continue
 			}
-			record, loadErr := run.Load(dataDir, runID)
+			record, loadErr := run.Load(rc.dataDir, runID)
 			if loadErr != nil {
 				// Recorded, not silently skipped (found via review): this
 				// network's paired container -- the one actually holding the
@@ -1134,7 +1164,7 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 				// reclaim it, and an operator scanning errs for exactly that
 				// signal deserves to see why, rather than this scan quietly
 				// doing nothing about a relay it could not even classify.
-				errs = append(errs, fmt.Errorf("load run %q for orphaned relay network %q: %w", runID, name, loadErr))
+				rc.errs = append(rc.errs, fmt.Errorf("load run %q for orphaned relay network %q: %w", runID, name, loadErr))
 				continue
 			}
 			terminal := record.State == run.StateAccepted ||
@@ -1147,138 +1177,152 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 				// the daemon can remove the network while the CLI itself loses
 				// the response, the same ambiguity every other removal in this
 				// package already treats as remove-and-confirm.
-				if removeErr := removeRelayNetwork(ctx, dockerBinary, name); removeErr != nil {
-					errs = append(errs, fmt.Errorf("reconcile orphaned relay network %q (run %q): %w", name, runID, removeErr))
+				if removeErr := removeRelayNetwork(rc.ctx, rc.dockerBinary, name); removeErr != nil {
+					rc.errs = append(rc.errs, fmt.Errorf("reconcile orphaned relay network %q (run %q): %w", name, runID, removeErr))
 					continue
 				}
-				removed = append(removed, name)
+				rc.removed = append(rc.removed, name)
 				continue
 			}
-			if !ownerHeartbeatStale(dataDir, runID) {
+			if !ownerHeartbeatStale(rc.dataDir, runID) {
 				continue
 			}
-			staleNetworkCandidates = append(staleNetworkCandidates, networkOrphan{name: name, runID: runID})
+			rc.staleNetworks = append(rc.staleNetworks, relayOrphan{name: name, runID: runID})
 		}
 	}
+}
 
-	if len(staleCandidates) > 0 || len(staleNetworkCandidates) > 0 {
-		// One shared wait for both candidate lists, not one per list
-		// (found via review, GitHub Codex App, PR #42, seventh round): an
-		// earlier version of this fix gave the network-only path its own
-		// separate debounce, so a scan containing both a stale container
-		// and a stale network-only orphan paid ownerHeartbeatInterval
-		// twice serially (30s with production defaults) -- doubling
-		// factoryd's own startup delay (this runs synchronously before
-		// dialing Temporal) and risking periodic reconciliation overrunning
-		// its own cadence. Same one-wait-for-the-whole-batch rationale
-		// ReconcileOrphans' own debounce already documents: N abandoned
-		// candidates should not each (or, here, each *type* of candidate)
-		// add their own ownerHeartbeatInterval of delay.
-		select {
-		case <-ownerDebounceAfter(ownerHeartbeatInterval):
-		case <-ctx.Done():
-			for _, c := range staleCandidates {
-				errs = append(errs, fmt.Errorf("reconcile abandoned relay %q (run %q): staleness debounce wait: %w", c.name, c.runID, ctx.Err()))
-			}
-			for _, c := range staleNetworkCandidates {
-				errs = append(errs, fmt.Errorf("reconcile abandoned relay network %q (run %q): staleness debounce wait: %w", c.name, c.runID, ctx.Err()))
-			}
-			return removed, errors.Join(errs...)
+// waitOutStalenessDebounce waits one owner heartbeat interval before the
+// stale candidates are looked at again. It reports false, with an error
+// recorded per candidate, when the context ends first.
+func (rc *relayReconcile) waitOutStalenessDebounce() bool {
+	// One shared wait for both candidate lists, not one per list
+	// (found via review, GitHub Codex App, PR #42, seventh round): an
+	// earlier version of this fix gave the network-only path its own
+	// separate debounce, so a scan containing both a stale container
+	// and a stale network-only orphan paid ownerHeartbeatInterval
+	// twice serially (30s with production defaults) -- doubling
+	// factoryd's own startup delay (this runs synchronously before
+	// dialing Temporal) and risking periodic reconciliation overrunning
+	// its own cadence. Same one-wait-for-the-whole-batch rationale
+	// ReconcileOrphans' own debounce already documents: N abandoned
+	// candidates should not each (or, here, each *type* of candidate)
+	// add their own ownerHeartbeatInterval of delay.
+	select {
+	case <-ownerDebounceAfter(ownerHeartbeatInterval):
+	case <-rc.ctx.Done():
+		for _, c := range rc.staleContainers {
+			rc.errs = append(rc.errs, fmt.Errorf("reconcile abandoned relay %q (run %q): staleness debounce wait: %w", c.name, c.runID, rc.ctx.Err()))
 		}
-		for _, c := range staleCandidates {
-			if !ownerHeartbeatStale(dataDir, c.runID) {
-				continue
+		for _, c := range rc.staleNetworks {
+			rc.errs = append(rc.errs, fmt.Errorf("reconcile abandoned relay network %q (run %q): staleness debounce wait: %w", c.name, c.runID, rc.ctx.Err()))
+		}
+		return false
+	}
+	return true
+}
+
+// reclaimStaleContainers removes each stale candidate whose owner heartbeat
+// is still stale after the debounce, and quarantines its run when no worker
+// container is left.
+func (rc *relayReconcile) reclaimStaleContainers() {
+	for _, c := range rc.staleContainers {
+		if !ownerHeartbeatStale(rc.dataDir, c.runID) {
+			continue
+		}
+		// Found via review (GitHub Codex App, PR #42, third round):
+		// checked before removal, not after -- an earlier version
+		// removed the relay first and checked worker presence
+		// afterward, so a transient failure of this query alone left
+		// the run stranded with its last discoverable anchor (the
+		// relay) already gone and nothing quarantined. Checking first
+		// means that failure instead just skips this run for this
+		// pass, relay included, so the next reconciliation pass has
+		// exactly the same resources to work with and can simply retry.
+		present, presentErr := WorkerContainerPresentForRun(rc.ctx, rc.dockerBinary, rc.dataDir, c.runID)
+		if presentErr != nil {
+			rc.errs = append(rc.errs, fmt.Errorf("check worker container for run %q before reclaiming relay %q: %w", c.runID, c.name, presentErr))
+			continue
+		}
+		containerRemoved, networkRemoved, removeErr := removeRelayContainerAndNetwork(rc.ctx, rc.dockerBinary, c.name, c.sharedNetwork)
+		if removeErr != nil {
+			rc.errs = append(rc.errs, fmt.Errorf("reconcile abandoned relay %q (run %q): %w", c.name, c.runID, removeErr))
+			if containerRemoved {
+				rc.removed = append(rc.removed, c.name)
 			}
-			// Found via review (GitHub Codex App, PR #42, third round):
-			// checked before removal, not after -- an earlier version
-			// removed the relay first and checked worker presence
-			// afterward, so a transient failure of this query alone left
-			// the run stranded with its last discoverable anchor (the
-			// relay) already gone and nothing quarantined. Checking first
-			// means that failure instead just skips this run for this
-			// pass, relay included, so the next reconciliation pass has
-			// exactly the same resources to work with and can simply retry.
-			present, presentErr := WorkerContainerPresentForRun(ctx, dockerBinary, dataDir, c.runID)
-			if presentErr != nil {
-				errs = append(errs, fmt.Errorf("check worker container for run %q before reclaiming relay %q: %w", c.runID, c.name, presentErr))
-				continue
-			}
-			containerRemoved, networkRemoved, removeErr := removeRelayContainerAndNetwork(ctx, dockerBinary, c.name, c.sharedNetwork)
-			if removeErr != nil {
-				errs = append(errs, fmt.Errorf("reconcile abandoned relay %q (run %q): %w", c.name, c.runID, removeErr))
-				if containerRemoved {
-					removed = append(removed, c.name)
-				}
-				continue
-			}
-			// The comment this replaces assumed ReconcileOrphans always has
-			// a worker container of its own to find and quarantine for this
-			// same runID -- true only if that container still exists. A
-			// worker container already exited and removed by its own --rm
-			// before factoryd crashed leaves ReconcileOrphans nothing to
-			// discover, so this relay is the only orphan reconciliation
-			// ever sees for that run; without quarantining here too, the
-			// durable record stays permanently non-terminal with no
-			// resource left for any later scan to act on.
-			// quarantineAbandonedRun's own lock and terminal-state recheck
-			// make it safe to call even when a concurrent worker-side
-			// reconciliation is also quarantining the same run right now.
-			//
-			// Only when !present: a worker container that ReconcileOrphans
-			// (which always runs immediately before this function at both
-			// of its call sites) failed to remove this same pass would
-			// still be present here, and quarantining marks HaltConfirmed
-			// true -- "nothing left that could still be running" -- which
-			// would be false while that worker container remains. Leave
-			// the run non-terminal in that case; only the relay is
-			// reclaimed this pass, and the worker container stays
-			// reachable for a later ReconcileOrphans pass to finish.
-			if !present {
-				if quarantineErr := quarantineAbandonedRun(dataDir, c.runID); quarantineErr != nil {
-					errs = append(errs, fmt.Errorf("quarantine abandoned run %q after removing relay %q: %w", c.runID, c.name, quarantineErr))
-				}
-			}
-			removed = append(removed, c.name)
-			if networkRemoved != "" {
-				removed = append(removed, networkRemoved)
+			continue
+		}
+		// The comment this replaces assumed ReconcileOrphans always has
+		// a worker container of its own to find and quarantine for this
+		// same runID -- true only if that container still exists. A
+		// worker container already exited and removed by its own --rm
+		// before factoryd crashed leaves ReconcileOrphans nothing to
+		// discover, so this relay is the only orphan reconciliation
+		// ever sees for that run; without quarantining here too, the
+		// durable record stays permanently non-terminal with no
+		// resource left for any later scan to act on.
+		// quarantineAbandonedRun's own lock and terminal-state recheck
+		// make it safe to call even when a concurrent worker-side
+		// reconciliation is also quarantining the same run right now.
+		//
+		// Only when !present: a worker container that ReconcileOrphans
+		// (which always runs immediately before this function at both
+		// of its call sites) failed to remove this same pass would
+		// still be present here, and quarantining marks HaltConfirmed
+		// true -- "nothing left that could still be running" -- which
+		// would be false while that worker container remains. Leave
+		// the run non-terminal in that case; only the relay is
+		// reclaimed this pass, and the worker container stays
+		// reachable for a later ReconcileOrphans pass to finish.
+		if !present {
+			if quarantineErr := quarantineAbandonedRun(rc.dataDir, c.runID); quarantineErr != nil {
+				rc.errs = append(rc.errs, fmt.Errorf("quarantine abandoned run %q after removing relay %q: %w", c.runID, c.name, quarantineErr))
 			}
 		}
-		for _, c := range staleNetworkCandidates {
-			if !ownerHeartbeatStale(dataDir, c.runID) {
-				continue
-			}
-			// Checked before removal, not after -- same reordering as the
-			// container path above, and for the same reason: a transient
-			// failure of this query must not remove the network out from
-			// under a run this query itself couldn't finish evaluating,
-			// since that network is this run's own last discoverable
-			// anchor.
-			present, presentErr := WorkerContainerPresentForRun(ctx, dockerBinary, dataDir, c.runID)
-			if presentErr != nil {
-				errs = append(errs, fmt.Errorf("check worker container for run %q before reclaiming relay network %q: %w", c.runID, c.name, presentErr))
-				continue
-			}
-			if removeErr := removeRelayNetwork(ctx, dockerBinary, c.name); removeErr != nil {
-				errs = append(errs, fmt.Errorf("reconcile abandoned relay network %q (run %q): %w", c.name, c.runID, removeErr))
-				continue
-			}
-			// A crash between a launch's network create and its paired
-			// container starting leaves exactly this shape -- a stale
-			// non-terminal run with only this now-removed network as
-			// evidence, no container of its own ever existed for this
-			// reconciler or ReconcileOrphans to find. Without quarantining
-			// here too (only when !present, same as the container path
-			// above), the durable record stays permanently non-terminal
-			// with nothing left for any later scan to rediscover.
-			if !present {
-				if quarantineErr := quarantineAbandonedRun(dataDir, c.runID); quarantineErr != nil {
-					errs = append(errs, fmt.Errorf("quarantine abandoned run %q after removing relay network %q: %w", c.runID, c.name, quarantineErr))
-				}
-			}
-			removed = append(removed, c.name)
+		rc.removed = append(rc.removed, c.name)
+		if networkRemoved != "" {
+			rc.removed = append(rc.removed, networkRemoved)
 		}
 	}
-	return removed, errors.Join(errs...)
+}
+
+// reclaimStaleNetworks is reclaimStaleContainers for networks whose
+// container is already gone.
+func (rc *relayReconcile) reclaimStaleNetworks() {
+	for _, c := range rc.staleNetworks {
+		if !ownerHeartbeatStale(rc.dataDir, c.runID) {
+			continue
+		}
+		// Checked before removal, not after -- same reordering as the
+		// container path above, and for the same reason: a transient
+		// failure of this query must not remove the network out from
+		// under a run this query itself couldn't finish evaluating,
+		// since that network is this run's own last discoverable
+		// anchor.
+		present, presentErr := WorkerContainerPresentForRun(rc.ctx, rc.dockerBinary, rc.dataDir, c.runID)
+		if presentErr != nil {
+			rc.errs = append(rc.errs, fmt.Errorf("check worker container for run %q before reclaiming relay network %q: %w", c.runID, c.name, presentErr))
+			continue
+		}
+		if removeErr := removeRelayNetwork(rc.ctx, rc.dockerBinary, c.name); removeErr != nil {
+			rc.errs = append(rc.errs, fmt.Errorf("reconcile abandoned relay network %q (run %q): %w", c.name, c.runID, removeErr))
+			continue
+		}
+		// A crash between a launch's network create and its paired
+		// container starting leaves exactly this shape -- a stale
+		// non-terminal run with only this now-removed network as
+		// evidence, no container of its own ever existed for this
+		// reconciler or ReconcileOrphans to find. Without quarantining
+		// here too (only when !present, same as the container path
+		// above), the durable record stays permanently non-terminal
+		// with nothing left for any later scan to rediscover.
+		if !present {
+			if quarantineErr := quarantineAbandonedRun(rc.dataDir, c.runID); quarantineErr != nil {
+				rc.errs = append(rc.errs, fmt.Errorf("quarantine abandoned run %q after removing relay network %q: %w", c.runID, c.name, quarantineErr))
+			}
+		}
+		rc.removed = append(rc.removed, c.name)
+	}
 }
 
 // removeRelayContainerAndNetwork removes a relay or registry-proxy container
