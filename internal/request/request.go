@@ -756,11 +756,62 @@ type JobSpend struct {
 	// At is when this spend was last recorded (the most recent
 	// contributing attempt's completion), not when the job started.
 	At time.Time `json:"at,omitempty"`
+	// ByModel splits the token/cost figures above by the role and model
+	// that spent them, in first-spent order. Set by Add only once the
+	// summed attempts ran on more than one role/model pair (the role's
+	// model changed between drafts); otherwise Role/Model above name the
+	// only one. Read through Shares, never directly.
+	ByModel []ModelSpend `json:"by_model,omitempty"`
+}
+
+// ModelSpend is the part of a JobSpend one role/model pair spent.
+type ModelSpend struct {
+	Role         string `json:"role,omitempty"`
+	Model        string `json:"model,omitempty"`
+	InputTokens  int64  `json:"input_tokens,omitempty"`
+	OutputTokens int64  `json:"output_tokens,omitempty"`
+	CostMicroUSD int64  `json:"cost_micro_usd,omitempty"`
+}
+
+// Shares returns s's figures per role/model pair: ByModel when Add recorded
+// one, else the single share Role/Model name. They sum to s's totals. Nil
+// for a nil s.
+func (s *JobSpend) Shares() []ModelSpend {
+	if s == nil {
+		return nil
+	}
+	if len(s.ByModel) > 0 {
+		return s.ByModel
+	}
+	return []ModelSpend{{Role: s.Role, Model: s.Model, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens, CostMicroUSD: s.CostMicroUSD}}
+}
+
+// mergeShares sums earlier and later per role/model pair, keeping
+// first-spent order.
+func mergeShares(earlier, later []ModelSpend) []ModelSpend {
+	merged := append([]ModelSpend(nil), earlier...)
+	for _, share := range later {
+		found := false
+		for i := range merged {
+			if merged[i].Role == share.Role && merged[i].Model == share.Model {
+				merged[i].InputTokens += share.InputTokens
+				merged[i].OutputTokens += share.OutputTokens
+				merged[i].CostMicroUSD += share.CostMicroUSD
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, share)
+		}
+	}
+	return merged
 }
 
 // Add returns a new JobSpend summing s and other's token/cost figures,
 // OR-ing SpendPartial, taking the later At, and preferring other's
-// Role/Model when s is nil or its own are empty -- the accumulation a
+// Role/Model when s is nil or its own are empty; when the two ran on
+// different role/model pairs, ByModel keeps what each pair spent -- the accumulation a
 // re-draft applies so an earlier attempt's spend is never silently
 // dropped when its evidence record is replaced (see SpecEvidence.Spend's
 // own doc comment). A nil s (the first attempt) returns other unchanged;
@@ -792,6 +843,9 @@ func (s *JobSpend) Add(other *JobSpend) *JobSpend {
 	}
 	if merged.At.Before(s.At) {
 		merged.At = s.At
+	}
+	if shares := mergeShares(s.Shares(), other.Shares()); len(shares) > 1 {
+		merged.ByModel = shares
 	}
 	return merged
 }

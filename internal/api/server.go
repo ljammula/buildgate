@@ -2686,6 +2686,14 @@ func (a *modelUsageAccumulator) add(role, model string, tokens, costMicroUSD int
 	mu.CostMicroUSD += costMicroUSD
 }
 
+// addJobSpend records a drafting job's spend, one observation per
+// role/model pair that spent it (request.JobSpend.Shares).
+func (a *modelUsageAccumulator) addJobSpend(sp *request.JobSpend) {
+	for _, share := range sp.Shares() {
+		a.add(share.Role, share.Model, share.InputTokens+share.OutputTokens, share.CostMicroUSD)
+	}
+}
+
 // finish returns the accumulated entries sorted by role, then model --
 // deterministic regardless of the map iteration/first-seen order above,
 // so a caller (the console, `factoryd cost`) never has to sort this
@@ -2834,7 +2842,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			if sp.SpendPartial {
 				cs.Complete = false
 			}
-			acc.add(sp.Role, sp.Model, sp.InputTokens+sp.OutputTokens, sp.CostMicroUSD)
+			acc.addJobSpend(sp)
 		} else {
 			if v, ok := costFromUsage(req.SpecEvidence.Usage); ok {
 				cs.Spec = v
@@ -2871,7 +2879,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			if sp.SpendPartial {
 				cs.Complete = false
 			}
-			acc.add(sp.Role, sp.Model, sp.InputTokens+sp.OutputTokens, sp.CostMicroUSD)
+			acc.addJobSpend(sp)
 		} else {
 			if v, ok := costFromUsage(req.PlanEvidence.Usage); ok {
 				cs.Plan = v
@@ -2901,7 +2909,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 		if sp.SpendPartial {
 			cs.Complete = false
 		}
-		acc.add(sp.Role, sp.Model, sp.InputTokens+sp.OutputTokens, sp.CostMicroUSD)
+		acc.addJobSpend(sp)
 	}
 	// Runs: every run.Run record this request ever spent on, found by
 	// scanning dataDir/runs for RequestID == req.ID (runsByRequest, built
