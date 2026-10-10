@@ -8,7 +8,7 @@ export interface FilterChipProps {
   readonly children: ReactNode;
 }
 
-/** A toggle pill for one filter value. */
+/** A toggle button for one filter value: a control is a rounded square, a state chip a pill. */
 export function FilterChip({ pressed, onPressedChange, children }: FilterChipProps) {
   return (
     <button
@@ -16,7 +16,7 @@ export function FilterChip({ pressed, onPressedChange, children }: FilterChipPro
       aria-pressed={pressed}
       onClick={onPressedChange}
       className={cn(
-        "h-7 rounded-full border px-3 text-xs font-medium transition-colors",
+        "h-7 rounded-md border px-3 text-xs font-medium transition-colors",
         pressed
           ? "border-accent bg-accent-soft text-accent"
           : "border-border bg-surface-raised text-fg-muted hover:bg-surface-hover hover:text-fg",

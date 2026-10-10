@@ -20,12 +20,16 @@ import { KanbanGroup } from "./KanbanGroup";
 /** The width every column with cards keeps, header and cell alike, so lanes line up and a narrow screen scrolls sideways. */
 export const columnClass = "w-0 min-w-56 flex-1";
 
+/** Needs you takes two shares of the width to one for each other column: it is where the work is. */
+export const needsYouColumnClass = "w-0 min-w-56 flex-[2]";
+
 /** A column with no card in view: a strip, so the others share its width. */
 export const narrowColumnClass = "w-28 shrink-0";
 
 /** The width class of a column, for its header and for each lane's cell. */
-export function columnWidthClass(narrow: boolean): string {
-  return narrow ? narrowColumnClass : columnClass;
+export function columnWidthClass(column: BoardColumn, narrow: boolean): string {
+  if (narrow) return narrowColumnClass;
+  return column === "needsYou" ? needsYouColumnClass : columnClass;
 }
 
 export interface KanbanLaneProps {
@@ -75,12 +79,13 @@ export function KanbanLane({
 }: KanbanLaneProps) {
   const cellsId = useId();
   const waiting = lane.cells.needsYou.requests.length;
-  const card = (request: RequestSummary, column: BoardColumn) => (
+  const card = (request: RequestSummary, column: BoardColumn, stateInHeading = false) => (
     <KanbanCard
       key={request.id}
       request={request}
       column={column}
       compact={isGroupedColumn(column)}
+      stateInHeading={stateInHeading}
       now={now}
       showProject={showProject}
       canWrite={canWrite}
@@ -96,17 +101,24 @@ export function KanbanLane({
     >
       {columns.map((column) => {
         const cell = lane.cells[column];
+        const narrow = isNarrowColumn(column, counts);
+        const across = cardsAcross(column, columns, counts);
         return (
           <ul
             key={column}
             aria-label={boardColumnLabels[column]}
-            data-narrow={isNarrowColumn(column, counts) || undefined}
+            data-narrow={narrow || undefined}
             // A lone lane's column is its own scroll box: focusable, so the
             // keyboard can scroll it.
             {...(headed ? {} : { tabIndex: 0 })}
             className={cn(
-              columnWidthClass(isNarrowColumn(column, counts)),
-              "bg-surface-sunken flex min-h-14 flex-col gap-2 rounded-md p-2",
+              columnWidthClass(column, narrow),
+              // A column with no card is a strip: no slab, no height of its own.
+              narrow
+                ? "flex flex-col gap-2 p-2"
+                : "bg-surface-sunken flex min-h-14 flex-col gap-2 rounded-md px-2 py-1.5",
+              // The list is the container its groups' two-across query measures.
+              across === 2 && "@container",
               !headed && "overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2",
             )}
           >
@@ -124,8 +136,8 @@ export function KanbanLane({
                   // One level below the column's heading, or the lane's when there is one.
                   headingLevel={headed ? "h4" : "h3"}
                   alone={chosen === label}
-                  across={cardsAcross(column, columns, counts)}
-                  renderCard={(request) => card(request, column)}
+                  across={across}
+                  renderCard={(request, stateInHeading) => card(request, column, stateInHeading)}
                 />
               );
             })}
@@ -144,7 +156,7 @@ export function KanbanLane({
   );
   if (!headed) return cells;
   return (
-    <section aria-label={`Project ${lane.project}`} className="flex shrink-0 flex-col gap-1.5">
+    <section aria-label={`Project ${lane.project}`} className="flex shrink-0 flex-col gap-1">
       {/* Stays at the top of the lanes' scroll box while its cards pass under it. */}
       <h3 className="bg-bg sticky top-0 z-20 flex items-center gap-2 text-sm">
         <button
@@ -152,7 +164,7 @@ export function KanbanLane({
           aria-expanded={!collapsed}
           aria-controls={cellsId}
           onClick={onToggle}
-          className="text-fg hover:bg-surface-hover flex items-center gap-1.5 rounded-md px-1.5 py-1 font-semibold transition-colors"
+          className="text-fg hover:bg-surface-hover flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-semibold transition-colors"
         >
           <ChevronRight
             aria-hidden

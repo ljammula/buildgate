@@ -415,6 +415,24 @@ test("the board row title is the derived short title, markdown/backticks strippe
   expect(link).toHaveAttribute("title", "`Add sub.py` and **div.py**");
 });
 
+test("the toolbar labels its filters, draws controls as rounded squares and the window as one joined group", async () => {
+  renderApp(<BoardScreen />, { server: board([{ id: "req-a", state: "spec_review" }]) });
+  expect(await screen.findByText("Show:")).toBeVisible();
+  expect(screen.getByText("Finished:")).toBeVisible();
+  const section = screen.getByRole("group", { name: "Section" });
+  for (const chip of within(section).getAllByRole("button")) {
+    expect(chip).toHaveClass("rounded-md");
+    expect(chip).not.toHaveClass("rounded-full");
+  }
+  const window = screen.getByRole("group", { name: "Finished work from the last" });
+  expect(
+    within(window)
+      .getAllByRole("button")
+      .map((b) => b.textContent),
+  ).toEqual(["7 days", "30 days", "All"]);
+  expect(window.className).toContain("[&>button]:rounded-none");
+});
+
 describe("release policy warning banner", () => {
   test("shows when the server reports a deny-all release policy", async () => {
     renderApp(<BoardScreen />, {
@@ -424,8 +442,20 @@ describe("release policy warning banner", () => {
           "release policy denies every PR unconditionally (release_max_files_changed=0) -- add release_max_files_changed, release_max_insertions, and release_rollback_plan to your session config",
       },
     });
+    const banner = await screen.findByTestId("release-policy-warning-banner");
+    expect(banner).toHaveTextContent("Release policy denies every PR");
+    // The server's sentence already says it: not said twice, and the fix stays visible.
+    expect(banner).not.toHaveTextContent("Release policy denies every PR: release policy");
+    expect(banner).toHaveTextContent("add release_max_files_changed");
+  });
+
+  test("a sentence that does not say it gets the prefix", async () => {
+    renderApp(<BoardScreen />, {
+      server: board([]),
+      config: { releasePolicyWarning: "no release_rollback_plan is set" },
+    });
     expect(await screen.findByTestId("release-policy-warning-banner")).toHaveTextContent(
-      "Release policy denies every PR",
+      "Release policy denies every PR: no release_rollback_plan is set",
     );
   });
 
@@ -446,8 +476,13 @@ describe("worker heartbeat banner", () => {
       server: withQueueRun(() => json({ state: "stale", last_heartbeat: "2026-09-24T09:00:00Z" })),
     });
     const banner = await screen.findByTestId("worker-down-banner");
-    expect(banner).toHaveTextContent("worker is not running");
-    expect(banner).toHaveTextContent("start `factoryd worker`");
+    expect(banner).toHaveTextContent("Worker is not running");
+    // The command between backticks is drawn as code.
+    expect(banner).toHaveTextContent("start factoryd worker");
+    expect(within(banner).getByText("factoryd worker").tagName).toBe("CODE");
+    // Said once, in the health strip, in place of the Worker fact.
+    expect(banner.closest("section")).toBe(screen.getByRole("region", { name: "Factory health" }));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   test("shows when worker is absent and a request is in a worker-dependent working state", async () => {
@@ -455,8 +490,8 @@ describe("worker heartbeat banner", () => {
       server: withQueueRun(() => json({ state: "absent" }), [{ id: "req-a", state: "building" }]),
     });
     const banner = await screen.findByTestId("worker-down-banner");
-    expect(banner).toHaveTextContent("no worker has run");
-    expect(banner).toHaveTextContent("start `factoryd worker`");
+    expect(banner).toHaveTextContent("No worker has run");
+    expect(banner).toHaveTextContent("start factoryd worker");
   });
 
   test("is hidden when worker is absent but no request is working", async () => {
@@ -483,12 +518,12 @@ describe("worker heartbeat banner", () => {
     expect(screen.queryByTestId("worker-down-banner")).not.toBeInTheDocument();
   });
 
-  test("Retry asks the server again", async () => {
+  test("Check again asks the server again", async () => {
     const { server } = renderApp(<BoardScreen />, {
       server: withQueueRun(() => json({ state: "stale", last_heartbeat: "" })),
     });
     const banner = await screen.findByTestId("worker-down-banner");
-    await userEvent.click(within(banner).getByRole("button", { name: "Retry" }));
+    await userEvent.click(within(banner).getByRole("button", { name: "Check again" }));
     await waitFor(() => {
       expect(server.sent("GET /queue-run")).toHaveLength(2);
     });

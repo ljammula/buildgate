@@ -441,8 +441,11 @@ describe("health strip", () => {
   test("a stale worker (the fixture) is named stale, with no slots, nothing running and no queue length", async () => {
     renderApp(<BoardScreen />, { server: fixtureServer(fixtureResponse("queue-run.json")) });
     const health = await strip();
-    await within(health).findByText("Stale");
-    expect(health).toHaveTextContent("last heartbeat");
+    // The dead worker is said once, by the alert that stands in place of the Worker fact.
+    const alert = await within(health).findByRole("alert");
+    expect(alert).toHaveTextContent("Worker is not running (last heartbeat");
+    expect(within(health).queryByText("Stale")).not.toBeInTheDocument();
+    expect(within(health).queryByText("Worker")).not.toBeInTheDocument();
     expect(health).not.toHaveTextContent("Job slots");
     // One request is building and nothing advances it: never "Queued 0".
     expect(health).not.toHaveTextContent("Queued");
@@ -451,14 +454,15 @@ describe("health strip", () => {
     );
     expect(health).toHaveTextContent("Waiting for a worker1 request, not advancing");
     expect(within(health).queryByRole("list", { name: "Running now" })).not.toBeInTheDocument();
-    // The warning strip above the board still says what to do about it.
+    // The alert says what to do about it, and no second red banner is drawn.
     expect(screen.getByTestId("worker-down-banner")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   test("an absent worker is named not running", async () => {
     renderApp(<BoardScreen />, { server: fixtureServer({ state: "absent" }) });
     const health = await strip();
-    await within(health).findByText("Not running");
+    expect(await within(health).findByRole("alert")).toHaveTextContent("worker has run");
     expect(health).not.toHaveTextContent("Job slots");
     expect(health).not.toHaveTextContent("Queued");
     expect(within(health).getByTestId("health-need-worker")).toHaveTextContent(
@@ -486,7 +490,7 @@ describe("health strip", () => {
       ),
     });
     const health = await strip();
-    await within(health).findByText("Stale");
+    await within(health).findByRole("alert");
     expect(health).not.toHaveTextContent("Waiting for a worker");
     expect(health).not.toHaveTextContent("Queued");
   });
@@ -570,9 +574,14 @@ describe("numbers", () => {
     { on: "GET /stats?since=7d", reply: stats },
   ];
 
-  test("a project with no ticket shows - for its rates, never 0%", async () => {
+  test("a project with no ticket shows – for its rates, never 0%", async () => {
     renderApp(<BoardScreen />, {
-      server: withStats(() => json({ overall: report(""), projects: [report("idle")] })),
+      server: withStats(() =>
+        json({
+          overall: { ...report(""), overall: { ...emptyMetrics, tickets: 2 } },
+          projects: [report("idle")],
+        }),
+      ),
     });
     const region = await numbers();
     const idle = within(region).getAllByTestId("numbers-row")[1]!;
@@ -580,8 +589,19 @@ describe("numbers", () => {
       within(idle)
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
-    ).toEqual(["0", "-", "-", "-", "-", "-", "-"]);
-    expect(region).not.toHaveTextContent("%");
+    ).toEqual(["0", "–", "–", "–", "–", "–", "–"]);
+    expect(region).not.toHaveTextContent("0%");
+  });
+
+  test("with no ticket in the window anywhere it is one line, not a table of dashes", async () => {
+    renderApp(<BoardScreen />, {
+      server: withStats(() => json({ overall: report(""), projects: [report("idle")] })),
+    });
+    const region = await numbers();
+    expect(region).toHaveTextContent("No finished tickets in the last 7 days");
+    expect(within(region).queryByRole("table")).not.toBeInTheDocument();
+    expect(within(region).queryAllByTestId("numbers-row")).toHaveLength(0);
+    expect(within(region).getByRole("heading", { name: /Numbers/ })).toBeInTheDocument();
   });
 
   test("an empty data dir says the numbers come with the first finished run", async () => {
@@ -986,22 +1006,22 @@ describe("groups inside a column", () => {
     await screen.findByTestId("card-req-pr-ready");
     const list = needsYou();
     expect(groupNames(list)).toEqual([
+      "Stuck",
       "Spec review",
       "Oracle review",
       "Plan review",
       "PR ready",
-      "Stuck",
     ]);
     expect(
       within(list)
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent),
     ).toEqual([
+      "Stuck (3)",
       "Spec review (1)",
       "Oracle review (1)",
       "Plan review (1)",
       "PR ready (1)",
-      "Stuck (3)",
     ]);
     expect(groupCards(list, "Spec review")).toEqual(["card-req-spec-review"]);
     expect(groupCards(list, "Oracle review")).toEqual(["card-req-oracle-review"]);
@@ -1037,7 +1057,7 @@ describe("groups inside a column", () => {
       ]),
     });
     await screen.findByTestId("card-req-h");
-    expect(groupNames(needsYou())).toEqual(["Plan review", "Stuck"]);
+    expect(groupNames(needsYou())).toEqual(["Stuck", "Plan review"]);
     expect(groupCards(needsYou(), "Plan review")).toEqual(["card-req-early", "card-req-late"]);
     expect(
       within(needsYou()).queryByRole("group", { name: "Spec review" }),
@@ -1078,7 +1098,7 @@ describe("groups inside a column", () => {
     const alpha = await screen.findByRole("region", { name: "Project alpha" });
     const beta = screen.getByRole("region", { name: "Project beta" });
     const cellOf = (lane: HTMLElement) => within(lane).getByRole("list", { name: "Needs you" });
-    expect(groupNames(cellOf(alpha))).toEqual(["Spec review", "Stuck"]);
+    expect(groupNames(cellOf(alpha))).toEqual(["Stuck", "Spec review"]);
     expect(groupCards(cellOf(alpha), "Stuck")).toEqual(["card-req-a2"]);
     expect(groupNames(cellOf(beta))).toEqual(["Plan review"]);
     expect(within(beta).getByRole("heading", { level: 4, name: "Plan review (1)" })).toBeVisible();
@@ -1328,13 +1348,26 @@ describe("a long Needs you column", () => {
     expect(card("req-spec-0")).toHaveAttribute("data-density", "compact");
     expect(card("req-draft")).toHaveAttribute("data-density", "compact");
     expect(card("req-build")).toHaveAttribute("data-density", "full");
-    // The title is one line, whole in the link's name and tooltip.
+    // The title is up to two lines, whole in the link's name and tooltip.
     const title = within(card("req-spec-0")).getByRole("link", { name: "Spec 0" });
-    expect(title).toHaveClass("truncate");
+    expect(title).toHaveClass("line-clamp-2");
+    expect(title).not.toHaveClass("truncate");
     expect(title).toHaveAttribute("title", "Spec 0");
-    // The stage and the age stay; a stuck card keeps its red marker.
-    expect(card("req-spec-0")).toHaveTextContent("Spec review");
-    expect(tokens(within(card("req-spec-0")).getByText(/^for /))).not.toContain("sr-only");
+    // The id and the age are always drawn, the age in the muted tone.
+    const id = within(card("req-spec-0")).getByTitle("req-spec-0").parentElement!;
+    expect(tokens(id)).not.toContain("sr-only");
+    const age = within(card("req-spec-0")).getByText(/^for /);
+    expect(tokens(age)).not.toContain("sr-only");
+    expect(age).toHaveClass("text-fg-muted", "tabular-nums");
+    expect(age).not.toHaveClass("text-fg-subtle");
+    // The Spec review heading says the state: no chip, the state kept for a screen reader.
+    expect(card("req-spec-0").querySelector("[data-tone]")).toBeNull();
+    expect(tokens(within(card("req-spec-0")).getByText("Spec review"))).toContain("sr-only");
+    // A group of several states (Stuck) keeps its chip.
+    expect(
+      within(card("req-stuck")).getByText("Quarantined", { selector: "[data-tone]" }),
+    ).toBeInTheDocument();
+    // The stuck card keeps its red marker.
     const alert = within(card("req-stuck")).getByTestId("kanban-alert");
     expect(tokens(alert)).not.toContain("sr-only");
     expect(alert).toHaveTextContent(/^Quarantined/);
@@ -1342,7 +1375,6 @@ describe("a long Needs you column", () => {
     for (const folded of [
       within(alert).getByText(": verify failed after 3 rounds"),
       within(card("req-spec-0")).getByText("Review the drafted spec."),
-      within(card("req-spec-0")).getByTitle("req-spec-0").parentElement!,
     ]) {
       // Hidden from the eye only: a screen reader reading the page still
       // gets it, which `display: none` or `visibility: hidden` would prevent.
@@ -1391,15 +1423,15 @@ describe("a long Needs you column", () => {
   test("the chips carry each group's count, narrow the column to one group and give it back", async () => {
     renderApp(<BoardScreen />, { server: server(many) });
     await screen.findByTestId("card-req-stuck");
-    expect(chipStates()).toEqual(["All:true", "Spec 5:false", "Plan 2:false", "Stuck 1:false"]);
+    expect(chipStates()).toEqual(["All:true", "Stuck 1:false", "Spec 5:false", "Plan 2:false"]);
     expect(
       within(needsYou())
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label")),
-    ).toEqual(["Spec review", "Plan review", "Stuck"]);
+    ).toEqual(["Stuck", "Spec review", "Plan review"]);
 
     await userEvent.click(within(chipRow()).getByRole("button", { name: "Spec 5" }));
-    expect(chipStates()).toEqual(["All:false", "Spec 5:true", "Plan 2:false", "Stuck 1:false"]);
+    expect(chipStates()).toEqual(["All:false", "Stuck 1:false", "Spec 5:true", "Plan 2:false"]);
     // Only that group, and all of it.
     expect(shownCards()).toEqual([
       "card-req-spec-0",
@@ -1494,8 +1526,10 @@ describe("a long Needs you column", () => {
     }
     for (const column of ["needsYou", "building"]) {
       expect(narrow(column)).not.toHaveAttribute("data-narrow");
-      expect(narrow(column)).toHaveClass("flex-1");
     }
+    // Needs you takes two shares of the width to Building's one.
+    expect(narrow("needsYou")).toHaveClass("flex-[2]");
+    expect(narrow("building")).toHaveClass("flex-1");
     // Order and headings are kept.
     expect(
       within(board())
@@ -1504,7 +1538,13 @@ describe("a long Needs you column", () => {
     ).toEqual(["Drafting (0)", "Needs you (8)", "Building (1)", "PR review (0)", "Done (0)"]);
     // The cells under them are as wide as their headers.
     expect(within(board()).getByRole("list", { name: "Done" })).toHaveClass("w-28");
-    expect(needsYou()).toHaveClass("flex-1");
+    // An empty column is not a slab: no sunken background, no height of its own.
+    expect(within(board()).getByRole("list", { name: "Done" })).not.toHaveClass(
+      "bg-surface-sunken",
+    );
+    expect(within(board()).getByRole("list", { name: "Done" })).not.toHaveClass("min-h-14");
+    expect(needsYou()).toHaveClass("flex-[2]", "bg-surface-sunken");
+    expect(within(board()).getByRole("list", { name: "Building" })).toHaveClass("flex-1");
   });
 
   test("with lanes a column is narrow only when it is empty in every lane", async () => {
@@ -1532,8 +1572,11 @@ describe("a long Needs you column", () => {
     expect(lists()).toEqual(["2", "2", "2"]);
     expect(
       within(within(needsYou()).getByRole("group", { name: "Spec review" })).getByRole("list"),
-    ).toHaveClass("xl:grid", "xl:grid-cols-2");
-    // Only on a wide screen: below it the cards stay one across.
+    ).toHaveClass("@min-[510px]:grid", "@min-[510px]:grid-cols-2");
+    // By the column's own width (a container query on its list), not the window's.
+    expect(needsYou()).toHaveClass("@container");
+    expect(tokens(needsYou()).some((t) => t.startsWith("xl:"))).toBe(false);
+    // Below that width the cards stay one across.
     const list = within(within(needsYou()).getByRole("group", { name: "Spec review" })).getByRole(
       "list",
     );
@@ -1556,7 +1599,8 @@ describe("a long Needs you column", () => {
     expect(lists()).toEqual(["1", "1", "1"]);
     expect(
       within(within(needsYou()).getByRole("group", { name: "Spec review" })).getByRole("list"),
-    ).not.toHaveClass("xl:grid-cols-2");
+    ).not.toHaveClass("@min-[510px]:grid-cols-2");
+    expect(needsYou()).not.toHaveClass("@container");
   });
 
   test("a chip whose group empties is forgotten: the group coming back does not narrow the column again", async () => {
@@ -1576,7 +1620,7 @@ describe("a long Needs you column", () => {
     fake.set("GET /requests", () => json(many));
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => {
-      expect(chipStates()).toEqual(["All:true", "Spec 5:false", "Plan 2:false", "Stuck 1:false"]);
+      expect(chipStates()).toEqual(["All:true", "Stuck 1:false", "Spec 5:false", "Plan 2:false"]);
     });
     expect(within(needsYou()).getAllByRole("group")).toHaveLength(3);
   });

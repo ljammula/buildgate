@@ -40,8 +40,8 @@ export function BoardToolbar({
   onSelectDays,
 }: BoardToolbarProps) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="relative w-full max-w-sm">
           <Search
             aria-hidden
@@ -58,57 +58,67 @@ export function BoardToolbar({
             className="pl-8"
           />
         </div>
-        <div role="group" aria-label="Section" className="flex flex-wrap items-center gap-1.5">
-          {SECTIONS.map((section) => (
-            <FilterChip
-              key={section}
-              pressed={filters.section === section}
-              onPressedChange={() => {
-                onToggleSection(section);
-              }}
-            >
-              {sectionLabels[section]}
-            </FilterChip>
-          ))}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span aria-hidden className="text-fg-muted text-xs">
+            Show:
+          </span>
+          <div role="group" aria-label="Section" className="flex flex-wrap items-center gap-1.5">
+            {SECTIONS.map((section) => (
+              <FilterChip
+                key={section}
+                pressed={filters.section === section}
+                onPressedChange={() => {
+                  onToggleSection(section);
+                }}
+              >
+                {sectionLabels[section]}
+              </FilterChip>
+            ))}
+          </div>
         </div>
         {/* One of three, always: pressing the one in use changes nothing. */}
-        <div
-          role="group"
-          aria-label="Finished work from the last"
-          title="How far back finished work, activity and the numbers go. Work in flight is always shown."
-          className="flex flex-wrap items-center gap-1.5"
-        >
-          {boardWindowChoices.map((days) => (
-            <FilterChip
-              key={days}
-              pressed={filters.days === days}
-              onPressedChange={() => {
-                onSelectDays(days);
-              }}
-            >
-              {boardWindowChoiceLabel(days)}
-            </FilterChip>
-          ))}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span aria-hidden className="text-fg-muted text-xs">
+            Finished:
+          </span>
+          <div
+            role="group"
+            aria-label="Finished work from the last"
+            title="How far back finished work, activity and the numbers go. Work in flight is always shown."
+            className="flex items-center [&>button]:relative [&>button]:rounded-none [&>button:first-child]:rounded-l-md [&>button:last-child]:rounded-r-md [&>button+button]:-ml-px [&>button[aria-pressed=true]]:z-10"
+          >
+            {boardWindowChoices.map((days) => (
+              <FilterChip
+                key={days}
+                pressed={filters.days === days}
+                onPressedChange={() => {
+                  onSelectDays(days);
+                }}
+              >
+                {boardWindowChoiceLabel(days)}
+              </FilterChip>
+            ))}
+          </div>
         </div>
+        {allProjects.length > 1 ? (
+          <div role="group" aria-label="Project" className="flex flex-wrap items-center gap-1.5">
+            {allProjects.map((project) => (
+              <FilterChip
+                key={project}
+                pressed={filters.projects.has(project)}
+                onPressedChange={() => {
+                  onToggleProject(project);
+                }}
+              >
+                {project}
+              </FilterChip>
+            ))}
+          </div>
+        ) : null}
         <div className="ml-auto">
           <FreshnessIndicator freshness={freshness} lastUpdateAt={lastUpdateAt} />
         </div>
       </div>
-      {allProjects.length > 1 ? (
-        <div role="group" aria-label="Project" className="flex flex-wrap items-center gap-1.5">
-          {allProjects.map((project) => (
-            <FilterChip
-              key={project}
-              pressed={filters.projects.has(project)}
-              onPressedChange={() => {
-                onToggleProject(project);
-              }}
-            >
-              {project}
-            </FilterChip>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

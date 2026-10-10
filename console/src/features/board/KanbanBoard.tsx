@@ -116,7 +116,7 @@ export function KanbanBoard({
         tabIndex={0}
         className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden focus-visible:outline-2 focus-visible:-outline-offset-2"
       >
-        <div className="flex h-full min-w-fit flex-col gap-2">
+        <div className="flex h-full min-w-fit flex-col gap-1.5">
           <div className="flex shrink-0 gap-3">
             {columns.map((column) => (
               <div
@@ -124,50 +124,50 @@ export function KanbanBoard({
                 data-testid={`column-${column}`}
                 data-narrow={isNarrowColumn(column, board.counts) || undefined}
                 className={cn(
-                  columnWidthClass(isNarrowColumn(column, board.counts)),
+                  columnWidthClass(column, isNarrowColumn(column, board.counts)),
                   "flex flex-col gap-1 px-2",
                 )}
               >
-                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <h2 className="text-fg text-sm font-semibold">
                     {boardColumnLabels[column]}{" "}
                     <span className="text-fg-muted font-normal">{`(${board.counts[column]})`}</span>
                   </h2>
+                  {column === "needsYou" && chips.length > 1 ? (
+                    <div
+                      role="group"
+                      aria-label="Needs you groups"
+                      className="flex min-w-0 flex-wrap items-center gap-1"
+                    >
+                      {/* Pressing the chip in force, or All, shows every group again. */}
+                      <FilterChip
+                        pressed={onlyGroup === null}
+                        onPressedChange={() => {
+                          setPressedGroup(null);
+                        }}
+                      >
+                        All
+                      </FilterChip>
+                      {chips.map((chip) => (
+                        <FilterChip
+                          key={chip.label}
+                          pressed={onlyGroup === chip.label}
+                          onPressedChange={() => {
+                            setPressedGroup(onlyGroup === chip.label ? null : chip.label);
+                          }}
+                        >
+                          {`${chip.short} ${chip.count}`}
+                        </FilterChip>
+                      ))}
+                    </div>
+                  ) : null}
                   {/* Triage is the screen for deciding one after another. */}
                   {column === "needsYou" && board.counts.needsYou > 0 ? (
-                    <Link to={triagePath()} className="text-accent text-xs hover:underline">
+                    <Link to={triagePath()} className="text-accent ml-auto text-xs hover:underline">
                       Open in Triage
                     </Link>
                   ) : null}
                 </div>
-                {column === "needsYou" && chips.length > 1 ? (
-                  <div
-                    role="group"
-                    aria-label="Needs you groups"
-                    className="flex flex-wrap items-center gap-1"
-                  >
-                    {/* Pressing the chip in force, or All, shows every group again. */}
-                    <FilterChip
-                      pressed={onlyGroup === null}
-                      onPressedChange={() => {
-                        setPressedGroup(null);
-                      }}
-                    >
-                      All
-                    </FilterChip>
-                    {chips.map((chip) => (
-                      <FilterChip
-                        key={chip.label}
-                        pressed={onlyGroup === chip.label}
-                        onPressedChange={() => {
-                          setPressedGroup(onlyGroup === chip.label ? null : chip.label);
-                        }}
-                      >
-                        {`${chip.short} ${chip.count}`}
-                      </FilterChip>
-                    ))}
-                  </div>
-                ) : null}
                 {column === "done" ? (
                   <OlderHiddenNote count={olderHidden} onShowAllTime={onShowAllTime} />
                 ) : null}
@@ -192,8 +192,10 @@ export function KanbanBoard({
                   key={column}
                   aria-label={boardColumnLabels[column]}
                   className={cn(
-                    columnWidthClass(isNarrowColumn(column, board.counts)),
-                    "bg-surface-sunken min-h-14 rounded-md p-2",
+                    columnWidthClass(column, isNarrowColumn(column, board.counts)),
+                    isNarrowColumn(column, board.counts)
+                      ? "p-2"
+                      : "bg-surface-sunken min-h-14 rounded-md p-2",
                   )}
                 />
               ))}

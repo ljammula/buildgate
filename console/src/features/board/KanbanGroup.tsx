@@ -14,7 +14,7 @@ export interface KanbanGroupProps {
   readonly alone: boolean;
   /** Cards side by side: 2 when the column is wide enough. */
   readonly across: 1 | 2;
-  readonly renderCard: (request: RequestSummary) => ReactNode;
+  readonly renderCard: (request: RequestSummary, stateInHeading: boolean) => ReactNode;
 }
 
 /**
@@ -39,11 +39,12 @@ export function KanbanGroup({ group, headingLevel, alone, across, renderCard }: 
           data-across={across}
           className={cn(
             "flex flex-col gap-2",
-            // Two across needs the room: a wide column on a wide screen.
-            across === 2 && "xl:grid xl:grid-cols-2 xl:items-start",
+            // Two across needs the room: the column's own width (a container
+            // query on its list), so each card stays at least about 250px.
+            across === 2 && "@min-[510px]:grid @min-[510px]:grid-cols-2 @min-[510px]:items-start",
           )}
         >
-          {shown.map(renderCard)}
+          {shown.map((request) => renderCard(request, group.oneState))}
         </ul>
         {more > 0 ? (
           <Button

@@ -3,7 +3,13 @@ import { useFactoryStats } from "@/api/runQueries";
 import { ApiError } from "@/domain/apiError";
 import type { BoardWindowDays } from "@/domain/boardFilters";
 import { boardWindowLabel, scopeLabel, statsSince } from "@/domain/boardWindow";
-import { type FactoryStats, numbersRows, statsEmpty } from "@/domain/stats";
+import {
+  type FactoryStats,
+  noTicketsText,
+  numbersHaveNoTickets,
+  numbersRows,
+  statsEmpty,
+} from "@/domain/stats";
 import { escapeInvisible } from "@/domain/textEscape";
 import { cn } from "@/ui/cn";
 import { StaleWarning } from "@/ui/StaleWarning";
@@ -20,9 +26,11 @@ import {
 function NumbersTable({
   stats,
   projects,
+  days,
 }: {
   readonly stats: FactoryStats;
   readonly projects: ReadonlySet<string>;
+  readonly days: BoardWindowDays;
 }) {
   const rows = numbersRows(stats, projects);
   if (statsEmpty(stats) || rows.length === 0) {
@@ -31,6 +39,10 @@ function NumbersTable({
         No ticket has a finished run yet: the numbers appear with the first one.
       </p>
     );
+  }
+  if (numbersHaveNoTickets(rows)) {
+    // A table of dashes says nothing: one line does.
+    return <p className="text-fg-muted text-sm">{noTicketsText(days)}</p>;
   }
   return (
     // Bounded, and focusable so the keyboard can scroll it.
@@ -140,7 +152,9 @@ export function NumbersPanel({ days, projects, className }: NumbersPanelProps) {
             : "Showing the last numbers loaded -- refresh failed:"}
         </StaleWarning>
       )}
-      {query.data === undefined ? null : <NumbersTable stats={query.data} projects={projects} />}
+      {query.data === undefined ? null : (
+        <NumbersTable stats={query.data} projects={projects} days={days} />
+      )}
     </section>
   );
 }

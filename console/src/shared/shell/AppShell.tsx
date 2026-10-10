@@ -133,7 +133,7 @@ export function AppShell({ children }: AppShellProps) {
                     className={cn("size-4", isActive ? "text-accent" : "text-fg-subtle")}
                   />
                   {label}
-                  {to === boardPath() || to === triagePath() ? <NavCount count={needsYou} /> : null}
+                  {to === triagePath() ? <NavCount count={needsYou} /> : null}
                 </>
               )}
             </NavLink>

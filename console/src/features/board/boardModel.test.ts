@@ -1,6 +1,12 @@
 import { requestSummary } from "@/test/requestFixtures";
 
-import { boardFreshness, freshnessLabel, queueRunWarning } from "./boardModel";
+import {
+  boardFreshness,
+  freshnessLabel,
+  queueRunWarning,
+  releasePolicyText,
+  sentenceCase,
+} from "./boardModel";
 
 function summary(o: { id: string; state: string }) {
   return requestSummary({ project: "app", ...o });
@@ -64,5 +70,27 @@ describe("freshness", () => {
     expect(freshnessLabel("recent", Date.parse("2026-09-10T09:00:00Z"), now)).toBe(
       "Last updated 30s ago",
     );
+  });
+});
+
+describe("releasePolicyText", () => {
+  test("a sentence that does not say it is prefixed", () => {
+    expect(releasePolicyText("no rollback plan is set")).toBe(
+      "Release policy denies every PR: no rollback plan is set",
+    );
+  });
+
+  test("a sentence that already starts with the words is not prefixed, only capitalised", () => {
+    expect(releasePolicyText("release policy denies every PR unconditionally -- add a limit")).toBe(
+      "Release policy denies every PR unconditionally -- add a limit",
+    );
+    expect(releasePolicyText("RELEASE POLICY DENIES EVERY PR: x")).toBe(
+      "RELEASE POLICY DENIES EVERY PR: x",
+    );
+  });
+
+  test("sentenceCase upper-cases the first letter only", () => {
+    expect(sentenceCase("worker is not running")).toBe("Worker is not running");
+    expect(sentenceCase("")).toBe("");
   });
 });

@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 
 import { decodeRequestSummary } from "@/domain/request";
 import { needsYouRequests } from "@/shared/request/needsYou";
@@ -10,7 +10,7 @@ function shell(list: Parameters<typeof requestJson>[0][]): FakeRoute[] {
   return [{ on: "GET /requests", reply: () => json(list.map(requestJson)) }];
 }
 
-test("the sidebar counts the requests that wait on the operator, on Requests and Triage", async () => {
+test("the sidebar counts the requests that wait on the operator, on Triage only", async () => {
   const { server } = renderApp(
     <AppShell>
       <p>page</p>
@@ -25,11 +25,18 @@ test("the sidebar counts the requests that wait on the operator, on Requests and
     },
   );
   await waitFor(() => {
-    expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(2);
+    expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(1);
   });
-  for (const pill of screen.getAllByTestId("nav-needs-you-count")) {
-    expect(pill).toHaveTextContent("2");
-  }
+  expect(screen.getByTestId("nav-needs-you-count")).toHaveTextContent("2");
+  // The count sits on Triage, the screen for deciding, and not on Mission Control.
+  expect(
+    within(screen.getByRole("link", { name: "Triage" })).getByTestId("nav-needs-you-count"),
+  ).toBeInTheDocument();
+  expect(
+    within(screen.getByRole("link", { name: "Mission Control" })).queryByTestId(
+      "nav-needs-you-count",
+    ),
+  ).not.toBeInTheDocument();
   // The pill is for the eye; the links keep their names and the count is announced once.
   expect(screen.getByRole("link", { name: "Mission Control" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Triage" })).toBeInTheDocument();
@@ -68,11 +75,9 @@ test("the Triage count is the number of rows Triage lists: every state that need
   ];
   renderApp(<AppShell>x</AppShell>, { server: shell(list) });
   await waitFor(() => {
-    expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(2);
+    expect(screen.getAllByTestId("nav-needs-you-count")).toHaveLength(1);
   });
-  for (const pill of screen.getAllByTestId("nav-needs-you-count")) {
-    expect(pill).toHaveTextContent("5");
-  }
+  expect(screen.getByTestId("nav-needs-you-count")).toHaveTextContent("5");
   // The same function lists the rows: it returns exactly those five.
   const summaries = list.map((o) => decodeRequestSummary(requestJson(o), "test"));
   expect(

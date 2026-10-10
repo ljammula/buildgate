@@ -18,6 +18,7 @@ import { factoryHealth } from "@/domain/health";
 import { needsHumanCount, sortedRequests } from "@/domain/requestOrder";
 import { sectionForRequest, type RequestBoardSection } from "@/domain/boardFilters";
 import { updateNeedsHumanSignal } from "@/platform/tabTitle";
+import { cn } from "@/ui/cn";
 import { IconButton } from "@/ui/IconButton";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -150,8 +151,8 @@ export function BoardScreen() {
     // does not. A short window keeps a usable board and scrolls the page; a
     // phone, where the sidebar sits on top, flows as a page.
     <div className="flex h-screen min-h-[42rem] flex-col max-md:h-auto max-md:min-h-0">
-      <PageHeader title="Mission Control" actions={headerActions} />
-      <PageBody className="min-h-0 flex-1 gap-4">
+      <PageHeader title="Mission Control" actions={headerActions} className="py-2" />
+      <PageBody className="min-h-0 flex-1 gap-2 pt-2 pb-2.5">
         {requests === undefined ? (
           refreshError === null ? (
             <Spinner />
@@ -160,11 +161,13 @@ export function BoardScreen() {
           )
         ) : (
           <>
-            <HealthStrip health={health} />
-            <BoardStrips
-              releasePolicyWarning={config.releasePolicyWarning}
+            <HealthStrip
+              health={health}
               workerWarning={queueRunWarning(queueRun.data ?? null, requests, now)}
               onRetryWorker={() => void queueRun.refetch()}
+            />
+            <BoardStrips
+              releasePolicyWarning={config.releasePolicyWarning}
               streamError={streamError}
               needsYouCount={needsHuman ?? 0}
               needsYouVisible={showsNeedsYou(visible)}
@@ -239,7 +242,13 @@ export function BoardScreen() {
                 <OlderHiddenNote count={olderHidden} onShowAllTime={showAllTime} />
               </div>
             )}
-            <div className="grid shrink-0 items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div
+              className={cn(
+                "grid shrink-0 items-stretch gap-4",
+                // Without an Activity panel the numbers take the whole width.
+                activity.length > 0 && "xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
+              )}
+            >
               <NumbersPanel days={days} projects={projects} className="max-h-44" />
               <ActivityPanel
                 entries={activity}

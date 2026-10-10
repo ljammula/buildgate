@@ -234,12 +234,20 @@ step("mission-control", async () => {
   // The health strip says what the server's own routes say.
   const worker = (await api("/queue-run")).body;
   const health = page.getByRole("region", { name: "Factory health" });
-  await health
-    .getByText(
-      worker.state === "alive" ? "Running" : worker.state === "stale" ? "Stale" : "Not running",
-      { exact: true },
-    )
-    .waitFor();
+  if (worker.state === "alive") {
+    await health.getByText("Running", { exact: true }).waitFor();
+  } else {
+    // A dead worker is said once, by the alert that stands in place of the
+    // Worker fact; with nothing waiting on a worker the fact says it instead.
+    await health
+      .getByTestId("worker-down-banner")
+      .or(health.getByText("Not running", { exact: true }))
+      .first()
+      .waitFor();
+    if ((await health.getByTestId("worker-down-banner").count()) > 0) {
+      await health.getByRole("button", { name: "Check again" }).waitFor();
+    }
+  }
   if (worker.state === "alive") {
     const queued = listed.filter((r) => r.queue_position !== undefined).length;
     await health.getByText("Queued").waitFor();

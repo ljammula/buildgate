@@ -79,14 +79,20 @@ const visible = await page.evaluate(() => {
   return out;
 });
 const fewest = visible.reduce((a, b) => (b.shown < a.shown ? b : a), visible[0]);
-report(
-  "shortest-visible-title@1280x800",
-  fewest
-    ? `${fewest.shown} of ${fewest.length} characters (${fewest.id}), ${visible.length} cards`
-    : "no card with a long title",
-  ">= 28",
-  fewest !== undefined && fewest.shown >= 28,
-);
+if (fewest === undefined && process.env.WALK_SEED !== "dense") {
+  // The default seed has no title that long: nothing to measure is not a
+  // miss there. The dense seed has them, so there it is.
+  console.log("SKIP shortest-visible-title@1280x800: no title of 40 or more characters");
+} else {
+  report(
+    "shortest-visible-title@1280x800",
+    fewest
+      ? `${fewest.shown} of ${fewest.length} characters (${fewest.id}), ${visible.length} cards`
+      : "no card with a long title",
+    ">= 28",
+    fewest !== undefined && fewest.shown >= 28,
+  );
+}
 
 // c: sideways overflow that nothing intends.
 const overflowing = () =>
