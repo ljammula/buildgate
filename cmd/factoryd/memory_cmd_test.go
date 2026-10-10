@@ -192,7 +192,7 @@ func TestMemoryListCollectsNotesAndShowsTheSection(t *testing.T) {
 	f := newMemFix(t, map[string]string{"AGENTS.md": sectionFile("# Guide\n\n", "", "- A line a person wrote.", "- Use go 1.26.")})
 	f.quarantinedRunWithNotes("run-a", "What I did\n- changed sum.go\n"+worthKnowing(
 		"Run `make gen` before the tests.", "see https://example.com/setup", "Use go 1.26"))
-	f.quarantinedRunWithNotes("run-b", worthKnowing("Run 'make gen' before the tests"))
+	f.quarantinedRunWithNotes("run-b", worthKnowing("Run `make gen` before the tests"))
 	if err := f.cmd().list(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestMemoryListCollectsNotesAndShowsTheSection(t *testing.T) {
 		"repository memory for " + f.project, "): on\n", "budget: 2 of 40 lines, 40 of 3000 characters",
 		"collected from build agents' notes: 1 new candidate(s), 1 note(s) refused by the text rule",
 		"  - A line a person wrote.\n  - Use go 1.26.\n", "ID SEEN SOURCE STATE LINE",
-		" 2 agent candidate - Run 'make gen' before the tests.",
+		" 2 agent candidate - Run `make gen` before the tests.",
 	} {
 		if !strings.Contains(out, want) && !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
 			t.Errorf("list lacks %q:\n%s", want, out)

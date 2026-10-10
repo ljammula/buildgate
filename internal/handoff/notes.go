@@ -23,6 +23,26 @@ type Notes struct {
 	Hypothesis     []string `json:"hypothesis,omitempty"`
 	LeftToDo       []string `json:"left_to_do,omitempty"`
 	Repository     []string `json:"repository,omitempty"`
+	// RepositoryAsWritten is Repository, item for item, with the agent's
+	// backticks kept instead of turned into quotes: the memory text rule
+	// accepts a command only inside backticks, so it has to judge the item
+	// as written. Only MemoryCandidates reads it. It is never rendered into
+	// the record a build is given (markdown uses Repository).
+	RepositoryAsWritten []string `json:"repository_as_written,omitempty"`
+}
+
+// MemoryCandidates returns the "worth knowing about this repository" items
+// for the memory text rule to judge (memory.CollectFromNotes): as the agent
+// wrote them, backticks included, each still one cleaned, capped line. A
+// record written before RepositoryAsWritten existed gives Repository.
+func (n *Notes) MemoryCandidates() []string {
+	if n == nil {
+		return nil
+	}
+	if len(n.RepositoryAsWritten) == len(n.Repository) {
+		return n.RepositoryAsWritten
+	}
+	return n.Repository
 }
 
 // notesHeadings are the five headings the agent is asked to use, lowercased,
@@ -51,11 +71,15 @@ func parseNotes(text string) *Notes {
 		if section == nil || len(*section) >= maxNoteItems {
 			continue
 		}
-		item := clean(stripBullet(line), maxSentenceLen)
+		asWritten := cleanKeepingBackticks(stripBullet(line), maxSentenceLen)
+		item := backticksToQuotes(asWritten)
 		if item == "" || strings.EqualFold(strings.TrimRight(item, "."), "none") {
 			continue
 		}
 		*section = append(*section, item)
+		if section == &n.Repository {
+			n.RepositoryAsWritten = append(n.RepositoryAsWritten, asWritten)
+		}
 	}
 	if len(n.Did)+len(n.TriedAndFailed)+len(n.Hypothesis)+len(n.LeftToDo)+len(n.Repository) == 0 {
 		return nil

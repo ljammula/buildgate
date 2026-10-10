@@ -419,6 +419,14 @@ requires a new contract review and an updated machine-checkable test.
   copied to the run directory first, where only the operator's prompts route
   and `factoryd logs -prompt` read them); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it.
+  The build's evidence file (`BUILD_EVIDENCE.json`) and round-state file
+  (`.pi-build-round-state.json`), which hold the build agent's last message
+  of each failed round (`agent_notes`), leave the worktree with the session:
+  the host moves the evidence file to the run directory, where the run
+  record is read from, and removes the round-state file, which a finished
+  build no longer needs; either one that cannot be removed fails the build
+  step, so no review works beside it. A build that was lost keeps both for
+  its resume, and no review follows a lost build.
   A saved prompt is what the build's session folder held when the host
   copied it; a build can alter its own before that, because the build script
   and the coding agent run as one user in one sandbox and the script has no
@@ -451,7 +459,13 @@ requires a new contract review and an updated machine-checkable test.
   under the fifth heading (things worth knowing about the repository) may
   also be listed to the operator as memory candidates, each only if it
   passes the memory text rule; they still reach no review, no planner and no
-  other ticket's build except under SC-020.
+  other ticket's build except under SC-020. That rule accepts a command only
+  inside backticks, so the handoff keeps one more copy of the fifth
+  heading's items for it alone (`repository_as_written`): each item as the
+  agent wrote it, backticks included, one line cleaned and cut like every
+  other value. The rule judges that text and nothing repairs it; the copy is
+  never rendered into the record a build is given, where every note still has
+  its backticks turned into quotes.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
