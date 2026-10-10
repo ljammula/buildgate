@@ -136,7 +136,7 @@ func TestStatsJSONForBothForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var overview statsOverview
+	var overview stats.Overview
 	if err := json.Unmarshal([]byte(out), &overview); err != nil {
 		t.Fatalf("decode: %v: %s", err, out)
 	}

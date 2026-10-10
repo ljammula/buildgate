@@ -2565,7 +2565,8 @@ type requestSummaryView struct {
 	// `factoryd status` uses, so the console and CLI agree) (C5).
 	WaitingOn string `json:"waiting_on,omitempty"`
 	// QueuePosition is this request's place among the requests that wait
-	// their turn (request.QueuePositions), from 1; 0 when it is not waiting.
+	// their turn (request.QueuePositions: oldest submitted first, an
+	// estimate), from 1; 0 when it is not waiting or no worker is alive.
 	QueuePosition int `json:"queue_position,omitempty"`
 	// Build is where the ticket build of a building request stands, from its
 	// run's own progress record; nil for a request that is not building or
@@ -2581,7 +2582,9 @@ type requestSummaryView struct {
 
 // buildProgressView is requestSummaryView's "build": the run a building
 // request is on, and what runViewFor reports of its progress, so the board
-// shows it without a call per request.
+// shows it without a call per request. It carries no timestamp: the list is
+// compared whole to decide what the event stream sends, and a time that
+// moves with every progress note would send the request on every poll.
 type buildProgressView struct {
 	RunID string `json:"run_id"`
 	// Ticket is the 1-based ticket being built, of Tickets.
@@ -2589,41 +2592,39 @@ type buildProgressView struct {
 	Tickets int `json:"tickets"`
 	// Stage, Round and MaxRounds are the run's current stage and build
 	// round; "" and 0 until its progress record names them.
-	Stage          string `json:"stage,omitempty"`
-	Round          int    `json:"round,omitempty"`
-	MaxRounds      int    `json:"max_rounds,omitempty"`
-	LastProgressAt string `json:"last_progress_at,omitempty"`
-	Stalled        bool   `json:"stalled,omitempty"`
+	Stage     string `json:"stage,omitempty"`
+	Round     int    `json:"round,omitempty"`
+	MaxRounds int    `json:"max_rounds,omitempty"`
+	Stalled   bool   `json:"stalled,omitempty"`
 }
 
-// buildProgressFor is req's buildProgressView: the newest run of the request
-// that has not reached a terminal state.
+// buildProgressFor is req's buildProgressView: the run its current ticket
+// records (the driver keeps Ticket.RunID on the run it started last), while
+// that run has not reached a terminal state. Nil before the ticket has a
+// run, and once its run has ended and the next has not started.
 func (s *Server) buildProgressFor(req *request.Request, runs []*run.Run) *buildProgressView {
-	if req.State != request.StateBuilding {
+	if req.State != request.StateBuilding || req.TicketIndex < 1 || req.TicketIndex > len(req.Tickets) {
 		return nil
 	}
+	runID := req.Tickets[req.TicketIndex-1].RunID
 	var current *run.Run
 	for _, candidate := range runs {
-		if candidate == nil || candidate.TerminalConfirmed() {
-			continue
-		}
-		if current == nil || candidate.CreatedAt > current.CreatedAt {
+		if candidate != nil && candidate.ID == runID {
 			current = candidate
 		}
 	}
-	if current == nil {
+	if runID == "" || current == nil || current.TerminalConfirmed() {
 		return nil
 	}
 	view := s.runViewFor(current)
 	return &buildProgressView{
-		RunID:          current.ID,
-		Ticket:         req.TicketIndex,
-		Tickets:        req.TicketCount,
-		Stage:          view.CurrentStage,
-		Round:          view.CurrentRound,
-		MaxRounds:      view.MaxRounds,
-		LastProgressAt: view.LastProgressAt,
-		Stalled:        view.Stalled,
+		RunID:     current.ID,
+		Ticket:    req.TicketIndex,
+		Tickets:   req.TicketCount,
+		Stage:     view.CurrentStage,
+		Round:     view.CurrentRound,
+		MaxRounds: view.MaxRounds,
+		Stalled:   view.Stalled,
 	}
 }
 
@@ -3585,11 +3586,15 @@ type requestQueue struct {
 // requestQueueFor reads the worker's heartbeat once for requests, which must
 // be in request.List's order.
 func (s *Server) requestQueueFor(requests []*request.Request) requestQueue {
-	active, slots := daemonheartbeat.WorkerActiveRequests(s.dataDir, time.Now())
-	return requestQueue{
-		waitingOn: request.WaitingOn(requests, active, slots),
-		position:  request.QueuePositions(requests, active, slots),
+	now := time.Now()
+	active, slots := daemonheartbeat.WorkerActiveRequests(s.dataDir, now)
+	queue := requestQueue{waitingOn: request.WaitingOn(requests, active, slots)}
+	// A place in the queue means something only while a worker takes
+	// requests from it.
+	if hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(s.dataDir)); err == nil && !daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
+		queue.position = request.QueuePositions(requests, active, slots)
 	}
+	return queue
 }
 
 // streamRequestEvents serves GET /requests/events: an SSE "state" event

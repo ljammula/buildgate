@@ -114,7 +114,6 @@
       "ticket": 2,
       "tickets": 2,
       "stage": "build",
-      "last_progress_at": "2026-09-10T09:46:00.000Z",
       "stalled": true
     },
     "active_job": {

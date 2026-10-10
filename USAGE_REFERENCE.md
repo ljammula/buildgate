@@ -1444,8 +1444,9 @@ no ticket is a gap in the line. The
 route is `/trend` because `GET /projects/{project}/stats` is the release
 figures behind the **Stats** tab. `GET /stats` (read token; query `all`) is
 the same report for every project of the data dir (`projects`, by name) and
-for all of them together (`overall`), with no buckets: what `factoryd stats`
-prints with no `-project`, and what the console's Mission Control shows.
+for all of them together (`overall`), in weekly buckets: the numbers
+`factoryd stats` prints with no `-project`, and what the console's Mission
+Control shows.
 Nothing is stored and no model is called.
 
 A **ticket attempt series** is the finished runs of one ticket in the order

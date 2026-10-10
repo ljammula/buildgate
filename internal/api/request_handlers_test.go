@@ -2646,12 +2646,19 @@ func seedQueueFixture(t *testing.T) string {
 		req.State = r.state
 		if r.state == request.StateBuilding {
 			req.TicketIndex, req.TicketCount = 2, 3
+			req.Tickets = []request.Ticket{{Index: 1}, {Index: 2}, {Index: 3}}
+		}
+		if r.id == "req-building" {
+			req.Tickets[0].RunID, req.Tickets[1].RunID = "req-building-001-a", "req-building-002-b"
 		}
 		if err := req.Save(dataDir); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// An earlier, finished run of the building request, and its current one.
+	// An earlier, finished run of the building request, its current one, and
+	// a newer run of the same request that is no ticket's (a run lost and
+	// kept for resume): the build shown is the current ticket's own run.
+	seedRun(t, dataDir, run.Run{ID: "req-building-002-lost", RequestID: "req-building", State: run.StateSliceRunning, CreatedAt: now.Add(time.Hour).UTC().Format(time.RFC3339Nano)})
 	seedRun(t, dataDir, run.Run{ID: "req-building-001-a", RequestID: "req-building", State: run.StateAccepted, HaltConfirmed: true, CreatedAt: now.Add(-time.Hour).UTC().Format(time.RFC3339Nano)})
 	seedRun(t, dataDir, run.Run{ID: "req-building-002-b", RequestID: "req-building", State: run.StateSliceRunning, CreatedAt: now.UTC().Format(time.RFC3339Nano)})
 	for _, e := range []progress.Event{
@@ -2710,6 +2717,20 @@ func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
 	}
 }
 
+// TestListRequestsGivesNoQueuePositionWithoutALiveWorker: a place in the
+// queue is reported only while a worker takes requests from it.
+func TestListRequestsGivesNoQueuePositionWithoutALiveWorker(t *testing.T) {
+	dataDir := seedQueueFixture(t)
+	if err := os.Remove(daemonheartbeat.WorkerPath(dataDir)); err != nil {
+		t.Fatal(err)
+	}
+	for id, r := range listQueueFixture(t, dataDir) {
+		if r.QueuePosition != 0 {
+			t.Errorf("%s: queue_position %d with no worker, want none", id, r.QueuePosition)
+		}
+	}
+}
+
 // TestListRequestsCarriesTheRunningBuildsStage: a building request whose run
 // has started carries that run's ticket, stage and round; a request that is
 // not building, or whose build has no run yet, carries none.
@@ -2717,13 +2738,8 @@ func TestListRequestsCarriesTheRunningBuildsStage(t *testing.T) {
 	rows := listQueueFixture(t, seedQueueFixture(t))
 	want := buildProgressView{RunID: "req-building-002-b", Ticket: 2, Tickets: 3, Stage: "build", Round: 2, MaxRounds: 4}
 	build := rows["req-building"].Build
-	if build == nil || build.LastProgressAt == "" {
-		t.Fatalf("build of the building request = %+v, want its unfinished run with a progress time", build)
-	}
-	got := *build
-	got.LastProgressAt = ""
-	if got != want {
-		t.Errorf("build = %+v, want %+v", got, want)
+	if build == nil || *build != want {
+		t.Fatalf("build of the building request = %+v, want %+v", build, want)
 	}
 	for _, id := range []string{"req-second", "req-fourth", "req-review"} {
 		if rows[id].Build != nil {
@@ -2760,10 +2776,10 @@ func TestGetStatsReportsEveryProjectAndTheirSum(t *testing.T) {
 		r.CreatedAt = at
 		seedRun(t, dataDir, r)
 	}
-	get := func(server *Server, path, token string) (int, statsOverview) {
+	get := func(server *Server, path, token string) (int, stats.Overview) {
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, requestActionFor(t, http.MethodGet, path, token, ""))
-		var overview statsOverview
+		var overview stats.Overview
 		_ = json.Unmarshal(recorder.Body.Bytes(), &overview)
 		return recorder.Code, overview
 	}
@@ -2776,6 +2792,11 @@ func TestGetStatsReportsEveryProjectAndTheirSum(t *testing.T) {
 	}
 	if _, all := get(NewServer(dataDir), "/stats?all=1", ""); all.Overall.Overall.Tickets != 4 {
 		t.Errorf("all=1: %d tickets, want 4", all.Overall.Overall.Tickets)
+	}
+	for _, off := range []string{"0", "false"} {
+		if _, some := get(NewServer(dataDir), "/stats?all="+off, ""); some.Overall.Overall.Tickets != 3 {
+			t.Errorf("all=%s: %d tickets, want 3", off, some.Overall.Overall.Tickets)
+		}
 	}
 	// Gated like every read.
 	gated := NewServer(dataDir, WithReadToken("read-token"))

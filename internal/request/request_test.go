@@ -421,10 +421,10 @@ func TestJobSpendAddKeepsEachModelsShare(t *testing.T) {
 	}
 }
 
-// TestQueuePositionsNumbersTheWaitingRequestsInTheOrderTheyAreTaken: the
-// requests WaitingOn names are numbered from 1, oldest submitted first; the
-// running one, the head between jobs, and a request at a gate have none.
-func TestQueuePositionsNumbersTheWaitingRequestsInTheOrderTheyAreTaken(t *testing.T) {
+// TestQueuePositionsNumbersTheWaitingRequestsOldestFirst: the requests
+// WaitingOn names are numbered from 1, oldest submitted first; the running
+// one, the head between jobs, and a request at a gate have none.
+func TestQueuePositionsNumbersTheWaitingRequestsOldestFirst(t *testing.T) {
 	list := []*Request{
 		{ID: "a", State: StateBuilding},
 		{ID: "b", State: StateSpecReview},
@@ -444,6 +444,10 @@ func TestQueuePositionsNumbersTheWaitingRequestsInTheOrderTheyAreTaken(t *testin
 	// submitted one takes none.
 	if got, want := QueuePositions(list, []string{"a", "c"}, 2), map[string]int{"f": 1}; !reflect.DeepEqual(got, want) {
 		t.Errorf("two slots taken: %v, want %v", got, want)
+	}
+	more := append(list, &Request{ID: "g", State: StatePlanning}, &Request{ID: "h", State: StateBuilding})
+	if got, want := QueuePositions(more, []string{"c", "a"}, 2), map[string]int{"f": 1, "g": 2, "h": 3}; !reflect.DeepEqual(got, want) {
+		t.Errorf("two slots taken, three waiting: %v, want %v", got, want)
 	}
 	if got := QueuePositions(list, []string{"a"}, 2); len(got) != 0 {
 		t.Errorf("two slots, one free: %v, want nobody waiting", got)

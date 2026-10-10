@@ -1844,9 +1844,11 @@ func WaitingOn(requests []*Request, active []string, slots int) map[string]strin
 	return waiting
 }
 
-// QueuePositions numbers the requests WaitingOn says are waiting, from 1, in
-// the order the daemon will take them: List's order, oldest submitted first.
-// A request absent from the map is not waiting.
+// QueuePositions numbers the requests WaitingOn says are waiting, from 1,
+// oldest submitted first (List's order). It is an estimate of the order they
+// will run in, not the worker's schedule: a job is taken in the order it was
+// scheduled, so a request approved late can run after a newer one that was
+// already waiting. A request absent from the map is not waiting.
 func QueuePositions(requests []*Request, active []string, slots int) map[string]int {
 	waiting := WaitingOn(requests, active, slots)
 	positions := make(map[string]int, len(waiting))
