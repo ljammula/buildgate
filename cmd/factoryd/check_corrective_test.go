@@ -447,7 +447,7 @@ func quarantinedThenLostBuildRunner(t *testing.T, dataDir, id, repoDir string, s
 			}
 			return rr.Save(dataDir)
 		case 2:
-			marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, runID, "temporal")
+			marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, runID, "temporal")
 			lostBranch := marker.Branch
 			if onAttemptsBranch {
 				lostBranch = branch

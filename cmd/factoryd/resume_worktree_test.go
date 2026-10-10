@@ -17,7 +17,7 @@ import (
 func TestHaltDeadOwnerRunKeepsTheWorktreeOfALostTemporalBuild(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "lost-build", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "lost-build", "temporal")
 	seedOwnedRun(t, dataDir, "lost-build", run.StateSliceRunning, deadPID(t), "")
 	seeded, _ := run.Load(dataDir, "lost-build")
 	seeded.RequestID = "req-1"
@@ -44,7 +44,7 @@ func TestHaltDeadOwnerRunKeepsTheWorktreeOfALostTemporalBuild(t *testing.T) {
 func TestHaltDeadOwnerRunDoesNotKeepWithoutATemporalWorktree(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "direct-run", "direct")
+	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "direct-run", "direct")
 	seedOwnedRun(t, dataDir, "direct-run", run.StateSliceRunning, deadPID(t), "")
 	seedOwnedRun(t, dataDir, "no-worktree", run.StateSliceRunning, deadPID(t), "")
 
@@ -63,7 +63,7 @@ func TestHaltDeadOwnerRunDoesNotKeepWithoutATemporalWorktree(t *testing.T) {
 func TestHaltDeadOwnerRunDoesNotKeepASingleTicketRunsWorktree(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "single-ticket", "temporal")
+	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "single-ticket", "temporal")
 	seedOwnedRun(t, dataDir, "single-ticket", run.StateSliceRunning, deadPID(t), "")
 	if halted, err := haltDeadOwnerRun(dataDir, "single-ticket"); err != nil || !halted {
 		t.Fatalf("haltDeadOwnerRun = %v, %v", halted, err)
@@ -75,7 +75,7 @@ func TestHaltDeadOwnerRunDoesNotKeepASingleTicketRunsWorktree(t *testing.T) {
 
 func TestReconcileSkipsAKeptWorktreeUntilCleared(t *testing.T) {
 	dataDir, repoDir, marker, _ := requestdrivertest.KeptRun(t, "kept-run")
-	other := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "reaped-run", "temporal")
+	other := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "reaped-run", "temporal")
 	if err := (&run.Run{ID: other.RunID, State: run.StateHalted, HaltConfirmed: true, ProjectPath: repoDir}).Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestClearKeptForResumeLeavesAWorktreeAnotherRunsMarkerClaims(t *testing.T) 
 func TestALostCorrectiveRoundIsNotKeptAndIsReaped(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "corrective", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "corrective", "temporal")
 	seedOwnedRun(t, dataDir, "corrective", run.StateSliceRunning, deadPID(t), "")
 	r, _ := run.Load(dataDir, "corrective")
 	r.RequestID, r.OnBranch = "req-1", "factoryd/pr-branch"

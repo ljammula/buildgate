@@ -957,7 +957,7 @@ func TestReconcileIsolationMarkersReapsNonterminalDirectRun(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "direct-crash", "direct")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "direct-crash", "direct")
 	if err := (&run.Run{ID: marker.RunID, State: run.StateSliceRunning, ProjectPath: repoDir, WorkspacePath: repoDir}).Save(dataDir); err != nil {
 		t.Fatalf("save nonterminal run: %v", err)
 	}
@@ -990,7 +990,7 @@ func TestReconcileIsolationMarkersPropagatesReapFailure(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "reap-failure", "direct")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "reap-failure", "direct")
 	if err := (&run.Run{ID: marker.RunID, State: run.StateSliceRunning, ProjectPath: repoDir, WorkspacePath: repoDir}).Save(dataDir); err != nil {
 		t.Fatalf("save nonterminal run: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestReconcileIsolationMarkersPreservesWhenSandboxDockerUnresolvable(t *test
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "docker-unresolvable", "direct")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "docker-unresolvable", "direct")
 	if err := (&run.Run{ID: marker.RunID, State: run.StateSliceRunning, ProjectPath: repoDir, WorkspacePath: repoDir}).Save(dataDir); err != nil {
 		t.Fatalf("save nonterminal run: %v", err)
 	}
@@ -1056,7 +1056,7 @@ func TestReconcileIsolationMarkersRequiresHeldRepositoryLock(t *testing.T) {
 	// not parallel: newFixtureRepo (testfixture.NewGitRepo) calls t.Setenv internally.
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "lock-required", "direct")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "lock-required", "direct")
 	reconcileIsolationMarkers(context.Background(), dataDir, repoDir, "", nil, nil)
 	if _, err := os.Stat(marker.WorktreePath); err != nil {
 		t.Fatalf("reconciliation without lock removed worktree: %v", err)
@@ -1073,15 +1073,15 @@ func TestReconcileIsolationMarkersPreservesAcceptedAndCompletedTemporalWork(t *t
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	accepted := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "accepted-run", "direct")
+	accepted := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "accepted-run", "direct")
 	if err := (&run.Run{ID: accepted.RunID, State: run.StateAccepted, ProjectPath: repoDir}).Save(dataDir); err != nil {
 		t.Fatalf("save accepted run: %v", err)
 	}
-	quarantined := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "quarantined-run", "direct")
+	quarantined := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "quarantined-run", "direct")
 	if err := (&run.Run{ID: quarantined.RunID, State: run.StateQuarantined, ProjectPath: repoDir}).Save(dataDir); err != nil {
 		t.Fatalf("save quarantined run: %v", err)
 	}
-	temporal := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "temporal-complete", "temporal")
+	temporal := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "temporal-complete", "temporal")
 	if err := wsisolation.RemoveIsolationMarker(wsisolation.IsolationMarkerPath(dataDir, temporal.RunID)); err != nil {
 		t.Fatalf("remove temporary marker path: %v", err)
 	}
@@ -1134,7 +1134,7 @@ func TestReconcileIsolationMarkersRevokesWorkerGroupWriteOnPreservedTerminalRun(
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	accepted := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "accepted-ungranted", "direct")
+	accepted := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "accepted-ungranted", "direct")
 	if err := (&run.Run{ID: accepted.RunID, State: run.StateAccepted, ProjectPath: repoDir}).Save(dataDir); err != nil {
 		t.Fatalf("save accepted run: %v", err)
 	}
@@ -1166,12 +1166,12 @@ func TestReconcileIsolationMarkersPreservesMalformedAndLegacyEvidence(t *testing
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "malformed-marker", "direct")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "malformed-marker", "direct")
 	marker.ParentDir = t.TempDir()
 	if err := wsisolation.WriteIsolationMarker(wsisolation.IsolationMarkerPath(dataDir, marker.RunID), marker); err != nil {
 		t.Fatalf("write escaped marker: %v", err)
 	}
-	legacy := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "legacy-marker", "direct")
+	legacy := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "legacy-marker", "direct")
 	legacy.Version = 99
 	if err := wsisolation.WriteIsolationMarker(wsisolation.IsolationMarkerPath(dataDir, legacy.RunID), legacy); err != nil {
 		t.Fatalf("write legacy marker: %v", err)
@@ -1192,7 +1192,7 @@ func TestReconcileIsolationMarkersReapsTemporalIntentWithoutCheckpoint(t *testin
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "temporal-intent", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "temporal-intent", "temporal")
 	reconcileIsolationMarkersWith(context.Background(), dataDir, repoDir, "", lock, func(context.Context, string) bool { return false })
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
 		t.Fatalf("Temporal intent worktree still exists after reconciliation: %v", err)
@@ -1204,7 +1204,7 @@ func TestReconcileIsolationMarkersLeavesTemporalIntentWithoutWorktree(t *testing
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "temporal-missing", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "temporal-missing", "temporal")
 	if err := wsisolation.Remove(repoDir, marker.WorktreePath, marker.Branch); err != nil {
 		t.Fatalf("remove prepared worktree: %v", err)
 	}
@@ -1222,7 +1222,7 @@ func TestReconcileIsolationMarkersPreservesCheckpointPathMismatch(t *testing.T) 
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	lock := testHeldIsolationLock(t, repoDir)
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "temporal-mismatch", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "temporal-mismatch", "temporal")
 	marker.ActivityRunID = "activity-run"
 	marker.ActivityID = "prepare-activity"
 	if err := (&run.Run{ID: marker.RunID, State: run.StateSliceRunning, ProjectPath: repoDir}).Save(dataDir); err != nil {

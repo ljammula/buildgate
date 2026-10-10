@@ -282,20 +282,20 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 		},
 		{
 			name:           "open draft checks passing no threads: marked ready",
-			state:          forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TestTicketRunResultSHA(1)},
+			state:          forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1)},
 			wantPRState:    "ready",
 			wantReadyCalls: 1,
 			wantRequest:    request.StatePRReview,
 		},
 		{
 			name:        "open draft checks failing no threads: not marked ready",
-			state:       forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &falseVal, HeadSHA: requestdrivertest.TestTicketRunResultSHA(1)},
+			state:       forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &falseVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1)},
 			wantPRState: "",
 			wantRequest: request.StatePRReview,
 		},
 		{
 			name:           "open draft checks unconfigured (nil) no threads: marked ready",
-			state:          forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: nil, HeadSHA: requestdrivertest.TestTicketRunResultSHA(1)},
+			state:          forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: nil, HeadSHA: requestdrivertest.TicketRunResultSHA(1)},
 			wantPRState:    "ready",
 			wantReadyCalls: 1,
 			wantRequest:    request.StatePRReview,
@@ -366,7 +366,7 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 				return saveAcceptedRoundRun(t, dataDir, accepted)
 			}
 			dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-				requestdrivertest.TestLastPushedSHA[branch] = sha
+				requestdrivertest.LastPushedSHA[branch] = sha
 				return nil
 			}
 			dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
@@ -421,7 +421,7 @@ func TestRunCorrectiveRoundTwoThreadsProducesOneRunAndTwoReplies(t *testing.T) {
 	pushCalls := 0
 	var pushedBranch string
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		pushCalls++
 		pushedBranch = branch
 		return nil
@@ -514,11 +514,11 @@ func TestRunCorrectiveRoundSetsRunRequestID(t *testing.T) {
 		return saveAcceptedRoundRun(t, dataDir, loaded)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -566,11 +566,11 @@ func TestRunCorrectiveRoundCarriesRequestPreflightProfile(t *testing.T) {
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -629,7 +629,7 @@ func TestRunCorrectiveRoundCarriesFullSuiteSource(t *testing.T) {
 				return saveAcceptedRoundRun(t, dataDir, accepted)
 			}
 			dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-				requestdrivertest.TestLastPushedSHA[branch] = sha
+				requestdrivertest.LastPushedSHA[branch] = sha
 				return nil
 			}
 			dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
@@ -672,11 +672,11 @@ func TestRunCorrectiveRoundCarriesExecutionHarness(t *testing.T) {
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -756,7 +756,7 @@ func TestRunCorrectiveRoundQuarantineDoesNotPush(t *testing.T) {
 	}
 	pushCalls := 0
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		pushCalls++
 		return nil
 	}
@@ -870,13 +870,13 @@ func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
-	requestdrivertest.TestLastPushedSHA = map[string]string{}
+	requestdrivertest.LastPushedSHA = map[string]string{}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -946,13 +946,13 @@ func TestRunCorrectiveRoundDoesNotCountConformityRoundsTowardMaxReviewRounds(t *
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
-	requestdrivertest.TestLastPushedSHA = map[string]string{}
+	requestdrivertest.LastPushedSHA = map[string]string{}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1001,7 +1001,7 @@ func TestRunCorrectiveRoundAfterAcceptedConformityRoundUsesOriginalBase(t *testi
 		Project:     "widget",
 		BaseSHA:     conformityRoundOwnTip,
 		DiffBaseSHA: originalBase,
-		ResultSHA:   requestdrivertest.TestTicketRunResultSHA(1),
+		ResultSHA:   requestdrivertest.TicketRunResultSHA(1),
 	}
 	if err := correctiveRun.Save(dataDir); err != nil {
 		t.Fatalf("save corrective run fixture: %v", err)
@@ -1038,13 +1038,13 @@ func TestRunCorrectiveRoundAfterAcceptedConformityRoundUsesOriginalBase(t *testi
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
-	requestdrivertest.TestLastPushedSHA = map[string]string{}
+	requestdrivertest.LastPushedSHA = map[string]string{}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1147,7 +1147,7 @@ func stackedRetargetFixture(dp *fakeDeps, t *testing.T) (r *request.Request, dat
 		if prURL != ticket2URL {
 			t.Fatalf("read unexpected PR %q (ticket 1 is merged and must not be polled)", prURL)
 		}
-		return forge.ReviewState{State: "OPEN", IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TestTicketRunResultSHA(2)}, nil
+		return forge.ReviewState{State: "OPEN", IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TicketRunResultSHA(2)}, nil
 	}
 	edits = new([]string)
 	dp.retargetPullRequestBaseFn = func(ctx context.Context, prURL, base string) error {
@@ -1267,7 +1267,7 @@ func TestPRPollStillRecordsApprovalWhenTheRetargetCannotHappen(t *testing.T) {
 	r, dataDir, edits := stackedRetargetFixture(dp, t)
 	r.Tickets[0].PRBase = "" // pre-upgrade merge: nothing to retarget onto
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
-		return forge.ReviewState{State: "OPEN", IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TestTicketRunResultSHA(2), ReviewDecision: forge.ReviewDecisionApproved}, nil
+		return forge.ReviewState{State: "OPEN", IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TicketRunResultSHA(2), ReviewDecision: forge.ReviewDecisionApproved}, nil
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
@@ -1323,11 +1323,11 @@ func TestAdvancePRReviewWatchesEveryOpenTicketPR(t *testing.T) {
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1566,7 +1566,7 @@ func TestPushAcceptedRoundHappyPathPushesResultSHAToBranchAndReplies(t *testing.
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
 		pushCalls++
 		pushedSHA, pushedBranch = sha, branch
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	replyCalls := 0
@@ -1921,7 +1921,7 @@ func TestAdvancePRReadyOrApprovedRevertsReadyWhenDecisionInvalidatedDuringTheFli
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	trueVal := true
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TestTicketRunResultSHA(1)}, nil)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1)}, nil)
 
 	dp.markPullRequestReadyFn = func(ctx context.Context, prURL string) error {
 		// Simulates a full_suite_verify regression on a different,
@@ -1962,7 +1962,7 @@ func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 	r.Tickets[0].Branch = "factoryd/run-1"
 
 	trueVal := true
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TestTicketRunResultSHA(1), BaseRefName: "factoryd/run-1"}, nil)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), BaseRefName: "factoryd/run-1"}, nil)
 	readyCalls := 0
 	var readyURLs []string
 	dp.markPullRequestReadyFn = func(ctx context.Context, prURL string) error {
@@ -2221,7 +2221,7 @@ func TestRunCorrectiveRoundFixAttemptAcceptedPushesAndCountsOnce(t *testing.T) {
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	replies := 0
@@ -2252,8 +2252,8 @@ func TestRunCorrectiveRoundFixAttemptAcceptedPushesAndCountsOnce(t *testing.T) {
 	if got.Outcome != request.RoundAccepted || !got.Pushed || got.RunID != "req-1-001-review1-fix1" || !slices.Equal(got.PriorRunIDs, []string{"req-1-001-review1"}) {
 		t.Errorf("round = %+v, want accepted and pushed, decided by the fix attempt's run, naming the first build as prior", got)
 	}
-	if requestdrivertest.TestLastPushedSHA["factoryd/run-1"] != "cafef00dcafef00dcafef00dcafef00dcafef00d" || replies != 1 {
-		t.Errorf("pushed = %q, replies = %d; want the fix attempt's commit pushed and one reply", requestdrivertest.TestLastPushedSHA["factoryd/run-1"], replies)
+	if requestdrivertest.LastPushedSHA["factoryd/run-1"] != "cafef00dcafef00dcafef00dcafef00dcafef00d" || replies != 1 {
+		t.Errorf("pushed = %q, replies = %d; want the fix attempt's commit pushed and one reply", requestdrivertest.LastPushedSHA["factoryd/run-1"], replies)
 	}
 }
 
@@ -2485,7 +2485,7 @@ func TestReadyToMergeFollowsTheLastPushedRoundAndClearsWhileOneRuns(t *testing.T
 	requestdrivertest.AcceptAndReview(t, dataDir, 1, run.GateResult{Check: "code_review", Passed: true})
 	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
 	roundSHA := "cafef00dcafef00dcafef00dcafef00dcafef00d"
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: requestdrivertest.TestTicketRunResultSHA(1), BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: requestdrivertest.TicketRunResultSHA(1), BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	var duringRound *request.MergeReadiness
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		duringRound = r.Tickets[0].MergeReadiness
@@ -2493,7 +2493,7 @@ func TestReadyToMergeFollowsTheLastPushedRoundAndClearsWhileOneRuns(t *testing.T
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
@@ -2643,11 +2643,11 @@ func TestRunCorrectiveRoundCarriesTheTicketOracleAndFullSuiteCommand(t *testing.
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.TestLastPushedSHA[branch]; ok {
+		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -2699,7 +2699,7 @@ func TestRunCorrectiveRoundUsesTicketRunsRecordedBranch(t *testing.T) {
 	}
 	var pushedBranch string
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.TestLastPushedSHA[branch] = sha
+		requestdrivertest.LastPushedSHA[branch] = sha
 		pushedBranch = branch
 		return nil
 	}
