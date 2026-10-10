@@ -12,7 +12,6 @@
 26 cmd/factoryd/integration_reclaim_and_temporal_test.go TestIntegrationReconcileReclaimedRunCancelsLateArrivingNeverStartedSignal
 39 cmd/factoryd/integration_reclaim_and_temporal_test.go TestIntegrationReconcileReclaimedRunDoesNotFalselyConfirmQueuedBehindLongRunningWork
 32 cmd/factoryd/integration_reclaim_and_temporal_test.go TestIntegrationReconcileReclaimedRunNamespacesChildByRepository
-84 cmd/factoryd/main.go realMain
 36 cmd/factoryd/onboard.go doOnboard
 29 cmd/factoryd/oracle_draft_job.go installDrafted
 51 cmd/factoryd/oracle_draft_job.go readDraftOutputMode
