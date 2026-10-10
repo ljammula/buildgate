@@ -92,11 +92,25 @@ var (
 	listStart = regexp.MustCompile(`^([-+>]|[0-9]+[.)])`)
 	// absolutePath is the one rule for an absolute path, outside a quoted
 	// command and inside one: a "/" at the start, or after any character
-	// that is not a letter, a digit, ".", "_" or "/", followed by a letter
-	// or a dot. A "/" inside a relative path follows one of those
+	// that is not a letter, a digit, ".", "_" or "/", followed by a
+	// character a path component can start with (a letter, a digit, "_",
+	// "." or "~"). A "/" inside a relative path follows one of those
 	// characters and is not one. "//" is refused apart from it, as part of
 	// a URL (forbiddenPart).
-	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z.]`)
+	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z0-9_.~]`)
+	// parentComponent is a ".." path component: ".." with no letter, digit,
+	// "." or "_" on either side ("./..." and "wait.." are not one).
+	parentComponent = regexp.MustCompile(`(^|[^A-Za-z0-9._])\.\.($|[^A-Za-z0-9._])`)
+	// flagGluedPath is a flag with a path glued to its letters, as in
+	// "-I/usr/include": absolutePath does not see that "/", which follows
+	// a letter.
+	flagGluedPath = regexp.MustCompile(`(^|[ (])-+[A-Za-z]+/`)
+	// schemeColon is a word, a colon and a domain-like token with nothing
+	// between them: a URL written without its slashes ("https:evil.com").
+	schemeColon = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*:[A-Za-z0-9-]+\.[A-Za-z]`)
+	// spanOpens and spanCloses are what may stand right before an opening
+	// backtick and right after a closing one, besides the line's ends.
+	spanOpens, spanCloses = " (", " .,;:)"
 	// longRun is 20 or more characters with no space from the set keys,
 	// hashes and encoded secrets are written in. One is refused only when
 	// it holds both a letter and a digit (longToken): a long word, a path
@@ -144,9 +158,10 @@ func shapeProblem(s string) string {
 	return ""
 }
 
-// forbiddenParts are refused anywhere, in any letter case: a URL in any form
-// ("//" covers "://" and a protocol-relative one, "www." an autolink), a home
-// path and a doubled colon.
+// forbiddenParts are refused anywhere, in any letter case: a URL with its
+// slashes ("//" covers "://" and a protocol-relative one, "www." an
+// autolink), a home path and a doubled colon. A host name written with no
+// scheme is not recognised (it has the shape of a Go import path).
 var forbiddenParts = []string{"//", "www.", "/users/", "/home/", "::"}
 
 func forbiddenPart(s string) string {
@@ -190,12 +205,16 @@ func forbiddenShape(s string) string {
 
 // ValidateReason refuses a reason that is not one plain sentence-like line of
 // at most 120 runes. Outside backticks the characters are
-// [A-Za-z0-9 .,:;()'"/=+-], with no absolute path; a pair of backticks quotes
-// a command, whose inside must pass ValidateCommand. A backtick without its
-// pair is refused, and so is a start that Markdown would read as a nested
-// list, an ordered list or a quote. Anywhere: no URL in any form, no home
-// path, no address, no unbroken token of 20 or more characters of
-// [A-Za-z0-9+/_-] that holds both a letter and a digit. It never repairs.
+// [A-Za-z0-9 .,:;()'"/=+-]; a pair of backticks that stands alone
+// (spanStandsAlone) quotes a command, whose inside must pass ValidateCommand.
+// A backtick without its pair or glued to other text is refused, and so is
+// a start that Markdown would read as a nested list, an ordered list or a
+// quote. Anywhere, on the line as written and with backticks, quotes and
+// parentheses removed (unsplit): no URL with a scheme, no home path, no
+// absolute path, no address, no unbroken token of 20 or more characters of
+// [A-Za-z0-9+/_-] that holds both a letter and a digit. Anywhere as written:
+// no ".." path component, no flag glued to a path, no URL without its
+// slashes (pathTrick). It never repairs.
 func ValidateReason(s string) error {
 	switch {
 	case s == "":
@@ -215,13 +234,48 @@ func ValidateReason(s string) error {
 	if sanitize.Line(s) != s {
 		return textErr("reason", "changes when cleaned", s)
 	}
-	if p := forbiddenPart(s); p != "" {
-		return textErr("reason", "contains "+p, s)
+	// Once on the line as written, once with the characters that can split
+	// a path or a token taken out, so punctuation hides neither.
+	for _, text := range []string{s, unsplit.Replace(s)} {
+		if why := hiddenProblem(text); why != "" {
+			return textErr("reason", why, s)
+		}
 	}
-	if why := forbiddenShape(s); why != "" {
+	if why := pathTrick(s); why != "" {
 		return textErr("reason", why, s)
 	}
 	return nil
+}
+
+// unsplit removes the characters a path, an address or a token can be split
+// with and still be read as one: backticks, quotes and parentheses.
+var unsplit = strings.NewReplacer("`", "", "'", "", `"`, "", "(", "", ")", "")
+
+// hiddenProblem names what is refused anywhere in a line or a command: a
+// URL or home path (forbiddenPart), an absolute path, a long token or an
+// address (forbiddenShape).
+func hiddenProblem(s string) string {
+	if p := forbiddenPart(s); p != "" {
+		return "contains " + p
+	}
+	if absolutePath.MatchString(s) {
+		return "has an absolute path"
+	}
+	return forbiddenShape(s)
+}
+
+// pathTrick names a path or URL written so that hiddenProblem does not see
+// it: a ".." component, a flag glued to a path, a URL without its slashes.
+func pathTrick(s string) string {
+	switch {
+	case parentComponent.MatchString(s):
+		return "has a .. path component"
+	case flagGluedPath.MatchString(s):
+		return "has a flag glued to a path"
+	case schemeColon.MatchString(s):
+		return "has a URL written without its slashes"
+	}
+	return ""
 }
 
 // validateSpans splits s at its backticks: the pieces outside a pair follow
@@ -233,6 +287,9 @@ func validateSpans(s string) error {
 	}
 	for i, part := range parts {
 		if i%2 == 1 {
+			if !spanStandsAlone(parts, i) {
+				return textErr("reason", "has a backtick glued to other text", s)
+			}
 			if err := ValidateCommand(part); err != nil {
 				return fmt.Errorf("reason has a quoted command that is refused: %w", err)
 			}
@@ -246,6 +303,17 @@ func validateSpans(s string) error {
 		}
 	}
 	return nil
+}
+
+// spanStandsAlone reports whether the quoted command parts[i] is set off
+// from the text around it: its opening backtick at the start of the line or
+// after a space or "(", its closing one at the end of the line or before a
+// space or one of ".,;:)". Two commands back to back do not stand alone.
+func spanStandsAlone(parts []string, i int) bool {
+	before, after := parts[i-1], parts[i+1]
+	opens := i == 1 && before == "" || before != "" && strings.IndexByte(spanOpens, before[len(before)-1]) >= 0
+	closes := i == len(parts)-2 && after == "" || after != "" && strings.IndexByte(spanCloses, after[0]) >= 0
+	return opens && closes
 }
 
 // ValidateCommand refuses anything but 1..120 bytes of [A-Za-z0-9 ._/:=-]
@@ -274,6 +342,9 @@ func ValidateCommand(s string) error {
 		return textErr("command", "contains "+p, s)
 	}
 	if why := forbiddenShape(s); why != "" {
+		return textErr("command", why, s)
+	}
+	if why := pathTrick(s); why != "" {
 		return textErr("command", why, s)
 	}
 	return nil

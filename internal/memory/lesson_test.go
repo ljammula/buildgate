@@ -417,7 +417,7 @@ func TestAQuotedCommandRefusesAnAbsolutePathAfterAnyNonPathCharacter(t *testing.
 		}
 	}
 	for _, command := range []string{
-		"make gen", "go test ./...", "python3 -m pytest agent/pi/tests/", "src/pkg/file.go", "cat ../notes/a.txt",
+		"make gen", "go test ./...", "python3 -m pytest agent/pi/tests/", "src/pkg/file.go", "./tools/gen.sh",
 	} {
 		if err := ValidateCommand(command); err != nil {
 			t.Errorf("ValidateCommand(%q) = %v, want a relative path accepted", command, err)
