@@ -1467,33 +1467,62 @@ func readDraftOutput(outDir string, criteria []string) (files map[string][]byte,
 // manifest-named regular files are ever copied). Every other check still
 // refuses the draft.
 func readDraftOutputMode(outDir string, criteria []string, partial bool) (files map[string][]byte, manifest []byte, targets map[string]string, ignoredRunCommand bool, err error) {
-	fail := func(format string, a ...any) (map[string][]byte, []byte, map[string]string, bool, error) {
-		return nil, nil, nil, false, fmt.Errorf(format, a...)
+	in, err := readDraftManifestEntries(outDir, criteria, partial)
+	if err != nil {
+		return nil, nil, nil, false, err
 	}
+	d := &draftOutput{
+		outDir:      outDir,
+		partial:     partial,
+		files:       map[string][]byte{},
+		targets:     map[string]string{},
+		targetOwner: map[string]string{},
+		seen:        map[string]string{},
+	}
+	out := make([]map[string]any, 0, len(in))
+	for i, entry := range in {
+		row, err := d.manifestRow(i, entry, criteria[i])
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		out = append(out, row)
+	}
+	manifest, err = json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return nil, nil, nil, false, fmt.Errorf("%v", err)
+	}
+	return d.files, append(manifest, '\n'), d.targets, d.ignoredRunCommand, nil
+}
+
+// readDraftManifestEntries refuses a drafting output directory that holds
+// anything but plain files (skipped in partial mode), reads its manifest and
+// returns the manifest's entries, one per criterion: aligned to the criteria
+// by text in partial mode, refused on a count mismatch otherwise.
+func readDraftManifestEntries(outDir string, criteria []string, partial bool) ([]map[string]any, error) {
 	entries, err := os.ReadDir(outDir)
 	if err != nil {
-		return fail("read drafting output: %v", err)
+		return nil, fmt.Errorf("read drafting output: %v", err)
 	}
 	for _, e := range entries {
 		if partial {
 			break
 		}
 		if strings.HasPrefix(e.Name(), ".") || !e.Type().IsRegular() {
-			return fail("drafting output contains %q, which is a dotfile, symlink or directory: refusing the whole draft", e.Name())
+			return nil, fmt.Errorf("drafting output contains %q, which is a dotfile, symlink or directory: refusing the whole draft", e.Name())
 		}
 	}
 	rawManifest, err := readBounded(filepath.Join(outDir, oracleManifestName), maxOracleControlFileBytes)
 	if err != nil {
-		return fail("read drafted manifest: %v", err)
+		return nil, fmt.Errorf("read drafted manifest: %v", err)
 	}
 	var in []map[string]any
 	if err := json.Unmarshal(rawManifest, &in); err != nil {
-		return fail("drafted manifest is malformed: %v", err)
+		return nil, fmt.Errorf("drafted manifest is malformed: %v", err)
 	}
 	for i := range criteria {
 		for j := 0; j < i; j++ {
 			if criterionKey(criteria[i]) == criterionKey(criteria[j]) {
-				return fail("criteria %d and %d are the same after normalisation, so an echoed criterion cannot be matched to one of them", j+1, i+1)
+				return nil, fmt.Errorf("criteria %d and %d are the same after normalisation, so an echoed criterion cannot be matched to one of them", j+1, i+1)
 			}
 		}
 	}
@@ -1501,140 +1530,171 @@ func readDraftOutputMode(outDir string, criteria []string, partial bool) (files 
 		in = alignPartialManifest(in, criteria)
 	}
 	if len(in) != len(criteria) {
-		return fail("drafted manifest has %d entries, want one per criterion (%d)", len(in), len(criteria))
+		return nil, fmt.Errorf("drafted manifest has %d entries, want one per criterion (%d)", len(in), len(criteria))
 	}
-	files = map[string][]byte{}
-	targets = map[string]string{}
-	targetOwner := map[string]string{} // target_path -> the file that claimed it
-	seen := map[string]string{}        // lower-cased name -> the exact name already claimed
-	total := 0
-	out := make([]map[string]any, 0, len(in))
-	for i, entry := range in {
-		crit, ok := entry["criterion"].(string)
-		if !ok || criterionKey(crit) != criterionKey(criteria[i]) {
-			return fail("drafted manifest entry %d does not match approved criterion %d", i+1, i+1)
-		}
-		if idx, ok := entry["criterion_index"].(float64); !ok || idx != float64(i+1) {
-			return fail("drafted manifest entry %d has criterion_index %v, want %d", i+1, entry["criterion_index"], i+1)
-		}
-		rationale := ""
-		switch v := entry["rationale"].(type) {
-		case nil:
-		case string:
-			rationale = v
-		default:
-			return fail("drafted manifest entry %d has a non-string rationale", i+1)
-		}
-		var target any
-		switch v := entry["target_path"].(type) {
-		case nil:
-		case string:
-			// Never trusted: an unsafe target_path is dropped, not repaired.
-			if oraclecommit.ValidateTargetPath(v, nil) == nil {
-				target = v
-			}
-		default:
-			return fail("drafted manifest entry %d has a non-string target_path", i+1)
-		}
-		var oracleFile any
-		switch name := entry["oracle_file"].(type) {
-		case nil:
-			target = nil
-		case string:
-			switch {
-			case name == request.TicketOracleRunCommandFilename || name == oracleManifestName:
-				// Never installed from model output; the criterion stays undrafted.
-				ignoredRunCommand = ignoredRunCommand || name == request.TicketOracleRunCommandFilename
-				rationale = "dropped: " + name + " is not an oracle test file"
-				target = nil
-			case isReservedOracleName(name):
-				return fail("drafted manifest names %q, a case alias of a reserved file name", name)
-			case !draftedNamePattern.MatchString(name):
-				return fail("drafted manifest names %q, which is not a plain ASCII file name", name)
-			default:
-				if prior, dup := seen[strings.ToLower(name)]; dup {
-					// One file may cover several criteria (one entry each); a
-					// case-variant of an earlier name is still an alias.
-					if prior != name {
-						return fail("drafted manifest names %q and %q, which differ only in case", prior, name)
-					}
-					if t, isStr := target.(string); isStr {
-						if have, had := targets[name]; had && have != t {
-							return fail("drafted manifest gives %q two different target_path values", name)
-						}
-						if other, clash := targetOwner[t]; clash && other != name {
-							return fail("drafted files %q and %q both target %q: one repository path cannot hold two oracle files", other, name, t)
-						}
-						targetOwner[t] = name
-						targets[name] = t
-					} else {
-						target = nil
-						if have, had := targets[name]; had {
-							target = have
-						}
-					}
-					oracleFile = name
-					break
-				}
-				seen[strings.ToLower(name)] = name
-				p := filepath.Join(outDir, name)
-				problem := ""
-				info, statErr := os.Lstat(p)
-				switch {
-				case statErr != nil || !info.Mode().IsRegular():
-					problem = fmt.Sprintf("drafted manifest names %q, which is not a regular file in the output", name)
-				case info.Size() > maxDraftedOracleFileBytes:
-					problem = fmt.Sprintf("drafted file %q is %d bytes, over the %d byte cap", name, info.Size(), maxDraftedOracleFileBytes)
-				case len(files) >= request.MaxTicketOracleFiles:
-					problem = fmt.Sprintf("drafted files exceed the %d file cap", request.MaxTicketOracleFiles)
-				case total+int(info.Size()) > maxDraftedOracleTotalBytes:
-					problem = fmt.Sprintf("drafted files exceed the %d byte total cap", maxDraftedOracleTotalBytes)
-				}
-				var content []byte
-				if problem == "" {
-					var readErr error
-					if content, readErr = readBounded(p, maxDraftedOracleFileBytes); readErr != nil {
-						problem = fmt.Sprintf("read drafted file %q: %v", name, readErr)
-					}
-				}
-				if problem != "" {
-					if !partial {
-						return fail("%s", problem)
-					}
-					delete(seen, strings.ToLower(name))
-					target = nil
-					rationale = "dropped: " + problem
-					break
-				}
-				total += len(content)
-				files[name] = content
-				if s, ok := target.(string); ok {
-					if other, clash := targetOwner[s]; clash && other != name {
-						return fail("drafted files %q and %q both target %q: one repository path cannot hold two oracle files", other, name, s)
-					}
-					targetOwner[s] = name
-					targets[name] = s
-				}
-				oracleFile = name
-			}
-		default:
-			return fail("drafted manifest entry %d has a non-string oracle_file", i+1)
-		}
-		out = append(out, map[string]any{
-			"criterion":       criteria[i],
-			"criterion_index": i + 1,
-			"oracle_file":     oracleFile,
-			"target_path":     target,
-			// supersedes is operator-authored only; never taken from output.
-			"supersedes": []string{},
-			"rationale":  rationale,
-		})
+	return in, nil
+}
+
+// draftOutput is what readDraftOutputMode has accepted so far while it walks
+// the manifest's entries in order.
+type draftOutput struct {
+	outDir  string
+	partial bool
+
+	files             map[string][]byte
+	targets           map[string]string
+	targetOwner       map[string]string // target_path -> the file that claimed it
+	seen              map[string]string // lower-cased name -> the exact name already claimed
+	total             int
+	ignoredRunCommand bool
+}
+
+// manifestRow validates entry i against its approved criterion and returns
+// the row the host-built manifest records for it.
+func (d *draftOutput) manifestRow(i int, entry map[string]any, criterion string) (map[string]any, error) {
+	crit, ok := entry["criterion"].(string)
+	if !ok || criterionKey(crit) != criterionKey(criterion) {
+		return nil, fmt.Errorf("drafted manifest entry %d does not match approved criterion %d", i+1, i+1)
 	}
-	manifest, err = json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return fail("%v", err)
+	if idx, ok := entry["criterion_index"].(float64); !ok || idx != float64(i+1) {
+		return nil, fmt.Errorf("drafted manifest entry %d has criterion_index %v, want %d", i+1, entry["criterion_index"], i+1)
 	}
-	return files, append(manifest, '\n'), targets, ignoredRunCommand, nil
+	rationale := ""
+	switch v := entry["rationale"].(type) {
+	case nil:
+	case string:
+		rationale = v
+	default:
+		return nil, fmt.Errorf("drafted manifest entry %d has a non-string rationale", i+1)
+	}
+	var target any
+	switch v := entry["target_path"].(type) {
+	case nil:
+	case string:
+		// Never trusted: an unsafe target_path is dropped, not repaired.
+		if oraclecommit.ValidateTargetPath(v, nil) == nil {
+			target = v
+		}
+	default:
+		return nil, fmt.Errorf("drafted manifest entry %d has a non-string target_path", i+1)
+	}
+	var oracleFile any
+	switch name := entry["oracle_file"].(type) {
+	case nil:
+		target = nil
+	case string:
+		var err error
+		if oracleFile, target, rationale, err = d.oracleFile(name, target, rationale); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("drafted manifest entry %d has a non-string oracle_file", i+1)
+	}
+	return map[string]any{
+		"criterion":       criterion,
+		"criterion_index": i + 1,
+		"oracle_file":     oracleFile,
+		"target_path":     target,
+		// supersedes is operator-authored only; never taken from output.
+		"supersedes": []string{},
+		"rationale":  rationale,
+	}, nil
+}
+
+// oracleFile handles an entry that names a file. It returns the entry's
+// oracle_file, target_path and rationale as the manifest records them: the
+// file is nil when the entry stays undrafted.
+func (d *draftOutput) oracleFile(name string, target any, rationale string) (any, any, string, error) {
+	switch {
+	case name == request.TicketOracleRunCommandFilename || name == oracleManifestName:
+		// Never installed from model output; the criterion stays undrafted.
+		d.ignoredRunCommand = d.ignoredRunCommand || name == request.TicketOracleRunCommandFilename
+		return nil, nil, "dropped: " + name + " is not an oracle test file", nil
+	case isReservedOracleName(name):
+		return nil, nil, "", fmt.Errorf("drafted manifest names %q, a case alias of a reserved file name", name)
+	case !draftedNamePattern.MatchString(name):
+		return nil, nil, "", fmt.Errorf("drafted manifest names %q, which is not a plain ASCII file name", name)
+	}
+	if prior, dup := d.seen[strings.ToLower(name)]; dup {
+		target, err := d.repeatedFile(name, prior, target)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return name, target, rationale, nil
+	}
+	return d.newFile(name, target, rationale)
+}
+
+// repeatedFile handles a name an earlier entry already claimed and returns
+// this entry's target_path. One file may cover several criteria (one entry
+// each); a case-variant of an earlier name is still an alias.
+func (d *draftOutput) repeatedFile(name, prior string, target any) (any, error) {
+	if prior != name {
+		return nil, fmt.Errorf("drafted manifest names %q and %q, which differ only in case", prior, name)
+	}
+	t, isStr := target.(string)
+	if !isStr {
+		if have, had := d.targets[name]; had {
+			return have, nil
+		}
+		return nil, nil
+	}
+	if have, had := d.targets[name]; had && have != t {
+		return nil, fmt.Errorf("drafted manifest gives %q two different target_path values", name)
+	}
+	if other, clash := d.targetOwner[t]; clash && other != name {
+		return nil, fmt.Errorf("drafted files %q and %q both target %q: one repository path cannot hold two oracle files", other, name, t)
+	}
+	d.targetOwner[t] = name
+	d.targets[name] = t
+	return target, nil
+}
+
+// newFile reads a file named for the first time and records it. A file that
+// cannot be taken refuses the draft, or in partial mode leaves the entry
+// undrafted with the problem as its rationale.
+func (d *draftOutput) newFile(name string, target any, rationale string) (any, any, string, error) {
+	d.seen[strings.ToLower(name)] = name
+	content, problem := d.readNamedFile(name)
+	if problem != "" {
+		if !d.partial {
+			return nil, nil, "", fmt.Errorf("%s", problem)
+		}
+		delete(d.seen, strings.ToLower(name))
+		return nil, nil, "dropped: " + problem, nil
+	}
+	d.total += len(content)
+	d.files[name] = content
+	if s, ok := target.(string); ok {
+		if other, clash := d.targetOwner[s]; clash && other != name {
+			return nil, nil, "", fmt.Errorf("drafted files %q and %q both target %q: one repository path cannot hold two oracle files", other, name, s)
+		}
+		d.targetOwner[s] = name
+		d.targets[name] = s
+	}
+	return name, target, rationale, nil
+}
+
+// readNamedFile returns the content of the output file a manifest entry
+// names, or the problem that keeps it from being installed.
+func (d *draftOutput) readNamedFile(name string) (content []byte, problem string) {
+	p := filepath.Join(d.outDir, name)
+	info, statErr := os.Lstat(p)
+	switch {
+	case statErr != nil || !info.Mode().IsRegular():
+		return nil, fmt.Sprintf("drafted manifest names %q, which is not a regular file in the output", name)
+	case info.Size() > maxDraftedOracleFileBytes:
+		return nil, fmt.Sprintf("drafted file %q is %d bytes, over the %d byte cap", name, info.Size(), maxDraftedOracleFileBytes)
+	case len(d.files) >= request.MaxTicketOracleFiles:
+		return nil, fmt.Sprintf("drafted files exceed the %d file cap", request.MaxTicketOracleFiles)
+	case d.total+int(info.Size()) > maxDraftedOracleTotalBytes:
+		return nil, fmt.Sprintf("drafted files exceed the %d byte total cap", maxDraftedOracleTotalBytes)
+	}
+	content, readErr := readBounded(p, maxDraftedOracleFileBytes)
+	if readErr != nil {
+		return nil, fmt.Sprintf("read drafted file %q: %v", name, readErr)
+	}
+	return content, ""
 }
 
 // alignPartialManifest returns one entry per criterion, in criterion order: the

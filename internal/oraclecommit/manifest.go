@@ -286,6 +286,28 @@ func validateOracleFileName(rel string) error {
 // dependency lockfiles, and every path in extraProtected (matched exactly
 // or, for a trailing "/", as a directory prefix).
 func ValidateTargetPath(p string, extraProtected []string) error {
+	if err := validateTargetPathShape(p); err != nil {
+		return err
+	}
+	if err := projectConfigTargetError(p); err != nil {
+		return err
+	}
+	if err := validateTargetPathUnprotected(p, extraProtected); err != nil {
+		return err
+	}
+	if len(policy.ExcludeHarnessByproducts([]string{p})) == 0 {
+		return fmt.Errorf("path %q is a harness byproduct path", p)
+	}
+	if len(evidence.DependencyLockfilesTouched([]string{p})) > 0 {
+		return fmt.Errorf("path %q is a dependency lockfile", p)
+	}
+	return nil
+}
+
+// validateTargetPathShape is ValidateTargetPath's first rules: a clean,
+// relative path with no control, backslash or glob character and no reserved
+// segment.
+func validateTargetPathShape(p string) error {
 	if p == "" {
 		return errors.New("empty path")
 	}
@@ -323,9 +345,12 @@ func ValidateTargetPath(p string, extraProtected []string) error {
 			return fmt.Errorf("path %q is under .oracle", p)
 		}
 	}
-	if err := projectConfigTargetError(p); err != nil {
-		return err
-	}
+	return nil
+}
+
+// validateTargetPathUnprotected refuses a path that is, or is under, one of
+// the extra protected paths.
+func validateTargetPathUnprotected(p string, extraProtected []string) error {
 	for _, prot := range extraProtected {
 		if prot == "" {
 			continue
@@ -339,12 +364,6 @@ func ValidateTargetPath(p string, extraProtected []string) error {
 		if strings.EqualFold(p, prot) {
 			return fmt.Errorf("path %q is a protected path", p)
 		}
-	}
-	if len(policy.ExcludeHarnessByproducts([]string{p})) == 0 {
-		return fmt.Errorf("path %q is a harness byproduct path", p)
-	}
-	if len(evidence.DependencyLockfilesTouched([]string{p})) > 0 {
-		return fmt.Errorf("path %q is a dependency lockfile", p)
 	}
 	return nil
 }

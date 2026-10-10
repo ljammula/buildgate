@@ -1,0 +1,364 @@
+$ factoryd
+exit 0
+stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: 
+stdout: Common commands:
+
+$ factoryd -h
+exit 0
+stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: 
+stdout: Common commands:
+
+$ factoryd -help
+exit 0
+stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: 
+stdout: Common commands:
+
+$ factoryd --help
+exit 0
+stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: 
+stdout: Common commands:
+
+$ factoryd help
+exit 0
+stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: 
+stdout: Common commands:
+
+$ factoryd help status
+exit 0
+stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: 
+stdout: Common commands:
+
+$ factoryd version
+exit 0
+stdout: factoryd version <version>
+
+$ factoryd version -zz-not-a-flag
+exit 0
+stdout: factoryd version <version>
+
+$ factoryd no-such-command
+exit 1
+stderr: data dir: "data" (source: default)
+stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
+stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+
+$ factoryd no-such-command -zz-not-a-flag
+exit 1
+stderr: data dir: "data" (source: default)
+stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
+stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+
+$ factoryd -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd [flags]  (build one ticket; see `factoryd quickstart` for full onboarding)
+
+$ factoryd STATUS -zz-not-a-flag
+exit 1
+stderr: data dir: "data" (source: default)
+stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
+stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+
+$ factoryd -ticket t status
+exit 1
+stderr: data dir: "data" (source: default)
+stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
+stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+
+$ factoryd stage-agent-tests a b
+exit 1
+stderr: factoryd: usage: factoryd stage-agent-tests <dest>
+
+$ factoryd stage-agent-tests
+exit 1
+stderr: factoryd: usage: factoryd stage-agent-tests <dest>
+
+$ factoryd override -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of override:
+stderr:   -by string
+
+$ factoryd serve -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of serve:
+stderr:   -addr string
+
+$ factoryd daemon -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of daemon:
+stderr:   -build-app-interpreter string
+
+$ factoryd supervise -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of supervise:
+stderr:   -build-app-interpreter string
+
+$ factoryd reset-stop-line -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of reset-stop-line:
+stderr:   -by string
+
+$ factoryd override-rate -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of override-rate:
+stderr:   -data-dir string
+
+$ factoryd check-project -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of check-project:
+stderr:   -architecture string
+
+$ factoryd check-ticket -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of check-ticket:
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+
+$ factoryd ticket-template -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of ticket-template:
+stderr:   -o string
+
+$ factoryd init -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of init:
+stderr:   -project string
+
+$ factoryd onboard -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of onboard:
+stderr:   -project string
+
+$ factoryd doctor -zz-not-a-flag
+exit 1
+stdout: factoryd doctor: running <binary> (<version>)
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of doctor:
+stderr:   -compose-services
+
+$ factoryd intake -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of intake:
+stderr:   -checkpoint string
+
+$ factoryd kill-switch -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of kill-switch:
+stderr:   -by string
+
+$ factoryd reconcile -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of reconcile:
+stderr:   -data-dir string
+
+$ factoryd status -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of status:
+stderr:   -config string
+
+$ factoryd inbox -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of inbox:
+stderr:   -json
+
+$ factoryd stop -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of stop:
+stderr:   -all
+
+$ factoryd uninstall -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of uninstall:
+stderr:   -dry-run
+
+$ factoryd upgrade -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of upgrade:
+stderr:   -source string
+
+$ factoryd use -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of use:
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+
+$ factoryd watch -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of watch:
+stderr:   -config string
+
+$ factoryd logs -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of logs:
+stderr:   -config string
+
+$ factoryd cost -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of cost:
+stderr:   -config string
+
+$ factoryd submit -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of submit:
+stderr:   -config string
+
+$ factoryd approve -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of approve:
+stderr:   -config string
+
+$ factoryd reject -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of reject:
+stderr:   -config string
+
+$ factoryd cancel -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of cancel:
+stderr:   -config string
+
+$ factoryd worker -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of worker:
+stderr:   -advance-on string
+
+$ factoryd retry -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of retry:
+stderr:   -config string
+
+$ factoryd resume -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of resume:
+stderr:   -config string
+
+$ factoryd amend-scope -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of amend-scope:
+stderr:   -config string
+
+$ factoryd init-config -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of init-config:
+stderr:   -path string
+
+$ factoryd install-service -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of install-service:
+stderr:   -config string
+
+$ factoryd uninstall-service -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of uninstall-service:
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+
+$ factoryd quickstart -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of quickstart:
+stderr:   -build-images
+
+$ factoryd console -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of console:
+stderr:   -config string
+
+$ factoryd install-skill -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of install-skill:
+stderr:   -dir string
+
+$ factoryd configure-images -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of configure-images:
+stderr:   -all-profiles
+
+$ factoryd image-inputs-hash -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: usage: factoryd image-inputs-hash [-repo-root <path>] [-base-inputs-hash <hash>] <meter|pifork|registry-proxy|worker>
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+
+$ factoryd restart -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of restart:
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+
+$ factoryd project-image-args -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of project-image-args:
+stderr:   -base-image string
+
+$ factoryd image-reuse -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: usage: factoryd image-reuse -inputs-hash <hash> [-force] [-docker <path>] <worker|meter|registry-proxy> <local-tag-ref>
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+
+$ factoryd setup -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of setup:
+stderr:   -config string
+
+$ factoryd mcp -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of mcp:
+stderr:   -config string
+
+$ factoryd memory -zz-not-a-flag
+exit 1
+stderr: factoryd: usage: factoryd memory <subcommand> -workspace <repository> [flags] [arguments]
+stderr: 
+stderr:   list                             the switch, the budget, the lines in force and the candidates
+
+$ factoryd stats -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of stats:
+stderr:   -all
+

@@ -353,6 +353,26 @@ func canonicalPathForContainmentCheck(p string) (string, error) {
 // invoked. In particular, callers cannot opt into host networking, privileged
 // mode, or an empty image/command.
 func (s LaunchSpec) Validate() error {
+	for _, check := range []func() error{
+		s.validateImageCommandAndWorkDir,
+		s.validateGitCommonDir,
+		s.validateInputAndOracleDirs,
+		s.validateScratchDirAndInputs,
+		s.validateIdentityAndLimits,
+		s.validateNetworks,
+		s.validateEnvironment,
+	} {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateImageCommandAndWorkDir is the first group of Validate's rules.
+// Validate runs the groups in order, and each group its rules in order, so
+// the first rule a spec breaks is the one reported.
+func (s LaunchSpec) validateImageCommandAndWorkDir() error {
 	if s.Image == "" || strings.HasPrefix(s.Image, "-") {
 		return errors.New("sandbox image is required")
 	}
@@ -375,6 +395,11 @@ func (s LaunchSpec) Validate() error {
 	if !filepath.IsAbs(s.WorkDir) {
 		return errors.New("sandbox work directory must be absolute")
 	}
+	return nil
+}
+
+// validateGitCommonDir checks the Git common directory mount.
+func (s LaunchSpec) validateGitCommonDir() error {
 	if s.gitCommonDir != "" && !filepath.IsAbs(s.gitCommonDir) {
 		return errors.New("sandbox Git common directory must be absolute")
 	}
@@ -384,6 +409,11 @@ func (s LaunchSpec) Validate() error {
 	if (s.gitCommonDir == "") != (s.gitCommonDirTarget == "") {
 		return errors.New("sandbox Git common directory source and target must be set together")
 	}
+	return nil
+}
+
+// validateInputAndOracleDirs checks the input directory and the reference-oracle mount.
+func (s LaunchSpec) validateInputAndOracleDirs() error {
 	if s.InputDir != "" && !filepath.IsAbs(s.InputDir) {
 		return errors.New("sandbox input directory must be absolute")
 	}
@@ -417,6 +447,11 @@ func (s LaunchSpec) Validate() error {
 	if s.ReferenceOracleDir != "" && ReferenceOracleSourceContained(s.WorkDir, s.ReferenceOracleDir) {
 		return errors.New("sandbox reference-oracle directory must not be inside the workspace")
 	}
+	return nil
+}
+
+// validateScratchDirAndInputs checks the scratch directory and the input mounts.
+func (s LaunchSpec) validateScratchDirAndInputs() error {
 	if s.ScratchDir != "" {
 		if !filepath.IsAbs(s.ScratchDir) {
 			return errors.New("sandbox scratch directory must be absolute")
@@ -430,6 +465,12 @@ func (s LaunchSpec) Validate() error {
 			return fmt.Errorf("sandbox input mount %q is invalid", mount.Target)
 		}
 	}
+	return nil
+}
+
+// validateIdentityAndLimits checks the log path, the container name, the run id, the data
+// directory, the user, the umask, the timeout and the resource limits.
+func (s LaunchSpec) validateIdentityAndLimits() error {
 	if s.LogPath == "" || !filepath.IsAbs(s.LogPath) {
 		return errors.New("sandbox log path must be absolute")
 	}
@@ -468,6 +509,11 @@ func (s LaunchSpec) Validate() error {
 	if s.Memory == "" || s.CPUs == "" || s.TmpfsSize == "" {
 		return errors.New("sandbox resource limits are required")
 	}
+	return nil
+}
+
+// validateNetworks checks the worker network and the compose network.
+func (s LaunchSpec) validateNetworks() error {
 	if s.Network == "" {
 		return errors.New("sandbox network policy is required")
 	}
@@ -503,6 +549,11 @@ func (s LaunchSpec) Validate() error {
 	if s.ComposeNetwork != "" && !strings.HasPrefix(s.ComposeNetwork, "bg-compose-") {
 		return fmt.Errorf("sandbox compose network %q is not allow-listed", s.ComposeNetwork)
 	}
+	return nil
+}
+
+// validateEnvironment checks the unrecorded environment, then the recorded one.
+func (s LaunchSpec) validateEnvironment() error {
 	environmentKeys := make(map[string]bool, len(s.Environment))
 	for _, value := range s.Environment {
 		environmentKeys[strings.SplitN(value, "=", 2)[0]] = true

@@ -1,0 +1,1139 @@
+== two files with targets (partial=false)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+target: b_test.go -> pkg/b_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "covers one",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/b_test.go"
+  }
+]
+
+== two files with targets (partial=true)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+target: b_test.go -> pkg/b_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "covers one",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/b_test.go"
+  }
+]
+
+== dotfile in the directory (partial=false)
+error: drafting output contains ".hidden", which is a dotfile, symlink or directory: refusing the whole draft
+ignored run command: false
+
+== dotfile in the directory (partial=true)
+file: a_test.go (1 bytes)
+file: b_test.go (1 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== directory in the directory (partial=false)
+error: drafting output contains "sub", which is a dotfile, symlink or directory: refusing the whole draft
+ignored run command: false
+
+== directory in the directory (partial=true)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== stray file not in the manifest (partial=false)
+file: a_test.go (1 bytes)
+file: b_test.go (1 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== stray file not in the manifest (partial=true)
+file: a_test.go (1 bytes)
+file: b_test.go (1 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== no manifest (partial=false)
+error: read drafted manifest: lstat <dir>/MANIFEST.json: no such file or directory
+ignored run command: false
+
+== no manifest (partial=true)
+error: read drafted manifest: lstat <dir>/MANIFEST.json: no such file or directory
+ignored run command: false
+
+== malformed manifest (partial=false)
+error: drafted manifest is malformed: json: cannot unmarshal object into Go value of type []map[string]interface {}
+ignored run command: false
+
+== malformed manifest (partial=true)
+error: drafted manifest is malformed: json: cannot unmarshal object into Go value of type []map[string]interface {}
+ignored run command: false
+
+== criteria equal after normalisation (partial=false)
+error: criteria 1 and 2 are the same after normalisation, so an echoed criterion cannot be matched to one of them
+ignored run command: false
+
+== criteria equal after normalisation (partial=true)
+error: criteria 1 and 2 are the same after normalisation, so an echoed criterion cannot be matched to one of them
+ignored run command: false
+
+== one entry for two criteria (partial=false)
+error: drafted manifest has 1 entries, want one per criterion (2)
+ignored run command: false
+
+== one entry for two criteria (partial=true)
+file: a_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": null,
+    "rationale": "not drafted: the run timed out",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== entries in reverse order (partial=false)
+error: drafted manifest entry 1 does not match approved criterion 1
+ignored run command: false
+
+== entries in reverse order (partial=true)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== criterion text differs (partial=false)
+error: drafted manifest entry 2 does not match approved criterion 2
+ignored run command: false
+
+== criterion text differs (partial=true)
+file: a_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": null,
+    "rationale": "not drafted: the run timed out",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== wrong criterion index (partial=false)
+error: drafted manifest entry 2 has criterion_index 7, want 2
+ignored run command: false
+
+== wrong criterion index (partial=true)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== wrong index then different criterion (partial=false)
+error: drafted manifest entry 1 has criterion_index 5, want 1
+ignored run command: false
+
+== wrong index then different criterion (partial=true)
+file: a_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": null,
+    "rationale": "not drafted: the run timed out",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== non-string rationale (partial=false)
+error: drafted manifest entry 1 has a non-string rationale
+ignored run command: false
+
+== non-string rationale (partial=true)
+error: drafted manifest entry 1 has a non-string rationale
+ignored run command: false
+
+== non-string target path (partial=false)
+error: drafted manifest entry 1 has a non-string target_path
+ignored run command: false
+
+== non-string target path (partial=true)
+error: drafted manifest entry 1 has a non-string target_path
+ignored run command: false
+
+== non-string rationale and target path (partial=false)
+error: drafted manifest entry 1 has a non-string rationale
+ignored run command: false
+
+== non-string rationale and target path (partial=true)
+error: drafted manifest entry 1 has a non-string rationale
+ignored run command: false
+
+== non-string target path and oracle file (partial=false)
+error: drafted manifest entry 1 has a non-string target_path
+ignored run command: false
+
+== non-string target path and oracle file (partial=true)
+error: drafted manifest entry 1 has a non-string target_path
+ignored run command: false
+
+== unsafe target path (partial=false)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== unsafe target path (partial=true)
+file: a_test.go (10 bytes)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== no oracle file but a target (partial=false)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "nothing to test",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== no oracle file but a target (partial=true)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "nothing to test",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== run command as oracle file (partial=false)
+file: b_test.go (1 bytes)
+ignored run command: true
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: RUN_COMMAND.txt is not an oracle test file",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== run command as oracle file (partial=true)
+file: b_test.go (1 bytes)
+ignored run command: true
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: RUN_COMMAND.txt is not an oracle test file",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== manifest as oracle file (partial=false)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: MANIFEST.json is not an oracle test file",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== manifest as oracle file (partial=true)
+file: b_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: MANIFEST.json is not an oracle test file",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== case alias of the run command (partial=false)
+error: drafted manifest names "run_command.TXT", a case alias of a reserved file name
+ignored run command: false
+
+== case alias of the run command (partial=true)
+error: drafted manifest names "run_command.TXT", a case alias of a reserved file name
+ignored run command: false
+
+== name with a path separator (partial=false)
+error: drafted manifest names "sub/a_test.go", which is not a plain ASCII file name
+ignored run command: false
+
+== name with a path separator (partial=true)
+error: drafted manifest names "sub/a_test.go", which is not a plain ASCII file name
+ignored run command: false
+
+== non-string oracle file (partial=false)
+error: drafted manifest entry 1 has a non-string oracle_file
+ignored run command: false
+
+== non-string oracle file (partial=true)
+error: drafted manifest entry 1 has a non-string oracle_file
+ignored run command: false
+
+== one file for two criteria (partial=false)
+file: a_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  }
+]
+
+== one file for two criteria (partial=true)
+file: a_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  }
+]
+
+== one file, second entry without target (partial=false)
+file: a_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  }
+]
+
+== one file, second entry without target (partial=true)
+file: a_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  }
+]
+
+== one file, first entry without target (partial=false)
+file: a_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  }
+]
+
+== one file, first entry without target (partial=true)
+file: a_test.go (10 bytes)
+target: a_test.go -> pkg/a_test.go
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": "pkg/a_test.go"
+  }
+]
+
+== one file with two targets (partial=false)
+error: drafted manifest gives "a_test.go" two different target_path values
+ignored run command: false
+
+== one file with two targets (partial=true)
+error: drafted manifest gives "a_test.go" two different target_path values
+ignored run command: false
+
+== names differing only in case (partial=false)
+error: drafted manifest names "a_test.go" and "A_test.go", which differ only in case
+ignored run command: false
+
+== names differing only in case (partial=true)
+error: drafted manifest names "a_test.go" and "A_test.go", which differ only in case
+ignored run command: false
+
+== two files with one target (partial=false)
+error: drafted files "a_test.go" and "b_test.go" both target "pkg/a_test.go": one repository path cannot hold two oracle files
+ignored run command: false
+
+== two files with one target (partial=true)
+error: drafted files "a_test.go" and "b_test.go" both target "pkg/a_test.go": one repository path cannot hold two oracle files
+ignored run command: false
+
+== repeated file takes another file's target (partial=false)
+error: drafted files "b_test.go" and "a_test.go" both target "pkg/b_test.go": one repository path cannot hold two oracle files
+ignored run command: false
+
+== repeated file takes another file's target (partial=true)
+error: drafted files "b_test.go" and "a_test.go" both target "pkg/b_test.go": one repository path cannot hold two oracle files
+ignored run command: false
+
+== named file missing (partial=false)
+error: drafted manifest names "a_test.go", which is not a regular file in the output
+ignored run command: false
+
+== named file missing (partial=true)
+file: b_test.go (1 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: drafted manifest names \"a_test.go\", which is not a regular file in the output",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== named file missing twice (partial=false)
+error: drafted manifest names "a_test.go", which is not a regular file in the output
+ignored run command: false
+
+== named file missing twice (partial=true)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: drafted manifest names \"a_test.go\", which is not a regular file in the output",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": null,
+    "rationale": "dropped: drafted manifest names \"a_test.go\", which is not a regular file in the output",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== named file is a symlink (partial=false)
+error: drafting output contains "a_test.go", which is a dotfile, symlink or directory: refusing the whole draft
+ignored run command: false
+
+== named file is a symlink (partial=true)
+file: b_test.go (1 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: drafted manifest names \"a_test.go\", which is not a regular file in the output",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== file over the size cap (partial=false)
+error: drafted file "a_test.go" is 16385 bytes, over the 16384 byte cap
+ignored run command: false
+
+== file over the size cap (partial=true)
+file: b_test.go (1 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": null,
+    "rationale": "dropped: drafted file \"a_test.go\" is 16385 bytes, over the 16384 byte cap",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== three large files and two strays (partial=false)
+file: a_test.go (16384 bytes)
+file: b_test.go (16384 bytes)
+file: c_test.go (16384 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "3. The third thing.",
+    "criterion_index": 3,
+    "oracle_file": "c_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== three large files and two strays (partial=true)
+file: a_test.go (16384 bytes)
+file: b_test.go (16384 bytes)
+file: c_test.go (16384 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. The first thing.",
+    "criterion_index": 1,
+    "oracle_file": "a_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. The second thing.",
+    "criterion_index": 2,
+    "oracle_file": "b_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "3. The third thing.",
+    "criterion_index": 3,
+    "oracle_file": "c_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== missing file then non-string rationale (partial=false)
+error: drafted manifest names "a_test.go", which is not a regular file in the output
+ignored run command: false
+
+== missing file then non-string rationale (partial=true)
+error: drafted manifest entry 2 has a non-string rationale
+ignored run command: false
+
+== bad name then missing file (partial=false)
+error: drafted manifest names "sub/a_test.go", which is not a plain ASCII file name
+ignored run command: false
+
+== bad name then missing file (partial=true)
+error: drafted manifest names "sub/a_test.go", which is not a plain ASCII file name
+ignored run command: false
+
+== missing file then bad name (partial=false)
+error: drafted manifest names "a_test.go", which is not a regular file in the output
+ignored run command: false
+
+== missing file then bad name (partial=true)
+error: drafted manifest names "sub/b_test.go", which is not a plain ASCII file name
+ignored run command: false
+
+== one file past the total cap (partial=false)
+error: drafted files exceed the 65536 byte total cap
+ignored run command: false
+
+== one file past the total cap (partial=true)
+file: f1_test.go (16384 bytes)
+file: f2_test.go (16384 bytes)
+file: f3_test.go (16384 bytes)
+file: f4_test.go (16384 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. Thing number 1.",
+    "criterion_index": 1,
+    "oracle_file": "f1_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. Thing number 2.",
+    "criterion_index": 2,
+    "oracle_file": "f2_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "3. Thing number 3.",
+    "criterion_index": 3,
+    "oracle_file": "f3_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "4. Thing number 4.",
+    "criterion_index": 4,
+    "oracle_file": "f4_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "5. Thing number 5.",
+    "criterion_index": 5,
+    "oracle_file": null,
+    "rationale": "dropped: drafted files exceed the 65536 byte total cap",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+
+== one file past the file cap (partial=false)
+error: drafted files exceed the 15 file cap
+ignored run command: false
+
+== one file past the file cap (partial=true)
+file: f10_test.go (10 bytes)
+file: f11_test.go (10 bytes)
+file: f12_test.go (10 bytes)
+file: f13_test.go (10 bytes)
+file: f14_test.go (10 bytes)
+file: f15_test.go (10 bytes)
+file: f1_test.go (10 bytes)
+file: f2_test.go (10 bytes)
+file: f3_test.go (10 bytes)
+file: f4_test.go (10 bytes)
+file: f5_test.go (10 bytes)
+file: f6_test.go (10 bytes)
+file: f7_test.go (10 bytes)
+file: f8_test.go (10 bytes)
+file: f9_test.go (10 bytes)
+ignored run command: false
+manifest:
+[
+  {
+    "criterion": "1. Thing number 1.",
+    "criterion_index": 1,
+    "oracle_file": "f1_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "2. Thing number 2.",
+    "criterion_index": 2,
+    "oracle_file": "f2_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "3. Thing number 3.",
+    "criterion_index": 3,
+    "oracle_file": "f3_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "4. Thing number 4.",
+    "criterion_index": 4,
+    "oracle_file": "f4_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "5. Thing number 5.",
+    "criterion_index": 5,
+    "oracle_file": "f5_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "6. Thing number 6.",
+    "criterion_index": 6,
+    "oracle_file": "f6_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "7. Thing number 7.",
+    "criterion_index": 7,
+    "oracle_file": "f7_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "8. Thing number 8.",
+    "criterion_index": 8,
+    "oracle_file": "f8_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "9. Thing number 9.",
+    "criterion_index": 9,
+    "oracle_file": "f9_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "10. Thing number 10.",
+    "criterion_index": 10,
+    "oracle_file": "f10_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "11. Thing number 11.",
+    "criterion_index": 11,
+    "oracle_file": "f11_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "12. Thing number 12.",
+    "criterion_index": 12,
+    "oracle_file": "f12_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "13. Thing number 13.",
+    "criterion_index": 13,
+    "oracle_file": "f13_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "14. Thing number 14.",
+    "criterion_index": 14,
+    "oracle_file": "f14_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "15. Thing number 15.",
+    "criterion_index": 15,
+    "oracle_file": "f15_test.go",
+    "rationale": "",
+    "supersedes": [],
+    "target_path": null
+  },
+  {
+    "criterion": "16. Thing number 16.",
+    "criterion_index": 16,
+    "oracle_file": null,
+    "rationale": "dropped: drafted files exceed the 15 file cap",
+    "supersedes": [],
+    "target_path": null
+  }
+]
+

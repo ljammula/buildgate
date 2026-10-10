@@ -497,128 +497,8 @@ func realMain(dp *deps) error {
 		printTopLevelHelp(os.Stdout)
 		return nil
 	}
-	if len(os.Args) > 1 && os.Args[1] == "override" {
-		return overrideMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		return serveMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "daemon" {
-		return daemonMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "supervise" {
-		return superviseMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "reset-stop-line" {
-		return resetStopLineMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "override-rate" {
-		return overrideRateMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "check-project" {
-		return checkProjectMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "check-ticket" {
-		return checkTicketMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "ticket-template" {
-		return ticketTemplateMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "init" {
-		return initMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "onboard" {
-		return onboardMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "doctor" {
-		return doctorMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "intake" {
-		return intakeMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "kill-switch" {
-		return killSwitchMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "reconcile" {
-		return reconcileMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "status" {
-		return statusMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "inbox" {
-		return inboxMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "stop" {
-		return stopMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "uninstall" {
-		return uninstallMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "upgrade" {
-		return upgradeMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "use" {
-		return useMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "watch" {
-		return watchMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "logs" {
-		return logsMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "cost" {
-		return costMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "submit" {
-		return submitMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "approve" {
-		return approveMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "reject" {
-		return rejectMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "cancel" {
-		return cancelMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "worker" {
-		return workerMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "retry" {
-		return retryMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "resume" {
-		return resumeMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "amend-scope" {
-		return amendScopeMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "init-config" {
-		return initConfigMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "install-service" {
-		return installServiceMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "uninstall-service" {
-		return uninstallServiceMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "quickstart" {
-		return quickstartMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "console" {
-		return consoleMain(dp, os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "install-skill" {
-		return installSkillMain(os.Args[2:])
-	}
-	if len(os.Args) > 1 && os.Args[1] == "configure-images" {
-		return configureImagesMain(os.Args[2:])
-	}
-	if handled, err := installSubcommand(dp, os.Args[1:]); handled {
-		return err
-	}
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		return versionMain()
+	if handler, ok := subcommands()[os.Args[1]]; ok {
+		return handler(dp, os.Args[2:])
 	}
 
 	return runMain(dp, os.Args[1:])
@@ -638,35 +518,80 @@ func runMain(dp *deps, args []string) error {
 	return runMainWithReady(dp, signalCtx, args, nil)
 }
 
-// installSubcommand runs the subcommands `make install` calls: the hidden
-// ones only the Makefile uses (through `go run ./cmd/factoryd`) and `setup`,
-// which an operator runs too. `mcp`, `restart`, `memory` and `stats` are dispatched
-// here as well, so realMain does not grow. handled is false for any other argument list.
-func installSubcommand(dp *deps, args []string) (handled bool, err error) {
-	if len(args) == 0 {
-		return false, nil
+// subcommand is the one signature every subcommand is dispatched through:
+// dp is the process's dependencies, args is what follows the subcommand's
+// name on the command line.
+type subcommand func(dp *deps, args []string) error
+
+// withoutDeps adapts a subcommand that takes only its arguments.
+func withoutDeps(run func(args []string) error) subcommand {
+	return func(_ *deps, args []string) error { return run(args) }
+}
+
+// subcommands is the dispatch table realMain looks its first argument up in:
+// one line per subcommand. A first argument that is not a key here is a
+// single-ticket run (runMain). `build-ca-bundle`, `image-inputs-hash`,
+// `stage-agent-tests`, `project-image-args` and `image-reuse` are the hidden
+// ones only the Makefile uses (through `go run ./cmd/factoryd`).
+func subcommands() map[string]subcommand {
+	return map[string]subcommand{
+		"override":          overrideMain,
+		"serve":             serveMain,
+		"daemon":            daemonMain,
+		"supervise":         superviseMain,
+		"reset-stop-line":   withoutDeps(resetStopLineMain),
+		"override-rate":     withoutDeps(overrideRateMain),
+		"check-project":     withoutDeps(checkProjectMain),
+		"check-ticket":      withoutDeps(checkTicketMain),
+		"ticket-template":   withoutDeps(ticketTemplateMain),
+		"init":              initMain,
+		"onboard":           onboardMain,
+		"doctor":            doctorMain,
+		"intake":            withoutDeps(intakeMain),
+		"kill-switch":       withoutDeps(killSwitchMain),
+		"reconcile":         withoutDeps(reconcileMain),
+		"status":            withoutDeps(statusMain),
+		"inbox":             withoutDeps(inboxMain),
+		"stop":              stopMain,
+		"uninstall":         uninstallMain,
+		"upgrade":           upgradeMain,
+		"use":               useMain,
+		"watch":             withoutDeps(watchMain),
+		"logs":              withoutDeps(logsMain),
+		"cost":              withoutDeps(costMain),
+		"submit":            submitMain,
+		"approve":           approveMain,
+		"reject":            rejectMain,
+		"cancel":            cancelMain,
+		"worker":            workerMain,
+		"retry":             retryMain,
+		"resume":            resumeMain,
+		"amend-scope":       amendScopeMain,
+		"init-config":       withoutDeps(initConfigMain),
+		"install-service":   installServiceMain,
+		"uninstall-service": uninstallServiceMain,
+		"quickstart":        quickstartMain,
+		"console":           consoleMain,
+		"install-skill":     withoutDeps(installSkillMain),
+		"configure-images":  withoutDeps(configureImagesMain),
+		"build-ca-bundle": func(dp *deps, _ []string) error {
+			return buildCABundleMain(dp, os.Stdout, os.Stderr)
+		},
+		"image-inputs-hash": withoutDeps(imageInputsHashMain),
+		"restart":           restartMain,
+		"stage-agent-tests": withoutDeps(stageAgentTestsMain),
+		"project-image-args": func(dp *deps, args []string) error {
+			return projectImageArgsMain(dp, args, os.Stdout, os.Stderr)
+		},
+		"image-reuse": withoutDeps(imageReuseMain),
+		"setup":       setupMain,
+		"mcp": func(dp *deps, args []string) error {
+			return mcpMain(dp, os.Stdout, args)
+		},
+		"memory": memoryMain,
+		"stats":  withoutDeps(statsMain),
+		"version": func(*deps, []string) error {
+			return versionMain()
+		},
 	}
-	switch args[0] {
-	case "build-ca-bundle":
-		return true, buildCABundleMain(dp, os.Stdout, os.Stderr)
-	case "image-inputs-hash":
-		return true, imageInputsHashMain(args[1:])
-	case "restart":
-		return true, restartMain(dp, args[1:])
-	case "stage-agent-tests":
-		return true, stageAgentTestsMain(args[1:])
-	case "project-image-args":
-		return true, projectImageArgsMain(dp, args[1:], os.Stdout, os.Stderr)
-	case "image-reuse":
-		return true, imageReuseMain(args[1:])
-	case "setup":
-		return true, setupMain(dp, args[1:])
-	case "mcp":
-		return true, mcpMain(dp, os.Stdout, args[1:])
-	case "memory":
-		return true, memoryMain(dp, args[1:])
-	case "stats":
-		return true, statsMain(args[1:])
-	}
-	return false, nil
 }
