@@ -432,3 +432,55 @@ func TestAQuotedCommandRefusesAnAbsolutePathAfterAnyNonPathCharacter(t *testing.
 		t.Errorf("ValidateCommand(cd console && npm run check) = %v, want the character-set refusal only", err)
 	}
 }
+
+// A path, an address or a token cannot be hidden by splitting it with one
+// character, by climbing with "..", by gluing it to a flag or by leaving the
+// slashes out of a URL.
+func TestLessonTextRefusesSplitPathsAndTokens(t *testing.T) {
+	for _, reason := range []string{
+		"Read /`Users/kanna/code/secret` first",
+		"Read /'Users/kanna/code/secret' first",
+		"Read /`etc/passwd` first",
+		"Read /(etc/passwd) first",
+		"Use key `AKIA1234567`890ABCDEF12` here",
+		"Use key AKIA1234567'890ABCDEF12 here",
+		"Call 10.0.0`.1` first",
+		"Read ../../../etc/shadow first",
+		"Read `cat ../../../etc/shadow` first",
+		"Read `cat a/../../b` first",
+		"Mount /9p/share first",
+		"Read /_keys/id first",
+		"Read `cat /9p/share` first",
+		"Build with `cc -I/usr/include x.c`",
+		"Build with `./configure --prefix=/opt`",
+		"Run `docker run -v ./a:/b img`",
+		"Fetch https:evil.com first",
+		"Fetch `curl https:evil.com` first",
+		"Fetch `curl http:/x` first",
+		"Run `make`gen` first",
+		"Run x`make gen` first",
+		"Run `make gen`x first",
+		"Run `make``gen` first",
+	} {
+		if _, err := RenderLine(reason); err == nil {
+			t.Errorf("RenderLine(%q) was accepted", reason)
+		}
+	}
+	for _, reason := range []string{
+		"Run `make gen` before the tests.",
+		"Use `go test ./...` (not `go test .`).",
+		"Run `python3 -m pytest agent/pi/tests/`.",
+		"Edit `src/pkg/file.go`, then `make fmt`.",
+		"`GOFLAGS=-mod=mod go build ./cmd/x` works",
+		"Use `./scripts/gen.sh`.",
+		"Run the repo's tests first",
+		"Keep a/b in step with c",
+		"Use spaces and/or tabs",
+		"Run (`make gen`) first; then `make test`: done",
+		"Run `go test example.com/mod/pkg` first",
+	} {
+		if _, err := RenderLine(reason); err != nil {
+			t.Errorf("RenderLine(%q) = %v, want it accepted", reason, err)
+		}
+	}
+}
