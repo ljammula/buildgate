@@ -88,11 +88,12 @@ if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && ! have terminal-notifier; t
 		# macOS lists an application under Notifications, and asks to allow
 		# it, only once it has been launched as an application: running the
 		# command from a shell is refused without a word to the operator.
-		app="$(brew --prefix)/opt/terminal-notifier/terminal-notifier.app"
-		if [ -d "$app" ] && have open; then
-			open -n "$app" --args -title Buildgate -message "Allow notifications from terminal-notifier, so a click opens the request." || true
+		app="$(brew --prefix 2>/dev/null || true)/opt/terminal-notifier/terminal-notifier.app"
+		if [ -d "$app" ] && have open && open -n "$app" --args -title Buildgate -message "Allow notifications from terminal-notifier, so a click opens the request."; then
+			echo "macOS asks once to allow its notifications: choose Allow, or turn it on under System Settings -> Notifications -> terminal-notifier. 'factoryd doctor -notify-test' sends one banner to check."
+		else
+			echo "macOS shows nothing from it until it is allowed: 'factoryd doctor -notify-test' says how."
 		fi
-		echo "macOS asks once to allow its notifications: choose Allow, or turn it on under System Settings -> Notifications -> terminal-notifier. 'factoryd doctor -notify-test' sends one banner to check."
 	else
 		echo "terminal-notifier not installed -- desktop notifications will have no click ('brew install terminal-notifier' adds it)" >&2
 	fi
