@@ -33,6 +33,10 @@ export interface KanbanBoardProps {
   /** The request whose Request changes dialog is open, held by the screen; null when none is. */
   readonly rejectingId: string | null;
   readonly onReject: (id: string) => void;
+  /** Requests whose card is highlighted for a moment: their state just changed. */
+  readonly changedIds: ReadonlySet<string>;
+  /** Whether a request's card shows the worker running it now. */
+  readonly isRunning: (id: string) => boolean;
   readonly now: Date;
   readonly onShowAllDone: () => void;
   readonly className?: string;
@@ -59,6 +63,8 @@ export function KanbanBoard({
   canWrite,
   rejectingId,
   onReject,
+  changedIds,
+  isRunning,
   now,
   onShowAllDone,
   className,
@@ -91,6 +97,8 @@ export function KanbanBoard({
       canWrite={canWrite}
       rejectingId={rejectingId}
       onReject={onReject}
+      changedIds={changedIds}
+      isRunning={isRunning}
       now={now}
       onShowAllDone={onShowAllDone}
     />

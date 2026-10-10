@@ -14,7 +14,7 @@ import {
   scopeLabel,
 } from "@/domain/boardWindow";
 import { distinctProjects, matchesRequestBoardFilters } from "@/domain/boardFilters";
-import { factoryHealth } from "@/domain/health";
+import { factoryHealth, isRunningNow } from "@/domain/health";
 import { needsHumanCount, sortedRequests } from "@/domain/requestOrder";
 import { sectionForRequest, type RequestBoardSection } from "@/domain/boardFilters";
 import { updateNeedsHumanSignal } from "@/platform/tabTitle";
@@ -38,6 +38,7 @@ import { ViewToggle } from "./ViewToggle";
 import { queueRunWarning } from "./boardModel";
 import { useBoardFilters } from "./useBoardFilters";
 import { useBoardFreshness } from "./useBoardFreshness";
+import { useChangedCards } from "./useChangedCards";
 import { useBoardView } from "./useBoardView";
 import { useCollapsedLanes } from "./useCollapsedLanes";
 
@@ -74,6 +75,7 @@ export function BoardScreen() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   const requests = query.data;
+  const changedIds = useChangedCards(requests);
   const refreshError = query.error;
   const needsHuman = requests === undefined ? null : needsHumanCount(requests);
   const pollFailed = refreshError !== null;
@@ -163,6 +165,7 @@ export function BoardScreen() {
           <>
             <HealthStrip
               health={health}
+              live={freshness === "live"}
               workerWarning={queueRunWarning(queueRun.data ?? null, requests, now)}
               onRetryWorker={() => void queueRun.refetch()}
             />
@@ -214,6 +217,8 @@ export function BoardScreen() {
                 canWrite={canWrite}
                 rejectingId={rejectingId}
                 onReject={setRejectingId}
+                changedIds={changedIds}
+                isRunning={(id) => isRunningNow(health, id, freshness === "live")}
                 now={now}
                 onShowAllDone={() => {
                   // For this visit: following a link is not choosing List.

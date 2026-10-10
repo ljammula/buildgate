@@ -21,10 +21,10 @@ export function DialogContent({
 }: DialogContentProps) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-bg/70" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-bg/70 data-[state=open]:animate-overlay-in motion-reduce:animate-none" />
       <DialogPrimitive.Content
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-lg border border-border bg-surface-raised p-5 shadow-popover",
+          "fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-lg border border-border bg-surface-raised p-5 shadow-popover data-[state=open]:animate-overlay-in motion-reduce:animate-none",
           className,
         )}
         {...props}

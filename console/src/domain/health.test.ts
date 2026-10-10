@@ -1,4 +1,4 @@
-import { factoryHealth, lastTransitionAt } from "@/domain/health";
+import { factoryHealth, isRunningNow, lastTransitionAt } from "@/domain/health";
 import { decodeQueueRunStatus } from "@/domain/ops";
 import { decodeRequestList, decodeRequestSummary } from "@/domain/request";
 import { asObject } from "@/domain/decode";
@@ -120,4 +120,27 @@ test("the last transition is the newest move of any request", () => {
   ).toBe("2026-09-10T09:30:00.5Z");
   expect(lastTransitionAt([wire({ id: "c", state: "done" })])).toBeNull();
   expect(factoryHealth(null, fixtureRequests).lastTransitionAt).toBe("2026-09-10T09:50:00Z");
+});
+
+describe("isRunningNow", () => {
+  const health = {
+    running: [
+      { requestId: "ok", title: "ok", detail: "", stalled: false },
+      { requestId: "stuck", title: "stuck", detail: "", stalled: true },
+    ],
+  };
+
+  test("a healthy running job on a live feed", () => {
+    expect(isRunningNow(health, "ok", true)).toBe(true);
+  });
+
+  test("a stalled job, a feed that is not live, or a request not running is not", () => {
+    expect(isRunningNow(health, "stuck", true)).toBe(false);
+    expect(isRunningNow(health, "ok", false)).toBe(false);
+    expect(isRunningNow(health, "queued", true)).toBe(false);
+  });
+
+  test("no worker lists nothing running", () => {
+    expect(isRunningNow(factoryHealth(null, []), "ok", true)).toBe(false);
+  });
 });

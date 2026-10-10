@@ -51,6 +51,10 @@ export interface KanbanLaneProps {
   readonly canWrite: boolean;
   readonly rejectingId: string | null;
   readonly onReject: (id: string) => void;
+  /** Requests whose card is highlighted for a moment: their state just changed. */
+  readonly changedIds: ReadonlySet<string>;
+  /** Whether a request's card shows the worker running it now. */
+  readonly isRunning: (id: string) => boolean;
   readonly now: Date;
   /** Opens the list of everything finished: the Done cap's way out. */
   readonly onShowAllDone: () => void;
@@ -74,6 +78,8 @@ export function KanbanLane({
   canWrite,
   rejectingId,
   onReject,
+  changedIds,
+  isRunning,
   now,
   onShowAllDone,
 }: KanbanLaneProps) {
@@ -91,6 +97,8 @@ export function KanbanLane({
       canWrite={canWrite}
       rejecting={rejectingId === request.id}
       onReject={onReject}
+      changed={changedIds.has(request.id)}
+      running={isRunning(request.id)}
     />
   );
   const cells = (
