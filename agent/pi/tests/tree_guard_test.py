@@ -175,6 +175,35 @@ class RestoreTests(unittest.TestCase):
 	def test_a_file_that_was_not_copied_stays_changed(self):
 		left = self.put_back(lambda r: ((r / "a.txt").write_text("changed\n"), (r / "run.sh").write_text("x")), copy=("run.sh",))
 		self.assertEqual(left, ["a.txt"])
+		# Left as the turn left it: never deleted for want of a copy.
+		self.assertEqual((self.root / "a.txt").read_text(), "changed\n")
+
+	def test_a_file_past_the_copy_bound_is_left_as_changed_not_deleted(self):
+		def change(root):
+			with open(root / "dir" / "sub" / "b.bin", "ab") as handle:
+				handle.write(b"!")
+
+		left = self.put_back(change, max_bytes=100)
+		self.assertEqual(left, ["dir/sub/b.bin"])
+		self.assertEqual((self.root / "dir" / "sub" / "b.bin").stat().st_size, 1_400_001)
+
+	def test_a_file_with_no_copy_that_became_something_else_is_left_whole(self):
+		def change(root):
+			(root / "a.txt").unlink()
+			(root / "a.txt").mkdir()
+			(root / "a.txt" / "inner").write_text("kept\n")
+			(root / "run.sh").unlink()
+			os.symlink("a.txt", root / "run.sh")
+
+		left = self.put_back(change, copy=())
+		self.assertEqual(left, ["a.txt", "a.txt/inner", "run.sh"])
+		self.assertEqual((self.root / "a.txt" / "inner").read_text(), "kept\n")
+		self.assertTrue(os.path.islink(self.root / "run.sh"))
+
+	def test_a_deleted_file_with_no_copy_stays_deleted_and_an_added_one_goes(self):
+		left = self.put_back(lambda r: ((r / "a.txt").unlink(), (r / "added").write_text("x")), copy=())
+		self.assertEqual(left, ["a.txt"])
+		self.assertFalse((self.root / "added").exists())
 
 	def test_the_copy_stops_at_its_byte_bound(self):
 		before = self.record()
@@ -193,6 +222,8 @@ class RestoreTests(unittest.TestCase):
 		Path(copies["a.txt"]).write_text("planted\n")
 		tree_guard.restore(self.root, before, self.record(), copies)
 		self.assertEqual(tree_guard.changed_paths(before, self.record()), ["a.txt"])
+		# A copy that is no longer the recorded content is not used at all.
+		self.assertEqual((self.root / "a.txt").read_text(), "changed\n")
 
 	def test_a_restore_that_cannot_finish_raises_nothing(self):
 		before = self.record()
