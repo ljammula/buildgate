@@ -27,7 +27,7 @@ class FixtureRepoTest(unittest.TestCase):
                 dest = os.path.join(tmp, name)
                 subprocess.run([SCRIPT, src, dest], check=True)
                 self.assertEqual(git(dest, "rev-parse", "--show-toplevel"), os.path.realpath(dest))
-                self.assertEqual(sorted(git(dest, "ls-files").splitlines()), [".gitignore", "add.py"])
+                self.assertEqual(sorted(git(dest, "ls-files").splitlines()), [".gitignore", "AGENTS.md", "add.py"])
                 self.assertEqual(git(dest, "rev-list", "--count", "HEAD"), "1")
                 self.assertEqual(git(dest, "status", "--porcelain"), "")
                 self.assertEqual(
