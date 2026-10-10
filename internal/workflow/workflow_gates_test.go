@@ -150,7 +150,11 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 		if in.Check == "security_audit" {
 			exitCode = 1
 		}
-		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: exitCode}}, nil
+		result := VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: exitCode}}
+		if exitCode != 0 {
+			result.BaseCheck = &run.GateBaseCheck{Outcome: run.GateBaseFails, BaseSHA: "base-sha", ExitCode: 1}
+		}
+		return result, nil
 	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
 
 	env.ExecuteWorkflow(RunWorkflow, input)
@@ -166,6 +170,13 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 	}
 	if !slices.Equal(calls, []string{"lint", "security_audit"}) {
 		t.Fatalf("named gate Activity calls = %v, want [lint security_audit] in that order", calls)
+	}
+	// The gate Activity's rerun on the base commit reaches the run's gate
+	// result; a gate that passed has none.
+	for _, g := range result.GateResults {
+		if want := g.Check == "security_audit"; g.FailsOnBase() != want {
+			t.Errorf("%s: fails on base = %v, want %v (%+v)", g.Check, g.FailsOnBase(), want, g.BaseCheck)
+		}
 	}
 	seen := map[string]run.GateResult{}
 	for _, g := range result.GateResults {

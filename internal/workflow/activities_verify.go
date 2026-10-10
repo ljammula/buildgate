@@ -411,6 +411,10 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	if err := a.fenceEarlierAttempts(ctx, input.RunWorkflowInput, true); err != nil {
 		return VerifyActivityResult{}, err
 	}
+	// Before the checkpoint's early return: an attempt whose worker died
+	// during the rerun on the base commit left a completed checkpoint and
+	// the rerun's scratch worktree.
+	a.sweepGateBaseWorktree(ctx, input)
 	checkpoint, path, found, err := loadRetriedActivityCheckpoint[VerifyActivityResult](ctx, a.checkpointDirFor(input.RunWorkflowInput))
 	if err != nil {
 		return VerifyActivityResult{}, checkpointLoadError("load "+input.Check+" gate Activity checkpoint", err)
@@ -610,6 +614,9 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	} else if err != nil {
 		checkpoint.Error = input.Check + " gate evidence infrastructure failure: " + err.Error()
 	}
+	// A gate that failed is rerun on the base commit below, after this
+	// result is checkpointed: until then it is recorded as interrupted.
+	gateResult.BaseCheck = pendingGateBaseCheck(input, result, runErr, err)
 	checkpoint.Result = gateResult
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
 		errType := launchErrorType(runErr)
@@ -622,7 +629,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	if err != nil {
 		return gateResult, temporal.NewApplicationErrorWithCause(input.Check+" gate evidence infrastructure failure", InfrastructureFailureType, err, gateResult.Attempts)
 	}
-	return gateResult, nil
+	return a.finishGateBaseCheck(ctx, input, command, registrySpec, path, checkpoint, gateResult), nil
 }
 
 // baselineBuildNoteFileName is the file, in the run's log directory, that

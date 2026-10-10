@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"buildgate/internal/run"
 )
 
 const wellFormedTicket = `This is an existing repo. Read ` + "`ARCHITECTURE.md`" + `, ` + "`PROGRESS.md`" + `, and ` + "`spec/contract.md`" + ` before changing anything, and preserve all existing functionality and passing tests -- this is an extension, not a rewrite.
@@ -1468,5 +1470,33 @@ func TestTicketStructureBrownfieldDoesNotAlterGreenfieldBehaviour(t *testing.T) 
 	passed, reasons := TicketStructure(wellFormedTicket, 2)
 	if !passed || len(reasons) != 0 {
 		t.Errorf("TicketStructure() = %v, %v, want true with no reasons (greenfield behaviour must be unchanged)", passed, reasons)
+	}
+}
+
+// A named gate's rerun on the base commit is carried to its gate result and
+// decides nothing: the gate fails on its own exit code alone.
+func TestEvaluateRunCarriesANamedGatesBaseCheckWithoutJudgingByIt(t *testing.T) {
+	passesOnBase := &run.GateBaseCheck{Outcome: run.GateBasePasses, BaseSHA: "abc"}
+	result := EvaluateRun(EvaluateRunInput{
+		VerifyCommand: []string{"sh", "-c", "true"},
+		NamedGates: []NamedGateInput{
+			{Check: "lint", Command: []string{"sh", "-c", "lint"}, ExitCode: 1, BaseCheck: passesOnBase},
+			{Check: "unit_tests", Command: []string{"sh", "-c", "test"}, ExitCode: 0},
+		},
+	})
+	if result.Accepted || !slices.Contains(result.FailedChecks, "lint") || slices.Contains(result.FailedChecks, "unit_tests") {
+		t.Fatalf("accepted = %v, failed checks = %v; want lint failed: a passing rerun must not pass the gate", result.Accepted, result.FailedChecks)
+	}
+	for _, g := range result.GateResults {
+		switch g.Check {
+		case "lint":
+			if g.Passed || g.BaseCheck != passesOnBase {
+				t.Errorf("lint = %+v, want failed with its base check", g)
+			}
+		case "unit_tests":
+			if !g.Passed || g.BaseCheck != nil {
+				t.Errorf("unit_tests = %+v, want passed with no base check", g)
+			}
+		}
 	}
 }

@@ -221,9 +221,16 @@ func Build(r *run.Run, dataDir string) Document {
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
-//     repository's setup commands (a worker older than them): BinOperator.
+//     repository's setup commands (a worker older than them): BinOperator;
+//   - a named or repository gate whose command also failed when rerun on the
+//     commit the ticket's work started from (run.GateBaseCheck): no build can
+//     make it pass, so it is the operator's (BinOperator) and no corrective
+//     build is spent on it. A rerun that passed, or could not be made, leaves
+//     the gate where BinOf puts it. The reference oracle is never rerun.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
+	case failsOnBase(r, finding.Check):
+		return BinOperator
 	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
 		return BinNever
 	case finding.Check == "spec_conformity" && !hasActionableVerdict(r.SpecConformityVerdicts):
@@ -234,6 +241,17 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 		return BinOperator
 	}
 	return BinOf(finding.Check)
+}
+
+// failsOnBase reports whether the failed gate triage reported for check (the
+// first failed result of that name) also failed on the base commit.
+func failsOnBase(r *run.Run, check string) bool {
+	for _, g := range r.GateResults {
+		if g.Check == check && !g.Passed {
+			return g.FailsOnBase()
+		}
+	}
+	return false
 }
 
 // setupNotRun reports whether r recorded the canonical_verify result for a

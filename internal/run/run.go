@@ -493,6 +493,51 @@ type GateResult struct {
 	// oracle content produced this specific result, independent of
 	// whatever that host directory contains later.
 	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
+	// BaseCheck is what rerunning a failed command gate on the commit the
+	// ticket's work started from showed (see GateBaseCheck). nil for a gate
+	// that passed, for a check that is not a named or repository command
+	// gate, and for a result recorded before the rerun existed.
+	BaseCheck *GateBaseCheck `json:"base_check,omitempty"`
+}
+
+// The outcomes of a GateBaseCheck.
+const (
+	// GateBaseFails: the gate's command exited non-zero on the base commit
+	// too, so no build of the ticket can make it pass.
+	GateBaseFails = "fails"
+	// GateBasePasses: the command exited zero on the base commit; the build
+	// (or a flaky command) is why it failed on the result.
+	GateBasePasses = "passes"
+	// GateBaseNotChecked: the rerun did not reach an exit code. Reason says
+	// why. The gate's failure is then treated as it was before the rerun
+	// existed.
+	GateBaseNotChecked = "not_checked"
+)
+
+// GateBaseCheck records one rerun of a failed command gate on the commit the
+// ticket's work started from, in a scratch worktree and a sandbox like the
+// gate's own. It never changes the gate's result: Passed, ExitCode and
+// LogSHA256 of the GateResult are the run on the build's result alone.
+type GateBaseCheck struct {
+	// Outcome is GateBaseFails, GateBasePasses or GateBaseNotChecked.
+	Outcome string `json:"outcome"`
+	// BaseSHA is the commit the command was rerun on: the run's diff base
+	// when it continues an earlier run's branch, else its own base commit.
+	BaseSHA string `json:"base_sha,omitempty"`
+	// ExitCode is the command's exit code on the base commit; meaningful
+	// only when Outcome is not GateBaseNotChecked.
+	ExitCode int `json:"exit_code"`
+	// LogPath and LogSHA256 are the rerun's output and its hash.
+	LogPath   string `json:"log_path,omitempty"`
+	LogSHA256 string `json:"log_sha256,omitempty"`
+	// Reason says why Outcome is GateBaseNotChecked, as one cleaned line.
+	Reason string `json:"reason,omitempty"`
+}
+
+// FailsOnBase reports whether g is a failed gate whose command also failed on
+// the base commit.
+func (g GateResult) FailsOnBase() bool {
+	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFails
 }
 
 // OracleCanaryEvidence records one runtime-canary check of a RUN_COMMAND.txt:

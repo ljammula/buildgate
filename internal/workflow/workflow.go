@@ -981,6 +981,7 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 				DurationMs:            gateResult.DurationMs,
 				LogSHA256:             gateResult.LogSHA256,
 				ReferenceOracleSHA256: gateResult.ReferenceOracleSHA256,
+				BaseCheck:             gateResult.BaseCheck,
 			})
 			if gateResult.Result.ExitCode != 0 {
 				namedGatesFailed = true

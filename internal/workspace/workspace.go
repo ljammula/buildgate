@@ -414,3 +414,20 @@ func AddDetachedWorktree(repoDir, worktreePath, rev string) error {
 	}
 	return nil
 }
+
+// AddScratchWorktree is AddDetachedWorktree for a checkout made while a run's
+// sandboxes have had the repository's worktree: the checkout runs none of the
+// repository's hooks and no file-system monitor, which its configuration
+// could point into a directory a sandbox wrote. Remove the worktree with
+// RemoveWorktreeOnly.
+func AddScratchWorktree(repoDir, worktreePath, rev string) error {
+	unlock, err := lockGitMetadata(repoDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if out, err := gitMutate(repoDir, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "worktree", "add", "--detach", worktreePath, rev); err != nil {
+		return fmt.Errorf("git worktree add --detach: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

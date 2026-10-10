@@ -327,7 +327,9 @@ requires a new contract review and an updated machine-checkable test.
   before the command of every build, verify and gate sandbox and never in a
   review sandbox, and the `.factory/` directory of the commit that file was
   read from, mounted read-only in each of those sandboxes (its snapshot
-  SHA-256 on each attempt).
+  SHA-256 on each attempt). A failed gate's rerun on the base commit is one
+  of those gate sandboxes: the same launch path, setup commands and
+  `.factory/` mount, on a scratch worktree, never on the host.
 - **SC-013 — asynchronous quarantine:** every failed or ambiguous policy check
   transitions to halt/quarantine and emits an out-of-band notification without
   waiting for a human response.
@@ -462,8 +464,11 @@ requires a new contract review and an updated machine-checkable test.
   `required_content_present`, and the two reviews when they gave a verdict.
   `reference_oracle` counts only where the build is already shown the oracle
   (a request's ticket). `tests_added`, a review that gave no verdict, a
-  repository gate that never ran and any check with no bin never do, and a
-  halt never does. A check on the diff of an attempt that committed nothing
+  repository gate that never ran, a named or repository gate that also failed
+  when the factory reran it on the commit the ticket's work started from (no
+  build can make it pass; the rerun is evidence on the gate's result and
+  never changes whether the gate passed) and any check with no bin never do,
+  and a halt never does. A check on the diff of an attempt that committed nothing
   (canonical verification never passed) is not judged either way. Such a
   build is a new run on the quarantined run's branch, started after the
   quarantine was recorded and notified (SC-013): every gate runs again on

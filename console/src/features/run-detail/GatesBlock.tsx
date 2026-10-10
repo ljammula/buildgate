@@ -1,14 +1,16 @@
 import { CircleAlert, CircleCheck } from "lucide-react";
 
 import type { GateResult } from "@/domain/run";
-import { formatGateDuration, gatesSummary } from "@/domain/runSummary";
+import { formatGateDuration, gateBaseCheckText, gatesSummary } from "@/domain/runSummary";
 import { listKeys } from "@/features/run-detail/listKeys";
+import { EscapedText } from "@/shared/oracle/EscapedText";
 import { CompactId } from "@/ui/CompactId";
 import { Disclosure } from "@/ui/Disclosure";
 import { cn } from "@/ui/cn";
 
 function GateRow({ gate }: { readonly gate: GateResult }) {
   const Icon = gate.passed ? CircleCheck : CircleAlert;
+  const onBase = gateBaseCheckText(gate);
   return (
     <li
       data-testid={`gate-${gate.check}`}
@@ -34,6 +36,15 @@ function GateRow({ gate }: { readonly gate: GateResult }) {
         Log SHA
         <CompactId value={gate.logSha256} max={14} label="log SHA-256" className="text-xs" />
       </span>
+      {onBase === "" ? null : (
+        <EscapedText
+          text={onBase}
+          className={cn(
+            "basis-full",
+            gate.baseCheck?.outcome === "fails" ? "font-medium text-fg" : "text-fg-muted",
+          )}
+        />
+      )}
     </li>
   );
 }
