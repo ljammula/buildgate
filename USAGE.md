@@ -410,7 +410,7 @@ factoryd mcp -disable   # endpoint off
 | `get_run` | One ticket build: attempts, gate results, halt reason | No |
 | `get_run_diff` | The run's diff, cut at 256 KiB | No |
 | `list_workspaces` | The repositories `submit_request` accepts | No |
-| `submit_request` | Starts a request (`workspace`, `text`, optional `draft_oracles`); it stops at `spec_review` | Yes: spends model budget |
+| `submit_request` | Starts a request (`workspace`, `text`, optional `draft_oracles`; it takes no spec or plan file); it stops at `spec_review` | Yes: spends model budget |
 
 ```text
 you (chat) -> MCP client -> POST /mcp (bearer token) -> factoryd serve
@@ -422,24 +422,40 @@ you -> GitHub -------------------------------------------> merge
 | Limit | Detail |
 |---|---|
 | No gate tools | No tool approves, rejects, retries, resumes, cancels, edits or overrides. Approve in the console or with the CLI; the client can tell you what is waiting |
-| Workspaces | `submit_request` takes only a repository on the session config's `workspaces:` list, or one an existing request already uses |
+| Workspaces | `submit_request` takes only a repository on the session config's `workspaces:` list (absolute paths, below), or one an existing request already uses |
+| Verify command | `submit_request` has no verify-command argument: the repository needs a committed `.factory.yml` with `verify_command`, or the call is refused. `list_workspaces` shows what each one resolves to |
 | Spend | At most 5 submissions an hour over MCP (per `serve` process); each is bounded by the same ceilings and budgets as any request. Anyone who can message your agent can ask it to submit: restrict who that is in the client |
 | Results are data | Spec, ticket and diff text is model-written. A client should not treat it as instructions |
 | Token | In `<config name>.mcp-token` beside the session config (`config.mcp-token` for `config.yml`), one per profile, readable only by you. The endpoint ignores a token file that is a symlink or readable by others |
+
+The `workspaces:` list in the session config takes absolute paths:
+
+```yaml
+workspaces:
+    - /abs/path/to/app
+```
 
 From another machine, keep `serve` on loopback and put a tunnel in front
 of it. With Tailscale:
 
 ```sh
+tailscale serve status                                     # / on port 443 already taken? use the table below
 tailscale serve --bg 8090                                  # HTTPS on the tailnet -> 127.0.0.1:8090
 factoryd stop
 factoryd serve -allowed-host <machine>.<tailnet>.ts.net    # accept that Host header
 ```
 
+`8090` is the port of this profile's `serve` (`factoryd use` lists it).
 `factoryd stop` also stops the worker; the next `submit` or `factoryd
 worker` starts it again. The client then uses
 `https://<machine>.<tailnet>.ts.net/mcp` with the same token. `-allowed-host` also opens the console's read routes to that
 name, so limit who can reach the node with a tailnet ACL.
+
+| Case | Do |
+|---|---|
+| `tailscale serve status` already shows `/` on port 443 | `tailscale serve --bg 8090` would replace it. Use another HTTPS port: `tailscale serve --bg --https=8443 http://127.0.0.1:8090` |
+| The tunnel is on a port other than 443 | The Host header carries the port, so name it: `-allowed-host <machine>.<tailnet>.ts.net:8443`. The bare name is refused with 403 |
+| Approve or reject from the other machine | The console is read-only under an `-allowed-host` name. Reach it as the server's own loopback address: `ssh -N -L 8090:127.0.0.1:8090 <machine>` (same port on both sides), then open `http://127.0.0.1:8090`. Or use `factoryd approve` on the machine itself |
 
 ## `.factory.yml` — commit per-repo defaults once
 
@@ -1156,6 +1172,7 @@ What changes for a build:
 | Runs stall with no error | A local/private model host is single-instance; `internal/modelhost` serializes callers automatically. Likewise only `compose_services_concurrency` runs at a time have compose sidecars | `factoryd watch`/console show a `model_host_lock` or `compose_services_lock` `waiting` line naming the holder |
 | Containers left behind after killing a run | The process died before cleanup | `docker ps`, then `docker rm -f` only the `factoryd-*` containers |
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
+| `gh auth status` fails with "no oauth token found" in an ssh session on a Mac | An ssh session cannot read the login keychain that holds the GitHub login; a process started from that session gets the same answer | Check `gh auth status` in the session that starts `worker`. If it fails, start `worker` and `serve` in the desktop login session: a terminal there, or launchd agents (`factoryd install-service`) |
 | A build fails: "sandbox runtime: ... run `factoryd doctor -fix`" | The OpenShell gateway or the meter is not running (a reboot, a colima restart, `stop -all`) | `factoryd doctor -fix` starts both; `worker` and a single-ticket run start them too unless `FACTORYD_AUTOSTART=0` |
 | `doctor`, `doctor -fix`, `worker` or a run reports `port N is published by container ...` | Another container in the Docker VM publishes one of the stack's ports (`17670`, `17671`, `17672`); the gateway shares the VM's network, so it cannot bind | Stop that container or publish it on another host port, then `factoryd doctor -fix` |
 | A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
