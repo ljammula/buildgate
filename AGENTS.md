@@ -23,18 +23,6 @@ only — it does not restate that content.
   known limits are in [`STATUS.md`](STATUS.md), summarised in README's
   "Status" and "Known limits" sections — update both in the same PR as a
   change that alters either.
-- A request runs three model **roles** (`planning`, `execution`, `review`),
-  each bound in the session config to a route, a model and a coding-agent
-  **harness** (`pi` default, `pifork`, `codex`, `copilot`). One execution
-  path runs every build: Temporal, in a per-run worktree. A run whose Temporal
-  is unreachable halts (`FACTORYD_AUTOSTART=0` with no `-temporal-address` is
-  refused).
-- Every worker container is created by the OpenShell gateway
-  (`internal/openshell`, images pinned by digest), never by `docker run`. A
-  worker has no network; its model calls leave through its sandbox's
-  supervisor under a per-run policy and are counted by buildgate's meter
-  (`internal/meter`, `cmd/factoryd-meter`). `factoryd doctor -fix`, `worker`
-  and a single-ticket run start the gateway and the meter.
 - Deliberately not built (don't add them): automatic merge/deploy, a
   host-execution path, a second worker launcher selectable by flag or config, runtime plugin loading, backward-compatibility shims
   for retired flags or config keys (delete them and update the docs).
@@ -239,11 +227,7 @@ user-specific absolute path.
 
 `make verify`, code review, and unit tests all validate logic in
 isolation. None of them run inside a real sandbox launched by the
-OpenShell gateway, against a real model route, with real git. Every serious bug found in this
-repo's build/gate/sandbox-runtime/conformity-review pipeline so far — a sandbox
-mount assumption that broke commits, a policy gate that could silently
-skip itself, a token budget that could overrun its own configured
-ceiling — was invisible to all three and only surfaced on a real run.
+OpenShell gateway, against a real model route, with real git.
 Passing review is evidence the *logic* is right; it is not evidence
 the *pipeline* works.
 
@@ -303,22 +287,18 @@ Track the goal here as **a live one-shot acceptance rate**, not
 reach an accepted, human-reviewable PR with zero manual intervention.
 Record dated runs of the broader (not just the fast standing pair)
 validation set as dated write-ups kept outside this repo — a rising number over
-successive runs is the actual signal this repository's pipeline is
-improving, since code review alone has no natural stopping point (a
-sufficiently adversarial pass always finds one more thing).
+successive runs is the signal this repository's pipeline is improving.
 
 `make baseline` (`scripts/baseline.py`) reads the run records under
 `BASELINE_DIRS` (default `~/buildgate` and `data`) and prints a one-shot
 acceptance rate over them, overall and per project, with rounds to green, the
 share of consecutive failed rounds that failed the same way, and the checks
 that quarantined runs. It counts every record it finds, smoke fixtures and
-fixtures built to fail included, so it is the live rate only for the projects
-that are real tickets: read the per-project rows or pass `--project`. It makes
-no model call and gates nothing; run it before and after a change meant to
-move one of those numbers, and compare like with like (its doc comment says
-which same-failure figure is recorded by the build and which is rebuilt from
-older records). `factoryd stats` shows the same numbers per repository, and
-per week, for the current data dir (live-smoke tickets left out unless `-all`);
+fixtures built to fail included: read the per-project rows or pass `--project`.
+It makes no model call and gates nothing; run it before and after a change
+meant to move one of those numbers, and compare like with like (see its doc
+comment). `factoryd stats` shows the same numbers per repository for the
+current data dir (USAGE_REFERENCE's "Is it getting better");
 `make baseline` stays for several data dirs and older record shapes.
 
 `make bar` (`scripts/bar.sh`) is the separate, standing measurement of the
@@ -338,10 +318,11 @@ live-validation runs.
 - Go 1.26, module `buildgate`. Follow existing package structure
   under `internal/` rather than introducing new top-level packages for a
   small feature.
-- Docs and comments in this repo are written dense and evidence-heavy on
-  purpose (dates, PR numbers, "found via review X" citations) — match
-  that register in normative docs (`safety-contract.md`, `CLAIMS.md`,
-  `containment-matrix.md`); README-style docs can be lighter.
+- Normative docs (`safety-contract.md`, `CLAIMS.md`,
+  `containment-matrix.md`) are dense and exact: the rule, its limits, the
+  test that enforces it, and no account of how it was found (a `CLAIMS.md`
+  row is the claim, its status and its tests; the contract holds the
+  mechanism). README-style docs can be lighter.
 - Don't add a way to run a coding-agent build outside the Docker sandbox
   (a host-execution mode, an "unsandboxed" flag/config, or similar
   escape hatch) — Docker containment is unconditional across every path
