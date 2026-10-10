@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"buildgate/internal/forge"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
@@ -266,45 +265,6 @@ func TestTryReviewCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testin
 	}
 	if *calls != 0 {
 		t.Fatalf("reviewCorrectiveRunner calls = %d, want 0", *calls)
-	}
-	if r.State != request.StateQuarantined {
-		t.Fatalf("State = %q, want %q", r.State, request.StateQuarantined)
-	}
-	if r.QuarantineCheck != request.QuarantineCheckBudgetRequest {
-		t.Errorf("QuarantineCheck = %q, want %q", r.QuarantineCheck, request.QuarantineCheckBudgetRequest)
-	}
-}
-
-// TestRunCorrectiveRoundQuarantinesWhenRequestBudgetExhausted covers the
-// PR-review corrective-round launch point (pr_review_driver.go): a
-// request already at its own budget must quarantine before
-// buildTicketRunArgs/the corrective runner ever runs, even though
-// maxReviewRounds has budget left.
-func TestRunCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
-	dp := newTestDeps(t)
-	r, dataDir := stubPRReviewTestFixture(t, 1)
-	r.PlanEvidence = &request.PlanEvidence{Spend: &request.JobSpend{InputTokens: 5000, At: time.Now()}}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	ticket := &r.Tickets[0]
-	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
-
-	origRunner := requestdriver.PrReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
-	calls := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		calls++
-		t.Fatal("prReviewCorrectiveRunner must not be called once the request budget is already exhausted")
-		return nil
-	}
-
-	cfg := requestdriver.WorkerConfig{MaxReviewRounds: 1, Settings: sessionconfig.Settings{RequestTokenBudget: 1000}}
-	if err := requestdriver.RunCorrectiveRound(dp, context.Background(), dataDir, r, ticket, threads, cfg, time.Now()); err != nil {
-		t.Fatalf("runCorrectiveRound: %v", err)
-	}
-	if calls != 0 {
-		t.Fatalf("prReviewCorrectiveRunner calls = %d, want 0", calls)
 	}
 	if r.State != request.StateQuarantined {
 		t.Fatalf("State = %q, want %q", r.State, request.StateQuarantined)

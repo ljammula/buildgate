@@ -177,15 +177,6 @@ func TestWorkerConfigRejectsMalformedModelExtraJSON(t *testing.T) {
 	}
 }
 
-func containsFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == name {
-			return true
-		}
-	}
-	return false
-}
-
 func containsArg(args []string, name, value string) bool {
 	for i, a := range args {
 		if a == name && i+1 < len(args) && args[i+1] == value {
