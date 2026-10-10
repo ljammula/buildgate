@@ -729,7 +729,12 @@ modified`, `must not change`, `no changes to`) is not checked. A criterion cover
 no ticket at all is left to the "unclaimed criterion" check. On either
 rejection the request driver re-plans once, feeding every infeasibility
 found back to the planner as feedback before the request reaches a human;
-if the redrafted plan is still infeasible, the request halts.
+if the redrafted plan is still infeasible, the request halts. A plan the
+planning model drafted that fails any other check (a ticket off the
+format, a missing header, another verify command, an unclaimed criterion)
+is re-planned once the same way, with the check's message as the feedback;
+a second refused plan halts the request. A handed-over plan that fails
+such a check halts at once.
 
 Real correctness coverage is `-conformity-policy`'s
 per-criterion review (default `required`, no `.factory.yml` key) plus the

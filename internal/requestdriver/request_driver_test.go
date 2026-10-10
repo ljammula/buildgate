@@ -3067,7 +3067,9 @@ func TestPlanningHaltReasonReachesTheRetriedPlanner(t *testing.T) {
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), readFeedbackRunner(dataDir, good, &seen), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests after retry: %v", err)
 	}
-	if !strings.HasPrefix(seen, "## Previous draft refused by the factory (") || !strings.Contains(seen, "make wrong-command-xyz") {
+	// The first refusal was redrafted once (a factory rejection); the second
+	// halted and left the refused-draft note.
+	if !strings.Contains(seen, "## Previous draft refused by the factory (") || !strings.Contains(seen, "make wrong-command-xyz") {
 		t.Errorf("plan-feedback.md = %q, want the refused-draft section naming make wrong-command-xyz", seen)
 	}
 	after, err := request.Load(dataDir, id)

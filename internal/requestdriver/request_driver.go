@@ -344,10 +344,9 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 // maxPlanningAttempts bounds AdvancePlanning's own automatic re-plan
 // (below) to exactly one retry within a single planning pass: an initial
 // drafting launch, plus at most one more when writeAndValidateDraftedTickets
-// rejects the plan as infeasible (errPlanInfeasible -- tests_added
-// infeasibility, a criterion naming a file no covering ticket may change,
-// or both at once). A second infeasible plan always halts -- this is a
-// bounded retry, not a loop.
+// refuses the plan and planRedraftable says the planner can fix it (an
+// infeasible plan, or a drafted plan whose content fails another check). A
+// second refused plan always halts -- this is a bounded retry, not a loop.
 const maxPlanningAttempts = 2
 
 // AdvancePlanning runs the plan-drafting job for r and either completes
@@ -381,10 +380,11 @@ const maxPlanningAttempts = 2
 // see CriterionFilesFeasible's own doc comment for that incident.
 // writeAndValidateDraftedTickets reports every infeasibility of either
 // class it finds in one message, so a single re-plan gets fed all of
-// them at once. Every other validation failure (missing Allowed-Files, an
-// unclaimed acceptance criterion, a Verify-Command drift, ...) still
-// halts on the very first attempt -- see maxPlanningAttempts's own doc
-// comment for the retry bound.
+// them at once. Every other content failure of a drafted plan (a ticket off
+// the format, missing Allowed-Files, an unclaimed acceptance criterion, a
+// Verify-Command drift, ...) gets the same single re-plan, told the check's
+// own message; a handed-over plan and an I/O error halt on the first
+// attempt -- see planRedraftable and maxPlanningAttempts.
 func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner PlanTicketsRunner, now time.Time) error {
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
@@ -495,7 +495,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		if validateErr == nil {
 			break
 		}
-		if attempt == maxPlanningAttempts || !errors.Is(validateErr, errPlanInfeasible) {
+		if attempt == maxPlanningAttempts || !planRedraftable(r, validateErr) {
 			_ = os.RemoveAll(ticketsDir)
 			// Keep what every attempt spent: `factoryd cost` reads it from
 			// PlanEvidence, and a halted plan's relay spend was real.
@@ -510,7 +510,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 			FromState: request.StatePlanning,
 			ForStage:  request.StatePlanReview,
 		})
-		log.Printf("request %s: plan drafted but infeasible (%v) -- re-planning automatically", r.ID, validateErr)
+		log.Printf("request %s: drafted plan refused (%v) -- re-planning automatically", r.ID, validateErr)
 	}
 	// A request with an approved request-level oracle/ gets each ticket's own
 	// <NNN>.oracle/ derived from it (a no-op for every other request), so the
@@ -534,6 +534,20 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	// gets -- the operator is waiting on them from this moment.
 	RemindRequest(dataDir, r, now)
 	return r.Save(dataDir)
+}
+
+// planRedraftable reports whether a plan refused with err gets the one
+// automatic re-plan: an infeasible plan, or a plan the model drafted whose
+// content failed any other check (a ticket off the format, a missing header,
+// an unclaimed criterion), which the next draft is told in the refusal's own
+// words. A handed-over plan is the operator's and is never sent to the
+// model; an I/O error says nothing about the draft.
+func planRedraftable(r *request.Request, err error) bool {
+	if errors.Is(err, errPlanInfeasible) {
+		return true
+	}
+	var content *draftContentError
+	return !importsPlan(r) && errors.As(err, &content)
 }
 
 // importsPlan reports whether this planning attempt takes the tickets the
