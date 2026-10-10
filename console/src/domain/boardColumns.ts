@@ -199,12 +199,18 @@ export interface BoardGroup {
   readonly label: string | null;
   /** The word on the group's summary chip ("Spec" for "Spec review"); null with a null label. */
   readonly short: string | null;
+  /** The group holds exactly one state and its heading says it: a card in it draws no stage chip. */
+  readonly oneState: boolean;
   readonly requests: readonly RequestSummary[];
 }
 
 interface GroupRule {
   readonly label: string;
   readonly short: string;
+  /** Where the group is drawn in its column, 0 first. Independent of the rule's place in the match list. */
+  readonly order: number;
+  /** The heading names the one state the rule holds. */
+  readonly oneState?: boolean;
   readonly holds: (request: RequestSummary) => boolean;
 }
 
@@ -213,34 +219,54 @@ const inState =
   (request: RequestSummary): boolean =>
     states.includes(request.state);
 
-// In the order drawn. The last rule of a column takes whatever the others
-// did not, so a state this console does not know still has a group.
+// In the order matched. The last rule of a column takes whatever the others
+// did not, so a state this console does not know still has a group. The order
+// drawn is each rule's `order`: Stuck is drawn first and matched last.
 const GROUP_RULES: Readonly<Partial<Record<BoardColumn, readonly GroupRule[]>>> = {
   needsYou: [
-    { label: "Spec review", short: "Spec", holds: inState("spec_review") },
-    { label: "Oracle review", short: "Oracle", holds: inState("oracle_review") },
-    { label: "Plan review", short: "Plan", holds: inState("plan_review") },
+    {
+      label: "Spec review",
+      short: "Spec",
+      order: 1,
+      oneState: true,
+      holds: inState("spec_review"),
+    },
+    {
+      label: "Oracle review",
+      short: "Oracle",
+      order: 2,
+      oneState: true,
+      holds: inState("oracle_review"),
+    },
+    {
+      label: "Plan review",
+      short: "Plan",
+      order: 3,
+      oneState: true,
+      holds: inState("plan_review"),
+    },
     // Only a pr_review whose pull requests all wait on a human is in this column.
-    { label: "PR ready", short: "PR ready", holds: inState("pr_review") },
+    { label: "PR ready", short: "PR ready", order: 4, holds: inState("pr_review") },
     // halted, quarantined, resume_review, and anything else that waits on
     // the operator without being a review: it needs a look, not a reading.
-    { label: "Stuck", short: "Stuck", holds: () => true },
+    { label: "Stuck", short: "Stuck", order: 0, holds: () => true },
   ],
   drafting: [
     {
       label: "Spec and oracles",
       short: "Spec",
+      order: 0,
       holds: inState("submitted", "spec_drafting", "oracle_drafting"),
     },
-    { label: "Planning", short: "Planning", holds: inState("planning") },
+    { label: "Planning", short: "Planning", order: 1, oneState: true, holds: inState("planning") },
     // A state this console does not know: in view, under no stage it may not be in.
-    { label: "Other", short: "Other", holds: () => true },
+    { label: "Other", short: "Other", order: 2, holds: () => true },
   ],
 };
 
 /**
  * The groups of one column's cards, in the order drawn: Needs you by what is
- * asked (the reviews, PR ready, Stuck), Drafting by stage; every other column
+ * asked (Stuck first, then the reviews and PR ready; Stuck is matched last), Drafting by stage; every other column
  * is one unnamed group. Each request is in exactly one group, a group with no
  * request is left out, and the cards keep the order they were given (a cell
  * of `buildBoard`: the longest wait first in Needs you, the running jobs and
@@ -253,18 +279,28 @@ export function columnGroups(
 ): BoardGroup[] {
   const rules = GROUP_RULES[column];
   if (rules === undefined) {
-    return requests.length === 0 ? [] : [{ label: null, short: null, requests }];
+    return requests.length === 0 ? [] : [{ label: null, short: null, oneState: false, requests }];
   }
   const groups = rules.map((rule) => ({
     label: rule.label,
     short: rule.short,
+    oneState: rule.oneState === true,
+    order: rule.order,
     requests: [] as RequestSummary[],
   }));
   for (const request of requests) {
     const index = rules.findIndex((rule) => rule.holds(request));
     groups[index]?.requests.push(request);
   }
-  return groups.filter((group) => group.requests.length > 0);
+  return groups
+    .filter((group) => group.requests.length > 0)
+    .sort((a, b) => a.order - b.order)
+    .map((group) => ({
+      label: group.label,
+      short: group.short,
+      oneState: group.oneState,
+      requests: group.requests,
+    }));
 }
 
 /** A column whose cards are drawn under sub-headings, in the compact density. */
@@ -342,11 +378,10 @@ export function isNarrowColumn(
 }
 
 /**
- * How many cards across a column's groups lay out: two in Needs you once it
- * is at least twice as wide as a column of the full five-column board, one
- * everywhere else. The columns that hold cards share the width equally (the
- * empty ones are strips), so with `n` of them Needs you has 1/n of it against
- * the normal 1/5: twice as wide when n is 1 or 2.
+ * How many cards across a column's groups may lay out: two in Needs you, one
+ * everywhere else. This only rules out the boards where two could never fit
+ * (three or more columns holding cards); whether they do fit is decided by the
+ * column's own width, in the group's container query.
  */
 export function cardsAcross(
   column: BoardColumn,

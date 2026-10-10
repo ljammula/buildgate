@@ -18,10 +18,10 @@ export function OlderHiddenNote({ count, onShowAllTime, className }: OlderHidden
   return (
     <p
       data-testid="older-hidden"
-      className={cn("text-fg-muted flex flex-wrap items-center gap-x-2 text-xs", className)}
+      className={cn("text-fg-muted flex flex-wrap items-center gap-x-2 gap-y-0 text-xs", className)}
     >
       <span>{`${count} older hidden`}</span>
-      <Button size="sm" variant="link" onClick={onShowAllTime}>
+      <Button size="sm" variant="link" className="h-5 px-0" onClick={onShowAllTime}>
         All time
       </Button>
     </p>

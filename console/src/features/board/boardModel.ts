@@ -71,3 +71,21 @@ export function freshnessLabel(
         : `Last updated ${formatAgeSeconds(now.getTime() - lastUpdateAtMs)} ago`;
   }
 }
+
+const RELEASE_POLICY_PREFIX = "Release policy denies every PR: ";
+
+/** First letter upper-cased, for a server sentence shown as prose. */
+export function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * The release-policy sentence as shown: the server's own words, prefixed
+ * only when they do not already say what the prefix says.
+ */
+export function releasePolicyText(warning: string): string {
+  const own = RELEASE_POLICY_PREFIX.trimEnd().slice(0, -1).toLowerCase();
+  return warning.toLowerCase().startsWith(own)
+    ? sentenceCase(warning)
+    : RELEASE_POLICY_PREFIX + warning;
+}

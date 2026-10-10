@@ -10,7 +10,7 @@ import {
   requestAwaitingPullRequest,
   requestShortTitle,
 } from "@/domain/request";
-import { REQUEST_VERBS } from "@/domain/status";
+import { REQUEST_VERBS, stateLabel } from "@/domain/status";
 import { escapeInvisible } from "@/domain/textEscape";
 import { requestPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
@@ -27,14 +27,20 @@ export interface KanbanCardProps {
   /** Name the project on the card: several projects are on the board with no lane to say which. */
   readonly showProject: boolean;
   /**
-   * The dense card of a grouped column (Needs you, Drafting): the title on one
-   * line, the stage and the age. The id, the sentence of what is asked, the
-   * reason of a failure and the controls appear while the card is hovered or
-   * holds the focus. The controls stay in the tab order while folded, so the
+   * The dense card of a grouped column (Needs you, Drafting): the title on up
+   * to two lines, the id, the stage and the age. The sentence of what is
+   * asked, the reason of a failure and the controls appear while the card is
+   * hovered or holds the focus. The controls stay in the tab order while folded, so the
    * keyboard reaches them and reaching them opens the card. Where nothing can
    * hover, or the pointer is a finger, the card is drawn in full.
    */
   readonly compact?: boolean;
+  /**
+   * The group's heading already names the card's one state (`oneState` of the
+   * group): the stage chip is not drawn, and the state stays in the card for
+   * assistive technology.
+   */
+  readonly stateInHeading?: boolean;
   /** This card's Request changes dialog is open (the screen holds it, so no list change can unmount it). */
   readonly rejecting: boolean;
   /** Opens Request changes for this request. */
@@ -45,7 +51,7 @@ export interface KanbanCardProps {
 
 // What a compact card folds away. It is hidden from the eye only (clipped,
 // as `sr-only` does), never with `display: none` or `visibility: hidden`: a
-// screen reader reading the page still gets the id, what is asked and a
+// screen reader reading the page still gets what is asked and a
 // failure's reason, and the controls stay in the tab order. It is drawn while
 // the card is hovered or holds the focus, and always where there is no hover
 // or the pointer is a finger (a phone, a touch laptop).
@@ -75,12 +81,23 @@ export const KanbanCard = memo(function KanbanCard({
   now,
   showProject,
   compact = false,
+  stateInHeading = false,
   rejecting,
   onReject,
   canWrite,
 }: KanbanCardProps) {
   const facts = cardFacts(request, column);
   const age = cardAge(request, column, now);
+  const ageElement =
+    age === null ? null : (
+      <time
+        dateTime={cardSince(request, column)}
+        title={formatLocalTimestamp(cardSince(request, column))}
+        className="text-fg-muted tabular-nums"
+      >
+        {age}
+      </time>
+    );
   const reviewable = column === "needsYou" && REVIEW_STATES.has(request.state);
   return (
     <li
@@ -98,24 +115,25 @@ export const KanbanCard = memo(function KanbanCard({
         title={request.title !== "" ? request.title : request.id}
         className={cn(
           "text-fg text-sm font-medium after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2",
-          // One line while folded; the whole title is the link's name and its tooltip.
-          compact ? "truncate" : "line-clamp-2",
+          // Two lines at most; the whole title is the link's name and its tooltip.
+          "line-clamp-2",
         )}
       >
         {requestShortTitle(request)}
       </Link>
-      <CompactId
-        value={request.id}
-        max={22}
-        copy={false}
-        className={cn("text-fg-subtle", compact && foldedText)}
-      />
+      {/* A compact card keeps its id and its age on one row. */}
+      <div className={cn(compact && "flex flex-wrap items-baseline justify-between gap-x-2")}>
+        <CompactId value={request.id} max={22} copy={false} className="text-fg-subtle" />
+        {compact ? ageElement : null}
+      </div>
       {showProject ? (
         <span className="text-fg-muted truncate" title={request.project}>
           {request.project}
         </span>
       ) : null}
-      {column === "needsYou" ? (
+      {column === "needsYou" && stateInHeading ? (
+        <span className="sr-only">{stateLabel(request.state)}</span>
+      ) : column === "needsYou" ? (
         // A long label ("Accepted · awaiting PR") in a narrow lane is clipped, never wider than the card.
         <div className="truncate">
           <RequestStageChip
@@ -150,7 +168,7 @@ export const KanbanCard = memo(function KanbanCard({
           className={cn(
             "text-fg-muted line-clamp-2",
             // Drafting's first line is its stage, which a folded card keeps.
-            compact && !(column === "drafting" && index === 0) && foldedText,
+            compact && !(column === "drafting" && index === 0 && !stateInHeading) && foldedText,
           )}
         >
           {line}
@@ -188,15 +206,7 @@ export const KanbanCard = memo(function KanbanCard({
           ))}
         </ul>
       ) : null}
-      {age === null ? null : (
-        <time
-          dateTime={cardSince(request, column)}
-          title={formatLocalTimestamp(cardSince(request, column))}
-          className="text-fg-subtle tabular-nums"
-        >
-          {age}
-        </time>
-      )}
+      {compact ? null : ageElement}
       {reviewable ? (
         <div
           data-testid="kanban-controls"

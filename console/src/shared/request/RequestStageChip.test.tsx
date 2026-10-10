@@ -9,6 +9,13 @@ test("chip shows a calm accepted label, not halted", () => {
   expect(screen.queryByText("halted")).not.toBeInTheDocument();
 });
 
+test("the awaiting-PR chip is in the waiting tone with the stuck shape, not the green of a passed state", () => {
+  render(<RequestStageChip state="halted" awaitingPullRequest />);
+  const chip = screen.getByText("Accepted · awaiting PR").closest("[data-tone]");
+  expect(chip).toHaveAttribute("data-tone", "warning");
+  expect(chip?.querySelector("svg")).toHaveClass("lucide-octagon-pause");
+});
+
 test('the state chip shows "Queued behind <short id>" instead of Building when waitingOn is set', () => {
   render(<RequestStageChip state="building" waitingOn="req-ahead" />);
   expect(screen.getByText("Queued behind req-ahead")).toBeInTheDocument();

@@ -4,12 +4,21 @@ import { Link } from "react-router";
 import type { FactoryHealth } from "@/domain/health";
 import { requestPath } from "@/routes/paths";
 import { cn } from "@/ui/cn";
+import { Button } from "@/ui/Button";
+import { Callout } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StallChip } from "@/ui/Time";
+import { TextWithCode } from "@/ui/TextWithCode";
 import { toneClasses } from "@/ui/tone";
+
+import { sentenceCase } from "./boardModel";
 
 export interface HealthStripProps {
   readonly health: FactoryHealth;
+  /** queueRunWarning's text, or null: the worker is then a fact; else the alert stands in its place. */
+  readonly workerWarning: string | null;
+  /** "Check again": re-reads the worker's status; it starts nothing. */
+  readonly onRetryWorker: () => void;
 }
 
 function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
@@ -33,15 +42,33 @@ function requestCount(count: number): string {
  * wait for a worker instead. Every fact is the server's
  * (`GET /queue-run`, the request list); a fact it did not send is left out.
  */
-export function HealthStrip({ health }: HealthStripProps) {
+export function HealthStrip({ health, workerWarning, onRetryWorker }: HealthStripProps) {
   const { worker, slots } = health;
   return (
     <section
       aria-label="Factory health"
-      className="border-border bg-surface rounded-lg border px-4 py-2.5 text-sm"
+      className="border-border bg-surface flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border px-3 py-1 text-sm"
     >
-      <dl className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        {worker === null ? (
+      {/* A dead worker is said once, here, in place of the "Worker" fact; the
+          requests it leaves waiting and the last move stay beside it. */}
+      {workerWarning === null ? null : (
+        <Callout
+          tone="danger"
+          data-testid="worker-down-banner"
+          className="min-w-0 flex-1 basis-72 border-0 bg-transparent p-0"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0">
+              <TextWithCode text={sentenceCase(workerWarning)} />
+            </span>
+            <Button size="sm" className="shrink-0" onClick={onRetryWorker}>
+              Check again
+            </Button>
+          </div>
+        </Callout>
+      )}
+      <dl className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {workerWarning !== null ? null : worker === null ? (
           // GET /queue-run has not answered, or this server has no such route.
           <Fact label="Worker">
             <span className="text-fg-muted">state unknown</span>

@@ -2,6 +2,8 @@ import { asObject } from "@/domain/decode";
 import {
   costPerAcceptedText,
   decodeFactoryStats,
+  noTicketsText,
+  numbersHaveNoTickets,
   numbersRows,
   rateText,
   spendText,
@@ -68,7 +70,7 @@ test("the fixture's rows: overall first, then each project", () => {
   ]);
 });
 
-test("null rates and nothing spent read as -, never as 0%", () => {
+test("null rates and nothing spent read as –, never as 0%", () => {
   const stats = decodeFactoryStats(
     { overall: report("", metrics()), projects: [report("idle", metrics())] },
     at,
@@ -76,12 +78,12 @@ test("null rates and nothing spent read as -, never as 0%", () => {
   expect(numbersRows(stats)[1]).toEqual({
     label: "idle",
     tickets: "0",
-    oneShot: "-",
-    accepted: "-",
-    medianRounds: "-",
-    topQuarantine: "-",
-    spend: "-",
-    costPerAccepted: "-",
+    oneShot: "–",
+    accepted: "–",
+    medianRounds: "–",
+    topQuarantine: "–",
+    spend: "–",
+    costPerAccepted: "–",
   });
   expect(statsEmpty(stats)).toBe(false);
 });
@@ -95,7 +97,7 @@ test("an empty data dir has nothing to show", () => {
 test("rateText uses the server's rate", () => {
   expect(rateText(0, 4, 0)).toBe("0/4 (0%)");
   expect(rateText(1, 8, 0.125)).toBe("1/8 (13%)");
-  expect(rateText(0, 0, null)).toBe("-");
+  expect(rateText(0, 0, null)).toBe("–");
 });
 
 test("spend names dollars only when a cost was recorded", () => {
@@ -105,7 +107,7 @@ test("spend names dollars only when a cost was recorded", () => {
   expect(spendText(m({ tokens: 12300, cost_micro_usd: 0 }))).toBe("12.3k tokens");
   expect(spendText(m({ tokens: 950, cost_micro_usd: 40000 }))).toBe("950 tokens · $0.04");
   // Spend with nothing accepted has no per-ticket figure.
-  expect(costPerAcceptedText(m({ tokens: 950, cost_micro_usd: 40000 }))).toBe("-");
+  expect(costPerAcceptedText(m({ tokens: 950, cost_micro_usd: 40000 }))).toBe("–");
   expect(
     costPerAcceptedText(
       m({ tokens: 1, cost_micro_usd: 2, per_accepted_ticket_micro_usd: 2500000 }, 2),
@@ -126,4 +128,32 @@ test("with projects chosen, only their rows: the overall row is every project's"
     ["beta", "3"],
   ]);
   expect(numbersRows(stats, new Set(["gone"]))).toEqual([]);
+});
+
+test("a table with no ticket in the window is one line, not a table of dashes", () => {
+  const empty = decodeFactoryStats(
+    { overall: report("", metrics()), projects: [report("idle", metrics())] },
+    at,
+  );
+  expect(numbersHaveNoTickets(numbersRows(empty))).toBe(true);
+  const busy = decodeFactoryStats(
+    { overall: report("", metrics({ tickets: 3 })), projects: [report("idle", metrics())] },
+    at,
+  );
+  expect(numbersHaveNoTickets(numbersRows(busy))).toBe(false);
+  // No ticket, but tokens were spent: the table is drawn.
+  const spent = decodeFactoryStats(
+    {
+      overall: report(
+        "",
+        metrics({ spend: { tokens: 1200, cost_micro_usd: 0, per_accepted_ticket_micro_usd: 0 } }),
+      ),
+      projects: [],
+    },
+    at,
+  );
+  expect(numbersHaveNoTickets(numbersRows(spent))).toBe(false);
+  expect(noTicketsText(7)).toBe("No finished tickets in the last 7 days");
+  expect(noTicketsText(30)).toBe("No finished tickets in the last 30 days");
+  expect(noTicketsText("all")).toBe("No finished tickets in all time");
 });

@@ -3,13 +3,13 @@ import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
 import { describeError } from "@/ui/ErrorDisplay";
 import { StaleWarning } from "@/ui/StaleWarning";
+import { TextWithCode } from "@/ui/TextWithCode";
+
+import { releasePolicyText } from "./boardModel";
 
 export interface BoardStripsProps {
   /** Config's release-policy warning: the policy denies every PR. */
   readonly releasePolicyWarning: string | null;
-  /** queueRunWarning's text, or null to hide the worker strip. */
-  readonly workerWarning: string | null;
-  readonly onRetryWorker: () => void;
   /** A permanent event-stream failure: the board then refreshes by polling only. */
   readonly streamError: ApiError | null;
   /**
@@ -26,7 +26,7 @@ export interface BoardStripsProps {
   readonly onRetryRefresh: () => void;
 }
 
-/** The warnings above the board: each one explains a silence the list alone would hide. */
+/** The warnings above the board (the worker's is in the health strip): each one explains a silence the list alone would hide. */
 export function BoardStrips(props: BoardStripsProps) {
   return (
     <>
@@ -34,20 +34,8 @@ export function BoardStrips(props: BoardStripsProps) {
           without this an operator only learns it after an accepted run
           produces no PR. */}
       {props.releasePolicyWarning === null ? null : (
-        <Callout tone="warning" data-testid="release-policy-warning-banner">
-          Release policy denies every PR: {props.releasePolicyWarning}
-        </Callout>
-      )}
-      {/* The worker advances a request between polls: without this, a
-          request stuck because it is down reads like one making progress. */}
-      {props.workerWarning === null ? null : (
-        <Callout tone="danger" data-testid="worker-down-banner">
-          <div className="flex items-center justify-between gap-3">
-            <span>{props.workerWarning}</span>
-            <Button size="sm" onClick={props.onRetryWorker}>
-              Retry
-            </Button>
-          </div>
+        <Callout tone="warning" data-testid="release-policy-warning-banner" className="py-1.5">
+          <TextWithCode text={releasePolicyText(props.releasePolicyWarning)} />
         </Callout>
       )}
       {props.streamError === null ? null : (

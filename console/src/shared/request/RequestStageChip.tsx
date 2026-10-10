@@ -29,7 +29,13 @@ export function RequestStageChip({
   waitingOn = null,
   needsYou = false,
 }: RequestStageChipProps) {
-  if (awaitingPullRequest) return <StatusChip status="done" label={AWAITING_PR_LABEL} />;
+  // Halted work that waits on the operator: the request's own (waiting) tone
+  // and the stuck shape, not the green of a passed state.
+  if (awaitingPullRequest) {
+    return (
+      <StatusChip status={statusForToken(state)} label={AWAITING_PR_LABEL} icon="octagon_pause" />
+    );
+  }
   if (waitingOn !== null && waitingOn !== "") {
     return (
       <StatusChip

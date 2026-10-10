@@ -250,12 +250,61 @@ describe("columnGroups", () => {
         requestSummary({ id: "spec", state: "spec_review" }),
       ]),
     ).toEqual([
+      ["Stuck", ["q"]],
       ["Spec review", ["spec"]],
       ["Oracle review", ["oracle"]],
       ["Plan review", ["plan"]],
       ["PR ready", ["pr"]],
-      ["Stuck", ["q"]],
     ]);
+  });
+
+  test("Stuck is drawn first but matched last: a review state never lands in it", () => {
+    const groups = columnGroups("needsYou", [
+      requestSummary({ id: "spec", state: "spec_review" }),
+      requestSummary({ id: "h", state: "halted" }),
+      requestSummary({ id: "new", state: "security_review" }),
+    ]);
+    expect(groups.map((g) => [g.label, g.requests.map((r) => r.id)])).toEqual([
+      ["Stuck", ["h", "new"]],
+      ["Spec review", ["spec"]],
+    ]);
+  });
+
+  test("Drafting is drawn Spec and oracles, Planning, Other", () => {
+    expect(
+      columnGroups("drafting", [
+        requestSummary({ id: "x", state: "security_review" }),
+        requestSummary({ id: "p", state: "planning" }),
+        requestSummary({ id: "s", state: "submitted" }),
+      ]).map((g) => g.label),
+    ).toEqual(["Spec and oracles", "Planning", "Other"]);
+  });
+
+  test("only a group that holds exactly one state is flagged oneState", () => {
+    const flags = (column: BoardColumn, states: string[]) =>
+      columnGroups(
+        column,
+        states.map((state) => requestSummary({ id: state, state })),
+      ).map((g) => [g.label, g.oneState]);
+    expect(
+      flags("needsYou", ["spec_review", "oracle_review", "plan_review", "pr_review", "halted"]),
+    ).toEqual([
+      ["Stuck", false],
+      ["Spec review", true],
+      ["Oracle review", true],
+      ["Plan review", true],
+      ["PR ready", false],
+    ]);
+    expect(flags("drafting", ["submitted", "planning", "security_review"])).toEqual([
+      ["Spec and oracles", false],
+      ["Planning", true],
+      ["Other", false],
+    ]);
+    expect(
+      columnGroups("building", [requestSummary({ id: "b", state: "building" })]).map(
+        (g) => g.oneState,
+      ),
+    ).toEqual([false]);
   });
 
   test("every Needs-you and Drafting state is in exactly one group", () => {
@@ -319,8 +368,8 @@ describe("columnGroups", () => {
         requestSummary({ id: "q-early", state: "quarantined", enteredAt: "2026-09-10T07:00:00Z" }),
       ]),
     ).toEqual([
-      ["Spec review", ["early", "late"]],
       ["Stuck", ["q-early", "halt-late"]],
+      ["Spec review", ["early", "late"]],
     ]);
   });
 
@@ -377,9 +426,9 @@ describe("density of the grouped columns", () => {
       ...waits(2, "plan_review"),
     ];
     expect(groupChips("needsYou", requests)).toEqual([
+      { label: "Stuck", short: "Stuck", count: 3 },
       { label: "Spec review", short: "Spec", count: 5 },
       { label: "Plan review", short: "Plan", count: 2 },
-      { label: "Stuck", short: "Stuck", count: 3 },
     ]);
     expect(groupChips("needsYou", [])).toEqual([]);
     // A column without groups has no chips.
