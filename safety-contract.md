@@ -448,8 +448,23 @@ requires a new contract review and an updated machine-checkable test.
   save and a file an earlier step planted is never kept as a later launch's
   prompt. What the build agent itself chooses to write into the
   workspace is an ordinary part of its diff, judged like the rest.
-  A build that ends without passing is asked once, in its own session, for
-  notes under five fixed headings. The factory copies the reply out of the
+  A build that ends without passing, or that passes after at least one round
+  that did not (never one that passes in its first round), is asked once, in
+  its own session, for notes under five fixed headings. The turn after a pass
+  runs with the harness's tools, so the build script, not the prompt and not a
+  harness flag, keeps the tree: it records the worktree before the turn and
+  again after it (every path outside `.git` and the session folder, tracked,
+  untracked and ignored: kind, permission bits, and the SHA-256 of a file's
+  content or a link's target), and keeps the reply only when the two records
+  are equal. Otherwise it removes the reply, puts the tree back where it holds
+  a copy, and runs the build's own setup, verify and oracle again on the tree
+  as it then is; if they fail the build ends as not passed, its last round
+  recorded as failed, and no further round runs, so one build runs the turn at
+  most once. A tree too large to record is not given the turn. This is the
+  build script's own claim inside the sandbox, where it and the agent are one
+  user: the host commits the worktree only after the build step has returned,
+  and its own verify, gates and reviews judge that commit exactly as for a
+  build with no notes turn. The factory copies the reply out of the
   session folder before removing it, splits it into one-line items cleaned and
   capped like every other value, and stores them in the handoff apart from its
   own facts and after them. They are labelled the agent's view, never decide a
@@ -465,7 +480,10 @@ requires a new contract review and an updated machine-checkable test.
   agent wrote it, backticks included, one line cleaned and cut like every
   other value. The rule judges that text and nothing repairs it; the copy is
   never rendered into the record a build is given, where every note still has
-  its backticks turned into quotes.
+  its backticks turned into quotes. A run saved accepted has no
+  handoff: of the notes its build left, only the items under the fifth heading
+  are read, cleaned and capped the same way, and only by the operator's memory
+  list; the rest of the file reaches no reader, the handoff route included.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.

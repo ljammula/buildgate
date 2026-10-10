@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"buildgate/internal/evidence"
 )
 
 const (
@@ -85,6 +87,28 @@ func parseNotes(text string) *Notes {
 		return nil
 	}
 	return &n
+}
+
+// RepositoryNotesOfAcceptedRun returns the items the build agent of an
+// accepted run left under its fifth heading (things worth knowing about the
+// repository), from the notes the host kept in runDir, each cleaned and
+// capped as in a handoff and kept as written for the memory text rule
+// (MemoryCandidates). An accepted run has no handoff (Sync removes it),
+// and a build that failed a round and then passed leaves notes all the same.
+// Only that heading is returned: what the agent did, tried or supposed is for
+// a later attempt of the same ticket, and an accepted ticket has none. The
+// caller decides that the run is accepted. The one reader is the operator's
+// memory list (SC-020), which puts every item through the memory text rule.
+func RepositoryNotesOfAcceptedRun(runDir string) []string {
+	text, ok := evidence.ReadRetainedAgentNotes(runDir)
+	if !ok {
+		return nil
+	}
+	notes := parseNotes(text)
+	if notes == nil {
+		return nil
+	}
+	return notes.MemoryCandidates()
 }
 
 // stripBullet removes one leading list marker: -, *, a bullet or "1.".

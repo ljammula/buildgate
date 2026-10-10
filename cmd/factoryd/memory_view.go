@@ -214,11 +214,17 @@ func repositoryRunsNewestFirst(dataDir, project, repoRoot string, limit int) []*
 }
 
 // repositoryNotes returns what a finished run's build agent said is worth
-// knowing about the repository, from the run's handoff, as the agent wrote
-// it (backticks kept: the memory text rule judges them). The handoff is read
-// only against the hash and state the run record holds, so one changed after
-// the run recorded it yields nothing.
+// knowing about the repository, as the agent wrote it (backticks kept: the
+// memory text rule judges them). For a run that stopped (quarantined or
+// halted) it is read from the run's handoff, only against the hash and state
+// the run record holds, so one changed after the run recorded it yields
+// nothing. An accepted run has no handoff: its build left notes only if it
+// failed a round before it passed, and they are read from the copy the host
+// kept in the run directory. A run in any other state is not finished.
 func repositoryNotes(dataDir string, r *run.Run) []string {
+	if r.State == run.StateAccepted {
+		return handoff.RepositoryNotesOfAcceptedRun(run.Dir(dataDir, r.ID))
+	}
 	if r.HandoffSHA256 == "" || r.State != run.StateQuarantined && r.State != run.StateHalted {
 		return nil
 	}

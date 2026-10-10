@@ -288,7 +288,7 @@ that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
 The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 
 - **A lost step is never retried automatically.** Sleep, crash or stop halts the run and keeps the work; you choose `factoryd resume`, `resume -from scratch` or `cancel`.
-- **Repository memory is unchecked notes.** Lines come only from builds that ended without passing (and whose notes turn ran) and from the operator; no command a line names is verified, and nothing is proposed or removed automatically.
+- **Repository memory is unchecked notes.** Lines come only from builds that ended without passing, or passed after a round that did not (and whose notes turn ran), and from the operator; no command a line names is verified, and nothing is proposed or removed automatically.
 - **The repository must be under `$HOME`.** The sandbox gateway sees nothing else.
 - **Your own worker image needs a `make` built without `posix_spawn`**; build it on the image `make install` produces (`make project-sandbox-image`). `su` and `sudo` fail in the sandbox too.
 - **A gate script is protected only under `.factory/`.** That directory is mounted read-only into every build, verify and gate sandbox as the commit `.factory.yml` was read from holds it; a script there that calls files outside it runs the build's copy of them, as `verify_command: make test` does.

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"buildgate/internal/api"
+	"buildgate/internal/handoff"
 	"buildgate/internal/memory"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -105,6 +106,37 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 	}
 	rr := quarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
 	rr.Project, rr.RepositoryRoot = f.project, f.root
+	if err := rr.Save(f.data); err != nil {
+		f.t.Fatal(err)
+	}
+	return rr
+}
+
+// acceptedRunWithNotes saves an accepted run of the fixture's project whose
+// build failed a round, passed the next and left notesFile: the host copied
+// the notes into the run directory, and an accepted run keeps no handoff.
+func (f *memFix) acceptedRunWithNotes(id, notesFile string) *run.Run {
+	f.t.Helper()
+	runDir := run.Dir(f.data, id)
+	if err := os.MkdirAll(runDir, 0o750); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "agent-notes.md"), []byte(notesFile), 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+	failed, passed := false, true
+	rr := &run.Run{
+		ID: id, Ticket: id, State: run.StateAccepted, Branch: "factoryd/" + id,
+		BaseSHA: strings.Repeat("1", 40), ResultSHA: strings.Repeat("2", 40), ChangedFiles: []string{"sum.go"},
+		Project: f.project, RepositoryRoot: f.root,
+		AgentEvidence: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{
+			{Index: 1, VerifyPassed: &failed, Blockers: []string{"canonical verification failed"}, ChangedFiles: []string{"sum.go"}, FailureSignature: "aaaa"},
+			{Index: 2, VerifyPassed: &passed, ChangedFiles: []string{"sum.go"}},
+		}},
+	}
+	if err := handoff.Sync(rr, f.data); err != nil {
+		f.t.Fatal(err)
+	}
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)
 	}
@@ -251,6 +283,46 @@ func TestMemoryListSkipsATamperedHandoff(t *testing.T) {
 	}
 	if ls := f.lessons(); len(ls) != 0 {
 		t.Fatalf("a tampered handoff gave candidates: %+v", ls)
+	}
+}
+
+// A build that failed a round and then passed leaves notes too, and its run
+// is accepted: an accepted run has no handoff, so its "worth knowing" items
+// are read from the notes the host kept in the run directory. Only that
+// heading is read, and only once the run is accepted.
+func TestMemoryListCollectsTheNotesOfAnAcceptedRun(t *testing.T) {
+	f := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n"})
+	accepted := f.acceptedRunWithNotes("run-a", "What I did\n- changed sum.go\n"+worthKnowing(
+		"Run `make gen` before the tests.", "see https://example.com/setup"))
+	if _, err := os.Stat(filepath.Join(run.Dir(f.data, "run-a"), handoff.FileName)); !os.IsNotExist(err) || accepted.HandoffSHA256 != "" {
+		t.Fatalf("the accepted run has a handoff (%v, hash %q): this test would prove nothing new", err, accepted.HandoffSHA256)
+	}
+	// Still being verified: its notes are not a finished run's.
+	verifying := f.acceptedRunWithNotes("run-b", worthKnowing("The linter needs network access"))
+	verifying.State = run.StateVerifying
+	if err := verifying.Save(f.data); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.cmd().list(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := f.out.String()
+	if !strings.Contains(out, "collected from build agents' notes: 1 new candidate(s), 1 note(s) refused by the text rule") {
+		t.Errorf("list did not collect from the accepted run:\n%s", out)
+	}
+	if strings.Contains(out, "example.com") || strings.Contains(out, "changed sum.go") || strings.Contains(out, "linter") {
+		t.Errorf("list shows a refused note, a note of another heading or a note of an unfinished run:\n%s", out)
+	}
+	ls := f.lessons()
+	if len(ls) != 1 || !strings.Contains(ls[0].Line, "make gen") || strings.Join(ls[0].Runs, ",") != "run-a" {
+		t.Fatalf("lessons = %+v, want the one line the accepted run said", ls)
+	}
+	// A second list counts the run once.
+	if err := f.cmd().list(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.out.String(), "collected from") || f.lessons()[0].Seen != 1 {
+		t.Fatalf("second list recounted:\n%s", f.out.String())
 	}
 }
 

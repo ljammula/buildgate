@@ -205,10 +205,13 @@ func ReadRetainedRoundLog(runDir string, round int, n int64) (name string, data 
 	return "", nil
 }
 
-// AgentNotesFileName is where RetainAgentNotes puts the notes a build that
-// ended without passing wrote for whoever attempts the ticket next, in the
-// run's own directory (the one holding RoundLogsDirName). The text is the
-// build agent's own: untrusted. Only the handoff reads it (SC-018).
+// AgentNotesFileName is where RetainAgentNotes puts the notes a build wrote
+// in its notes turn (one that ended without passing, or passed after a round
+// that did not), in the run's own directory (the one holding
+// RoundLogsDirName). The text is the build agent's own: untrusted. Only
+// internal/handoff reads it: into the handoff of a stopped run (SC-018), and,
+// for an accepted run, its fifth heading for the operator's memory list
+// (SC-020).
 const AgentNotesFileName = "agent-notes.md"
 
 // agentNotesSource is where build_app.py leaves the notes, relative to the

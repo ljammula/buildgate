@@ -94,6 +94,103 @@ func TestRunBuildActivityCarriesTheNotesOutBeforeAnyLaterStep(t *testing.T) {
 	})
 }
 
+// The notes a build left are in the run directory once the build step has
+// returned, whether the build passed or not, and nowhere in the worktree a
+// review explores: no review launch mounts the notes file, the run directory
+// or the data directory, and the worktree it does mount holds no session
+// folder.
+func TestAReviewLaunchCannotSeeTheBuildAgentsNotes(t *testing.T) {
+	rt := &sandboxtest.WorkerRuntime{Lines: []string{"ok"}}
+	activities, input, _ := runtimeActivities(t, rt)
+	routed := testRoutedActivities(sandbox.RouteSecret{})
+	routed.LogDir, routed.DataDir, routed.Sandboxes = activities.LogDir, activities.DataDir, rt
+	routed.MeterLedgerRoot, routed.SandboxDocker = activities.MeterLedgerRoot, activities.SandboxDocker
+	input.SpecPath = ""
+	input.BuildAppScript = realScripts(t)
+	input.BuildAppInterpreter = "python3"
+	input.RoutePolicy = testRelayPolicy()
+	input.RoutePolicy.AllowUnauthenticatedUpstream = true
+	input.RoutePolicy.Upstream = "http://127.0.0.1:8080"
+	input.RoutePolicy.AllowPlaintextUpstream = true
+	input.RoutePolicy.AllowedPathPrefix = "/v1/chat/completions"
+	input.RoutePolicy.UsageFormat = "openai"
+	input.RoutePolicy.WorkerModelID = "qwen"
+	input.RoutePolicy.WorkerBasePath = "/v1"
+	// The notes of a build that passed are where the host copy puts them.
+	notes := filepath.Join(routed.LogDir, evidence.AgentNotesFileName)
+	writeFile(t, notes, "Things worth knowing about this repository\n- "+notesMarker+"\n")
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(routed.RunReviewStepActivity)
+	_, err := env.ExecuteActivity(routed.RunReviewStepActivity, ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined})
+	if len(rt.Requests()) != 1 {
+		t.Fatalf("the review did not launch (%v)", err)
+	}
+	if rel, err := filepath.Rel(input.WorkspacePath, routed.LogDir); err == nil && !strings.HasPrefix(rel, "..") {
+		t.Fatalf("the run directory %s is inside the workspace %s: the mounts would carry it", routed.LogDir, input.WorkspacePath)
+	}
+	req := rt.Requests()[0]
+	paths := append([]string{}, req.ReadOnlyPaths...)
+	paths = append(paths, req.ReadWritePaths...)
+	for _, m := range req.Mounts {
+		paths = append(paths, m.Source)
+	}
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		// Neither the notes file nor a folder that holds it (the run
+		// directory, the data directory).
+		if holds, _ := filepath.Rel(abs, notes); !strings.HasPrefix(holds, "..") {
+			t.Errorf("the review launch mounts %s, which is or holds the build agent's notes", p)
+		}
+		if found := holdingMarker(t, abs, notesMarker); len(found) != 0 {
+			t.Errorf("the review launch mounts %s, which holds the build agent's notes: %v", p, found)
+		}
+	}
+	for _, name := range []string{buildSessionDir, filepath.Join(buildSessionDir, "handoff-notes.md")} {
+		if _, err := os.Lstat(filepath.Join(input.WorkspacePath, name)); !os.IsNotExist(err) {
+			t.Errorf("the worktree the review mounts holds %s (%v)", name, err)
+		}
+	}
+	for _, value := range req.Environment {
+		if strings.Contains(value, notesMarker) || strings.Contains(value, evidence.AgentNotesFileName) {
+			t.Errorf("the review launch's environment names the notes: %s", value)
+		}
+	}
+}
+
+// A build that passed leaves its notes the same way as one that did not.
+func TestRunBuildActivityCarriesTheNotesOfABuildThatPassedOut(t *testing.T) {
+	repo := testfixture.NewGitRepo(t)
+	logDir := t.TempDir()
+	activities := &Activities{
+		LogDir: logDir,
+		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+			writeFile(t, filepath.Join(repo, buildSessionDir, "handoff-notes.md"), "Things worth knowing about this repository\n- "+notesMarker+"\n")
+			return runner.Result{ExitCode: 0}, nil
+		},
+	}
+	input := fixtureInput()
+	input.WorkspacePath = repo
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(activities.RunBuildActivity)
+	if _, err := env.ExecuteActivity(activities.RunBuildActivity, input); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(logDir, evidence.AgentNotesFileName)); err != nil || !strings.Contains(string(got), notesMarker) {
+		t.Errorf("retained notes = %q, %v, want the reply copied out", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, buildSessionDir)); !os.IsNotExist(err) {
+		t.Errorf("the session folder is still in the worktree (%v)", err)
+	}
+}
+
 func TestRunBuildActivityRetainsNothingFromASessionFolderThatIsALink(t *testing.T) {
 	repo := testfixture.NewGitRepo(t)
 	logDir := t.TempDir()
