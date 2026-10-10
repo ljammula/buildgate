@@ -326,10 +326,6 @@ func WithStartToken(token string) Option {
 	}
 }
 
-// WithAuthToken is a concise alias for WithStartToken for callers that use a
-// single bearer credential for their control-plane write routes.
-func WithAuthToken(token string) Option { return WithStartToken(token) }
-
 // WithReadToken gates this Server's read routes (GET /runs, GET /runs/{id},
 // GET /runs/{id}/events, GET /runs/{id}/diff, GET /projects) behind
 // Authorization: Bearer <token>. Unlike WithOverrideToken/WithStartToken, an
@@ -1542,7 +1538,7 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 // Served from a durable file on disk (`run.DiffPath`), not recomputed from
 // the live git workspace on every request, and not carried on the run
 // record itself — found via review, this endpoint used to shell out to
-// `runner.GitDiffIncludingWorktree` against the workspace path at request
+// `git diff` against the workspace path at request
 // time, which was wrong two ways: (1) a later run reusing the same
 // workspace, or any other later edit, would make an older run's diff
 // silently show that later, unrelated content instead of its own — there

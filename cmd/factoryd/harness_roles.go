@@ -19,26 +19,6 @@ func requireHarnessSandboxImage(role string, d harness.Descriptor, sandboxImage 
 	return nil
 }
 
-// harnessRoles is the default harness each configured-or-defaulted role runs
-// under, keyed by role name, for every role a session can launch a job for
-// (planning, execution, review). An unconfigured role resolves to pi, exactly
-// as modelrole.RoleHarness does.
-func harnessRoles(settings sessionconfig.Settings) (map[string]harness.Descriptor, error) {
-	out := map[string]harness.Descriptor{}
-	for _, role := range sessionRoles {
-		name, err := modelrole.RoleHarness(settings, role, "")
-		if err != nil {
-			return nil, err
-		}
-		d, err := harness.Lookup(name)
-		if err != nil {
-			return nil, fmt.Errorf("roles.%s: %w", role, err)
-		}
-		out[string(role)] = d
-	}
-	return out, nil
-}
-
 var sessionRoles = []modelrole.Role{modelrole.RolePlanning, modelrole.RoleExecution, modelrole.RoleReview}
 
 // harnessRoleSets is every harness each role can resolve to: its default

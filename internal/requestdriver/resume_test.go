@@ -371,7 +371,7 @@ func TestKeptRunsAreClearedByARebuildAndByCancel(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	other := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "kept-other", "temporal")
+	other := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "kept-other", "temporal")
 	if err := (&run.Run{ID: "kept-other", State: run.StateHalted, HaltConfirmed: true, KeptForResume: true, RequestID: "req-2", ProjectPath: repoDir, WorkspacePath: other.WorktreePath, Branch: other.Branch}).Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestAResumedRunThatIsKeptInTurnIsReapedWithItsRequest(t *testing.T) {
 	if err := a.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	markerB := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "run-b", "temporal")
+	markerB := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "run-b", "temporal")
 	if got := requestdriver.ResumedRequestID(dataDir, "run-a"); got != "req-1" {
 		t.Fatalf("resumedRequestID = %q, want the halted run's request", got)
 	}

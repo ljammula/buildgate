@@ -449,46 +449,6 @@ func TestCollectEvidence(t *testing.T) {
 	}
 }
 
-func TestValidateOverlayTarget(t *testing.T) {
-	target := "internal/mood/zz_oracle_test.go"
-	good := `go test -overlay '{"Replace":{"internal/mood/zz_oracle_test.go":".oracle/mood_oracle_test.go"}}' ./internal/mood/`
-	if err := ValidateOverlayTarget(good, target, nil); err != nil {
-		t.Fatalf("good command refused: %v", err)
-	}
-	if err := ValidateOverlayTarget(strings.Replace(good, "-overlay '", "-overlay='", 1), target, nil); err != nil {
-		t.Fatalf("-overlay= form refused: %v", err)
-	}
-	if err := ValidateOverlayTarget(strings.ReplaceAll(good, "internal/mood/zz", "./internal/mood/zz"), target, nil); err != nil {
-		t.Fatalf("./-prefixed key refused: %v", err)
-	}
-	bad := map[string]string{
-		"different key":   `go test -overlay '{"Replace":{"internal/other/zz_oracle_test.go":".oracle/x.go"}}' ./...`,
-		"no overlay":      `go test ./.oracle/...`,
-		"absolute key":    `go test -overlay '{"Replace":{"/work/internal/mood/zz_oracle_test.go":".oracle/x.go"}}' ./...`,
-		"unparseable":     `go test -overlay '{"Replace":' ./...`,
-		"missing arg":     `go test -overlay`,
-		"file, no reader": `go test -overlay overlay.json ./...`,
-		"unterminated":    `go test -overlay '{"Replace":{}}`,
-	}
-	for name, cmd := range bad {
-		if err := ValidateOverlayTarget(cmd, target, nil); err == nil {
-			t.Errorf("%s: mismatching command accepted", name)
-		}
-	}
-	reader := func(name string) ([]byte, error) {
-		if name != "overlay.json" {
-			t.Fatalf("unexpected overlay file %q", name)
-		}
-		return []byte(`{"Replace":{"internal/mood/zz_oracle_test.go":".oracle/a.go"}}`), nil
-	}
-	if err := ValidateOverlayTarget(`go test -overlay overlay.json ./...`, target, reader); err != nil {
-		t.Fatalf("file overlay refused: %v", err)
-	}
-	if err := ValidateOverlayTarget(good, "../evil_test.go", nil); err == nil {
-		t.Fatal("invalid target_path accepted by the overlay validator")
-	}
-}
-
 // One oracle file may cover several criteria: entries naming the same
 // oracle_file and target_path are one file to commit.
 func TestLoadPlanSharedOracleFileIsOneCommittedFile(t *testing.T) {

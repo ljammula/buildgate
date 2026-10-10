@@ -15,7 +15,6 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 
-	"buildgate/internal/release"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
@@ -258,7 +257,7 @@ func haltDeadOwnerRun(dataDir, runID string) (bool, error) {
 // Temporal-mode isolated worktree behind: the prepared isolation marker names
 // a worktree that still exists. The worktree holds the build's round state
 // and files, so every reaper skips the run until a human decides (a resume
-// adopts it; clearKeptForResume reaps it). The worktree path and branch are
+// adopts it; release.ClearKeptForResume reaps it). The worktree path and branch are
 // copied onto the record when the run was lost before it recorded them.
 // Direct-mode worktrees are never kept: only the Temporal path can resume
 // one, so keeping it would leak it. Must run inside the run lock, before the
@@ -283,10 +282,4 @@ func markKeptForResume(dataDir string, r *run.Run) {
 		r.WorkspacePath = marker.WorktreePath
 		r.Branch = marker.Branch
 	}
-}
-
-// clearKeptForResume reaps a kept worktree and clears the run's
-// KeptForResume flag; see release.ClearKeptForResume.
-func clearKeptForResume(dataDir, runID string) error {
-	return release.ClearKeptForResume(dataDir, runID)
 }

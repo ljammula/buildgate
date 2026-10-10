@@ -66,7 +66,7 @@ func TestWorkerConfigRejectsMaxReviewRoundsBelowOne(t *testing.T) {
 // is not.
 func TestPRPollChecksTheReadyToMergeBar(t *testing.T) {
 	yes, no := true, false
-	head := requestdrivertest.TestTicketRunResultSHA(1)
+	head := requestdrivertest.TicketRunResultSHA(1)
 	reviewed := run.GateResult{Check: "code_review", Passed: true}
 	untrusted := []forge.Thread{{ID: "t1", Author: "mallory", Body: "hm", CommentID: 9}}
 	cases := []struct {

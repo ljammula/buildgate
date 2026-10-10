@@ -32,9 +32,6 @@ func NewServer(cfg Config) (*Server, error) {
 	return &Server{registry: registry, grpc: server}, nil
 }
 
-// Registry is the server's per-sandbox state.
-func (s *Server) Registry() *Registry { return s.registry }
-
 // Serve serves lis until Stop.
 func (s *Server) Serve(lis net.Listener) error { return s.grpc.Serve(lis) }
 

@@ -16,7 +16,7 @@ import (
 	wsisolation "buildgate/internal/workspace"
 )
 
-func TestIsolationMarker(t *testing.T, repoDir, dataDir, runID, mode string) wsisolation.IsolationMarker {
+func IsolationMarker(t *testing.T, repoDir, dataDir, runID, mode string) wsisolation.IsolationMarker {
 	t.Helper()
 	base, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -140,7 +140,7 @@ func LostBuildFixture(dp requestdriver.Deps, t *testing.T, decision string) (dat
 		t.Fatal(err)
 	}
 	repoDir := testfixture.NewGitRepo(t)
-	marker = TestIsolationMarker(t, repoDir, dataDir, "lost-run", "temporal")
+	marker = IsolationMarker(t, repoDir, dataDir, "lost-run", "temporal")
 	if err := (&run.Run{
 		ID: "lost-run", State: run.StateHalted, HaltConfirmed: true, KeptForResume: true, RequestID: id,
 		ProjectPath: repoDir, WorkspacePath: marker.WorktreePath, Branch: marker.Branch,
@@ -173,7 +173,7 @@ func KeptRun(t *testing.T, id string) (dataDir, repoDir string, marker wsisolati
 	t.Helper()
 	repoDir = testfixture.NewGitRepo(t)
 	dataDir = t.TempDir()
-	marker = TestIsolationMarker(t, repoDir, dataDir, id, "temporal")
+	marker = IsolationMarker(t, repoDir, dataDir, id, "temporal")
 	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("resolve base: %v", err)

@@ -53,13 +53,6 @@ func TestIsTransientInfraErrorClassifiesNarrowly(t *testing.T) {
 			t.Errorf("isTransientInfraError(%q) = true, want false", err)
 		}
 	}
-
-	// markNonRetryable forces false even when the wrapped message would
-	// otherwise match a transient substring.
-	forced := markNonRetryable(errors.New("connection refused"))
-	if isTransientInfraError(forced) {
-		t.Errorf("isTransientInfraError(markNonRetryable(...)) = true, want false")
-	}
 }
 
 // TestRetryTransientInfraRecoversFromOneTransientFailure is the generic

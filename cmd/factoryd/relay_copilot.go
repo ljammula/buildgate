@@ -104,24 +104,6 @@ func githubCopilotAuthPaths(home string) []string {
 	}
 }
 
-// discoveredGitHubCopilotAuthExists reports whether either host-only
-// discovery location holds a real file, without parsing it (a malformed
-// or key-mismatched file still counts as "exists" here -- daemonMain's
-// own gate on this only decides whether to attempt resolution at all;
-// resolveGitHubCopilotToken itself reports a parse/key failure).
-func discoveredGitHubCopilotAuthExists() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	for _, path := range githubCopilotAuthPaths(home) {
-		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
-			return true
-		}
-	}
-	return false
-}
-
 func expandAuthPath(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()

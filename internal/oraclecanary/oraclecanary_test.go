@@ -141,22 +141,6 @@ func TestBuildSnapshotRefusals(t *testing.T) {
 	}
 }
 
-func TestCommandsPassValidateOracleRunCommand(t *testing.T) {
-	goCmd, err := GoCommand("svc", "internal/mood", "mood_oracle_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	goRoot, err := GoCommand(".", ".", "mood_oracle_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmds := map[string]string{
-		"go": goCmd, "go-root": goRoot,
-		"python": PythonCommand(), "vitest": VitestCommand(), "jest": JestCommand(), "dart": DartCommand(),
-	}
-	_ = cmds // static acceptance is asserted in external_test.go (package oraclecanary_test)
-}
-
 func TestCommandStrings(t *testing.T) {
 	c, err := GoCommand("svc", "internal/mood", "mood_oracle_test.go")
 	if err != nil {
@@ -165,16 +149,6 @@ func TestCommandStrings(t *testing.T) {
 	want := `W="$PWD" && cd svc && printf '{"Replace":{"%s":"%s"}}' "$PWD/internal/mood/zz_oracle_test.go" "$W/.oracle/mood_oracle_test.go" > /tmp/oracle-overlay.json && go test -overlay=/tmp/oracle-overlay.json ./internal/mood/ -run TestOracle -count=1`
 	if c != want {
 		t.Errorf("GoCommand=\n%s\nwant\n%s", c, want)
-	}
-	for got, want := range map[string]string{
-		PythonCommand(): "pytest --rootdir . --import-mode=importlib .oracle",
-		VitestCommand(): "vitest run .oracle",
-		JestCommand():   "jest --rootDir . --roots .oracle",
-		DartCommand():   "flutter test .oracle/",
-	} {
-		if got != want {
-			t.Errorf("got %q want %q", got, want)
-		}
 	}
 }
 

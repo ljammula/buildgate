@@ -228,7 +228,7 @@ func reconcileIsolationMarkersWith(ctx context.Context, dataDir, repoDir, sandbo
 			if r.KeptForResume {
 				// A lost build's worktree holds its round state until a human
 				// decides (resume, rebuild or cancel); only
-				// clearKeptForResume reaps it. Its containers are removed by
+				// release.ClearKeptForResume reaps it. Its containers are removed by
 				// the sandbox reconcilers, not here.
 				log.Printf("isolation recovery: keeping %s for run %s awaiting a resume decision", marker.WorktreePath, marker.RunID)
 				continue

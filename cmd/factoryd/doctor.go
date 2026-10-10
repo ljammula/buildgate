@@ -2526,12 +2526,6 @@ func doctorManifestsAt(dir string) []string {
 	return found
 }
 
-// doctorHasManifest reports whether any of doctorMonorepoManifests exists
-// directly at dir's own root.
-func doctorHasManifest(dir string) bool {
-	return len(doctorManifestsAt(dir)) > 0
-}
-
 // doctorSourceRepoProbeCap bounds how many distinct in-flight source repos
 // one doctor run probes (each probe starts a container).
 const doctorSourceRepoProbeCap = 10

@@ -21,7 +21,7 @@ import (
 // disk (needed only by the corrective-round path, which reads
 // ticket.SpecPath via ticketspec.ParseVerifyCommand) -- returns the
 // request and dataDir.
-// TestTicketRunResultSHA is StubPRReviewTestFixture's own ticket i's
+// TicketRunResultSHA is StubPRReviewTestFixture's own ticket i's
 // ResultSHA -- a package-level helper (not just a literal inline) so
 // every test constructing its own forge.ReviewState{HeadSHA: ...} to
 // exercise a "marked ready"/"approved" path can compute the exact value
@@ -29,16 +29,16 @@ import (
 // via review, GitHub Codex App, PR #154 round 5) requires them to match,
 // without duplicating the literal or risking it drifting from the
 // fixture that sets it.
-func TestTicketRunResultSHA(i int) string {
+func TicketRunResultSHA(i int) string {
 	return fmt.Sprintf("%040d", 900+i)
 }
 
-// TestLastPushedSHA is stubPRReviewDeps' own default forge.pushExistingBranch/
+// LastPushedSHA is stubPRReviewDeps' own default forge.pushExistingBranch/
 // forge.remoteBranchHeadSHA pairing's shared state -- see stubPRReviewDeps'
 // own doc comment. Reset at the start of every stubPRReviewDeps call, so
 // tests never leak state into one another despite this package's
 // non-parallel convention.
-var TestLastPushedSHA map[string]string
+var LastPushedSHA map[string]string
 
 func StubPRReviewTestFixture(t *testing.T, ticketCount int) (*request.Request, string) {
 	t.Helper()
@@ -64,7 +64,7 @@ func StubPRReviewTestFixture(t *testing.T, ticketCount int) (*request.Request, s
 		// (matching the request's own Project field below) so
 		// release.ProjectOf resolves to the same project the recorded
 		// decision just below is saved under.
-		ticketRun := &run.Run{ID: runID, Project: "widget", BaseSHA: fmt.Sprintf("%040d", i), ResultSHA: TestTicketRunResultSHA(i)}
+		ticketRun := &run.Run{ID: runID, Project: "widget", BaseSHA: fmt.Sprintf("%040d", i), ResultSHA: TicketRunResultSHA(i)}
 		if err := ticketRun.Save(dataDir); err != nil {
 			t.Fatalf("save ticket run fixture: %v", err)
 		}
@@ -147,7 +147,7 @@ func StubPRReviewHooks(h PrReviewHooks, t *testing.T, state forge.ReviewState, r
 	*h.ReadReviewState = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 		return state, readErr
 	}
-	// TestLastPushedSHA/forge.remoteBranchHeadSHA/forge.roundResultDescendsFromHead
+	// LastPushedSHA/forge.remoteBranchHeadSHA/forge.roundResultDescendsFromHead
 	// default to a consistent, always-succeeding trio for
 	// pushAcceptedRoundAndReply's own pre-push branch/ancestry guards and
 	// its post-push remote-verification read (see that function's own
@@ -157,9 +157,9 @@ func StubPRReviewHooks(h PrReviewHooks, t *testing.T, state forge.ReviewState, r
 	// round's push. A test that specifically exercises one of these
 	// guards overrides forge.roundResultDescendsFromHead or
 	// forge.remoteBranchHeadSHA directly instead of using this default.
-	TestLastPushedSHA = map[string]string{}
+	LastPushedSHA = map[string]string{}
 	*h.RemoteBranchHeadSHA = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := TestLastPushedSHA[branch]; ok {
+		if sha, ok := LastPushedSHA[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"buildgate/internal/release"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -16,7 +17,7 @@ import (
 func TestHaltDeadOwnerRunKeepsTheWorktreeOfALostTemporalBuild(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "lost-build", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "lost-build", "temporal")
 	seedOwnedRun(t, dataDir, "lost-build", run.StateSliceRunning, deadPID(t), "")
 	seeded, _ := run.Load(dataDir, "lost-build")
 	seeded.RequestID = "req-1"
@@ -43,7 +44,7 @@ func TestHaltDeadOwnerRunKeepsTheWorktreeOfALostTemporalBuild(t *testing.T) {
 func TestHaltDeadOwnerRunDoesNotKeepWithoutATemporalWorktree(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "direct-run", "direct")
+	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "direct-run", "direct")
 	seedOwnedRun(t, dataDir, "direct-run", run.StateSliceRunning, deadPID(t), "")
 	seedOwnedRun(t, dataDir, "no-worktree", run.StateSliceRunning, deadPID(t), "")
 
@@ -62,7 +63,7 @@ func TestHaltDeadOwnerRunDoesNotKeepWithoutATemporalWorktree(t *testing.T) {
 func TestHaltDeadOwnerRunDoesNotKeepASingleTicketRunsWorktree(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "single-ticket", "temporal")
+	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "single-ticket", "temporal")
 	seedOwnedRun(t, dataDir, "single-ticket", run.StateSliceRunning, deadPID(t), "")
 	if halted, err := haltDeadOwnerRun(dataDir, "single-ticket"); err != nil || !halted {
 		t.Fatalf("haltDeadOwnerRun = %v, %v", halted, err)
@@ -74,7 +75,7 @@ func TestHaltDeadOwnerRunDoesNotKeepASingleTicketRunsWorktree(t *testing.T) {
 
 func TestReconcileSkipsAKeptWorktreeUntilCleared(t *testing.T) {
 	dataDir, repoDir, marker, _ := requestdrivertest.KeptRun(t, "kept-run")
-	other := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "reaped-run", "temporal")
+	other := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "reaped-run", "temporal")
 	if err := (&run.Run{ID: other.RunID, State: run.StateHalted, HaltConfirmed: true, ProjectPath: repoDir}).Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -91,24 +92,24 @@ func TestReconcileSkipsAKeptWorktreeUntilCleared(t *testing.T) {
 		t.Errorf("an ordinary confirmed-halted worktree should still be reaped (stat err = %v)", err)
 	}
 
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
-		t.Fatalf("clearKeptForResume: %v", err)
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Fatalf("ClearKeptForResume: %v", err)
 	}
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
-		t.Errorf("worktree still exists after clearKeptForResume (stat err = %v)", err)
+		t.Errorf("worktree still exists after ClearKeptForResume (stat err = %v)", err)
 	}
 	if _, err := os.Stat(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); !os.IsNotExist(err) {
-		t.Errorf("isolation marker still exists after clearKeptForResume (stat err = %v)", err)
+		t.Errorf("isolation marker still exists after ClearKeptForResume (stat err = %v)", err)
 	}
 	if out := requestdrivertest.WorktreeGitOut(t, repoDir, "branch", "--list", marker.Branch); out != "" {
-		t.Errorf("branch %s still exists after clearKeptForResume: %q", marker.Branch, out)
+		t.Errorf("branch %s still exists after ClearKeptForResume: %q", marker.Branch, out)
 	}
 	if r, _ := run.Load(dataDir, "kept-run"); r.KeptForResume {
-		t.Error("KeptForResume still set after clearKeptForResume")
+		t.Error("KeptForResume still set after ClearKeptForResume")
 	}
 	// Idempotent: the flag is already clear.
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
-		t.Errorf("second clearKeptForResume: %v", err)
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Errorf("second ClearKeptForResume: %v", err)
 	}
 }
 
@@ -242,8 +243,8 @@ func TestClearKeptForResumeWithNoMarkerStillRemovesTheWorktree(t *testing.T) {
 	if err := os.Remove(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); err != nil {
 		t.Fatal(err)
 	}
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
-		t.Fatalf("clearKeptForResume: %v", err)
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Fatalf("ClearKeptForResume: %v", err)
 	}
 	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
 		t.Errorf("worktree leaked with no marker (stat err = %v)", err)
@@ -269,7 +270,7 @@ func TestClearKeptForResumeLeavesAWorktreeAnotherRunsMarkerClaims(t *testing.T) 
 	if err := os.Remove(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); err != nil {
 		t.Fatal(err)
 	}
-	if err := clearKeptForResume(dataDir, "kept-run"); err != nil {
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(marker.WorktreePath); err != nil {
@@ -285,7 +286,7 @@ func TestClearKeptForResumeLeavesAWorktreeAnotherRunsMarkerClaims(t *testing.T) 
 func TestALostCorrectiveRoundIsNotKeptAndIsReaped(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	marker := requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "corrective", "temporal")
+	marker := requestdrivertest.IsolationMarker(t, repoDir, dataDir, "corrective", "temporal")
 	seedOwnedRun(t, dataDir, "corrective", run.StateSliceRunning, deadPID(t), "")
 	r, _ := run.Load(dataDir, "corrective")
 	r.RequestID, r.OnBranch = "req-1", "factoryd/pr-branch"

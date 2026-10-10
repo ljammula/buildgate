@@ -14,7 +14,7 @@ import (
 
 // retryMain implements `factoryd retry [-data-dir data] <id>`: put a
 // quarantined, halted or resume_review request back in motion (see
-// retryRequest). Any other request state, or an id no request has, is
+// retryRequestFrom). Any other request state, or an id no request has, is
 // refused with the reason.
 // newRetryFlags builds `factoryd retry`'s FlagSet in isolation from
 // parsing, so USAGE.md's doc-vs-flag drift test
@@ -76,18 +76,13 @@ func retryMain(dp *deps, args []string) error {
 	return err
 }
 
-// retryRequest handles `factoryd retry <request-id>` for a request:
+// retryRequestFrom handles `factoryd retry <request-id>` for a request:
 // if r is quarantined or halted, it delegates to the shared
 // request.Retry -- the same function POST /requests/{id}/retry calls, so neither path can
 // diverge on what counts as a legal retry (see request.Retry's own doc
 // comment for exactly which shapes it recognizes) -- and reports
 // handled=true. Otherwise reports handled=false so retryMain refuses the
-// request with its state.
-func retryRequest(dp *deps, dataDir string, r *request.Request, reason string, now time.Time) (handled bool, err error) {
-	return retryRequestFrom(dp, dataDir, r, reason, false, now)
-}
-
-// retryRequestFrom is retryRequest with `-from scratch`'s choice: a rebuilt
+// request with its state. fromScratch is `-from scratch`'s choice: a rebuilt
 // ticket starts from the base commit whatever the quarantined attempt left.
 func retryRequestFrom(dp *deps, dataDir string, r *request.Request, reason string, fromScratch bool, now time.Time) (handled bool, err error) {
 	// resume_review is handled too, so request.Retry refuses it with the hint

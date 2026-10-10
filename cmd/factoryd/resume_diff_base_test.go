@@ -20,7 +20,7 @@ import (
 func TestALostRunThatContinuedABranchCannotBeResumed(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	requestdrivertest.TestIsolationMarker(t, repoDir, dataDir, "req-1-001-corrective1", "temporal")
+	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "req-1-001-corrective1", "temporal")
 	seedOwnedRun(t, dataDir, "req-1-001-corrective1", run.StateSliceRunning, deadPID(t), "")
 	r, _ := run.Load(dataDir, "req-1-001-corrective1")
 	r.RequestID, r.OnBranch, r.DiffBaseSHA = "req-1", "factoryd/req-1-001", strings.Repeat("1", 40)

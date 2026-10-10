@@ -90,7 +90,7 @@ type WorkerConfig struct {
 	// corrective round entirely.
 	ReviewCorrectiveRounds int
 	// hitlReminderInterval is how often the worker's reminder ticker
-	// (RemindDueRequests) re-reminds a request waiting in spec_review,
+	// (RemindIfDue) re-reminds a request waiting in spec_review,
 	// oracle_review or plan_review. See -hitl-reminder-interval's own
 	// help text.
 	HitlReminderInterval time.Duration

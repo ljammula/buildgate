@@ -143,7 +143,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// request that enters spec_review or plan_review is reminded
 	// immediately (the request driver's own remindRequest call, request_driver.go) and
 	// then again every time this much has elapsed since its last
-	// reminder (the worker's remindDueRequests call, below).
+	// reminder (the worker's RemindIfDue call).
 	f.hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "how often a request waiting in spec_review, oracle_review, plan_review or resume_review is re-reminded; must be at least 1m")
 
 	// advanceOn: the request driver's own ticket-sequencing policy. See
