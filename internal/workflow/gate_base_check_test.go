@@ -588,3 +588,15 @@ func TestBaseRerunTellsTheSameFailureFromADifferentOne(t *testing.T) {
 		})
 	}
 }
+
+// A resumed run that carries the lost run's diff base is rerun on it: the
+// ticket's base is known again.
+func TestBaseRerunOfAResumedRunThatCarriesADiffBaseUsesIt(t *testing.T) {
+	f := newGateBaseFixture(t, 1, 0)
+	f.input.DiffBaseSHA, f.input.BaseSHA = f.base, f.result
+	f.input.ResumeFrom = &ResumeFrom{RunID: "lost-run", WorktreePath: f.repo, Branch: "factoryd/t", BaseSHA: f.result}
+	res := f.runGate("lint", "")
+	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base {
+		t.Errorf("base check = %+v, want passes on the carried diff base %s", bc, f.base)
+	}
+}
