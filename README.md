@@ -108,6 +108,11 @@ and token. Its tools read requests and runs and submit a request; none
 approves, rejects or merges.
 [USAGE.md § Drive Buildgate from an MCP client](USAGE.md#drive-buildgate-from-an-mcp-client).
 
+To approve from another machine, `factoryd gate-token` prints a link that
+opens the console there with its own credential: it reads and does the
+request actions, and cannot override a run.
+[USAGE.md § The console from another machine](USAGE.md#the-console-from-another-machine).
+
 ### Troubleshooting a fresh Mac
 
 | Symptom | Cause | Fix |
