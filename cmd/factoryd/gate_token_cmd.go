@@ -188,24 +188,15 @@ func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 		fmt.Fprintf(stdout, "Gate token disabled: %s\nNo gate token opens a console that is not on this machine. `factoryd gate-token -rotate` writes a new token; `-remove` turns the gate off.\n", path)
 		return nil
 	}
-	file := readGateFile(path, now)
-	if file.unsafe {
-		return fmt.Errorf("%s -- %s", file.reason, file.fix)
+	var file gateFile
+	var err error
+	if *f.rotate {
+		file, err = rotateGateToken(dp, path, *f.ttl, now)
+	} else {
+		file, err = ensureGateToken(dp, path, *f.ttl, now)
 	}
-	if file.token == "" || *f.rotate {
-		if file.present && file.token == "" && !*f.rotate && file.expires.IsZero() {
-			// Disabled or malformed: only an explicit -rotate replaces it.
-			return fmt.Errorf("%s -- %s", file.reason, file.fix)
-		}
-		token, err := generateStartToken()
-		if err != nil {
-			return err
-		}
-		expires := now.Add(*f.ttl).UTC().Truncate(time.Second)
-		if err := writeGateFile(dp, path, token+"\n"+gateExpiresPrefix+expires.Format(time.RFC3339)+"\n"); err != nil {
-			return err
-		}
-		file = gateFile{present: true, token: token, expires: expires}
+	if err != nil {
+		return err
 	}
 	fmt.Fprintf(stdout, "Gate token: %s\n", file.token)
 	fmt.Fprintf(stdout, "Expires:    %s (in %s)\n", file.expires.Local().Format(time.RFC3339), file.expires.Sub(now).Round(time.Minute))
@@ -235,4 +226,42 @@ func doctorGateTokenChecks(configPath string, now time.Time) []doctorCheck {
 		Err:      fmt.Errorf("%s: no gate token opens a console that is not on this machine", file.reason),
 		Fix:      file.fix + "; `factoryd gate-token -remove` turns the gate off",
 	}}
+}
+
+// ensureGateToken returns the usable gate token at path, writing one when
+// none exists or the one there has expired. A file it cannot trust, a
+// disabled gate and a malformed file are refused: only -rotate replaces the
+// last two.
+func ensureGateToken(dp *deps, path string, ttl time.Duration, now time.Time) (gateFile, error) {
+	file := readGateFile(path, now)
+	switch {
+	case file.unsafe:
+		return gateFile{}, fmt.Errorf("%s -- %s", file.reason, file.fix)
+	case file.token != "":
+		return file, nil
+	case file.present && file.expires.IsZero():
+		return gateFile{}, fmt.Errorf("%s -- %s", file.reason, file.fix)
+	}
+	return writeGateToken(dp, path, ttl, now)
+}
+
+// rotateGateToken replaces whatever gate token path holds, unless the file
+// there is one this command cannot trust.
+func rotateGateToken(dp *deps, path string, ttl time.Duration, now time.Time) (gateFile, error) {
+	if file := readGateFile(path, now); file.unsafe {
+		return gateFile{}, fmt.Errorf("%s -- %s", file.reason, file.fix)
+	}
+	return writeGateToken(dp, path, ttl, now)
+}
+
+func writeGateToken(dp *deps, path string, ttl time.Duration, now time.Time) (gateFile, error) {
+	token, err := generateStartToken()
+	if err != nil {
+		return gateFile{}, err
+	}
+	expires := now.Add(ttl).UTC().Truncate(time.Second)
+	if err := writeGateFile(dp, path, token+"\n"+gateExpiresPrefix+expires.Format(time.RFC3339)+"\n"); err != nil {
+		return gateFile{}, err
+	}
+	return gateFile{present: true, token: token, expires: expires}, nil
 }

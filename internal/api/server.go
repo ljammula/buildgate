@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -446,6 +447,17 @@ func WithAllowedHosts(hosts []string) Option {
 	}
 }
 
+// WithAllowedHostSource adds allowed hosts read from source on every request
+// whose Host is not otherwise accepted, so a host can be added or removed
+// while the server runs (`factoryd remote-console` writes the file the
+// source reads). They are allowed hosts in every respect WithAllowedHosts
+// describes: never local, never a reason to relax a write.
+func WithAllowedHostSource(source func() []string) Option {
+	return func(s *Server) {
+		s.allowedHostSource = source
+	}
+}
+
 // WithTemporalUIURL sets GET /console-config.json's own temporal_ui_url:
 // the base URL `factoryd serve -temporal-ui-url` names, which the
 // console joins with a run's own TemporalWorkflowID to build an "Open in
@@ -557,6 +569,8 @@ type Server struct {
 	console       http.Handler
 	overrideToken string
 	startToken    string
+	// allowedHostSource is WithAllowedHostSource's source; nil without one.
+	allowedHostSource func() []string
 	// gateToken is WithGateToken's source; nil while the gate is off.
 	gateToken func() GateToken
 	readToken string
@@ -1095,7 +1109,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// function's own doc comment.
 	// A request a proxy passed on must name an -allowed-host: its Host is the
 	// caller's own text, and "127.0.0.1:<port>" there is not this machine.
-	if s.loopback && (!s.hostAllowed(r) || (forwarded(r) && !s.allowedHosts[r.Host])) {
+	if s.loopback && (!s.hostAllowed(r) || (forwarded(r) && !s.allowedHost(r.Host))) {
 		writeError(w, http.StatusForbidden, "Host header does not match this server's own loopback address (127.0.0.1, localhost, or [::1], with this server's own port) or a configured -allowed-host -- refused to defend against DNS rebinding. A request a reverse proxy passed on must keep its Host and name an -allowed-host")
 		return
 	}
@@ -4484,7 +4498,23 @@ func (s *Server) hostMatchesLoopback(r *http.Request) bool {
 // host must never be treated as loopback for that purpose (added by an
 // adversarial review, 2026-09-24).
 func (s *Server) hostAllowed(r *http.Request) bool {
-	return s.hostMatchesLoopback(r) || s.allowedHosts[r.Host]
+	return s.hostMatchesLoopback(r) || s.allowedHost(r.Host)
+}
+
+// allowedHost reports whether host is one the operator named: an
+// -allowed-host value (WithAllowedHosts), or one WithAllowedHostSource's
+// source reports for this request.
+func (s *Server) allowedHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if s.allowedHosts[host] {
+		return true
+	}
+	if s.allowedHostSource == nil {
+		return false
+	}
+	return slices.Contains(s.allowedHostSource(), host)
 }
 
 // loopbackSameOriginWrite reports whether r qualifies for the

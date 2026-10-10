@@ -531,3 +531,50 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 		t.Errorf("a run override claiming the suffix = %d, want 400", got)
 	}
 }
+
+// TestAllowedHostSourceIsReadPerRequest: a host the source reports is an
+// allowed host from the next request, and stops being one when the source
+// stops reporting it, with no restart. It is never local: its reads follow
+// the gate and its writes need a token.
+func TestAllowedHostSourceIsReadPerRequest(t *testing.T) {
+	var hosts atomic.Pointer[[]string]
+	hosts.Store(&[]string{})
+	gate := gateState(GateToken{})
+	server := NewServer(t.TempDir(), WithListenAddr(gateTestAddr),
+		WithAllowedHostSource(func() []string { return *hosts.Load() }),
+		WithGateToken(func() GateToken { return *gate.Load() }))
+	read := func(token string) int {
+		return gateStatus(server, gateRequest(t, http.MethodGet, "/requests", token, false))
+	}
+	write := func(token string) int {
+		return gateStatus(server, gateRequest(t, http.MethodPost, "/requests/none/approve", token, false))
+	}
+	if got := read(""); got != http.StatusForbidden {
+		t.Fatalf("before the source names the host: read = %d, want 403 (Host rule)", got)
+	}
+	hosts.Store(&[]string{gateTestHost})
+	if got := read(""); got != http.StatusOK {
+		t.Errorf("once the source names the host, gate off: read = %d, want 200", got)
+	}
+	if got := write(""); got != http.StatusForbidden {
+		t.Errorf("write under a sourced host with no token = %d, want 403", got)
+	}
+	gate.Store(&GateToken{On: true, Token: gateTestToken})
+	if got := read(""); got != http.StatusForbidden {
+		t.Errorf("gate on, no token: read = %d, want 403", got)
+	}
+	if got := write(gateTestToken); got != http.StatusNotFound {
+		t.Errorf("gate on, the token: write = %d, want it let through (404 for the missing id)", got)
+	}
+	hosts.Store(&[]string{})
+	if got := read(gateTestToken); got != http.StatusForbidden {
+		t.Errorf("after the source drops the host: read with the token = %d, want 403 (Host rule)", got)
+	}
+	// An empty Host is never allowed, whatever the source says.
+	hosts.Store(&[]string{""})
+	req := gateRequest(t, http.MethodGet, "/requests", "", false)
+	req.Host = ""
+	if got := gateStatus(server, req); got != http.StatusForbidden {
+		t.Errorf("empty Host with a source reporting \"\": read = %d, want 403", got)
+	}
+}

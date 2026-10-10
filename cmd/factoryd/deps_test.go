@@ -128,6 +128,7 @@ type fakeHost struct {
 	rootTreeAtCommitFn   func(ctx context.Context, repoDir string, commit string) ([]gitTreeEntry, error)
 	runUpgradeCommandFn  func(c upgradeCmd) ([]byte, error)
 	serveHealthzOKFn     func(addr string) bool
+	tailscaleFn          func(ctx context.Context, args ...string) ([]byte, error)
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
 	shippedRootsPEMFn    func(ctx context.Context) ([]byte, error)
 	sleepFn              func(d time.Duration)
@@ -159,6 +160,9 @@ func (f *fakeHost) pidLooksLikeWorker(pid int) bool                { return f.pi
 func (f *fakeHost) processUID(pid int) (int, bool)                 { return f.processUIDFn(pid) }
 func (f *fakeHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) { return f.runUpgradeCommandFn(c) }
 func (f *fakeHost) serveHealthzOK(addr string) bool                { return f.serveHealthzOKFn(addr) }
+func (f *fakeHost) tailscale(ctx context.Context, args ...string) ([]byte, error) {
+	return f.tailscaleFn(ctx, args...)
+}
 func (f *fakeHost) serveVerifiedOurs(dataDir string, addr string) (int, bool) {
 	return f.serveVerifiedOursFn(dataDir, addr)
 }
@@ -307,7 +311,11 @@ func newTestDeps(t testing.TB) *deps {
 		processUIDFn:         realHost.processUID,
 		runUpgradeCommandFn:  realHost.runUpgradeCommand,
 		serveHealthzOKFn:     realHost.serveHealthzOK,
-		serveVerifiedOursFn:  realHost.serveVerifiedOurs,
+		// No test touches the developer's own tailnet.
+		tailscaleFn: func(context.Context, ...string) ([]byte, error) {
+			return nil, errors.New("test host: no tailscale")
+		},
+		serveVerifiedOursFn: realHost.serveVerifiedOurs,
 		// No test reaches a public host or the machine's keychain: the
 		// TLS-interception check is skipped unless a test sets these.
 		shippedRootsPEMFn: func(context.Context) ([]byte, error) {

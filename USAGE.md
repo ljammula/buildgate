@@ -436,39 +436,42 @@ workspaces:
 ```
 
 From another machine, keep `serve` on loopback and put a tunnel in front
-of it. With Tailscale:
+of it. With Tailscale, one command does it:
 
 ```sh
-tailscale serve status                                     # / on port 443 already taken? use the table below
-tailscale serve --bg 8090                                  # HTTPS on the tailnet -> 127.0.0.1:8090
-factoryd stop
-factoryd serve -allowed-host <machine>.<tailnet>.ts.net    # accept that Host header
+factoryd remote-console        # listener, accepted Host and a gate token for the console
 ```
 
-`8090` is the port of this profile's `serve` (`factoryd use` lists it).
-`factoryd stop` also stops the worker; the next `submit` or `factoryd
-worker` starts it again. The client then uses
-`https://<machine>.<tailnet>.ts.net/mcp` with the same token. `-allowed-host` also opens the console's read routes to that
-name, so limit who can reach the node with a tailnet ACL.
-
-| Case | Do |
-|---|---|
-| `tailscale serve status` already shows `/` on port 443 | `tailscale serve --bg 8090` would replace it. Use another HTTPS port: `tailscale serve --bg --https=8443 http://127.0.0.1:8090` |
-| The tunnel is on a port other than 443 | The Host header carries the port, so name it: `-allowed-host <machine>.<tailnet>.ts.net:8443`. The bare name is refused with 403 |
-| Approve or reject from the other machine | On the host, `factoryd gate-token` prints a token. Open the console under its `-allowed-host` address and paste the token into the field it shows. See [The console from another machine](#the-console-from-another-machine) |
+It prints the console's address, `https://<machine>.<tailnet>.ts.net[:port]/`.
+The MCP client uses that address with `/mcp` and the MCP token.
+[The console from another machine](#the-console-from-another-machine) has what
+the command does and how to do the same by hand behind another reverse proxy.
 
 ### The console from another machine
 
 ```text
 host                                   other machine
 ----                                   -------------
-factoryd serve -allowed-host <name>
-<reverse proxy> -> 127.0.0.1:<port>
-factoryd gate-token  -- prints -->     the token: open https://<name>/ and paste it
+factoryd remote-console  -- prints --> https://<name>[:port]/ and the gate token
+                                       open the address, paste the token
                                        (once per browser tab)
                                        console reads, approves, rejects, edits, submits
 factoryd gate-token -rotate            the old token stops working at once
+factoryd remote-console -off           the address stops answering
 ```
+
+`factoryd remote-console` needs Tailscale on the host. It does three things,
+and `-off` undoes them:
+
+| Step | What it does | By hand, behind another reverse proxy |
+|---|---|---|
+| Listener | `tailscale serve` forwards an HTTPS port of the host's tailnet name to this profile's `serve`. It reuses the listener already forwarding there, else takes the first free of 443, 8443, 8444 and up (`-https-port` to choose), and never a port that serves something else. It starts `serve` when none runs | Forward HTTPS to `serve`'s loopback address. The proxy must keep the `Host` header and add `X-Forwarded-For` |
+| Accepted `Host` | Records the address in `<config name>.remote-console` beside the session config. `serve` reads that file on each request, so nothing restarts and a restart keeps it | `factoryd serve -allowed-host <name[:port]>`: the port is part of the name unless it is 443 |
+| Gate token | Writes one if none is usable and prints it | `factoryd gate-token` |
+
+Run it again at any time: it prints the same address and token, and points the
+listener at `serve` if that moved to another port (`factoryd doctor` warns
+`remote console` when it has).
 
 | Topic | What happens |
 |---|---|
@@ -480,7 +483,7 @@ factoryd gate-token -rotate            the old token stops working at once
 | Handing the token over | Paste it into the "Gate token" field the console shows when it holds none: the token is then never part of a URL. `https://<name>/#gate=<token>` does the same in one step, and that link can stay in the browser's history: treat it as a password |
 | In the browser | Kept for the tab only, never in the address bar. A new tab asks for the token again |
 | Who the history names | The name you give the console, followed by `(gate token)` |
-| Stop it | `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the `-allowed-host` name need no token, and the console there cannot write) |
+| Stop it | `factoryd remote-console -off` (listener, accepted `Host` and token all removed). The token alone: `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the remote address need no token, and the console there cannot write) |
 | A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing: behind one, run `serve` with `-override-token` (for writes) and `FACTORYD_API_READ_TOKEN` (for reads) |
 
 ## `.factory.yml` — commit per-repo defaults once
@@ -836,7 +839,7 @@ every request verb takes `-config`):
 | Cap a request's (or a month's) total spend | Session-config `request_token_budget`/`request_cost_budget_micro_usd` (one request's drafting + every ticket run + corrective/PR-review round) and `monthly_token_budget`/`monthly_cost_budget_micro_usd` (all requests in the data dir, current UTC calendar month) — 0/absent means unlimited. Unlike `meter_token_ceiling`/`meter_cost_ceiling_micro_usd` (a per-job ceiling the relay itself enforces mid-job), these are checked host-side before a job is launched at all; reaching one quarantines the request (`budget_exhausted:request`/`budget_exhausted:monthly`) naming the key, the spend, and the limit. `factoryd cost` prints the configured budgets and month-to-date spend once any are set |
 | Fail closed all future releases for a project | `factoryd kill-switch -project <p> -state engaged -by <you> -reason "..."` — CLI-only, works without `serve` |
 | Notification when a request waits with no `worker` alive | `factoryd status` and `factoryd serve` both check the heartbeat file each poll; the console board shows the same banner. Nothing notifies if neither is running |
-| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values. Reads need no token there unless a gate token exists; writes need the gate token (`factoryd gate-token`, [the console from another machine](#the-console-from-another-machine)) or `-override-token`; an enabled MCP endpoint can submit a request there with its own token. A request a reverse proxy passed on must name an `-allowed-host`, whatever its `Host` says |
+| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `factoryd remote-console` sets it up behind Tailscale ([the console from another machine](#the-console-from-another-machine)). By hand, `-allowed-host <host[:port]>` adds exact extra values. Reads need no token there unless a gate token exists; writes need the gate token (`factoryd gate-token`, [the console from another machine](#the-console-from-another-machine)) or `-override-token`; an enabled MCP endpoint can submit a request there with its own token. A request a reverse proxy passed on must name an `-allowed-host`, whatever its `Host` says |
 | Console link printed by `submit` / `factoryd console` | Built from `<data-dir>/console-address`, which a live `factoryd serve` writes for its data dir. `submit` and `factoryd console` start that `serve` when it is missing; with `FACTORYD_AUTOSTART=0` (or a `serve` that cannot start) `submit` prints how to get a link instead (or set `-console-base-url` / `FACTORYD_CONSOLE_URL`) |
 | Drive Buildgate from Copilot / Claude Code / Codex | `factoryd install-skill`, then ask in plain words: see "Drive Buildgate from a coding agent" above. `factoryd upgrade` refreshes the skill |
 | Drive Buildgate from an MCP client (Claude Code, Hermes, any other) | `factoryd mcp`, then add the printed endpoint and token to the client: see "Drive Buildgate from an MCP client" above |

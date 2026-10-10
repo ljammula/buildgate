@@ -126,6 +126,8 @@ type hostBoundary interface {
 	shippedRootsPEM(ctx context.Context) ([]byte, error)
 	sleep(d time.Duration)
 	spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
+	// tailscale runs the operator's tailscale CLI and returns its output.
+	tailscale(ctx context.Context, args ...string) ([]byte, error)
 	spawnWorker(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
 	tlsRoot(ctx context.Context, host string) (*x509.Certificate, error)
 }
