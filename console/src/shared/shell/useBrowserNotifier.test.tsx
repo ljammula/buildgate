@@ -10,8 +10,9 @@ import { AppShell } from "@/shared/shell/AppShell";
 import { requestJson } from "@/test/requestFixtures";
 import { type FakeRoute, json, renderApp, sseResponse } from "@/test/render";
 
+// `first` was sent before any test's tab started looking; `second` after.
 const first = "2026-10-10T09:00:00Z";
-const second = "2026-10-10T09:30:00Z";
+const second = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 interface MadeNotification {
   title: string;

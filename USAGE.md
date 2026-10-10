@@ -909,7 +909,7 @@ carries a token.
 | is quarantined | Quarantined: needs you | Once, with the reason. A quarantined build the factory follows with a corrective round of its own sends nothing |
 | has a pull request ready to merge | Pull request ready to merge | Once per pull request head |
 | has a pull request the factory marked ready that is not yet ready to merge | Pull request ready for your review | Once per head, and never after "ready to merge" for that head |
-| has a pull request still not ready to merge ten minutes after it was first checked (failing checks, a thread that blocks it, a denied release decision) | Pull request not ready: needs you | Once per head, with what is missing. A pull request stacked on another sends nothing: the one under it does |
+| has a pull request still not ready to merge ten minutes after it was first checked (failing checks, a thread that blocks it, a denied release decision) | Pull request not ready: needs you | Once per head, with what is missing. Checks that run longer than ten minutes send it too. A pull request stacked on one that has not merged sends nothing: the one under it does |
 | had a PR-review round that was not accepted | Review round quarantined (or halted): pull request needs you | Once per round |
 
 A run started on its own (`factoryd run`, no request) notifies when it halts,
@@ -942,8 +942,9 @@ The link is the page of the `serve` of the request's own data dir. When none
 answers, the worker starts one at the start of a request's next step, at most
 once every five minutes (not under `FACTORYD_AUTOSTART=0`). A notification
 sent while none answers has no link, and its banner says to run
-`factoryd console`. `FACTORYD_CONSOLE_URL` overrides the address; a value
-with user information, a query or a fragment is ignored.
+`factoryd console`. `FACTORYD_CONSOLE_URL` overrides the address when it is
+an `http://` or `https://` address with no user information, query or
+fragment; any other value is treated as unset.
 
 `make install` installs `terminal-notifier` with Homebrew when it is missing.
 macOS shows nothing from it until you allow it:

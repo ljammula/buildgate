@@ -55,16 +55,17 @@ var Listening = func(addr string) bool {
 	return true
 }
 
-// BaseURL resolves the console base URL: flagValue, then EnvVar, then --
+// BaseURL resolves the console base URL: flagValue, then EnvVar (each only
+// when it is an address and nothing more, addressOnly), then --
 // only when the console is embedded in this binary -- the live address a
 // serve for dataDir recorded (ServeAddress). "" means no console to link
 // to.
 func BaseURL(flagValue, dataDir string) string {
-	if flagValue != "" {
-		return addressOnly(flagValue)
+	if base := addressOnly(flagValue); base != "" {
+		return base
 	}
-	if env := os.Getenv(EnvVar); env != "" {
-		return addressOnly(env)
+	if env := EnvBase(); env != "" {
+		return env
 	}
 	if embedded() {
 		if addr := ServeAddress(dataDir); addr != "" {
@@ -74,13 +75,20 @@ func BaseURL(flagValue, dataDir string) string {
 	return ""
 }
 
-// addressOnly returns base when it is a console address and nothing more,
-// else "": a base with user information, a query or a fragment would put
-// whatever those hold (a token, in the worst case) into every link built on
-// it, and every link is handed to another program.
+// EnvBase is EnvVar's value when it is usable as a console address, else "":
+// a value that is not is treated as unset, by every caller.
+func EnvBase() string {
+	return addressOnly(os.Getenv(EnvVar))
+}
+
+// addressOnly returns base when it is an http or https console address and
+// nothing more, else "": a base with user information, a query or a fragment
+// would put whatever those hold (a token, in the worst case) into every link
+// built on it, and every link is handed to another program. A path is kept:
+// a console behind a reverse proxy can live under one.
 func addressOnly(base string) string {
 	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || strings.ContainsAny(base, "?#") {
 		return ""
 	}
 	return base

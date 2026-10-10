@@ -150,8 +150,8 @@ const pullRequestDraftGrace = 10 * time.Minute
 //     it ready (what is missing will not come by itself), or it has stayed
 //     not ready for pullRequestDraftGrace on this head.
 //
-// A pull request stacked on another waits for that one, which has its own
-// notification. For one head it sends at most one of each, and never
+// A pull request stacked on one that has not merged waits for that one,
+// which has its own notification. For one head it sends at most one of each, and never
 // "review" after "merge": a thread the operator opens on a pull request
 // they were told to merge is not news to them. It records what it sent, and
 // since when the head has not been ready, on ticket and r; the caller saves
@@ -171,7 +171,10 @@ func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *reques
 			Ask:    "Pull request ready to merge",
 			Detail: fmt.Sprintf("%s: checks pass, no review thread is open, and the last code review of the whole diff is clean. The factory never merges.", ticket.PRURL),
 		}
-	case ticket.PRState == "stacked":
+	case ticket.PRState == "stacked" && !ticketBelowMerged(r, ticket):
+		// It waits for the pull request under it, which has its own
+		// notification; the grace starts when that one has merged.
+		ticket.PRNotReadySince = ""
 		return
 	case ticket.PRState == "ready" || notReadyFor(ticket, mr.HeadSHA, now) >= pullRequestDraftGrace:
 		ask = pullRequestAskReview
@@ -196,6 +199,18 @@ func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *reques
 	n := prepareRequestNotification(dataDir, r, notice, now)
 	ticket.NotifiedPR = sent
 	notify.DispatchExternal(dataDir, n)
+}
+
+// ticketBelowMerged reports whether the pull request of the ticket before
+// ticket has merged: from then on nothing but ticket's own state keeps a
+// stacked pull request from being ready.
+func ticketBelowMerged(r *request.Request, ticket *request.Ticket) bool {
+	for i := range r.Tickets {
+		if r.Tickets[i].Index == ticket.Index-1 {
+			return r.Tickets[i].PRState == "merged"
+		}
+	}
+	return false
 }
 
 // notReadyFor is how long ticket's pull request has been checked not ready

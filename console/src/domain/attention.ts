@@ -22,12 +22,13 @@ function isLater(candidate: string, recorded: string): boolean {
 
 /**
  * Decides whether `request` raises a notification, and returns the map to
- * keep. `watchingSince` is the time (ms) from which this tab has been
- * looking: a request seen for the first time raises only when it was notified
- * after that (one submitted and notified between two looks, or notified
- * while the page reloaded); what was announced before this tab looked is not
- * news. An empty time raises nothing and keeps the recorded one, so a server
- * that clears it and sets it later is still compared against the old value.
+ * keep. `watchingSince` is the time (ms) from which this tab answers for the
+ * notifications: nothing sent before it raises, whether the request is seen
+ * for the first time or not. That is what keeps a tab from replaying what
+ * was announced before it looked, and a tab that takes over as the notifier
+ * from replaying what the one before it raised. An empty time raises nothing
+ * and keeps the recorded one, so a server that clears it and sets it later
+ * is still compared against the old value.
  */
 export function attend(
   seen: SeenNotifications,
@@ -35,19 +36,22 @@ export function attend(
   watchingSince: number,
 ): Attention {
   const recorded = seen.get(request.id);
+  const at = Date.parse(request.lastNotifiedAt);
+  const sinceWatching = !Number.isNaN(at) && at > watchingSince;
   if (recorded === undefined) {
-    const at = Date.parse(request.lastNotifiedAt);
     return {
       seen: new Map(seen).set(request.id, request.lastNotifiedAt),
-      raise: !Number.isNaN(at) && at > watchingSince,
+      raise: sinceWatching,
     };
   }
   if (request.lastNotifiedAt === "") return { seen, raise: false };
   if (recorded !== "" && !isLater(request.lastNotifiedAt, recorded)) {
     return { seen, raise: false };
   }
-  // A request seen with no notification and now having one is news too.
-  return { seen: new Map(seen).set(request.id, request.lastNotifiedAt), raise: true };
+  return {
+    seen: new Map(seen).set(request.id, request.lastNotifiedAt),
+    raise: sinceWatching,
+  };
 }
 
 export interface NotificationContent {

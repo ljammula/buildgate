@@ -18,6 +18,9 @@ import {
 } from "@/platform/browserNotifications";
 import { requestPath } from "@/routes/paths";
 
+/** How long the server holds the host's banner back after a notifying tab's stream ends. */
+const takeoverSlackMs = 20_000;
+
 export interface BrowserNotifier {
   readonly support: NotificationSupport;
   /** The operator turned notifications on in this browser. */
@@ -60,12 +63,20 @@ export function useBrowserNotifier(): BrowserNotifier {
   const navigate = useNavigate();
   const { data } = useRequests(needsYouPollMs);
   const seen = useRef<SeenNotifications>(new Map());
-  const [since] = useState(() => watchingSince(Date.now()));
+  // From when this tab answers for the notifications: its last look (kept
+  // across a reload), or, for a tab that takes over as the notifier, a
+  // little before it did: the host's banner stays held back that long after
+  // the tab before it went away.
+  const [firstLook] = useState(() => watchingSince(Date.now()));
+  const since = useRef(firstLook);
+  useEffect(() => {
+    if (active) since.current = Math.max(since.current, Date.now() - takeoverSlackMs);
+  }, [active]);
   // The list the shell polls and the notifier stream's frames both pass
   // through here; `seen` is what keeps one ask from being raised twice.
   const consider = useCallback(
     (request: RequestSummary) => {
-      const attention = attend(seen.current, request, since);
+      const attention = attend(seen.current, request, since.current);
       seen.current = attention.seen;
       recordWatching(Date.now());
       if (attention.raise && active) {
@@ -74,7 +85,7 @@ export function useBrowserNotifier(): BrowserNotifier {
         });
       }
     },
-    [active, navigate, since],
+    [active, navigate],
   );
   useEffect(() => {
     data?.forEach(consider);

@@ -11,11 +11,13 @@ function request(over: Record<string, unknown> = {}): RequestSummary {
 
 const t1 = "2026-10-10T09:00:00.100000000Z";
 const t3 = "2026-10-10T09:05:00Z";
-// A tab that started looking after every time used below.
-const later = Date.parse("2026-10-10T12:00:00Z");
+// A tab that started looking before every time used below.
+const later = Date.parse("2026-10-10T08:00:00Z");
+// One that started looking after them.
+const afterAll = Date.parse("2026-10-10T12:00:00Z");
 
 test("the first sight of a request records its time and raises nothing", () => {
-  const out = attend(new Map(), request({ last_notified_at: t1 }), later);
+  const out = attend(new Map(), request({ last_notified_at: t1 }), afterAll);
   expect(out.raise).toBe(false);
   expect(out.seen.get("req-1")).toBe(t1);
 });
@@ -109,4 +111,10 @@ test("a request first seen with a notification sent after this tab started looki
 test("a request first seen with no time, or one that does not parse, raises nothing", () => {
   expect(attend(new Map(), request(), 0).raise).toBe(false);
   expect(attend(new Map(), request({ last_notified_at: "yesterday" }), 0).raise).toBe(false);
+});
+
+test("a later notification sent before this tab answered for them raises nothing, and is recorded", () => {
+  const out = attend(new Map([["req-1", t1]]), request({ last_notified_at: t3 }), afterAll);
+  expect(out.raise).toBe(false);
+  expect(out.seen.get("req-1")).toBe(t3);
 });

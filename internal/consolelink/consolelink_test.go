@@ -173,23 +173,42 @@ func TestTabNotifierIsPresentOnlyWhileFresh(t *testing.T) {
 	}
 }
 
-func TestBaseURLRefusesABaseThatCarriesMoreThanAnAddress(t *testing.T) {
+func TestBaseURLTreatsABaseThatCarriesMoreThanAnAddressAsUnset(t *testing.T) {
+	orig := Listening
+	t.Cleanup(func() { Listening = orig })
+	Listening = func(string) bool { return true }
+	origEmbedded := embedded
+	t.Cleanup(func() { embedded = origEmbedded })
+	embedded = func() bool { return true }
+	dataDir := t.TempDir()
+	remove, err := RecordServeAddress(dataDir, "127.0.0.1:18090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
 	for _, base := range []string{
 		"https://console.example/#gate=secret",
 		"https://console.example/?t=secret",
+		"https://console.example/?",
+		"https://console.example/#",
 		"https://user:secret@console.example",
-		"console.example",
+		"file://console.example/",
+		"console.example:8090",
 	} {
 		t.Setenv(EnvVar, base)
-		if got := BaseURL("", t.TempDir()); got != "" {
-			t.Errorf("BaseURL with %s=%q = %q, want none", EnvVar, base, got)
+		if got := EnvBase(); got != "" {
+			t.Errorf("EnvBase with %q = %q, want none", base, got)
 		}
-		if got := BaseURL(base, t.TempDir()); got != "" {
-			t.Errorf("BaseURL(%q) = %q, want none", base, got)
+		if got := BaseURL("", dataDir); got != "http://127.0.0.1:18090" {
+			t.Errorf("BaseURL with %s=%q = %q, want the recorded serve", EnvVar, base, got)
+		}
+		t.Setenv(EnvVar, "")
+		if got := BaseURL(base, dataDir); got != "http://127.0.0.1:18090" {
+			t.Errorf("BaseURL(%q) = %q, want the recorded serve", base, got)
 		}
 	}
 	t.Setenv(EnvVar, "https://console.example/base/")
-	if got := RequestURL(BaseURL("", t.TempDir()), "req-1"); got != "https://console.example/base/requests/req-1" {
+	if got := RequestURL(BaseURL("", dataDir), "req-1"); got != "https://console.example/base/requests/req-1" {
 		t.Errorf("a base with a path: %q", got)
 	}
 }

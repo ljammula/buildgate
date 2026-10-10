@@ -142,8 +142,19 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 		return nil
 	}
 
+	// A terminal-notifier that used up the caller's time still leaves this
+	// banner a moment of its own.
+	if ctx.Err() != nil {
+		fresh, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		ctx = fresh
+	}
+
 	// This banner has no click action: a request's says where to go.
 	if n.Ask != "" {
+		if message != "" && !strings.ContainsRune(".!?", rune(message[len(message)-1])) {
+			message += "."
+		}
 		message += " Open the console to act on it (`factoryd console`)."
 	}
 	// Split across subtitle and body rather than one flattened line:
@@ -154,10 +165,6 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 	_ = exec.CommandContext(ctx, path, "-e", script).Run()
 	return nil
 }
-
-// clickableTimeout bounds terminal-notifier, so that one that hangs leaves
-// the osascript banner time to be shown within the caller's own deadline.
-const clickableTimeout = 3 * time.Second
 
 // showClickable shows n through terminal-notifier with target as what its
 // click opens, and returns terminal-notifier's output and error: not on
@@ -186,9 +193,11 @@ func showClickable(ctx context.Context, n Notification, target string) ([]byte, 
 	if icon := desktopIconPath(); icon != "" {
 		args = append(args, "-contentImage", icon)
 	}
-	ctx, cancel := context.WithTimeout(ctx, clickableTimeout)
-	defer cancel()
-	return exec.CommandContext(ctx, clickPath, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, clickPath, args...)
+	// A child that outlives a killed terminal-notifier must not hold this
+	// call open through the output pipe.
+	cmd.WaitDelay = time.Second
+	return cmd.CombinedOutput()
 }
 
 // ShowClickableTest sends one notification through terminal-notifier alone,

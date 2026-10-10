@@ -228,10 +228,43 @@ func TestADraftPullRequestThatStaysNotReadyNotifiesOnceAfterTheGrace(t *testing.
 	if len(got) != 1 || got[0].Ask != "Pull request not ready: needs you" || !strings.Contains(got[0].Reason, "its checks are pending or failing") {
 		t.Fatalf("after the grace: %+v", got)
 	}
-	// A new head starts the grace again; a stacked pull request never notifies.
+	// A new head starts the grace again.
 	poll(start.Add(3*pullRequestDraftGrace), "draft", "bbb")
-	poll(start.Add(9*pullRequestDraftGrace), "stacked", "ccc")
 	if got := loggedNotifications(t, dataDir); len(got) != 1 {
-		t.Fatalf("a new head, then a stacked pull request, notified at once: %+v", got)
+		t.Fatalf("a new head notified at once: %+v", got)
+	}
+}
+
+// A stacked pull request waits for the one under it and says nothing; once
+// that one has merged, a pull request still marked stacked is on its own and
+// must not wait in silence.
+func TestAStackedPullRequestNotifiesOnlyOnceTheOneUnderItHasMerged(t *testing.T) {
+	dataDir := t.TempDir()
+	r := notifiedRequest(t, dataDir, request.StatePRReview)
+	r.TicketCount = 2
+	r.Tickets = []request.Ticket{
+		{Index: 1, PRURL: "https://github.com/acme/widgets/pull/7", PRState: "ready"},
+		{Index: 2, PRURL: "https://github.com/acme/widgets/pull/8", PRState: "stacked"},
+	}
+	stacked := &r.Tickets[1]
+	start := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
+	poll := func(at time.Time) {
+		stacked.MergeReadiness = &request.MergeReadiness{HeadSHA: "aaa", Blockers: []string{"it is stacked on an earlier ticket's pull request, which must merge first"}}
+		notifyPullRequestWaiting(dataDir, r, stacked, at)
+	}
+	poll(start)
+	poll(start.Add(5 * pullRequestDraftGrace))
+	if got := loggedNotifications(t, dataDir); len(got) != 0 {
+		t.Fatalf("a pull request stacked on an unmerged one notified: %+v", got)
+	}
+	r.Tickets[0].PRState = "merged"
+	poll(start.Add(6 * pullRequestDraftGrace))
+	if got := loggedNotifications(t, dataDir); len(got) != 0 {
+		t.Fatalf("notified the moment the one under it merged, before the grace: %+v", got)
+	}
+	poll(start.Add(7 * pullRequestDraftGrace))
+	got := loggedNotifications(t, dataDir)
+	if len(got) != 1 || got[0].Ask != "Pull request not ready: needs you" || !strings.HasPrefix(got[0].Reason, "Ticket 2/2. ") {
+		t.Fatalf("after the grace: %+v", got)
 	}
 }

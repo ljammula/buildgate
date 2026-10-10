@@ -85,7 +85,7 @@ func TestBannerFallsBackToOsascriptWhenTerminalNotifierIsRefused(t *testing.T) {
 	for _, want := range []string{
 		`with title "Spec ready for your review"`,
 		`subtitle "checkouts: Add a coupon field"`,
-		"Open the console to act on it",
+		"request changes. Open the console to act on it",
 	} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("osascript script %q does not contain %q", b, want)
@@ -159,5 +159,22 @@ func TestTerminalNotifierTextCannotBeReadAsAnOption(t *testing.T) {
 		if got := terminalNotifierText(in); got != want {
 			t.Errorf("terminalNotifierText(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestTheUnclickableBannerEndsTheReasonBeforeSayingWhereToGo(t *testing.T) {
+	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
+	withDesktopOS(t, "darwin")
+	withDesktopClickNotifierLookPath(t, func() (string, error) { return "", errNotFoundForTest })
+	osascript, argsFile := recordingNotifier(t, "0")
+	withDesktopNotifierLookPath(t, func() (string, error) { return osascript, nil })
+	n := requestNotification()
+	n.Reason = "full_suite_verify failed: exit 1"
+	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(argsFile)
+	if !strings.Contains(string(b), "exit 1. Open the console to act on it") {
+		t.Errorf("osascript script %q", b)
 	}
 }
