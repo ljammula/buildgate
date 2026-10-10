@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const jsonBody = `{"max_tokens":10}` // estimate: 17 input + 10 output tokens
@@ -571,6 +572,39 @@ func TestTokenBudgetWindowDeniesWithBudgetExceeded(t *testing.T) {
 	f.clock.Advance(61 * time.Second)
 	if r := f.evaluate(config, httpRequest{sandboxID: "sbx-1", requestID: "r3", body: []byte(jsonBody)}); r.GetDecision() != pb.Decision_DECISION_ALLOW {
 		t.Fatalf("after the window denied: %v", r)
+	}
+}
+
+// TestCostBudgetWindowDeniesWithBudgetExceeded has no token window and no
+// ceiling: only the cost window can deny. The usage costs 6*1 + 6*2 = 18
+// micro-USD at the configured prices.
+func TestCostBudgetWindowDeniesWithBudgetExceeded(t *testing.T) {
+	usage := httpResponse{contentType: "application/json", chunks: [][]byte{[]byte(`{"usage":{"input_tokens":6,"output_tokens":6}}`)}}
+	policyWith := func(budget int) *structpb.Struct {
+		return policyStruct(t, map[string]any{
+			"cost_budget_micro_usd": budget, "cost_window_seconds": 60,
+			"input_price_micro_usd_per_mtok": 1_000_000, "output_price_micro_usd_per_mtok": 2_000_000,
+		})
+	}
+
+	f := newFixture(t)
+	config := policyWith(18)
+	f.completeRequest(config, httpRequest{sandboxID: "sbx-1", requestID: "r1", body: []byte(jsonBody)}, usage)
+	denied := f.evaluate(config, httpRequest{sandboxID: "sbx-1", requestID: "r2", body: []byte(jsonBody)})
+	if denied.GetDecision() != pb.Decision_DECISION_DENY || denied.GetReasonCode() != "budget_exceeded" {
+		t.Fatalf("second = %v, want deny budget_exceeded", denied)
+	}
+	f.clock.Advance(61 * time.Second)
+	if r := f.evaluate(config, httpRequest{sandboxID: "sbx-1", requestID: "r3", body: []byte(jsonBody)}); r.GetDecision() != pb.Decision_DECISION_ALLOW {
+		t.Fatalf("after the window denied: %v", r)
+	}
+
+	// One micro-USD more budget than the usage cost: still admitted.
+	below := newFixture(t)
+	config = policyWith(19)
+	below.completeRequest(config, httpRequest{sandboxID: "sbx-1", requestID: "r1", body: []byte(jsonBody)}, usage)
+	if r := below.evaluate(config, httpRequest{sandboxID: "sbx-1", requestID: "r2", body: []byte(jsonBody)}); r.GetDecision() != pb.Decision_DECISION_ALLOW {
+		t.Fatalf("below the cost budget denied: %v", r)
 	}
 }
 
