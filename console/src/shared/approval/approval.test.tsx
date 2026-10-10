@@ -82,6 +82,8 @@ test("the name prompt remembers the name, then continues to the flow", async () 
     expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
   });
   expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+    expected_state: "spec_review",
+    expected_entered_at: "2026-09-10T09:05:00Z",
     reason: "too broad",
     by: "jane",
   });
@@ -304,6 +306,8 @@ test("reject needs a reason, then sends reason and by", async () => {
     expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
   });
   expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+    expected_state: "spec_review",
+    expected_entered_at: "2026-09-10T09:05:00Z",
     reason: "scope is too broad",
     by: "operator",
   });
@@ -426,6 +430,8 @@ test("send back defaults to plan and sends the target", async () => {
     expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
   });
   expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+    expected_state: "spec_review",
+    expected_entered_at: "2026-09-10T09:05:00Z",
     reason: "diff_scope: allow the contract test",
     by: "operator",
     to: "plan",
@@ -587,6 +593,8 @@ describe("Request changes with notes on specific places", () => {
       expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
     });
     expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+      expected_state: "spec_review",
+      expected_entered_at: "2026-09-10T09:05:00Z",
       reason: "",
       by: "jane",
       anchors: [
@@ -615,6 +623,8 @@ describe("Request changes with notes on specific places", () => {
       expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
     });
     expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toEqual({
+      expected_state: "spec_review",
+      expected_entered_at: "2026-09-10T09:05:00Z",
       reason: "too broad",
       by: "jane",
     });
@@ -631,4 +641,114 @@ describe("Request changes with notes on specific places", () => {
     await screen.findByLabelText("Reason");
     expect(screen.queryByLabelText("Place")).not.toBeInTheDocument();
   });
+});
+
+describe("the stage a rejection is of", () => {
+  const stage = { expected_state: "spec_review", expected_entered_at: "2026-09-10T09:05:00Z" };
+  const reply = {
+    on: "POST /requests/req-spec-review/reject",
+    reply: json(rawFixture("request-spec-review.json", { state: "spec_drafting" })),
+  };
+
+  // The caller's record changes while the dialog is open, as a page kept
+  // live by the event stream does.
+  function Changing({
+    render,
+    next,
+  }: {
+    readonly render: (props: FlowProps) => React.ReactNode;
+    readonly next: Record<string, unknown>;
+  }) {
+    const [request, setRequest] = useState(() => fixture("request-spec-review.json"));
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            setRequest(fixture("request-spec-review.json", next));
+          }}
+        >
+          record changes
+        </button>
+        <Host request={request} render={render} />
+      </>
+    );
+  }
+  const change = () => {
+    // Behind a modal dialog the page takes no pointer: the change comes from outside it.
+    screen.getByRole("button", { name: "record changes", hidden: true }).click();
+  };
+
+  test.each([
+    ["the request moved to another state", { state: "plan_review" }],
+    ["the request was redrafted into the same state", { entered_at: "2026-09-10T11:00:00Z" }],
+  ])(
+    "Request changes sends the stage shown when it opened, though %s underneath",
+    async (_, next) => {
+      const { server } = renderApp(
+        <Changing render={(props) => <RejectDialog {...props} />} next={next} />,
+        { server: [reply] },
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Request changes" });
+      await userEvent.type(within(dialog).getByLabelText("Reason"), "too broad");
+      await waitFor(change);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Request changes" }));
+      await waitFor(() => {
+        expect(server.sent(reply.on)).toHaveLength(1);
+      });
+      expect(server.sent(reply.on)[0]?.body).toEqual({
+        reason: "too broad",
+        by: "operator",
+        ...stage,
+      });
+    },
+  );
+
+  test.each([
+    ["the request moved to another state", { state: "building" }],
+    ["the request re-entered the state", { entered_at: "2026-09-10T11:00:00Z" }],
+  ])("Send back sends the stage shown when it opened, though %s underneath", async (_, next) => {
+    const { server } = renderApp(
+      <Changing render={(props) => <SendBackDialog {...props} />} next={next} />,
+      { server: [reply] },
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Send back" });
+    await userEvent.type(within(dialog).getByLabelText("Reason"), "replan it");
+    await waitFor(change);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Send back" }));
+    await waitFor(() => {
+      expect(server.sent(reply.on)).toHaveLength(1);
+    });
+    expect(server.sent(reply.on)[0]?.body).toMatchObject({ reason: "replan it", ...stage });
+  });
+
+  test.each([
+    ["Request changes", RejectDialog],
+    ["Send back", SendBackDialog],
+  ] as const)(
+    "%s: a 409 keeps the dialog and the typed text and shows the server's own sentence",
+    async (name, Dialog) => {
+      const message =
+        "request req-spec-review is in plan_review now, not the spec_review you were shown";
+      const { server } = renderApp(
+        <Host request={specReview()} render={(props) => <Dialog {...props} />} />,
+        {
+          server: [
+            { on: reply.on, reply: () => apiErrorResponse(409, message) },
+            {
+              on: "GET /requests/req-spec-review",
+              reply: json(rawFixture("request-spec-review.json", { state: "plan_review" })),
+            },
+          ],
+        },
+      );
+      const dialog = await screen.findByRole("dialog", { name });
+      await userEvent.type(within(dialog).getByLabelText("Reason"), "too broad");
+      await userEvent.click(within(dialog).getByRole("button", { name }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(message);
+      expect(screen.getByText("dialog open")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Reason")).toHaveValue("too broad");
+      expect(server.sent(reply.on)).toHaveLength(1);
+    },
+  );
 });

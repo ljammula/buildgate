@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newQuarantinedRequestWithPlan builds a quarantined/halted request that
@@ -387,5 +388,52 @@ func TestDraftHaltNoteClearedBySendBack(t *testing.T) {
 	}
 	if got.DraftHalt != nil {
 		t.Errorf("DraftHalt = %+v, want cleared by the send-back", got.DraftHalt)
+	}
+}
+
+// TestADecisionMadeOnAStageAppliesOnlyWhileTheRequestIsInIt: RejectSeen and
+// SendBackSeen refuse, changing nothing, when the request is in another state
+// or entered the same state at another time; the zero Seen expects nothing.
+func TestADecisionMadeOnAStageAppliesOnlyWhileTheRequestIsInIt(t *testing.T) {
+	seed := func(state State) (string, *Request) {
+		t.Helper()
+		dataDir := t.TempDir()
+		r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow.Add(-time.Hour))
+		r.State = state
+		if err := SaveText(dataDir, "req-1", "text"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(dataDir, "req-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dataDir, loaded
+	}
+	dataDir, r := seed(StateSpecReview)
+	for name, seen := range map[string]Seen{
+		"another state":            {State: StatePlanReview, EnteredAt: r.EnteredAt},
+		"the state, another entry": {State: StateSpecReview, EnteredAt: "2020-01-01T00:00:00Z"},
+		"only a state":             {State: StateSpecReview},
+	} {
+		if _, err := RejectSeen(dataDir, "req-1", "alice", "redo it", nil, seen, fixedNow); !errors.Is(err, ErrStageMoved) {
+			t.Errorf("%s: err = %v, want ErrStageMoved", name, err)
+		}
+	}
+	if after, err := Load(dataDir, "req-1"); err != nil || after.State != StateSpecReview || len(after.Rejections) != 0 {
+		t.Fatalf("after the refusals: %v with %d rejections (err %v), want it untouched", after.State, len(after.Rejections), err)
+	}
+	if got, err := RejectSeen(dataDir, "req-1", "alice", "redo it", nil, Seen{State: r.State, EnteredAt: r.EnteredAt}, fixedNow); err != nil || got.State != StateSpecDrafting {
+		t.Errorf("the stage as read: %v, err %v; want it rejected", got, err)
+	}
+
+	dataDir, r = seed(StateQuarantined)
+	if _, err := SendBackSeen(dataDir, "req-1", "alice", "replan", SendBackToSpec, Seen{State: StateHalted, EnteredAt: r.EnteredAt}, fixedNow); !errors.Is(err, ErrStageMoved) {
+		t.Errorf("send-back made on another state: err = %v, want ErrStageMoved", err)
+	}
+	if got, err := SendBackSeen(dataDir, "req-1", "alice", "replan", SendBackToSpec, Seen{State: r.State, EnteredAt: r.EnteredAt}, fixedNow); err != nil || got.State != StateSpecDrafting {
+		t.Errorf("send-back on the stage as read: %v, err %v", got, err)
 	}
 }

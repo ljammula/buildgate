@@ -569,7 +569,7 @@ func TestRejectRequestHandler(t *testing.T) {
 	seedApprovableRequest(t, dataDir, "req-1", request.StatePlanReview, true)
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", `{"reason":"scope is too broad"}`))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", `{"reason":"scope is too broad"}`)))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -625,7 +625,7 @@ func TestRejectRequestAPISendBackToPlanReturns200(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", `{"reason":"diff_scope: allow the contract test","to":"plan"}`))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", `{"reason":"diff_scope: allow the contract test","to":"plan"}`)))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -647,7 +647,7 @@ func TestRejectRequestAPISendBackRefusedFromBuilding(t *testing.T) {
 	seedApprovableRequest(t, dataDir, "req-1", request.StateBuilding, true)
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", `{"reason":"try a different plan","to":"plan"}`))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", `{"reason":"try a different plan","to":"plan"}`)))
 
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusConflict, recorder.Body.String())
@@ -833,7 +833,7 @@ func TestRejectRequestHandlerRejectsWrongState(t *testing.T) {
 	seedApprovableRequest(t, dataDir, "req-1", request.StateBuilding, false)
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", `{"reason":"not ready"}`))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", `{"reason":"not ready"}`)))
 
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusConflict, recorder.Body.String())
@@ -867,7 +867,7 @@ func TestRejectRequestHandlerRequiresReason(t *testing.T) {
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", `{"reason":""}`))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", `{"reason":""}`)))
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
@@ -959,7 +959,7 @@ func TestRejectRequestHandlerAcceptsBy(t *testing.T) {
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", `{"reason":"needs work","by":"alice"}`))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", `{"reason":"needs work","by":"alice"}`)))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -2507,7 +2507,7 @@ func TestRejectRequestHandlerRecordsAnchors(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	body := `{"by":"alice","anchors":[{"path":"spec.md","section":"## Acceptance criteria","item":2,"note":"which\naccount?"}]}`
-	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", body))
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", body)))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -2538,7 +2538,7 @@ func TestRejectRequestHandlerRefusesBadAnchors(t *testing.T) {
 			dataDir := t.TempDir()
 			seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
 			recorder := httptest.NewRecorder()
-			NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", body))
+			NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", body)))
 			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
 			}
@@ -2816,5 +2816,101 @@ func TestGetStatsReportsEveryProjectAndTheirSum(t *testing.T) {
 	}
 	if code, _ := get(gated, "/stats", "read-token"); code != http.StatusOK {
 		t.Errorf("GET /stats with the read token = %d, want 200", code)
+	}
+}
+
+// seenBody adds to a reject body the stage its caller read the request in
+// (expected_state, expected_entered_at), which POST /requests/{id}/reject
+// requires: here, the stage the request is in on disk right now.
+func seenBody(t *testing.T, dataDir, id, body string) string {
+	t.Helper()
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatalf("load %s for its stage: %v", id, err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(body), &fields); err != nil {
+		t.Fatalf("reject body %q: %v", body, err)
+	}
+	fields["expected_state"], fields["expected_entered_at"] = string(loaded.State), loaded.EnteredAt
+	out, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// TestRejectRequestRefusesADecisionMadeOnAnotherStage: a rejection or a
+// send-back names the state and entry time its caller read. It is refused
+// with 409, and changes nothing, when the request has since moved to another
+// state or come back to the same one; without the two fields it is a 400.
+func TestRejectRequestRefusesADecisionMadeOnAnotherStage(t *testing.T) {
+	post := func(dataDir, body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", body))
+		return recorder
+	}
+	untouched := func(dataDir string, want request.State) {
+		t.Helper()
+		loaded, err := request.Load(dataDir, "req-1")
+		if err != nil || loaded.State != want || len(loaded.Rejections) != 0 {
+			t.Errorf("request = %v with %d rejections (err %v), want it untouched in %q", loaded.State, len(loaded.Rejections), err, want)
+		}
+	}
+
+	// Written for the spec; the request is at plan review by the time it is sent.
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	forSpec := seenBody(t, dataDir, "req-1", `{"reason":"the spec misses the error case"}`)
+	seedPlanReviewRequestWithTicket(t, dataDir, "req-1")
+	if got := post(dataDir, forSpec); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "plan_review") {
+		t.Errorf("a spec rejection sent at plan review = %d %s, want 409 naming the state it is in", got.Code, got.Body.String())
+	}
+	untouched(dataDir, request.StatePlanReview)
+
+	// The same state again, entered later (a redraft came back).
+	dataDir = t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, _ := json.Marshal(map[string]string{"reason": "redo it", "expected_state": string(loaded.State), "expected_entered_at": "2020-01-01T00:00:00Z"})
+	if got := post(dataDir, string(stale)); got.Code != http.StatusConflict {
+		t.Errorf("a rejection made on an earlier entry into the same state = %d %s, want 409", got.Code, got.Body.String())
+	}
+	untouched(dataDir, request.StateSpecReview)
+
+	// Neither field, or one: refused before anything is read.
+	for _, body := range []string{`{"reason":"redo it"}`, `{"reason":"redo it","expected_state":"spec_review"}`, `{"reason":"redo it","expected_entered_at":"` + loaded.EnteredAt + `"}`} {
+		if got := post(dataDir, body); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "expected_state") {
+			t.Errorf("body %s = %d %s, want 400 naming the fields", body, got.Code, got.Body.String())
+		}
+	}
+	untouched(dataDir, request.StateSpecReview)
+
+	// A send-back made on a quarantine the request has since left and come
+	// back to: the same state, entered again. Only the entry time tells them
+	// apart, and without the check this send-back would be applied.
+	dataDir = t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateQuarantined, false)
+	quarantined, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier, _ := json.Marshal(map[string]string{"reason": "allow the file", "to": "spec", "expected_state": string(quarantined.State), "expected_entered_at": "2020-01-01T00:00:00Z"})
+	if got := post(dataDir, string(earlier)); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "read it again") {
+		t.Errorf("a send-back made on an earlier quarantine = %d %s, want 409 saying to read it again", got.Code, got.Body.String())
+	}
+	untouched(dataDir, request.StateQuarantined)
+	if got := post(dataDir, seenBody(t, dataDir, "req-1", `{"reason":"allow the file","to":"spec"}`)); got.Code != http.StatusOK {
+		t.Errorf("a send-back made on the quarantine it is in = %d %s, want 200", got.Code, got.Body.String())
+	}
+
+	// And the stage as read: accepted.
+	dataDir = t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	if got := post(dataDir, seenBody(t, dataDir, "req-1", `{"reason":"redo it"}`)); got.Code != http.StatusOK {
+		t.Errorf("a rejection made on the stage the request is in = %d %s, want 200", got.Code, got.Body.String())
 	}
 }

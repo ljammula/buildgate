@@ -144,6 +144,17 @@ cancel, create; `internal/api.Server.authorizeRequestWrite`):
   local), so `serve` needs `-override-token`, which turns the write
   relaxation off, and `FACTORYD_API_READ_TOKEN` for the reads.
 
+A rejection or a send-back over HTTP (`POST /requests/{id}/reject`) names
+the stage it was made on: the request's `state` and `entered_at` as the
+caller read them (`request.Seen`). It is applied only while the request is
+still in that stage, checked under the request lock, and refused with 409
+otherwise, so a decision written for one draft cannot land on the stage or
+the redraft that followed. It binds the stage, not the text: an edit made
+in place while the request stays in that stage does not change `entered_at`.
+An approval is bound to text instead, by the hashes of the files it
+approves: always for oracle files, and for a spec or plan when the caller
+sends them.
+
 Start-class routes (`POST /runs`, daemon lifecycle, and the `GET` release
 and stats routes; `authorizeStart`) get no relaxation. A missing or wrong
 bearer token is always a 403. The token is handled as follows:

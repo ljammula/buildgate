@@ -194,6 +194,9 @@ test("GET /requests decodes every fixture row", () => {
   expect(building.activeJob?.stage).toBe("build");
   expect(building.spec).toBe("");
   expect(building.nextAction).toBe("");
+  // The stage a rejection names: both routes carry when the state was entered.
+  expect(list.every((r) => r.enteredAt !== "")).toBe(true);
+  expect(detail("request-spec-review").enteredAt).toBe("2026-09-10T09:05:00Z");
   expect(list[1]!.tickets[0]!.prState).toBe("merged");
   expect(list[4]!.oracleDraftStatus).toBe("drafted");
 });

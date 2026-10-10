@@ -4,6 +4,7 @@ import { useRequest } from "@/api/requestQueries";
 import { compareTimestamps } from "@/domain/elapsed";
 import { type RequestSummary, requestShortTitle } from "@/domain/request";
 import { stateLabel } from "@/domain/status";
+import { movedOnNotice } from "@/shared/approval/movedOn";
 import { RejectDialog } from "@/shared/approval/RejectDialog";
 import { Button } from "@/ui/Button";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -20,15 +21,6 @@ export interface CardDecisionProps {
 }
 
 /**
- * Whether the request the list now holds is still the one the dialog was
- * opened on: the same state, entered at the same instant. A redraft that
- * comes back to the same review state has a new `enteredAt`.
- */
-function sameStage(live: RequestSummary, opened: RequestSummary): boolean {
-  return live.state === opened.state && compareTimestamps(live.enteredAt, opened.enteredAt) === 0;
-}
-
-/**
  * Request changes, started from a card: the shared dialog over the request's
  * own record, as Triage opens it. The screen mounts it once, outside the
  * board's lanes and columns, when the operator presses a card's button: no
@@ -38,11 +30,13 @@ function sameStage(live: RequestSummary, opened: RequestSummary): boolean {
  * criteria a note can be tied to: those are read from `GET /requests/{id}`,
  * fetched after the press and never older than the card.
  *
- * The rejection is sent with no stage: the server rejects whichever review is
- * current. So the dialog keeps comparing the list's record with the one it
- * was opened on, and once they differ it can no longer send: the request has
- * moved on, or been redrafted, and the operator has not seen that work. What
- * was typed stays on screen to be copied.
+ * The rejection names the stage it is of (`expected_state`,
+ * `expected_entered_at`, from the record the dialog was opened on) and the
+ * server refuses it (409) once the request has left that stage or entered it
+ * again, so it can never land on work the operator did not see, however old
+ * the list is. The dialog still compares the list's record with the one it
+ * was opened on and stops sending once they differ: that says so before the
+ * operator presses send, with what was typed left on screen to be copied.
  *
  * A card never approves. An approval passes a human gate, and the text it
  * approves is on the request page, not on a card: the card links there.
@@ -91,13 +85,7 @@ export function CardDecision({ request, onClose }: CardDecisionProps) {
       <RejectDialog
         open
         request={opened}
-        blocked={
-          sameStage(request, opened)
-            ? undefined
-            : request.state === opened.state
-              ? `This request has moved on: it was redrafted and is in ${stateLabel(request.state)} again, with text you have not seen here. Nothing can be sent from this dialog. Copy what you typed, close it and open the request.`
-              : `This request has moved on to ${stateLabel(request.state)}. Nothing can be sent from this dialog. Copy what you typed, close it and open the request.`
-        }
+        blocked={movedOnNotice(request, opened)}
         onOpenChange={(open) => {
           if (!open) onClose();
         }}

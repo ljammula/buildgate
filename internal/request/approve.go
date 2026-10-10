@@ -401,6 +401,32 @@ func Reject(dataDir, id, by, reason string, now time.Time) (*Request, error) {
 	return RejectAnchored(dataDir, id, by, reason, nil, now)
 }
 
+// Seen is the stage a caller read a request in before deciding on it: its
+// State and EnteredAt. A decision made with a Seen applies only while the
+// request is still in that stage, entered at that time, so a rejection
+// written for a spec cannot land on the plan that followed, nor on a
+// redraft that came back to the same state. The zero Seen expects nothing:
+// the CLI's, whose operator names the request at a terminal.
+type Seen struct {
+	State     State
+	EnteredAt string
+}
+
+// ErrStageMoved is the refusal for a decision whose Seen no longer matches
+// the request.
+var ErrStageMoved = errors.New("the request is no longer in the stage this decision was made on")
+
+// check reports ErrStageMoved unless r is in the stage seen names.
+func (seen Seen) check(r *Request) error {
+	if seen == (Seen{}) {
+		return nil
+	}
+	if r.State != seen.State || r.EnteredAt != seen.EnteredAt {
+		return fmt.Errorf("request %s: it is in %q (entered %s), and this decision was made on %q (entered %s): read it again %w", r.ID, r.State, r.EnteredAt, seen.State, seen.EnteredAt, ErrStageMoved)
+	}
+	return nil
+}
+
 // RejectAnchored is Reject with notes tied to places in the reviewed files
 // (RejectionAnchor). The rejection is recorded under AnchoredReason(anchors,
 // note), which is what every reader of a reason sees, the redraft's
@@ -408,6 +434,13 @@ func Reject(dataDir, id, by, reason string, now time.Time) (*Request, error) {
 // the Rejection as given, for a console to show against the document. note
 // may be empty when there is at least one anchor.
 func RejectAnchored(dataDir, id, by, note string, anchors []RejectionAnchor, now time.Time) (*Request, error) {
+	return RejectSeen(dataDir, id, by, note, anchors, Seen{}, now)
+}
+
+// RejectSeen is RejectAnchored for a caller that read the request before
+// deciding: it rejects only while the request is in the stage seen names
+// (ErrStageMoved otherwise), checked under the request lock.
+func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Seen, now time.Time) (*Request, error) {
 	anchors, err := NormalizeRejectionAnchors(anchors)
 	if err != nil {
 		return nil, fmt.Errorf("request %s: %w", id, err)
@@ -423,6 +456,11 @@ func RejectAnchored(dataDir, id, by, note string, anchors []RejectionAnchor, now
 	defer unlock()
 	r, err := Load(dataDir, id)
 	if err != nil {
+		return nil, err
+	}
+	// Under the request lock, with the record just read: nothing moves the
+	// request between this check and the rejection below.
+	if err := seen.check(r); err != nil {
 		return nil, err
 	}
 	fromState := r.State

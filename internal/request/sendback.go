@@ -89,6 +89,13 @@ func (t SendBackTarget) Valid() bool {
 //     disk are left untouched; only this request's own pointers to them
 //     are cleared.
 func SendBack(dataDir, id, by, reason string, target SendBackTarget, now time.Time) (*Request, error) {
+	return SendBackSeen(dataDir, id, by, reason, target, Seen{}, now)
+}
+
+// SendBackSeen is SendBack for a caller that read the request before
+// deciding: it applies only while the request is in the stage seen names
+// (ErrStageMoved otherwise), checked under the request lock.
+func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Seen, now time.Time) (*Request, error) {
 	if reason == "" {
 		return nil, fmt.Errorf("request %s: send-back requires a reason", id)
 	}
@@ -102,6 +109,9 @@ func SendBack(dataDir, id, by, reason string, target SendBackTarget, now time.Ti
 	defer unlock()
 	r, err := Load(dataDir, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := seen.check(r); err != nil {
 		return nil, err
 	}
 	if r.State != StateQuarantined && r.State != StateHalted {

@@ -63,6 +63,11 @@ function RejectBody({ request, by, onOpenChange, onDone, blocked }: BodyProps) {
   // arriving underneath must not re-point a note already written.
   const [targets] = useState(() => anchorTargets(request));
   const [notes, setNotes] = useState<readonly RejectionAnchor[]>([]);
+  // The stage on screen when the dialog opened is the one being rejected. It
+  // is fixed here too: the caller's record can change underneath (a redraft
+  // arriving), and sending the new stage would defeat the server's check
+  // that the request is still where the operator saw it.
+  const [seen] = useState({ state: request.state, enteredAt: request.enteredAt });
   return (
     <ReasonFlow
       title={REQUEST_VERBS.requestChanges}
@@ -72,7 +77,7 @@ function RejectBody({ request, by, onOpenChange, onDone, blocked }: BodyProps) {
       pending={reject.isPending}
       error={reject.error}
       onOpenChange={onOpenChange}
-      write={(reason) => reject.mutateAsync({ reason, by, anchors: notes })}
+      write={(reason) => reject.mutateAsync({ reason, by, anchors: notes, seen })}
       onDone={onDone}
     >
       <AnchoredNotes
