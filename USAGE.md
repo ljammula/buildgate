@@ -896,11 +896,18 @@ The queue place and the build's stage come from the server (`queue_position` and
 The Projects screen is the one place for a project's figures. Each row is a
 project already run against: its runs, how many were accepted (and the share
 accepted by an operator override), and its kill switch (engaged, clear, or
-unknown when the read failed, never drawn as clear). A row's button opens its
+unknown when the latest read failed, even after an earlier success, never drawn
+as clear; a failed stats read shows a dash). A row's button opens its
 **Stats**, **Release**, **Trend**, **Observations** and **Memory** tabs. The
 kill switch is read there and set only with `factoryd kill-switch`. The open
 row and tab are in the link: `/app/projects?project=<project>&tab=stats|release|trend|observations|memory`.
-The worker's state is on Mission Control's health strip.
+To open a project by its id, type it in **Open a project by id** at the top of
+the page. A project with no run has no row, but its kill switch can already be
+engaged (`factoryd kill-switch -project <id>`), so an id the list does not hold
+opens in a panel above the table, "No runs recorded for this project.", with the
+same tabs; **Close** dismisses it.
+The worker's state is on Mission Control's health strip, which shows
+`factoryd worker` with a copy button whenever no worker is alive.
 
 ### Notifications
 

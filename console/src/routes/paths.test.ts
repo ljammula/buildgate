@@ -65,6 +65,14 @@ test("projectsPath opens a project's row, on a tab when one is named", () => {
   expect(projectsPath("")).toBe("/app/projects");
 });
 
+test("an id with &, % or a space survives projectsPath and a URL read", () => {
+  for (const id of ["a&b", "50%", "my repo", "a&tab=x"]) {
+    const url = new URL(projectsPath(id, "release"), "http://console.test");
+    expect(url.searchParams.get("project")).toBe(id);
+    expect(url.searchParams.get("tab")).toBe("release");
+  }
+});
+
 test("only the five tabs of a project row are tabs", () => {
   for (const tab of ["stats", "release", "trend", "observations", "memory"]) {
     expect(isProjectTab(tab)).toBe(true);

@@ -719,6 +719,17 @@ step("project-release", async () => {
     .waitFor();
   await panel.getByText("incident 42").first().waitFor();
   await panel.getByText("operator@example.com").first().waitFor();
+  // A project that never ran has no row, but its kill switch is read all the same.
+  await visit("/app/projects?project=never-ran&tab=release");
+  await main().getByRole("heading", { name: "never-ran", exact: true }).waitFor();
+  await main().getByText("No runs recorded for this project.", { exact: true }).waitFor();
+  const unlisted = (await api("/projects/never-ran/release", startHeaders)).body;
+  await main()
+    .getByRole("tabpanel")
+    .getByText(unlisted.kill_switch.engaged ? "Kill switch engaged" : "Kill switch clear", {
+      exact: true,
+    })
+    .waitFor();
 });
 
 step("ops-redirect", async () => {

@@ -5,10 +5,17 @@ import type { ProjectReleaseView } from "@/domain/release";
 
 export interface ProjectRow {
   readonly summary: ProjectSummary;
-  /** Null when this project's stats fetch failed. */
+  /** Null when this project's stats read failed, even if an earlier read left data. */
   readonly stats: ProjectStats | null;
-  /** Null when this project's release fetch failed: the kill switch is then unknown, never clear. */
+  /**
+   * Null when this project's release read failed, even if an earlier read left data: the kill
+   * switch is then unknown, never an old state shown as current.
+   */
   readonly release: ProjectReleaseView | null;
+  /** The latest stats read failed. */
+  readonly statsFailed: boolean;
+  /** The latest release read failed. */
+  readonly releaseFailed: boolean;
   /** True while either read has no answer yet: the row shows a dash, not a guess. */
   readonly loading: boolean;
 }
@@ -34,8 +41,10 @@ export function useProjectRows() {
       : [
           {
             summary,
-            stats: pair.stats.data ?? null,
-            release: pair.release.data ?? null,
+            stats: pair.stats.isError ? null : (pair.stats.data ?? null),
+            release: pair.release.isError ? null : (pair.release.data ?? null),
+            statsFailed: pair.stats.isError,
+            releaseFailed: pair.release.isError,
             loading: pair.stats.isPending || pair.release.isPending,
           },
         ];

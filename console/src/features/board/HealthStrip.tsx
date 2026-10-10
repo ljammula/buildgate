@@ -5,6 +5,7 @@ import type { FactoryHealth } from "@/domain/health";
 import { requestPath } from "@/routes/paths";
 import { cn } from "@/ui/cn";
 import { Button } from "@/ui/Button";
+import { CopyButton } from "@/ui/CopyButton";
 import { Callout } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StallChip } from "@/ui/Time";
@@ -32,6 +33,8 @@ function Fact({ label, children }: { readonly label: string; readonly children: 
     </div>
   );
 }
+
+const workerCommand = "factoryd worker";
 
 function requestCount(count: number): string {
   return count === 1 ? "1 request" : `${count} requests`;
@@ -64,9 +67,13 @@ export function HealthStrip({ health, live, workerWarning, onRetryWorker }: Heal
             <span className="min-w-0">
               <TextWithCode text={sentenceCase(workerWarning)} />
             </span>
-            <Button size="sm" className="shrink-0" onClick={onRetryWorker}>
-              Check again
-            </Button>
+            <span className="flex shrink-0 items-center gap-1">
+              {/* The alert's own command text, copyable; the strip draws it once. */}
+              <CopyButton text={workerCommand} label="Copy command" size="sm" />
+              <Button size="sm" onClick={onRetryWorker}>
+                Check again
+              </Button>
+            </span>
           </div>
         </Callout>
       )}
@@ -85,6 +92,12 @@ export function HealthStrip({ health, live, workerWarning, onRetryWorker }: Heal
               />
               {worker.label}
             </span>
+            {worker.alive ? null : (
+              <span className="inline-flex items-center gap-1">
+                <code className="font-mono text-xs">{workerCommand}</code>
+                <CopyButton text={workerCommand} label="Copy command" size="sm" />
+              </span>
+            )}
             {!worker.alive && health.lastHeartbeat !== "" ? (
               <span className="text-fg-muted">
                 (last heartbeat <RelativeTime value={health.lastHeartbeat} />)

@@ -2,11 +2,9 @@ import { type Http, createHttp } from "@/api/http";
 import { asObject } from "@/domain/decode";
 import {
   type ConsoleConfig,
-  type DaemonStatus,
   type QueueRunStatus,
   type WorkspaceHint,
   decodeConsoleConfig,
-  decodeDaemonList,
   decodeQueueRunStatus,
   decodeWorkspaceHintList,
 } from "@/domain/ops";
@@ -51,23 +49,9 @@ export async function fetchConsoleConfig(http: Http, signal?: AbortSignal): Prom
 }
 
 /**
- * GET /daemons: whether `worker` (and any other companion daemon) is alive,
- * so the board can warn an operator that a request stuck in a working state
- * simply has nothing driving it forward, rather than looking like ordinary
- * progress. Start-token gated on the server (internal/api authorizeStart,
- * like the daemon lifecycle routes): sending the read token here left the
- * board's worker strip permanently hidden behind a 403 (found live,
- * 2026-09-24).
- */
-export async function listDaemons(http: Http, signal?: AbortSignal): Promise<DaemonStatus[]> {
-  return decodeDaemonList(await http.getJson("/daemons", "start", signal), "GET /daemons");
-}
-
-/**
  * GET /queue-run: whether `factoryd worker` is alive against this data dir.
- * Read-token gated (unlike listDaemons's start-token gated GET /daemons) and
- * answering regardless of whether `factoryd serve` itself manages the daemon
- * lifecycle; see QueueRunStatus for why this is a separate route.
+ * Read-token gated and answering regardless of whether `factoryd serve` itself
+ * manages the daemon lifecycle; see QueueRunStatus for why this is a separate route.
  */
 export async function getQueueRunStatus(http: Http, signal?: AbortSignal): Promise<QueueRunStatus> {
   const at = "GET /queue-run";

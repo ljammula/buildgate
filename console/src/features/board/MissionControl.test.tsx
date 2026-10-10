@@ -495,6 +495,25 @@ describe("health strip", () => {
     expect(health).not.toHaveTextContent("Queued");
   });
 
+  test("a worker that is not alive always has its start command at hand, once", async () => {
+    // Alert drawn: its command text is the one command, and it gets the copy button.
+    const first = renderApp(<BoardScreen />, { server: fixtureServer({ state: "absent" }) });
+    const health = await strip();
+    await within(health).findByRole("alert");
+    expect(within(health).getAllByText("factoryd worker")).toHaveLength(1);
+    expect(within(health).getAllByRole("button", { name: "Copy command" })).toHaveLength(1);
+    first.unmount();
+
+    // No alert (nothing waits on a worker): the strip draws the command itself.
+    renderApp(<BoardScreen />, {
+      server: server([], [{ on: "GET /queue-run", reply: () => json({ state: "absent" }) }]),
+    });
+    const quiet = await strip();
+    expect(await within(quiet).findByText("factoryd worker")).toBeInTheDocument();
+    expect(within(quiet).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(quiet).getAllByRole("button", { name: "Copy command" })).toHaveLength(1);
+  });
+
   test("a server with no queue-run route says the worker's state is unknown, and claims no queue", async () => {
     renderApp(<BoardScreen />, {
       server: fixtureServer(() => apiErrorResponse(404, "not found")),

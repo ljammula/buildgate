@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { apiErrorResponse, json, renderApp } from "@/test/render";
 
@@ -71,4 +72,31 @@ test("a failed refresh keeps the last state under a warning, and Retry is offere
   expect(await screen.findByText(/refresh failed: kill switch is unreadable/)).toBeInTheDocument();
   expect(screen.getByText("Kill switch engaged")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+});
+
+test("Retry is disabled while the refresh is in flight", async () => {
+  const { server, queryClient } = renderRelease("checkouts", () => json(projectRelease));
+  expect(await screen.findByText("Kill switch engaged")).toBeInTheDocument();
+  server.set("GET /projects/checkouts/release", () => apiErrorResponse(500, "unreadable"));
+  void queryClient.refetchQueries();
+  const retry = await screen.findByRole("button", { name: "Retry" });
+
+  let finish: () => void = () => undefined;
+  server.set(
+    "GET /projects/checkouts/release",
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = () => {
+          resolve(json(projectRelease));
+        };
+      }),
+  );
+  await userEvent.click(retry);
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+  });
+  finish();
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
 });

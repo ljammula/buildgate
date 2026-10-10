@@ -45,8 +45,26 @@ export function ProjectListRow({ row, expanded, onToggle }: ProjectListRowProps)
         </Link>
       </TableCell>
       <TableCell numeric>{summary.runCount}</TableCell>
-      <TableCell className="text-xs">{pending ? NO_VALUE : acceptedText(stats)}</TableCell>
-      <TableCell>{pending ? NO_VALUE : <KillSwitchChip engaged={engaged} />}</TableCell>
+      <TableCell className="text-xs">
+        {pending ? (
+          NO_VALUE
+        ) : row.statsFailed ? (
+          <span title="Stats could not be read">{NO_VALUE}</span>
+        ) : (
+          acceptedText(stats)
+        )}
+      </TableCell>
+      <TableCell>
+        {pending ? (
+          NO_VALUE
+        ) : row.releaseFailed ? (
+          <span title="Last read failed; showing nothing rather than an old state">
+            <KillSwitchChip engaged={null} />
+          </span>
+        ) : (
+          <KillSwitchChip engaged={engaged} />
+        )}
+      </TableCell>
       <TableCell className="text-xs whitespace-nowrap tabular-nums">
         <RelativeTime value={summary.lastRunAt} />
       </TableCell>

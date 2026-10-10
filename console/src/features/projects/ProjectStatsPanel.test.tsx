@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { apiErrorResponse, json, renderApp } from "@/test/render";
 
@@ -149,4 +150,38 @@ test("the facts sit in a card", async () => {
   expect(facts?.parentElement).toHaveClass("border", "rounded-lg");
   // The panel sits in its project's own row: there is no other project to load.
   expect(screen.queryByLabelText("Project id")).not.toBeInTheDocument();
+});
+
+test("Retry is disabled while the refresh is in flight", async () => {
+  const body = {
+    project: "checkouts",
+    total_runs: 3,
+    accepted: 0,
+    accepted_via_override: 0,
+    halted: 1,
+  };
+  const { server, queryClient } = renderStats("checkouts", () => json(body));
+  expect(await screen.findByText("Override rate (accepted)")).toBeInTheDocument();
+  server.set("GET /projects/checkouts/stats", () => apiErrorResponse(500, "unreadable"));
+  void queryClient.refetchQueries();
+  const retry = await screen.findByRole("button", { name: "Retry" });
+
+  let finish: () => void = () => undefined;
+  server.set(
+    "GET /projects/checkouts/stats",
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = () => {
+          resolve(json(body));
+        };
+      }),
+  );
+  await userEvent.click(retry);
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+  });
+  finish();
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
 });

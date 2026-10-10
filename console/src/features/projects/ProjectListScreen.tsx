@@ -11,7 +11,9 @@ import { PageBody, PageHeader } from "@/ui/PageLayout";
 import { Table, TableBody, TableFrame, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
 
 import { ProjectListRow } from "./ProjectListRow";
+import { ProjectLookupForm } from "./ProjectLookupForm";
 import { ProjectRowDetails } from "./ProjectRowDetails";
+import { ProjectUnlistedPanel } from "./ProjectUnlistedPanel";
 import { useProjectRows } from "./useProjectRows";
 
 const columnCount = 7;
@@ -21,7 +23,9 @@ const columnCount = 7;
  * against (derived from run history) with its runs, acceptance and kill
  * switch, and under a row's button its stats, release, trend, observations and
  * memory. Which row is open and on which tab is in the query string
- * (`?project=<id>&tab=<tab>`), so a link can open it. A workspace link opens
+ * (`?project=<id>&tab=<tab>`), so a link can open it. An id the list does not
+ * hold (no run yet, but a kill switch can already be engaged) opens in a panel
+ * above the table, and the lookup field in the header opens any id. A workspace link opens
  * the new-run form pre-filled (see NewRunScreen); "New run" opens it blank,
  * for a project never run before. Nothing here changes anything.
  */
@@ -29,8 +33,13 @@ export function ProjectListScreen() {
   const { projects, rows, startTokenFailure, refresh } = useProjectRows();
   const [params, setParams] = useSearchParams();
   const requested = params.get("project");
-  // An unknown project, or an unknown tab, is ignored rather than shown as an error.
-  const open = rows.find((row) => row.summary.project === requested)?.summary.project ?? null;
+  // Rows are keyed by workspace; only the first row with the requested id opens.
+  const openRow = rows.find((row) => row.summary.project === requested);
+  const unlistedId =
+    requested !== null && requested !== "" && projects.data !== undefined && openRow === undefined
+      ? requested
+      : null;
+  // An unknown tab is ignored rather than shown as an error.
   const tabParam = params.get("tab");
   const tab = isProjectTab(tabParam) ? tabParam : "stats";
 
@@ -42,6 +51,20 @@ export function ProjectListScreen() {
     else next.set("tab", nextTab);
     setParams(next, { replace: true });
   };
+
+  const unlistedPanel =
+    unlistedId !== null ? (
+      <ProjectUnlistedPanel
+        project={unlistedId}
+        tab={tab}
+        onTabChange={(next) => {
+          select(unlistedId, next);
+        }}
+        onClose={() => {
+          select(null, null);
+        }}
+      />
+    ) : null;
 
   let body;
   if (projects.data === undefined) {
@@ -89,7 +112,7 @@ export function ProjectListScreen() {
             <TableBody>
               {rows.map((row) => {
                 const project = row.summary.project;
-                const expanded = open === project;
+                const expanded = row === openRow;
                 return (
                   <Fragment key={row.summary.projectPath}>
                     <ProjectListRow
@@ -125,6 +148,7 @@ export function ProjectListScreen() {
         title="Projects"
         actions={
           <>
+            <ProjectLookupForm />
             <Button asChild variant="primary" size="sm">
               <Link to={newRunPath()}>
                 <Plus aria-hidden="true" />
@@ -138,7 +162,10 @@ export function ProjectListScreen() {
         }
       />
       <PageBody>
-        <div className="flex flex-col gap-3">{body}</div>
+        <div className="flex flex-col gap-3">
+          {unlistedPanel}
+          {body}
+        </div>
       </PageBody>
     </>
   );

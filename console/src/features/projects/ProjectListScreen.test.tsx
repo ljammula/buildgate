@@ -355,16 +355,7 @@ test("a project with no tab opens on Stats", async () => {
   );
 });
 
-test("an unknown project or an unknown tab is ignored", async () => {
-  const { unmount } = renderApp(<ProjectListScreen />, {
-    path: "/app/projects?project=nope&tab=release",
-    pattern: "/app/projects",
-    server: urlServer,
-  });
-  await screen.findByText("2 / 4 · 50% via override");
-  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-  unmount();
-
+test("an unknown tab is ignored", async () => {
   renderApp(<ProjectListScreen />, {
     path: "/app/projects?project=app&tab=ops",
     pattern: "/app/projects",
@@ -374,6 +365,168 @@ test("an unknown project or an unknown tab is ignored", async () => {
     "aria-selected",
     "true",
   );
+});
+
+test("a project the list does not hold opens in a panel, and its Release tab reads its own kill switch", async () => {
+  const { server } = renderApp(<ProjectListScreen />, {
+    path: "/app/projects?project=never-ran&tab=release",
+    pattern: "/app/projects",
+    server: [
+      ...urlServer,
+      {
+        on: "GET /projects/never-ran/release",
+        reply: () =>
+          json({
+            project: "never-ran",
+            kill_switch: { project: "never-ran", engaged: true, history: [] },
+          }),
+      },
+    ],
+  });
+
+  expect(await screen.findByRole("heading", { name: "never-ran" })).toBeInTheDocument();
+  expect(screen.getByText("No runs recorded for this project.")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Release" })).toHaveAttribute("aria-selected", "true");
+  // The row for app stays closed: the panel is for the id the URL names.
+  expect(screen.getByRole("button", { name: "Show details for /workspaces/app" })).toBeVisible();
+  const panelChip = await screen.findAllByText("Kill switch engaged");
+  expect(panelChip.length).toBeGreaterThan(1);
+  expect(server.sent("GET /projects/never-ran/release")).toHaveLength(1);
+});
+
+test("an unknown project's failed read shows its error in the panel", async () => {
+  renderApp(<ProjectListScreen />, {
+    path: "/app/projects?project=bad&tab=release",
+    pattern: "/app/projects",
+    server: [
+      ...urlServer,
+      { on: "GET /projects/bad/release", reply: () => apiErrorResponse(400, "invalid project id") },
+    ],
+  });
+  expect(await screen.findByText(/invalid project id/)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "bad" })).toBeInTheDocument();
+});
+
+test("Close clears the query", async () => {
+  const { location } = renderApp(<ProjectListScreen />, {
+    path: "/app/projects?project=never-ran&tab=release",
+    pattern: "/app/projects",
+    server: urlServer,
+  });
+  await userEvent.click(await screen.findByRole("button", { name: "Close" }));
+  expect(location()).toBe("/app/projects");
+  expect(screen.queryByText("No runs recorded for this project.")).not.toBeInTheDocument();
+});
+
+test("the lookup form opens a project by id on its Release tab, and does nothing when empty", async () => {
+  const { location } = renderApp(<ProjectListScreen />, {
+    path: "/app/projects",
+    pattern: "/app/projects",
+    server: urlServer,
+  });
+  await screen.findByText("2 / 4 · 50% via override");
+
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  expect(location()).toBe("/app/projects");
+
+  await userEvent.type(screen.getByLabelText("Open a project by id"), "never-ran{Enter}");
+  expect(location()).toBe("/app/projects?project=never-ran&tab=release");
+  expect(await screen.findByText("No runs recorded for this project.")).toBeInTheDocument();
+});
+
+test("two rows with one id open only the first", async () => {
+  renderApp(<ProjectListScreen />, {
+    path: "/app/projects?project=app",
+    pattern: "/app/projects",
+    server: [
+      {
+        on: "GET /projects",
+        reply: () => json([appProject, { ...appProject, project_path: "/workspaces/other" }]),
+      },
+      { on: "GET /projects/app/stats", reply: () => json(appStats) },
+      { on: "GET /projects/app/release", reply: () => json(appRelease(false)) },
+    ],
+  });
+  expect(
+    await screen.findByRole("button", { name: "Hide details for /workspaces/app" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "Show details for /workspaces/other" })).toBeVisible();
+  expect(screen.getAllByRole("tab", { name: "Stats" })).toHaveLength(1);
+});
+
+test("opening project B after project A never shows A's figures in B's panel", async () => {
+  const other = { ...appProject, project_path: "/workspaces/b", project: "b" };
+  renderApp(<ProjectListScreen />, {
+    path: "/app/projects?project=app",
+    pattern: "/app/projects",
+    server: [
+      { on: "GET /projects", reply: () => json([appProject, other]) },
+      { on: "GET /projects/app/stats", reply: () => json(appStats) },
+      { on: "GET /projects/app/release", reply: () => json(appRelease(false)) },
+      { on: "GET /projects/b/stats", reply: () => apiErrorResponse(500, "b stats unreadable") },
+      { on: "GET /projects/b/release", reply: () => json({ ...appRelease(false), project: "b" }) },
+    ],
+  });
+  expect(await screen.findByText("Total runs")).toBeInTheDocument();
+  expect(screen.getByText("4")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Show details for /workspaces/b" }));
+
+  expect(await screen.findByText(/b stats unreadable/)).toBeInTheDocument();
+  expect(screen.queryByText("Total runs")).not.toBeInTheDocument();
+});
+
+test.each([
+  ["a&b", "a%26b"],
+  ["50%", "50%25"],
+  ["my repo", "my%20repo"],
+])("an id %j is read and written through the URL intact", async (id, encoded) => {
+  const { location, server } = renderApp(<ProjectListScreen />, {
+    path: "/app/projects",
+    pattern: "/app/projects",
+    server: [
+      { on: "GET /projects", reply: () => json([]) },
+      {
+        on: `GET /projects/${encoded}/release`,
+        reply: () =>
+          json({ project: id, kill_switch: { project: id, engaged: true, history: [] } }),
+      },
+    ],
+  });
+  await screen.findByText(/No projects yet/);
+  await userEvent.type(screen.getByLabelText("Open a project by id"), `${id}{Enter}`);
+
+  expect(await screen.findByRole("heading", { name: id })).toBeInTheDocument();
+  expect(new URLSearchParams(location().split("?")[1]).get("project")).toBe(id);
+  expect(await screen.findByText("Kill switch engaged")).toBeInTheDocument();
+  expect(server.sent(`GET /projects/${encoded}/release`)).toHaveLength(1);
+});
+
+test("a release read that fails after one succeeded reads unknown, never clear", async () => {
+  const { server, queryClient } = renderApp(<ProjectListScreen />, {
+    path: "/app/projects",
+    pattern: "/app/projects",
+    server: urlServer.map((route) =>
+      route.on === "GET /projects/app/release"
+        ? { on: route.on, reply: () => json(appRelease(false)) }
+        : route,
+    ),
+  });
+  expect(await screen.findByText("Kill switch clear")).toBeInTheDocument();
+
+  server.set("GET /projects/app/release", () => apiErrorResponse(500, "unreadable"));
+  server.set("GET /projects/app/stats", () => apiErrorResponse(500, "unreadable"));
+  void queryClient.refetchQueries();
+
+  const chip = await screen.findByText("Kill switch unknown");
+  expect(screen.queryByText("Kill switch clear")).not.toBeInTheDocument();
+  expect(chip.closest("[title]")).toHaveAttribute(
+    "title",
+    "Last read failed; showing nothing rather than an old state",
+  );
+  // The stale figures are gone too, and the dash says why.
+  expect(screen.queryByText("2 / 4 · 50% via override")).not.toBeInTheDocument();
+  expect(screen.getByTitle("Stats could not be read")).toHaveTextContent("–");
 });
 
 test("opening a row, changing tab and closing it are written to the query string", async () => {
