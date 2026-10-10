@@ -4,6 +4,7 @@ import {
   decodeProjectCheckResponse,
   decodeProjectList,
   decodeProjectStats,
+  isOpenableProjectId,
 } from "@/domain/project";
 import { readFixtureJson } from "@/test/fixtures";
 
@@ -107,4 +108,14 @@ test("accepted reads as accepted over total, with the override share when the se
   expect(acceptedText(stats)).toBe("2 / 4 · 50% via override");
   expect(acceptedText({ ...stats, overrideRatePercent: null })).toBe("2 / 4");
   expect(acceptedText(null)).toBe("–");
+});
+
+test("a project id that a browser would fold out of a path cannot be opened", () => {
+  expect(isOpenableProjectId("app")).toBe(true);
+  expect(isOpenableProjectId("billing-service")).toBe(true);
+  expect(isOpenableProjectId("")).toBe(false);
+  expect(isOpenableProjectId("   ")).toBe(false);
+  expect(isOpenableProjectId(".")).toBe(false);
+  expect(isOpenableProjectId("..")).toBe(false);
+  expect(isOpenableProjectId("a..b")).toBe(true);
 });

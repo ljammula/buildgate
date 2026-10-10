@@ -2,6 +2,7 @@ import { Plus, RefreshCw } from "lucide-react";
 import { Fragment } from "react";
 import { Link, useSearchParams } from "react-router";
 
+import { isOpenableProjectId } from "@/domain/project";
 import { isProjectTab, newRunPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { Callout, EmptyState, Spinner } from "@/ui/Feedback";
@@ -32,11 +33,16 @@ const columnCount = 7;
 export function ProjectListScreen() {
   const { projects, rows, startTokenFailure, refresh } = useProjectRows();
   const [params, setParams] = useSearchParams();
-  const requested = params.get("project");
+  const asked = params.get("project");
+  const requested = asked !== null && isOpenableProjectId(asked) ? asked : null;
   // Rows are keyed by workspace; only the first row with the requested id opens.
   const openRow = rows.find((row) => row.summary.project === requested);
   const unlistedId =
-    requested !== null && requested !== "" && projects.data !== undefined && openRow === undefined
+    // Shown once the list has answered either way: a failed list must not
+    // hide a project whose own reads do not depend on it.
+    requested !== null &&
+    (projects.data !== undefined || projects.error !== null) &&
+    openRow === undefined
       ? requested
       : null;
   // An unknown tab is ignored rather than shown as an error.

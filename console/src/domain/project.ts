@@ -152,3 +152,13 @@ export function decodeProjectCheckResponse(o: JsonObject, at: string): ProjectCh
     checks: objectList(o, "checks", at, decodeProjectCheckResult),
   };
 }
+
+/**
+ * Whether `id` can name a project in a console address. "." and ".." are
+ * refused: a browser folds them out of a request path, so the read would go
+ * to another route and answer under this project's name.
+ */
+export function isOpenableProjectId(id: string): boolean {
+  const trimmed = id.trim();
+  return trimmed !== "" && trimmed !== "." && trimmed !== "..";
+}

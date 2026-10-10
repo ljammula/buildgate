@@ -60,7 +60,7 @@ test("a failed lookup is reported, not shown as disengaged", async () => {
   expect(screen.queryByText("Kill switch clear")).not.toBeInTheDocument();
 });
 
-test("a failed refresh keeps the last state under a warning, and Retry is offered", async () => {
+test("a failed refresh keeps the history under a warning, reads the state as unknown, and offers Retry", async () => {
   const { server, queryClient } = renderRelease("checkouts", () => json(projectRelease));
   expect(await screen.findByText("Kill switch engaged")).toBeInTheDocument();
 
@@ -70,7 +70,10 @@ test("a failed refresh keeps the last state under a warning, and Retry is offere
   void queryClient.refetchQueries();
 
   expect(await screen.findByText(/refresh failed: kill switch is unreadable/)).toBeInTheDocument();
-  expect(screen.getByText("Kill switch engaged")).toBeInTheDocument();
+  // The state on hand is an older read: it is not drawn as the current one.
+  expect(screen.queryByText("Kill switch engaged")).not.toBeInTheDocument();
+  expect(screen.queryByText("Kill switch clear")).not.toBeInTheDocument();
+  expect(screen.getByText("Kill switch unknown")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
 });
 

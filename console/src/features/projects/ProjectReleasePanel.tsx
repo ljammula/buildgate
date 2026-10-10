@@ -18,7 +18,14 @@ import {
 } from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
 
-function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
+function ReleaseBody({
+  release,
+  stale,
+}: {
+  readonly release: ProjectReleaseView;
+  /** The latest read failed: the state on hand is an older one, and is not drawn as current. */
+  readonly stale: boolean;
+}) {
   const { killSwitch } = release;
   return (
     <>
@@ -28,7 +35,7 @@ function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
             <span className="font-mono">{release.project}</span>
           </DescriptionItem>
           <DescriptionItem label="State">
-            <KillSwitchChip engaged={killSwitch.engaged} />
+            <KillSwitchChip engaged={stale ? null : killSwitch.engaged} />
           </DescriptionItem>
           <DescriptionItem label="Control">
             Engage and disengage from the command line (factoryd kill-switch). It is deliberately
@@ -98,7 +105,7 @@ export function ProjectReleasePanel({ project }: { readonly project: string }) {
               onRetry={() => void query.refetch()}
             />
           )}
-          <ReleaseBody release={query.data} />
+          <ReleaseBody release={query.data} stale={query.error !== null} />
         </>
       )}
     </>

@@ -2,6 +2,7 @@ import { Search } from "lucide-react";
 import { type SyntheticEvent, useState } from "react";
 import { useNavigate } from "react-router";
 
+import { isOpenableProjectId } from "@/domain/project";
 import { projectsPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { Input } from "@/ui/Input";
@@ -16,7 +17,7 @@ export function ProjectLookupForm() {
   const submit = (event: SyntheticEvent) => {
     event.preventDefault();
     const project = id.trim();
-    if (project === "") return;
+    if (!isOpenableProjectId(project)) return;
     void navigate(projectsPath(project, "release"));
   };
   return (
