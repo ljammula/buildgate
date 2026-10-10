@@ -224,7 +224,8 @@ After splitting or moving a listed function, regenerate the baseline with
 `CLAIMS_UPDATE_COMPLEXITY_BASELINE=1 go test ./internal/claims -run TestFunctionComplexityStaysWithinLimit`.
 Its diff may only remove lines, lower numbers, or rename a moved function.
 
-The tests of `internal/hostcontrol` and `internal/requestdriver` still live in `cmd/factoryd` and call them through exported names.
+The tests of `internal/hostcontrol` still live in `cmd/factoryd` and call it through exported names.
+The unit tests of `internal/requestdriver` live in its own package (`requestdriver_test`, on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse); a test that also needs a `cmd/factoryd` command, the worker, a model job or a fixture the command tests share stays in `cmd/factoryd`.
 
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as
