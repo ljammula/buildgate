@@ -14,8 +14,8 @@
 //   "neutralOnDark" unknown on a dark surface
 //   "muted"         kill switch clear
 //
-// StatusIcon names: priority_high, autorenew, check_circle, error,
-// help_outline, warning_amber, check_circle_outline.
+// StatusIcon names are lucide's own, in snake case; ui/statusIcons maps each
+// to its component.
 
 /**
  * needsHuman must be reserved for states that are genuinely operator-actionable
@@ -29,14 +29,32 @@ export type Status = "needsHuman" | "working" | "done" | "failed" | "unknown";
 export type StatusTone =
   "warning" | "info" | "success" | "danger" | "neutral" | "neutralOnDark" | "muted";
 
+/**
+ * One shape per state family; the name is the lucide icon's, in snake case.
+ *   circle_alert      waits on the operator
+ *   circle_dot        in progress: the factory is working
+ *   circle_check      passed or done
+ *   circle_x          failed
+ *   circle_help       unknown
+ *   triangle_alert    stalled, or a warning
+ *   circle_check_big  confirmed clear
+ *   octagon_pause     stuck: the factory cannot move it
+ *   circle_dashed     not started, queued or connecting
+ *   circle_minus      skipped
+ *   hourglass         waiting its turn
+ */
 export type StatusIcon =
-  | "priority_high"
-  | "autorenew"
-  | "check_circle"
-  | "error"
-  | "help_outline"
-  | "warning_amber"
-  | "check_circle_outline";
+  | "circle_alert"
+  | "circle_dot"
+  | "circle_check"
+  | "circle_x"
+  | "circle_help"
+  | "triangle_alert"
+  | "circle_check_big"
+  | "octagon_pause"
+  | "circle_dashed"
+  | "circle_minus"
+  | "hourglass";
 
 export type Brightness = "light" | "dark";
 
@@ -159,16 +177,26 @@ export function statusTone(status: Status, brightness: Brightness = "light"): St
 export function statusIcon(status: Status): StatusIcon {
   switch (status) {
     case "needsHuman":
-      return "priority_high";
+      return "circle_alert";
     case "working":
-      return "autorenew";
+      return "circle_dot";
     case "done":
-      return "check_circle";
+      return "circle_check";
     case "failed":
-      return "error";
+      return "circle_x";
     case "unknown":
-      return "help_outline";
+      return "circle_help";
   }
+}
+
+const STUCK_TOKENS: ReadonlySet<string> = new Set(["halted", "resume_review", "quarantined"]);
+
+/**
+ * The icon for a state token: the stuck states (the factory cannot move them
+ * on its own) get the octagon, every other token the icon of its Status.
+ */
+export function statusIconForToken(token: string): StatusIcon {
+  return STUCK_TOKENS.has(token) ? "octagon_pause" : statusIcon(statusForToken(token));
 }
 
 /** What an operator can do to a request, each action named once for every screen. */
@@ -275,20 +303,25 @@ export function killSwitchDisplay(
   brightness: Brightness = "light",
 ): KillSwitchDisplay {
   if (engaged === true) {
-    return { label: "Kill switch engaged", tone: "danger", icon: "warning_amber", outlined: false };
+    return {
+      label: "Kill switch engaged",
+      tone: "danger",
+      icon: "triangle_alert",
+      outlined: false,
+    };
   }
   if (engaged === false) {
     return {
       label: "Kill switch clear",
       tone: "muted",
-      icon: "check_circle_outline",
+      icon: "circle_check_big",
       outlined: false,
     };
   }
   return {
     label: "Kill switch unknown",
     tone: brightness === "dark" ? "neutralOnDark" : "neutral",
-    icon: "help_outline",
+    icon: "circle_help",
     outlined: true,
   };
 }

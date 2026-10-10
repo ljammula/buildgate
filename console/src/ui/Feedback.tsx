@@ -21,7 +21,10 @@ export interface SpinnerProps extends HTMLAttributes<HTMLSpanElement> {
 export function Spinner({ label = "Loading", className, ...props }: SpinnerProps) {
   return (
     <span role="status" aria-label={label} className={cn("inline-flex", className)} {...props}>
-      <Loader2 className="size-4 animate-spin text-fg-muted" aria-hidden="true" />
+      <Loader2
+        className="size-4 animate-spin motion-reduce:animate-none text-fg-muted"
+        aria-hidden="true"
+      />
     </span>
   );
 }
@@ -30,7 +33,10 @@ export function Skeleton({ className, ...props }: HTMLAttributes<HTMLDivElement>
   return (
     <div
       aria-hidden="true"
-      className={cn("h-4 animate-pulse rounded-md bg-surface-hover", className)}
+      className={cn(
+        "h-4 animate-pulse motion-reduce:animate-none rounded-md bg-surface-hover",
+        className,
+      )}
       {...props}
     />
   );

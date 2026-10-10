@@ -1,4 +1,4 @@
-import { CircleAlert, ExternalLink } from "lucide-react";
+import { ArrowRight, CircleAlert } from "lucide-react";
 import { Link } from "react-router";
 
 import { useRunRecord } from "@/api/runQueries";
@@ -116,8 +116,8 @@ export function TicketCard({
           <div>
             <Button asChild size="sm">
               <Link to={runPath(ticket.runId)}>
-                <ExternalLink aria-hidden="true" />
                 View run
+                <ArrowRight aria-hidden="true" />
               </Link>
             </Button>
           </div>

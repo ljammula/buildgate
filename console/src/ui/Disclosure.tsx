@@ -88,7 +88,7 @@ export function Disclosure({
       >
         <ChevronRight
           aria-hidden="true"
-          className="size-4 shrink-0 translate-y-0.5 text-fg-subtle transition-transform group-data-[open=true]:rotate-90"
+          className="size-4 shrink-0 translate-y-0.5 text-fg-subtle transition-transform duration-100 motion-reduce:transition-none group-data-[open=true]:rotate-90"
         />
         {Heading === null ? (
           <span className={cn("shrink-0 font-medium", failed ? "text-tone-danger" : "text-fg")}>

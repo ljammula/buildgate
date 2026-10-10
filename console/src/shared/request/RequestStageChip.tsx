@@ -1,5 +1,5 @@
 import { headTruncate } from "@/domain/middleTruncate";
-import { AWAITING_PR_LABEL, statusForToken } from "@/domain/status";
+import { AWAITING_PR_LABEL, statusForToken, statusIconForToken } from "@/domain/status";
 import { StatusChip } from "@/ui/StatusChip";
 
 export interface RequestStageChipProps {
@@ -35,11 +35,21 @@ export function RequestStageChip({
       <StatusChip
         status={statusForToken(state)}
         label={`Queued behind ${headTruncate(waitingOn, 12, "…")}`}
+        icon="circle_dashed"
       />
     );
   }
   // A failure that waits on the operator (quarantined) keeps its failure
   // colour: the "Waiting on you" badge beside it says the rest.
   const own = statusForToken(state);
-  return <StatusChip status={needsYou && own !== "failed" ? "needsHuman" : own} label={state} />;
+  // The stuck states keep their octagon; any other state drawn as waiting
+  // takes the waiting icon with its colour.
+  const stuck = statusIconForToken(state) === "octagon_pause";
+  return (
+    <StatusChip
+      status={needsYou && own !== "failed" ? "needsHuman" : own}
+      label={state}
+      {...(stuck ? { icon: "octagon_pause" as const } : {})}
+    />
+  );
 }

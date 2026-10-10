@@ -12,11 +12,19 @@ import { cn } from "@/ui/cn";
  * log name and notes) is agent-reported too: secondary style, text only,
  * invisible characters written out.
  */
-export function TimelineRowItem({ row }: { row: TimelineRow }) {
+export function TimelineRowItem({
+  row,
+  live,
+  stalled,
+}: {
+  row: TimelineRow;
+  live: boolean;
+  stalled: boolean;
+}) {
   return (
     <li data-testid={`timeline-row-${row.rowKey}`} className="flex flex-col gap-0.5 py-1.5">
       <div className="flex items-center gap-2 text-sm">
-        <StageGlyph glyph={row.glyph} />
+        <StageGlyph glyph={row.glyph} live={live} stalled={stalled} />
         <span className={cn(row.glyph === "pending" ? "text-fg-subtle" : "font-medium text-fg")}>
           {row.label}
         </span>
@@ -28,7 +36,7 @@ export function TimelineRowItem({ row }: { row: TimelineRow }) {
       {row.subRows.map((sub, i) => (
         <div key={i} className="flex flex-col gap-0.5 pl-6">
           <div className="flex items-center gap-1.5">
-            <StageGlyph glyph={sub.glyph} small />
+            <StageGlyph glyph={sub.glyph} small live={live} stalled={stalled} />
             <span
               className={cn(
                 "min-w-0 flex-1 text-xs",

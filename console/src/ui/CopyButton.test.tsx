@@ -1,7 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { render as renderBare, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 
+import { TooltipProvider } from "@/ui/Tooltip";
 import { CopyButton } from "@/ui/CopyButton";
+
+// IconButton's tooltip needs the provider the app mounts once.
+const render = (ui: ReactElement) => renderBare(ui, { wrapper: TooltipProvider });
 
 describe.each(["sm", "md"] as const)("CopyButton size %s", (size) => {
   test("copies the text and names itself Copied afterwards", async () => {

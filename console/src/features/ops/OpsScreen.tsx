@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 
-import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { Callout, EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
@@ -58,9 +58,9 @@ export function OpsScreen() {
       <PageHeader
         title="Operations"
         actions={
-          <Button variant="ghost" size="icon" aria-label="Refresh" onClick={() => void refresh()}>
+          <IconButton label="Refresh" onClick={() => void refresh()}>
             <RefreshCw aria-hidden="true" />
-          </Button>
+          </IconButton>
         }
       />
       <PageBody>

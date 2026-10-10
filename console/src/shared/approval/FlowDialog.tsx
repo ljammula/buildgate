@@ -100,7 +100,9 @@ export function FlowDialog({
             disabled={confirmDisabled || pending}
             onClick={onConfirm}
           >
-            {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+            {pending ? (
+              <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : null}
             {confirmLabel}
           </Button>
         </DialogFooter>

@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { Disclosure } from "@/ui/Disclosure";
 import { Markdown } from "@/ui/Markdown";
 import { useCopied } from "@/ui/useCopied";
@@ -50,14 +51,12 @@ export interface FileContentSectionProps {
 function CopyPathButton({ fullPath }: { readonly fullPath: string }) {
   const { copied, copy } = useCopied();
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={copied ? "Path copied" : "Copy path to edit this file"}
+    <IconButton
+      label={copied ? "Path copied" : "Copy path to edit this file"}
       onClick={() => void copy(fullPath)}
     >
       {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-    </Button>
+    </IconButton>
   );
 }
 

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 
 import { queryKeys } from "@/api/queryKeys";
 import { useRequestBoard } from "@/api/requestQueries";
-import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
@@ -27,17 +27,15 @@ export function TriageScreen() {
   const requests = useMemo(() => (data === undefined ? [] : triageRequests(data)), [data]);
 
   const refresh = (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label="Refresh"
+    <IconButton
+      label="Refresh"
       onClick={() => {
         // The list and the focused detail (the only detail query on screen).
         void client.invalidateQueries({ queryKey: queryKeys.requests.all });
       }}
     >
       <RefreshCw aria-hidden="true" />
-    </Button>
+    </IconButton>
   );
 
   return (

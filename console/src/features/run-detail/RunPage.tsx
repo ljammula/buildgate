@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
@@ -61,8 +61,8 @@ export function RunPage({ id }: { id: string }) {
           run.requestId === "" ? null : (
             <Button asChild>
               <Link to={requestPath(run.requestId)}>
-                <ExternalLink aria-hidden="true" />
                 Open request
+                <ArrowRight aria-hidden="true" />
               </Link>
             </Button>
           )

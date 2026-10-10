@@ -29,6 +29,9 @@ export function Timeline({ run, events, error }: TimelineProps) {
   // Durations tick while the run can still change; a finished run's are fixed.
   const now = useNow(runIsTerminalForDisplay(run) ? null : 1000);
   const rows = useMemo(() => computeTimeline(events, now, run), [events, now, run]);
+  const stalled = stallChipDisplay(run)?.kind === "stalled";
+  // A spinner means work is happening: not for a stalled run, a lost feed or a finished run.
+  const live = !stalled && error === null && !runIsTerminalForDisplay(run);
   const strip = computeStatusStrip(events, run, now);
   const tail = firstUntouchedTail(rows);
   const folded = rows.length - tail >= COLLAPSE_AT;
@@ -49,7 +52,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
         <StallChip run={run} />
         <StatusChipForToken token={run.state} />
       </div>
-      {strip.lastActivity !== null && stallChipDisplay(run)?.kind === "stalled" ? (
+      {strip.lastActivity !== null && stalled ? (
         <Callout tone="danger" data-testid="stall-explanation">
           Stalled: nothing has been reported for {strip.lastActivity}. The worker may have stopped;
           check that `factoryd worker` is running.
@@ -62,7 +65,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
       ) : null}
       <ol aria-label="Timeline stages" className="divide-y divide-border/60">
         {shown.map((row) => (
-          <TimelineRowItem key={row.rowKey} row={row} />
+          <TimelineRowItem key={row.rowKey} row={row} live={live} stalled={stalled} />
         ))}
         {folded ? <TimelineNotStarted rows={rows.slice(tail)} /> : null}
       </ol>

@@ -2,11 +2,10 @@ import { RefreshCw } from "lucide-react";
 
 import { useRunRelease } from "@/api/runQueries";
 import { ReleaseDetails } from "@/features/run-detail/ReleaseDetails";
-import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 import { StaleWarning } from "@/ui/StaleWarning";
-import { Tooltip } from "@/ui/Tooltip";
 
 /**
  * The release view of a run. GET /runs/{id}/release is start-token-gated, so
@@ -66,17 +65,9 @@ export function ReleasePanel({ runId }: { runId: string }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-fg">Release — {runId}</h2>
-        <Tooltip content="Refresh">
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="Refresh"
-            disabled={loading}
-            onClick={() => void release.refetch()}
-          >
-            <RefreshCw aria-hidden="true" />
-          </Button>
-        </Tooltip>
+        <IconButton label="Refresh" disabled={loading} onClick={() => void release.refetch()}>
+          <RefreshCw aria-hidden="true" />
+        </IconButton>
       </div>
       {content}
     </div>

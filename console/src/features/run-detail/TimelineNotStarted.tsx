@@ -14,7 +14,7 @@ export function TimelineNotStarted({ rows }: { readonly rows: readonly TimelineR
       <Disclosure bare headingLevel={null} title={`${rows.length} later stages not started`}>
         <ol className="divide-border/60 -mt-2 divide-y">
           {rows.map((row) => (
-            <TimelineRowItem key={row.rowKey} row={row} />
+            <TimelineRowItem key={row.rowKey} row={row} live={false} stalled={false} />
           ))}
         </ol>
       </Disclosure>

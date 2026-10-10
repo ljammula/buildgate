@@ -18,7 +18,7 @@ import { factoryHealth } from "@/domain/health";
 import { needsHumanCount, sortedRequests } from "@/domain/requestOrder";
 import { sectionForRequest, type RequestBoardSection } from "@/domain/boardFilters";
 import { updateNeedsHumanSignal } from "@/platform/tabTitle";
-import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
@@ -138,15 +138,9 @@ export function BoardScreen() {
   const headerActions = (
     <>
       <ViewToggle view={view} onChange={boardView.choose} />
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Refresh"
-        disabled={query.isFetching}
-        onClick={refresh}
-      >
+      <IconButton label="Refresh" disabled={query.isFetching} onClick={refresh}>
         <RefreshCw aria-hidden="true" />
-      </Button>
+      </IconButton>
     </>
   );
   const allProjects = requests === undefined ? [] : distinctProjects(requests);

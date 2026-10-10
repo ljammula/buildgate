@@ -516,6 +516,26 @@ describe("Timeline", () => {
     expect(within(list).getAllByText("Running").length).toBeGreaterThan(0);
   });
 
+  test("a stalled run's running stage is a warning icon, not a spinner", async () => {
+    renderRun(inProgressRun(), { progress: inProgressFeed });
+
+    const list = await screen.findByRole("list", { name: "Timeline stages" });
+    await waitFor(() => {
+      expect(within(list).getByTestId("timeline-row-preflight")).toHaveTextContent("Running");
+    });
+    expect(list.querySelector(".animate-spin")).toBeNull();
+  });
+
+  test("a run that is not stalled spins its running stage", async () => {
+    renderRun(waitingRun("behind 1 run(s) on foo/bar"), { progress: inProgressFeed });
+
+    const list = await screen.findByRole("list", { name: "Timeline stages" });
+    await waitFor(() => {
+      expect(within(list).getByTestId("timeline-row-preflight")).toHaveTextContent("Running");
+    });
+    expect(list.querySelector(".animate-spin")).not.toBeNull();
+  });
+
   // Regression: the whole Timeline once merged into one accessibility node and
   // the glyphs had no label, so a screen reader or Playwright could not tell
   // which stage passed. Each stage is its own list item and names its status.

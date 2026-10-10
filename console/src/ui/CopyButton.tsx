@@ -1,6 +1,6 @@
 import { Check, Copy } from "lucide-react";
 
-import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { cn } from "@/ui/cn";
 import { useCopied } from "@/ui/useCopied";
 
@@ -41,14 +41,8 @@ export function CopyButton({ text, label, size = "md", writeText, className }: C
     );
   }
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={name}
-      onClick={() => void copy(text)}
-      className={className}
-    >
+    <IconButton label={name} onClick={() => void copy(text)} className={className}>
       {glyph}
-    </Button>
+    </IconButton>
   );
 }

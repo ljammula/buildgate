@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { useProjects } from "@/api/runQueries";
 import { newRunPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
+import { IconButton } from "@/ui/IconButton";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
@@ -98,11 +99,9 @@ export function ProjectListScreen() {
                           <LocalTimeText value={project.lastRunAt} />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
+                          <IconButton
                             aria-expanded={isExpanded}
-                            aria-label={`${isExpanded ? "Hide" : "Show"} details for ${project.projectPath}`}
+                            label={`${isExpanded ? "Hide" : "Show"} details for ${project.projectPath}`}
                             onClick={() => {
                               setExpandedProject(isExpanded ? null : project.project);
                             }}
@@ -112,7 +111,7 @@ export function ProjectListScreen() {
                             ) : (
                               <ChevronRight aria-hidden="true" />
                             )}
-                          </Button>
+                          </IconButton>
                         </TableCell>
                       </TableRow>
                       {isExpanded ? <ProjectRowDetails project={project.project} /> : null}
