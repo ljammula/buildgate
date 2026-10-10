@@ -432,7 +432,7 @@ export interface Run {
    * Mirrors run.Run.DiffAvailable: whether a diff snapshot exists to fetch
    * (GET /runs/{id}/diff). False for a run predating the field, or one
    * whose evidence collection warned-and-continued on the diff step; a
-   * "View diff" action should only be shown when this is true, not merely
+   * "Diff" action should only be shown when this is true, not merely
    * when resultSha is set (found via review: a run with no snapshot but a
    * resultSha could otherwise show a button that only ever opens an error
    * screen).

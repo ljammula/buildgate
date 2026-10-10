@@ -230,9 +230,9 @@ const RECOVERY: readonly RequestVerb[] = ["retry", "sendBack", "cancel"];
 /** One row per request state: its label and the operator's verbs there. */
 const REQUEST_STATES: Readonly<Record<string, RequestStateRow>> = {
   submitted: { label: "Submitted", verbs: [] },
-  spec_drafting: { label: "Drafting spec", verbs: [] },
+  spec_drafting: { label: "Spec drafting", verbs: [] },
   spec_review: { label: "Spec review", verbs: REVIEW },
-  oracle_drafting: { label: "Drafting oracles", verbs: [] },
+  oracle_drafting: { label: "Oracle drafting", verbs: [] },
   oracle_review: { label: "Oracle review", verbs: REVIEW },
   planning: { label: "Planning", verbs: [] },
   plan_review: { label: "Plan review", verbs: REVIEW },

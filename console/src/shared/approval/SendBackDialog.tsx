@@ -11,7 +11,7 @@ import { ReasonFlow } from "./ReasonFlow";
 /**
  * "Send back": the recovery route to internal/request.SendBack. Required
  * reason plus a target, then POST `/requests/{id}/reject` with
- * `{ reason, by, to }`, `to` being `plan` or `spec`. The "Back to planning"
+ * `{ reason, by, to }`, `to` being `plan` or `spec`. The "To planning"
  * target is disabled when `request.canSendBackToPlan` is false (the dialog
  * then starts on spec, the only target the server accepts); it also starts
  * on spec for a `spec_conformity` quarantine, where the criterion itself
@@ -91,7 +91,7 @@ function SendBackBody({ request, by, onOpenChange, onDone, blocked }: BodyProps)
               setTarget("plan");
             }}
           />
-          Back to planning
+          To planning
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -103,7 +103,7 @@ function SendBackBody({ request, by, onOpenChange, onDone, blocked }: BodyProps)
               setTarget("spec");
             }}
           />
-          Back to spec drafting
+          To spec
         </label>
       </fieldset>
     </ReasonFlow>

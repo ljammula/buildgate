@@ -34,7 +34,7 @@ export function BuildLogPane({ runId, enabled, onEnabledChange }: BuildLogPanePr
         <span className="flex flex-col">
           <span className="text-fg">Show live build log</span>
           <span id={hintId} className="text-xs text-fg-muted">
-            Viewer only -- plain text, no input is ever sent from here.
+            Viewer only: plain text, and no input is ever sent from here.
           </span>
         </span>
       </label>

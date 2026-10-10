@@ -41,7 +41,7 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
           <RelativeTime value={request.updatedAt} />
         </DescriptionItem>
         {request.ticketCount > 0 ? (
-          <DescriptionItem label="Ticket">{`${request.ticketIndex} / ${request.ticketCount}`}</DescriptionItem>
+          <DescriptionItem label="Tickets">{`${request.ticketIndex} / ${request.ticketCount}`}</DescriptionItem>
         ) : null}
         {/* A halted or quarantined request shows its cause in the recovery
             callout, beside the actions. */}

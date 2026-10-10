@@ -18,14 +18,14 @@ export function OracleDraftingSection({ request }: OracleDraftingSectionProps) {
       <div className="flex items-start gap-2">
         <Spinner label="Drafting" />
         <p>
-          Drafting acceptance-test oracles from the approved spec. Nothing to do yet -- this request
+          Drafting acceptance-test oracles from the approved spec. Nothing to do yet: this request
           moves to Oracle review when drafting finishes; this page updates on its own.
         </p>
       </div>
       {request.oracleDraftStatus !== "" ? (
         <EscapedText
           text={`Previous pass: ${oracleDraftStatusLabel(request.oracleDraftStatus)}${
-            request.oracleDraftDetail === "" ? "" : ` -- ${request.oracleDraftDetail}`
+            request.oracleDraftDetail === "" ? "" : `: ${request.oracleDraftDetail}`
           }`}
         />
       ) : null}

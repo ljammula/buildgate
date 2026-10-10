@@ -26,7 +26,7 @@ export function RunListScreen() {
   return (
     <>
       <PageHeader
-        title="Factory runs"
+        title="Runs"
         actions={
           <>
             <Button asChild variant="primary" size="sm">
@@ -53,7 +53,7 @@ export function RunListScreen() {
                 </IconButton>
               }
             />
-            <IconButton asChild label="Operations">
+            <IconButton asChild label="Open Ops">
               <Link to={opsPath()}>
                 <LayoutDashboard aria-hidden="true" />
               </Link>

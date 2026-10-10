@@ -62,7 +62,7 @@ export function RequestHeader({ request, refreshing, onRefresh, actions }: Reque
     <PageHeader
       sticky
       title={request === null ? "Request detail" : requestShortTitle(request)}
-      breadcrumbs={<Link to={boardPath()}>Back to board</Link>}
+      breadcrumbs={<Link to={boardPath()}>Back to Mission Control</Link>}
       {...(request === null ? {} : { description: <RequestChips request={request} /> })}
       actions={
         <>

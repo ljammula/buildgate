@@ -14,7 +14,7 @@ import { RejectionNote } from "./RejectionNote";
 import { currentContentFor, revisionDiffText } from "./requestDetailLogic";
 
 function revisionLabel(revision: RevisionSummary): string {
-  return `Revision ${revision.index} — rejected by ${revision.by} at ${formatLocalTimestamp(revision.at)}`;
+  return `Revision ${revision.index}: changes requested by ${revision.by} at ${formatLocalTimestamp(revision.at)}`;
 }
 
 /**
@@ -59,7 +59,7 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
       : null;
 
   return (
-    <Panel title="Changes since you rejected">
+    <Panel title="Changes since you asked for changes">
       {note === undefined ? null : (
         <RejectionNote
           rejection={note}
@@ -80,7 +80,7 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
             setEnabled(event.target.checked);
           }}
         />
-        Compare with rejected revision
+        Compare with an earlier revision
       </label>
       {!enabled ? null : revisions.isPending ? (
         <Spinner label="Loading revisions" />
@@ -90,7 +90,7 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
           <ErrorCallout error={revisions.error} />
         </div>
       ) : list.length === 0 ? (
-        <p className="text-sm">No rejected revisions recorded.</p>
+        <p className="text-sm">No earlier revisions recorded.</p>
       ) : (
         <>
           <Select

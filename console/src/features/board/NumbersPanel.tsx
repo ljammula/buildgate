@@ -149,7 +149,7 @@ export function NumbersPanel({ days, projects, className }: NumbersPanelProps) {
         >
           {query.data === undefined
             ? "The numbers could not be loaded:"
-            : "Showing the last numbers loaded -- refresh failed:"}
+            : "Showing the last numbers loaded. The refresh failed:"}
         </StaleWarning>
       )}
       {query.data === undefined ? null : (

@@ -199,13 +199,13 @@ export function stallChipDisplay(
   run: Pick<Run, "stalled" | "waitingReason">,
 ): StallChipDisplay | null {
   if (stallStatus(run) === "stalled") {
-    return { kind: "stalled", label: "stalled", tone: "danger", icon: "triangle_alert" };
+    return { kind: "stalled", label: "Stalled", tone: "danger", icon: "triangle_alert" };
   }
   const waitingReason = run.waitingReason;
   if (waitingReason !== null && waitingReason !== "") {
     return {
       kind: "waiting",
-      label: `waiting: ${waitingReason}`,
+      label: `Waiting: ${waitingReason}`,
       tone: "warning",
       icon: "hourglass",
     };

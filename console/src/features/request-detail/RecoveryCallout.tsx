@@ -154,7 +154,7 @@ export function RecoveryCallout({
             <div className="flex flex-col items-start gap-2">
               <p>
                 Correcting the ticket&apos;s own run record (accepted vs. halted) is a separate,
-                optional action -- it does not affect whether Retry above will work.
+                optional action; it does not affect whether Retry above will work.
               </p>
               <Button asChild>
                 <Link

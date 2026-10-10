@@ -108,8 +108,8 @@ describe("the board", () => {
     const { server: fake } = renderApp(<BoardScreen />, { server: fixtureServer() });
     const building = await screen.findByTestId("card-req-building");
     expect(building).toHaveTextContent("Ticket 2 of 2");
-    expect(within(building).getByText("build")).toBeInTheDocument();
-    expect(within(building).getByTestId("stalled-chip")).toHaveTextContent("stalled");
+    expect(within(building).getByText("Build")).toBeInTheDocument();
+    expect(within(building).getByTestId("stalled-chip")).toHaveTextContent("Stalled");
     // The card's facts come with the list: no call per card.
     expect(
       fake.requests.map((r) => r.url).filter((url) => url.startsWith("/requests/req-")),
@@ -141,7 +141,7 @@ describe("the board", () => {
     const building = await screen.findByTestId("card-req-b");
     expect(building).toHaveTextContent("Ticket 1 of 3");
     expect(building).toHaveTextContent("Round 2 of 3");
-    expect(building).toHaveTextContent("verify");
+    expect(building).toHaveTextContent("Verify");
     expect(within(building).queryByTestId("stalled-chip")).not.toBeInTheDocument();
     expect(within(card("req-q")).getByTestId("kanban-queue")).toHaveTextContent(
       "Queued · position 2 · behind req-b",
@@ -657,9 +657,9 @@ describe("activity", () => {
     const region = await screen.findByRole("region", { name: "Activity" });
     const entries = within(region).getAllByTestId("activity-entry");
     expect(entries.map((entry) => entry.textContent)).toEqual([
-      expect.stringMatching(/^AlphaDrafting spec → Spec review·by factoryd·/),
+      expect.stringMatching(/^AlphaSpec drafting → Spec review·by factoryd·/),
       expect.stringMatching(/^BetaSpec review → Planning·by kim·/),
-      expect.stringMatching(/^AlphaSubmitted → Drafting spec·by factoryd·/),
+      expect.stringMatching(/^AlphaSubmitted → Spec drafting·by factoryd·/),
     ]);
     expect(within(entries[1]!).getByRole("link", { name: "Beta" })).toHaveAttribute(
       "href",

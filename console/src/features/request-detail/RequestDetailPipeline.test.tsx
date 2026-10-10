@@ -290,7 +290,7 @@ describe("compare with a rejected revision", () => {
 
   async function selectFirst() {
     const select = await screen.findByRole("combobox", { name: "Revision" });
-    await userEvent.selectOptions(select, `Revision 1 — rejected by jane at ${stamp()}`);
+    await userEvent.selectOptions(select, `Revision 1: changes requested by jane at ${stamp()}`);
   }
 
   test("is on by default: the note is quoted and the diff shows with no click, beside the whole current text", async () => {
@@ -340,7 +340,7 @@ describe("compare with a rejected revision", () => {
       },
     );
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
-    expect(screen.getByRole("switch", { name: "Compare with rejected revision" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Compare with an earlier revision" })).toBeChecked();
     expect(screen.getByTestId("revision-note")).toHaveTextContent("You asked (jane,");
     expect(screen.getByTestId("revision-note")).toHaveTextContent("too broad");
     // The full current text stays whole in its own card, whatever the diff shows.
@@ -349,7 +349,9 @@ describe("compare with a rejected revision", () => {
     ).toBeVisible();
 
     const diff = await screen.findByTestId("revision-diff");
-    expect(screen.getByRole("region", { name: "Changes since you rejected" })).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Changes since you asked for changes" }),
+    ).toBeVisible();
     // A revision with no hand-off recorded: the operator is told the redraft did not see the note.
     expect(screen.getByTestId("revision-feedback")).toHaveTextContent(
       "The drafter was not given this note",
@@ -427,7 +429,7 @@ describe("compare with a rejected revision", () => {
     expect(items[0]).toHaveTextContent("- 2. A key is scoped.");
     expect(items[0]).toHaveTextContent("+ 2. A key is scoped to one account.");
     expect(items[1]).toHaveTextContent("spec.md · Risks");
-    expect(items[1]).toHaveTextContent("Unchanged since you rejected");
+    expect(items[1]).toHaveTextContent("Unchanged since you asked for changes");
     // The approval is bound to the whole current text, which stays open below.
     expect(
       within(screen.getByTestId("markdown-raw-content")).getByText(/scoped to one account/),
@@ -585,7 +587,7 @@ describe("compare with a rejected revision", () => {
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
     expect(await screen.findByTestId("revision-diff")).toBeInTheDocument();
     // The switch turns it off again.
-    await userEvent.click(screen.getByRole("switch", { name: "Compare with rejected revision" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Compare with an earlier revision" }));
     expect(screen.queryByTestId("revision-diff")).not.toBeInTheDocument();
   });
 
@@ -606,7 +608,7 @@ describe("compare with a rejected revision", () => {
       extra: [{ on: "GET /requests/req-1/revisions", reply: json([]) }],
     });
     await screen.findByRole("heading", { level: 1, name: "Rejected once" });
-    expect(await screen.findByText("No rejected revisions recorded.")).toBeInTheDocument();
+    expect(await screen.findByText("No earlier revisions recorded.")).toBeInTheDocument();
     view.unmount();
 
     openRequest(rejected, {
@@ -636,7 +638,7 @@ describe("compare with a rejected revision", () => {
     await screen.findByRole("heading", { level: 1, name: "Rejected at spec" });
     await waitFor(() => {
       expect(
-        screen.queryByRole("region", { name: "Changes since you rejected" }),
+        screen.queryByRole("region", { name: "Changes since you asked for changes" }),
       ).not.toBeInTheDocument();
     });
   });

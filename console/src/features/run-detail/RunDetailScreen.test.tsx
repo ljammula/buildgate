@@ -324,7 +324,7 @@ test("the override section only appears for a quarantined run", async () => {
   expect(screen.queryByRole("heading", { name: "Operator override" })).not.toBeInTheDocument();
 });
 
-// The "View diff" view both appears (the run has a diff snapshot) and fetches
+// The "Diff" view both appears (the run has a diff snapshot) and fetches
 // and displays the real diff from the backing endpoint, not just the
 // file-count summary already on the Overview. It is a view of the run page
 // selected by the URL, so a reload lands on it.
@@ -338,7 +338,7 @@ test("accepted run detail screen navigates to the diff view", async () => {
     ],
   });
 
-  const tab = await screen.findByRole("tab", { name: "View diff" });
+  const tab = await screen.findByRole("tab", { name: "Diff" });
   // Fetched only once the view is selected.
   expect(server.sent("GET /runs/run-accepted/diff")).toHaveLength(0);
   await userEvent.click(tab);
@@ -359,7 +359,7 @@ test("a shared diff link lands on the diff view, and Overview returns to the run
   });
 
   expect(await screen.findByText("+added line")).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "View diff" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
 
   await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
   expect(await screen.findByRole("heading", { name: "Timeline" })).toBeInTheDocument();
@@ -373,7 +373,7 @@ test("the diff view is not offered when no diff snapshot exists", async () => {
   renderRun({ ...acceptedRun(), diff_available: false });
 
   await screen.findByText("ticket-accepted");
-  expect(screen.queryByRole("tab", { name: "View diff" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
 });
 
 // The run page reaches the release view, which renders the run's real recorded
@@ -383,7 +383,7 @@ test("run detail screen navigates to the release view", async () => {
     routes: [{ on: "GET /runs/run-accepted/release", reply: json(deniedRelease) }],
   });
 
-  const tab = await screen.findByRole("tab", { name: "View release decision" });
+  const tab = await screen.findByRole("tab", { name: "Release" });
   // The Overview's Release card already shows the verdict: no explanation sentence.
   expect(await screen.findByText("Denied")).toBeInTheDocument();
   expect(screen.queryByText("Not evaluated yet")).not.toBeInTheDocument();
@@ -416,7 +416,7 @@ test("truncated diff shows a warning banner", async () => {
     ],
   });
 
-  await userEvent.click(await screen.findByRole("tab", { name: "View diff" }));
+  await userEvent.click(await screen.findByRole("tab", { name: "Diff" }));
 
   expect(await screen.findByText(/truncated/)).toBeInTheDocument();
   expect(screen.getByText("+added line")).toBeInTheDocument();
@@ -805,7 +805,7 @@ describe("Timeline", () => {
     renderRun(inProgressRun());
 
     const strip = await screen.findByTestId("timeline-status-strip");
-    expect(within(strip).getByText("stalled")).toBeInTheDocument();
+    expect(within(strip).getByText("Stalled")).toBeInTheDocument();
   });
 
   // Live bug (operator walk, 2026-09-26, Temporal path): the built-in policy

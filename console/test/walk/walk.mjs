@@ -122,9 +122,9 @@ step("shell-navigation", async () => {
   await visit("/");
   for (const [name, pathname, title] of [
     ["Triage", "/triage", "Triage"],
-    ["Runs", "/runs", "Factory runs"],
+    ["Runs", "/runs", "Runs"],
     ["Projects", "/app/projects", "Projects"],
-    ["Ops", "/ops", "Operations"],
+    ["Ops", "/ops", "Ops"],
     ["Mission Control", "/", "Mission Control"],
   ]) {
     await page
@@ -534,7 +534,7 @@ step("run-detail", async () => {
 
 step("run-diff", async () => {
   await visit("/runs/run-accepted");
-  await page.getByRole("tab", { name: "View diff" }).click();
+  await page.getByRole("tab", { name: "Diff" }).click();
   await page.waitForURL(/view=diff/);
   await page.getByText("+// Key scopes a retry to one account.").waitFor();
   // The view is a link: a reload lands on it.
@@ -580,7 +580,7 @@ step("run-quarantined", async () => {
   await heading("Operator override").waitFor();
   await button("Override run").waitFor();
   check(
-    (await page.getByRole("tab", { name: "View diff" }).count()) === 0,
+    (await page.getByRole("tab", { name: "Diff" }).count()) === 0,
     "a run with no diff offers a diff view",
   );
 });
@@ -772,7 +772,7 @@ step("request-page", async () => {
   await page.getByLabel("Raw").uncheck();
   await heading("Idempotency keys for checkout").waitFor();
   await page.getByLabel("Raw").check();
-  await link("Back to board").click();
+  await link("Back to Mission Control").click();
   await heading("Mission Control", { level: 1 }).waitFor();
 });
 
@@ -981,7 +981,7 @@ step("request-plan-approve", async () => {
   // was given it, read from the server's own revision record.
   const revision = (await api("/requests/req-plan-review/revisions")).body.at(-1);
   check(revision.feedback_supplied === true, "the seeded revision records no hand-off");
-  const changes = main().getByRole("region", { name: "Changes since you rejected" });
+  const changes = main().getByRole("region", { name: "Changes since you asked for changes" });
   await changes.getByText("The drafter was given this note for the redraft.").waitFor();
   const noted = changes
     .getByRole("list", { name: "Your notes on specific places" })
@@ -1146,7 +1146,7 @@ step("request-revisions", async () => {
   const revisions = (await api("/requests/req-spec-review-b/revisions")).body;
   check(revisions.length >= 1, "the rejection left no revision");
   await main()
-    .getByRole("button", { name: /Rejection history/ })
+    .getByRole("button", { name: /Requested changes/ })
     .click();
   await page.getByText("does not say which account", { exact: false }).first().waitFor();
 });

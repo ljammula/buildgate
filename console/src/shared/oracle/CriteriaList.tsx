@@ -28,7 +28,7 @@ export function CriteriaList({ criteria }: CriteriaListProps) {
             />
             <EscapedText
               text={`${c.number}. ${c.eligible ? "Eligible" : "Not eligible"}${
-                c.reason === "" ? "" : ` -- ${c.reason}`
+                c.reason === "" ? "" : `: ${c.reason}`
               }`}
             />
           </div>

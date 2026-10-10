@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ApiError } from "@/domain/apiError";
 import { Button } from "@/ui/Button";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 /**
  * An operator-facing classification of a caught error: a short `headline`
@@ -62,7 +63,7 @@ export function describeError(error: unknown, { startClass = false } = {}): Erro
           headline: "Not authorized",
           nextStep:
             "This browser's start token is missing or is from a " +
-            "previous `factoryd serve` run -- the token changes every " +
+            "previous `factoryd serve` run: the token changes every " +
             "restart. Open the console link `factoryd serve` printed in " +
             "its own log/terminal output just now (ends in `#t=...`), " +
             "which reloads this page with the current token.",
@@ -76,7 +77,7 @@ export function describeError(error: unknown, { startClass = false } = {}): Erro
           "(FACTORYD_API_READ_TOKEN for run/request reads, " +
           "FACTORYD_API_START_TOKEN for starting runs and the " +
           "release/stats/daemon views, or FACTORYD_API_OVERRIDE_TOKEN " +
-          "for approve/reject/override) -- or none is configured on one " +
+          "for approve/reject/override), or none is configured on one " +
           "side. Check the token for this action and reload.",
         raw,
       };
@@ -158,7 +159,13 @@ export function ErrorCallout({
   return (
     <div role="alert" className="flex flex-col items-start gap-1 text-sm">
       <Heading className="text-tone-danger font-semibold">{summary.headline}</Heading>
-      <p className="text-fg whitespace-pre-line">{summary.nextStep}</p>
+      <p className="text-fg whitespace-pre-line">
+        {summary.nextStep === summary.raw ? (
+          summary.nextStep
+        ) : (
+          <TextWithCode text={summary.nextStep} />
+        )}
+      </p>
       {onRetry !== undefined && (
         <Button size="sm" disabled={pending} onClick={() => void retry()}>
           Retry

@@ -11,6 +11,7 @@ import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Callout, Spinner } from "@/ui/Feedback";
 import { Checkbox, Field, Input, Select, Textarea } from "@/ui/Input";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 import { useNewRequestForm } from "./useNewRequestForm";
 
@@ -42,7 +43,9 @@ export function NewRequestScreen() {
     <>
       <PageHeader
         title="New request"
-        description="A request drives spec drafting, planning, and building end to end -- the same thing `factoryd submit` starts from a terminal."
+        description={
+          <TextWithCode text="A request drives spec drafting, planning, and building end to end: the same thing `factoryd submit` starts from a terminal." />
+        }
       />
       <PageBody>
         <Card className="max-w-2xl">
@@ -175,8 +178,8 @@ export function NewRequestScreen() {
             <div className="flex flex-col gap-3 bg-surface-sunken/50 p-4">
               {!canWrite ? (
                 <Callout tone="danger">
-                  This console cannot write to the server from here -- no override token is
-                  configured and the server did not enable an unauthenticated console write.
+                  This console cannot write to the server from here: no override token is configured
+                  and the server did not enable an unauthenticated console write.
                 </Callout>
               ) : null}
               {form.error ? <ErrorCallout error={form.error} /> : null}

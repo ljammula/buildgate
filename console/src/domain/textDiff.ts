@@ -27,7 +27,7 @@ export function unifiedLineDiff(oldText: string, newText: string): string {
   if ((m + 1) * (n + 1) > MAX_DIFF_CELLS) {
     return (
       `(diff not shown: ${m} and ${n} lines is too large to compare ` +
-      "here -- open each revision separately instead)\n"
+      "here; open each revision separately instead)\n"
     );
   }
   // dp[i * w + j] = LCS length of oldLines[i:] and newLines[j:].

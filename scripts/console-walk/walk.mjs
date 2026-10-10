@@ -161,7 +161,7 @@ try {
   await step('board', async () => {
     await page.goto(base + '/', { waitUntil: 'load' });
     await waitForText(/Extend math_ops with two more operations/, MIN, 'the request row');
-    if (await page.getByText(/worker is not running/).count()) throw new Error('board says the worker is not running while it is');
+    if (await page.getByText(/worker is not running/i).count()) throw new Error('board says the worker is not running while it is');
     // The full raw title is still in the row's tooltip, so assert the
     // visible short title instead: stripped and ellipsized.
     if (!(await page.getByText(/own unit tests \(use Python…/).count())) throw new Error('board row does not show the short title');
@@ -213,7 +213,7 @@ try {
   await step('approve-spec', async () => {
     await button('Approve').click();
     const sheet = await dialog().innerText();
-    if (!/oracle_drafting|Drafting oracles/.test(sheet)) throw new Error('approve sheet does not name oracle drafting as the next state');
+    if (!/oracle_drafting|Oracle drafting/.test(sheet)) throw new Error('approve sheet does not name oracle drafting as the next state');
     await dialogButton('Approve').click();
     await waitForState(['oracle_drafting', 'oracle_review'], MIN);
   });

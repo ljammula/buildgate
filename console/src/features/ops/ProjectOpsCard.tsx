@@ -41,7 +41,7 @@ export function ProjectOpsCard({ row }: ProjectOpsCardProps) {
           <p>
             Accepted {stats.accepted} / {stats.totalRuns} runs
             {stats.overrideRatePercent !== null
-              ? ` -- ${stats.overrideRatePercent}% via override`
+              ? `: ${stats.overrideRatePercent}% via override`
               : ""}
           </p>
           {causes.length > 0 ? (

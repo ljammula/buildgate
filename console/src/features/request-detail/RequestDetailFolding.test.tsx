@@ -59,7 +59,7 @@ describe("review states keep what is being approved whole and open", () => {
       path: "/requests/req-1",
       pattern: "/requests/:id",
     });
-    await screen.findByRole("button", { name: "Reload files" });
+    await screen.findByRole("button", { name: "Reload oracle files" });
 
     expect(foldedBlocks()).toHaveLength(0);
     expect(screen.getByRole("region", { name: "Spec" })).toBeInTheDocument();

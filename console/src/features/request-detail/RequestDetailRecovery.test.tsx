@@ -440,7 +440,7 @@ describe("resume_review", () => {
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Rerun step" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/Run the lost Drafting spec step again/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Run the lost Spec drafting step again/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/paid run/)).not.toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "Rerun step" }));
 

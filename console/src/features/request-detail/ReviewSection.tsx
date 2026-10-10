@@ -69,7 +69,7 @@ export function ReviewSection({
       ) : null}
       {anyEditorOpen ? (
         <p className="text-fg-muted text-sm">
-          Approve/Request changes are disabled while an edit is open -- Save or Cancel it first.
+          Approve/Request changes are disabled while an edit is open. Save or Cancel it first.
         </p>
       ) : null}
     </Panel>

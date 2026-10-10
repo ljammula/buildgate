@@ -102,12 +102,12 @@ describe("Disclosure", () => {
 
   test("headingLevel null: the title is plain text and the summary is a named button", async () => {
     render(
-      <Disclosure title="Rejection history (2)" headingLevel={null}>
+      <Disclosure title="Requested changes (2)" headingLevel={null}>
         <p>body</p>
       </Disclosure>,
     );
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "Rejection history (2)" });
+    const toggle = screen.getByRole("button", { name: "Requested changes (2)" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");

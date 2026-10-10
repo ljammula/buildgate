@@ -10,7 +10,7 @@ export function RejectionHistory({ rejections }: { readonly rejections: readonly
     <Disclosure
       bare
       headingLevel={null}
-      title={`Rejection history (${rejections.length})`}
+      title={`Requested changes (${rejections.length})`}
       testId="rejection-history"
     >
       <ul className="flex flex-col gap-3">

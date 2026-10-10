@@ -33,7 +33,7 @@ test("with asChild the child stays a link", () => {
   render(
     <MemoryRouter>
       <TooltipProvider>
-        <IconButton asChild label="Operations">
+        <IconButton asChild label="Ops">
           <Link to="/ops">
             <svg aria-hidden="true" />
           </Link>
@@ -41,5 +41,5 @@ test("with asChild the child stays a link", () => {
       </TooltipProvider>
     </MemoryRouter>,
   );
-  expect(screen.getByRole("link", { name: "Operations" })).toHaveAttribute("href", "/ops");
+  expect(screen.getByRole("link", { name: "Ops" })).toHaveAttribute("href", "/ops");
 });

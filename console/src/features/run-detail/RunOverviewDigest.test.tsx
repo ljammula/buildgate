@@ -172,7 +172,7 @@ describe("the facts card", () => {
     expect(within(card).getByText("478.3k tokens")).toBeInTheDocument();
     expect(within(card).getByText("lib/app.dart")).toBeInTheDocument();
     expect(within(card).getByText("2 files +18 −3")).toBeInTheDocument();
-    expect(within(card).getByText("committed by factoryd")).toBeInTheDocument();
+    expect(within(card).getByText("Committed by factoryd")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Changed files", level: 2 }),
     ).not.toBeInTheDocument();

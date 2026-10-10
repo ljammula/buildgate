@@ -10,7 +10,7 @@ describe("StaleWarning", () => {
   test("says the default message with the error's raw text", () => {
     render(<StaleWarning error={new Error("socket hang up")} />);
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Showing the last successfully loaded data -- refresh failed: socket hang up",
+      "Showing the last successfully loaded data. The refresh failed: socket hang up",
     );
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });

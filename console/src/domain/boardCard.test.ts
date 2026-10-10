@@ -71,7 +71,7 @@ describe("cardFacts", () => {
     const building = fixture("req-building");
     expect(columnForRequest(building)).toBe("building");
     expect(cardFacts(building, "building")).toMatchObject({
-      lines: ["Ticket 2 of 2", "build"],
+      lines: ["Ticket 2 of 2", "Build"],
       stalled: true,
       queue: null,
     });
@@ -82,14 +82,14 @@ describe("cardFacts", () => {
     expect(cardFacts(wire({ id: "a", state: "building" }, { build }), "building").lines).toEqual([
       "Ticket 1 of 3",
       "Round 2",
-      "verify",
+      "Verify",
     ]);
     expect(
       cardFacts(
         wire({ id: "a", state: "building" }, { build: { ...build, max_rounds: 3 } }),
         "building",
       ).lines,
-    ).toEqual(["Ticket 1 of 3", "Round 2 of 3", "verify"]);
+    ).toEqual(["Ticket 1 of 3", "Round 2 of 3", "Verify"]);
   });
 
   test("Building: before its run starts, the queue position and the request's own ticket count", () => {

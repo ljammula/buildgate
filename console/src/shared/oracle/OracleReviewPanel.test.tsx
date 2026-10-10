@@ -47,13 +47,13 @@ const contentOf = (keyId: string) =>
   within(screen.getByTestId(`oracle-content-${keyId}`)).getByRole("region").textContent;
 
 async function loaded() {
-  await screen.findByRole("button", { name: "Reload files" });
+  await screen.findByRole("button", { name: "Reload oracle files" });
 }
 
 /** Waits for a background reload to finish (Approve is disabled while one runs). */
 async function settled() {
   await waitFor(() => {
-    expect(screen.getByRole("button", { name: "Reload files" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reload oracle files" })).toBeEnabled();
   });
 }
 
@@ -68,7 +68,7 @@ test("lists files with sha256, keeps Approve disabled until every file has been 
   ).toBeInTheDocument();
   expect(approveButton()).toBeDisabled();
   expect(
-    screen.getByText("Files (0 of 3 shown) -- open every one to enable Approve"),
+    screen.getByText("Files (0 of 3 shown): open every one to enable Approve"),
   ).toBeInTheDocument();
   expect(screen.getByText("Open 3 more files to approve.")).toBeInTheDocument();
 
@@ -136,7 +136,7 @@ test("a file that changed on the server after it was shown must be re-shown befo
   });
 
   server.files.set("RUN_COMMAND.txt", enc("go test ./internal/...\n"));
-  await userEvent.click(screen.getByRole("button", { name: "Reload files" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reload oracle files" }));
 
   // The open tile re-fetched the changed bytes, so it shows the new content
   // and approval carries the new hash.
@@ -217,7 +217,7 @@ test("a file collapsed and then rewritten on the server is not shown again until
   expect(approveButton()).toBeDisabled();
 
   server.files.set("RUN_COMMAND.txt", enc("rm -rf /\n"));
-  await userEvent.click(screen.getByRole("button", { name: "Reload files" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reload oracle files" }));
   await settled();
   expect(approveButton()).toBeDisabled();
   // A collapsed changed file must not be auto-refetched.
@@ -340,13 +340,13 @@ test("a failed Reload keeps the stale listing visible with its error and disable
   });
 
   server.failListing = true;
-  await userEvent.click(screen.getByRole("button", { name: "Reload files" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reload oracle files" }));
   expect(await screen.findByTestId("oracle-stale-listing")).toBeInTheDocument();
   expect(screen.getByText("RUN_COMMAND.txt")).toBeInTheDocument();
   expect(approveButton()).toBeDisabled();
 
   server.failListing = false;
-  await userEvent.click(screen.getByRole("button", { name: "Reload files" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reload oracle files" }));
   await waitFor(() => {
     expect(screen.queryByTestId("oracle-stale-listing")).toBeNull();
   });
@@ -379,11 +379,11 @@ test("shows the drafting status, its detail and the proposed command, and keeps 
   setup(server);
 
   expect(
-    await screen.findByText(/Oracle draft: Drafting failed -- model returned no manifest/),
+    await screen.findByText(/Oracle draft: Drafting failed: model returned no manifest/),
   ).toBeInTheDocument();
   expect(screen.getByTestId("oracle-proposed-command")).toBeInTheDocument();
   expect(
-    screen.getByText("Suggested RUN_COMMAND.txt (a suggestion only -- not written to the file):"),
+    screen.getByText("Suggested RUN_COMMAND.txt (a suggestion only; not written to the file):"),
   ).toBeInTheDocument();
 });
 
@@ -399,7 +399,7 @@ test("oracle_drafting shows an in-progress notice, and the previous pass's failu
 
   expect(screen.getByTestId("oracle-drafting-section")).toBeInTheDocument();
   expect(screen.getByText(/Drafting acceptance-test oracles/)).toBeInTheDocument();
-  expect(screen.getByText(/Previous pass: Drafting failed -- timeout/)).toBeInTheDocument();
+  expect(screen.getByText(/Previous pass: Drafting failed: timeout/)).toBeInTheDocument();
   expect(screen.queryByTestId("oracle-review-panel")).toBeNull();
   expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
 });
@@ -426,11 +426,9 @@ test("shows a per-criterion eligibility verdict alongside the drafting status", 
 
   expect(await screen.findByTestId("oracle-draft-criteria")).toBeInTheDocument();
   expect(
-    screen.getByText(
-      "1. Not eligible -- divide_numbers(a, 0) raises ValueError, not a return value",
-    ),
+    screen.getByText("1. Not eligible: divide_numbers(a, 0) raises ValueError, not a return value"),
   ).toBeInTheDocument();
-  expect(screen.getByText("2. Eligible -- pure function, deterministic")).toBeInTheDocument();
+  expect(screen.getByText("2. Eligible: pure function, deterministic")).toBeInTheDocument();
 });
 
 test("the file tile marks a file as shown only while it counts", async () => {
@@ -450,5 +448,5 @@ test("a failed first listing shows the error with Retry, and Retry recovers", as
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   server.failListing = false;
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-  expect(await screen.findByRole("button", { name: "Reload files" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Reload oracle files" })).toBeInTheDocument();
 });
