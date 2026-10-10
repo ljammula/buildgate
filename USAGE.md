@@ -443,7 +443,9 @@ factoryd remote-console        # listener, accepted Host and a gate token for th
 ```
 
 It prints the console's address, `https://<machine>.<tailnet>.ts.net[:port]/`.
-The MCP client uses that address with `/mcp` and the MCP token.
+The MCP client uses that address with `/mcp` and the MCP token. Any device
+your tailnet lets reach the machine can open the address, so limit who that
+is with a tailnet ACL; without a token it reads and writes nothing.
 [The console from another machine](#the-console-from-another-machine) has what
 the command does and how to do the same by hand behind another reverse proxy.
 
@@ -460,18 +462,21 @@ factoryd gate-token -rotate            the old token stops working at once
 factoryd remote-console -off           the address stops answering
 ```
 
-`factoryd remote-console` needs Tailscale on the host. It does three things,
-and `-off` undoes them:
+`factoryd remote-console` needs Tailscale on the host, connected. It does three
+things, in this order, and `-off` undoes what it set up:
 
 | Step | What it does | By hand, behind another reverse proxy |
 |---|---|---|
-| Listener | `tailscale serve` forwards an HTTPS port of the host's tailnet name to this profile's `serve`. It reuses the listener already forwarding there, else takes the first free of 443, 8443, 8444 and up (`-https-port` to choose), and never a port that serves something else. It starts `serve` when none runs | Forward HTTPS to `serve`'s loopback address. The proxy must keep the `Host` header and add `X-Forwarded-For` |
+| Gate token | Writes one if none is usable (`-ttl` sets its lifetime) and prints it. A usable one is kept; a disabled one stops the command | `factoryd gate-token` |
+| Listener | `tailscale serve` forwards an HTTPS port of the host's tailnet name to this profile's `serve`. It keeps the port it used before, else takes the first free of 443, 8443, 8444 and up (`-https-port` to choose). It never takes a port that serves something else, or one Funnel opens to the internet. It starts `serve` when none runs | Forward HTTPS to `serve`'s loopback address. The proxy must keep the `Host` header and add `X-Forwarded-For` |
 | Accepted `Host` | Records the address in `<config name>.remote-console` beside the session config. `serve` reads that file on each request, so nothing restarts and a restart keeps it | `factoryd serve -allowed-host <name[:port]>`: the port is part of the name unless it is 443 |
-| Gate token | Writes one if none is usable and prints it | `factoryd gate-token` |
 
-Run it again at any time: it prints the same address and token, and points the
-listener at `serve` if that moved to another port (`factoryd doctor` warns
-`remote console` when it has).
+| Case | What happens |
+|---|---|
+| Run it again | The same address and token. If `serve` came back on another port, the listener is pointed at it and the address stays (`factoryd doctor` warns `remote console` until then) |
+| `-off` | Removes the accepted `Host` first, so the address stops answering at once; then the gate token, if this command wrote it; then the listener, unless that port has since been pointed elsewhere by hand. It says what it left |
+| A step fails | Nothing is left half open: no listener forwards before the token exists, and no `Host` is accepted before the listener is in place. The error says what to run |
+| Who can open the address | Any device your tailnet lets reach the host. Without the token it reads and writes nothing; a tailnet ACL limits who can try |
 
 | Topic | What happens |
 |---|---|
