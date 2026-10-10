@@ -86,7 +86,7 @@ func assertNoGateBaseWorktreeLeft(t *testing.T, ws, dataDir, runID string) {
 // the handoff sorts it as the operator's with a sentence that says so, and
 // what the failures allow next is therefore not a corrective build.
 func TestIntegrationGateThatFailsTheSameWayOnTheBaseCommitIsTheOperators(t *testing.T) {
-	ws, base := gateBaseFixture(t, "false")
+	ws, base := gateBaseFixture(t, `echo "FAIL: the house rule is broken"; exit 1`)
 	dataDir := t.TempDir()
 	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil, nil, dataDir)
 
@@ -249,4 +249,22 @@ func TestIntegrationGateRedOnTheBaseThatFailsDifferentlyOnTheResultStaysCorrecti
 		t.Errorf("the finding lacks %q: %q", want, check.Finding)
 	}
 	assertNoGateBaseWorktreeLeft(t, ws, dataDir, r.ID)
+}
+
+// A gate that prints nothing gives the factory nothing to compare: red on the
+// base and on the result with the same exit code, it is still not called the
+// same failure, and keeps its corrective build.
+func TestIntegrationSilentGateRedOnTheBaseStaysCorrective(t *testing.T) {
+	ws, _ := gateBaseFixture(t, "false")
+	dataDir := t.TempDir()
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil, nil, dataDir)
+	if r.State != run.StateQuarantined {
+		t.Fatalf("state = %q, want %q (gates: %+v)", r.State, run.StateQuarantined, r.GateResults)
+	}
+	if baseCheck := recordedBaseCheck(t, dataDir, r.ID, "repo-house_rule"); baseCheck["outcome"] != "fails_differently" {
+		t.Errorf("base_check = %v, want fails_differently: there is no output to call the same", baseCheck)
+	}
+	if doc, check := handoffCheck(t, dataDir, r, "repo-house_rule"); check.Bin != handoff.BinCorrective || doc.Next != handoff.BinCorrective {
+		t.Errorf("repo-house_rule is sorted %q, next %q; want both %q", check.Bin, doc.Next, handoff.BinCorrective)
+	}
 }
