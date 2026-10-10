@@ -782,7 +782,7 @@ func (sv *serveRun) listenAndServe() error {
 		if file := readGateFile(gatePath, time.Now()); file.present && file.token != "" {
 			log.Printf("gate token on (file %s, expires %s): a console that is not on this machine needs it to read", gatePath, file.expires.Format(time.RFC3339))
 		} else if file.present {
-			log.Printf("gate token on with no usable token (%s): a console that is not on this machine can neither read nor write -- %s", file.reason, file.fix)
+			log.Printf("gate token on with no usable token (%s): no gate token opens a console that is not on this machine -- %s", file.reason, file.fix)
 		}
 	}
 	if *sv.temporalUIURL != "" {

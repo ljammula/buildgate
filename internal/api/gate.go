@@ -136,7 +136,7 @@ const badPrincipal = "by is not a name this write can be recorded under: it is t
 // writePrincipal is the name a request write by r is recorded under: by
 // (requestAPIPrincipal when empty), with gateViaSuffix when only the gate
 // token authorized r. ok is false for a by that already carries the suffix,
-// which no caller may claim, or one too long to record.
+// which no caller may claim, or one too long to record with it.
 func (s *Server) writePrincipal(r *http.Request, by string) (principal string, ok bool) {
 	if strings.Contains(by, strings.TrimSpace(gateViaSuffix)) {
 		return "", false
@@ -146,9 +146,9 @@ func (s *Server) writePrincipal(r *http.Request, by string) (principal string, o
 	}
 	if s.viaGateOnly(r) {
 		by += gateViaSuffix
-	}
-	if len(by) > request.MaxEditByLen {
-		return "", false
+		if len(by) > request.MaxEditByLen {
+			return "", false
+		}
 	}
 	return by, true
 }

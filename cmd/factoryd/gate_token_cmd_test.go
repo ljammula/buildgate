@@ -90,7 +90,7 @@ func TestGateTokenMainDisablesAndRemoves(t *testing.T) {
 	if got := source(); got != (api.GateToken{On: true}) {
 		t.Errorf("after -disable: %+v, want the gate on with no token", got)
 	}
-	if !strings.Contains(out, "neither read nor write") {
+	if !strings.Contains(out, "No gate token opens") {
 		t.Errorf("-disable output does not say what it closes:\n%s", out)
 	}
 	if err := gateTokenMain(dp, &discard, nil); err == nil || !strings.Contains(err.Error(), "-rotate") {
@@ -104,7 +104,7 @@ func TestGateTokenMainDisablesAndRemoves(t *testing.T) {
 	if got := source(); got != (api.GateToken{}) {
 		t.Errorf("after -remove: %+v, want the gate off", got)
 	}
-	if !strings.Contains(out, "reads with no token again") {
+	if !strings.Contains(out, "reads with no token") {
 		t.Errorf("-remove output does not say reads are open again:\n%s", out)
 	}
 	runGateToken(t, dp, "-remove")
@@ -146,7 +146,10 @@ func TestGateFileThatCannotBeUsedLeavesTheGateOnWithNoToken(t *testing.T) {
 		"two tokens on a line": func(t *testing.T, path string) {
 			writeFileMode(t, path, "tok abc\n"+gateExpiresPrefix+now.Add(time.Hour).UTC().Format(time.RFC3339)+"\n", 0o600)
 		},
-		"disabled": func(t *testing.T, path string) { writeFileMode(t, path, gateDisabledLine+"\n", 0o600) },
+		"disabled":   func(t *testing.T, path string) { writeFileMode(t, path, gateDisabledLine+"\n", 0o600) },
+		"empty":      func(t *testing.T, path string) { writeFileMode(t, path, "", 0o600) },
+		"only space": func(t *testing.T, path string) { writeFileMode(t, path, " \n\n", 0o600) },
+		"unreadable": func(t *testing.T, path string) { writeFileMode(t, path, valid, 0o000) },
 	}
 	for name, write := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -157,7 +160,7 @@ func TestGateFileThatCannotBeUsedLeavesTheGateOnWithNoToken(t *testing.T) {
 				t.Errorf("source = %+v, want the gate on with no token", got)
 			}
 			checks := doctorGateTokenChecks(filepath.Join(cfgDir, "config.yml"), now)
-			if len(checks) != 1 || checks[0].Err == nil || !strings.Contains(checks[0].Err.Error(), "neither read nor write") || checks[0].Fix == "" {
+			if len(checks) != 1 || checks[0].Err == nil || !strings.Contains(checks[0].Err.Error(), "no gate token opens") || checks[0].Fix == "" {
 				t.Errorf("doctor = %+v, want one row saying the remote console is closed and how to fix it", checks)
 			}
 			// The plain command replaces only an expired token; it never

@@ -1096,7 +1096,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A request a proxy passed on must name an -allowed-host: its Host is the
 	// caller's own text, and "127.0.0.1:<port>" there is not this machine.
 	if s.loopback && (!s.hostAllowed(r) || (forwarded(r) && !s.allowedHosts[r.Host])) {
-		writeError(w, http.StatusForbidden, "Host header does not match this server's own loopback address (127.0.0.1, localhost, or [::1], with this server's own port) or a configured -allowed-host -- refused to defend against DNS rebinding")
+		writeError(w, http.StatusForbidden, "Host header does not match this server's own loopback address (127.0.0.1, localhost, or [::1], with this server's own port) or a configured -allowed-host -- refused to defend against DNS rebinding. A request a reverse proxy passed on must keep its Host and name an -allowed-host")
 		return
 	}
 	if s.corsAllowOrigin != "" && s.corsAllowOrigin != "*" {
@@ -2248,6 +2248,13 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		newState = run.StateHalted
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("state must be %q or %q", run.StateAccepted, run.StateHalted))
+		return
+	}
+
+	if strings.Contains(req.By, strings.TrimSpace(gateViaSuffix)) {
+		// Only the server writes that text, on a request write the gate
+		// token authorized; an override is never one.
+		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
 

@@ -129,8 +129,10 @@ cancel, create; `internal/api.Server.authorizeRequestWrite`):
 - **Limit:** a forwarder that adds none of those headers (a TCP-level
   forward, an ssh tunnel, a proxy set to rewrite `Host` to the loopback
   address and add nothing) makes its callers local by this test. An ssh
-  tunnel needs a shell on the host, which is already the operator. Any other
-  such forwarder needs `-override-token`, which turns the relaxation off.
+  tunnel needs a shell on the host, which is already the operator. Behind
+  any other such forwarder the gate token guards nothing (every caller is
+  local), so `serve` needs `-override-token`, which turns the write
+  relaxation off, and `FACTORYD_API_READ_TOKEN` for the reads.
 
 Start-class routes (`POST /runs`, daemon lifecycle, and the `GET` release
 and stats routes; `authorizeStart`) get no relaxation. A missing or wrong
@@ -222,12 +224,12 @@ The credential of a console that is not on the machine (`internal/api`'s
 | What it opens | The read routes (`authorizeRead`) and the request writes (`authorizeRequestWrite`): create, approve, reject, retry, resume, cancel, and the spec, ticket and oracle-file edits. A request created with it may carry every field `POST /requests` accepts, a verify command included: it is the operator's credential, and the same holder approves the plan |
 | What it never opens | `POST /runs/{id}/override` (`authorizeOverride` compares against the override token only), the start-class routes (`authorizeStart`), and `POST /mcp` (`serveMCP` compares against the MCP token only). The MCP token and the start token open no gate route |
 | Who needs it | While the gate is on, a request that is not local (`Server.local`, above) reads only with the gate token, or the read token when one is set. The console's own files, `/console-config.json` and `/healthz` stay open: the page has to load to take the token from the URL fragment |
-| Local use | Unchanged by the gate: a local request reads and writes as [Console loopback writes](#console-loopback-writes) says |
+| Local use | The gate decides nothing for a local request: it reads and writes as [Console loopback writes](#console-loopback-writes) says |
 | The file | `<config name>.gate-token` beside the session config: the token and `expires <RFC 3339 time>`. Written beside and renamed into place, never through a symlink, never inside a git work tree. `serve` reads it on each request that needs it, with the start-token file's checks (not a symlink, a regular file, this user's, mode 0600) |
-| States | No file: the gate is off. A usable file: on. A file `serve` cannot use (it fails a check, is malformed, has expired, or holds `disabled`): **on with no token**, so a request that is not local can neither read nor write. A file that goes bad never reopens the reads it guarded |
+| States | No file: the gate is off. A usable file: on. A file `serve` cannot use (it fails a check, is malformed, has expired, or holds `disabled`): **on with no gate token**, so no gate token opens anything and a request that is not local reads only with the read token and writes only with the override token, when those are set. A file that goes bad never reopens the reads it guarded |
 | One value, one class | A gate token equal to the override, start, read or MCP token is not usable |
 | Lifetime | 12 hours unless `-ttl` says otherwise (one minute to 30 days). `-rotate` replaces it: the old token is refused on the next request, and a stream opened with it ends at its next poll |
-| Who is recorded | A write the gate token alone authorized is recorded under the name the console sent (`api` when it sent none) with ` (gate token)` added by the server (`writePrincipal`). A request whose name already carries that text is refused, so only the server writes it. The name is the caller's claim; the suffix is what the server knows |
+| Who is recorded | A write the gate token alone authorized is recorded under the name the console sent (`api` when it sent none) with ` (gate token)` added by the server (`writePrincipal`). A request write or a run override whose name already carries that text is refused, so only the server writes it. The name is the caller's claim; the suffix is what the server knows. **Exception:** the oracle run-command write (`PUT /requests/{id}/oracle/RUN_COMMAND.txt`) has no entry on the request record for any caller; `serve` logs who made it |
 | In the browser | The console takes the token from `#gate=<token>`, keeps it in `sessionStorage`, removes it from the address bar, and sends it only as an `Authorization` header. **Residuals:** the original link can remain in the browser's history; script running in the console's page could read `sessionStorage` (the console renders model-written text as text, never as HTML). The token's expiry, `-rotate`, and its having no override power bound both |
 
 ### MCP endpoint

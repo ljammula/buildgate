@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"buildgate/internal/request"
+	"buildgate/internal/run"
 )
 
 const (
@@ -407,3 +408,126 @@ type stringBody struct{ *strings.Reader }
 func (stringBody) Close() error { return nil }
 
 func readCloser(s string) stringBody { return stringBody{strings.NewReader(s)} }
+
+// TestForwardedRequestIsNotLocalWhenLoopbackIsAnAllowedHost: with the
+// loopback address itself listed as an -allowed-host, a forwarded request
+// naming it passes the Host rule, and still gets no loopback relaxation.
+func TestForwardedRequestIsNotLocalWhenLoopbackIsAnAllowedHost(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	server := NewServer(dataDir, WithListenAddr(gateTestAddr), WithAllowedHosts([]string{gateTestAddr}))
+	forged := func(method, path string) *http.Request {
+		req := gateRequest(t, method, path, "", true)
+		req.Header.Set("X-Forwarded-For", "100.64.0.9")
+		return req
+	}
+	if got := gateStatus(server, forged(http.MethodPost, "/requests/req-1/approve")); got != http.StatusForbidden {
+		t.Errorf("forwarded approve with a loopback Host that is an allowed host = %d, want 403", got)
+	}
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, forged(http.MethodGet, "/console-config.json"))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"writes_enabled":false`) {
+		t.Errorf("console-config = %d %s, want 200 with writes off", recorder.Code, recorder.Body.String())
+	}
+	if reloaded, err := request.Load(dataDir, "req-1"); err != nil || reloaded.State != request.StateSpecReview {
+		t.Fatalf("request state = %v (err %v), want it untouched", reloaded.State, err)
+	}
+}
+
+// TestRotatedGateTokenEndsEveryKindOfStream: each of the four streams ends
+// by itself once the token that opened it is rotated out.
+func TestRotatedGateTokenEndsEveryKindOfStream(t *testing.T) {
+	for _, path := range []string{"/requests/events", "/runs/run-1/events", "/runs/run-1/progress", "/runs/run-1/log?follow=1"} {
+		t.Run(path, func(t *testing.T) {
+			dataDir := t.TempDir()
+			seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+			seedRun(t, dataDir, run.Run{ID: "run-1", State: run.StateSliceRunning})
+			gate := gateState(GateToken{On: true, Token: gateTestToken})
+			server := gateTestServer(t, dataDir, gate, WithPollInterval(10*time.Millisecond))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			req := gateRequest(t, http.MethodGet, path, gateTestToken, false).WithContext(ctx)
+			recorder := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				server.ServeHTTP(recorder, req)
+			}()
+			select {
+			case <-done:
+				t.Fatalf("the stream ended while its token was valid: %d %s", recorder.Code, recorder.Body.String())
+			case <-time.After(150 * time.Millisecond):
+			}
+			gate.Store(&GateToken{On: true, Token: "the-new-token"})
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the stream stayed open after its token was rotated out")
+			}
+		})
+	}
+}
+
+// TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes: each request
+// write that records who made it records the gate token's suffix when the
+// gate token authorized it, and the plain name when the override token did.
+// No caller can send the suffix itself, on a request write or a run
+// override.
+func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
+	lastHistory := func(r *request.Request) string { return r.History[len(r.History)-1].By }
+	lastEdit := func(r *request.Request) string { return r.Edits[len(r.Edits)-1].By }
+	content := func(c string) string {
+		body, _ := json.Marshal(map[string]string{"by": "kanna", "content": c})
+		return string(body)
+	}
+	cases := []struct {
+		name   string
+		seed   func(t *testing.T, dataDir string)
+		method string
+		path   string
+		body   string
+		by     func(r *request.Request) string
+	}{
+		{"reject", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/reject", `{"by":"kanna","reason":"redo the scope"}`, lastHistory},
+		{"retry", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateQuarantined, false) }, http.MethodPost, "/requests/req-1/retry", `{"by":"kanna","reason":"again"}`, lastHistory},
+		{"cancel", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/cancel", `{"by":"kanna","reason":"not needed"}`, lastHistory},
+		{"spec edit", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPut, "/requests/req-1/spec", content(validSpecMD), lastEdit},
+		{"ticket edit", func(t *testing.T, d string) { seedPlanReviewRequestWithTicket(t, d, "req-1") }, http.MethodPut, "/requests/req-1/tickets/1", content(validTicketMD), lastEdit},
+	}
+	for _, tc := range cases {
+		for _, via := range []struct{ token, want string }{{gateTestToken, "kanna (gate token)"}, {gateTestOverride, "kanna"}} {
+			t.Run(tc.name+" by "+via.want, func(t *testing.T) {
+				dataDir := t.TempDir()
+				tc.seed(t, dataDir)
+				server := gateTestServer(t, dataDir, gateState(GateToken{On: true, Token: gateTestToken}))
+				req := gateRequest(t, tc.method, tc.path, via.token, false)
+				req.Body = readCloser(tc.body)
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+				}
+				reloaded, err := request.Load(dataDir, "req-1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := tc.by(reloaded); got != via.want {
+					t.Errorf("recorded by = %q, want %q", got, via.want)
+				}
+				claimed := gateRequest(t, tc.method, tc.path, via.token, false)
+				claimed.Body = readCloser(strings.Replace(tc.body, `"kanna"`, `"mallory (gate token)"`, 1))
+				if got := gateStatus(server, claimed); got != http.StatusBadRequest {
+					t.Errorf("the same write claiming the suffix = %d, want 400", got)
+				}
+			})
+		}
+	}
+	dataDir := t.TempDir()
+	seedRun(t, dataDir, run.Run{ID: "run-1", State: run.StateQuarantined})
+	server := gateTestServer(t, dataDir, gateState(GateToken{On: true, Token: gateTestToken}))
+	override := gateRequest(t, http.MethodPost, "/runs/run-1/override", gateTestOverride, false)
+	override.Body = readCloser(`{"by":"mallory (gate token)","reason":"x","state":"accepted"}`)
+	if got := gateStatus(server, override); got != http.StatusBadRequest {
+		t.Errorf("a run override claiming the suffix = %d, want 400", got)
+	}
+}
