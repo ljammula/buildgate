@@ -8,6 +8,7 @@
 // expanded with content whose hash matches the listing's, and the hashes sent
 // are those of the bytes received. A collapsed file counts as not shown, and
 // so does everything while the listing is stale (a failed reload).
+import { pastesAsShown } from "@/domain/textEscape";
 import { Check, RefreshCw } from "lucide-react";
 
 import { useApi } from "@/api/ApiProvider";
@@ -25,6 +26,7 @@ import { oracleDraftStatusLabel } from "@/shared/oracle/oracleDraftStatus";
 import { type OracleFileSource, useOracleFileStore } from "@/shared/oracle/useOracleFileStore";
 import { useRunCommandEditing } from "@/shared/oracle/useRunCommandEditing";
 import { Button } from "@/ui/Button";
+import { CopyButton } from "@/ui/CopyButton";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";
 import { StaleWarning } from "@/ui/StaleWarning";
@@ -144,8 +146,16 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
           <p className="text-fg-muted text-xs">
             Suggested RUN_COMMAND.txt (a suggestion only; not written to the file):
           </p>
-          <div data-testid="oracle-proposed-command">
+          <div data-testid="oracle-proposed-command" className="flex items-start gap-1">
             <EscapedText text={listing.proposedCommand} className="font-mono text-xs" />
+            {/* Offered only when the paste is exactly the line shown. */}
+            {pastesAsShown(listing.proposedCommand) ? (
+              <CopyButton
+                size="sm"
+                text={listing.proposedCommand}
+                label="Copy suggested RUN_COMMAND.txt"
+              />
+            ) : null}
           </div>
         </div>
       ) : null}

@@ -1,3 +1,5 @@
+import { shellJoin } from "@/domain/shellQuote";
+import { escapeInvisible, pastesAsShown } from "@/domain/textEscape";
 import { useState } from "react";
 
 import { formatElapsedCompact, formatLocalTimestamp, elapsedBetween } from "@/domain/elapsed";
@@ -8,6 +10,7 @@ import { ReviewMaskedPaths } from "@/features/run-detail/ReviewMaskedPaths";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { CompactId } from "@/ui/CompactId";
+import { CopyButton } from "@/ui/CopyButton";
 import { cn } from "@/ui/cn";
 
 export interface AttemptCardProps {
@@ -70,7 +73,17 @@ export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
             Command
           </Button>
           {commandOpen ? (
-            <p className="mt-1 font-mono text-xs break-all">{attempt.command.join(" ")}</p>
+            <p className="mt-1 flex items-start gap-1 font-mono text-xs break-all">
+              {/* Quoted as a shell reads it, so the line shown is the line that runs. */}
+              {escapeInvisible(shellJoin(attempt.command))}
+              {pastesAsShown(shellJoin(attempt.command)) ? (
+                <CopyButton
+                  size="sm"
+                  text={shellJoin(attempt.command)}
+                  label="Copy attempt command"
+                />
+              ) : null}
+            </p>
           ) : null}
         </div>
       </CardBody>

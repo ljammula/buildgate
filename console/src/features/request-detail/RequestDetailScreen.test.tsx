@@ -557,3 +557,21 @@ test("a request in pr_review shows the server's next step: what its pull request
   await loaded();
   expect(screen.getByTestId("next-action-banner")).toHaveTextContent(next);
 });
+
+test("a ticket's pull request link can be copied", async () => {
+  const user = userEvent.setup();
+  openRequest(
+    requestWire({
+      state: "pr_review",
+      tickets: [
+        ticketWire({
+          index: 1,
+          prUrl: "https://github.com/acme/app/pull/1",
+          prState: "open",
+        }),
+      ],
+    }),
+  );
+  await user.click(await screen.findByRole("button", { name: "Copy pull request link" }));
+  expect(await navigator.clipboard.readText()).toBe("https://github.com/acme/app/pull/1");
+});

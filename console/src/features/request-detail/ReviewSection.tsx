@@ -3,6 +3,7 @@ import type { RequestSummary } from "@/domain/request";
 import { OracleReviewPanel } from "@/shared/oracle/OracleReviewPanel";
 import { TicketOraclePanel } from "@/shared/oracle/TicketOraclePanel";
 import { Callout } from "@/ui/Feedback";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 import { Panel } from "./Panel";
 import { ticketOracleAnchorId } from "./ReviewActions";
@@ -41,8 +42,8 @@ export function ReviewSection({
         <Callout tone="neutral" title="Note">
           This console cannot write here: the server has writes disabled for this origin and no
           override token is configured for this console build. Ask the operator running{" "}
-          <code className="font-mono">factoryd serve</code> to bind it to loopback (or configure an
-          override token) to enable approve/reject from here.
+          <TextWithCode text="`factoryd serve`" /> to bind it to loopback (or configure an override
+          token) to enable approve/reject from here.
         </Callout>
       ) : null}
       {canWrite && !detailLoaded ? (

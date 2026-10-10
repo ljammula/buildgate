@@ -5,6 +5,7 @@ import type { Run } from "@/domain/run";
 import type { RequestSummary } from "@/domain/request";
 import { stageLabels } from "@/domain/runDetail";
 import { runPath } from "@/routes/paths";
+import { CompactId } from "@/ui/CompactId";
 import { TableCell, TableRow } from "@/ui/Table";
 import { ShortPath } from "@/ui/ShortPath";
 import { StatusChipForToken } from "@/ui/StatusChip";
@@ -39,8 +40,8 @@ export function RunRow({ run, request }: RunRowProps) {
         {request === null ? null : <div className="text-xs text-fg-muted">Ticket {run.ticket}</div>}
         <StallChip run={run} />
       </TableCell>
-      <TableCell className="truncate font-mono text-xs" title={run.id}>
-        {run.id}
+      <TableCell className="text-xs">
+        <CompactId value={run.id} max={24} label={`run id ${run.id}`} />
       </TableCell>
       <TableCell>
         <StatusChipForToken token={run.state} />

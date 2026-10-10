@@ -7,6 +7,7 @@ import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Section } from "@/ui/PageLayout";
 import { StaleWarning } from "@/ui/StaleWarning";
 import { KillSwitchChip } from "@/ui/StatusChip";
+import { TextWithCode } from "@/ui/TextWithCode";
 import {
   Table,
   TableBody,
@@ -38,8 +39,7 @@ function ReleaseBody({
             <KillSwitchChip engaged={stale ? null : killSwitch.engaged} />
           </DescriptionItem>
           <DescriptionItem label="Control">
-            Engage and disengage from the command line (factoryd kill-switch). It is deliberately
-            not a console action, so hitting it never depends on a healthy factoryd serve.
+            <TextWithCode text="Engage and disengage from the command line (`factoryd kill-switch`). It is deliberately not a console action, so hitting it never depends on a healthy `factoryd serve`." />
           </DescriptionItem>
         </DescriptionList>
       </Card>

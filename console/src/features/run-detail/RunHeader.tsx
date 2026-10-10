@@ -23,7 +23,7 @@ function RunHeaderView({ run, title }: RunHeaderViewProps) {
       breadcrumbs={<Link to={runsPath()}>Back to Runs</Link>}
       description={
         <span className="inline-flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs">{run.ticket}</span>
+          <CompactId value={run.ticket} max={34} label="ticket id" className="text-xs" />
           <CompactId value={run.id} max={34} label="run id" className="text-xs" />
           <StatusChipForToken token={run.state} />
           <StallChip run={run} />

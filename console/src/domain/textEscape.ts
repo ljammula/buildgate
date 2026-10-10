@@ -146,3 +146,17 @@ export function decodeUtf8Escaping(bytes: ArrayLike<number>): string {
   }
   return out;
 }
+
+/**
+ * Whether `text` pastes into a terminal as exactly what it reads as: one
+ * line of printable ASCII. That is stricter than what the console draws as
+ * an escape, on purpose: a no-break space, a tab or a variation selector
+ * reads as nothing or as a plain space and pastes as something a shell
+ * treats differently. Commands, ids, paths and addresses are ASCII in
+ * practice; text that is not can still be selected and copied by hand, with
+ * the reader's own eyes on it. Every copy button is gated on this
+ * (`ui/CopyButton`), so no caller can forget it.
+ */
+export function pastesAsShown(text: string): boolean {
+  return /^[\x20-\x7e]+$/.test(text);
+}

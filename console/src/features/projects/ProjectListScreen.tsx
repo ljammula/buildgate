@@ -10,6 +10,7 @@ import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { IconButton } from "@/ui/IconButton";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
 import { Table, TableBody, TableFrame, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 import { ProjectListRow } from "./ProjectListRow";
 import { ProjectLookupForm } from "./ProjectLookupForm";
@@ -93,9 +94,9 @@ export function ProjectListScreen() {
         {startTokenFailure ? (
           <Callout tone="danger">
             One or more projects&apos; stats/release could not be read (401/403). Open the console
-            link <code className="font-mono">factoryd serve</code> printed in its own log/terminal
-            output just now (ends in <code className="font-mono">#t=...</code>). The start token
-            changes every restart.
+            link <TextWithCode text="`factoryd serve`" /> printed in its own log/terminal output
+            just now (ends in <code className="font-mono">#t=...</code>). The start token changes
+            every restart.
           </Callout>
         ) : null}
         <TableFrame>

@@ -396,3 +396,12 @@ test("a row is the title on one line, then the id, the project and the waiting a
   expect(age).toHaveClass("text-fg-muted", "tabular-nums");
   expect(age.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/);
 });
+
+test("the detail pane copies the focused request's id", async () => {
+  const user = userEvent.setup();
+  renderApp(<TriageScreen />, {
+    server: triage([{ id: "req-copy", state: "spec_review", title: "Copy me" }]),
+  });
+  await user.click(await screen.findByRole("button", { name: "Copy request id" }));
+  expect(await navigator.clipboard.readText()).toBe("req-copy");
+});

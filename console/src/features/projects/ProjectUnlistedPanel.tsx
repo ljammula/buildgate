@@ -1,6 +1,7 @@
 import type { ProjectTab } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
+import { CopyButton } from "@/ui/CopyButton";
 
 import { ProjectDetails } from "./ProjectDetails";
 
@@ -26,9 +27,12 @@ export function ProjectUnlistedPanel({
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate font-mono text-sm font-semibold text-fg" title={project}>
-            {project}
-          </h2>
+          <div className="flex items-center gap-1">
+            <h2 className="truncate font-mono text-sm font-semibold text-fg" title={project}>
+              {project}
+            </h2>
+            <CopyButton size="sm" text={project} label="Copy project id" />
+          </div>
           <p className="text-sm text-fg-muted">No runs recorded for this project.</p>
         </div>
         <Button size="sm" onClick={onClose}>

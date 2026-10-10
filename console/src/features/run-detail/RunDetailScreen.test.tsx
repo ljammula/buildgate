@@ -1085,3 +1085,15 @@ test("a run that cannot be loaded shows the error with Retry", async () => {
     expect(server.sent("GET /runs/run-gone").length).toBeGreaterThan(1);
   });
 });
+
+test("the Temporal link can be copied", async () => {
+  const user = userEvent.setup();
+  renderRun(
+    { ...acceptedRun(), temporal_workflow_id: "wf 123" },
+    { config: { temporalUiUrl: "http://temporal.test" } },
+  );
+  await user.click(await screen.findByRole("button", { name: "Copy Temporal link" }));
+  expect(await navigator.clipboard.readText()).toBe(
+    "http://temporal.test/namespaces/default/workflows/wf%20123",
+  );
+});

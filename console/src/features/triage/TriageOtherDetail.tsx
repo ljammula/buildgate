@@ -6,6 +6,7 @@ import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { RequestStatusUnit } from "@/shared/request/RequestStatusUnit";
 import { requestPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
+import { CompactId } from "@/ui/CompactId";
 import { Kbd } from "@/ui/Kbd";
 
 import { triageReason } from "./triageModel";
@@ -26,6 +27,12 @@ export function TriageOtherDetail({ request, now }: TriageOtherDetailProps) {
       <h2 className="text-fg text-sm font-semibold">
         {request.title !== "" ? request.title : request.id}
       </h2>
+      <CompactId
+        value={request.id}
+        max={40}
+        label="request id"
+        className="text-fg-subtle -mt-2 text-xs"
+      />
       <RequestStatusUnit request={request} now={now}>
         <RequestStageChip state={request.state} needsYou />
       </RequestStatusUnit>

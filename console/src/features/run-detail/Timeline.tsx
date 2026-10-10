@@ -12,6 +12,7 @@ import { stallChipDisplay } from "@/domain/elapsed";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Callout } from "@/ui/Feedback";
 import { StatusChipForToken } from "@/ui/StatusChip";
+import { TextWithCode } from "@/ui/TextWithCode";
 import { StallChip, useNow } from "@/ui/Time";
 
 export interface TimelineProps {
@@ -55,7 +56,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
       {strip.lastActivity !== null && stalled ? (
         <Callout tone="danger" data-testid="stall-explanation">
           Stalled: nothing has been reported for {strip.lastActivity}. The worker may have stopped;
-          check that <code className="font-mono">factoryd worker</code> is running.
+          check that <TextWithCode text="`factoryd worker`" /> is running.
         </Callout>
       ) : null}
       {strip.latest !== null ? (

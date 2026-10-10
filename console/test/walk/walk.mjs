@@ -410,6 +410,8 @@ step("mission-control-review", async () => {
   // The keyboard reaches them too: Tab from the title lands on Review.
   await card("req-spec-review").getByRole("link").first().focus();
   await page.keyboard.press("Tab");
+  // The id's copy button sits between the title and the controls.
+  await page.keyboard.press("Tab");
   check(
     await card("req-spec-review")
       .getByRole("link", { name: "Review", exact: true })

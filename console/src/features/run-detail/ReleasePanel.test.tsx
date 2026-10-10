@@ -76,6 +76,8 @@ test("the screen exposes no kill-switch control", async () => {
 
   expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
     "Refresh",
+    "Copy factoryd kill-switch",
+    "Copy factoryd serve",
   ]);
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();

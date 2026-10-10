@@ -31,7 +31,7 @@ export function ReleaseDetails({ release }: { release: ReleaseView }) {
               <DescriptionItem label="Decision">
                 <Badge tone="danger">
                   release decision could not be recorded: {recordingFailure.error}; fix, then run{" "}
-                  <code className="font-mono">factoryd retry</code>
+                  <TextWithCode text="`factoryd retry`" />
                 </Badge>
               </DescriptionItem>
               <DescriptionItem label="Failed at">
@@ -89,8 +89,7 @@ export function ReleaseDetails({ release }: { release: ReleaseView }) {
             <KillSwitchChip engaged={killSwitch.engaged} />
           </DescriptionItem>
           <DescriptionItem label="Control">
-            Engage and disengage from the command line (factoryd kill-switch). It is deliberately
-            not a console action, so hitting it never depends on a healthy factoryd serve.
+            <TextWithCode text="Engage and disengage from the command line (`factoryd kill-switch`). It is deliberately not a console action, so hitting it never depends on a healthy `factoryd serve`." />
           </DescriptionItem>
           {killSwitch.history.length === 0 ? (
             <DescriptionItem label="History">

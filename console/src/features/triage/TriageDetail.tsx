@@ -8,6 +8,7 @@ import { Button } from "@/ui/Button";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
+import { CompactId } from "@/ui/CompactId";
 import { Kbd } from "@/ui/Kbd";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 import { REQUEST_VERBS } from "@/domain/status";
@@ -58,6 +59,12 @@ export function TriageDetail({
       <h2 className="text-fg text-sm font-semibold">
         {request.title !== "" ? request.title : request.id}
       </h2>
+      <CompactId
+        value={request.id}
+        max={40}
+        label="request id"
+        className="text-fg-subtle -mt-2 text-xs"
+      />
       <RequestStatusUnit request={request} now={now}>
         <RequestStageChip state={request.state} needsYou />
       </RequestStatusUnit>
