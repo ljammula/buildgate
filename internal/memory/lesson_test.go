@@ -438,8 +438,8 @@ func TestAQuotedCommandRefusesAnAbsolutePathAfterAnyNonPathCharacter(t *testing.
 // slashes out of a URL.
 func TestLessonTextRefusesSplitPathsAndTokens(t *testing.T) {
 	for _, reason := range []string{
-		"Read /`Users/kanna/code/secret` first",
-		"Read /'Users/kanna/code/secret' first",
+		"Read /`Users/op/code/secret` first",
+		"Read /'Users/op/code/secret' first",
 		"Read /`etc/passwd` first",
 		"Read /(etc/passwd) first",
 		"Use key `AKIA1234567`890ABCDEF12` here",
