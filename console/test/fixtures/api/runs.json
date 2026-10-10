@@ -562,7 +562,15 @@
         "exit_code": 3,
         "duration_ms": 3,
         "log_sha256": "every-field log_sha256",
-        "reference_oracle_sha256": "every-field reference_oracle_sha256"
+        "reference_oracle_sha256": "every-field reference_oracle_sha256",
+        "base_check": {
+          "outcome": "every-field outcome",
+          "base_sha": "every-field base_sha",
+          "exit_code": 3,
+          "log_path": "every-field log_path",
+          "log_sha256": "every-field log_sha256",
+          "reason": "every-field reason"
+        }
       }
     ],
     "notifications": [

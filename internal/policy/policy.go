@@ -373,6 +373,9 @@ type NamedGateInput struct {
 	// over already-collected evidence, the same reason LogSHA256 is
 	// passed in rather than hashed by this function).
 	ReferenceOracleSHA256 string
+	// BaseCheck is the gate's rerun on the base commit, copied through to
+	// run.GateResult.BaseCheck. It never decides Passed.
+	BaseCheck *run.GateBaseCheck
 }
 
 // NamedGate evaluates one NamedGateInput the same way FullSuiteVerify
@@ -547,6 +550,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 
 	for _, g := range input.NamedGates {
 		gate := NamedGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256, g.ReferenceOracleSHA256)
+		gate.BaseCheck = g.BaseCheck
 		result.GateResults = append(result.GateResults, gate)
 		if !gate.Passed {
 			accepted = false

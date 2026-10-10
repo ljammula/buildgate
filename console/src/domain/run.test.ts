@@ -150,6 +150,11 @@ describe("fixtures", () => {
       exitCode: 3,
       durationMs: 3,
       logSha256: "every-field log_sha256",
+      baseCheck: {
+        outcome: "every-field outcome",
+        baseSha: "every-field base_sha",
+        reason: "every-field reason",
+      },
     });
     expect(r.notifications[0]).toEqual({
       runId: "every-field run_id",

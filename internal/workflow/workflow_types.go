@@ -575,6 +575,11 @@ type VerifyActivityResult struct {
 	// run.OracleCanaryEvidence); nil for every other Activity and when the real
 	// oracle command did not pass (the canary only runs after it did).
 	OracleCanary *run.OracleCanaryEvidence `json:"oracle_canary,omitempty"`
+	// BaseCheck is a failed named or repository gate's rerun on the base
+	// commit (run.GateBaseCheck), made inside the gate's own Activity; nil
+	// for a gate that passed, for the reference oracle and for every other
+	// Activity.
+	BaseCheck *run.GateBaseCheck `json:"base_check,omitempty"`
 }
 
 // ReviewStepInput is RunReviewStepActivity's input. Embeds RunWorkflowInput

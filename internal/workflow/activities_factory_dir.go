@@ -16,7 +16,8 @@ import (
 
 // Every sandbox of a run that executes a repository command (the build, the
 // baseline and canonical verify, the full suite, every named and repository
-// gate, the oracle canary and the reruns after an oracle commit) sees
+// gate and a failed one's rerun on the base commit, the oracle canary and the
+// reruns after an oracle commit) sees
 // /workspace/.factory as the commit .factory.yml was read from holds it,
 // mounted read-only (SC-012). runSandboxWithRetries is the one place that
 // attaches the mount, before every launch; a review's launch, which runs no

@@ -181,7 +181,9 @@ on a rebuild, because a human chose that retry.
 **Corrective builds for other checks.** A ticket run quarantined by checks
 other than the two reviews alone is followed by a corrective build when its
 handoff sorts every judged failed check as `corrective` (see "What a stopped
-run left behind" in USAGE.md for the bins). The build runs on the
+run left behind" in USAGE.md for the bins). A named or repository gate that
+also fails on the base commit is sorted `operator`, so no corrective build
+follows it (see "A failed gate is rerun on the base commit"). The build runs on the
 quarantined run's branch (`-on-branch`/`-diff-base`) with the ticket's own
 build spec, unchanged, and the handoff rendered as text as
 `-earlier-attempt <file>`: a read-only input beside the spec that only the
@@ -602,6 +604,7 @@ size budget). No buildgate change or release is needed to add one.
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is judged by |
 | Cost | One sandbox launch per gate per run, two with an oracle commit; with Compose services, each launch brings the services up and down. `doctor` does not check a repo gate's executable against the image, as it does for the five named gates |
 | A gate that did not run | An accepted run with no result for one of the repository's gates is quarantined naming it (a long-lived Worker older than this `factoryd`): `factoryd restart` |
+| A gate that fails on the base commit too | See "A failed gate is rerun on the base commit" under Named gates: the same rule |
 
 **Setup and autofix commands.** `setup:` and `autofix:` each list shell
 commands for the repository. `setup:` runs in every build, verify and gate
@@ -689,6 +692,24 @@ keys are one compiled-in table (`internal/policy.CommandGates`) rather
 than five independently-maintained lists — adding a 6th command gate
 touches that table, its YAML key (`projectconfig.Config.GateCommands`),
 and this doc, not the run loop or the Temporal wiring.
+
+**A failed gate is rerun on the base commit.** A named gate (`lint`,
+`security_audit`, `unit_tests`, `integration_tests`) or a repository gate
+(`repo-<id>`) that fails on the build's result is run once more on the commit
+the ticket's work started from. A gate that fails there too cannot be fixed by
+a build, so the factory spends none on it.
+
+| | |
+|---|---|
+| When | Only after the gate failed, inside the gate's own step. A passing gate is never rerun. `reference_oracle`, `canonical_verify` (see the baseline verify) and `full_suite_verify` are not |
+| Which commit | The run's base commit. For a run that continues an earlier run's branch (a corrective build, a PR-review round, a `retry` on the failed attempt's branch): the ticket's own base (`diff_base_sha`), not the commit the round started from |
+| Where | A sandbox like the gate's own (same image, `setup:`, limits, registry proxy, Compose services, `.factory/` read-only from the trusted commit, no model route), on a scratch worktree of that commit under the run's directory (`gate-base/<check>`), removed afterwards. Never on the host, never in the run's worktree |
+| Time | What is left of the gate's own time limit, less one minute; with less than that left it is not started |
+| Record | `base_check` on the gate's entry in `run.json` `gate_results` (and `GET /runs/{id}`): `outcome`, `base_sha`, `exit_code`, `log_path`, `log_sha256`, `reason`. The gate's own `passed`, `exit_code` and `log_sha256` are the run on the result alone and never change |
+| `outcome: fails` | The handoff sorts the gate `operator`: the run's reason reads `<gate> fails on the base commit <sha> too, so no build can fix it: fix the gate command or the repository. No corrective build is started.` Fix it, then `factoryd retry <id>` |
+| `outcome: passes` | The build's changes (or a flaky command) fail the gate: sorted `corrective`, as a failed gate always was |
+| `outcome: not_checked` | The rerun reached no exit code (`reason`: no base commit on record, the commit could not be checked out, the sandbox could not start, time ran out, the worker stopped during it). Sorted `corrective`, as a failed gate always was |
+| Cost | One more sandbox launch for each failed gate; with Compose services, the services come up and go down once more |
 
 `reference_oracle_command` should run a check the agent didn't author — a
 script outside `Allowed-Files` that diffs the candidate's output against

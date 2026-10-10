@@ -181,6 +181,60 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 	}
 }
 
+// A gate that failed on the build's result and on the base commit is not
+// handed to a corrective build, which could not make it pass: the request
+// quarantines with the run's sentence telling the operator what to change. The
+// same gate with a rerun that passed, or that could not be made, gets its
+// round as before.
+func TestCheckCorrectiveRoundIsNotSpentOnAGateThatAlsoFailsOnTheBaseCommit(t *testing.T) {
+	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
+	for _, tc := range []struct {
+		outcome   string
+		wantRound bool
+	}{
+		{run.GateBaseFails, false},
+		{run.GateBasePasses, true},
+		{run.GateBaseNotChecked, true},
+	} {
+		t.Run(tc.outcome, func(t *testing.T) {
+			dp := newTestDeps(t)
+			dataDir, id := buildingFixture(dp, t, 1)
+			branch := "factoryd/" + id + "-001"
+			buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+				ticket := argValue(args, "-ticket")
+				if onReady != nil {
+					onReady(&run.Run{ID: ticket})
+				}
+				rr := &run.Run{
+					ID: ticket, Ticket: ticket, State: run.StateQuarantined, Branch: branch, BaseSHA: base, ResultSHA: result, ChangedFiles: []string{"sum.go"},
+					GateResults: []run.GateResult{{Check: "repo-docs", ExitCode: 2, BaseCheck: &run.GateBaseCheck{Outcome: tc.outcome, BaseSHA: base, ExitCode: 2}}},
+				}
+				if err := handoff.Sync(rr, dataDir); err != nil {
+					t.Fatalf("write the handoff: %v", err)
+				}
+				return rr.Save(dataDir)
+			}
+			calls, _ := stubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
+			})
+			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
+			if err := driveRequests(dp, context.Background(), dataDir, cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), buildRunner); err != nil {
+				t.Fatalf("driveRequests: %v", err)
+			}
+			if got := *calls == 1; got != tc.wantRound {
+				t.Fatalf("corrective round ran = %v (calls %d), want %v", got, *calls, tc.wantRound)
+			}
+			loaded, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantRound && loaded.State != request.StateQuarantined {
+				t.Errorf("request state = %q, want %q", loaded.State, request.StateQuarantined)
+			}
+		})
+	}
+}
+
 // A handoff the run did not record, or that no longer matches the run, is
 // not given to a build: the request quarantines as it did before.
 func TestCheckCorrectiveRoundNeedsAHandoffTheRunVouchesFor(t *testing.T) {

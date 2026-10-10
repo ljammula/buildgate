@@ -552,3 +552,43 @@ func TestBuildSortsAVerifyThatNeverRanSetupIntoTheOperatorsBin(t *testing.T) {
 		t.Errorf("an ordinary failed canonical_verify has Next = %q, want corrective", got.Next)
 	}
 }
+
+// A named or repository gate that also failed on the base commit is the
+// operator's, with a sentence that says what to change; one that passed
+// there, or whose rerun could not be made, stays a failure a build is given.
+func TestBuildSortsAGateThatAlsoFailsOnTheBaseCommitIntoTheOperatorsBin(t *testing.T) {
+	const base = "0123456789abcdef0123456789abcdef01234567"
+	gate := func(check, outcome string) run.GateResult {
+		return run.GateResult{Check: check, ExitCode: 1, BaseCheck: &run.GateBaseCheck{Outcome: outcome, BaseSHA: base, Reason: "why"}}
+	}
+	for _, tc := range []struct {
+		name string
+		gate run.GateResult
+		want Bin
+	}{
+		{"a named gate that fails on the base", gate("lint", run.GateBaseFails), BinOperator},
+		{"a repository gate that fails on the base", gate("repo-docs", run.GateBaseFails), BinOperator},
+		{"a gate that passes on the base", gate("lint", run.GateBasePasses), BinCorrective},
+		{"a gate whose rerun could not be made", gate("repo-docs", run.GateBaseNotChecked), BinCorrective},
+		{"a gate recorded before the rerun existed", run.GateResult{Check: "lint", ExitCode: 1}, BinCorrective},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &run.Run{ID: "run-b", Ticket: "t", State: run.StateQuarantined, BaseSHA: base, GateResults: []run.GateResult{tc.gate}}
+			doc := Build(r, t.TempDir())
+			if len(doc.Checks) != 1 || doc.Checks[0].Bin != tc.want || doc.Next != tc.want {
+				t.Fatalf("checks = %+v, next = %q, want %q", doc.Checks, doc.Next, tc.want)
+			}
+			finding := doc.Checks[0].Finding
+			saysSo := strings.Contains(finding, "fails on the base commit 0123456789ab too") && strings.Contains(finding, "fix the gate command or the repository") && strings.Contains(finding, "No corrective build is started")
+			if saysSo != (tc.want == BinOperator) {
+				t.Errorf("finding = %q; it tells the operator about the base commit = %v, want %v", finding, saysSo, tc.want == BinOperator)
+			}
+		})
+	}
+	// One gate the build can fix beside one it cannot: the attempt as a
+	// whole is the operator's, since a corrective build could not pass.
+	r := &run.Run{ID: "run-m", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", run.GateBasePasses), gate("repo-docs", run.GateBaseFails)}}
+	if doc := Build(r, t.TempDir()); doc.Next != BinOperator {
+		t.Errorf("next = %q, want operator", doc.Next)
+	}
+}

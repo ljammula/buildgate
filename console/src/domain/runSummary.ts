@@ -49,6 +49,28 @@ export function gatesSummary(gates: readonly GateResult[]): BlockSummary {
   };
 }
 
+/**
+ * What a failed command gate's rerun on the base commit showed, as one line;
+ * "" for a gate that was not rerun. `reason` and the commit are the server's
+ * text and are shown as text.
+ */
+export function gateBaseCheckText(gate: Pick<GateResult, "baseCheck">): string {
+  const check = gate.baseCheck;
+  if (check === null) return "";
+  const base =
+    check.baseSha === "" ? "the base commit" : `the base commit ${check.baseSha.slice(0, 12)}`;
+  switch (check.outcome) {
+    case "fails":
+      return `Also fails on ${base}: no build can fix it. Fix the gate command or the repository.`;
+    case "passes":
+      return `Passes on ${base}: the build's changes fail it.`;
+    case "not_checked":
+      return `Not checked on ${base}${check.reason === "" ? "" : `: ${check.reason}`}`;
+    default:
+      return `On ${base}: ${check.outcome}`;
+  }
+}
+
 export function composeSummary(phases: readonly ComposePhase[]): string {
   return phases
     .map((phase) => {
