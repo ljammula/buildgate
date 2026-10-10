@@ -90,13 +90,12 @@ var (
 	// listStart is how a line would open a nested list, an ordered list or a
 	// quote once it follows "- ".
 	listStart = regexp.MustCompile(`^([-+>]|[0-9]+[.)])`)
-	// absolutePath is, outside a quoted command, a token that starts with
-	// "/" and a letter or a dot. A "/" inside a relative path follows a
-	// letter, a digit, "." or "_" and is not one.
-	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z.]`)
-	// spanAbsolutePath is the same inside a quoted command: a "/" at the
-	// start, or after a space or "=", followed by a letter, a dot or "/".
-	spanAbsolutePath = regexp.MustCompile(`(^|[ =])/[A-Za-z./]`)
+	// absolutePath is the one rule for an absolute path, outside a quoted
+	// command and inside one: a "/" at the start, or after any character
+	// that is not a letter, a digit, ".", "_" or "/", followed by a letter,
+	// a dot or "/". A "/" inside a relative path follows one of those
+	// characters and is not one.
+	absolutePath = regexp.MustCompile(`(^|[^A-Za-z0-9._/])/[A-Za-z./]`)
 	// longRun is 20 or more characters with no space from the set keys,
 	// hashes and encoded secrets are written in. One is refused only when
 	// it holds both a letter and a digit (longToken): a long word, a path
@@ -264,7 +263,7 @@ func ValidateCommand(s string) error {
 		return textErr("command", "has a character outside the allowed set", s)
 	case s[0] == '-':
 		return textErr("command", "starts with a dash", s)
-	case spanAbsolutePath.MatchString(s):
+	case absolutePath.MatchString(s):
 		return textErr("command", "has an absolute path", s)
 	}
 	if why := shapeProblem(s); why != "" {

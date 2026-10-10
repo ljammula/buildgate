@@ -1414,9 +1414,9 @@ The text rule a line passes (never repaired, for a build agent's note and for
 |---|---|
 | Length | One line, at most 120 characters |
 | Characters outside backticks | Letters, digits, space and `. , : ; ( ) ' " / = + -` |
-| A command | Inside one pair of backticks: letters, digits, space and `. _ / : = -`, not starting with `-`, and no absolute path: no `/` followed by a letter, `.` or `/` at the start of the command or after a space or `=`. A relative path (`./tools/gen.sh`, `tests/x.py`) is accepted |
+| A command | Inside one pair of backticks: letters, digits, space and `. _ / : = -`, not starting with `-`, and no absolute path: no `/` followed by a letter, `.` or `/` unless a letter, digit, `.`, `_` or `/` comes right before it (the same rule as outside backticks, so `host:/etc/x`, `-/etc/x` and `.:/var/x` are refused). A relative path (`./tools/gen.sh`, `tests/x.py`) is accepted |
 | Refused anywhere | `//` and `www.` (a URL in any form), an e-mail address, `/users/` and `/home/` in any case, an IPv4 or hex-colon address, `::`, an unbroken run of 20 or more of `A-Z a-z 0-9 + / _ -` that holds at least one letter and at least one digit (a hash, a key id, an encoded secret; a long word, a path or a variable name with no digit is accepted), anything secret redaction would change |
-| Refused outside backticks | An absolute path: `/` followed by a letter or `.`, unless a letter, digit, `.`, `_` or `/` comes right before it; a start of `-`, `+` or digits followed by `.` or `)` |
+| Refused outside backticks | An absolute path: `/` followed by a letter, `.` or `/`, unless a letter, digit, `.`, `_` or `/` comes right before it; a start of `-`, `+` or digits followed by `.` or `)` |
 
 Store layout, under `<data-dir>/memory/<key>/`, where `<key>` is the
 lower-cased project name, `-`, and the first 12 hex characters of the SHA-256
