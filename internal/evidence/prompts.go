@@ -215,11 +215,7 @@ func retainSessionPrompts(root *os.Root, src, dstDir string, room int) (int, err
 // retainPrompt reads one saved prompt through root, redacts it, and writes
 // it into dstDir under name (or the first free numbered name).
 func retainPrompt(root *os.Root, src, dstDir, name string) error {
-	opened, err := root.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return err
-	}
-	in, err := checkHostileRegularFile(opened, src, maxSavedPromptBytes)
+	in, err := openHostileRegularFileIn(root, src, maxSavedPromptBytes)
 	if err != nil {
 		return err
 	}
@@ -351,15 +347,11 @@ func ReadSavedPrompt(dir, attempt, name string) ([]byte, bool) {
 		return nil, false
 	}
 	defer root.Close()
-	opened, err := root.OpenFile(PromptsDirName+"/"+attempt+"/"+name+".md", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	opened, err := openHostileRegularFileIn(root, PromptsDirName+"/"+attempt+"/"+name+".md", maxSavedPromptBytes)
 	if err != nil {
 		return nil, false
 	}
 	defer opened.Close()
-	info, err := opened.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxSavedPromptBytes {
-		return nil, false
-	}
 	data, err := io.ReadAll(io.LimitReader(opened, maxSavedPromptBytes))
 	if err != nil {
 		return nil, false
