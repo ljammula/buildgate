@@ -1,4 +1,4 @@
-import { checkProject, getProjectStats, listProjects } from "@/api/projects";
+import { checkProject, getProjectStats, getStats, listProjects } from "@/api/projects";
 import { createHttp } from "@/api/http";
 import { readFixtureText } from "@/test/fixtures";
 
@@ -125,5 +125,25 @@ describe("getProjectStats", () => {
     const { fetch, calls } = recordingFetch(() => json(readFixtureText("api/project-stats.json")));
     await getProjectStats(httpFor(fetch), "a b/c");
     expect(calls[0]?.url).toBe("/projects/a%20b%2Fc/stats");
+  });
+});
+
+describe("getStats", () => {
+  test("sends GET /stats with the read token and decodes the fixture", async () => {
+    const { fetch, calls } = recordingFetch(() => json(readFixtureText("api/stats.json")));
+    const stats = await getStats(httpFor(fetch), null);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/stats");
+    expect(calls[0]?.init.method).toBe("GET");
+    expect(calls[0]?.init.headers).toEqual({ Authorization: "Bearer read-t" });
+    expect(stats.overall.overall.tickets).toBe(3);
+    expect(stats.projects.map((p) => p.project)).toEqual(["app"]);
+  });
+
+  test("a window is sent as `since`, in the trend route's form", async () => {
+    const { fetch, calls } = recordingFetch(() => json(readFixtureText("api/stats.json")));
+    await getStats(httpFor(fetch), "7d");
+    await getStats(httpFor(fetch), "30d");
+    expect(calls.map((call) => call.url)).toEqual(["/stats?since=7d", "/stats?since=30d"]);
   });
 });

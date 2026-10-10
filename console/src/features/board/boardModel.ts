@@ -33,7 +33,7 @@ function heartbeatAge(lastHeartbeat: string, now: Date): string | null {
  * server or a network blip.
  */
 export function queueRunWarning(
-  status: QueueRunStatus | null,
+  status: Pick<QueueRunStatus, "state" | "lastHeartbeat"> | null,
   requests: readonly RequestSummary[],
   now: Date,
 ): string | null {

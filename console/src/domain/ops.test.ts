@@ -66,7 +66,12 @@ test("GET /queue-run decodes", () => {
     asObject(readFixtureJson("api/queue-run.json"), "queue-run.json"),
     "GET /queue-run",
   );
-  expect(status).toEqual({ state: "stale", lastHeartbeat: "2026-09-10T09:50:00Z" });
+  expect(status).toEqual({
+    state: "stale",
+    lastHeartbeat: "2026-09-10T09:50:00Z",
+    activeRequests: [],
+    jobSlots: 0,
+  });
 });
 
 test("getQueueRunStatus sends the read token, which is what the server gates GET /queue-run on", () => {
@@ -78,7 +83,29 @@ test("an empty queue-run answer reads as absent", () => {
   expect(decodeQueueRunStatus({}, "GET /queue-run")).toEqual({
     state: "absent",
     lastHeartbeat: "",
+    activeRequests: [],
+    jobSlots: 0,
   });
+});
+
+test("a live worker's queue-run answer names what it runs and its job slots", () => {
+  const status = decodeQueueRunStatus(
+    {
+      state: "alive",
+      last_heartbeat: "2026-09-10T09:50:00Z",
+      active_requests: ["req-a", "req-b"],
+      job_slots: 2,
+    },
+    "GET /queue-run",
+  );
+  expect(status.activeRequests).toEqual(["req-a", "req-b"]);
+  expect(status.jobSlots).toBe(2);
+});
+
+test("active_requests that is not a list of strings is refused with the route's name", () => {
+  expect(() =>
+    decodeQueueRunStatus({ state: "alive", active_requests: "req-a" }, "GET /queue-run"),
+  ).toThrow("GET /queue-run");
 });
 
 test("GET /workspaces decodes, with omitted hints as empty strings", () => {

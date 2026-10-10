@@ -8,6 +8,7 @@ import {
   optBoolean,
   optString,
   reqString,
+  stringList,
   stringOrNull,
 } from "@/domain/decode";
 
@@ -126,12 +127,18 @@ export function decodeDaemonList(value: unknown, at: string): DaemonStatus[] {
 export interface QueueRunStatus {
   readonly state: string;
   readonly lastHeartbeat: string;
+  /** The requests the worker runs a job for right now. Sent only while `state` is "alive". */
+  readonly activeRequests: readonly string[];
+  /** How many jobs the worker runs at once; 0 when the server sent none (not alive, or an older server). */
+  readonly jobSlots: number;
 }
 
 export function decodeQueueRunStatus(o: JsonObject, at: string): QueueRunStatus {
   return {
     state: optString(o, "state", at, "absent"),
     lastHeartbeat: optString(o, "last_heartbeat", at),
+    activeRequests: stringList(o, "active_requests", at),
+    jobSlots: numberOr(o, "job_slots", at, 0),
   };
 }
 

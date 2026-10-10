@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 
 import {
+  type BoardWindowDays,
   type RequestBoardFilters,
   type RequestBoardSection,
   copyRequestBoardFilters,
@@ -18,6 +19,8 @@ export interface BoardFilterControls {
   readonly toggleSection: (section: RequestBoardSection) => void;
   readonly selectSection: (section: RequestBoardSection | null) => void;
   readonly toggleProject: (project: string) => void;
+  /** The window on finished work: 7 days, 30 days or all. */
+  readonly selectDays: (days: BoardWindowDays) => void;
 }
 
 function toSearchParams(filters: RequestBoardFilters): URLSearchParams {
@@ -30,7 +33,7 @@ function toSearchParams(filters: RequestBoardFilters): URLSearchParams {
 }
 
 /**
- * The board's filters, kept in the URL (?project=&group=&q=) so a filtered
+ * The board's filters, kept in the URL (?project=&group=&q=&days=) so a filtered
  * board is a shareable link. Changes replace the history entry: Back leaves
  * the board instead of walking through every keystroke.
  */
@@ -68,6 +71,9 @@ export function useBoardFilters(): BoardFilterControls {
       const projects = new Set(filters.projects);
       if (!projects.delete(project)) projects.add(project);
       apply(copyRequestBoardFilters(filters, { projects }));
+    },
+    selectDays: (days) => {
+      apply(copyRequestBoardFilters(filters, { days }));
     },
   };
 }

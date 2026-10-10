@@ -39,7 +39,7 @@ test("the main navigation links to every top-level screen", () => {
     a.getAttribute("href"),
   ]);
   expect(links).toEqual([
-    ["Requests", "/"],
+    ["Mission Control", "/"],
     ["Triage", "/triage"],
     ["Runs", "/runs"],
     ["Projects", "/app/projects"],
@@ -50,7 +50,7 @@ test("the main navigation links to every top-level screen", () => {
 test("the current screen's link is marked as the current page", () => {
   renderApp("/runs");
   expect(screen.getByRole("link", { name: "Runs" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", { name: "Requests" })).not.toHaveAttribute("aria-current");
+  expect(screen.getByRole("link", { name: "Mission Control" })).not.toHaveAttribute("aria-current");
 });
 
 test("the theme toggle cycles system, light, dark and applies each to the document", async () => {

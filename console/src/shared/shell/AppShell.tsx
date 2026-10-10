@@ -1,7 +1,7 @@
 import {
   Activity,
   FolderGit2,
-  Inbox,
+  LayoutDashboard,
   ListChecks,
   Monitor,
   Moon,
@@ -38,7 +38,7 @@ interface NavItem {
 }
 
 const navItems: readonly NavItem[] = [
-  { to: boardPath(), label: "Requests", icon: Inbox, end: true },
+  { to: boardPath(), label: "Mission Control", icon: LayoutDashboard, end: true },
   { to: triagePath(), label: "Triage", icon: ListChecks },
   { to: runsPath(), label: "Runs", icon: Activity },
   { to: projectsPath(), label: "Projects", icon: FolderGit2 },

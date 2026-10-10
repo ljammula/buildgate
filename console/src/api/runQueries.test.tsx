@@ -5,6 +5,7 @@ import { createHttp } from "@/api/http";
 import { queryKeys } from "@/api/queryKeys";
 import {
   runDetailOptions,
+  useFactoryStats,
   useOverrideRun,
   useProjectOpsQueries,
   useRun,
@@ -158,5 +159,48 @@ describe("useProjectOpsQueries", () => {
     const { wrapper } = harness([]);
     const { result } = renderHook(() => useProjectOpsQueries([]), { wrapper });
     expect(result.current).toEqual([]);
+  });
+});
+
+describe("useFactoryStats", () => {
+  const statsRoute = {
+    match: (url: string) => url.startsWith("/stats"),
+    respond: () => new Response(readFixtureText("api/stats.json")),
+  };
+
+  test("reads GET /stats once and caches it under the key of its window", async () => {
+    const { wrapper, client, calls } = harness([statsRoute]);
+    const { result } = renderHook(() => useFactoryStats(null), { wrapper });
+    await waitFor(() => {
+      expect(result.current.data?.overall.overall.tickets).toBe(3);
+    });
+    expect(calls.map((call) => call.url)).toEqual(["/stats"]);
+    expect(client.getQueryData(queryKeys.ops.stats(null))).toBe(result.current.data);
+    expect(client.getQueryData(queryKeys.ops.stats("7d"))).toBeUndefined();
+  });
+
+  test("another window is another read, with its `since`", async () => {
+    const { wrapper, calls } = harness([statsRoute]);
+    const { result, rerender } = renderHook(({ since }) => useFactoryStats(since), {
+      wrapper,
+      initialProps: { since: "7d" },
+    });
+    await waitFor(() => {
+      expect(result.current.data).toBeDefined();
+    });
+    rerender({ since: "30d" });
+    await waitFor(() => {
+      expect(calls.map((call) => call.url)).toEqual(["/stats?since=7d", "/stats?since=30d"]);
+    });
+    expect(queryKeys.ops.stats("7d")).not.toEqual(queryKeys.ops.stats("30d"));
+  });
+
+  test("a failed read is the query's error, with no data invented", async () => {
+    const { wrapper } = harness([]);
+    const { result } = renderHook(() => useFactoryStats("7d"), { wrapper });
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    expect(result.current.data).toBeUndefined();
   });
 });

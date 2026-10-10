@@ -31,7 +31,7 @@ test("the sidebar counts the requests that wait on the operator, on Requests and
     expect(pill).toHaveTextContent("2");
   }
   // The pill is for the eye; the links keep their names and the count is announced once.
-  expect(screen.getByRole("link", { name: "Requests" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Mission Control" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Triage" })).toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("2 requests need you.");
   // No event stream is opened just to count.
@@ -50,7 +50,7 @@ test("no pill when nothing waits, and none when the list cannot be read", async 
 
   renderApp(<AppShell>x</AppShell>, { server: [] });
   await waitFor(() => {
-    expect(screen.getByRole("link", { name: "Requests" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Mission Control" })).toBeInTheDocument();
   });
   expect(screen.queryByTestId("nav-needs-you-count")).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("");

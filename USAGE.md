@@ -883,6 +883,8 @@ The console's home screen: what the factory is doing, and what each request wait
 | Acting | A card opens its request. A card waiting on a spec, oracle or plan review has **Review**, which opens the request where the text is and where you approve, and **Request changes**, the same dialog as on the request page. A card never approves and cards do not drag: a gate is passed on the page that shows what you are approving |
 | Numbers | Per project and overall, what `factoryd stats` prints (tickets, one-shot rate, accepted rate, median rounds, top quarantine check, spend and cost per accepted ticket) |
 | Activity | The latest moves across every request: which request, from and to, by whom, when |
+| Window | **7 days** (the default), **30 days** or **All**, kept in the link (`?days=30`, `?days=all`). It narrows what is finished: the Done column, cancelled requests, Activity and Numbers. It never hides a request that is drafting, building, in PR review or waiting on you, however old. Done says how many older ones it hides |
+| One screen | The board fits the window: each column scrolls by itself under its heading (with project lanes, the lanes scroll together under sticky lane headings), and Activity scrolls in its own box |
 | List | The Board / List switch shows the same requests as a list in three sections; the browser remembers the choice |
 
 The queue place and the build's stage come from the server (`queue_position` and `build` on `GET /requests`, `active_requests` and `job_slots` on `GET /queue-run`), so the console and `factoryd status` agree. From another machine it is the same screen: [the console from another machine](#the-console-from-another-machine).

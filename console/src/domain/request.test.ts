@@ -198,6 +198,41 @@ test("GET /requests decodes every fixture row", () => {
   expect(list[4]!.oracleDraftStatus).toBe("drafted");
 });
 
+test("GET /requests carries the running build of a building request, and no queue position while it runs", () => {
+  const list = decodeRequestList(readFixtureJson("api/requests.json"), "GET /requests");
+  expect(list[0]!.build).toEqual({
+    runId: "run-running",
+    ticket: 2,
+    tickets: 2,
+    stage: "build",
+    round: 0,
+    maxRounds: 0,
+    stalled: true,
+  });
+  expect(list[0]!.queuePosition).toBeNull();
+  // Only a building request whose run has started has one.
+  expect(list.slice(1).every((r) => r.build === null && r.queuePosition === null)).toBe(true);
+});
+
+test("a waiting request decodes its queue position, and a build its round", () => {
+  const waiting = decodeRequestSummary(
+    {
+      id: "req-w",
+      workspace: "/repos/app",
+      project: "app",
+      state: "building",
+      submitted_at: "2026-09-10T09:00:00Z",
+      updated_at: "2026-09-10T09:00:00Z",
+      queue_position: 2,
+      waiting_on: "req-ahead",
+      build: { run_id: "run-1", ticket: 1, tickets: 3, stage: "verify", round: 2, max_rounds: 3 },
+    },
+    "GET /requests[0]",
+  );
+  expect(waiting.queuePosition).toBe(2);
+  expect(waiting.build).toMatchObject({ round: 2, maxRounds: 3, stage: "verify", stalled: false });
+});
+
 test("request-spec-review decodes", () => {
   const r = detail("request-spec-review");
   expect(r.id).toBe("req-spec-review");

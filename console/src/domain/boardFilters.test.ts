@@ -166,6 +166,38 @@ describe("RequestBoardFilters URL round-trip", () => {
     expect(restored.projects).toEqual(new Set(["billing,legacy", "checkouts"]));
   });
 
+  test("the window is 7 days when the URL says nothing, and that default is not written", () => {
+    expect(filtersFromSearchParams(new URLSearchParams()).days).toBe(7);
+    expect(toQueryParameters(filters({ days: 7 }))).toEqual({});
+    // A link from before the window existed has no `days`: it opens on the default.
+    expect(filtersFromSearchParams(new URLSearchParams("group=working&q=x")).days).toBe(7);
+  });
+
+  test("30 days and All round-trip as days=30 and days=all", () => {
+    expect(toQueryParameters(filters({ days: 30 }))).toEqual({ days: "30" });
+    expect(toQueryParameters(filters({ days: "all" }))).toEqual({ days: "all" });
+    expect(filtersFromSearchParams(new URLSearchParams("days=30")).days).toBe(30);
+    expect(filtersFromSearchParams(new URLSearchParams("days=all")).days).toBe("all");
+    const original = filters({ days: "all", section: "finished", search: "x" });
+    const restored = filtersFromSearchParams(toSearchParams(toQueryParameters(original)));
+    expect(requestBoardFiltersEqual(restored, original)).toBe(true);
+    expect(requestBoardFiltersEqual(filters({ days: 30 }), filters({ days: 7 }))).toBe(false);
+  });
+
+  test("a days value that is not one of the three reads as the default", () => {
+    for (const value of ["14", "0", "", "ALL", "7d"]) {
+      expect(filtersFromSearchParams(new URLSearchParams({ days: value })).days).toBe(7);
+    }
+  });
+
+  test("the window is not part of matching: it never hides a request there", () => {
+    const old = decodeRequestSummary(
+      requestJson({ id: "old", state: "done", updatedAt: "2020-01-01T00:00:00Z" }),
+      "test",
+    );
+    expect(matchesRequestBoardFilters(old, filters({ days: 7 }))).toBe(true);
+  });
+
   test("an unrecognized group query value is ignored, not crashed on", () => {
     const params = new URLSearchParams({ group: "bogus" });
     expect(filtersFromSearchParams(params).section).toBeNull();

@@ -1,10 +1,13 @@
 import { Search } from "lucide-react";
 
 import {
+  type BoardWindowDays,
   type RequestBoardFilters,
   type RequestBoardSection,
+  boardWindowChoices,
   sectionLabels,
 } from "@/domain/boardFilters";
+import { boardWindowChoiceLabel } from "@/domain/boardWindow";
 import { Input } from "@/ui/Input";
 
 import { FilterChip } from "./FilterChip";
@@ -21,9 +24,10 @@ export interface BoardToolbarProps {
   readonly onSearch: (value: string) => void;
   readonly onToggleSection: (section: RequestBoardSection) => void;
   readonly onToggleProject: (project: string) => void;
+  readonly onSelectDays: (days: BoardWindowDays) => void;
 }
 
-/** Search, the section filter, the project filter (only with more than one project to choose) and the live indicator. */
+/** Search, the section filter, the window on finished work, the project filter (only with more than one project to choose) and the live indicator. */
 export function BoardToolbar({
   filters,
   searchText,
@@ -33,6 +37,7 @@ export function BoardToolbar({
   onSearch,
   onToggleSection,
   onToggleProject,
+  onSelectDays,
 }: BoardToolbarProps) {
   return (
     <div className="flex flex-col gap-3">
@@ -63,6 +68,25 @@ export function BoardToolbar({
               }}
             >
               {sectionLabels[section]}
+            </FilterChip>
+          ))}
+        </div>
+        {/* One of three, always: pressing the one in use changes nothing. */}
+        <div
+          role="group"
+          aria-label="Finished work from the last"
+          title="How far back finished work, activity and the numbers go. Work in flight is always shown."
+          className="flex flex-wrap items-center gap-1.5"
+        >
+          {boardWindowChoices.map((days) => (
+            <FilterChip
+              key={days}
+              pressed={filters.days === days}
+              onPressedChange={() => {
+                onSelectDays(days);
+              }}
+            >
+              {boardWindowChoiceLabel(days)}
             </FilterChip>
           ))}
         </div>

@@ -125,7 +125,7 @@ step("shell-navigation", async () => {
     ["Runs", "/runs", "Factory runs"],
     ["Projects", "/app/projects", "Projects"],
     ["Ops", "/ops", "Operations"],
-    ["Requests", "/", "Requests"],
+    ["Mission Control", "/", "Mission Control"],
   ]) {
     await page
       .getByRole("navigation", { name: "Main" })
@@ -137,7 +137,7 @@ step("shell-navigation", async () => {
   await link("New request").click();
   await heading("New request", { level: 1 }).waitFor();
   await page.goBack();
-  await heading("Requests", { level: 1 }).waitFor();
+  await heading("Mission Control", { level: 1 }).waitFor();
 });
 
 step("theme", async () => {
@@ -155,8 +155,256 @@ step("theme", async () => {
   check((await theme()) === null, "system did not clear the attribute");
 });
 
-step("board", async () => {
+/** Mission Control's Board or List view; the choice is kept by the browser. */
+async function showView(name) {
+  const toggle = page.getByRole("group", { name: "View" }).getByRole("button", { name });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  check((await toggle.getAttribute("aria-pressed")) === "true", `${name} is not shown as on`);
+}
+
+const board = () => page.getByRole("region", { name: "Board" });
+const card = (id) => page.getByTestId(`card-${id}`);
+
+// The states of each board column, as the server names them. A pr_review
+// request is in "PR review" or "Needs you" by its pull requests' states, so
+// those two are checked together.
+const columnStates = {
+  Drafting: ["submitted", "spec_drafting", "oracle_drafting", "planning"],
+  Building: ["building"],
+  Done: ["done"],
+};
+
+step("mission-control", async () => {
+  // The seeded requests are weeks old: with the default 7-day window the
+  // finished ones are out of view, so this step looks at all time.
+  await visit("/?days=all");
+  await heading("Mission Control", { level: 1 }).waitFor();
+  await showView("Board");
+  const listed = (await api("/requests")).body;
+  const counts = {};
+  for (const name of ["Drafting", "Needs you", "Building", "PR review", "Done"]) {
+    const text = await board()
+      .getByRole("heading", { name: new RegExp(`^${name} \\(\\d+\\)$`) })
+      .innerText();
+    counts[name] = Number(/\((\d+)\)/.exec(text)[1]);
+  }
+  for (const [name, states] of Object.entries(columnStates)) {
+    const want = listed.filter((r) => states.includes(r.state)).length;
+    check(counts[name] === want, `${name} counts ${counts[name]}, the server has ${want}`);
+  }
+  const elsewhere = listed.filter(
+    (r) => r.state !== "cancelled" && !Object.values(columnStates).flat().includes(r.state),
+  ).length;
+  check(
+    counts["Needs you"] + counts["PR review"] === elsewhere,
+    `Needs you and PR review hold ${counts["Needs you"] + counts["PR review"]} cards, the server has ${elsewhere}`,
+  );
+  // The running build's facts are on its card, from the list alone.
+  const building = listed.find((r) => r.build !== undefined);
+  check(building !== undefined, "the seeded data has no running build");
+  await card(building.id)
+    .getByText(`Ticket ${building.build.ticket} of ${building.build.tickets}`)
+    .waitFor();
+  if (building.build.stalled) await card(building.id).getByTestId("stalled-chip").waitFor();
+
+  // Lanes: only with more than one project.
+  const projects = [...new Set(listed.map((r) => r.project))].sort();
+  if (projects.length > 1) {
+    const lane = page.getByRole("region", { name: `Project ${projects[0]}` });
+    const fold = lane.getByRole("button", { expanded: true });
+    await fold.click();
+    check((await lane.getByRole("list").count()) === 0, "a folded lane still shows its cards");
+    await page.reload();
+    await lane.getByRole("button", { expanded: false }).click();
+    await lane.getByRole("list").first().waitFor();
+  } else {
+    check(
+      (await page.getByRole("region", { name: /^Project / }).count()) === 0,
+      "one project is drawn as a lane",
+    );
+    console.log(`      (one project, "${projects[0]}": no lanes to fold; that part is not walked)`);
+  }
+
+  // The health strip says what the server's own routes say.
+  const worker = (await api("/queue-run")).body;
+  const health = page.getByRole("region", { name: "Factory health" });
+  await health
+    .getByText(
+      worker.state === "alive" ? "Running" : worker.state === "stale" ? "Stale" : "Not running",
+      { exact: true },
+    )
+    .waitFor();
+  const queued = listed.filter((r) => r.queue_position !== undefined).length;
+  await health.getByText(String(queued), { exact: true }).first().waitFor();
+  await health.getByText("Last transition").waitFor();
+
+  // The numbers are GET /stats's.
+  const stats = (await api("/stats")).body;
+  const numbers = page.getByRole("region", { name: "Numbers" });
+  const rows = numbers.getByTestId("numbers-row");
+  await rows.first().waitFor();
+  check(
+    (await rows.count()) === 1 + stats.projects.length,
+    `the numbers have ${await rows.count()} rows, want ${1 + stats.projects.length}`,
+  );
+  const overall = stats.overall.overall;
+  await rows
+    .first()
+    .getByRole("cell", { name: String(overall.tickets), exact: true })
+    .first()
+    .waitFor();
+  await rows
+    .first()
+    .getByText(
+      `${overall.accepted}/${overall.tickets} (${Math.round(overall.accepted_rate * 100)}%)`,
+    )
+    .waitFor();
+
+  // Activity: the newest move of any request leads.
+  const activity = page.getByRole("region", { name: "Activity" }).getByTestId("activity-entry");
+  await activity.first().waitFor();
+  const moves = listed.flatMap((r) => r.history ?? []);
+  check(
+    (await activity.count()) === Math.min(15, moves.length),
+    `the activity shows ${await activity.count()} moves of ${moves.length}`,
+  );
+
+  // The section filter narrows the board to that section's columns.
+  await button("Working", { exact: true }).click();
+  await page.waitForURL(/group=working/);
+  await board()
+    .getByRole("heading", { name: /^Needs you \(/ })
+    .waitFor({ state: "detached" });
+  await board()
+    .getByRole("heading", { name: /^Building \(/ })
+    .waitFor();
+  await button("Working", { exact: true }).click();
+  await board()
+    .getByRole("heading", { name: /^Needs you \(/ })
+    .waitFor();
+});
+
+step("mission-control-window", async () => {
+  // The window on finished work: 7 days by default, in the URL otherwise.
   await visit("/");
+  await showView("Board");
+  const chips = page.getByRole("group", { name: "Finished work from the last" });
+  const on = async (name) =>
+    (await chips.getByRole("button", { name, exact: true }).getAttribute("aria-pressed")) ===
+    "true";
+  check(await on("7 days"), "7 days is not the default window");
+  const listed = (await api("/requests")).body;
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const finished = listed.filter((r) => r.state === "done" || r.state === "cancelled");
+  const old = finished.filter((r) => Date.parse(r.updated_at) < weekAgo);
+  const doneCount = async () =>
+    Number(
+      /\((\d+)\)/.exec(
+        await board()
+          .getByRole("heading", { name: /^Done \(\d+\)$/ })
+          .innerText(),
+      )[1],
+    );
+  const doneNow = (rows) => rows.filter((r) => r.state === "done").length;
+  check(old.length > 0, "the seeded data has no finished request older than a week");
+  const inWeek = doneNow(finished.filter((r) => !old.includes(r)));
+  check((await doneCount()) === inWeek, `Done shows ${await doneCount()}, want ${inWeek}`);
+  await page.getByTestId("older-hidden").getByText(`${old.length} older hidden`).waitFor();
+  // What waits or runs is in view at any age.
+  const inFlight = listed.filter((r) => r.state !== "done" && r.state !== "cancelled");
+  check(
+    inFlight.some((r) => Date.parse(r.updated_at) < weekAgo),
+    "the seeded data has no old request in flight",
+  );
+  for (const r of inFlight) await card(r.id).waitFor();
+  await page.getByTestId("numbers-window").getByText("Last 7 days").waitFor();
+  // The note's control widens the window.
+  await page.getByTestId("older-hidden").getByRole("button", { name: "All time" }).click();
+  await page.waitForURL(/days=all/);
+  await chips.getByRole("button", { name: "All", exact: true, pressed: true }).waitFor();
+  await page.getByTestId("older-hidden").waitFor({ state: "detached" });
+  check(
+    (await doneCount()) === doneNow(finished),
+    `Done shows ${await doneCount()} over all time, want ${doneNow(finished)}`,
+  );
+  await page.getByTestId("numbers-window").getByText("All time").waitFor();
+  // A link keeps the window; 7 days takes it out of the URL again.
+  await page.reload();
+  await page.getByTestId("numbers-window").getByText("All time").waitFor();
+  await chips.getByRole("button", { name: "30 days", exact: true }).click();
+  await page.waitForURL(/days=30/);
+  await chips.getByRole("button", { name: "7 days", exact: true }).click();
+  await page.getByTestId("older-hidden").waitFor();
+  check(!page.url().includes("days="), `the default window stayed in the URL: ${page.url()}`);
+});
+
+step("mission-control-card", async () => {
+  await visit("/?days=all");
+  await showView("Board");
+  await card("req-done")
+    .getByRole("link", { name: /Add idempotency keys/ })
+    .click();
+  await page.waitForURL(/\/requests\/req-done$/);
+  await page.locator("h1").first().waitFor();
+});
+
+step("mission-control-review", async () => {
+  // A card never approves: the gate is passed on the request page, with the
+  // text on screen. Nothing is written here, so no request is used up.
+  await visit("/");
+  await showView("Board");
+  const needsYou = board().getByRole("list", { name: "Needs you" });
+  await needsYou.getByTestId("card-req-spec-review").waitFor();
+  check(
+    (await board()
+      .getByRole("button", { name: /approve/i })
+      .count()) === 0,
+    "a card offers Approve",
+  );
+  for (const id of ["req-spec-review", "req-plan-review", "req-oracle-review"]) {
+    await card(id).getByRole("link", { name: "Review", exact: true }).waitFor();
+    await card(id).getByRole("button", { name: "Request changes", exact: true }).waitFor();
+  }
+  // Request changes opens its dialog from the card; cancelled, it sends nothing.
+  const before = await request("req-spec-review");
+  await card("req-spec-review")
+    .getByRole("button", { name: "Request changes", exact: true })
+    .click();
+  await dialog().waitFor();
+  await nameIfAsked();
+  await dialog().getByLabel("Reason").waitFor();
+  await dialog().getByRole("button", { name: "Cancel", exact: true }).click();
+  await dialog().waitFor({ state: "detached" });
+  const after = await request("req-spec-review");
+  check(
+    after.state === "spec_review" && after.updated_at === before.updated_at,
+    "a cancelled dialog changed the request",
+  );
+  // Review lands where the spec is shown and Approve is.
+  await card("req-spec-review").getByRole("link", { name: "Review", exact: true }).click();
+  await page.waitForURL(/\/requests\/req-spec-review$/);
+  await page.getByText("Acceptance criteria (2)").waitFor();
+  await main().getByRole("button", { name: "Approve", exact: true }).waitFor();
+});
+
+step("mission-control-list", async () => {
+  await visit("/");
+  await showView("List");
+  await heading(/Working \(\d+\)/).waitFor();
+  check((await board().count()) === 0, "the board is still drawn in the list view");
+  // The choice is the browser's: it survives a reload.
+  await page.reload();
+  await heading(/Working \(\d+\)/).waitFor();
+  await page.getByRole("region", { name: "Factory health" }).waitFor();
+  await showView("Board");
+  await board().waitFor();
+  check((await heading(/Working \(\d+\)/).count()) === 0, "the list stayed under the board");
+});
+
+step("board", async () => {
+  // Every seeded request, the weeks-old finished ones included.
+  await visit("/?days=all");
+  await showView("List");
   await heading(/Needs you \(\d+\)/).waitFor();
   await heading(/Working \(\d+\)/).waitFor();
   await heading(/Finished \(\d+\)/).waitFor();
@@ -168,7 +416,8 @@ step("board", async () => {
 });
 
 step("board-filters", async () => {
-  await visit("/");
+  await visit("/?days=all");
+  await showView("List");
   await button("Working", { exact: true }).click();
   await page.waitForURL(/group=working/);
   await heading(/Needs you \(/).waitFor({ state: "detached" });
@@ -416,7 +665,7 @@ step("new-request", async () => {
   // The new request is on the board without a reload of the board's data by hand.
   await page
     .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Requests", exact: true })
+    .getByRole("link", { name: "Mission Control", exact: true })
     .click();
   await page.getByText(id, { exact: true }).first().waitFor();
 });
@@ -480,7 +729,7 @@ step("request-page", async () => {
   await heading("Idempotency keys for checkout").waitFor();
   await page.getByLabel("Raw").check();
   await link("Back to board").click();
-  await heading("Requests", { level: 1 }).waitFor();
+  await heading("Mission Control", { level: 1 }).waitFor();
 });
 
 const validSpec = `# Spec

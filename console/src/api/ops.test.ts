@@ -160,7 +160,21 @@ describe("getQueueRunStatus", () => {
   test("decodes the fixture", async () => {
     const { fetch } = recordingFetch(() => json(readFixtureText("api/queue-run.json")));
     const status = await getQueueRunStatus(httpFor(fetch));
-    expect(status).toEqual({ state: "stale", lastHeartbeat: "2026-09-10T09:50:00Z" });
+    expect(status).toEqual({
+      state: "stale",
+      lastHeartbeat: "2026-09-10T09:50:00Z",
+      activeRequests: [],
+      jobSlots: 0,
+    });
+  });
+
+  test("decodes what a live worker runs and its job slots", async () => {
+    const { fetch } = recordingFetch(() =>
+      json('{"state":"alive","active_requests":["req-building"],"job_slots":2}'),
+    );
+    const status = await getQueueRunStatus(httpFor(fetch));
+    expect(status.activeRequests).toEqual(["req-building"]);
+    expect(status.jobSlots).toBe(2);
   });
 });
 
