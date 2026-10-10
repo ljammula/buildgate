@@ -424,8 +424,9 @@ requires a new contract review and an updated machine-checkable test.
   of each failed round (`agent_notes`), leave the worktree with the session:
   the host moves the evidence file to the run directory, where the run
   record is read from, and removes the round-state file, which a finished
-  build no longer needs; either one that cannot be removed fails the build
-  step, so no review works beside it. A build that was lost keeps both for
+  build no longer needs; whatever is at either name is removed, a directory
+  with all it holds and no link followed, and only a removal that fails
+  fails the build step, so no review works beside it. A build that was lost keeps both for
   its resume, and no review follows a lost build.
   A saved prompt is what the build's session folder held when the host
   copied it; a build can alter its own before that, because the build script
