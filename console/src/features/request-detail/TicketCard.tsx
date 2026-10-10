@@ -10,6 +10,7 @@ import { EscapedText } from "@/shared/oracle/EscapedText";
 import { runPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";
+import { CopyButton } from "@/ui/CopyButton";
 import { Spinner } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StatusChip, StatusChipForToken } from "@/ui/StatusChip";
@@ -109,7 +110,13 @@ export function TicketCard({
             </a>
           ) : (
             <span className="font-mono">{ticket.prUrl}</span>
-          )}
+          )}{" "}
+          <CopyButton
+            size="sm"
+            text={ticket.prUrl}
+            label="Copy pull request link"
+            className="align-middle"
+          />
         </p>
       )}
       <MergeReadinessLine ticket={ticket} />

@@ -9,6 +9,7 @@ import { cn } from "@/ui/cn";
 import { Badge } from "@/ui/Badge";
 import { Button } from "@/ui/Button";
 import { CompactId } from "@/ui/CompactId";
+import { CopyButton } from "@/ui/CopyButton";
 import { Disclosure } from "@/ui/Disclosure";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Section } from "@/ui/PageLayout";
@@ -139,13 +140,14 @@ export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardPr
       )}
       <ChangedFiles run={run} />
       {temporalHref !== null ? (
-        <div>
+        <div className="flex items-center gap-1">
           <Button asChild>
             <a href={temporalHref} target="_blank" rel="noopener noreferrer">
               <ExternalLink aria-hidden="true" />
               Open in Temporal UI
             </a>
           </Button>
+          <CopyButton size="sm" text={temporalHref} label="Copy Temporal link" />
         </div>
       ) : null}
     </Section>

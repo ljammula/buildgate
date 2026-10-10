@@ -90,8 +90,8 @@ export function RequestRow({ request, now, showProject }: RequestRowProps) {
         <CompactId
           value={request.id}
           max={36}
-          copy={false}
-          className="text-fg-subtle flex text-xs"
+          label={`request id ${request.id}`}
+          className="text-fg-subtle relative z-10 flex text-xs"
         />
         <MemoryBadge request={request} />
       </TableCell>

@@ -48,6 +48,10 @@ function fixtureServer(queueRun: Wire | (() => Response) = alive): FakeRoute[] {
 }
 
 const card = (id: string) => screen.getByTestId(`card-${id}`);
+const buttonNames = (root: HTMLElement) =>
+  within(root)
+    .queryAllByRole("button")
+    .map((b) => b.getAttribute("aria-label") ?? "");
 const columnHeadings = () =>
   screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
 
@@ -387,7 +391,8 @@ describe("deciding from a card", () => {
     renderApp(<BoardScreen />, { server: fixtureServer() });
     await screen.findByTestId("card-req-plan-review");
     for (const id of ["req-quarantined", "req-halted", "req-every-field", "req-building"]) {
-      expect(within(card(id)).queryByRole("button")).not.toBeInTheDocument();
+      // Only copy buttons (the id, a pull request link) sit on such a card.
+      expect(buttonNames(card(id)).filter((name) => !name.startsWith("Copy "))).toEqual([]);
       expect(within(card(id)).queryByRole("link", { name: "Review" })).not.toBeInTheDocument();
     }
   });
@@ -395,7 +400,7 @@ describe("deciding from a card", () => {
   test("a console that cannot write still links to the review, and offers no write", async () => {
     renderApp(<BoardScreen />, { server: fixtureServer(), config: { writesEnabled: false } });
     const specCard = await screen.findByTestId("card-req-spec-review");
-    expect(within(specCard).queryByRole("button")).not.toBeInTheDocument();
+    expect(buttonNames(specCard).filter((name) => !name.startsWith("Copy "))).toEqual([]);
     expect(within(specCard).getByRole("link", { name: "Review" })).toHaveAttribute(
       "href",
       "/requests/req-spec-review",
@@ -496,12 +501,12 @@ describe("health strip", () => {
   });
 
   test("a worker that is not alive always has its start command at hand, once", async () => {
-    // Alert drawn: its command text is the one command, and it gets the copy button.
+    // Alert drawn: its command text is the one command, and its code span gets the copy button.
     const first = renderApp(<BoardScreen />, { server: fixtureServer({ state: "absent" }) });
     const health = await strip();
     await within(health).findByRole("alert");
     expect(within(health).getAllByText("factoryd worker")).toHaveLength(1);
-    expect(within(health).getAllByRole("button", { name: "Copy command" })).toHaveLength(1);
+    expect(within(health).getAllByRole("button", { name: "Copy factoryd worker" })).toHaveLength(1);
     first.unmount();
 
     // No alert (nothing waits on a worker): the strip draws the command itself.
@@ -1443,6 +1448,8 @@ describe("a long Needs you column", () => {
     const title = within(first).getByRole("link", { name: "Spec 0" });
     title.focus();
     await userEvent.tab();
+    expect(within(first).getByRole("button", { name: /^Copy request id / })).toHaveFocus();
+    await userEvent.tab();
     expect(within(first).getByRole("link", { name: "Review" })).toHaveFocus();
     await userEvent.tab();
     expect(within(first).getByRole("button", { name: "Request changes" })).toHaveFocus();
@@ -1919,5 +1926,42 @@ describe("live work and changes on the board", () => {
       expect(screen.getByTestId("card-req-moves")).toHaveAttribute("data-changed", "true");
     });
     expect(screen.getByTestId("card-req-stays")).not.toHaveAttribute("data-changed");
+  });
+});
+
+describe("copy on a card", () => {
+  test("the id copy writes the id and the card does not navigate", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<BoardScreen />, { server: fixtureServer() });
+    await screen.findByTestId("card-req-spec-review");
+    await user.click(
+      within(card("req-spec-review")).getByRole("button", {
+        name: "Copy request id req-spec-review",
+      }),
+    );
+    expect(await navigator.clipboard.readText()).toBe("req-spec-review");
+    expect(view.location()).toBe("/");
+  });
+
+  test("a pull request link copies its address and does not navigate", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<BoardScreen />, {
+      server: server([
+        requestJson({
+          id: "req-d",
+          state: "done",
+          title: "Shipped",
+          tickets: [ticketJson({ index: 1, prState: "merged" })],
+        }),
+      ]),
+    });
+    await screen.findByTestId("card-req-d");
+    await user.click(
+      within(card("req-d")).getByRole("button", {
+        name: "Copy pull request link for req-d ticket 1",
+      }),
+    );
+    expect(await navigator.clipboard.readText()).toBe("https://github.com/acme/app/pull/1");
+    expect(view.location()).toBe("/");
   });
 });

@@ -8,6 +8,7 @@ import { ReviewMaskedPaths } from "@/features/run-detail/ReviewMaskedPaths";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
 import { CompactId } from "@/ui/CompactId";
+import { CopyButton } from "@/ui/CopyButton";
 import { cn } from "@/ui/cn";
 
 export interface AttemptCardProps {
@@ -70,7 +71,10 @@ export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
             Command
           </Button>
           {commandOpen ? (
-            <p className="mt-1 font-mono text-xs break-all">{attempt.command.join(" ")}</p>
+            <p className="mt-1 flex items-start gap-1 font-mono text-xs break-all">
+              {attempt.command.join(" ")}
+              <CopyButton size="sm" text={attempt.command.join(" ")} label="Copy attempt command" />
+            </p>
           ) : null}
         </div>
       </CardBody>

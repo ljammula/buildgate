@@ -17,6 +17,7 @@ import { PrStateChip } from "@/shared/request/PrStateChip";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { Button } from "@/ui/Button";
 import { CompactId } from "@/ui/CompactId";
+import { CopyButton } from "@/ui/CopyButton";
 import { cn } from "@/ui/cn";
 import { StallChip } from "@/ui/Time";
 
@@ -137,7 +138,13 @@ export const KanbanCard = memo(function KanbanCard({
         {/* Beside the id, which every card shows: a folded line would hide it. */}
         <span className="inline-flex items-center gap-1.5">
           {running ? <RunningMark /> : null}
-          <CompactId value={request.id} max={22} copy={false} className="text-fg-subtle" />
+          {/* Above the title link that stretches over the card, so the copy button takes the click. */}
+          <CompactId
+            value={request.id}
+            max={22}
+            label={`request id ${request.id}`}
+            className="text-fg-subtle relative z-10"
+          />
         </span>
         {compact ? ageElement : null}
       </div>
@@ -206,15 +213,22 @@ export const KanbanCard = memo(function KanbanCard({
               {pr.url === null ? (
                 <span className="text-fg-muted">{`Ticket ${pr.ticket}`}</span>
               ) : (
-                <a
-                  href={pr.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent relative z-10 inline-flex items-center gap-1 hover:underline"
-                >
-                  {`Ticket ${pr.ticket} PR`}
-                  <ExternalLink aria-hidden className="size-3" />
-                </a>
+                <span className="relative z-10 inline-flex items-center gap-0.5">
+                  <a
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent inline-flex items-center gap-1 hover:underline"
+                  >
+                    {`Ticket ${pr.ticket} PR`}
+                    <ExternalLink aria-hidden className="size-3" />
+                  </a>
+                  <CopyButton
+                    size="sm"
+                    text={pr.url}
+                    label={`Copy pull request link for ${request.id} ticket ${pr.ticket}`}
+                  />
+                </span>
               )}
               <PrStateChip prState={pr.prState} />
             </li>

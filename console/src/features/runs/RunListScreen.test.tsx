@@ -238,3 +238,12 @@ test("a long project path is shortened to its last two segments, whole on hover"
   const path = await screen.findByText("…/walk/workspace");
   expect(path).toHaveAttribute("title", "/home/op/buildgate/walk/workspace");
 });
+
+test("a run row copies its run id", async () => {
+  const user = userEvent.setup();
+  renderApp(<RunListScreen />, {
+    server: [{ on: "GET /runs", reply: () => json([runJson()]) }, noRequests],
+  });
+  await user.click(await screen.findByRole("button", { name: "Copy run id run-accepted" }));
+  expect(await navigator.clipboard.readText()).toBe("run-accepted");
+});

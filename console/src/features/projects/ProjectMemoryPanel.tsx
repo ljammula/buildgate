@@ -9,6 +9,7 @@ import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { EmptyState, Spinner } from "@/ui/Feedback";
 import { Section } from "@/ui/PageLayout";
 import { StaleWarning } from "@/ui/StaleWarning";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 /**
  * One candidate line. The line is a build agent's or the operator's note, so
@@ -73,8 +74,7 @@ function MemoryBody({ memory }: { readonly memory: ProjectMemory }) {
       <Section title="Candidates, most seen first">
         {memory.candidates.length === 0 ? (
           <EmptyState title="No candidate">
-            Run factoryd memory list to collect what build agents noted, or factoryd memory add to
-            write your own.
+            <TextWithCode text="Run `factoryd memory list` to collect what build agents noted, or `factoryd memory add` to write your own." />
           </EmptyState>
         ) : (
           <ul className="flex flex-col">

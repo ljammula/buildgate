@@ -4,6 +4,7 @@ import type { TokenOffer } from "@/app/session";
 import { Button } from "@/ui/Button";
 import { Card, CardBody, CardHeader } from "@/ui/Card";
 import { Field, Input } from "@/ui/Input";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 export interface GateScreenProps {
   /** The gate token this browser held was refused: say so, or the operator pastes the same one. */
@@ -16,7 +17,7 @@ export interface GateScreenProps {
 
 const problems: Record<Exclude<TokenOffer, "accepted">, string> = {
   refused:
-    "That token was not accepted. It may have expired or been replaced: run factoryd gate-token on the host again.",
+    "That token was not accepted. It may have expired or been replaced: run `factoryd gate-token` on the host again.",
   "no-answer":
     "The server did not answer. The token was not checked: try again, or reload the page.",
   "not-kept":
@@ -62,8 +63,7 @@ export function GateScreen({ tokenRefused, offerToken, onAccepted }: GateScreenP
         <CardBody className="flex flex-col gap-3 text-sm text-fg">
           <p>
             This console needs its gate token. On the host, run{" "}
-            <code className="font-mono text-xs">factoryd gate-token</code> and paste the token it
-            prints here.
+            <TextWithCode text="`factoryd gate-token`" /> and paste the token it prints here.
           </p>
           {tokenRefused ? (
             <p className="text-fg-muted">
@@ -74,7 +74,13 @@ export function GateScreen({ tokenRefused, offerToken, onAccepted }: GateScreenP
             <Field
               label="Gate token"
               className="grow"
-              error={problem ? <span role="alert">{problems[problem]}</span> : undefined}
+              error={
+                problem ? (
+                  <span role="alert">
+                    <TextWithCode text={problems[problem]} />
+                  </span>
+                ) : undefined
+              }
             >
               <Input
                 type="text"

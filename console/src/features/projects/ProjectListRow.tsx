@@ -5,6 +5,7 @@ import { acceptedText } from "@/domain/project";
 import { shortPath } from "@/domain/middleTruncate";
 import { NO_VALUE } from "@/domain/noValue";
 import { newRunPath } from "@/routes/paths";
+import { CompactId } from "@/ui/CompactId";
 import { IconButton } from "@/ui/IconButton";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { KillSwitchChip } from "@/ui/StatusChip";
@@ -32,8 +33,8 @@ export function ProjectListRow({ row, expanded, onToggle }: ProjectListRowProps)
   const pending = row.loading;
   return (
     <TableRow>
-      <TableCell className="truncate font-mono text-xs" title={summary.project}>
-        {summary.project}
+      <TableCell className="text-xs">
+        <CompactId value={summary.project} max={24} label={`project id ${summary.project}`} />
       </TableCell>
       <TableCell className="font-mono text-xs">
         <Link

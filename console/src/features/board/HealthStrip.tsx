@@ -67,13 +67,9 @@ export function HealthStrip({ health, live, workerWarning, onRetryWorker }: Heal
             <span className="min-w-0">
               <TextWithCode text={sentenceCase(workerWarning)} />
             </span>
-            <span className="flex shrink-0 items-center gap-1">
-              {/* The alert's own command text, copyable; the strip draws it once. */}
-              <CopyButton text={workerCommand} label="Copy command" size="sm" />
-              <Button size="sm" onClick={onRetryWorker}>
-                Check again
-              </Button>
-            </span>
+            <Button size="sm" className="shrink-0" onClick={onRetryWorker}>
+              Check again
+            </Button>
           </div>
         </Callout>
       )}
