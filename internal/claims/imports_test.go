@@ -444,11 +444,7 @@ func TestHostcontroltestIsATestsOnlyLeaf(t *testing.T) {
 			t.Errorf("hostcontroltest imports only daemonheartbeat among buildgate packages: %s imports %s", testPkg, imp)
 		}
 	}
-	for pkg, imports := range g {
-		if imports[testPkg] {
-			t.Errorf("hostcontroltest is imported by tests only: non-test code of %s imports it", pkg)
-		}
-	}
+	requireImportedByTestsOnly(t, g, testPkg)
 }
 
 // TestRequestdrivertestIsATestsOnlyPackage: internal/requestdriver/requestdrivertest
@@ -478,9 +474,59 @@ func TestRequestdrivertestIsATestsOnlyPackage(t *testing.T) {
 			t.Errorf("requestdrivertest imports only its allow-list: %s imports %s", testPkg, imp)
 		}
 	}
+	requireImportedByTestsOnly(t, g, testPkg)
+}
+
+// TestSandboxtestIsATestsOnlyPackage: internal/sandbox/sandboxtest is the
+// worker-like sandbox.Runtime for the tests of packages that launch through
+// one. No shipped code may import it. (That it imports only sandbox is
+// checked in TestPackageBoundaryRules.)
+func TestSandboxtestIsATestsOnlyPackage(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const testPkg = "buildgate/internal/sandbox/sandboxtest"
+	requirePackage(t, g, testPkg)
+	requireImportedByTestsOnly(t, g, testPkg)
+}
+
+// requireImportedByTestsOnly fails for every package whose shipped code
+// imports testPkg: g is built from non-test files only, so any importer in it
+// is shipped code.
+func requireImportedByTestsOnly(t *testing.T, g importGraph, testPkg string) {
+	t.Helper()
+	for _, pkg := range importersOf(g, testPkg) {
+		t.Errorf("%s is imported by tests only: non-test code of %s imports it", testPkg, pkg)
+	}
+}
+
+// importersOf returns the packages of g that import target, sorted.
+func importersOf(g importGraph, target string) []string {
+	var out []string
 	for pkg, imports := range g {
-		if imports[testPkg] {
-			t.Errorf("requestdrivertest is imported by tests only: non-test code of %s imports it", pkg)
+		if imports[target] {
+			out = append(out, pkg)
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestImportersOfFindsAShippedImporter is the self-test of the tests-only
+// check: a graph in which shipped code imports the test package is flagged,
+// and one in which nothing does is not.
+func TestImportersOfFindsAShippedImporter(t *testing.T) {
+	t.Parallel()
+	const testPkg = "buildgate/internal/sandbox/sandboxtest"
+	g := importGraph{
+		"buildgate/internal/workflow":  {testPkg: true, "fmt": true},
+		"buildgate/internal/openshell": {"buildgate/internal/sandbox": true},
+		testPkg:                        {"buildgate/internal/sandbox": true},
+	}
+	if got := importersOf(g, testPkg); len(got) != 1 || got[0] != "buildgate/internal/workflow" {
+		t.Errorf("importersOf = %v, want [buildgate/internal/workflow]", got)
+	}
+	delete(g, "buildgate/internal/workflow")
+	if got := importersOf(g, testPkg); len(got) != 0 {
+		t.Errorf("importersOf = %v, want none", got)
 	}
 }

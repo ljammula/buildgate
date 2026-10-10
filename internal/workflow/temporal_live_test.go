@@ -63,9 +63,9 @@ func duplicateBuildWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput
 	return result, err
 }
 
-// TestTemporalLiveRunWorkflow is a real-server smoke test. It skips when the
-// configured Temporal address is unreachable, so ordinary verification does
-// not require a local Temporal Service.
+// TestTemporalLiveRunWorkflow is a real-server smoke test. It skips when no
+// test Temporal server was provided (dialTemporal), so a bare go test does
+// not require one.
 func TestTemporalLiveRunWorkflow(t *testing.T) {
 	temporalClient := dialTemporal(t)
 	defer temporalClient.Close()
@@ -127,7 +127,7 @@ func TestTemporalLiveRunWorkflow(t *testing.T) {
 		BaseSHA:           string(baseSHABytes[:len(baseSHABytes)-1]),
 		// Sandboxing is unconditional: this test now also requires a real
 		// Docker daemon and the canonical sandbox image, on top of the
-		// TEMPORAL_ADDRESS server dialTemporal already requires.
+		// test Temporal server dialTemporal already requires.
 		TestsRequiredOptOut: "not exercising tests_added in this fixture",
 	})
 	if err != nil {
@@ -216,7 +216,7 @@ func TestTemporalLiveRunWorkflowQuarantinesOnDiffScopeViolation(t *testing.T) {
 		AllowedFiles: []string{"content.txt"},
 		// Sandboxing is unconditional: this test now also requires a real
 		// Docker daemon and the canonical sandbox image, on top of the
-		// TEMPORAL_ADDRESS server dialTemporal already requires.
+		// test Temporal server dialTemporal already requires.
 		TestsRequiredOptOut: "not exercising tests_added in this fixture",
 	})
 	if err != nil {
@@ -445,6 +445,36 @@ func TestTemporalLiveRepositoryOwnerWorkflowIDCollision(t *testing.T) {
 	}
 }
 
+// testTemporalAddressEnv names the test Temporal dev server the runner
+// started (scripts/test-sharded.sh, scripts/verify-live.sh), the same one
+// cmd/factoryd's tests use. It is the only address these tests dial: never
+// the ambient TEMPORAL_ADDRESS, never the operator's localhost:7233.
+const testTemporalAddressEnv = "FACTORYD_TEST_TEMPORAL_ADDRESS"
+
+// testTemporalAddress is the address the live tests dial, "" when no runner
+// provided a test server.
+func testTemporalAddress() string {
+	return os.Getenv(testTemporalAddressEnv)
+}
+
+// TestLiveTestsDialOnlyTheTestTemporalServer: an ambient TEMPORAL_ADDRESS is
+// not an address these tests use, and with no test server there is none (the
+// client's default, localhost:7233, is never filled in).
+func TestLiveTestsDialOnlyTheTestTemporalServer(t *testing.T) {
+	t.Setenv("TEMPORAL_ADDRESS", "ambient.invalid:7233")
+	t.Setenv(testTemporalAddressEnv, "")
+	if got := testTemporalAddress(); got != "" {
+		t.Errorf("address with no test server = %q, want none", got)
+	}
+	t.Setenv(testTemporalAddressEnv, "127.0.0.1:1")
+	if got := testTemporalAddress(); got != "127.0.0.1:1" {
+		t.Errorf("address = %q, want the test server's", got)
+	}
+}
+
+// dialTemporal returns a client of the test Temporal server. The test skips
+// when no runner provided one, and fails when the one provided does not
+// answer.
 func dialTemporal(t *testing.T) client.Client {
 	t.Helper()
 	// Sandboxing is unconditional: every test in this file now launches its
@@ -455,15 +485,17 @@ func dialTemporal(t *testing.T) client.Client {
 	// the mount-visibility probe's own --entrypoint flag, so skip that
 	// probe the same way every sandboxed cmd/factoryd test does.
 	t.Setenv(sandbox.SkipMountVisibilityCheckEnv, "1")
-	address := os.Getenv("TEMPORAL_ADDRESS")
+	address := testTemporalAddress()
 	if address == "" {
-		address = client.DefaultHostPort
+		// Same anchored phrase scripts/verify-live.sh and ci.yml's
+		// false-green guard grep for.
+		t.Skipf("Temporal server at %s is unreachable: the variable is not set (make verify and make verify-live set it to the test Temporal server they start)", testTemporalAddressEnv)
 	}
-	dialCtx, cancelDial := context.WithTimeout(context.Background(), 2*time.Second)
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelDial()
 	temporalClient, err := client.DialContext(dialCtx, client.Options{HostPort: address})
 	if err != nil {
-		t.Skipf("Temporal Service at %s is unreachable: %v", address, err)
+		t.Fatalf("test Temporal server at %s (%s) does not answer: %v", address, testTemporalAddressEnv, err)
 	}
 	return temporalClient
 }
@@ -489,7 +521,7 @@ func liveFixtureInput(t *testing.T, ticket string) RunWorkflowInput {
 		BaseSHA:           string(baseSHABytes[:len(baseSHABytes)-1]),
 		// Sandboxing is unconditional: this fixture now also requires a real
 		// Docker daemon and the canonical sandbox image, on top of the
-		// TEMPORAL_ADDRESS server dialTemporal already requires.
+		// test Temporal server dialTemporal already requires.
 		TestsRequiredOptOut: "not exercising tests_added in this fixture",
 	}
 }

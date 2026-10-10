@@ -754,32 +754,16 @@ esac
 // without it, a resumed owner mid-launch (network created, container
 // not yet up) could have its network reclaimed and its run quarantined out
 // from under it before its heartbeat goroutine got a chance to refresh.
-// Mirrors TestReconcileOrphansDebouncesStalenessBeforeReaping's own timing
-// approach: refresh the marker partway through the debounce wait and prove
+// Mirrors TestReconcileOrphansDebouncesStalenessBeforeReaping's own
+// approach: refresh the marker during the debounce wait and prove
 // the network -- and the run record -- survive untouched.
 func TestReconcileRelayOrphansDebouncesNetworkOnlyStaleness(t *testing.T) {
-	const unit = 250 * time.Millisecond
-	previousStale := ownerStaleAfter
-	ownerStaleAfter = 3 * unit
-	t.Cleanup(func() { ownerStaleAfter = previousStale })
-	previousInterval := ownerHeartbeatInterval
-	ownerHeartbeatInterval = 2 * unit
-	t.Cleanup(func() { ownerHeartbeatInterval = previousInterval })
-
 	dataDir := t.TempDir()
 	r := run.Run{ID: "run-network-only-resumed-owner", State: run.StateSliceRunning}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("save run: %v", err)
 	}
-	if err := writeOwnerHeartbeat(dataDir, r.ID); err != nil {
-		t.Fatalf("writeOwnerHeartbeat: %v", err)
-	}
-
-	go func() {
-		time.Sleep(5 * unit)
-		_ = writeOwnerHeartbeat(dataDir, r.ID)
-	}()
-	time.Sleep(4 * unit) // let the initial marker actually go stale first
+	debounces := staleOwnerRefreshedDuringDebounce(t, dataDir, r.ID)
 
 	docker := filepath.Join(t.TempDir(), "docker-fake")
 	script := `#!/bin/sh
@@ -802,6 +786,9 @@ esac
 	}
 	if len(removed) != 0 {
 		t.Fatalf("removed = %v, want none: the owner refreshed its heartbeat during the debounce wait, so this network must survive", removed)
+	}
+	if *debounces != 1 {
+		t.Errorf("debounce waits = %d, want 1: the stale marker must be rechecked after one wait", *debounces)
 	}
 	record, err := run.Load(dataDir, r.ID)
 	if err != nil {

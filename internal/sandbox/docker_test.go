@@ -1579,45 +1579,17 @@ func TestReconcileOrphansLeavesNonTerminalRunWithLiveOwner(t *testing.T) {
 // look stale for the brief window between resume and the owning heartbeat
 // goroutine's next scheduled refresh. Simulates exactly that: the marker
 // starts already stale (as if the process had been suspended past
-// ownerStaleAfter), but a goroutine standing in for the just-resumed
-// heartbeat refreshes it partway through ReconcileOrphans' own debounce
-// wait — proving the container survives instead of being reaped out from
+// ownerStaleAfter), and the just-resumed heartbeat refreshes it during
+// ReconcileOrphans' own debounce wait (staleOwnerRefreshedDuringDebounce)
+// — proving the container survives instead of being reaped out from
 // under a real, still-running attempt.
 func TestReconcileOrphansDebouncesStalenessBeforeReaping(t *testing.T) {
-	// A small time unit, not the package's real defaults: ownerStaleAfter
-	// must be strictly positive here (unlike the other tests' `= 0`) so
-	// that a *refreshed* marker reads as fresh again — a zero threshold
-	// would make ReconcileOrphans' own second (post-debounce) staleness
-	// check report stale regardless of any refresh, since any elapsed time
-	// at all exceeds a zero threshold.
-	const unit = 250 * time.Millisecond
-	previousStale := ownerStaleAfter
-	ownerStaleAfter = 3 * unit
-	t.Cleanup(func() { ownerStaleAfter = previousStale })
-	previousInterval := ownerHeartbeatInterval
-	ownerHeartbeatInterval = 2 * unit // the debounce wait's own duration
-	t.Cleanup(func() { ownerHeartbeatInterval = previousInterval })
-
 	dataDir := t.TempDir()
 	r := run.Run{ID: "run-resumed-owner", State: run.StateSliceRunning}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("save run: %v", err)
 	}
-	if err := writeOwnerHeartbeat(dataDir, r.ID); err != nil {
-		t.Fatalf("writeOwnerHeartbeat: %v", err)
-	}
-
-	// Stands in for the real owner's heartbeat goroutine catching up after
-	// a resume — refreshes the marker partway through the debounce wait
-	// ReconcileOrphans is about to start (which begins once the marker is
-	// already older than ownerStaleAfter, at 4*unit below, and lasts
-	// ownerHeartbeatInterval=2*unit; refreshing at 5*unit lands centered
-	// inside that window with a full unit of margin on either side).
-	go func() {
-		time.Sleep(5 * unit)
-		_ = writeOwnerHeartbeat(dataDir, r.ID)
-	}()
-	time.Sleep(4 * unit) // let the initial marker actually go stale first
+	debounces := staleOwnerRefreshedDuringDebounce(t, dataDir, r.ID)
 
 	docker := filepath.Join(t.TempDir(), "docker-fake")
 	script := "#!/bin/sh\ncase \"$1\" in\nps) printf 'container-resumed-owner\\trun-resumed-owner\\n' ;;\nrm) exit 0 ;;\nesac\n"
@@ -1632,6 +1604,9 @@ func TestReconcileOrphansDebouncesStalenessBeforeReaping(t *testing.T) {
 	if len(removed) != 0 {
 		t.Fatalf("removed = %v, want none: the owner refreshed its heartbeat during the debounce wait, so this container must survive", removed)
 	}
+	if *debounces != 1 {
+		t.Errorf("debounce waits = %d, want 1: the stale marker must be rechecked after one wait", *debounces)
+	}
 	record, err := run.Load(dataDir, r.ID)
 	if err != nil {
 		t.Fatalf("run.Load after reconciliation: %v", err)
@@ -1639,6 +1614,50 @@ func TestReconcileOrphansDebouncesStalenessBeforeReaping(t *testing.T) {
 	if record.State != run.StateSliceRunning {
 		t.Errorf("run state = %q, want unchanged %q — a resumed owner's run must not be quarantined out from under it", record.State, run.StateSliceRunning)
 	}
+}
+
+// staleOwnerRefreshedDuringDebounce sets up a suspended-then-resumed owner
+// for runID without any wall-clock wait: its heartbeat marker is written and
+// back-dated past ownerStaleAfter, and the debounce wait (ownerDebounceAfter)
+// is replaced by one that refreshes the marker, as the owner's heartbeat
+// goroutine would on resume, and then fires at once. It fails the test if the
+// marker does not read stale before the wait or fresh after the refresh, and
+// returns the number of debounce waits started.
+func staleOwnerRefreshedDuringDebounce(t *testing.T, dataDir, runID string) *int {
+	t.Helper()
+	// Strictly positive, so that a refreshed marker reads as fresh again,
+	// and far larger than any scheduling delay.
+	previousStale := ownerStaleAfter
+	ownerStaleAfter = time.Hour
+	t.Cleanup(func() { ownerStaleAfter = previousStale })
+
+	if err := writeOwnerHeartbeat(dataDir, runID); err != nil {
+		t.Fatalf("writeOwnerHeartbeat: %v", err)
+	}
+	suspendedSince := time.Now().Add(-2 * ownerStaleAfter)
+	if err := os.Chtimes(ownerPIDPath(dataDir, runID), suspendedSince, suspendedSince); err != nil {
+		t.Fatalf("back-date owner heartbeat: %v", err)
+	}
+	if !ownerHeartbeatStale(dataDir, runID) {
+		t.Fatal("back-dated owner heartbeat does not read stale")
+	}
+
+	debounces := new(int)
+	previousDebounceAfter := ownerDebounceAfter
+	ownerDebounceAfter = func(time.Duration) <-chan time.Time {
+		*debounces++
+		if err := writeOwnerHeartbeat(dataDir, runID); err != nil {
+			t.Errorf("refresh owner heartbeat during the debounce wait: %v", err)
+		}
+		if ownerHeartbeatStale(dataDir, runID) {
+			t.Error("refreshed owner heartbeat still reads stale")
+		}
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	}
+	t.Cleanup(func() { ownerDebounceAfter = previousDebounceAfter })
+	return debounces
 }
 
 // TestReconcileOrphansDebouncesBatchOnce is the regression for a real P2
