@@ -1442,7 +1442,7 @@ of the data dir. The console's **Trend** tab of a project reads the route and dr
 bucket's one-shot rate as a line on a 0-100% axis above the table; a bucket with
 no ticket is a gap in the line. The
 route is `/trend` because `GET /projects/{project}/stats` is the release
-figures behind the **Stats** tab. `GET /stats` (read token; query `all`) is
+figures behind the **Stats** tab. `GET /stats` (read token; query `since`, `all`) is
 the same report for every project of the data dir (`projects`, by name) and
 for all of them together (`overall`), in weekly buckets: the numbers
 `factoryd stats` prints with no `-project`, and what the console's Mission

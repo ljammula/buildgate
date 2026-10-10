@@ -2798,6 +2798,17 @@ func TestGetStatsReportsEveryProjectAndTheirSum(t *testing.T) {
 			t.Errorf("all=%s: %d tickets, want 3", off, some.Overall.Overall.Tickets)
 		}
 	}
+	// since narrows it to the tickets begun in the window.
+	seedRun(t, dataDir, run.Run{ID: "alpha-000", Ticket: "alpha-000", Project: "alpha", State: run.StateAccepted, CreatedAt: time.Now().Add(-20 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)})
+	if _, month := get(NewServer(dataDir), "/stats?since=30d", ""); month.Overall.Overall.Tickets != 4 {
+		t.Errorf("since=30d: %d tickets, want 4", month.Overall.Overall.Tickets)
+	}
+	if _, week := get(NewServer(dataDir), "/stats?since=7d", ""); week.Overall.Overall.Tickets != 3 || week.Overall.Since == "" {
+		t.Errorf("since=7d: %d tickets (since %q), want 3 and the window echoed", week.Overall.Overall.Tickets, week.Overall.Since)
+	}
+	if code, _ := get(NewServer(dataDir), "/stats?since=soon", ""); code != http.StatusBadRequest {
+		t.Errorf("since=soon = %d, want 400", code)
+	}
 	// Gated like every read.
 	gated := NewServer(dataDir, WithReadToken("read-token"))
 	if code, _ := get(gated, "/stats", ""); code != http.StatusForbidden {

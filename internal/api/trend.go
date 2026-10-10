@@ -65,7 +65,9 @@ func (s *Server) getProjectTrend(w http.ResponseWriter, r *http.Request) {
 
 // getStats serves GET /stats: stats.Overview, the report of every repository
 // in this data dir and of all of them together, with weekly buckets and the
-// live-smoke tickets left out (all=1 counts them). Computed from the run
+// live-smoke tickets left out (all=1 counts them). Query since (30d or
+// YYYY-MM-DD) narrows it to the tickets begun since then, as it does for the
+// trend. Computed from the run
 // records on each read, like GET /projects/{project}/trend, and gated like
 // it. `factoryd stats` with no project prints the same numbers.
 func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +81,13 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "read runs")
 		return
 	}
-	opts := stats.Options{Now: time.Now()}
+	now := time.Now()
+	since, err := stats.ParseSince(r.URL.Query().Get("since"), now)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	opts := stats.Options{Now: now, Since: since}
 	if all := r.URL.Query().Get("all"); all == "" || all == "0" || all == "false" {
 		opts.ExcludeTicketPrefixes = []string{stats.SmokePrefix}
 	}
