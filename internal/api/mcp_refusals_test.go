@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,9 +10,14 @@ import (
 	"testing"
 )
 
-// cliFlag matches a command-line flag in a message: a dash and a name at
-// the start of a word (`pass -verify-command`, "(-data-dir").
-var cliFlag = regexp.MustCompile("(^|[\\s(\"'`/])--?[a-z][a-z-]*")
+// cliFlag matches a command-line flag in a message: a dash and a name that
+// start a word (`pass -verify-command`, "(-data-dir"), not a dash inside a
+// word or a path.
+var cliFlag = regexp.MustCompile(`(^|[^A-Za-z0-9_./-])--?[A-Za-z][A-Za-z-]*`)
+
+// cliCommand matches a factoryd command line, which an MCP caller has no
+// shell to run.
+var cliCommand = regexp.MustCompile("`factoryd [a-z]")
 
 // TestMCPToolErrorsNameNoFlag: an MCP caller has a tool's arguments and
 // nothing else, so no tool error tells it to pass a command-line flag, and
@@ -94,8 +100,18 @@ func TestMCPToolErrorsNameNoFlag(t *testing.T) {
 			if !isError {
 				t.Fatalf("%s %s: not an error: %s", tool, arguments, text)
 			}
+			var body struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(text), &body); err != nil || body.Error == "" {
+				t.Fatalf("error is not the route's error body: %v: %s", err, text)
+			}
+			text = body.Error
 			if flag := cliFlag.FindString(text); flag != "" {
 				t.Errorf("error names a flag (%q) an MCP caller cannot pass: %s", strings.TrimSpace(flag), text)
+			}
+			if cliCommand.MatchString(text) {
+				t.Errorf("error names a factoryd command an MCP caller cannot run: %s", text)
 			}
 			for _, want := range tc.want {
 				if !strings.Contains(text, want) {

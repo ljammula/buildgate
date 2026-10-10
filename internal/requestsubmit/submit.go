@@ -61,16 +61,16 @@ const AgentsFilePrompt = "Write " + run.RootInstructionFile + " at the root of t
 	"Run the repository's own formatter or linter over the file. Keep it short and exact."
 
 // Refusal is a Submit error whose remedy depends on what the caller can do:
-// `factoryd submit` has flags, an MCP tool call has only the tool's
-// arguments. Error is the wording for a caller with flags; WithoutFlags is
-// the wording for one without, and names no flag.
+// `factoryd submit` has flags and a shell, an MCP tool call has only the
+// tool's arguments. Error is the wording for the first; WithoutFlags is the
+// wording for the second, and names no flag or command.
 type Refusal struct {
 	// Reason says what is wrong, naming no flag.
 	Reason string
-	// FlagRemedy is what a caller with flags can do, "" when nothing.
-	FlagRemedy string
-	// Remedy is what any caller, or the operator for it, can do.
+	// Remedy is what a caller with no flags, or the operator for it, can do.
 	Remedy string
+	// FlagRemedy is the remedy for a caller with flags.
+	FlagRemedy string
 	// Kind is the sentinel errors.Is matches (ErrNoVerifyCommand), or nil.
 	Kind error
 }
@@ -79,13 +79,7 @@ type Refusal struct {
 // resolves no verify command.
 var ErrNoVerifyCommand = errors.New("no verify command resolvable")
 
-func (r *Refusal) Error() string {
-	remedy := r.Remedy
-	if r.FlagRemedy != "" {
-		remedy = r.FlagRemedy + ", or " + r.Remedy
-	}
-	return r.Reason + ": " + remedy
-}
+func (r *Refusal) Error() string { return r.Reason + ": " + r.FlagRemedy }
 
 // WithoutFlags is the refusal for a caller that cannot pass a flag.
 func (r *Refusal) WithoutFlags() string { return r.Reason + ": " + r.Remedy }
@@ -347,8 +341,8 @@ func submitProjectBootstrapPreflight(workspaceAbs, preflightProfile string) erro
 	}
 	return &Refusal{
 		Reason:     "project-bootstrap preflight failed, request not submitted (this would halt every ticket's own run-time preflight identically, after spec/plan review already spent human attention on it): " + strings.Join(failures, " | "),
-		FlagRemedy: "pass -preflight-profile brownfield (preflight_profile \"brownfield\" on this request)",
-		Remedy:     "fix these before submitting, or set preflight_profile: brownfield in the workspace's " + projectconfig.FileName + " if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention (see `factoryd onboard`)",
+		Remedy:     "fix these before submitting, or set preflight_profile: brownfield in the workspace's " + projectconfig.FileName + " if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention",
+		FlagRemedy: "fix these before submitting, or set preflight_profile: brownfield in the workspace's " + projectconfig.FileName + " (or pass -preflight-profile brownfield / preflight_profile \"brownfield\" on this request) if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention (see `factoryd onboard`)",
 	}
 }
 
@@ -683,8 +677,8 @@ func Submit(p Params) (Result, error) {
 	} else if inside {
 		return Result{}, &Refusal{
 			Reason:     fmt.Sprintf("the data dir (%q, resolving to %q) is inside the workspace %q; Docker containment is unconditional and a later worker will refuse to drain this entry once queued here, with no way to re-home it", p.DataDir, dataAbs, workspaceAbs),
+			Remedy:     "the operator has to keep the data dir outside the workspace",
 			FlagRemedy: "pass -data-dir <path outside -workspace>",
-			Remedy:     "have the operator keep the data dir outside the workspace",
 		}
 	}
 	repositoryRoot := release.RepositoryRoot(workspaceAbs)
@@ -733,8 +727,8 @@ func Submit(p Params) (Result, error) {
 	if verifyCommand == "" {
 		return Result{}, &Refusal{
 			Reason:     ErrNoVerifyCommand.Error(),
-			FlagRemedy: "pass -verify-command",
 			Remedy:     "commit a verify_command in the workspace's " + projectconfig.FileName,
+			FlagRemedy: "pass -verify-command, or commit a verify_command in the workspace's " + projectconfig.FileName,
 			Kind:       ErrNoVerifyCommand,
 		}
 	}

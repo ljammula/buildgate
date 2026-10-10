@@ -1,6 +1,7 @@
 package requestsubmit
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -614,5 +615,24 @@ func TestSubmitRefusesARepositoryWithoutAgentsFileBeforeRecording(t *testing.T) 
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "requests")); !os.IsNotExist(err) {
 		t.Fatalf("a refused submit left a requests directory (stat: %v)", err)
+	}
+}
+
+// TestRefusalNamesTheFlagOnlyForACallerWithFlags: a refusal's Error is the
+// wording for `factoryd submit`, which can pass the flag it names;
+// WithoutFlags names none.
+func TestRefusalNamesTheFlagOnlyForACallerWithFlags(t *testing.T) {
+	workspace := t.TempDir()
+	testfixture.CommitAgentsFile(t, workspace)
+	_, err := Submit(Params{WorkspaceArg: workspace, DataDir: t.TempDir(), RequestText: "Add a thing", Source: request.Source{Kind: request.SourceText}})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || !errors.Is(err, ErrNoVerifyCommand) {
+		t.Fatalf("Submit error = %v, want a Refusal of kind ErrNoVerifyCommand", err)
+	}
+	if !strings.Contains(err.Error(), "pass -verify-command, or commit a verify_command") {
+		t.Errorf("Error() = %q, want it to name -verify-command", err.Error())
+	}
+	if got := refusal.WithoutFlags(); strings.Contains(got, " -") || !strings.Contains(got, "commit a verify_command") {
+		t.Errorf("WithoutFlags() = %q, want the committed-file remedy and no flag", got)
 	}
 }
