@@ -266,8 +266,9 @@ func TestMemoryListCollectsNotesAndShowsTheSection(t *testing.T) {
 	}
 }
 
-// A handoff changed after the run recorded it yields no candidate.
-func TestMemoryListSkipsATamperedHandoff(t *testing.T) {
+// The memory list reads the notes file the host kept, never the handoff: a
+// handoff changed after the run recorded it changes no candidate.
+func TestMemoryListReadsTheNotesFileNotTheHandoff(t *testing.T) {
 	f := newMemFix(t, nil)
 	f.quarantinedRunWithNotes("run-a", worthKnowing("Use go 1.26"))
 	path := filepath.Join(run.Dir(f.data, "run-a"), "handoff.json")
@@ -281,8 +282,8 @@ func TestMemoryListSkipsATamperedHandoff(t *testing.T) {
 	if err := f.cmd().list(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if ls := f.lessons(); len(ls) != 0 {
-		t.Fatalf("a tampered handoff gave candidates: %+v", ls)
+	if ls := f.lessons(); len(ls) != 1 || ls[0].Line != "- Use go 1.26." {
+		t.Fatalf("lessons = %+v, want the one line the notes file holds, whatever the handoff says", ls)
 	}
 }
 

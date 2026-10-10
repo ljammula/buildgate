@@ -531,11 +531,11 @@ func TestParseNotesOfNothingUsableIsNil(t *testing.T) {
 	}
 }
 
-// An accepted run's notes give up only the fifth heading, cleaned like every
+// A finished run's notes give up only the fifth heading, cleaned like every
 // value from a build, and only from a plain file of the retained size.
-func TestRepositoryNotesOfAcceptedRunReadsOnlyTheFifthHeading(t *testing.T) {
+func TestRepositoryNotesAsWrittenReadsOnlyTheFifthHeading(t *testing.T) {
 	dir := t.TempDir()
-	if got := RepositoryNotesOfAcceptedRun(dir); got != nil {
+	if got := RepositoryNotesAsWritten(dir); got != nil {
 		t.Fatalf("no notes file gave %v", got)
 	}
 	notes := "What I did\n- changed sum.go\nMy current hypothesis\n- the cache key\n" +
@@ -543,7 +543,7 @@ func TestRepositoryNotesOfAcceptedRunReadsOnlyTheFifthHeading(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, evidence.AgentNotesFileName), []byte(notes), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := RepositoryNotesOfAcceptedRun(dir)
+	got := RepositoryNotesAsWritten(dir)
 	if len(got) != 2 || got[0] != "Run `make gen` first" || len(got[1]) > maxSentenceLen+3 {
 		t.Fatalf("items = %q, want the two cleaned items of the fifth heading, backticks kept for the memory text rule", got)
 	}
@@ -557,14 +557,14 @@ func TestRepositoryNotesOfAcceptedRunReadsOnlyTheFifthHeading(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, evidence.AgentNotesFileName), filepath.Join(linked, evidence.AgentNotesFileName)); err != nil {
 		t.Fatal(err)
 	}
-	if got := RepositoryNotesOfAcceptedRun(linked); got != nil {
+	if got := RepositoryNotesAsWritten(linked); got != nil {
 		t.Errorf("a linked notes file gave %v", got)
 	}
 	// Nor a file with no fifth heading.
 	if err := os.WriteFile(filepath.Join(dir, evidence.AgentNotesFileName), []byte("What I did\n- changed sum.go\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := RepositoryNotesOfAcceptedRun(dir); len(got) != 0 {
+	if got := RepositoryNotesAsWritten(dir); len(got) != 0 {
 		t.Errorf("notes with no fifth heading gave %v", got)
 	}
 }

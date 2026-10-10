@@ -474,16 +474,18 @@ requires a new contract review and an updated machine-checkable test.
   under the fifth heading (things worth knowing about the repository) may
   also be listed to the operator as memory candidates, each only if it
   passes the memory text rule; they still reach no review, no planner and no
-  other ticket's build except under SC-020. That rule accepts a command only
-  inside backticks, so the handoff keeps one more copy of the fifth
-  heading's items for it alone (`repository_as_written`): each item as the
-  agent wrote it, backticks included, one line cleaned and cut like every
-  other value. The rule judges that text and nothing repairs it; the copy is
-  never rendered into the record a build is given, where every note still has
-  its backticks turned into quotes. A run saved accepted has no
-  handoff: of the notes its build left, only the items under the fifth heading
-  are read, cleaned and capped the same way, and only by the operator's memory
-  list; the rest of the file reaches no reader, the handoff route included.
+  other ticket's build except under SC-020. The memory list does not take
+  them from the handoff: for a run saved quarantined, halted or accepted, the
+  items under the fifth heading are read by the operator's memory list from
+  the host's copy of the notes in the run directory (`agent-notes.md`), as
+  written, each one line cleaned and cut like every other value and a
+  candidate only if it passes the memory text rule, which accepts a command
+  only inside backticks and repairs nothing. That file's text has two readers
+  and no other: the build of the handoff, which stores every item with its
+  backticks turned into quotes (and through it the handoff route and a later
+  build's record), and the memory list, which reads the fifth heading alone.
+  A run saved accepted has no handoff, so the rest of its notes reaches no
+  reader, the handoff route included.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
