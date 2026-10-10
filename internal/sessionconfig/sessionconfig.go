@@ -221,7 +221,8 @@ type Config struct {
 	// field), not a daemon-wide Tier-2 setting.
 	ConformityPolicy *string `yaml:"conformity_policy,omitempty"`
 
-	// CodeReviewPolicy mirrors worker's own -code-review-policy flag:
+	// CodeReviewPolicy mirrors the -code-review-policy flag of worker and
+	// of a single-ticket run (Settings.CodeReviewPolicy):
 	// the standalone AI code-review pass's own policy (off|advisory|
 	// required, agent/pi/scripts/code_review.py, internal/codereview).
 	// Like ConformityPolicy above, this is a per-invocation Tier-1 value

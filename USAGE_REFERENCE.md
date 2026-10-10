@@ -1614,8 +1614,8 @@ reusing an existing config backfills only the missing keys. `doctor` warns
 **Code review default.** `quickstart` writing a new config (not reusing an
 existing one) also sets `code_review_policy: required`; `worker`'s bare
 `-code-review-policy` flag stays `off` with no config. A single-ticket run
-(`factoryd -ticket ...`) with no `-code-review-policy` takes the config's
-value too; its flag overrides it.
+(`factoryd -ticket ...`, and a run `serve` starts for `POST /runs`) with no
+`-code-review-policy` takes the config's value too; its flag overrides it.
 
 ## Temporal: repository owners, daemons, observing
 

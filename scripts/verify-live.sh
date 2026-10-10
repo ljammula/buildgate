@@ -121,7 +121,7 @@ echo "verify-live: pass 1/2 -- go test -race <all non-data packages> (DOCKER_SAN
 	# run artifacts there are not this module's source.
 	# shellcheck disable=SC2046 -- deliberate word-split package list
 	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -p 1 $(go list ./... | grep -v /data/)
-) >"$LOG" 2>&1 || status=1
+) >"$LOG" 2>&1 9>&- || status=1
 tail -100 "$LOG"
 if [ "$status" -ne 0 ]; then
 	echo "verify-live: pass 1 failed -- full log at $LOG (not cleaned up)" >&2
@@ -136,7 +136,7 @@ echo "verify-live: pass 2/2 -- -v -run '$RUN' over $PKGS (false-green skip guard
 	cd "$REPO_ROOT"
 	# shellcheck disable=SC2086 -- PKGS is a deliberate word-split package list
 	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1 -v" go test -race -p 1 -run "$RUN" $PKGS
-) >"$LOG" 2>&1 || status=1
+) >"$LOG" 2>&1 9>&- || status=1
 grep -E '^(--- (PASS|FAIL|SKIP)|ok|FAIL)' "$LOG" || true
 
 # Same anchored phrase as ci.yml's own false-green guard: a live Temporal
