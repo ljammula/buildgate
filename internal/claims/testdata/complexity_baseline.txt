@@ -23,7 +23,6 @@
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 28 cmd/factoryd/reclaim_dead_owner.go reclaimDeadOwnerRuns
-38 cmd/factoryd/release_and_evidence.go renderEvidenceMarkdown
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
 29 cmd/factoryd/run_temporal.go awaitRunWorkflow
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
@@ -47,9 +46,7 @@
 28 internal/openshell/live_test.go TestLiveSandboxRunsTheGuardedCommand
 34 internal/oraclecommit/commit.go Apply
 26 internal/oraclecommit/commit.go CollectEvidence
-32 internal/oraclecommit/manifest.go ValidateTargetPath
 26 internal/registryproxy/server.go NewServer
-36 internal/release/merge_policy.go MergePolicyCheck
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
 29 internal/request/retry.go retry
@@ -61,7 +58,6 @@
 29 internal/sandbox/composeservices_orphans.go ReconcileComposeServicesOrphans
 58 internal/sandbox/relay.go ReconcileRelayOrphans
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
-44 internal/sessionconfig/routing.go ValidateRouting
 28 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
 39 internal/workflow/activities_build.go (*Activities).RunBuildActivity
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence

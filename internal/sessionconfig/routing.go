@@ -532,44 +532,12 @@ func ValidateRouting(s Settings) error {
 		}
 	}
 
-	checkModel := func(context, name string) (Model, error) {
-		model, ok := s.Models[name]
-		if !ok {
-			return Model{}, fmt.Errorf("%s: model %q is not a models: entry", context, name)
-		}
-		if model.ID == "" {
-			return Model{}, fmt.Errorf("models.%s: id is required", name)
-		}
-		if len(model.Routes) == 0 {
-			return Model{}, fmt.Errorf("models.%s: routes is required (at least one)", name)
-		}
-		for _, r := range model.Routes {
-			if _, ok := s.Routes[r]; !ok {
-				return Model{}, fmt.Errorf("models.%s: route %q is not a routes: entry", name, r)
-			}
-		}
-		for r := range model.RouteIDs {
-			if !slices.Contains(model.Routes, r) {
-				return Model{}, fmt.Errorf("models.%s: route_ids names %q, which is not in this model's own routes %v", name, r, model.Routes)
-			}
-		}
-		if _, err := model.WorkerModelJSON(""); err != nil {
-			return Model{}, fmt.Errorf("models.%s: %w", name, err)
-		}
-		// A model with no price-table entry is allowed (it costs $0; doctor
-		// warns); only a malformed compiled table is an error here.
-		if _, err := prices.Lookup(model.ID); err != nil && !errors.Is(err, prices.ErrNoPrice) {
-			return Model{}, err
-		}
-		return model, nil
-	}
-
 	// Every declared model is validated, referenced by a role or not: an
 	// operator who defines a broken models: entry they haven't wired to
 	// any role yet must still learn about it now, not the day they
 	// finally reference it.
 	for name := range s.Models {
-		if _, err := checkModel("models", name); err != nil {
+		if _, err := checkRoutingModel(s, "models", name); err != nil {
 			return err
 		}
 	}
@@ -578,73 +546,116 @@ func ValidateRouting(s Settings) error {
 		return errors.New("roles.execution is required to launch a relay; configure routes:/models:/roles: (see USAGE_REFERENCE.md \"Model routes\")")
 	}
 
-	checkRole := func(roleName string, rc *RoleConfig) error {
-		if rc == nil {
-			return nil
-		}
-		if rc.Model == "" {
-			return fmt.Errorf("roles.%s: model is required", roleName)
-		}
-		allowedNames := resolveAllowed(rc)
-		if !slices.Contains(allowedNames, rc.Model) {
-			return fmt.Errorf("roles.%s: model %q must be included in allowed", roleName, rc.Model)
-		}
-		for _, name := range allowedNames {
-			model, err := checkModel(fmt.Sprintf("roles.%s.allowed", roleName), name)
-			if err != nil {
-				return err
-			}
-			if rc.Thinking == "" || rc.Thinking == "off" {
-				continue
-			}
-			if !validThinkingLevels[rc.Thinking] {
-				return fmt.Errorf("roles.%s: thinking %q is not a supported level (want one of off, minimal, low, medium, high, xhigh, max)", roleName, rc.Thinking)
-			}
-			if !model.Reasoning {
-				return fmt.Errorf("roles.%s: thinking %q needs models.%s.reasoning: true (Pi sends no reasoning effort at all without it)", roleName, rc.Thinking, name)
-			}
-			if rc.Thinking == "xhigh" || rc.Thinking == "max" {
-				if model.ThinkingLevelMap[rc.Thinking] == "" {
-					return fmt.Errorf("roles.%s: thinking %q needs models.%s.thinking_level_map.%s (Pi silently clamps an undeclared level to high)", roleName, rc.Thinking, name, rc.Thinking)
-				}
-			}
-		}
-		return checkRoleHarness(roleName, rc, s.Routes, s.Models)
-	}
-
-	if err := checkRole("planning", s.Roles.Planning); err != nil {
+	if err := checkRoutingRole(s, "planning", s.Roles.Planning); err != nil {
 		return err
 	}
-	if err := checkRole("execution", s.Roles.Execution); err != nil {
+	if err := checkRoutingRole(s, "execution", s.Roles.Execution); err != nil {
 		return err
 	}
-	if err := checkRole("review", s.Roles.Review); err != nil {
+	if err := checkRoutingRole(s, "review", s.Roles.Review); err != nil {
 		return err
 	}
 
-	if s.Roles.Review != nil && !s.Roles.Review.AllowSharedModel {
-		for _, reviewName := range resolveAllowed(s.Roles.Review) {
-			reviewModel, err := checkModel("roles.review.allowed", reviewName)
+	return checkReviewBackendDiffers(s)
+}
+
+// checkRoutingModel returns the models: entry name, or why it is unusable.
+// context names who referenced it, for the error of a name that is no entry.
+func checkRoutingModel(s Settings, context, name string) (Model, error) {
+	model, ok := s.Models[name]
+	if !ok {
+		return Model{}, fmt.Errorf("%s: model %q is not a models: entry", context, name)
+	}
+	if model.ID == "" {
+		return Model{}, fmt.Errorf("models.%s: id is required", name)
+	}
+	if len(model.Routes) == 0 {
+		return Model{}, fmt.Errorf("models.%s: routes is required (at least one)", name)
+	}
+	for _, r := range model.Routes {
+		if _, ok := s.Routes[r]; !ok {
+			return Model{}, fmt.Errorf("models.%s: route %q is not a routes: entry", name, r)
+		}
+	}
+	for r := range model.RouteIDs {
+		if !slices.Contains(model.Routes, r) {
+			return Model{}, fmt.Errorf("models.%s: route_ids names %q, which is not in this model's own routes %v", name, r, model.Routes)
+		}
+	}
+	if _, err := model.WorkerModelJSON(""); err != nil {
+		return Model{}, fmt.Errorf("models.%s: %w", name, err)
+	}
+	// A model with no price-table entry is allowed (it costs $0; doctor
+	// warns); only a malformed compiled table is an error here.
+	if _, err := prices.Lookup(model.ID); err != nil && !errors.Is(err, prices.ErrNoPrice) {
+		return Model{}, err
+	}
+	return model, nil
+}
+
+// checkRoutingRole validates one roles: entry; a role that is not configured
+// passes.
+func checkRoutingRole(s Settings, roleName string, rc *RoleConfig) error {
+	if rc == nil {
+		return nil
+	}
+	if rc.Model == "" {
+		return fmt.Errorf("roles.%s: model is required", roleName)
+	}
+	allowedNames := resolveAllowed(rc)
+	if !slices.Contains(allowedNames, rc.Model) {
+		return fmt.Errorf("roles.%s: model %q must be included in allowed", roleName, rc.Model)
+	}
+	for _, name := range allowedNames {
+		model, err := checkRoutingModel(s, fmt.Sprintf("roles.%s.allowed", roleName), name)
+		if err != nil {
+			return err
+		}
+		if rc.Thinking == "" || rc.Thinking == "off" {
+			continue
+		}
+		if !validThinkingLevels[rc.Thinking] {
+			return fmt.Errorf("roles.%s: thinking %q is not a supported level (want one of off, minimal, low, medium, high, xhigh, max)", roleName, rc.Thinking)
+		}
+		if !model.Reasoning {
+			return fmt.Errorf("roles.%s: thinking %q needs models.%s.reasoning: true (Pi sends no reasoning effort at all without it)", roleName, rc.Thinking, name)
+		}
+		if rc.Thinking == "xhigh" || rc.Thinking == "max" {
+			if model.ThinkingLevelMap[rc.Thinking] == "" {
+				return fmt.Errorf("roles.%s: thinking %q needs models.%s.thinking_level_map.%s (Pi silently clamps an undeclared level to high)", roleName, rc.Thinking, name, rc.Thinking)
+			}
+		}
+	}
+	return checkRoleHarness(roleName, rc, s.Routes, s.Models)
+}
+
+// checkReviewBackendDiffers refuses a review model that resolves to the same
+// backend as an execution model, unless roles.review.allow_shared_model
+// waives it.
+func checkReviewBackendDiffers(s Settings) error {
+	if s.Roles.Review == nil || s.Roles.Review.AllowSharedModel {
+		return nil
+	}
+	for _, reviewName := range resolveAllowed(s.Roles.Review) {
+		reviewModel, err := checkRoutingModel(s, "roles.review.allowed", reviewName)
+		if err != nil {
+			return err
+		}
+		reviewIdentities := modelBackendIdentities(reviewModel, s.Routes)
+		for _, execName := range resolveAllowed(s.Roles.Execution) {
+			execModel, err := checkRoutingModel(s, "roles.execution.allowed", execName)
 			if err != nil {
 				return err
 			}
-			reviewIdentities := modelBackendIdentities(reviewModel, s.Routes)
-			for _, execName := range resolveAllowed(s.Roles.Execution) {
-				execModel, err := checkModel("roles.execution.allowed", execName)
-				if err != nil {
-					return err
-				}
-				for _, ri := range reviewIdentities {
-					for _, ei := range modelBackendIdentities(execModel, s.Routes) {
-						if ri == ei {
-							return fmt.Errorf("roles.review: model %q resolves to the same backend as roles.execution.allowed %q (credential_mode=%s upstream=%s id=%s api=%s); set roles.review.allow_shared_model: true to waive this", reviewName, execName, ri.credentialMode, ri.upstream, ri.id, ri.api)
-						}
+			for _, ri := range reviewIdentities {
+				for _, ei := range modelBackendIdentities(execModel, s.Routes) {
+					if ri == ei {
+						return fmt.Errorf("roles.review: model %q resolves to the same backend as roles.execution.allowed %q (credential_mode=%s upstream=%s id=%s api=%s); set roles.review.allow_shared_model: true to waive this", reviewName, execName, ri.credentialMode, ri.upstream, ri.id, ri.api)
 					}
 				}
 			}
 		}
 	}
-
 	return nil
 }
 

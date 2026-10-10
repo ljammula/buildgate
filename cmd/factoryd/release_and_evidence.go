@@ -858,6 +858,53 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	// "tests_added: pass" with no changed test file otherwise has no way
 	// to tell "a real test file satisfied this" apart from "the ticket
 	// opted out and why".
+	writeOracleOptOutLine(&b, r)
+	if r.TestsRequiredOptOut != "" {
+		fmt.Fprintf(&b, "`tests_added` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
+	}
+	// Per-criterion spec-conformity verdicts, when
+	// -spec-acceptance-criteria was given. Purely informational -- see
+	// run.AgentEvidence.ReviewVerdicts' own doc comment for why this is
+	// never itself a gate: the actual required/advisory/degraded
+	// enforcement already happened inside conformity_review.py, reflected
+	// here only through the run's own accept/quarantine outcome.
+	//
+	// Reads r.SpecConformityVerdicts, the independent phase-2 reviewer's
+	// output. AgentEvidence.ReviewVerdicts is only the fallback for a run
+	// recorded before that field existed: since the phase-2 split
+	// build_app.py no longer receives the criteria, so that legacy field is
+	// empty for every current run and this section never rendered at all.
+	writeSpecConformitySection(&b, r)
+	b.WriteString(renderCodeReviewMarkdown(r.CodeReview))
+	// Every policy.CommandGate always gets its own line, even when the
+	// project never configured one -- "not configured" is a real,
+	// distinct state a reviewer needs to see, not silence the way an
+	// undeclared ticket-scoped gate (diff_scope, required_files_changed,
+	// required_content_present) is: those have no "the operator should
+	// have configured this" implication, these project-scoped ones do.
+	writeNamedGatesSection(&b, r)
+	writeChangedFilesAndDependencies(&b, r)
+	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
+		fmt.Fprintf(&b, "**Relay spend:** %s\n\n", relaySpendLine(totalCostMicroUSD, totalTokens, partial, run.SubscriptionBilled(r.Attempts)))
+	}
+	fmt.Fprintf(&b, "Full evidence: `GET /runs/%s/release` (release decision) and `GET /runs/%s/diff` (unified diff), or the durable run record on disk.\n", r.ID, r.ID)
+	// r.PRCloses is a fully-qualified "<owner>/<repo>#<N>" GitHub issue
+	// reference built by resolveSubmitRequestText from -issue's own URL
+	// (factoryd submit -issue), never free text an agent or ticket author
+	// controls -- unlike ChangedFiles/DependencyChanges above, it needs no
+	// sanitizeMarkdownField pass before interpolation. "Closes
+	// <owner>/<repo>#<N>" is GitHub's own auto-close convention: merging
+	// this PR closes that issue. Always qualified, never a bare "#<N>",
+	// since the issue and this run's own repository are independent
+	// inputs that may differ (see run.Run.PRCloses's own doc comment).
+	if r.PRCloses != "" {
+		fmt.Fprintf(&b, "\nCloses %s\n", r.PRCloses)
+	}
+	return b.String()
+}
+
+// writeOracleOptOutLine says what became of a `-no-commit-oracles` request.
+func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
 	if r.OraclesNotCommittedByRequest {
 		switch {
 		case r.Oracles != nil && len(r.Oracles.Authored) > 0:
@@ -876,21 +923,11 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 			}
 		}
 	}
-	if r.TestsRequiredOptOut != "" {
-		fmt.Fprintf(&b, "`tests_added` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
-	}
-	// Per-criterion spec-conformity verdicts, when
-	// -spec-acceptance-criteria was given. Purely informational -- see
-	// run.AgentEvidence.ReviewVerdicts' own doc comment for why this is
-	// never itself a gate: the actual required/advisory/degraded
-	// enforcement already happened inside conformity_review.py, reflected
-	// here only through the run's own accept/quarantine outcome.
-	//
-	// Reads r.SpecConformityVerdicts, the independent phase-2 reviewer's
-	// output. AgentEvidence.ReviewVerdicts is only the fallback for a run
-	// recorded before that field existed: since the phase-2 split
-	// build_app.py no longer receives the criteria, so that legacy field is
-	// empty for every current run and this section never rendered at all.
+}
+
+// writeSpecConformitySection lists each criterion's verdict and whether the
+// reference oracle agrees.
+func writeSpecConformitySection(b *strings.Builder, r *run.Run) {
 	verdicts := r.SpecConformityVerdicts
 	if len(verdicts) == 0 && r.AgentEvidence != nil {
 		verdicts = r.AgentEvidence.ReviewVerdicts
@@ -904,7 +941,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 		oraclePassed := conformity.OracleOutcome(r.GateResults)
 		disagreements := 0
 		for _, c := range conformity.CrossCheck(verdicts, r.OracleCoveredCriteria, oraclePassed) {
-			fmt.Fprintf(&b, "- %s: **%s**", sanitizeMarkdownField(c.Criterion), sanitizeMarkdownField(c.Verdict))
+			fmt.Fprintf(b, "- %s: **%s**", sanitizeMarkdownField(c.Criterion), sanitizeMarkdownField(c.Verdict))
 			switch c.Agreement {
 			case conformity.AgreementAgree:
 				b.WriteString(" (oracle-checked, agrees)")
@@ -921,17 +958,15 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 			b.WriteString("\n")
 		}
 		if disagreements > 0 {
-			fmt.Fprintf(&b, "\n%d criterion verdict(s) disagree with the reference oracle -- the reviewer and the deterministic check reached opposite conclusions, so the prose criterion and the oracle may have drifted apart. Read both before merging.\n", disagreements)
+			fmt.Fprintf(b, "\n%d criterion verdict(s) disagree with the reference oracle -- the reviewer and the deterministic check reached opposite conclusions, so the prose criterion and the oracle may have drifted apart. Read both before merging.\n", disagreements)
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(renderCodeReviewMarkdown(r.CodeReview))
-	// Every policy.CommandGate always gets its own line, even when the
-	// project never configured one -- "not configured" is a real,
-	// distinct state a reviewer needs to see, not silence the way an
-	// undeclared ticket-scoped gate (diff_scope, required_files_changed,
-	// required_content_present) is: those have no "the operator should
-	// have configured this" implication, these project-scoped ones do.
+}
+
+// writeNamedGatesSection lists every command gate and the repository's own
+// gates.
+func writeNamedGatesSection(b *strings.Builder, r *run.Run) {
 	b.WriteString("## Named gates\n\n")
 	namedGateResults := make(map[string]run.GateResult, len(r.GateResults))
 	for _, g := range r.GateResults {
@@ -947,49 +982,37 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 				status = "FAIL"
 			}
 		}
-		fmt.Fprintf(&b, "- `%s`: %s\n", check, status)
+		fmt.Fprintf(b, "- `%s`: %s\n", check, status)
 		// The reference-oracle content hash (SC-012, PR #151 review
 		// round-2 follow-up) only exists when -reference-oracle-dir was
 		// configured -- empty otherwise, including for every other named
 		// gate, so this line is added only when there's something real
 		// to show.
 		if check == gatepolicy.ReferenceOracleGateID && gateResult.ReferenceOracleSHA256 != "" {
-			fmt.Fprintf(&b, "  - reference-oracle content: `sha256:%s`\n", gateResult.ReferenceOracleSHA256)
+			fmt.Fprintf(b, "  - reference-oracle content: `sha256:%s`\n", gateResult.ReferenceOracleSHA256)
 		}
 	}
-	writeRepoGateLines(&b, r.GateResults)
+	writeRepoGateLines(b, r.GateResults)
 	b.WriteString("\n")
+}
+
+// writeChangedFilesAndDependencies lists the changed files and the dependency
+// changes.
+func writeChangedFilesAndDependencies(b *strings.Builder, r *run.Run) {
 	if len(r.ChangedFiles) > 0 {
-		fmt.Fprintf(&b, "## Changed files (%d)\n\n", len(r.ChangedFiles))
+		fmt.Fprintf(b, "## Changed files (%d)\n\n", len(r.ChangedFiles))
 		for _, f := range r.ChangedFiles {
-			fmt.Fprintf(&b, "- `%s`\n", sanitizeMarkdownField(f))
+			fmt.Fprintf(b, "- `%s`\n", sanitizeMarkdownField(f))
 		}
 		b.WriteString("\n")
 	}
 	if len(r.DependencyChanges) > 0 {
 		b.WriteString("## Dependency changes\n\n")
 		for _, d := range r.DependencyChanges {
-			fmt.Fprintf(&b, "- `%s`: %s -> %s\n", sanitizeMarkdownField(d.Name), sanitizeMarkdownField(d.Base), sanitizeMarkdownField(d.Result))
+			fmt.Fprintf(b, "- `%s`: %s -> %s\n", sanitizeMarkdownField(d.Name), sanitizeMarkdownField(d.Base), sanitizeMarkdownField(d.Result))
 		}
 		b.WriteString("\n")
 	}
-	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
-		fmt.Fprintf(&b, "**Relay spend:** %s\n\n", relaySpendLine(totalCostMicroUSD, totalTokens, partial, run.SubscriptionBilled(r.Attempts)))
-	}
-	fmt.Fprintf(&b, "Full evidence: `GET /runs/%s/release` (release decision) and `GET /runs/%s/diff` (unified diff), or the durable run record on disk.\n", r.ID, r.ID)
-	// r.PRCloses is a fully-qualified "<owner>/<repo>#<N>" GitHub issue
-	// reference built by resolveSubmitRequestText from -issue's own URL
-	// (factoryd submit -issue), never free text an agent or ticket author
-	// controls -- unlike ChangedFiles/DependencyChanges above, it needs no
-	// sanitizeMarkdownField pass before interpolation. "Closes
-	// <owner>/<repo>#<N>" is GitHub's own auto-close convention: merging
-	// this PR closes that issue. Always qualified, never a bare "#<N>",
-	// since the issue and this run's own repository are independent
-	// inputs that may differ (see run.Run.PRCloses's own doc comment).
-	if r.PRCloses != "" {
-		fmt.Fprintf(&b, "\nCloses %s\n", r.PRCloses)
-	}
-	return b.String()
 }
 
 // insertionsLowThreshold is the fixed cutoff riskLabel uses to call a diff
