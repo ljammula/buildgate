@@ -1273,17 +1273,6 @@ func (r *Request) AnyTicketAccepted() bool {
 	return false
 }
 
-// awaitingPRRunID returns the RunID of the accepted ticket with no pull
-// request yet -- the one AwaitingPullRequestLabel/NextAction both name a
-// branch for -- or "" if none is found (defensive only: AwaitingPullRequest
-// being true should always mean some ticket matches).
-func (r *Request) awaitingPRRunID() string {
-	if t, ok := r.AwaitingPRTicket(); ok {
-		return t.RunID
-	}
-	return ""
-}
-
 // awaitingPRBranch returns the git branch AwaitingPullRequestLabel/
 // haltedNextAction should tell an operator to merge by hand: the
 // awaiting ticket's own recorded Branch (the run's real isolated branch)

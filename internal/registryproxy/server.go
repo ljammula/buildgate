@@ -67,7 +67,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -732,27 +731,6 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = fmt.Fprintln(w, message)
-}
-
-// SortedRouteHosts returns every route's upstream host plus its allowed
-// redirect hosts, sorted, for logging/diagnostics -- e.g. the launcher's own
-// "which hosts can this run reach" audit line.
-func SortedRouteHosts(routes []Route) []string {
-	set := map[string]bool{}
-	for _, route := range routes {
-		if route.Upstream != nil {
-			set[route.Upstream.Hostname()] = true
-		}
-		for host := range route.AllowedHosts {
-			set[host] = true
-		}
-	}
-	hosts := make([]string, 0, len(set))
-	for host := range set {
-		hosts = append(hosts, host)
-	}
-	sort.Strings(hosts)
-	return hosts
 }
 
 // selectHrefRewriter returns the rewrite function matching contentType for

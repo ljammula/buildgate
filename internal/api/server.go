@@ -326,10 +326,6 @@ func WithStartToken(token string) Option {
 	}
 }
 
-// WithAuthToken is a concise alias for WithStartToken for callers that use a
-// single bearer credential for their control-plane write routes.
-func WithAuthToken(token string) Option { return WithStartToken(token) }
-
 // WithReadToken gates this Server's read routes (GET /runs, GET /runs/{id},
 // GET /runs/{id}/events, GET /runs/{id}/diff, GET /projects) behind
 // Authorization: Bearer <token>. Unlike WithOverrideToken/WithStartToken, an
