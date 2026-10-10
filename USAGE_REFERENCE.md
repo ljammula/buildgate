@@ -353,6 +353,7 @@ The same two verbs are on HTTP: `POST
 | `reason` | Free text for the redraft. Required unless `anchors` has an entry |
 | `by` | Who rejected; recorded on the rejection |
 | `to` | `plan` or `spec`: send a quarantined or halted request back instead |
+| `expected_state`, `expected_entered_at` | Required: the request's `state` and `entered_at` as you read them before deciding. The call is refused with 409, changing nothing, when the request has left that stage or entered it again since, so a rejection written for a spec cannot land on the plan that followed. Missing: 400. `factoryd reject` on the host takes no such field |
 | `anchors` | Notes tied to places in the reviewed files: `[{"path": "spec.md", "section": "## Acceptance criteria", "item": 2, "note": "..."}]`. `section` and `item` are optional; each field is put on one line; at most 50. The rejection's reason becomes one line per anchor (`- spec.md, ## Acceptance criteria, number 2: ...`) followed by `reason`, and that text is what the redraft reads. Not accepted with `to` |
 
 ## A retried draft

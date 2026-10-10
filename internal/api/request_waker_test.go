@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,8 +66,12 @@ func TestRequestWakerOnWriteRoutes(t *testing.T) {
 					woken = append(woken, id)
 					return wakeErr
 				}))
+				body := tc.body
+				if strings.HasSuffix(tc.path, "/reject") {
+					body = seenBody(t, dataDir, "req-1", body)
+				}
 				recorder := httptest.NewRecorder()
-				server.ServeHTTP(recorder, requestActionFor(t, http.MethodPost, tc.path, "test-token", tc.body))
+				server.ServeHTTP(recorder, requestActionFor(t, http.MethodPost, tc.path, "test-token", body))
 				return recorder.Code, woken
 			}
 

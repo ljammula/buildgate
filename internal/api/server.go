@@ -2517,6 +2517,12 @@ type rejectRequestBody struct {
 	// (request.RejectionAnchor). With at least one, Reason may be empty.
 	// Refused together with To: a send-back has no document under review.
 	Anchors []request.RejectionAnchor `json:"anchors,omitempty"`
+	// ExpectedState and ExpectedEnteredAt are the request's state and
+	// entered_at as the caller read them before deciding (request.Seen).
+	// Both are required: the call is refused with 409 when the request has
+	// left that stage, or re-entered it, since.
+	ExpectedState     string `json:"expected_state"`
+	ExpectedEnteredAt string `json:"expected_entered_at"`
 }
 
 // retryOrCancelRequestBody is POST /requests/{id}/retry and POST
@@ -3849,15 +3855,20 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "anchors apply to a review rejection, not to a send-back (to)")
 		return
 	}
+	if body.ExpectedState == "" || body.ExpectedEnteredAt == "" {
+		writeError(w, http.StatusBadRequest, "expected_state and expected_entered_at are required: the request's state and entered_at as you read them, so the decision cannot land on a stage you did not see")
+		return
+	}
+	seen := request.Seen{State: request.State(body.ExpectedState), EnteredAt: body.ExpectedEnteredAt}
 	if body.To != "" {
 		target := request.SendBackTarget(body.To)
 		if !target.Valid() {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("to must be %q or %q, got %q", request.SendBackToPlan, request.SendBackToSpec, body.To))
 			return
 		}
-		loaded, err = request.SendBack(s.dataDir, id, by, body.Reason, target, time.Now())
+		loaded, err = request.SendBackSeen(s.dataDir, id, by, body.Reason, target, seen, time.Now())
 	} else {
-		loaded, err = request.RejectAnchored(s.dataDir, id, by, body.Reason, body.Anchors, time.Now())
+		loaded, err = request.RejectSeen(s.dataDir, id, by, body.Reason, body.Anchors, seen, time.Now())
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
@@ -3868,7 +3879,7 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 	// a malformed request (400) -- an empty reason (checked first, inside
 	// request.Reject/request.SendBack, before either ever loads r) is
 	// still a genuine 400.
-	if errors.Is(err, request.ErrIllegalTransition) {
+	if errors.Is(err, request.ErrIllegalTransition) || errors.Is(err, request.ErrStageMoved) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

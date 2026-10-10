@@ -500,8 +500,12 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 				dataDir := t.TempDir()
 				tc.seed(t, dataDir)
 				server := gateTestServer(t, dataDir, gateState(GateToken{On: true, Token: gateTestToken}))
+				body := tc.body
+				if tc.name == "reject" {
+					body = seenBody(t, dataDir, "req-1", body)
+				}
 				req := gateRequest(t, tc.method, tc.path, via.token, false)
-				req.Body = readCloser(tc.body)
+				req.Body = readCloser(body)
 				recorder := httptest.NewRecorder()
 				server.ServeHTTP(recorder, req)
 				if recorder.Code != http.StatusOK {
@@ -515,7 +519,7 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 					t.Errorf("recorded by = %q, want %q", got, via.want)
 				}
 				claimed := gateRequest(t, tc.method, tc.path, via.token, false)
-				claimed.Body = readCloser(strings.Replace(tc.body, `"alice"`, `"mallory (gate token)"`, 1))
+				claimed.Body = readCloser(strings.Replace(body, `"alice"`, `"mallory (gate token)"`, 1))
 				if got := gateStatus(server, claimed); got != http.StatusBadRequest {
 					t.Errorf("the same write claiming the suffix = %d, want 400", got)
 				}
