@@ -3,12 +3,10 @@ import { screen, within } from "@testing-library/react";
 import { readFixtureJson } from "@/test/fixtures";
 import { apiErrorResponse, json, renderApp } from "@/test/render";
 
-import { ProjectObservationsScreen } from "./ProjectObservationsScreen";
+import { ProjectObservationsPanel } from "./ProjectObservationsPanel";
 
 function renderObservations(project: string, reply: () => Response) {
-  return renderApp(<ProjectObservationsScreen />, {
-    path: `/projects/${project}/observations`,
-    pattern: "/projects/:project/observations",
+  return renderApp(<ProjectObservationsPanel project={project} />, {
     server: [{ on: `GET /projects/${project}/observations`, reply }],
   });
 }

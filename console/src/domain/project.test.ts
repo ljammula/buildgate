@@ -1,5 +1,6 @@
 import { DecodeError, asObject } from "@/domain/decode";
 import {
+  acceptedText,
   decodeProjectCheckResponse,
   decodeProjectList,
   decodeProjectStats,
@@ -88,4 +89,22 @@ test("POST /projects/check decodes checks, with absent reasons as an empty list"
   expect(() => decodeProjectCheckResponse({ checks: [] }, "POST /projects/check")).toThrow(
     /POST \/projects\/check\.passed:/,
   );
+});
+
+test("accepted reads as accepted over total, with the override share when the server gives one", () => {
+  const stats = decodeProjectStats(
+    {
+      project: "app",
+      total_runs: 4,
+      accepted: 2,
+      accepted_via_override: 1,
+      override_rate_percent: 50,
+      quarantined_by_cause: {},
+      halted: 0,
+    },
+    "GET /projects/app/stats",
+  );
+  expect(acceptedText(stats)).toBe("2 / 4 · 50% via override");
+  expect(acceptedText({ ...stats, overrideRatePercent: null })).toBe("2 / 4");
+  expect(acceptedText(null)).toBe("–");
 });

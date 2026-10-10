@@ -510,6 +510,17 @@ describe("health strip", () => {
 describe("numbers", () => {
   const numbers = () => screen.findByRole("region", { name: "Numbers" });
 
+  test("a project's label links to the Projects screen with it open, and Overall is no link", async () => {
+    renderApp(<BoardScreen />, { server: fixtureServer() });
+    const region = await numbers();
+    expect(within(region).getByRole("link", { name: "app" })).toHaveAttribute(
+      "href",
+      "/app/projects?project=app",
+    );
+    expect(within(region).queryByRole("link", { name: "Overall" })).not.toBeInTheDocument();
+    expect(within(region).getByText("Overall")).toBeInTheDocument();
+  });
+
   test("the fixture's numbers, overall and per project", async () => {
     renderApp(<BoardScreen />, { server: fixtureServer() });
     const region = await numbers();

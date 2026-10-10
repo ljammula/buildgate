@@ -28,6 +28,8 @@ export function decodeFactoryStats(o: JsonObject, at: string): FactoryStats {
 export interface NumbersRow {
   /** "Overall", or the project. */
   readonly label: string;
+  /** The project id of a project's row; null for the overall row, which is no project. */
+  readonly project: string | null;
   readonly tickets: string;
   readonly oneShot: string;
   readonly accepted: string;
@@ -67,11 +69,12 @@ export function costPerAcceptedText(metrics: TrendMetrics): string {
     : NO_VALUE;
 }
 
-function numbersRow(label: string, metrics: TrendMetrics): NumbersRow {
+function numbersRow(label: string, project: string | null, metrics: TrendMetrics): NumbersRow {
   // The server sorts quarantined_by largest first.
   const top = metrics.quarantinedBy[0];
   return {
     label,
+    project,
     tickets: String(metrics.tickets),
     oneShot: rateText(metrics.oneShot, metrics.tickets, metrics.oneShotRate),
     accepted: rateText(metrics.accepted, metrics.tickets, metrics.acceptedRate),
@@ -93,9 +96,9 @@ export function numbersRows(
 ): NumbersRow[] {
   const perProject = stats.projects
     .filter((report) => projects.size === 0 || projects.has(report.project))
-    .map((report) => numbersRow(report.project, report.overall));
+    .map((report) => numbersRow(report.project, report.project, report.overall));
   return projects.size === 0
-    ? [numbersRow("Overall", stats.overall.overall), ...perProject]
+    ? [numbersRow("Overall", null, stats.overall.overall), ...perProject]
     : perProject;
 }
 

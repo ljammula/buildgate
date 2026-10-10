@@ -1,11 +1,9 @@
 import {
+  isProjectTab,
   newRequestRoute,
-  opsRoute,
   parseRoute,
   pathForRoute,
-  projectObservationsPath,
-  projectReleaseRoute,
-  projectStatsRoute,
+  projectsPath,
   requestDetailRoute,
   runDetailRoute,
   runListRoute,
@@ -25,24 +23,17 @@ test("/runs/{id} parses to a runDetail deep link", () => {
   expect(config.deepLinkId).toBe("run-7");
 });
 
-test("/projects/{p}/release parses to a projectRelease deep link", () => {
-  const config = parseRoute("/projects/checkouts/release");
-  expect(config.deepLink).toBe("projectRelease");
-  expect(config.deepLinkId).toBe("checkouts");
-});
-
 test("each deep link round-trips through pathForRoute", () => {
   expect(pathForRoute(requestDetailRoute("req-42"))).toBe("/requests/req-42");
   expect(pathForRoute(runDetailRoute("run-7"))).toBe("/runs/run-7");
-  expect(pathForRoute(projectReleaseRoute("checkouts"))).toBe("/projects/checkouts/release");
 });
 
 test("a deep-link id with an escapable character round-trips without double-encoding", () => {
   const rawId = "my repo";
-  const path = pathForRoute(projectReleaseRoute(rawId));
-  expect(path).toBe("/projects/my%20repo/release");
+  const path = pathForRoute(runDetailRoute(rawId));
+  expect(path).toBe("/runs/my%20repo");
   const config = parseRoute(path);
-  expect(config.deepLink).toBe("projectRelease");
+  expect(config.deepLink).toBe("runDetail");
   expect(config.deepLinkId).toBe(rawId);
 });
 
@@ -62,30 +53,24 @@ test("/runs parses to a runList deep link", () => {
   expect(config.deepLinkId).toBeNull();
 });
 
-test("/ops parses to an ops deep link", () => {
-  const config = parseRoute("/ops");
-  expect(config.deepLink).toBe("ops");
-  expect(config.deepLinkId).toBeNull();
-});
-
-test("/projects/{p}/stats parses to a projectStats deep link", () => {
-  const config = parseRoute("/projects/checkouts/stats");
-  expect(config.deepLink).toBe("projectStats");
-  expect(config.deepLinkId).toBe("checkouts");
-});
-
-test("/projects/{p}/observations parses to a projectObservations deep link", () => {
-  const config = parseRoute("/projects/my%20repo/observations");
-  expect(config.deepLink).toBe("projectObservations");
-  expect(config.deepLinkId).toBe("my repo");
-  expect(pathForRoute(config)).toBe("/projects/my%20repo/observations");
-  expect(projectObservationsPath("checkouts")).toBe("/projects/checkouts/observations");
-});
-
-test("these deep links round-trip through pathForRoute", () => {
+test("the run list deep link round-trips through pathForRoute", () => {
   expect(pathForRoute(runListRoute())).toBe("/runs");
-  expect(pathForRoute(opsRoute())).toBe("/ops");
-  expect(pathForRoute(projectStatsRoute("checkouts"))).toBe("/projects/checkouts/stats");
+});
+
+test("projectsPath opens a project's row, on a tab when one is named", () => {
+  expect(projectsPath()).toBe("/app/projects");
+  expect(projectsPath("app")).toBe("/app/projects?project=app");
+  expect(projectsPath("app", "release")).toBe("/app/projects?project=app&tab=release");
+  expect(projectsPath("my repo", "stats")).toBe("/app/projects?project=my+repo&tab=stats");
+  expect(projectsPath("")).toBe("/app/projects");
+});
+
+test("only the five tabs of a project row are tabs", () => {
+  for (const tab of ["stats", "release", "trend", "observations", "memory"]) {
+    expect(isProjectTab(tab)).toBe(true);
+  }
+  expect(isProjectTab("ops")).toBe(false);
+  expect(isProjectTab(null)).toBe(false);
 });
 
 test("/triage still parses to the triage config, unaffected by the deep-link changes", () => {

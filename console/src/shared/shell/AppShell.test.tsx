@@ -87,11 +87,11 @@ test("the Triage count is the number of rows Triage lists: every state that need
   ).toEqual(["a", "b", "c", "d", "e"]);
 });
 
-test("Projects is the current item on a project's stats and release pages", async () => {
+test("Projects is the current item on the Projects screen", async () => {
   renderApp(<AppShell>x</AppShell>, {
     server: shell([]),
-    path: "/projects/app/stats",
-    pattern: "/projects/:project/stats",
+    path: "/app/projects?project=app&tab=release",
+    pattern: "/app/projects",
   });
   const projects = await screen.findByRole("link", { name: "Projects" });
   expect(projects).toHaveAttribute("aria-current", "page");

@@ -1,6 +1,7 @@
 // Projects as the API lists them and the per-project figures a team lead
 // decides on: GET /projects, GET /projects/{project}/stats and
 // POST /projects/check.
+import { NO_VALUE } from "@/domain/noValue";
 import {
   type JsonObject,
   decodeList,
@@ -101,6 +102,18 @@ export function decodeProjectStats(o: JsonObject, at: string): ProjectStats {
     ),
     medianAcceptedTokens: optNumber(o, "median_accepted_tokens", at),
   };
+}
+
+/**
+ * "2 / 4", plus " · 50% via override" when the server gives an override rate;
+ * the no-value dash when the stats could not be read, never "0 / 0".
+ */
+export function acceptedText(stats: ProjectStats | null): string {
+  if (stats === null) return NO_VALUE;
+  const base = `${stats.accepted} / ${stats.totalRuns}`;
+  return stats.overrideRatePercent === null
+    ? base
+    : `${base} · ${stats.overrideRatePercent}% via override`;
 }
 
 /**

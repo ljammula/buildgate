@@ -274,8 +274,11 @@ await say("Quarantined: the cause, and the ways on: retry, send back, cancel", 3
 await visit("/requests/req-halted");
 await say("Halted: what stopped it and the command that resumes it", 3200);
 
-await visit("/ops");
-await say("Ops: queue, daemon and kill-switch state per project", 3000);
+await visit("/app/projects?project=app&tab=release");
+await say(
+  "Projects: runs, accepted share and kill switch per project; a row opens its release history",
+  3400,
+);
 await page.getByRole("button", { name: /^Theme:/ }).click();
 await pause(500);
 await page.getByRole("button", { name: /^Theme:/ }).click();

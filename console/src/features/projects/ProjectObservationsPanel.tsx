@@ -8,7 +8,7 @@ import {
   observationKindLabel,
 } from "@/domain/observation";
 import { escapeInvisible } from "@/domain/textEscape";
-import { projectObservationsPath, requestPath, runPath } from "@/routes/paths";
+import { requestPath, runPath } from "@/routes/paths";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -16,9 +16,6 @@ import { EmptyState, Spinner } from "@/ui/Feedback";
 import { Section } from "@/ui/PageLayout";
 import { StaleWarning } from "@/ui/StaleWarning";
 import { LocalTimeText } from "@/ui/Time";
-
-import { ProjectIdForm } from "./ProjectIdForm";
-import { useLoadProject } from "./useLoadProject";
 
 /**
  * One observation: the sentence, the run it is from, and what the round's
@@ -153,21 +150,10 @@ function ObservationsBody({ report }: { readonly report: ObservationReport }) {
  * here is a setting, and nothing on it changes how a build runs. A failed
  * refresh keeps the last data under a warning.
  */
-export function ProjectObservationsPanel({
-  project,
-  withForm = true,
-}: {
-  readonly project: string;
-  /** False inside a project's own row, where there is no other project to load. */
-  readonly withForm?: boolean;
-}) {
+export function ProjectObservationsPanel({ project }: { readonly project: string }) {
   const query = useProjectObservations(project);
-  const load = useLoadProject(project, projectObservationsPath, () => void query.refetch());
   return (
     <>
-      {withForm ? (
-        <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
-      ) : null}
       {query.isFetching ? <Spinner label="Loading observations" /> : null}
       {query.data === undefined ? (
         query.error === null ? null : (

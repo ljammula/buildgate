@@ -1,6 +1,5 @@
 import { useProjectRelease } from "@/api/runQueries";
 import type { ProjectReleaseView } from "@/domain/release";
-import { projectReleasePath } from "@/routes/paths";
 import { Card } from "@/ui/Card";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Spinner } from "@/ui/Feedback";
@@ -18,9 +17,6 @@ import {
   TableRow,
 } from "@/ui/Table";
 import { LocalTimeText } from "@/ui/Time";
-
-import { ProjectIdForm } from "./ProjectIdForm";
-import { useLoadProject } from "./useLoadProject";
 
 function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
   const { killSwitch } = release;
@@ -83,21 +79,10 @@ function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
  * warning; another project (a new key in the screen) starts from nothing, so
  * project B's error can never sit next to project A's "Engaged" chip.
  */
-export function ProjectReleasePanel({
-  project,
-  withForm = true,
-}: {
-  readonly project: string;
-  /** False inside a project's own row, where there is no other project to load. */
-  readonly withForm?: boolean;
-}) {
+export function ProjectReleasePanel({ project }: { readonly project: string }) {
   const query = useProjectRelease(project);
-  const load = useLoadProject(project, projectReleasePath, () => void query.refetch());
   return (
     <>
-      {withForm ? (
-        <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
-      ) : null}
       {query.isFetching ? <Spinner label="Loading release" /> : null}
       {query.data === undefined ? (
         query.error === null ? null : (

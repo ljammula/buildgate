@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { apiErrorResponse, json, renderApp } from "@/test/render";
@@ -112,18 +112,18 @@ test("run list renders terminal and in-progress states", async () => {
   }
 });
 
-test("the project release button opens ProjectReleaseScreen", async () => {
-  const { location } = renderApp(<RunListScreen />, {
+test("the toolbar has New run and Refresh, and no project lookups or Ops link", async () => {
+  renderApp(<RunListScreen />, {
     server: [{ on: "GET /runs", reply: () => json([]) }, noRequests],
     path: "/runs",
     pattern: "/runs",
   });
   await screen.findByText("No runs found.");
-  await userEvent.click(screen.getByRole("button", { name: "Project release" }));
-  await userEvent.type(screen.getByLabelText("Project id"), "app");
-  await userEvent.click(screen.getByRole("button", { name: "Open" }));
-  expect(await screen.findByText("Navigated to /projects/app/release")).toBeInTheDocument();
-  expect(location()).toBe("/projects/app/release");
+  const banner = within(screen.getByRole("banner"));
+  const controls = [...banner.queryAllByRole("link"), ...banner.queryAllByRole("button")].map(
+    (el) => el.getAttribute("aria-label") ?? el.textContent,
+  );
+  expect(controls.sort()).toEqual(["New run", "Refresh"]);
 });
 
 test("run list row shows project, elapsed time, and run id", async () => {

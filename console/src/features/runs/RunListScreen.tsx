@@ -1,7 +1,7 @@
-import { BarChart3, LayoutDashboard, Plus, RefreshCw, Shield } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 
-import { opsPath, projectReleasePath, projectStatsPath, projectsPath } from "@/routes/paths";
+import { projectsPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import { EmptyState, Spinner } from "@/ui/Feedback";
@@ -10,7 +10,6 @@ import { PageBody, PageHeader } from "@/ui/PageLayout";
 import { StaleWarning } from "@/ui/StaleWarning";
 import { Table, TableBody, TableFrame, TableHead, TableHeaderCell, TableRow } from "@/ui/Table";
 
-import { ProjectLookupDialog } from "./ProjectLookupDialog";
 import { RunRow } from "./RunRow";
 import { useRunList } from "./useRunList";
 
@@ -35,29 +34,6 @@ export function RunListScreen() {
                 New run
               </Link>
             </Button>
-            <ProjectLookupDialog
-              title="Project release"
-              pathFor={projectReleasePath}
-              trigger={
-                <IconButton label="Project release">
-                  <Shield aria-hidden="true" />
-                </IconButton>
-              }
-            />
-            <ProjectLookupDialog
-              title="Project stats"
-              pathFor={projectStatsPath}
-              trigger={
-                <IconButton label="Project stats">
-                  <BarChart3 aria-hidden="true" />
-                </IconButton>
-              }
-            />
-            <IconButton asChild label="Open Ops">
-              <Link to={opsPath()}>
-                <LayoutDashboard aria-hidden="true" />
-              </Link>
-            </IconButton>
             <IconButton label="Refresh" disabled={loading} onClick={() => void refresh()}>
               <RefreshCw aria-hidden="true" />
             </IconButton>
