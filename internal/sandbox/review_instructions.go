@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
@@ -68,6 +69,20 @@ const (
 	reviewInstructionTreeDir      = "tree"
 	reviewInstructionScratchDir   = "scratch"
 )
+
+// ReviewInstructionTimeout is the deadline of one whole snapshot. The caps
+// above bound what a snapshot keeps, not the work two hostile trees can make
+// of it (a link is one git process, a deep path many comparisons), so every
+// loop whose length the repository decides checks its context and this
+// deadline ends it: a repository too costly to compare gets no review. It is
+// shorter than the commit-directory snapshot's minute because the review step
+// takes the snapshot before its first heartbeat, inside that Activity's
+// heartbeat timeout (internal/workflow checks the two against each other).
+const ReviewInstructionTimeout = 10 * time.Second
+
+// reviewInstructionTimeout is ReviewInstructionTimeout; a variable so a test
+// can change it.
+var reviewInstructionTimeout = ReviewInstructionTimeout
 
 var fullGitSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
@@ -324,10 +339,11 @@ type gitTree struct {
 	byPath   map[string]treeEntry
 	linkFold map[string]bool // folded paths of the symlinks
 	gitFold  map[string]bool // folded paths of the gitlinks
+	foldLens map[int]bool    // the lengths of the keys of linkFold and gitFold
 }
 
 func newGitTree() *gitTree {
-	return &gitTree{byPath: map[string]treeEntry{}, linkFold: map[string]bool{}, gitFold: map[string]bool{}}
+	return &gitTree{byPath: map[string]treeEntry{}, linkFold: map[string]bool{}, gitFold: map[string]bool{}, foldLens: map[int]bool{}}
 }
 
 var treeModePattern = regexp.MustCompile(`^[0-7]{6}$`)
@@ -367,7 +383,7 @@ func streamTree(ctx context.Context, root, sha string, fn func(treeEntry) error)
 		pw.CloseWithError(err)
 		done <- err
 	}()
-	err := scanTree(pr, fn)
+	err := scanTree(ctx, pr, fn)
 	pr.CloseWithError(errors.New("done"))
 	if gerr := <-done; err == nil && gerr != nil {
 		err = gerr
@@ -378,12 +394,15 @@ func streamTree(ctx context.Context, root, sha string, fn func(treeEntry) error)
 	return nil
 }
 
-func scanTree(r io.Reader, fn func(treeEntry) error) error {
+func scanTree(ctx context.Context, r io.Reader, fn func(treeEntry) error) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	sc.Split(splitNUL)
 	n := 0
 	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if n++; n > maxReviewInstructionTree {
 			return fmt.Errorf("more than %d entries", maxReviewInstructionTree)
 		}
@@ -552,10 +571,10 @@ func (s *planState) index(t *gitTree, e treeEntry, side int) error {
 	switch {
 	case e.isLink():
 		fold := foldName(e.path)
-		t.linkFold[fold], kept = true, len(fold)
+		t.linkFold[fold], t.foldLens[len(fold)], kept = true, true, len(fold)
 	case e.isGitlink():
 		fold := foldName(e.path)
-		t.gitFold[fold], kept = true, len(fold)
+		t.gitFold[fold], t.foldLens[len(fold)], kept = true, true, len(fold)
 	}
 	if e.isLink() || e.isGitlink() || ip.relevant() {
 		t.byPath[e.path] = e
@@ -622,7 +641,7 @@ func (c *candidate) isDir() bool {
 
 // differing returns the candidates the two trees do not hold identically, in
 // order, after the spelling, type and cap rules.
-func (s *planState) differing() ([]*candidate, error) {
+func (s *planState) differing(ctx context.Context) ([]*candidate, error) {
 	keys := make([]string, 0, len(s.cands))
 	for k := range s.cands {
 		keys = append(keys, k)
@@ -631,6 +650,9 @@ func (s *planState) differing() ([]*candidate, error) {
 	var out []*candidate
 	var baseFiles, resFiles int
 	for _, k := range keys {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		c := s.cands[k]
 		if sameEntries(c.base, c.res) {
 			continue
@@ -686,6 +708,9 @@ func (s *planState) stage(ctx context.Context, root, dst string, cands []*candid
 	var masks []WorkspaceMask
 	var diffs []stagedDiff
 	for _, c := range cands {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		if err := validateMaskTarget(c.canon); err != nil {
 			return nil, nil, fmt.Errorf("review instructions: %w", err)
 		}
@@ -717,6 +742,9 @@ func (s *planState) writeBase(ctx context.Context, root, treeDir, target string,
 		return writeSnapshotFile(target, nil, false)
 	}
 	for _, e := range c.base {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		out := filepath.Join(treeDir, filepath.FromSlash(e.path))
 		if err := ensureContainedPath(treeDir, out); err != nil {
 			return fmt.Errorf("review instructions: %w", err)
@@ -816,6 +844,9 @@ func (s *planState) stageDiffs(ctx context.Context, root, dst string, c *candida
 	}
 	var out []stagedDiff
 	for _, p := range order {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		d := *byPath[p]
 		if d.base != nil && d.res != nil && *d.base == *d.res {
 			continue
@@ -849,12 +880,19 @@ func (s *planState) stageDiffs(ctx context.Context, root, dst string, c *candida
 // On any error after dst has been accepted, everything under dst is removed,
 // what an earlier call left there included, so no caller can read a stale or
 // partial snapshot.
-func SnapshotReviewInstructions(ctx context.Context, workDir, baseSHA, resultSHA, dst string) (snap ReviewInstructionSnapshot, err error) {
+func SnapshotReviewInstructions(parent context.Context, workDir, baseSHA, resultSHA, dst string) (snap ReviewInstructionSnapshot, err error) {
 	if err := requireDestinationOutside(workDir, dst); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
+	ctx, cancel := context.WithTimeout(parent, reviewInstructionTimeout)
+	defer cancel()
 	defer func() {
 		if err != nil {
+			// The snapshot's own deadline is a refusal: the trees made it slow.
+			// The caller's context having ended is the caller's error.
+			if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				err = fmt.Errorf("review instructions: the repository is too costly to compare: the snapshot of its instruction paths did not finish in %v (%w)", reviewInstructionTimeout, err)
+			}
 			snap = ReviewInstructionSnapshot{}
 			if rerr := os.RemoveAll(dst); rerr != nil {
 				err = errors.Join(err, fmt.Errorf("review instructions: clear %s: %w", dst, rerr))
@@ -912,7 +950,7 @@ func planSnapshot(ctx context.Context, root, baseSHA, resultSHA string) (*planSt
 	if err := plan.checkLinks(ctx, root); err != nil {
 		return nil, nil, err
 	}
-	cands, err := plan.differing()
+	cands, err := plan.differing(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -955,16 +993,28 @@ func publicDirs(dst string) error {
 
 // ---- the diff file ----
 
-// writeReviewInstructionDiff writes dst/instructions.diff: for each changed
-// file a quoted header, a mode line when the executable bit changed and the
-// bounded hunks of the base blob against the result blob (git runs in dst on
-// blobs written there, so no worktree attribute applies and no host path
-// reaches the file), then one section per removed untracked entry.
-func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []stagedDiff, removed []removal) error {
+// reviewInstructionDiffLine is more than the longest line the diff file writes
+// about a cut: one "[truncated: ...]" line after a section, and the last line
+// that counts the paths not listed.
+const reviewInstructionDiffLine = 64
+
+// diffSection is one path of the diff file: its header (with the mode line,
+// when the executable bit changed), then a changed file's hunks or a removed
+// entry's content, then the note of a removed entry that has no content.
+type diffSection struct {
+	head, note string
+	diff       *stagedDiff
+	body       []byte
+}
+
+// fixed is the bytes the section writes whatever room its content gets.
+func (s diffSection) fixed() int { return len(s.head) + len(s.note) + reviewInstructionDiffLine }
+
+func diffSections(diffs []stagedDiff, removed []removal) []diffSection {
 	sort.Slice(diffs, func(i, j int) bool { return diffs[i].path < diffs[j].path })
-	var out bytes.Buffer
-	used := 0
-	for _, d := range diffs {
+	out := make([]diffSection, 0, len(diffs)+len(removed))
+	for i := range diffs {
+		d := &diffs[i]
 		label := "changed"
 		switch {
 		case d.base == nil:
@@ -972,28 +1022,77 @@ func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []stagedD
 		case d.res == nil:
 			label = "removed by the build"
 		}
-		fmt.Fprintf(&out, "=== %s (%s) ===\n", strconv.Quote(d.path), label)
+		head := fmt.Sprintf("=== %s (%s) ===\n", strconv.Quote(d.path), label)
 		if d.base != nil && d.res != nil && d.base.mode != d.res.mode {
-			fmt.Fprintf(&out, "mode changed: %s -> %s\n", d.base.mode, d.res.mode)
+			head += fmt.Sprintf("mode changed: %s -> %s\n", d.base.mode, d.res.mode)
 		}
-		text, over, err := diffOne(ctx, dst, d, min(maxReviewInstructionDiffBytes-used, maxReviewInstructionFileDiff))
-		if err != nil {
-			return err
-		}
-		used += len(text)
-		appendBounded(&out, text, over)
+		out = append(out, diffSection{head: head, diff: d})
 	}
 	for _, r := range removed {
-		fmt.Fprintf(&out, "=== %s (untracked, removed before review) ===\n", strconv.Quote(r.path))
-		body := r.body
-		room := max(maxReviewInstructionDiffBytes-used, 0)
-		over := int64(max(len(body)-room, 0))
-		body = body[:len(body)-int(over)]
-		used += len(body)
-		appendBounded(&out, body, over)
+		sec := diffSection{head: fmt.Sprintf("=== %s (untracked, removed before review) ===\n", strconv.Quote(r.path)), body: r.body}
 		if r.note != "" {
-			out.WriteString(r.note + "\n")
+			sec.note = r.note + "\n"
 		}
+		out = append(out, sec)
+	}
+	return out
+}
+
+// writeReviewInstructionDiff writes dst/instructions.diff: for each changed
+// file a quoted header, a mode line when the executable bit changed and the
+// bounded hunks of the base blob against the result blob (git runs in dst on
+// blobs written there, so no worktree attribute applies and no host path
+// reaches the file), then one section per removed untracked entry. The file
+// is at most maxReviewInstructionDiffBytes, headers included. Content gets the
+// room that the headers of the sections after it do not need. When the headers
+// of every section do not fit, only those of the changed files are kept room
+// for, so their content is still shown, removed entries are listed by header
+// alone as far as the file goes, and the last line counts the paths not
+// listed.
+func writeReviewInstructionDiff(ctx context.Context, dst string, diffs []stagedDiff, removed []removal) error {
+	sections := diffSections(diffs, removed)
+	const limit = maxReviewInstructionDiffBytes - reviewInstructionDiffLine
+	reserved, reserve := len(sections), 0 // the sections whose headers are kept room for, and the room
+	for _, sec := range sections {
+		reserve += sec.fixed()
+	}
+	if reserve > limit {
+		reserved, reserve = len(diffs), 0
+		for _, sec := range sections[:reserved] {
+			reserve += sec.fixed()
+		}
+	}
+	var out bytes.Buffer
+	listed := 0
+	for i, sec := range sections {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		left := limit - out.Len()
+		if sec.fixed() > left {
+			break
+		}
+		out.WriteString(sec.head)
+		room := 0
+		if i < reserved {
+			room = max(left-reserve, 0)
+			reserve -= sec.fixed()
+		}
+		text, over := sec.body, int64(0)
+		if sec.diff != nil {
+			var err error
+			if text, over, err = diffOne(ctx, dst, *sec.diff, min(room, maxReviewInstructionFileDiff)); err != nil {
+				return err
+			}
+		} else if len(text) > room {
+			text, over = text[:room], int64(len(text)-room)
+		}
+		appendBounded(&out, text, over)
+		out.WriteString(sec.note)
+		listed++
+	}
+	if listed < len(sections) {
+		fmt.Fprintf(&out, "[%d more instruction paths not listed]\n", len(sections)-listed)
 	}
 	return writeSnapshotFile(filepath.Join(dst, reviewInstructionDiffFile), out.Bytes(), false)
 }

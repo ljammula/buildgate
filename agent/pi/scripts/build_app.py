@@ -1527,6 +1527,11 @@ def neutralise_instructions_diff(text: str) -> str:
 INSTRUCTIONS_DIFF_HEADER = re.compile(r'^=== ("(?:[^"\\\n]|\\.)*") \(([^\n]*?)\) ===$', re.MULTILINE)
 
 
+# The last line of the host's file when its bound left paths out: how many.
+# The host writes it at column 0, where no content line starts with "[".
+INSTRUCTIONS_DIFF_NOT_LISTED = re.compile(r"\n\[(\d+) more instruction paths not listed\]\n*\Z")
+
+
 # The most entries, and characters, of a path list in the instructions block.
 MAX_INSTRUCTIONS_LIST_ENTRIES = 400
 MAX_INSTRUCTIONS_LIST_CHARS = 40_000
@@ -1577,7 +1582,8 @@ def instructions_diff_block(path: Path | None) -> str:
 	section, from its line to the next header; a path whose section runs past
 	the cap is named after the diff cut as not shown in full, the one the cut
 	falls in included, so a build cannot hide an instruction change behind
-	filler earlier in the file."""
+	filler earlier in the file. Paths the host's own bound left out of its
+	file (its last line counts them) are added to the total and reported."""
 	if path is None:
 		return ""
 	text = "\n".join(printable_instructions_line(raw) for raw in path.read_bytes().split(b"\n"))
@@ -1585,15 +1591,22 @@ def instructions_diff_block(path: Path | None) -> str:
 		return ""
 	found = list(INSTRUCTIONS_DIFF_HEADER.finditer(text))
 	sections = [(m.group(1), m.group(2), found[i + 1].start() if i + 1 < len(found) else len(text)) for i, m in enumerate(found)]
+	not_listed = INSTRUCTIONS_DIFF_NOT_LISTED.search(text)
+	unlisted = int(not_listed.group(1)) if not_listed else 0
 	not_shown = []
 	if len(text) > MAX_INSTRUCTIONS_DIFF_CHARS:
 		omitted = len(text) - MAX_INSTRUCTIONS_DIFF_CHARS
 		not_shown = [(quoted, what) for quoted, what, end in sections if end > MAX_INSTRUCTIONS_DIFF_CHARS]
 		text = text[:MAX_INSTRUCTIONS_DIFF_CHARS] + f"\n[instructions diff truncated here: {omitted:,} more characters not shown]"
 	touched = ""
-	if sections:
-		lines = [f"Instruction paths this change touched ({len(sections)}):"]
+	if sections or unlisted:
+		lines = [f"Instruction paths this change touched ({len(sections) + unlisted}):"]
 		lines += instructions_path_list([(quoted, what) for quoted, what, _ in sections])
+		if unlisted:
+			lines.append(
+				f"... and {unlisted} more instruction paths the host's file does not name: "
+				"this change touches too many instruction files to review; report that as a finding."
+			)
 		if not_shown:
 			lines += ["", "Not shown in full below (the diff was cut):"]
 			lines += instructions_path_list(not_shown)

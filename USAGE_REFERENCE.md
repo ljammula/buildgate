@@ -1328,7 +1328,7 @@ and gate launches are not masked.
 |---|---|
 | Which commit | The commit the request started from (the run's `instruction_base_sha`, set by `-instruction-base` for every build that follows an earlier run; for a ticket's first build, the run's own base). It must be an ancestor of the result, else the run halts as below |
 | Sees, as the base commit has them | Each instruction path the build changed, mounted read-only over the worktree; a path the build deleted is mounted back |
-| Shown as data | What the build did to those paths, as a fenced block after the diff (`--instructions-diff`, at most 60,000 characters), labelled as data about the change, never instructions. A complete, uncut list of the paths it touched comes first, and names those the cap cut out; the review is told to report such a path as a finding |
+| Shown as data | What the build did to those paths, as a fenced block after the diff (`--instructions-diff`, at most 60,000 characters), labelled as data about the change, never instructions. A complete, uncut list of the paths it touched comes first, and names those the cap cut out; the review is told to report such a path as a finding. The host's file is at most 2 MiB with its headers: past that it counts the remaining paths in one line, the review is given the total, and is told to report it as a finding |
 | Removed first | Instruction-named paths the worktree holds that the result commit does not (untracked or ignored); listed in `review_removed_paths` |
 
 | Halts the run before the review launches | What to change |
@@ -1339,6 +1339,8 @@ and gate launches are not masked.
 | A path is spelled two ways (`AGENTS.md` and `agents.md`, or `pkg/.claude` and `Pkg/.claude`), or a submodule sits under an instruction path, or its checkout holds one or a link at the `.github`, `.vscode` or `.agents` folder above one | Keep one spelling; move the submodule |
 | More than 64 instruction paths changed, over 2,000 instruction files, a file over 16 MiB, or an instruction path that changed between a file and a directory | Split the change so the build leaves fewer instruction files altered; the review attempt's `review_instructions_error` names which limit |
 | One commit holds more than 100,000 directories that lead to or lie under instruction paths (every folder above a `.github`, `.vscode`, `.agents`, `.claude`, `.pi` or `.codex` folder or an `AGENTS.md`-style file counts once), or over 64 MiB of path text the review must keep (those folders, the instruction files, and every symlink and submodule of the repository) | Take the generated or vendored tree that holds them out of the repository; no ordinary repository reaches either limit |
+| The snapshot of the instruction paths does not finish in 10 seconds (very many links at instruction paths, or trees too large or too deep to compare in that time); `review_instructions_error` says the repository is too costly to compare | Take the links or the generated tree out of the repository |
+| The worktree holds more than 50,000 untracked or ignored instruction paths (a folder counts once, whatever it holds) | Delete them from the worktree, then `factoryd retry` |
 
 The halt's `halt_reason_code` is `review_instructions_failed`; its message is
 a fixed sentence. The cause is in the review attempt's

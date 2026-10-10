@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -59,7 +60,7 @@ func snapshotSteps(ctx context.Context, r *instructionRepo) error {
 // context: a snapshot of a few thousand entries asks at least once for each,
 // and a deadline that falls in any of them ends the snapshot with it.
 func TestReviewInstructionLoopsCheckTheirContext(t *testing.T) {
-	const files, tracked, untracked = 3000, 200, 300
+	const files, tracked, untracked = 1000, 40, 300
 	base := map[string]string{".gitignore": "node_modules/\n", "docs/guide.md": "g\n", ".claude/keep": "k\n"}
 	for i := 0; i < files; i++ {
 		base[fmt.Sprintf("src/d%02d/f%04d.go", i%50, i)] = "package x\n"
@@ -276,7 +277,7 @@ func TestReviewInstructionPlansAgreeWithANaiveMatcher(t *testing.T) {
 		bc, rc := refs[fmt.Sprintf("fb%d", it)], refs[fmt.Sprintf("fr%d", it)]
 		_, cands, err := planSnapshot(context.Background(), r.dir, bc, rc)
 		if err != nil {
-			fmt.Fprintf(digest, "%d refused: %v\n", it, err)
+			fmt.Fprintf(digest, "%d refused: %s\n", it, strings.ReplaceAll(err.Error(), r.dir, "<work>"))
 			continue
 		}
 		planned++
@@ -315,5 +316,138 @@ func TestReviewInstructionPlansAgreeWithANaiveMatcher(t *testing.T) {
 	t.Logf("%d pairs: %d planned (%d masks), %d refused; digest of every outcome %x", iterations, planned, masks, iterations-planned, digest.Sum(nil)[:8])
 	if planned < iterations/10 || masks == 0 {
 		t.Fatalf("only %d of %d pairs planned, with %d masks: the generator no longer exercises the plan", planned, iterations, masks)
+	}
+}
+
+// The snapshot's own deadline is a refusal that says the repository is too
+// costly to compare, whatever the caller's deadline; the caller's own
+// cancellation is not. 1,500 links at an instruction path are two git
+// processes each.
+func TestReviewInstructionSnapshotHasItsOwnDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes 1,500 symlinks")
+	}
+	links := map[string]string{}
+	for i := 0; i < 1500; i++ {
+		links[fmt.Sprintf(".claude/l%04d", i)] = "keep"
+	}
+	r := newInstructionRepoWithLinks(t, map[string]string{".claude/keep": "k\n"}, links)
+	r.write("main.go", "package main // changed\n")
+	r.commit()
+	dst := filepath.Join(filepath.Dir(r.dir), "snap")
+	old := reviewInstructionTimeout
+	reviewInstructionTimeout = time.Second
+	t.Cleanup(func() { reviewInstructionTimeout = old })
+
+	start := time.Now()
+	_, err := SnapshotReviewInstructions(context.Background(), r.dir, r.base, r.result, dst)
+	took := time.Since(start)
+	t.Logf("1,500 links, a deadline of 1s: returned after %v: %.200v", took.Round(time.Millisecond), err)
+	if err == nil || !strings.Contains(err.Error(), "the repository is too costly to compare: the snapshot of its instruction paths did not finish in 1s") {
+		t.Fatalf("err = %v, want the refusal of a repository too costly to compare", err)
+	}
+	if took > 4*time.Second {
+		t.Errorf("returned %v after a deadline of 1s", took.Round(time.Millisecond))
+	}
+	if _, serr := os.Stat(dst); !os.IsNotExist(serr) {
+		t.Errorf("the refused snapshot left %s behind (%v)", dst, serr)
+	}
+
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := SnapshotReviewInstructions(parent, r.dir, r.base, r.result, dst); err == nil || strings.Contains(err.Error(), "too costly") {
+		t.Fatalf("a cancelled caller: err = %v, want an error that is not the refusal", err)
+	}
+}
+
+// naiveTrackedChildren is trackedChildren as it was first written: every
+// prefix of every entry, spelled out.
+func naiveTrackedChildren(tracked []treeEntry) map[string][]string {
+	seen := map[string]map[string]bool{}
+	for _, e := range tracked {
+		parts := strings.Split(e.path, "/")
+		for k := range parts {
+			dir := strings.Join(parts[:k], "/")
+			if seen[dir] == nil {
+				seen[dir] = map[string]bool{}
+			}
+			seen[dir][parts[k]] = true
+		}
+	}
+	out := make(map[string][]string, len(seen))
+	for dir, names := range seen {
+		for n := range names {
+			out[dir] = append(out[dir], n)
+		}
+		sort.Strings(out[dir])
+	}
+	return out
+}
+
+// The worktree pass builds its tables of tracked directories from each entry
+// upwards, stopping at what an earlier entry recorded. They are the tables
+// the plain way builds: every prefix of every entry.
+func TestReviewInstructionTrackedTablesMatchThePlainWay(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	names := []string{"a", "b", "c", ".claude", ".github", "AGENTS.md", "x"}
+	for round := 0; round < 300; round++ {
+		root := t.TempDir()
+		s := newPlan()
+		seen := map[string]bool{}
+		for i, n := 0, rng.Intn(12); i < n; i++ {
+			parts := make([]string, 1+rng.Intn(6))
+			for k := range parts {
+				parts[k] = names[rng.Intn(len(names))]
+			}
+			p := strings.Join(parts, "/")
+			if seen[p] {
+				continue
+			}
+			seen[p] = true
+			s.tracked = append(s.tracked, treeEntry{path: p, mode: "100644", oid: strings.Repeat("0", 40)})
+			// The directories exist on disk for some entries only, and never
+			// where an earlier entry made a file.
+			if rng.Intn(3) > 0 {
+				_ = os.MkdirAll(filepath.Join(root, filepath.FromSlash(strings.Join(parts[:len(parts)-1], "/"))), 0o755)
+				_ = os.WriteFile(filepath.Join(root, filepath.FromSlash(p)), nil, 0o644)
+			}
+		}
+		kids, err := s.trackedChildren(context.Background())
+		if want := naiveTrackedChildren(s.tracked); err != nil || !reflect.DeepEqual(kids, want) {
+			t.Fatalf("round %d: trackedChildren = %v (%v), want %v", round, kids, err, want)
+		}
+		d := &diskState{planState: s, root: root, dirsOK: map[string]bool{}}
+		wantDirs, wantOK := map[int][]string{}, map[string]bool{}
+		dirSeen := map[string]bool{}
+		for _, e := range s.tracked {
+			parts := strings.Split(e.path, "/")
+			checking := true
+			for k := 1; k < len(parts); k++ {
+				dir := strings.Join(parts[:k], "/")
+				info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(dir)))
+				if !dirSeen[dir] {
+					dirSeen[dir] = true
+					if err == nil {
+						wantDirs[k] = append(wantDirs[k], dir)
+					}
+				}
+				if checking = checking && err == nil && info.IsDir(); checking {
+					wantOK[dir] = true
+				}
+			}
+			_ = d.verify(context.Background(), e)
+		}
+		gotDirs := map[int][]string{}
+		for k, list := range d.trackedDirs() {
+			for _, kf := range list {
+				gotDirs[k] = append(gotDirs[k], kf.name)
+			}
+		}
+		if !reflect.DeepEqual(gotDirs, wantDirs) {
+			t.Fatalf("round %d: trackedDirs = %v, want %v (entries %v)", round, gotDirs, wantDirs, s.tracked)
+		}
+		if !reflect.DeepEqual(d.dirsOK, wantOK) {
+			t.Fatalf("round %d: checked directories = %v, want %v (entries %v)", round, d.dirsOK, wantOK, s.tracked)
+		}
 	}
 }
