@@ -27,6 +27,7 @@ import { useNow } from "@/ui/Time";
 import { ActivityPanel } from "./ActivityPanel";
 import { BoardStrips } from "./BoardStrips";
 import { BoardToolbar } from "./BoardToolbar";
+import { CardDecision } from "./CardDecision";
 import { HealthStrip } from "./HealthStrip";
 import { KanbanBoard } from "./KanbanBoard";
 import { NumbersPanel } from "./NumbersPanel";
@@ -65,6 +66,11 @@ export function BoardScreen() {
   const { view } = boardView;
   const collapsedLanes = useCollapsedLanes();
   const [showCancelled, setShowCancelled] = useState(false);
+  // Which request's Request changes dialog is open. Held here and drawn once,
+  // outside the board, so that no change to the list (a lane appearing, a card
+  // changing column or view) unmounts it with what the operator typed. It
+  // closes on send, on cancel, or when the request leaves the list.
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   const requests = query.data;
   const refreshError = query.error;
@@ -121,6 +127,10 @@ export function BoardScreen() {
   const showAllTime = (): void => {
     controls.selectDays("all");
   };
+
+  const rejecting =
+    rejectingId === null ? null : ((requests ?? []).find((r) => r.id === rejectingId) ?? null);
+  if (rejectingId !== null && requests !== undefined && rejecting === null) setRejectingId(null);
 
   const refresh = (): void => {
     void query.refetch();
@@ -182,6 +192,15 @@ export function BoardScreen() {
               onToggleProject={controls.toggleProject}
               onSelectDays={controls.selectDays}
             />
+            {rejecting === null ? null : (
+              <CardDecision
+                key={rejecting.id}
+                request={rejecting}
+                onClose={() => {
+                  setRejectingId(null);
+                }}
+              />
+            )}
             {matching.length === 0 ? (
               <EmptyState title="No requests found." />
             ) : view === "board" ? (
@@ -196,6 +215,8 @@ export function BoardScreen() {
                 olderHidden={olderHidden}
                 onShowAllTime={showAllTime}
                 canWrite={canWrite}
+                rejectingId={rejectingId}
+                onReject={setRejectingId}
                 now={now}
                 onShowAllDone={() => {
                   // For this visit: following a link is not choosing List.

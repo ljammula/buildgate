@@ -45,6 +45,8 @@ export interface KanbanLaneProps {
   readonly onToggle: () => void;
   readonly showProject: boolean;
   readonly canWrite: boolean;
+  readonly rejectingId: string | null;
+  readonly onReject: (id: string) => void;
   readonly now: Date;
   /** Opens the list of everything finished: the Done cap's way out. */
   readonly onShowAllDone: () => void;
@@ -66,6 +68,8 @@ export function KanbanLane({
   onToggle,
   showProject,
   canWrite,
+  rejectingId,
+  onReject,
   now,
   onShowAllDone,
 }: KanbanLaneProps) {
@@ -80,6 +84,8 @@ export function KanbanLane({
       now={now}
       showProject={showProject}
       canWrite={canWrite}
+      rejecting={rejectingId === request.id}
+      onReject={onReject}
     />
   );
   const cells = (

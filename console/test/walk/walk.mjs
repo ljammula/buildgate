@@ -247,7 +247,10 @@ step("mission-control", async () => {
   } else {
     // No live worker, no queue: the strip never says "Queued 0" over
     // requests that nothing is advancing.
-    check((await health.getByText("Queued").count()) === 0, "a queue length is shown with no live worker");
+    check(
+      (await health.getByText("Queued").count()) === 0,
+      "a queue length is shown with no live worker",
+    );
     const jobStates = ["submitted", "spec_drafting", "oracle_drafting", "planning", "building"];
     if (listed.some((r) => jobStates.includes(r.state))) {
       await health.getByTestId("health-need-worker").waitFor();

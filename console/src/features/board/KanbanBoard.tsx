@@ -30,6 +30,9 @@ export interface KanbanBoardProps {
   readonly olderHidden: number;
   readonly onShowAllTime: () => void;
   readonly canWrite: boolean;
+  /** The request whose Request changes dialog is open, held by the screen; null when none is. */
+  readonly rejectingId: string | null;
+  readonly onReject: (id: string) => void;
   readonly now: Date;
   readonly onShowAllDone: () => void;
   readonly className?: string;
@@ -54,6 +57,8 @@ export function KanbanBoard({
   olderHidden,
   onShowAllTime,
   canWrite,
+  rejectingId,
+  onReject,
   now,
   onShowAllDone,
   className,
@@ -67,6 +72,9 @@ export function KanbanBoard({
   );
   const [pressedGroup, setPressedGroup] = useState<string | null>(null);
   const onlyGroup = activeGroup(pressedGroup, chips);
+  // The chosen group has emptied: forget the choice, so the column is not
+  // narrowed again, unasked, when that group next holds a card.
+  if (pressedGroup !== null && onlyGroup === null) setPressedGroup(null);
   const lanes = board.lanes.map((lane) => (
     <KanbanLane
       key={lane.project}
@@ -81,6 +89,8 @@ export function KanbanBoard({
       }}
       showProject={showProject}
       canWrite={canWrite}
+      rejectingId={rejectingId}
+      onReject={onReject}
       now={now}
       onShowAllDone={onShowAllDone}
     />

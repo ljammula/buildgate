@@ -38,7 +38,9 @@ export function KanbanGroup({ group, headingLevel, alone, across, renderCard }: 
         <ul
           data-across={across}
           className={cn(
-            across === 2 ? "grid grid-cols-2 items-start gap-2" : "flex flex-col gap-2",
+            "flex flex-col gap-2",
+            // Two across needs the room: a wide column on a wide screen.
+            across === 2 && "xl:grid xl:grid-cols-2 xl:items-start",
           )}
         >
           {shown.map(renderCard)}

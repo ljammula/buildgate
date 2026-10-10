@@ -1,17 +1,7 @@
 import { formatAgeCompact, formatAgeSeconds } from "@/domain/elapsed";
+import { workerJobStates } from "@/domain/health";
 import type { QueueRunStatus } from "@/domain/ops";
 import type { RequestSummary } from "@/domain/request";
-
-// States only a live worker can advance (the Go side's queueRunDependentState):
-// every *_review state waits on the operator and every terminal state needs
-// nothing further.
-const QUEUE_RUN_DEPENDENT_STATES: ReadonlySet<string> = new Set([
-  "submitted",
-  "spec_drafting",
-  "oracle_drafting",
-  "planning",
-  "building",
-]);
 
 /** "Ns", "Nm", "2h 05m", "3d 4h" since a heartbeat; null when it is not a parseable timestamp. */
 function heartbeatAge(lastHeartbeat: string, now: Date): string | null {
@@ -44,7 +34,7 @@ export function queueRunWarning(
     return `worker is not running${suffix} -- requests won't advance; start \`factoryd worker\``;
   }
   if (status.state === "absent") {
-    if (!requests.some((r) => QUEUE_RUN_DEPENDENT_STATES.has(r.state))) return null;
+    if (!requests.some((r) => workerJobStates.has(r.state))) return null;
     return (
       "no worker has run against this data dir -- requests won't advance; " +
       "start `factoryd worker`"

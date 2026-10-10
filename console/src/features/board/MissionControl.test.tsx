@@ -357,7 +357,7 @@ describe("deciding from a card", () => {
     });
   });
 
-  test("a detail that cannot be read shows the error on the card, and nothing is sent", async () => {
+  test("a detail that cannot be read shows the error, naming the request, and nothing is sent", async () => {
     const { server: fake } = renderApp(<BoardScreen />, {
       server: server(
         [listed],
@@ -366,10 +366,17 @@ describe("deciding from a card", () => {
     });
     const specCard = await screen.findByTestId("card-req-s");
     await userEvent.click(within(specCard).getByRole("button", { name: "Request changes" }));
-    expect(await within(specCard).findByRole("alert")).toHaveTextContent("Request failed (500)");
+    const status = await screen.findByTestId("card-decision");
+    expect(await within(status).findByRole("alert")).toHaveTextContent("Request failed (500)");
+    expect(status).toHaveTextContent("Request changes: Charge once");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await userEvent.click(within(specCard).getByRole("button", { name: "Dismiss" }));
-    expect(within(specCard).getByRole("button", { name: "Request changes" })).toBeEnabled();
+    // The pressed button is marked, not disabled: it can still hold the focus.
+    const pressed = within(specCard).getByRole("button", { name: "Request changes" });
+    expect(pressed).toHaveAttribute("aria-disabled", "true");
+    expect(pressed).toBeEnabled();
+    await userEvent.click(within(status).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("card-decision")).not.toBeInTheDocument();
+    expect(pressed).toHaveAttribute("aria-disabled", "false");
     expect(fake.requests.filter((r) => r.method === "POST")).toEqual([]);
   });
 
@@ -1140,7 +1147,9 @@ describe("Request changes from a card, while the board keeps refreshing", () => 
     const specCard = await screen.findByTestId("card-req-s");
     await userEvent.click(within(specCard).getByRole("button", { name: "Request changes" }));
     expect(
-      await within(specCard).findByRole("status", { name: "Loading the request" }),
+      await within(screen.getByTestId("card-decision")).findByRole("status", {
+        name: "Loading the request",
+      }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     release(json({ ...listed, spec }));
@@ -1161,12 +1170,14 @@ describe("Request changes from a card, while the board keeps refreshing", () => 
     });
     const specCard = await screen.findByTestId("card-req-s");
     await userEvent.click(within(specCard).getByRole("button", { name: "Request changes" }));
-    expect(await within(specCard).findByTestId("card-moved-on")).toHaveTextContent(
+    expect(await screen.findByTestId("card-moved-on")).toHaveTextContent(
       "This request has moved on to Plan review. Nothing was sent.",
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await userEvent.click(within(specCard).getByRole("button", { name: "Dismiss" }));
-    expect(within(specCard).queryByTestId("card-moved-on")).not.toBeInTheDocument();
+    await userEvent.click(
+      within(screen.getByTestId("card-decision")).getByRole("button", { name: "Dismiss" }),
+    );
+    expect(screen.queryByTestId("card-moved-on")).not.toBeInTheDocument();
     expect(fake.requests.filter((r) => r.method !== "GET")).toEqual([]);
   });
 });
@@ -1286,6 +1297,7 @@ describe("a long Needs you column", () => {
     within(needsYou())
       .getAllByTestId(/^card-/)
       .map((item) => item.dataset.testid);
+  const tokens = (element: Element) => element.className.split(/\s+/);
   const many = [
     ...Array.from({ length: 5 }, (_, i) =>
       requestJson({
@@ -1319,22 +1331,28 @@ describe("a long Needs you column", () => {
     expect(title).toHaveAttribute("title", "Spec 0");
     // The stage and the age stay; a stuck card keeps its red marker.
     expect(card("req-spec-0")).toHaveTextContent("Spec review");
-    expect(within(card("req-spec-0")).getByText(/^for /)).not.toHaveClass("hidden");
+    expect(tokens(within(card("req-spec-0")).getByText(/^for /))).not.toContain("sr-only");
     const alert = within(card("req-stuck")).getByTestId("kanban-alert");
-    expect(alert).not.toHaveClass("hidden");
-    expect(within(alert).getByText("Quarantined", { exact: false })).not.toHaveClass("hidden");
+    expect(tokens(alert)).not.toContain("sr-only");
+    expect(alert).toHaveTextContent(/^Quarantined/);
     // Its reason, the id and the sentence of what is asked open with the card.
     for (const folded of [
       within(alert).getByText(": verify failed after 3 rounds"),
       within(card("req-spec-0")).getByText("Review the drafted spec."),
       within(card("req-spec-0")).getByTitle("req-spec-0").parentElement!,
     ]) {
-      expect(folded).toHaveClass("hidden");
-      expect(folded.className).toContain("group-focus-within/card:");
-      expect(folded.className).toContain("group-hover/card:");
-      // No hover on a touch screen: the full card.
-      expect(folded.className).toContain("[@media(hover:none)]:");
+      // Hidden from the eye only: a screen reader reading the page still
+      // gets it, which `display: none` or `visibility: hidden` would prevent.
+      expect(tokens(folded)).toContain("sr-only");
+      for (const removed of ["hidden", "invisible"]) expect(tokens(folded)).not.toContain(removed);
+      expect(tokens(folded)).toContain("group-focus-within/card:not-sr-only");
+      expect(tokens(folded)).toContain("group-hover/card:not-sr-only");
+      // No hover, or a finger for a pointer (a phone, a touch laptop): the full card.
+      expect(tokens(folded)).toContain("[@media(hover:none)]:not-sr-only");
+      expect(tokens(folded)).toContain("[@media(any-pointer:coarse)]:not-sr-only");
     }
+    // A full card folds nothing.
+    expect(card("req-build").querySelector(".sr-only")).toBeNull();
   });
 
   test("a compact card's controls stay in the tab order, and focus opens the card", async () => {
@@ -1343,7 +1361,16 @@ describe("a long Needs you column", () => {
     const controls = within(first).getByTestId("kanban-controls");
     // Clipped to no height, never taken out of the layout: a hidden control cannot be tabbed to.
     expect(controls).toHaveClass("max-h-0", "overflow-hidden");
-    expect(controls).not.toHaveClass("hidden", "invisible");
+    // Any one of these on the controls, or on anything around them inside the
+    // card, would take them out of the tab order.
+    for (let node: HTMLElement | null = controls; node !== null && first.contains(node);) {
+      for (const removed of ["hidden", "invisible", "sr-only"]) {
+        expect(tokens(node)).not.toContain(removed);
+      }
+      expect(node).not.toHaveAttribute("hidden");
+      node = node.parentElement;
+    }
+    expect(tokens(controls)).toContain("[@media(any-pointer:coarse)]:max-h-none");
     expect(controls.className).toContain("group-focus-within/card:max-h-40");
     expect(controls.className).toContain("group-hover/card:max-h-40");
     expect(controls.className).toContain("[@media(hover:none)]:max-h-none");
@@ -1502,7 +1529,13 @@ describe("a long Needs you column", () => {
     expect(lists()).toEqual(["2", "2", "2"]);
     expect(
       within(within(needsYou()).getByRole("group", { name: "Spec review" })).getByRole("list"),
-    ).toHaveClass("grid", "grid-cols-2");
+    ).toHaveClass("xl:grid", "xl:grid-cols-2");
+    // Only on a wide screen: below it the cards stay one across.
+    const list = within(within(needsYou()).getByRole("group", { name: "Spec review" })).getByRole(
+      "list",
+    );
+    expect(tokens(list)).toContain("flex-col");
+    expect(tokens(list)).not.toContain("grid-cols-2");
     first.unmount();
 
     renderApp(<BoardScreen />, {
@@ -1520,7 +1553,43 @@ describe("a long Needs you column", () => {
     expect(lists()).toEqual(["1", "1", "1"]);
     expect(
       within(within(needsYou()).getByRole("group", { name: "Spec review" })).getByRole("list"),
-    ).not.toHaveClass("grid-cols-2");
+    ).not.toHaveClass("xl:grid-cols-2");
+  });
+
+  test("a chip whose group empties is forgotten: the group coming back does not narrow the column again", async () => {
+    const stuck = many.find((r) => r.id === "req-stuck")!;
+    const { server: fake } = renderApp(<BoardScreen />, { server: server(many) });
+    await screen.findByTestId("card-req-stuck");
+    await userEvent.click(within(chipRow()).getByRole("button", { name: "Stuck 1" }));
+    expect(shownCards()).toEqual(["card-req-stuck"]);
+    // The stuck request is retried and leaves Needs you.
+    fake.set("GET /requests", () => json(many.filter((r) => r !== stuck)));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => {
+      expect(chipStates()).toEqual(["All:true", "Spec 5:false", "Plan 2:false"]);
+    });
+    expect(within(needsYou()).getAllByRole("group")).toHaveLength(2);
+    // Another request gets stuck later: every group is still shown.
+    fake.set("GET /requests", () => json(many));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => {
+      expect(chipStates()).toEqual(["All:true", "Spec 5:false", "Plan 2:false", "Stuck 1:false"]);
+    });
+    expect(within(needsYou()).getAllByRole("group")).toHaveLength(3);
+  });
+
+  test("the tab title's count is every request that waits, with a chip pressed and with groups folded to three", async () => {
+    renderApp(<BoardScreen />, { server: server(many) });
+    await screen.findByTestId("card-req-stuck");
+    // Eight wait; five are drawn before "+2 more" is opened, plus the two plans and the stuck one.
+    expect(shownCards()).toHaveLength(6);
+    await waitFor(() => {
+      expect(document.title).toBe("(8) Buildgate");
+    });
+    await userEvent.click(within(chipRow()).getByRole("button", { name: "Plan 2" }));
+    expect(shownCards()).toHaveLength(2);
+    expect(document.title).toBe("(8) Buildgate");
+    expect(screen.getByRole("heading", { level: 2, name: "Needs you (8)" })).toBeInTheDocument();
   });
 
   test("Needs you links to Triage", async () => {
@@ -1530,5 +1599,135 @@ describe("a long Needs you column", () => {
       within(screen.getByTestId("column-needsYou")).getByRole("link", { name: "Open in Triage" }),
     ).toHaveAttribute("href", "/triage");
     expect(screen.getAllByRole("link", { name: "Open in Triage" })).toHaveLength(1);
+  });
+});
+
+describe("an open Request changes dialog and a list that keeps changing", () => {
+  const spec = "# Spec\n\nCharge once.\n";
+  const listed = requestJson({ id: "req-s", state: "spec_review", title: "Charge once" });
+  const detail = { ...listed, spec };
+  const open = async (requests: readonly Wire[] = [listed]) => {
+    const rendered = renderApp(<BoardScreen />, {
+      server: server(requests, [
+        { on: "GET /requests/req-s", reply: () => json(detail) },
+        {
+          on: "POST /requests/req-s/reject",
+          reply: () => json({ ...detail, state: "spec_drafting" }),
+        },
+      ]),
+    });
+    const specCard = await screen.findByTestId("card-req-s");
+    await userEvent.click(within(specCard).getByRole("button", { name: "Request changes" }));
+    const dialog = await screen.findByRole("dialog", { name: "Request changes" });
+    await userEvent.type(within(dialog).getByLabelText("Reason"), "Name the account.");
+    return { ...rendered, dialog };
+  };
+  /** The list's next answer, as the poll would bring it (the page behind a dialog takes no click). */
+  const listBecomes = async (
+    rendered: Pick<Awaited<ReturnType<typeof open>>, "server" | "queryClient">,
+    next: readonly Wire[],
+  ) => {
+    rendered.server.set("GET /requests", () => json(next));
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries();
+    });
+  };
+  const send = (dialog: HTMLElement) =>
+    within(dialog).getByRole("button", { name: "Request changes" });
+
+  test("nothing changes: the rejection is sent, and the dialog closes", async () => {
+    const rendered = await open();
+    const { server: fake, dialog } = rendered;
+    expect(within(dialog).queryByTestId("flow-blocked")).not.toBeInTheDocument();
+    expect(send(dialog)).toBeEnabled();
+    await userEvent.click(send(dialog));
+    await waitFor(() => {
+      expect(fake.sent("POST /requests/req-s/reject")).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  test("the request moves to another stage while the dialog is open: nothing can be sent, the text stays", async () => {
+    const rendered = await open();
+    const { server: fake, dialog } = rendered;
+    await listBecomes(rendered, [
+      { ...listed, state: "plan_review", entered_at: "2026-09-10T09:30:00Z" },
+    ]);
+    expect(await within(dialog).findByTestId("flow-blocked")).toHaveTextContent(
+      "This request has moved on to Plan review. Nothing can be sent from this dialog.",
+    );
+    expect(send(dialog)).toBeDisabled();
+    expect(within(dialog).getByLabelText("Reason")).toHaveValue("Name the account.");
+    await userEvent.click(send(dialog));
+    expect(fake.requests.filter((r) => r.method !== "GET")).toEqual([]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  test("the request is redrafted back into the same state while the dialog is open: nothing can be sent", async () => {
+    const rendered = await open();
+    const { server: fake, dialog } = rendered;
+    // Rejected elsewhere and drafted again: spec_review once more, entered later.
+    await listBecomes(rendered, [
+      { ...listed, entered_at: "2026-09-10T09:40:00Z", updated_at: "2026-09-10T09:40:00Z" },
+    ]);
+    expect(await within(dialog).findByTestId("flow-blocked")).toHaveTextContent(
+      "it was redrafted and is in Spec review again",
+    );
+    expect(send(dialog)).toBeDisabled();
+    expect(within(dialog).getByLabelText("Reason")).toHaveValue("Name the account.");
+    expect(fake.requests.filter((r) => r.method !== "GET")).toEqual([]);
+  });
+
+  test("an update that leaves the stage as it was does not block the dialog", async () => {
+    const rendered = await open();
+    const { server: fake, dialog } = rendered;
+    await listBecomes(rendered, [
+      { ...listed, updated_at: "2026-09-10T09:45:00Z", title: "Charge once" },
+    ]);
+    await waitFor(() => {
+      expect(fake.sent("GET /requests").length).toBeGreaterThan(1);
+    });
+    expect(within(dialog).queryByTestId("flow-blocked")).not.toBeInTheDocument();
+    expect(send(dialog)).toBeEnabled();
+  });
+
+  test("lanes appearing and disappearing under the dialog leave it, and the typed text, in place", async () => {
+    const rendered = await open();
+    const { server: fake, dialog } = rendered;
+    expect(screen.queryByRole("region", { name: /^Project / })).not.toBeInTheDocument();
+    // A second project's request arrives: every card moves into a lane.
+    const other = requestJson({ id: "req-o", state: "building", project: "other" });
+    await listBecomes(rendered, [listed, other]);
+    expect(await screen.findByRole("region", { name: "Project other", hidden: true })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Request changes" })).toBe(dialog);
+    expect(within(dialog).getByLabelText("Reason")).toHaveValue("Name the account.");
+    // And goes again: back to one bare lane.
+    await listBecomes(rendered, [listed]);
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Project other", hidden: true })).toBeNull();
+    });
+    expect(screen.getByRole("dialog", { name: "Request changes" })).toBe(dialog);
+    expect(within(dialog).getByLabelText("Reason")).toHaveValue("Name the account.");
+    // Still the same stage: it can be sent.
+    await userEvent.click(send(dialog));
+    await waitFor(() => {
+      expect(fake.sent("POST /requests/req-s/reject")).toHaveLength(1);
+    });
+    expect(fake.sent("POST /requests/req-s/reject")[0]?.body).toMatchObject({
+      reason: "Name the account.",
+    });
+  });
+
+  test("the request leaving the list closes the dialog", async () => {
+    const rendered = await open();
+    const { server: fake } = rendered;
+    await listBecomes(rendered, [requestJson({ id: "req-o", state: "building" })]);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(fake.requests.filter((r) => r.method !== "GET")).toEqual([]);
   });
 });

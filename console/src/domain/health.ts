@@ -62,10 +62,14 @@ function runningJob(id: string, requests: readonly RequestSummary[]): RunningJob
   };
 }
 
-// The states only a worker's job advances (the Go side's
-// queueRunDependentState): reviews wait on the operator, terminal states on
-// nothing.
-const JOB_STATES: ReadonlySet<string> = new Set([
+/**
+ * The request states only a worker's job advances: drafting, planning and
+ * building. Every review state waits on the operator and every terminal state
+ * on nothing, so a request in one of these is what stands still without a
+ * live worker. The one list: the worker strip and the health strip both read
+ * it.
+ */
+export const workerJobStates: ReadonlySet<string> = new Set([
   "submitted",
   "spec_drafting",
   "oracle_drafting",
@@ -99,7 +103,7 @@ export function factoryHealth(
         : null,
     running: active.map((id) => runningJob(id, requests)),
     queued: worker?.alive === true ? requests.filter((r) => r.queuePosition !== null).length : null,
-    needWorker: requests.filter((r) => JOB_STATES.has(r.state)).length,
+    needWorker: requests.filter((r) => workerJobStates.has(r.state)).length,
     lastTransitionAt: lastTransitionAt(requests),
   };
 }
