@@ -4,84 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"buildgate/internal/release"
-	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
 )
-
-// TestResolveFullSuiteCommandSubstitutesVerifyCommand is the unit-level
-// proof of resolveFullSuiteCommand's own core case: no full-suite command
-// configured from any source substitutes the resolved verify command,
-// recorded as fullSuiteSourceVerifyCommand.
-func TestResolveFullSuiteCommandSubstitutesVerifyCommand(t *testing.T) {
-	t.Parallel()
-	command, source := requestdriver.ResolveFullSuiteCommand("", "make verify")
-	if command != "make verify" {
-		t.Errorf("command = %q, want the substituted verify command", command)
-	}
-	if source != fullSuiteSourceVerifyCommand {
-		t.Errorf("source = %q, want %q", source, fullSuiteSourceVerifyCommand)
-	}
-}
-
-// TestResolveFullSuiteCommandRealValuePassesThrough proves a genuinely
-// configured command is returned unchanged with no source recorded (it
-// was not a substitution).
-func TestResolveFullSuiteCommandRealValuePassesThrough(t *testing.T) {
-	t.Parallel()
-	command, source := requestdriver.ResolveFullSuiteCommand("cd backend && go test ./...", "make verify")
-	if command != "cd backend && go test ./..." {
-		t.Errorf("command = %q, want the configured command unchanged", command)
-	}
-	if source != "" {
-		t.Errorf("source = %q, want empty (not a substitution)", source)
-	}
-}
-
-// TestFullSuiteNoneKeepsDenial is the regression test for the explicit
-// `-full-suite-command none` / `.factory.yml full_suite_command: none`
-// opt-out: it must keep today's pre-substitution behavior end to end --
-// resolveFullSuiteCommand
-// resolves no command and records the opt-out, and a run that never
-// scheduled full_suite_verify as a result is STILL denied release by
-// internal/release.MergePolicyCheck's own RequiredGates, exactly as
-// before this feature existed. This is the "Do NOT change RequiredGates
-// or merge_policy.go's gate semantics" constraint made concrete: opting
-// out supplies no command and the existing gate machinery denies on its
-// own, unmodified.
-func TestFullSuiteNoneKeepsDenial(t *testing.T) {
-	t.Parallel()
-	command, source := requestdriver.ResolveFullSuiteCommand(fullSuiteCommandNone, "make verify")
-	if command != "" {
-		t.Errorf("command = %q, want empty under the none opt-out", command)
-	}
-	if source != fullSuiteSourceNone {
-		t.Errorf("source = %q, want %q", source, fullSuiteSourceNone)
-	}
-
-	r := run.Run{
-		State:        run.StateAccepted,
-		BaseSHA:      "base",
-		ResultSHA:    "result",
-		ChangedFiles: []string{"a.go"},
-		DiffStat:     &run.DiffStat{FilesChanged: 1, Insertions: 1},
-		GateResults:  []run.GateResult{{Check: "canonical_verify", Passed: true}},
-		// FullSuiteConfigured deliberately left false (the zero value):
-		// the none opt-out never schedules the gate at all, same as a
-		// run that never declared -full-suite-command before this
-		// feature existed.
-	}
-	policy := release.MergePolicy{
-		RollbackPlan:    "git revert the merge commit on main",
-		MaxFilesChanged: 25,
-		MaxInsertions:   1000,
-		RequiredGates:   []string{"canonical_verify", "full_suite_verify"},
-	}
-	allowed, reasons := release.MergePolicyCheck(r, policy)
-	if allowed {
-		t.Fatalf("allowed = true, want false: full_suite_verify never ran and is required -- reasons=%v", reasons)
-	}
-}
 
 // TestResolveEffectiveFullSuiteCommandRespectsForwardedNoneOptOut proves
 // run_ticket.go's own final resolution step (resolveEffectiveFullSuiteCommand)

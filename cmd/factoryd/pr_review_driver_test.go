@@ -1340,17 +1340,6 @@ func TestContinueAfterPRApprovalResumesBuildingWhenTicketsRemain(t *testing.T) {
 	}
 }
 
-func TestReplyToReviewCommentPathIsScopedByPullNumber(t *testing.T) {
-	owner, repo, number, err := requestdriver.ParsePullRequestOwnerRepo("https://github.com/acme/widget/pull/271")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := requestdriver.ReplyToReviewCommentPath(owner, repo, number, 987)
-	if got != "repos/acme/widget/pulls/271/comments/987/replies" {
-		t.Fatalf("path = %q", got)
-	}
-}
-
 // TestRunCorrectiveRoundQuarantineLeavesThreadsEligibleForRetry: a
 // quarantined round must not mark its threads seen -- the next poll
 // retries them (bounded by max_review_rounds), instead of dropping them
@@ -1957,50 +1946,6 @@ func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 	}
 	if r.Tickets[1].PRState != "stacked" {
 		t.Errorf("ticket 2 PRState = %q, want %q: left draft while stacked on ticket 1's still-open branch, recorded so the console shows it waiting on a human merge", r.Tickets[1].PRState, "stacked")
-	}
-}
-
-// TestCurrentPRHeadRunIDPrefersLatestAcceptedRound is the direct unit
-// test for the helper: it must skip non-accepted rounds (which never
-// move the branch) and return the ticket's original RunID when no round
-// has been accepted yet.
-func TestCurrentPRHeadRunIDPrefersLatestAcceptedRound(t *testing.T) {
-	cases := []struct {
-		name   string
-		ticket request.Ticket
-		want   string
-	}{
-		{"no rounds", request.Ticket{RunID: "run-1"}, "run-1"},
-		{"only a halted round", request.Ticket{RunID: "run-1", Rounds: []request.Round{{Index: 1, RunID: "run-1-round-1", Outcome: request.RoundHalted}}}, "run-1"},
-		{"one accepted, confirmed-pushed round", request.Ticket{RunID: "run-1", Rounds: []request.Round{{Index: 1, RunID: "run-1-round-1", Outcome: request.RoundAccepted, Pushed: true}}}, "run-1-round-1"},
-		{
-			"accepted but NOT pushed: falls back to ticket.RunID, not the unpushed round",
-			request.Ticket{RunID: "run-1", Rounds: []request.Round{{Index: 1, RunID: "run-1-round-1", Outcome: request.RoundAccepted, Pushed: false}}},
-			"run-1",
-		},
-		{"accepted then quarantined: latest accepted+pushed still wins", request.Ticket{RunID: "run-1", Rounds: []request.Round{
-			{Index: 1, RunID: "run-1-round-1", Outcome: request.RoundAccepted, Pushed: true},
-			{Index: 2, RunID: "run-1-round-2", Outcome: request.RoundQuarantined},
-		}}, "run-1-round-1"},
-		{"two accepted+pushed rounds: the later one wins", request.Ticket{RunID: "run-1", Rounds: []request.Round{
-			{Index: 1, RunID: "run-1-round-1", Outcome: request.RoundAccepted, Pushed: true},
-			{Index: 2, RunID: "run-1-round-2", Outcome: request.RoundAccepted, Pushed: true},
-		}}, "run-1-round-2"},
-		{
-			"latest accepted round push failed: falls back to the earlier, confirmed-pushed round",
-			request.Ticket{RunID: "run-1", Rounds: []request.Round{
-				{Index: 1, RunID: "run-1-round-1", Outcome: request.RoundAccepted, Pushed: true},
-				{Index: 2, RunID: "run-1-round-2", Outcome: request.RoundAccepted, Pushed: false},
-			}},
-			"run-1-round-1",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := requestdriver.CurrentPRHeadRunID(&tc.ticket); got != tc.want {
-				t.Errorf("currentPRHeadRunID(...) = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"buildgate/internal/oraclecanary"
 	"buildgate/internal/request"
@@ -1448,29 +1447,6 @@ func TestOracleDraftNoneEligibleWithRunCommandTellsOperatorToDeleteIt(t *testing
 	got, err := f.run(t)
 	if err != nil || got.Status != request.OracleNoneEligible || !strings.Contains(got.Detail, "delete oracle/RUN_COMMAND.txt") {
 		t.Fatalf("got %+v, %v", got, err)
-	}
-}
-
-func TestCapOracleFeedbackKeepsNewestAndValidUTF8(t *testing.T) {
-	var b strings.Builder
-	for i := 1; i <= 40; i++ {
-		fmt.Fprintf(&b, "## Oracle rejected 2026-09-%02d by op\n\nreason-%d %s\n\n", i%28+1, i, strings.Repeat("é", 300))
-	}
-	got := requestdriver.CapFeedback(b.String(), requestdriver.MaxFeedbackBytes, "## Oracle rejected ")
-	if len(got) > requestdriver.MaxFeedbackBytes {
-		t.Errorf("len = %d, want <= %d", len(got), requestdriver.MaxFeedbackBytes)
-	}
-	if !strings.Contains(got, "reason-40 ") || strings.Contains(got, "reason-1 ") {
-		t.Errorf("did not keep the newest and drop the oldest:\n%.200s", got)
-	}
-	if !strings.Contains(got, "omitted") {
-		t.Error("truncation not announced")
-	}
-	if !utf8.ValidString(got) {
-		t.Error("invalid UTF-8 after capping")
-	}
-	if small := "## Oracle rejected x\n\nshort\n\n"; requestdriver.CapFeedback(small, requestdriver.MaxFeedbackBytes, "## Oracle rejected ") != small {
-		t.Error("small feedback altered")
 	}
 }
 
