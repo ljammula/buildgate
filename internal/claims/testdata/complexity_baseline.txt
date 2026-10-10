@@ -14,7 +14,6 @@
 32 cmd/factoryd/integration_reclaim_and_temporal_test.go TestIntegrationReconcileReclaimedRunNamespacesChildByRepository
 36 cmd/factoryd/onboard.go doOnboard
 29 cmd/factoryd/oracle_draft_job.go installDrafted
-51 cmd/factoryd/oracle_draft_job.go readDraftOutputMode
 38 cmd/factoryd/oracle_draft_job.go replaceOracleDir
 40 cmd/factoryd/project_check.go checkProjectMain
 26 cmd/factoryd/project_check.go resolvePiTicketPath
@@ -30,7 +29,6 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-46 cmd/factoryd/run_ticket.go (*ticketRun).resolveRoutesAndDefaults
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 40 cmd/factoryd/status.go statusMain
@@ -52,7 +50,6 @@
 32 internal/oraclecommit/manifest.go ValidateTargetPath
 26 internal/registryproxy/server.go NewServer
 36 internal/release/merge_policy.go MergePolicyCheck
-47 internal/request/approve.go approve
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
 29 internal/request/retry.go retry
