@@ -78,6 +78,41 @@ func NewGitRepoAt(t testing.TB, root string) string {
 	return dir
 }
 
+// AgentsFileName and AgentsFileContent are the root instruction file
+// CommitAgentsFile commits: a request is refused on a repository without one
+// at HEAD (requestsubmit.RequireAgentsFile). NewGitRepo commits none, since a
+// single-ticket run needs none and the review-instruction tests start from a
+// repository without it.
+const (
+	AgentsFileName    = "AGENTS.md"
+	AgentsFileContent = "# AGENTS.md\n\nFixture repository.\n\n- Setup: none.\n- Test: `make verify`.\n- Build: none.\n- Lint: none.\n"
+)
+
+// CommitAgentsFile writes a root AGENTS.md in dir and commits everything
+// there, making dir a git repository first when it is not one, for a test
+// that builds its own workspace instead of using NewGitRepo. Call it after
+// the test's own files are written: once a repository has a commit, its
+// .factory.yml is read from HEAD too.
+func CommitAgentsFile(t testing.TB, dir string) {
+	t.Helper()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=factoryd-test@example.com", "-c", "user.name=factoryd-test"}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		run("init", "-q", "-b", "main")
+	}
+	if err := os.WriteFile(filepath.Join(dir, AgentsFileName), []byte(AgentsFileContent), 0o644); err != nil {
+		t.Fatalf("write %s: %v", AgentsFileName, err)
+	}
+	run("add", "-A")
+	run("commit", "-q", "--allow-empty", "-m", "fixture files with "+AgentsFileName)
+}
+
 // WriteProjectBootstrapScaffold writes an already-passing project-bootstrap
 // scaffold at root (a project root, one level above a "workspace"
 // subdirectory the caller controls directly, e.g. via -workspace) —

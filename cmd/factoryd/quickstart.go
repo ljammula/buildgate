@@ -40,6 +40,7 @@ import (
 	"buildgate/internal/modelrole"
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/request"
+	"buildgate/internal/requestsubmit"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 )
@@ -510,6 +511,12 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 		return err
 	}
 	fmt.Fprintf(w, "Repository: %s\n", repoRoot)
+
+	// Before any setup: no request starts on a repository without a
+	// committed AGENTS.md, so nothing below is worth doing for one.
+	if err := requestsubmit.RequireAgentsFile(repoRoot); err != nil {
+		return err
+	}
 
 	// Checked before the (slower) image-pull/config steps below, not only
 	// after a full build -- opening a PR is quickstart's whole point, and this

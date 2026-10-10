@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"buildgate/internal/release"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
-	"buildgate/internal/testfixture"
 )
 
 // apiSandboxTestMu serializes every test that points tier2SettingsOverride
@@ -108,33 +106,13 @@ func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
-	// This test's workspace is a Git repository with no commits — the
-	// specific failure under test — so it needs its own passing
-	// project-bootstrap scaffold at filepath.Dir(workspace): the mandatory
-	// preflight runs before that failure, and a missing scaffold would
-	// make apiStartStarter return synchronously instead of reaching
-	// "ready" at all.
-	//
-	// A plain non-Git directory used to serve this same purpose, but
-	// AcquireDirectLock (added by "enforce repository ownership during
-	// reclaim") now runs its own `git rev-parse --git-common-dir` check
-	// *before* onReady fires, so a non-Git workspace now fails
-	// synchronously, before ever reaching "ready" — no longer exercising
-	// this test's actual subject (a failure discovered *after* the ready
-	// record already exists). An initialized-but-commit-less repository
-	// satisfies that common-dir check (needs no commits) while still
-	// failing the later runner.GitRevParseHEAD call immediately after
-	// onReady fires (an empty repository has no HEAD to resolve),
-	// restoring the original post-ready failure this test means to
-	// exercise.
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	if err := os.MkdirAll(workspace, 0o750); err != nil {
-		t.Fatalf("mkdir workspace: %v", err)
-	}
-	if out, err := exec.Command("git", "-C", workspace, "init").CombinedOutput(); err != nil {
-		t.Fatalf("git init workspace: %v\n%s", err, out)
-	}
-	testfixture.WriteProjectBootstrapScaffold(t, filepath.Dir(workspace))
+	// The failure under test is one found after the ready record exists.
+	// Every check of the workspace itself (a git repository, a commit at
+	// HEAD, its AGENTS.md, the project-bootstrap preflight) runs before
+	// "ready" and would return synchronously, so the workspace is a passing
+	// fixture and the failure is the Temporal dial, which an explicit
+	// address reaches only after "ready".
+	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
 	if err != nil {
@@ -143,10 +121,10 @@ func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
 	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{allowedImages: []string{fakeSandboxImage}})(context.Background(), api.StartRequest{
-		TemporalAddress: sharedTemporalAddress(t),
-		ID:              "api-start-invalid-workspace",
+		TemporalAddress: "127.0.0.1:1", // nothing listens there
+		ID:              "api-start-unreachable-temporal",
 		Ticket:          "api-ticket",
-		Workspace:       workspace, // deliberately a commit-less Git repository
+		Workspace:       workspace,
 		Spec:            spec,
 		SandboxImage:    fakeSandboxImage,
 		// An explicit, offline build script: sandboxing is unconditional,
@@ -546,7 +524,7 @@ func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 	withFakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
-	workspace := testfixture.NewGitRepo(t)
+	workspace := newFixtureRepo(t)
 	// Deliberately no spec/tickets/ directory: newFixtureRepo's own strict
 	// scaffold (spec.md/contract.md/ARCHITECTURE.md) is real, so only
 	// ticket_structure can fail here.

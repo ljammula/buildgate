@@ -58,7 +58,7 @@ func TestApplySessionConfigAcceptsValidRoutesModeConfig(t *testing.T) {
 func TestSubmitMainAcceptsValidRoutesModeConfig(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	configPath := filepath.Join(t.TempDir(), "config.yml")

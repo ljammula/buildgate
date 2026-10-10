@@ -45,6 +45,7 @@ func TestLiveDockerBuildPhaseMountsTheOracleSnapshot(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(repoRoot) })
 	ws := testfixture.NewGitRepoAt(t, repoRoot)
+	testfixture.CommitAgentsFile(t, ws)
 	dataDir, err := os.MkdirTemp(liveRoot, "factoryd-oracle-snapshot-live-data-")
 	if err != nil {
 		t.Fatal(err)

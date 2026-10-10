@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/testfixture"
 )
 
 // newProjectConfigTestFlags builds the subset of runMainWithReady's flags
@@ -60,6 +61,15 @@ func writeTestFactoryYML(t *testing.T, dir, content string) {
 	if err := os.WriteFile(filepath.Join(dir, ".factory.yml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// writeTestSubmitRepo is writeTestFactoryYML for a test whose submit must
+// succeed: it also commits the .factory.yml with a root AGENTS.md, without
+// which a request is refused.
+func writeTestSubmitRepo(t *testing.T, dir, content string) {
+	t.Helper()
+	writeTestFactoryYML(t, dir, content)
+	testfixture.CommitAgentsFile(t, dir)
 }
 
 func TestApplyProjectConfigDefaultsFillsUnsetFlags(t *testing.T) {

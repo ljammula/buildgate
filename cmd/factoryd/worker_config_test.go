@@ -19,7 +19,6 @@ import (
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
-	"buildgate/internal/testfixture"
 )
 
 // TestBuildTicketRunArgsIsAcceptedByRunMainWithReadysOwnFlagSet closes the
@@ -1008,7 +1007,7 @@ func TestApplySessionConfigLeavesCodeReviewPolicyAtExplicitFlagValue(t *testing.
 // state.
 func runQueueEntryWithPolicyGateFixture(dp *deps, t *testing.T, conformityPolicy string) run.State {
 	t.Helper()
-	workspace := testfixture.NewGitRepo(t)
+	workspace := newFixtureRepo(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- policy-gate fixture doesn't exercise tests_added\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)

@@ -12,6 +12,7 @@ import (
 	"buildgate/internal/composeservices"
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/requestsubmit"
+	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 )
@@ -19,7 +20,7 @@ import (
 // doctorRegisterTargetRepoFlag registers -target-repo directly on flags,
 // like doctorRegisterListModelsFlag.
 func doctorRegisterTargetRepoFlag(flags *flag.FlagSet) *string {
-	return flags.String("target-repo", "", "a target repo checkout to check as a run and a submit would: its compose file at HEAD (one line per service with its verdict and BG_SERVICE_* variables, and a warning when the worker plus its sidecars exceed Docker's memory), its verify command, the project-bootstrap preflight submit refuses on, and the Go, Python and Node versions it declares against the sandbox image's; empty skips these checks")
+	return flags.String("target-repo", "", "a target repo checkout to check as a run and a submit would: its compose file at HEAD (one line per service with its verdict and BG_SERVICE_* variables, and a warning when the worker plus its sidecars exceed Docker's memory), its verify command, the root AGENTS.md and the project-bootstrap preflight submit refuses on, and the Go, Python and Node versions it declares against the sandbox image's; empty skips these checks")
 }
 
 // composeServicesSpecAtCommit loads the compose spec a run against dir at
@@ -151,7 +152,8 @@ func formatGiB(b int64) string {
 
 // doctorTargetRepoSubmitChecks reports what `factoryd submit` would refuse
 // against repo with no per-request flags: a missing verify command (a
-// warning, since -verify-command supplies one) and the project-bootstrap
+// warning, since -verify-command supplies one), a root AGENTS.md that is
+// missing or empty at HEAD (a FAIL) and the project-bootstrap
 // preflight under the repo's own .factory.yml profile (a FAIL, the same
 // checks submit runs). Without it, doctor -target-repo passed a repo that
 // submit then refused.
@@ -169,6 +171,12 @@ func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 	}
 
 	var checks []doctorCheck
+	if err := requestsubmit.RequireAgentsFile(abs); err != nil {
+		checks = append(checks, doctorCheck{Name: run.RootInstructionFile + " for " + repo, Err: err,
+			Fix: "run that prompt in the repo with your coding agent, review and commit the file, then run this again: submit, quickstart and a run refuse the repo until then, and no flag or config key skips the check"})
+	} else {
+		checks = append(checks, doctorCheck{Name: run.RootInstructionFile + " for " + repo + ": committed at HEAD"})
+	}
 	if cfg.VerifyCommand == "" {
 		checks = append(checks, doctorCheck{Name: "verify command for " + repo, Advisory: true,
 			Err: fmt.Errorf("no verify_command in its committed %s", projectconfig.FileName),
