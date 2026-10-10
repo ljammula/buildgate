@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -393,6 +394,8 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 			discardCommitDir(root, dst, dstExisted)
 		}
 	}()
+	blobs := &commitDirBlobs{repoDir: repoDir}
+	defer blobs.close()
 	for _, e := range records {
 		out := filepath.Join(root, filepath.FromSlash(e.path))
 		if err := ensureContainedPath(root, out); err != nil {
@@ -406,7 +409,7 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 			}
 			continue
 		}
-		if err := writeCommitDirFile(ctx, repoDir, out, e); err != nil {
+		if err := writeCommitDirFile(ctx, blobs, out, e); err != nil {
 			return snap, err
 		}
 	}
@@ -424,18 +427,67 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 	return CommitDirSnapshot{Mask: &mask, TreeOID: tree, SHA256: sum, Files: nfiles}, nil
 }
 
-func writeCommitDirFile(ctx context.Context, repoDir, out string, e commitDirEntry) error {
-	blob := &cappedWriter{max: maxCommitDirBlobBytes}
-	if err := commitDirGit(ctx, repoDir, blob, "cat-file", "blob", e.oid); err != nil {
-		// A blob git cannot read (missing, corrupt) is the tree's doing.
-		return commitDirGitRefuse("read "+strconv.Quote(e.path), err)
+// commitDirBlobs reads every blob of one snapshot through one blobReader (one
+// `git cat-file --batch` process under HardenedGitCommand), started at the
+// first file, so the git processes of a snapshot do not grow with its files.
+type commitDirBlobs struct {
+	repoDir string
+	reader  *blobReader
+}
+
+// close ends the reader, if one was started.
+func (c *commitDirBlobs) close() { c.reader.close() }
+
+// read returns the bytes of e's blob, which must be as many as its tree
+// listed. After any error the reader answers nothing more: every one of them
+// ends the snapshot.
+func (c *commitDirBlobs) read(ctx context.Context, e commitDirEntry) ([]byte, error) {
+	if c.reader == nil {
+		b, err := startBlobReader(ctx, c.repoDir)
+		if err != nil {
+			// A git that could not be started read nothing.
+			return nil, fmt.Errorf("%w: %w", ErrCommitDirIO, err)
+		}
+		b.oids = commitObjectIDPattern
+		c.reader = b
 	}
-	if blob.over > 0 {
-		return commitDirRefuse("%s is over %d bytes", strconv.Quote(e.path), maxCommitDirBlobBytes)
+	b := c.reader
+	size, err := b.size(e.oid)
+	if err != nil {
+		return nil, c.refuse(e, err)
 	}
-	body := blob.buf.Bytes()
-	if int64(len(body)) != e.size {
-		return commitDirRefuse("%s read %d bytes, listed %d", strconv.Quote(e.path), len(body), e.size)
+	// The size is checked before a byte of the body is read; the unread body
+	// leaves the reader unusable, so it is closed.
+	switch {
+	case size > maxCommitDirBlobBytes:
+		_ = b.fail(fmt.Errorf("git cat-file: blob %s is over %d bytes", e.oid, maxCommitDirBlobBytes))
+		return nil, commitDirRefuse("%s is over %d bytes", strconv.Quote(e.path), maxCommitDirBlobBytes)
+	case size != e.size:
+		_ = b.fail(fmt.Errorf("git cat-file: blob %s is %d bytes, listed %d", e.oid, size, e.size))
+		return nil, commitDirRefuse("%s read %d bytes, listed %d", strconv.Quote(e.path), size, e.size)
+	}
+	var body bytes.Buffer
+	body.Grow(int(size))
+	if err := b.body(&body, size); err != nil {
+		return nil, c.refuse(e, err)
+	}
+	return body.Bytes(), nil
+}
+
+// refuse is the refusal for a blob the started git did not give (missing,
+// corrupt, not a blob): the tree's doing. The reader is closed by then, so
+// everything git said on its standard error is in.
+func (c *commitDirBlobs) refuse(e commitDirEntry, err error) error {
+	if said := strings.TrimSpace(c.reader.stderr.buf.String()); said != "" {
+		return commitDirRefuse("read %s: %v: %s", strconv.Quote(e.path), err, said)
+	}
+	return commitDirRefuse("read %s: %v", strconv.Quote(e.path), err)
+}
+
+func writeCommitDirFile(ctx context.Context, blobs *commitDirBlobs, out string, e commitDirEntry) error {
+	body, err := blobs.read(ctx, e)
+	if err != nil {
+		return err
 	}
 	mode := os.FileMode(0o444)
 	if e.exec() {
