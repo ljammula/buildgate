@@ -219,23 +219,55 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 		return nil
 	}
 
-	// checkpointed tracks every "<key>.json" (non-intent) filename seen,
-	// regardless of whether it parsed or matched the current schema
-	// version — its mere presence means that Activity execution *did*
-	// reach a completed checkpoint (even if this reader can't decode its
-	// contents, e.g. a legacy schema), so any sibling ".intent.json" for
-	// the same key must not be treated as still in flight below.
-	//
-	// The value is the highest Temporal attempt the checkpoint accounts for
-	// (its own ActivityAttempt; every attempt when that is unknown): records
-	// of a later attempt of the same execution are still in flight or lost
-	// and are included below.
-	checkpointed := make(map[string]int32)
+	checkpointed, attempts := readCompletedCheckpoints(dir, entries)
 	covered := func(recordKey string) bool {
 		upTo, ok := checkpointed[executionKeyOfRecord(recordKey)]
 		return ok && attemptOfRecord(recordKey) <= upTo
 	}
-	var attempts []run.Attempt
+
+	// A journal records completed internal retries before the Activity's
+	// final checkpoint. It is supplementary evidence only: a completed
+	// checkpoint above always wins, while malformed journals are skipped so
+	// recovery can still use other valid records and the unmatched intent
+	// remains the conservative unknown-attempt signal below.
+	journaled := readAttemptJournals(checkpointDir)
+	for key, journalAttempts := range journaled {
+		if !covered(key) {
+			attempts = append(attempts, journalAttempts...)
+		}
+	}
+
+	// An intent record with no completed checkpoint for its execution means
+	// that Activity's subprocess was still running (or the checkpoint
+	// save itself hadn't happened yet) when this run halted — found via
+	// review: TerminateWorkflow kills that subprocess without waiting for
+	// it to return, so it never reaches its own checkpoint save and would
+	// otherwise be silently absent from run.json entirely, not just
+	// missing its outcome. Synthesized with FinishedAt left empty — the
+	// honest marker that this attempt's outcome is unknown, not that it
+	// exited 0.
+	attempts = append(attempts, inFlightAttempts(dir, entries, covered, journaled)...)
+	sortRecoveredAttempts(attempts)
+	return attempts
+}
+
+// readCompletedCheckpoints reads every completed Activity checkpoint among
+// entries (the files of dir). It returns the attempts they record and
+// checkpointed:
+//
+// checkpointed tracks every "<key>.json" (non-intent) filename seen,
+// regardless of whether it parsed or matched the current schema
+// version — its mere presence means that Activity execution *did*
+// reach a completed checkpoint (even if this reader can't decode its
+// contents, e.g. a legacy schema), so any sibling ".intent.json" for
+// the same key must not be treated as still in flight below.
+//
+// The value is the highest Temporal attempt the checkpoint accounts for
+// (its own ActivityAttempt; every attempt when that is unknown): records
+// of a later attempt of the same execution are still in flight or lost
+// and are included below.
+func readCompletedCheckpoints(dir string, entries []os.DirEntry) (checkpointed map[string]int32, attempts []run.Attempt) {
+	checkpointed = make(map[string]int32)
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".intent.json") || strings.HasSuffix(name, ".lease.json") || strings.HasSuffix(name, ".spend-start.json") {
@@ -264,12 +296,12 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 		}
 		attempts = append(attempts, parsed.Result.Attempts...)
 	}
+	return checkpointed, attempts
+}
 
-	// A journal records completed internal retries before the Activity's
-	// final checkpoint. It is supplementary evidence only: a completed
-	// checkpoint above always wins, while malformed journals are skipped so
-	// recovery can still use other valid records and the unmatched intent
-	// remains the conservative unknown-attempt signal below.
+// readAttemptJournals reads every valid attempt journal under checkpointDir,
+// keyed by its Activity attempt. A malformed journal is skipped.
+func readAttemptJournals(checkpointDir string) map[string][]run.Attempt {
 	journaled := make(map[string][]run.Attempt)
 	journalDir := filepath.Join(checkpointDir, "activity-attempt-journals")
 	journalEntries, err := os.ReadDir(journalDir)
@@ -299,21 +331,14 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 			}
 		}
 	}
-	for key, journalAttempts := range journaled {
-		if !covered(key) {
-			attempts = append(attempts, journalAttempts...)
-		}
-	}
+	return journaled
+}
 
-	// An intent record with no completed checkpoint for its execution means
-	// that Activity's subprocess was still running (or the checkpoint
-	// save itself hadn't happened yet) when this run halted — found via
-	// review: TerminateWorkflow kills that subprocess without waiting for
-	// it to return, so it never reaches its own checkpoint save and would
-	// otherwise be silently absent from run.json entirely, not just
-	// missing its outcome. Synthesized with FinishedAt left empty — the
-	// honest marker that this attempt's outcome is unknown, not that it
-	// exited 0.
+// inFlightAttempts synthesizes an attempt of unknown outcome for every intent
+// record among entries that covered does not report as checkpointed and that
+// journaled does not account for.
+func inFlightAttempts(dir string, entries []os.DirEntry, covered func(recordKey string) bool, journaled map[string][]run.Attempt) []run.Attempt {
+	var attempts []run.Attempt
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".intent.json") {
@@ -360,7 +385,13 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 			})
 		}
 	}
+	return attempts
+}
 
+// sortRecoveredAttempts orders attempts by start time, then by kind, then by
+// the remaining fields, so the result does not depend on the order the
+// records were read in.
+func sortRecoveredAttempts(attempts []run.Attempt) {
 	// Sorted by (StartedAt, build-before-verify): found via review, two
 	// fast commands recorded within the same RFC3339 second (no
 	// fractional-second precision) tie on StartedAt alone, and
@@ -415,7 +446,6 @@ func RecoverAttemptsFromCheckpointDir(checkpointDir string) []run.Attempt {
 		}
 		return attempts[i].ExitCode < attempts[j].ExitCode
 	})
-	return attempts
 }
 
 // commandKind reports whether kind is one of the single-command Activities

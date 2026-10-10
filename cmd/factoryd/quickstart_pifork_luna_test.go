@@ -193,12 +193,12 @@ func TestQuickstartPullDoctorInputsCarriesConfigHarness(t *testing.T) {
 		Roles:        &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "luna", Harness: harness.Pifork}},
 		SandboxImage: &image,
 	})
-	roles, err := harnessRoles(in.settings)
+	execution, err := modelrole.RoleHarness(in.settings, modelrole.RoleExecution, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if roles["execution"].Name != harness.Pifork || in.sandboxImage != testPiforkImage {
-		t.Errorf("doctor inputs execution harness=%q sandboxImage=%q, want %q and the pifork image", roles["execution"].Name, in.sandboxImage, harness.Pifork)
+	if execution != harness.Pifork || in.sandboxImage != testPiforkImage {
+		t.Errorf("doctor inputs execution harness=%q sandboxImage=%q, want %q and the pifork image", execution, in.sandboxImage, harness.Pifork)
 	}
 }
 

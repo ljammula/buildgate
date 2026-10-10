@@ -148,11 +148,7 @@ func roundLogRounds(root *os.Root) ([]int, error) {
 // retainFromRoot is RetainFile for a source named relative to root, and
 // returns the bytes it copied.
 func retainFromRoot(root *os.Root, src, dst string) (int64, error) {
-	opened, err := root.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return 0, err
-	}
-	in, err := checkHostileRegularFile(opened, src, maxRetainFileSize)
+	in, err := openHostileRegularFileIn(root, src, maxRetainFileSize)
 	if err != nil {
 		return 0, err
 	}
@@ -246,15 +242,11 @@ func RetainAgentNotes(workspace, dstPath string) (retained bool, err error) {
 		return false, err
 	}
 	defer root.Close()
-	opened, err := root.OpenFile(agentNotesSource, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	in, err := openHostileRegularFileIn(root, agentNotesSource, maxAgentNotesBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, err
-	}
-	in, err := checkHostileRegularFile(opened, agentNotesSource, maxAgentNotesBytes)
-	if err != nil {
 		return false, err
 	}
 	defer in.Close()
@@ -273,15 +265,11 @@ func ReadRetainedAgentNotes(runDir string) (string, bool) {
 		return "", false
 	}
 	defer root.Close()
-	opened, err := root.OpenFile(AgentNotesFileName, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	opened, err := openHostileRegularFileIn(root, AgentNotesFileName, maxAgentNotesBytes)
 	if err != nil {
 		return "", false
 	}
 	defer opened.Close()
-	info, err := opened.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxAgentNotesBytes {
-		return "", false
-	}
 	data, err := io.ReadAll(io.LimitReader(opened, maxAgentNotesBytes))
 	if err != nil {
 		return "", false

@@ -11,6 +11,7 @@ import (
 	"buildgate/internal/memory"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 )
 
@@ -150,7 +151,7 @@ func TestStaleMemoryRequestIsHaltedBeforeItsBuild(t *testing.T) {
 		t.Fatalf("an ordinary request: reason = %q, want none", reason)
 	}
 	f.commitAgents(sectionFile("# Guide\n\nEdited by hand.\n\n", "", "- An old line."))
-	acts := &requestActivities{dp: f.dp, dataDir: f.data, buildRunner: failingBuildRunner(t)}
+	acts := &requestActivities{dp: f.dp, dataDir: f.data, buildRunner: requestdrivertest.FailingBuildRunner(t)}
 	after, err := acts.AdvanceRequest(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)

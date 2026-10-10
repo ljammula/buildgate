@@ -845,30 +845,9 @@ func GitStatusPaths(dir string) ([]string, error) {
 // build that moved `.factory.yml`, a committed oracle or any other protected
 // or out-of-scope file away had not, by this list, touched it.
 // --ignore-submodules=none: a `.gitmodules` the build wrote (`ignore = all`)
-// cannot hide a changed submodule entry. --no-ext-diff as in GitDiff.
-// GitDiff returns the full unified diff text between base and result in
-// dir — content, not just the name/stat evidence GitDiffNameOnly/
-// GitDiffShortStat already provide, for a caller (the API's own diff
-// screen) that needs to actually display what changed, not just count it.
-// `--no-color` keeps the output plain text regardless of the invoking
-// process's own git config (a color.diff=always in the workspace's own
-// config would otherwise embed ANSI escapes in evidence meant for an HTML
-// viewer). `--no-ext-diff --no-textconv` refuse the workspace's own
-// `.gitattributes`/`.git/config`-declared external diff driver and textconv
-// filters — found via review: without these, a workspace can name an
-// arbitrary command as its diff/textconv driver and have this function
-// execute it as the factoryd process merely by computing a diff. Returns an
-// empty string, not an error, when base and result are identical — the same
-// "no error on no difference" convention GitDiffShortStat already
-// establishes.
-func GitDiff(dir, base, result string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "diff", "--no-color", "--no-ext-diff", "--no-textconv", base, result).Output()
-	if err != nil {
-		return "", fmt.Errorf("git diff %s %s: %w", base, result, err)
-	}
-	return string(out), nil
-}
-
+// cannot hide a changed submodule entry. --no-ext-diff: the workspace's own
+// `.gitattributes`/`.git/config` cannot name a command to run as its diff
+// driver.
 func GitDiffNameOnly(dir, base, result string) ([]string, error) {
 	out, err := exec.Command("git", "-C", dir, "diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=none", "--no-ext-diff", base, result).Output()
 	if err != nil {
@@ -889,35 +868,12 @@ func GitDiffNameOnly(dir, base, result string) ([]string, error) {
 // are optional and default to 0 when absent.
 var gitShortStatRE = regexp.MustCompile(`(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
 
-// GitDiffShortStat returns the file/insertion/deletion counts between base
-// and result in dir — the "diff size" evidence from the plan's Phase 4
-// list. Returns all zeros, not an error, when base and result are
-// identical.
-func GitDiffShortStat(dir, base, result string) (filesChanged, insertions, deletions int, err error) {
-	out, err := exec.Command("git", "-C", dir, "diff", "--shortstat", "--no-ext-diff", "--no-textconv", base, result).Output()
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("git diff --shortstat %s %s: %w", base, result, err)
-	}
-	line := strings.TrimSpace(string(out))
-	if line == "" {
-		return 0, 0, 0, nil
-	}
-	m := gitShortStatRE.FindStringSubmatch(line)
-	if m == nil {
-		return 0, 0, 0, fmt.Errorf("unrecognized git diff --shortstat output: %q", line)
-	}
-	filesChanged = atoiOrZero(m[1])
-	insertions = atoiOrZero(m[2])
-	deletions = atoiOrZero(m[3])
-	return filesChanged, insertions, deletions, nil
-}
-
 // GitDiffShortStatIncludingWorktree returns file/insertion/deletion counts
 // for everything that has changed since base — both committed changes and
 // whatever is still uncommitted in the working tree (tracked or
 // untracked) — so it stays consistent with a ChangedFiles inventory built
-// from GitDiffNameOnly unioned with GitStatusPaths. GitDiffShortStat's
-// two-commit form alone would silently exclude uncommitted changes (e.g.
+// from GitDiffNameOnly unioned with GitStatusPaths. A two-commit
+// `git diff --shortstat` alone would silently exclude uncommitted changes (e.g.
 // left behind by a verify command that runs a formatter without
 // committing), producing diff-size evidence that disagrees with the
 // changed-file list recorded alongside it.
@@ -951,32 +907,6 @@ func GitDiffShortStatIncludingWorktree(dir, base string) (filesChanged, insertio
 	return atoiOrZero(m[1]), atoiOrZero(m[2]), atoiOrZero(m[3]), nil
 }
 
-// GitDiffIncludingWorktree returns the full unified diff between base and
-// the current worktree — committed changes since base *and* whatever is
-// still uncommitted (tracked or untracked) — the content counterpart to
-// GitDiffShortStatIncludingWorktree's own counts, using the same
-// worktreeInclusiveGit machinery for the same reason: a caller that wants
-// to show an operator what a run *actually* changed can't rely on a plain
-// two-commit `GitDiff` alone. Found via review: a quarantined run's
-// evidence collection deliberately leaves a failed build/verify's dirt
-// uncommitted (so ResultSHA can equal BaseSHA), but that dirt is still
-// part of the run's own recorded ChangedFiles/DiffStat evidence — a diff
-// viewer that only compared BaseSHA..ResultSHA would report "no changes"
-// or omit exactly the content an operator most needs to inspect.
-func GitDiffIncludingWorktree(dir, base string) (string, error) {
-	gitFn, cleanup, err := worktreeInclusiveGit(dir)
-	if err != nil {
-		return "", err
-	}
-	defer cleanup()
-
-	out, err := gitFn("diff", "--no-color", "--no-ext-diff", "--no-textconv", base).Output()
-	if err != nil {
-		return "", fmt.Errorf("git diff %s: %w", base, err)
-	}
-	return string(out), nil
-}
-
 // MaxStoredDiffBytes bounds how much diff content GitDiffIncludingWorktreeToFile
 // will keep on disk — and, by construction, how much a caller ever holds in
 // memory at once. Found via review: an unbounded diff for a run with a very
@@ -988,14 +918,20 @@ func GitDiffIncludingWorktree(dir, base string) (string, error) {
 // GitDiffIncludingWorktreeToFile's doc comment).
 const MaxStoredDiffBytes = 4 * 1024 * 1024
 
-// GitDiffIncludingWorktreeToFile is GitDiffIncludingWorktree's bounded,
-// streaming counterpart: it writes the diff directly to destPath instead of
-// returning it as a string, and never buffers more than maxBytes of it in
-// memory or on disk. Found via review: GitDiffIncludingWorktree's own
-// exec.Cmd.Output call buffers the entire diff before any truncation could
-// be applied, so a workspace containing a very large text change could
-// still make factoryd hold (and OOM on) hundreds of megabytes even though
-// the eventual stored result was capped — and, separately, returning that
+// GitDiffIncludingWorktreeToFile writes the full unified diff between base
+// and the current worktree — committed changes since base *and* whatever is
+// still uncommitted (tracked or untracked), the content counterpart to
+// GitDiffShortStatIncludingWorktree's own counts, through the same
+// worktreeInclusiveGit machinery — directly to destPath, and never buffers
+// more than maxBytes of it in memory or on disk. Worktree-inclusive because
+// a quarantined run's evidence collection deliberately leaves a failed
+// build/verify's dirt uncommitted (so ResultSHA can equal BaseSHA), and a
+// diff of BaseSHA..ResultSHA would omit exactly the content an operator
+// most needs to inspect. Streamed because an exec.Cmd.Output call buffers
+// the entire diff before any truncation could be applied, so a workspace
+// containing a very large text change could make factoryd hold (and OOM
+// on) hundreds of megabytes even though the stored result was capped —
+// and, separately, returning that
 // content through a Temporal Activity's return value risks exceeding
 // Temporal's own default 2 MiB Activity-result payload limit regardless of
 // this package's own cap. Writing straight to a file used as the Activity's

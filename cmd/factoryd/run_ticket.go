@@ -661,7 +661,6 @@ func (tr *ticketRun) parseFlags() error {
 
 // resolveRoutesAndDefaults resolves the execution and review routes, applies the project config's defaults and validates the sandbox settings.
 func (tr *ticketRun) resolveRoutesAndDefaults() error {
-	var err error
 	// -build-app-max-attempts/-verify-max-attempts fall back to settings
 	// (resolveSettings' own session config/tier2SettingsOverride
 	// resolution) only when the caller left the flag itself unset -- see
@@ -690,35 +689,8 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	// route/credential is never resolved for this invocation.
 	tr.relayNeededForExecution = modelRouteNeeded(tr.settings, buildAppScriptExplicit)
 	if tr.relayNeededForExecution {
-		routeCredentialProbe := func(_ string, r sessionconfig.Route) error {
-			_, err := resolveRouteCredentials(r)
+		if err := tr.selectRoleRoutes(); err != nil {
 			return err
-		}
-		sel, err := modelrole.SelectRoute(tr.settings, modelrole.RoleExecution, *tr.executionModel, *tr.executionHarness, "", routeCredentialProbe)
-		if err != nil {
-			return fmt.Errorf("roles.execution: %w", err)
-		}
-		// The resolved model/route decides UsageFormat -- there is no
-		// CLI or session-config override anywhere in routes: mode
-		// (restored to match the original Phase 2C-1 behavior; found via
-		// review: an earlier version of this branch let an explicit
-		// -relay-usage-format override sel.Policy.UsageFormat here, which
-		// main's own routes: mode never allowed. The flag, the API field,
-		// and the relay_usage_format session key have all since been
-		// deleted -- see CLAIMS.md / legacyRoutingKeys).
-		tr.execSelection = &sel
-		logRouteSkips("execution", tr.execSelection)
-		tr.executionThinking = sel.Thinking
-
-		if tr.settings.Roles != nil && tr.settings.Roles.Review != nil {
-			revSel, err := modelrole.SelectRoute(tr.settings, modelrole.RoleReview, "", "", "", routeCredentialProbe)
-			if err != nil {
-				return fmt.Errorf("roles.review: %w", err)
-			}
-			tr.reviewSelection = &revSel
-			logRouteSkips("review", tr.reviewSelection)
-			tr.reviewOK = true
-			tr.reviewThinking = revSel.Thinking
 		}
 	}
 	if !buildAppMaxAttemptsExplicit {
@@ -727,6 +699,65 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	if !verifyMaxAttemptsExplicit {
 		*tr.verifyMaxAttempts = tr.settings.VerifyMaxAttempts
 	}
+	if err := tr.applyProjectDefaults(); err != nil {
+		return err
+	}
+	// The operator-approved verify-command substitution is applied further
+	// down, right after verifyCmd resolves the TICKET's own declared
+	// Verify-Command: (if any) -- not here against the bare
+	// *verifyCommand flag/.factory.yml default. Substituting here instead
+	// would use the wrong command whenever a ticket overrides
+	// -verify-command (found via TestIntegrationTicketVerifyCommandOverridesFlagDefault
+	// failing during review of this same change): a ticket declaring
+	// Verify-Command: true while -verify-command defaults to "false"
+	// would otherwise get "false" substituted as the full-suite command,
+	// genuinely failing a gate that has nothing to do with what the
+	// ticket actually asked to verify.
+	if err := tr.resolveSandboxDefaults(buildAppScriptExplicit); err != nil {
+		return err
+	}
+	return tr.validateHarnessAndSandboxIdentity()
+}
+
+// selectRoleRoutes resolves roles.execution's route and, when roles.review is
+// configured, roles.review's.
+func (tr *ticketRun) selectRoleRoutes() error {
+	routeCredentialProbe := func(_ string, r sessionconfig.Route) error {
+		_, err := resolveRouteCredentials(r)
+		return err
+	}
+	sel, err := modelrole.SelectRoute(tr.settings, modelrole.RoleExecution, *tr.executionModel, *tr.executionHarness, "", routeCredentialProbe)
+	if err != nil {
+		return fmt.Errorf("roles.execution: %w", err)
+	}
+	// The resolved model/route decides UsageFormat -- there is no
+	// CLI or session-config override anywhere in routes: mode
+	// (restored to match the original Phase 2C-1 behavior; found via
+	// review: an earlier version of this branch let an explicit
+	// -relay-usage-format override sel.Policy.UsageFormat here, which
+	// main's own routes: mode never allowed. The flag, the API field,
+	// and the relay_usage_format session key have all since been
+	// deleted -- see CLAIMS.md / legacyRoutingKeys).
+	tr.execSelection = &sel
+	logRouteSkips("execution", tr.execSelection)
+	tr.executionThinking = sel.Thinking
+
+	if tr.settings.Roles != nil && tr.settings.Roles.Review != nil {
+		revSel, err := modelrole.SelectRoute(tr.settings, modelrole.RoleReview, "", "", "", routeCredentialProbe)
+		if err != nil {
+			return fmt.Errorf("roles.review: %w", err)
+		}
+		tr.reviewSelection = &revSel
+		logRouteSkips("review", tr.reviewSelection)
+		tr.reviewOK = true
+		tr.reviewThinking = revSel.Thinking
+	}
+	return nil
+}
+
+// applyProjectDefaults requires the ticket, workspace and spec, then applies
+// the repository's project config to the flags the operator left unset.
+func (tr *ticketRun) applyProjectDefaults() error {
 	if *tr.ticket == "" || *tr.workspace == "" || *tr.spec == "" {
 		tr.flags.Usage()
 		return fmt.Errorf("-ticket, -workspace, and -spec are required")
@@ -761,20 +792,13 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	// the session default would still launch with the higher,
 	// pre-project-config ceiling (found via review round 2).
 	applyFinalRelayCeilings(tr.settings, tr.execSelection, tr.reviewSelection)
-	if err := tr.applyCommittedProjectConfig(explicitFlags["full-suite-command"]); err != nil {
-		return err
-	}
-	// The operator-approved verify-command substitution is applied further
-	// down, right after verifyCmd resolves the TICKET's own declared
-	// Verify-Command: (if any) -- not here against the bare
-	// *verifyCommand flag/.factory.yml default. Substituting here instead
-	// would use the wrong command whenever a ticket overrides
-	// -verify-command (found via TestIntegrationTicketVerifyCommandOverridesFlagDefault
-	// failing during review of this same change): a ticket declaring
-	// Verify-Command: true while -verify-command defaults to "false"
-	// would otherwise get "false" substituted as the full-suite command,
-	// genuinely failing a gate that has nothing to do with what the
-	// ticket actually asked to verify.
+	return tr.applyCommittedProjectConfig(explicitFlags["full-suite-command"])
+}
+
+// resolveSandboxDefaults validates the sandbox limits and the egress CA
+// bundle, then fills the sandbox image, registry proxy, compose services and
+// build script from the session config where no flag named them.
+func (tr *ticketRun) resolveSandboxDefaults(buildAppScriptExplicit bool) error {
 	if err := validateSandboxResourceLimitFlags("-sandbox", *tr.sandboxMemory, *tr.sandboxCPUs, *tr.sandboxTmpfsSize); err != nil {
 		return err
 	}
@@ -843,6 +867,13 @@ func (tr *ticketRun) resolveRoutesAndDefaults() error {
 		return err
 	}
 	*tr.buildAppScript = resolvedBuildAppScript
+	return nil
+}
+
+// validateHarnessAndSandboxIdentity is resolveRoutesAndDefaults' last step:
+// every harness has its worker image and worker model, the sandbox identity
+// is usable, an image is configured, and the follow-up run inputs agree.
+func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 	// The canonical build_app.py drives a model-backed agent. An
 	// explicitly supplied build script may be an offline worker (including
 	// the live default-sandbox acceptance fixture), so its connectivity

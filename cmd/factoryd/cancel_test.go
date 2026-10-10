@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 // TestCancelMainParsesRealFlagSet proves -reason and -data-dir parse
@@ -14,7 +15,7 @@ func TestCancelMainParsesRealFlagSet(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 
 	if err := cancelMain(dp, []string{"-reason", "no longer needed", "-data-dir", dataDir, "req-1"}); err != nil {
 		t.Fatalf("cancelMain: %v", err)
@@ -42,7 +43,7 @@ func TestCancelMainRefusesTerminalState(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateDone)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateDone)
 
 	err := cancelMain(dp, []string{"-data-dir", dataDir, "req-1"})
 	if err == nil {
@@ -68,7 +69,7 @@ func TestCancelMainFromQuarantinedOrHaltedSucceeds(t *testing.T) {
 		state := state
 		t.Run(string(state), func(t *testing.T) {
 			dataDir := t.TempDir()
-			newApprovableDriverRequest(t, dataDir, "req-1", state)
+			requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", state)
 
 			if err := cancelMain(dp, []string{"-data-dir", dataDir, "req-1"}); err != nil {
 				t.Fatalf("cancelMain from %s: %v", state, err)

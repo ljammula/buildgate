@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sort"
 	"strconv"
-	"strings"
 
 	"buildgate/internal/requestsubmit"
 	wsisolation "buildgate/internal/workspace"
@@ -147,11 +146,6 @@ func validateSandboxResourceLimitFlags(prefix, memory, cpus, tmpfsSize string) e
 	return nil
 }
 
-func pathWithin(parent, candidate string) bool {
-	rel, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(candidate))
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 // stringSetsEqual reports whether a and b hold the same strings, ignoring
 // order — used to compare a ticket's declared Allowed-Files:/
 // Required-Changed-Files: (which are logically unordered sets of paths)
@@ -193,7 +187,7 @@ func canonicalPath(path string) (string, error) {
 // containment is unconditional. Shared by run_ticket.go's own real,
 // pre-run guard and doctor.go's prediction of it (factoryd doctor code
 // review, 2026-09-14: two hand-synced copies of the same
-// canonicalPath+pathWithin logic risk silently drifting apart). Now a
+// containment check risk silently drifting apart). Now a
 // thin wrapper around internal/requestsubmit.DataDirInsideWorkspace: that
 // package's Submit needs the identical check for `factoryd submit` and the new
 // POST /requests console route, so this is a third caller of the same

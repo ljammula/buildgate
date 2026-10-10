@@ -5,30 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
-
-// newApprovableDriverRequest mirrors internal/request's own
-// newApprovableRequest test helper, kept package-local since it writes
-// the same fixture shape approveMain/rejectMain/verifyApprovedHashes all
-// need but internal/request's helper is unexported.
-func newApprovableDriverRequest(t *testing.T, dataDir, id string, state request.State) {
-	t.Helper()
-	if err := request.SaveText(dataDir, id, "the original request text"); err != nil {
-		t.Fatalf("SaveText: %v", err)
-	}
-	r := request.New(id, "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
-	r.State = state
-	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte("# Spec\n"), 0o600); err != nil {
-		t.Fatalf("write spec.md: %v", err)
-	}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-}
 
 // TestApproveMainParsesRealFlagSet proves -data-dir and the positional
 // request id are parsed through approveMain's own real flag.FlagSet (see
@@ -38,7 +19,7 @@ func TestApproveMainParsesRealFlagSet(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 
 	if err := approveMain(dp, []string{"-data-dir", dataDir, "req-1"}); err != nil {
 		t.Fatalf("approveMain: %v", err)
@@ -77,7 +58,7 @@ func TestRejectMainParsesRealFlagSet(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 
 	if err := rejectMain(dp, []string{"-reason", "needs more detail", "-data-dir", dataDir, "req-1"}); err != nil {
 		t.Fatalf("rejectMain: %v", err)
@@ -105,7 +86,7 @@ func TestRejectMainRequiresReason(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 	if err := rejectMain(dp, []string{"-data-dir", dataDir, "req-1"}); err == nil {
 		t.Fatal("rejectMain without -reason: want an error, got nil")
 	}
@@ -127,7 +108,7 @@ func TestRejectMainSendBackFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateQuarantined)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateQuarantined)
 	loaded, err := request.Load(dataDir, "req-1")
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +143,7 @@ func TestVerifyApprovedHashesRefusesAndNamesFile(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	dataDir := t.TempDir()
-	newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 
 	if err := approveMain(dp, []string{"-data-dir", dataDir, "req-1"}); err != nil {
 		t.Fatalf("approveMain: %v", err)
@@ -197,8 +178,8 @@ func TestApproveAndRejectUseSessionConfigDataDir(t *testing.T) {
 	configPath := isolateSessionConfig(t)
 	dataDir := t.TempDir()
 	writeDataDirSessionConfig(t, configPath, dataDir)
-	newApprovableDriverRequest(t, dataDir, "req-a", request.StateSpecReview)
-	newApprovableDriverRequest(t, dataDir, "req-r", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-a", request.StateSpecReview)
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-r", request.StateSpecReview)
 
 	if err := approveMain(dp, []string{"req-a"}); err != nil {
 		t.Fatalf("approveMain: %v", err)

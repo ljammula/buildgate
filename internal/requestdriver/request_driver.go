@@ -242,7 +242,7 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	}
 	// Entering spec_review: the operator is waiting on them starting
 	// now -- send the first reminder immediately rather than leaving
-	// them to discover it only on RemindDueRequests' own next tick.
+	// them to discover it only on RemindIfDue's own next tick.
 	// See RemindRequest's own doc comment.
 	RemindRequest(dataDir, r, now)
 	return r.Save(dataDir)
@@ -2872,7 +2872,7 @@ func requestReminderTarget(dataDir string, r *request.Request) string {
 // The one function both call sites this WP's design calls for share: the
 // request driver (AdvanceRequest, above -- the immediate reminder on
 // entering a review state) and worker's own ticker
-// (RemindDueRequests, below -- the every-interval repeat). Neither checks
+// (RemindIfDue, below -- the every-interval repeat). Neither checks
 // r.State itself before calling this; that is each caller's own job (see
 // their own doc comments), since what counts as "due" differs between an
 // unconditional first reminder and a ticker's elapsed-time check.
@@ -2881,7 +2881,7 @@ func requestReminderTarget(dataDir string, r *request.Request) string {
 // clock must not restart on every reminder), r.LastNotifiedAt, and
 // increments r.NotifyCount, but does NOT save r: callers own that, as
 // part of whatever else they are already saving in the same step (the
-// driver's own AdvanceRequest call below; RemindDueRequests' own Save
+// driver's own AdvanceRequest call below; RemindIfDue's own Save
 // per reminder it sends).
 func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 	ts := now.UTC().Format(time.RFC3339Nano)
@@ -2945,7 +2945,7 @@ func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 
 // ReviewState reports whether s is one of the states a request waits on the
 // operator in (approve/reject, or resume for a lost step) -- the only states
-// RemindDueRequests reminds for. oracle_review is one: it blocks on a human
+// RemindIfDue reminds for. oracle_review is one: it blocks on a human
 // exactly like spec_review and plan_review; so does resume_review.
 func ReviewState(s request.State) bool {
 	return s == request.StateSpecReview || s == request.StateOracleReview || s == request.StatePlanReview || s == request.StateResumeReview
@@ -2970,39 +2970,20 @@ func reminderDue(r *request.Request, interval time.Duration, now time.Time) (boo
 	return now.Sub(last) >= interval, nil
 }
 
-// RemindDueRequests is worker's own reminder ticker: scans
-// every request in a review state and re-reminds (RemindRequest, above)
-// any whose last reminder is at least interval old, saving each one it
-// reminds. The driver's own immediate call (AdvanceRequest) covers the
-// first reminder on entering a review state; this covers every one
-// after.
+// RemindIfDue is the worker's every-interval reminder for one request:
+// it re-reminds (RemindRequest, above) a request in a review state whose
+// last reminder is at least interval old, and saves it. The driver's own
+// immediate call (AdvanceRequest) covers the first reminder on entering a
+// review state; this covers every one after.
 //
 // Restart-safe by construction: LastNotifiedAt is read straight off disk
-// via request.List on every call, so a fresh process (after a crash or a
-// normal restart) resumes counting from whatever the last save recorded
-// rather than reminding again from zero -- there is no in-memory ticker
-// state anywhere for a restart to lose.
-func RemindDueRequests(dataDir string, interval time.Duration, now func() time.Time) error {
-	requests, err := request.List(dataDir)
-	if err != nil {
-		return fmt.Errorf("list requests for reminders: %w", err)
-	}
-	for _, listed := range requests {
-		if !ReviewState(listed.State) {
-			continue
-		}
-		if err := RemindIfDue(dataDir, listed.ID, interval, now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// RemindIfDue is RemindDueRequests' per-request body, under the request's
-// own lock and against a fresh Load: an operator's `factoryd approve` in
-// another process can move this request out of review between List and
-// Save here, and an unlocked stale save would put it back (found by
-// adversarial review).
+// on every call, so a fresh process resumes counting from whatever the
+// last save recorded rather than reminding again from zero.
+//
+// It runs under the request's own lock and against a fresh Load: an
+// operator's `factoryd approve` in another process can move this request
+// out of review before the Save here, and an unlocked stale save would
+// put it back (found by adversarial review).
 func RemindIfDue(dataDir, id string, interval time.Duration, now func() time.Time) error {
 	unlock, err := request.Lock(dataDir, id)
 	if err != nil {

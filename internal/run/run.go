@@ -1369,7 +1369,7 @@ type Run struct {
 	// every worktree reaper (reconcile, stranded-worktree recovery, the
 	// workflow and caller-side rollbacks) skips a run with this flag until a
 	// human decides: a resume adopts the worktree, a rebuild or cancel reaps
-	// it and clears the flag (cmd/factoryd clearKeptForResume). Containers
+	// it and clears the flag (release.ClearKeptForResume). Containers
 	// are still removed. The zero value keeps today's behaviour for every
 	// older record.
 	KeptForResume bool `json:"kept_for_resume,omitempty"`

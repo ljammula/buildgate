@@ -258,13 +258,6 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 	return workerSpec, nil
 }
 
-func (l *RegistryProxyLifecycle) Facts() RegistryProxyLaunchFacts {
-	if l == nil {
-		return RegistryProxyLaunchFacts{}
-	}
-	return l.facts
-}
-
 // Cleanup tears this run's registry proxy down and stops the owner
 // heartbeat -- idempotent on success.
 func (l *RegistryProxyLifecycle) Cleanup() error {

@@ -156,56 +156,9 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 		return nil, err
 	}
 
-	var relPaths, specRelPaths []string
-	switch r.State {
-	case StateSpecReview:
-		relPaths = []string{specFileName}
-		if err := refuseOpenDecisions(dataDir, id); err != nil {
-			return nil, err
-		}
-	case StatePlanReview:
-		relPaths, err = ticketSpecRelPaths(dataDir, id)
-		if err != nil {
-			return nil, err
-		}
-		specRelPaths = append([]string(nil), relPaths...)
-		// Re-validate every ticket's own content before this approval
-		// proceeds any further -- the same request.ValidateTicketSpecContent
-		// the console's own ticket editor (PUT /requests/{id}/tickets/{n},
-		// internal/api/server.go) already enforces on every edit. Without
-		// this, an operator who edits tickets/NNN.spec.md directly on disk
-		// (bypassing the console entirely) and then runs `factoryd approve`
-		// gets no validation at all: the malformed edit sails through
-		// plan_review approval and only fails much later, at build start,
-		// via -request-ticket's own fail-closed preflight (found live
-		// 2026-09-25). Runs before any hashing or state mutation below, so
-		// a refusal here leaves the request exactly as it was.
-		if err := validateTicketSpecs(dataDir, id, specRelPaths); err != nil {
-			return nil, err
-		}
-		// Any ticket's own <NNN>.oracle/ directory (an optional,
-		// operator-reviewed reference oracle drafted for that ticket) is
-		// approved -- hash-pinned, tamper-detected on every later state
-		// advance via VerifyApprovedHashes -- the exact same way, at the
-		// exact same moment, its ticket spec already is. No new hashing
-		// mechanism: an oracle file is just one more relPath in this same
-		// approval's own file set.
-		oraclePaths, err := ticketOracleRelPaths(dataDir, id, relPaths)
-		if err != nil {
-			return nil, err
-		}
-		relPaths = append(relPaths, oraclePaths...)
-	case StateOracleReview:
-		// The request-level oracle (oracle/*, beside spec.md) is hash-pinned
-		// here like spec.md is at spec approval; an absent or empty directory
-		// pins nothing and the approval is a skip. Refuses (state unchanged)
-		// an unusable directory -- see requestOracleRelPaths.
-		relPaths, err = requestOracleRelPaths(dataDir, id)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("request %s: cannot approve from state %q (must be %q, %q or %q) %w", id, r.State, StateSpecReview, StateOracleReview, StatePlanReview, ErrIllegalTransition)
+	relPaths, specRelPaths, err := approvalRelPaths(dataDir, id, r)
+	if err != nil {
+		return nil, err
 	}
 
 	// Hash every covered file, and check it against expectedSHA256,
@@ -228,20 +181,111 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 			return nil, fmt.Errorf("request %s: %w", id, err)
 		}
 	}
+	if err := checkApprovalAgainstExpected(id, hashes, expectedSHA256, requireOracleShown); err != nil {
+		return nil, err
+	}
+
+	if err := r.approveTransition(by, now, relPaths); err != nil {
+		return nil, err
+	}
+	// The review this approval just released is over -- any pending HITL
+	// reminder for it must stop, not fire once more on the next
+	// tick before the newly-entered state's own reminder logic (if any)
+	// takes over.
+	r.ClearReminderState()
+
+	if r.ApprovedSHA256 == nil {
+		r.ApprovedSHA256 = make(map[string]string, len(relPaths))
+	}
+	for relPath, hash := range hashes {
+		r.ApprovedSHA256[relPath] = hash
+	}
+	r.ApprovedBy = by
+	r.ApprovedAt = now.UTC().Format(time.RFC3339Nano)
+
+	if err := r.Save(dataDir); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// approvalRelPaths returns the files an approval from r's state covers
+// (relPaths) and, at plan review, the ticket specs among them (specRelPaths).
+// It refuses a state nothing is approved from, a spec with open decisions,
+// an invalid ticket spec and an unusable oracle directory.
+func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []string, err error) {
+	switch r.State {
+	case StateSpecReview:
+		relPaths = []string{specFileName}
+		if err := refuseOpenDecisions(dataDir, id); err != nil {
+			return nil, nil, err
+		}
+	case StatePlanReview:
+		relPaths, err = ticketSpecRelPaths(dataDir, id)
+		if err != nil {
+			return nil, nil, err
+		}
+		specRelPaths = append([]string(nil), relPaths...)
+		// Re-validate every ticket's own content before this approval
+		// proceeds any further -- the same request.ValidateTicketSpecContent
+		// the console's own ticket editor (PUT /requests/{id}/tickets/{n},
+		// internal/api/server.go) already enforces on every edit. Without
+		// this, an operator who edits tickets/NNN.spec.md directly on disk
+		// (bypassing the console entirely) and then runs `factoryd approve`
+		// gets no validation at all: the malformed edit sails through
+		// plan_review approval and only fails much later, at build start,
+		// via -request-ticket's own fail-closed preflight (found live
+		// 2026-09-25). Runs before any hashing or state mutation below, so
+		// a refusal here leaves the request exactly as it was.
+		if err := validateTicketSpecs(dataDir, id, specRelPaths); err != nil {
+			return nil, nil, err
+		}
+		// Any ticket's own <NNN>.oracle/ directory (an optional,
+		// operator-reviewed reference oracle drafted for that ticket) is
+		// approved -- hash-pinned, tamper-detected on every later state
+		// advance via VerifyApprovedHashes -- the exact same way, at the
+		// exact same moment, its ticket spec already is. No new hashing
+		// mechanism: an oracle file is just one more relPath in this same
+		// approval's own file set.
+		oraclePaths, err := ticketOracleRelPaths(dataDir, id, relPaths)
+		if err != nil {
+			return nil, nil, err
+		}
+		relPaths = append(relPaths, oraclePaths...)
+	case StateOracleReview:
+		// The request-level oracle (oracle/*, beside spec.md) is hash-pinned
+		// here like spec.md is at spec approval; an absent or empty directory
+		// pins nothing and the approval is a skip. Refuses (state unchanged)
+		// an unusable directory -- see requestOracleRelPaths.
+		relPaths, err = requestOracleRelPaths(dataDir, id)
+		if err != nil {
+			return nil, nil, err
+		}
+	default:
+		return nil, nil, fmt.Errorf("request %s: cannot approve from state %q (must be %q, %q or %q) %w", id, r.State, StateSpecReview, StateOracleReview, StatePlanReview, ErrIllegalTransition)
+	}
+	return relPaths, specRelPaths, nil
+}
+
+// checkApprovalAgainstExpected compares the files about to be approved
+// (hashes) with what the caller reviewed (expectedSHA256): an oracle file
+// the client did not show when requireOracleShown, then a stale or
+// mismatched artifact set.
+func checkApprovalAgainstExpected(id string, hashes, expectedSHA256 map[string]string, requireOracleShown bool) error {
 	if requireOracleShown {
 		for relPath := range hashes {
 			if !isOracleRelPath(relPath) && !isRequestOracleRelPath(relPath) {
 				continue
 			}
 			if _, ok := expectedSHA256[relPath]; !ok {
-				return nil, fmt.Errorf("request %s: %s would be approved but this client did not show it %w -- approve from the CLI (factoryd approve), or a client that shows oracle files", id, relPath, ErrOracleNotShown)
+				return fmt.Errorf("request %s: %s would be approved but this client did not show it %w -- approve from the CLI (factoryd approve), or a client that shows oracle files", id, relPath, ErrOracleNotShown)
 			}
 		}
 	}
 	if len(expectedSHA256) > 0 {
 		// Require the full current relPaths set, not just whatever keys
 		// happen to be present in both maps -- see this function's own
-		// doc comment for exactly the state-change/added-ticket/removed-
+		// doc comment (approve's) for exactly the state-change/added-ticket/removed-
 		// ticket cases a partial, either-side-optional comparison misses.
 		//
 		// Oracle-file relPaths (tickets/<NNN>.oracle/*) are the one
@@ -273,7 +317,7 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 			}
 		}
 		if expectedNonOracle != currentNonOracle {
-			return nil, fmt.Errorf("request %s: expected artifact set does not match the current review (%d expected, %d actually under review) %w (fetch the request again and re-review before approving)", id, expectedNonOracle, currentNonOracle, ErrApprovalStale)
+			return fmt.Errorf("request %s: expected artifact set does not match the current review (%d expected, %d actually under review) %w (fetch the request again and re-review before approving)", id, expectedNonOracle, currentNonOracle, ErrApprovalStale)
 		}
 		for relPath, current := range hashes {
 			expected, ok := expectedSHA256[relPath]
@@ -281,11 +325,16 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 				continue
 			}
 			if !ok || expected == "" || expected != current {
-				return nil, fmt.Errorf("request %s: %s %w (fetch the request again and re-review before approving)", id, relPath, ErrApprovalStale)
+				return fmt.Errorf("request %s: %s %w (fetch the request again and re-review before approving)", id, relPath, ErrApprovalStale)
 			}
 		}
 	}
+	return nil
+}
 
+// approveTransition moves r out of the review state it is in. relPaths is
+// the file set the approval covers: an oracle review with none is a skip.
+func (r *Request) approveTransition(by string, now time.Time, relPaths []string) error {
 	switch r.State {
 	case StateSpecReview:
 		// NextApprovalState, not a second r.DraftOracles check: the console
@@ -296,10 +345,10 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 		// instance).
 		if next, _ := NextApprovalState(r); next == StateOracleDrafting {
 			if err := r.ApproveSpecToOracles(by, now); err != nil {
-				return nil, err
+				return err
 			}
 		} else if err := r.ApproveSpec(by, now); err != nil {
-			return nil, err
+			return err
 		}
 	case StateOracleReview:
 		approveOracle := r.ApproveOracle
@@ -307,32 +356,14 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 			approveOracle = r.ApproveOracleSkipped
 		}
 		if err := approveOracle(by, now); err != nil {
-			return nil, err
+			return err
 		}
 	case StatePlanReview:
 		if err := r.ApprovePlan(by, now); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	// The review this approval just released is over -- any pending HITL
-	// reminder for it must stop, not fire once more on the next
-	// tick before the newly-entered state's own reminder logic (if any)
-	// takes over.
-	r.ClearReminderState()
-
-	if r.ApprovedSHA256 == nil {
-		r.ApprovedSHA256 = make(map[string]string, len(relPaths))
-	}
-	for relPath, hash := range hashes {
-		r.ApprovedSHA256[relPath] = hash
-	}
-	r.ApprovedBy = by
-	r.ApprovedAt = now.UTC().Format(time.RFC3339Nano)
-
-	if err := r.Save(dataDir); err != nil {
-		return nil, err
-	}
-	return r, nil
+	return nil
 }
 
 // Reject sends a request in a review state back to the prior drafting

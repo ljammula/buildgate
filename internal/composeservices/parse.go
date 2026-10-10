@@ -742,17 +742,8 @@ func parseOneService(name string, svc types.ServiceConfig, workingDir string, al
 	}
 	spec.Environment = env
 
-	spec.Ports = make([]string, 0, len(svc.Ports))
-	for _, p := range svc.Ports {
-		spec.Ports = append(spec.Ports, fmt.Sprintf("%d", p.Target))
-		if p.Published == "" || (p.Protocol != "" && p.Protocol != "tcp") {
-			continue
-		}
-		host, err := strconv.Atoi(p.Published)
-		if err != nil || host < 1 || host > 65535 || p.Target < 1 || p.Target > 65535 {
-			return ServiceSpec{}, fmt.Sprintf("port %q:%d is not a single published TCP port", p.Published, p.Target)
-		}
-		spec.PublishedPorts = append(spec.PublishedPorts, PublishedPort{Host: host, Target: int(p.Target)})
+	if reason := decodePorts(svc.Ports, &spec); reason != "" {
+		return ServiceSpec{}, reason
 	}
 
 	aliasPort, reason := decodeExtensions(svc.Extensions)
@@ -780,19 +771,11 @@ func parseOneService(name string, svc types.ServiceConfig, workingDir string, al
 		spec.Healthcheck = decodeHealthcheck(svc.HealthCheck)
 	}
 
-	depNames := make([]string, 0, len(svc.DependsOn))
-	for dep := range svc.DependsOn {
-		depNames = append(depNames, dep)
+	dependsOn, reason := decodeDependsOn(name, svc.DependsOn)
+	if reason != "" {
+		return ServiceSpec{}, reason
 	}
-	sort.Strings(depNames) // deterministic order regardless of the source map's own iteration order
-	spec.DependsOn = make([]ServiceDependency, 0, len(depNames))
-	for _, dep := range depNames {
-		condition := svc.DependsOn[dep].Condition
-		if !allowedDependsOnConditions[condition] {
-			return ServiceSpec{}, fmt.Sprintf("service %q depends on %q with unsupported condition %q", name, dep, condition)
-		}
-		spec.DependsOn = append(spec.DependsOn, ServiceDependency{Name: dep, Condition: condition})
-	}
+	spec.DependsOn = dependsOn
 
 	vols, reason := decodeNamedVolumes(svc.Volumes, workingDir)
 	if reason != "" {
@@ -810,6 +793,43 @@ func parseOneService(name string, svc types.ServiceConfig, workingDir string, al
 	}
 
 	return spec, ""
+}
+
+// decodePorts records a service's container ports on spec, and its published
+// TCP ports. It returns the reason a published port is refused.
+func decodePorts(ports []types.ServicePortConfig, spec *ServiceSpec) string {
+	spec.Ports = make([]string, 0, len(ports))
+	for _, p := range ports {
+		spec.Ports = append(spec.Ports, fmt.Sprintf("%d", p.Target))
+		if p.Published == "" || (p.Protocol != "" && p.Protocol != "tcp") {
+			continue
+		}
+		host, err := strconv.Atoi(p.Published)
+		if err != nil || host < 1 || host > 65535 || p.Target < 1 || p.Target > 65535 {
+			return fmt.Sprintf("port %q:%d is not a single published TCP port", p.Published, p.Target)
+		}
+		spec.PublishedPorts = append(spec.PublishedPorts, PublishedPort{Host: host, Target: int(p.Target)})
+	}
+	return ""
+}
+
+// decodeDependsOn returns a service's dependencies in name order, or the
+// reason one of them is refused.
+func decodeDependsOn(name string, dependsOnIn types.DependsOnConfig) ([]ServiceDependency, string) {
+	depNames := make([]string, 0, len(dependsOnIn))
+	for dep := range dependsOnIn {
+		depNames = append(depNames, dep)
+	}
+	sort.Strings(depNames) // deterministic order regardless of the source map's own iteration order
+	dependsOn := make([]ServiceDependency, 0, len(depNames))
+	for _, dep := range depNames {
+		condition := dependsOnIn[dep].Condition
+		if !allowedDependsOnConditions[condition] {
+			return nil, fmt.Sprintf("service %q depends on %q with unsupported condition %q", name, dep, condition)
+		}
+		dependsOn = append(dependsOn, ServiceDependency{Name: dep, Condition: condition})
+	}
+	return dependsOn, ""
 }
 
 // firstRejectedFieldPresent walks rejectedFields in a fixed order and

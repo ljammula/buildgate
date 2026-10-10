@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
 // TestRequestCommandsHonourConfigFlagDataDir proves approve, reject,
@@ -31,7 +32,7 @@ func TestRequestCommandsHonourConfigFlagDataDir(t *testing.T) {
 			dataDir := t.TempDir()
 			explicitConfig := filepath.Join(t.TempDir(), "other.yml")
 			writeDataDirSessionConfig(t, explicitConfig, dataDir)
-			newApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
+			requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecReview)
 
 			if err := tc.run(explicitConfig); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)

@@ -1,6 +1,7 @@
 package oraclecanary_test
 
 import (
+	"strings"
 	"testing"
 
 	"buildgate/internal/oraclecanary"
@@ -16,8 +17,9 @@ func TestCommandsPassValidateOracleRunCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmds := map[string]string{
-		"go": goCmd, "python": oraclecanary.PythonCommand(), "vitest": oraclecanary.VitestCommand(),
-		"jest": oraclecanary.JestCommand(), "dart": oraclecanary.DartCommand(),
+		"go": goCmd, "python": "pytest --rootdir . --import-mode=importlib .oracle", "vitest": "vitest run .oracle",
+		"jest": "jest --rootDir . --roots .oracle", "dart": "flutter test .oracle/",
+		"python-stdlib": oraclecanary.PythonStdlibCommand(),
 		// The vacuous command passes the static check: that is why the runtime
 		// canary exists.
 		"vacuous": "echo .oracle && cd svc && go test ./...",
@@ -30,8 +32,8 @@ func TestCommandsPassValidateOracleRunCommand(t *testing.T) {
 }
 
 func TestMountPathMatchesRequestPackage(t *testing.T) {
-	cmd := oraclecanary.PythonCommand()
-	if want := "pytest --rootdir . --import-mode=importlib " + request.TicketOracleMountPath; cmd != want {
-		t.Errorf("PythonCommand = %q, want %q: the duplicated mount path drifted from request.TicketOracleMountPath", cmd, want)
+	cmd := oraclecanary.PythonStdlibCommand()
+	if want := `glob.glob("` + request.TicketOracleMountPath + `/test_oracle_*.py")`; !strings.Contains(cmd, want) {
+		t.Errorf("PythonStdlibCommand = %q, want it to hold %q: the duplicated mount path drifted from request.TicketOracleMountPath", cmd, want)
 	}
 }

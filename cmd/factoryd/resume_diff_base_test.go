@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
@@ -19,7 +20,7 @@ import (
 func TestALostRunThatContinuedABranchCannotBeResumed(t *testing.T) {
 	repoDir := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	testIsolationMarker(t, repoDir, dataDir, "req-1-001-corrective1", "temporal")
+	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "req-1-001-corrective1", "temporal")
 	seedOwnedRun(t, dataDir, "req-1-001-corrective1", run.StateSliceRunning, deadPID(t), "")
 	r, _ := run.Load(dataDir, "req-1-001-corrective1")
 	r.RequestID, r.OnBranch, r.DiffBaseSHA = "req-1", "factoryd/req-1-001", strings.Repeat("1", 40)
@@ -32,7 +33,7 @@ func TestALostRunThatContinuedABranchCannotBeResumed(t *testing.T) {
 	if got, _ := run.Load(dataDir, "req-1-001-corrective1"); got.KeptForResume {
 		t.Fatal("a lost run that continued a branch was kept for resume")
 	}
-	if _, _, err := requestdriver.ResolveResumeFrom(context.Background(), dataDir, noContainersDocker(t), "req-1-001-corrective1", "", 0); err == nil || !strings.Contains(err.Error(), "not kept for a resume") {
+	if _, _, err := requestdriver.ResolveResumeFrom(context.Background(), dataDir, requestdrivertest.NoContainersDocker(t), "req-1-001-corrective1", "", 0); err == nil || !strings.Contains(err.Error(), "not kept for a resume") {
 		t.Errorf("resume of a lost run that continued a branch: %v, want refused as not kept", err)
 	}
 }

@@ -658,6 +658,22 @@ func statusMain(args []string) error {
 	// approve/reject/retry take only a full id, and ids generated from
 	// similar titles share long prefixes, so a short id was ambiguous and
 	// unusable (two "add-get-" rows in the 2026-09-26 Flutter + Go app run).
+	if err := printRequestStatusRows(requestEntries); err != nil {
+		return err
+	}
+	if len(requestEntries) > 0 && len(entries) > 0 {
+		fmt.Fprintln(os.Stdout)
+	}
+
+	if err := printRunStatusRows(entries); err != nil {
+		return err
+	}
+	return printStatusFooter(len(requestEntries) > 0 || len(entries) > 0, heartbeatLine, routeLine, roleLines)
+}
+
+// printRequestStatusRows prints one line per request, ids padded to the
+// widest.
+func printRequestStatusRows(requestEntries []requestStatusEntry) error {
 	idWidth := 0
 	for _, r := range requestEntries {
 		idWidth = max(idWidth, len(r.ID))
@@ -701,10 +717,11 @@ func statusMain(args []string) error {
 			return fmt.Errorf("print request status line: %w", err)
 		}
 	}
-	if len(requestEntries) > 0 && len(entries) > 0 {
-		fmt.Fprintln(os.Stdout)
-	}
+	return nil
+}
 
+// printRunStatusRows prints one line per run, then its detail lines.
+func printRunStatusRows(entries []statusEntry) error {
 	for _, e := range entries {
 		id := e.ID
 		if len(id) > statusShortIDLen {
@@ -737,8 +754,15 @@ func statusMain(args []string) error {
 			}
 		}
 	}
+	return nil
+}
+
+// printStatusFooter prints the worker heartbeat line, the worker route line
+// and the roles lines, each set off by a blank line when anything was
+// printed above it. anyRows is whether a request or a run row was printed.
+func printStatusFooter(anyRows bool, heartbeatLine, routeLine string, roleLines []string) error {
 	if heartbeatLine != "" {
-		if len(requestEntries) > 0 || len(entries) > 0 {
+		if anyRows {
 			fmt.Fprintln(os.Stdout)
 		}
 		if _, err := fmt.Fprintln(os.Stdout, heartbeatLine); err != nil {
@@ -746,7 +770,7 @@ func statusMain(args []string) error {
 		}
 	}
 	if routeLine != "" {
-		if len(requestEntries) > 0 || len(entries) > 0 {
+		if anyRows {
 			fmt.Fprintln(os.Stdout)
 		}
 		if _, err := fmt.Fprintln(os.Stdout, routeLine); err != nil {
@@ -754,7 +778,7 @@ func statusMain(args []string) error {
 		}
 	}
 	if len(roleLines) > 0 {
-		if len(requestEntries) > 0 || len(entries) > 0 || routeLine != "" {
+		if anyRows || routeLine != "" {
 			fmt.Fprintln(os.Stdout)
 		}
 		for _, line := range roleLines {

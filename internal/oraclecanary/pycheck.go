@@ -445,15 +445,6 @@ func resolvePythonInterpreter() (string, error) {
 	return "", pythonInterpreterErr
 }
 
-// resetPythonInterpreterCacheForTest clears the cached interpreter choice so
-// a test can inject a fake lookPath and observe a fresh resolution.
-func resetPythonInterpreterCacheForTest() {
-	pythonInterpreterMu.Lock()
-	defer pythonInterpreterMu.Unlock()
-	pythonInterpreterDone = false
-	pythonInterpreterPath, pythonInterpreterErr = "", nil
-}
-
 // inspectPythonAST runs pythonASTInspector against src and returns the facts
 // it reports. A python3 that cannot be found or that exits non-zero (a parse
 // error, most commonly) is reported as the oracle failing to parse -- the

@@ -22,6 +22,7 @@ import (
 	"buildgate/internal/release"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 )
@@ -104,7 +105,7 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 	if err := os.WriteFile(filepath.Join(runDir, "agent-notes.md"), []byte(notesFile), 0o600); err != nil {
 		f.t.Fatal(err)
 	}
-	rr := quarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
 	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)
@@ -685,7 +686,7 @@ func driveMemoryRequest(t *testing.T, f *memFix, id string, want request.State) 
 		if loaded.State == want || i == 4 {
 			return loaded.State
 		}
-		if err := driveRequests(f.dp, context.Background(), f.data, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), failingOracleDraftRunner(t), failingBuildRunner(t)); err != nil {
+		if err := driveRequests(f.dp, context.Background(), f.data, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}

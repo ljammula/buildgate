@@ -115,6 +115,55 @@ func (p MergePolicy) CanNeverAllow() bool {
 func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 	var reasons []string
 
+	reasons = append(reasons, runEvidenceReasons(r, cfg)...)
+	reasons = append(reasons, diffStatReasons(r, cfg)...)
+	if cfg.RollbackPlan == "" {
+		reasons = append(reasons, "evidence package has no rollback plan")
+	}
+
+	if len(r.Overrides) != 0 && !cfg.AllowOverrides {
+		reasons = append(reasons, "run has override history and policy does not allow overridden runs")
+	}
+
+	if !r.Sandboxed() && !cfg.AllowUnsandboxed {
+		reasons = append(reasons, "run's build attempt did not execute inside the Docker sandbox (no image digest recorded) and policy does not allow unsandboxed runs")
+	}
+
+	reasons = append(reasons, requiredGateReasons(r, cfg)...)
+
+	// InvalidatedByRunID/SpecDriftDetectedByRunID are attribution the
+	// factory only ever adds after this run was already accepted -- a
+	// later chained run observed a full-suite regression or a project
+	// spec/contract change it attributes back to this one. Neither
+	// changes r.State (see run.Run's own doc comments on both fields for
+	// why), so without reading them here a run durably flagged this way
+	// still evaluates identically to one that was never flagged at all.
+	// There is no AllowInvalidated/AllowSpecDrift escape hatch: unlike
+	// AllowOverrides or AllowUnsandboxed, these do not represent a
+	// legitimate operator choice to accept known risk -- they are the
+	// factory's own record that this run's evidence may no longer be
+	// trustworthy, so a human must resolve the underlying flag (not this
+	// policy) before the run can be merge-eligible again.
+	if r.InvalidatedByRunID != "" {
+		reasons = append(reasons, fmt.Sprintf("run was invalidated by run %q: %s", r.InvalidatedByRunID, r.InvalidatedReason))
+	}
+	if r.SpecDriftDetectedByRunID != "" {
+		reasons = append(reasons, fmt.Sprintf("spec/contract drift was detected by run %q: %s", r.SpecDriftDetectedByRunID, r.SpecDriftReason))
+	}
+	if r.SkipProjectCheck && !cfg.AllowSkippedProjectCheck {
+		reasons = append(reasons, "run bypassed the mandatory project-bootstrap preflight (-skip-project-check) and policy does not allow skipped-preflight runs")
+	}
+
+	reasons = append(reasons, memoryEditReasons(r.MemoryEdit)...)
+
+	return len(reasons) == 0, reasons
+}
+
+// runEvidenceReasons is why the run's state, gate results, SHAs and
+// changed-file evidence deny a merge, in the order MergePolicyCheck reports
+// them.
+func runEvidenceReasons(r run.Run, cfg MergePolicy) []string {
+	var reasons []string
 	if r.State != run.StateAccepted {
 		reasons = append(reasons, fmt.Sprintf("run state is %q, not %q", r.State, run.StateAccepted))
 	}
@@ -144,7 +193,12 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 			reasons = append(reasons, fmt.Sprintf("run touched dependency lockfile(s) %v and policy does not allow dependency-lockfile changes", r.DependencyLockfilesTouched))
 		}
 	}
+	return reasons
+}
 
+// diffStatReasons is why the run's diff stat denies a merge.
+func diffStatReasons(r run.Run, cfg MergePolicy) []string {
+	var reasons []string
 	if r.DiffStat == nil {
 		reasons = append(reasons, "run has no diff stat")
 	} else {
@@ -163,89 +217,59 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 			reasons = append(reasons, fmt.Sprintf("diff has %d insertions, limit is %d", r.DiffStat.Insertions, cfg.MaxInsertions))
 		}
 	}
-	if cfg.RollbackPlan == "" {
-		reasons = append(reasons, "evidence package has no rollback plan")
-	}
+	return reasons
+}
 
-	if len(r.Overrides) != 0 && !cfg.AllowOverrides {
-		reasons = append(reasons, "run has override history and policy does not allow overridden runs")
+// requiredGateReasons names every gate the policy requires that has no
+// passing result on the run.
+func requiredGateReasons(r run.Run, cfg MergePolicy) []string {
+	if len(cfg.RequiredGates) == 0 {
+		return nil
 	}
-
-	if !r.Sandboxed() && !cfg.AllowUnsandboxed {
-		reasons = append(reasons, "run's build attempt did not execute inside the Docker sandbox (no image digest recorded) and policy does not allow unsandboxed runs")
-	}
-
-	if len(cfg.RequiredGates) > 0 {
-		passed := make(map[string]bool, len(r.GateResults))
-		for _, gate := range r.GateResults {
-			if gate.Passed {
-				passed[gate.Check] = true
-			}
-		}
-		for _, name := range cfg.RequiredGates {
-			// full_suite_verify is legitimately absent from GateResults
-			// on a run this policy still fully expects to be release-
-			// eligible: -full-suite-cadence deliberately clears the
-			// effective command (leaving r.FullSuiteScheduled false) on
-			// every slice that isn't due, by design, not by omission —
-			// found via a real local `codex review` pass on this PR: an
-			// earlier version of this check required it unconditionally,
-			// which denied the release decision for every valid
-			// non-cadence-boundary run. r.FullSuiteScheduled (set
-			// wherever the effective command is resolved) is the
-			// authoritative "was this run actually supposed to run it"
-			// signal EvaluateRun's own input construction already
-			// records, so this only holds a run to the requirement when
-			// that's true.
-			//
-			// r.FullSuiteConfigured, not r.FullSuiteScheduled alone
-			// (found via a real GitHub Codex App review of this same
-			// PR): FullSuiteScheduled is also false whenever
-			// -full-suite-command was never configured at all, not
-			// just when cadence skipped a configured one -- exempting
-			// on that alone let a run that never enabled the oracle in
-			// the first place satisfy this requirement with no
-			// result, silently reopening the exact canonical-only
-			// release path this fix exists to close. Only a
-			// cadence-skipped slice of a genuinely configured suite
-			// (Configured true, Scheduled false) is exempt; an
-			// entirely unconfigured suite (Configured false) still
-			// denies below, same as any other missing required gate.
-			if name == "full_suite_verify" && r.FullSuiteConfigured && !r.FullSuiteScheduled {
-				continue
-			}
-			if !passed[name] {
-				reasons = append(reasons, fmt.Sprintf("policy requires gate %q but it has no passing result on this run -- either it never ran or it failed", name))
-			}
+	var reasons []string
+	passed := make(map[string]bool, len(r.GateResults))
+	for _, gate := range r.GateResults {
+		if gate.Passed {
+			passed[gate.Check] = true
 		}
 	}
-
-	// InvalidatedByRunID/SpecDriftDetectedByRunID are attribution the
-	// factory only ever adds after this run was already accepted -- a
-	// later chained run observed a full-suite regression or a project
-	// spec/contract change it attributes back to this one. Neither
-	// changes r.State (see run.Run's own doc comments on both fields for
-	// why), so without reading them here a run durably flagged this way
-	// still evaluates identically to one that was never flagged at all.
-	// There is no AllowInvalidated/AllowSpecDrift escape hatch: unlike
-	// AllowOverrides or AllowUnsandboxed, these do not represent a
-	// legitimate operator choice to accept known risk -- they are the
-	// factory's own record that this run's evidence may no longer be
-	// trustworthy, so a human must resolve the underlying flag (not this
-	// policy) before the run can be merge-eligible again.
-	if r.InvalidatedByRunID != "" {
-		reasons = append(reasons, fmt.Sprintf("run was invalidated by run %q: %s", r.InvalidatedByRunID, r.InvalidatedReason))
+	for _, name := range cfg.RequiredGates {
+		// full_suite_verify is legitimately absent from GateResults
+		// on a run this policy still fully expects to be release-
+		// eligible: -full-suite-cadence deliberately clears the
+		// effective command (leaving r.FullSuiteScheduled false) on
+		// every slice that isn't due, by design, not by omission —
+		// found via a real local `codex review` pass on this PR: an
+		// earlier version of this check required it unconditionally,
+		// which denied the release decision for every valid
+		// non-cadence-boundary run. r.FullSuiteScheduled (set
+		// wherever the effective command is resolved) is the
+		// authoritative "was this run actually supposed to run it"
+		// signal EvaluateRun's own input construction already
+		// records, so this only holds a run to the requirement when
+		// that's true.
+		//
+		// r.FullSuiteConfigured, not r.FullSuiteScheduled alone
+		// (found via a real GitHub Codex App review of this same
+		// PR): FullSuiteScheduled is also false whenever
+		// -full-suite-command was never configured at all, not
+		// just when cadence skipped a configured one -- exempting
+		// on that alone let a run that never enabled the oracle in
+		// the first place satisfy this requirement with no
+		// result, silently reopening the exact canonical-only
+		// release path this fix exists to close. Only a
+		// cadence-skipped slice of a genuinely configured suite
+		// (Configured true, Scheduled false) is exempt; an
+		// entirely unconfigured suite (Configured false) still
+		// denies below, same as any other missing required gate.
+		if name == "full_suite_verify" && r.FullSuiteConfigured && !r.FullSuiteScheduled {
+			continue
+		}
+		if !passed[name] {
+			reasons = append(reasons, fmt.Sprintf("policy requires gate %q but it has no passing result on this run -- either it never ran or it failed", name))
+		}
 	}
-	if r.SpecDriftDetectedByRunID != "" {
-		reasons = append(reasons, fmt.Sprintf("spec/contract drift was detected by run %q: %s", r.SpecDriftDetectedByRunID, r.SpecDriftReason))
-	}
-	if r.SkipProjectCheck && !cfg.AllowSkippedProjectCheck {
-		reasons = append(reasons, "run bypassed the mandatory project-bootstrap preflight (-skip-project-check) and policy does not allow skipped-preflight runs")
-	}
-
-	reasons = append(reasons, memoryEditReasons(r.MemoryEdit)...)
-
-	return len(reasons) == 0, reasons
+	return reasons
 }
 
 // Reasons memoryEditReasons returns. Callers and tests match on them.

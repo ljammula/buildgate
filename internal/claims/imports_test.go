@@ -428,3 +428,59 @@ func TestFindForbiddenImportChainCatchesAViolation(t *testing.T) {
 		t.Fatalf("findForbiddenImportChain flagged a clean graph with no forbidden edge: %v", chain)
 	}
 }
+
+// TestHostcontroltestIsATestsOnlyLeaf: internal/hostcontrol/hostcontroltest
+// holds the fake docker and colima the tests of hostcontrol and of
+// cmd/factoryd share. It must not import hostcontrol (hostcontrol's own
+// in-package tests import it), and no shipped code may import it: the graph
+// is built from non-test files only, so any importer in it is shipped code.
+func TestHostcontroltestIsATestsOnlyLeaf(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const testPkg = "buildgate/internal/hostcontrol/hostcontroltest"
+	requirePackage(t, g, testPkg)
+	for imp := range buildgateImports(g, testPkg) {
+		if imp != "buildgate/internal/daemonheartbeat" {
+			t.Errorf("hostcontroltest imports only daemonheartbeat among buildgate packages: %s imports %s", testPkg, imp)
+		}
+	}
+	for pkg, imports := range g {
+		if imports[testPkg] {
+			t.Errorf("hostcontroltest is imported by tests only: non-test code of %s imports it", pkg)
+		}
+	}
+}
+
+// TestRequestdrivertestIsATestsOnlyPackage: internal/requestdriver/requestdrivertest
+// holds the request, run and resume fixtures the tests of requestdriver and
+// of cmd/factoryd share. It sits on requestdriver (whose external test
+// package imports it) and on the packages whose records it writes; it must
+// never import cmd or hostcontrol, and no shipped code may import it: the
+// graph is built from non-test files only, so any importer in it is shipped
+// code.
+func TestRequestdrivertestIsATestsOnlyPackage(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const testPkg = "buildgate/internal/requestdriver/requestdrivertest"
+	requirePackage(t, g, testPkg)
+	allowed := map[string]bool{
+		"buildgate/internal/forge":         true,
+		"buildgate/internal/handoff":       true,
+		"buildgate/internal/release":       true,
+		"buildgate/internal/request":       true,
+		"buildgate/internal/requestdriver": true,
+		"buildgate/internal/run":           true,
+		"buildgate/internal/testfixture":   true,
+		"buildgate/internal/workspace":     true,
+	}
+	for imp := range buildgateImports(g, testPkg) {
+		if !allowed[imp] {
+			t.Errorf("requestdrivertest imports only its allow-list: %s imports %s", testPkg, imp)
+		}
+	}
+	for pkg, imports := range g {
+		if imports[testPkg] {
+			t.Errorf("requestdrivertest is imported by tests only: non-test code of %s imports it", pkg)
+		}
+	}
+}

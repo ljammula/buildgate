@@ -121,6 +121,23 @@ func openHostileRegularFile(src string, maxSize int64) (*os.File, error) {
 	return checkHostileRegularFile(in, src, maxSize)
 }
 
+// openHostileRegularFileIn is openHostileRegularFile for a source named
+// relative to root, a directory the untrusted worker could write (its
+// workspace) or one that holds copies of what it wrote (a run's directory):
+// the open goes through root, so no link anywhere in src leads out of it,
+// follows no link at src itself and does not block on a pipe, and the opened
+// file must be a regular file of at most maxSize bytes. It is the one way
+// this package opens such a file: what is then done with it (a byte copy, a
+// redacted copy, a read) and the cap are the caller's. The open's own error
+// is returned as it is, so os.IsNotExist tells a missing file apart.
+func openHostileRegularFileIn(root *os.Root, src string, maxSize int64) (*os.File, error) {
+	in, err := root.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	return checkHostileRegularFile(in, src, maxSize)
+}
+
 // checkHostileRegularFile is openHostileRegularFile's check on a file the
 // caller opened itself (with O_NOFOLLOW|O_NONBLOCK): it closes in and
 // returns an error unless in is a regular file no larger than maxSize.

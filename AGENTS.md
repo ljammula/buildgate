@@ -23,18 +23,6 @@ only — it does not restate that content.
   known limits are in [`STATUS.md`](STATUS.md), summarised in README's
   "Status" and "Known limits" sections — update both in the same PR as a
   change that alters either.
-- A request runs three model **roles** (`planning`, `execution`, `review`),
-  each bound in the session config to a route, a model and a coding-agent
-  **harness** (`pi` default, `pifork`, `codex`, `copilot`). One execution
-  path runs every build: Temporal, in a per-run worktree. A run whose Temporal
-  is unreachable halts (`FACTORYD_AUTOSTART=0` with no `-temporal-address` is
-  refused).
-- Every worker container is created by the OpenShell gateway
-  (`internal/openshell`, images pinned by digest), never by `docker run`. A
-  worker has no network; its model calls leave through its sandbox's
-  supervisor under a per-run policy and are counted by buildgate's meter
-  (`internal/meter`, `cmd/factoryd-meter`). `factoryd doctor -fix`, `worker`
-  and a single-ticket run start the gateway and the meter.
 - Deliberately not built (don't add them): automatic merge/deploy, a
   host-execution path, a second worker launcher selectable by flag or config, runtime plugin loading, backward-compatibility shims
   for retired flags or config keys (delete them and update the docs).
@@ -119,16 +107,19 @@ Test gotchas that have broken `main` before:
 
 - Judge `go test`/`make verify` by exit status and the full `--- FAIL` list,
   never by a head-truncated grep of the output.
-- `make verify` runs `cmd/factoryd` tests as 2 to 8 concurrent processes,
-  sized from the machine's cores and memory (`scripts/test-sharded.sh`;
-  `TEST_SHARDS=<n>` overrides): a fixture path, port or package global shared
-  across tests needs a per-process name, or tests that swap it run
-  sequentially. A test that starts a process waits for it to answer (30 s,
-  `waitForServeHealthy`), never a couple of seconds: under eight shards a
-  start is slow. Tests are dealt to shards on each run from the measured
-  seconds in `scripts/factoryd-test-timings.txt`; a new test needs no entry,
-  and `TEST_SHARDS_RECORD=1 make test` re-measures. The run fails if a test is
-  in zero or two shards. On a memory-tight machine,
+- `make verify` runs the slow packages (`cmd/factoryd`, `internal/sandbox`,
+  `internal/workflow`: `SHARDED_PACKAGES` in `scripts/test-sharded.sh`) as
+  shards, several processes of one test binary at once. The number of
+  processes is read from the machine on each run: 2 on a 16 GiB Mac (both
+  `cmd/factoryd`'s), up to half the cores where that much memory is free;
+  `TEST_SHARDS=<n>` overrides. In those packages a fixture path, port or
+  package global shared across tests needs a per-process name, or tests that
+  swap it run sequentially. A test that starts a process waits for it to
+  answer (30 s, `waitForServeHealthy`), never a couple of seconds: under many
+  shards a start is slow. Processes are dealt to packages, and tests to
+  shards, on each run from the measured seconds in `scripts/test-timings.txt`;
+  a new test needs no entry, and `TEST_SHARDS_RECORD=1 make test` re-measures.
+  The run fails if a test is in zero or two shards. On a memory-tight machine,
   `TEST_SHARDS_SEQUENTIAL=1 make verify` runs the shards one after another
   (slower, peak memory of one race binary).
 - `make verify-live` fails loudly without Docker and needs Temporal at
@@ -204,6 +195,8 @@ that name an allow-list.
 | `internal/meter` | The spend meter the OpenShell supervisor calls for every model request (`cmd/factoryd-meter`): ceilings, sliding windows, pricing, per-format usage parsers, reasoning-effort ranking, each sandbox's usage ledger (`Account`, `Ledger`); also the route host pins and the host-side Copilot model listing and token exchange | Allow-list: its own generated `middlewarepb`. Imports no other buildgate package. `internal/claims/imports_test.go` enforces it |
 | `internal/openshell` | The `sandbox.Runtime` over the OpenShell gateway: turns a `sandbox.SandboxRequest` into the gateway's sandbox spec, workload template and network policy, pushes a route's credential, and reads Docker's view of a sandbox's containers. The only package that imports the OpenShell Go SDK | Allow-list: `sandbox`. Reaches the gateway through the SDK's client interface, plus its own `RouteReadiness` interface for the one call the SDK lacks, and Docker through its own `Containers` interface. Its `Live` tests run only with `OPENSHELL_LIVE=1` against a running gateway |
 | `internal/sandbox/sandboxtest` | A worker-like `sandbox.Runtime` for the tests of packages that launch through one | Allow-list: `sandbox`. Imported by tests only |
+| `internal/hostcontrol/hostcontroltest` | The fake `docker` and `colima` on disk, a test CA and a worker heartbeat, for the tests of `hostcontrol` and of the commands that call it | Allow-list: `daemonheartbeat`. Never `hostcontrol`, whose in-package tests import it. Imported by tests only |
+| `internal/requestdriver/requestdrivertest` | The request, run and resume fixtures (records on disk, stub runners for the model jobs and the ticket build, stand-ins for the resume checks) for the tests of `requestdriver` and of the commands that call it | Allow-list: `forge`, `handoff`, `release`, `request`, `requestdriver`, `run`, `testfixture`, `workspace`. Never `cmd` or `hostcontrol`. A fixture that needs a `requestdriver.Deps` takes the caller's fake. Imported by tests only (`TestRequestdrivertestIsATestsOnlyPackage`) |
 
 Rules for a new boundary:
 
@@ -224,7 +217,9 @@ After splitting or moving a listed function, regenerate the baseline with
 `CLAIMS_UPDATE_COMPLEXITY_BASELINE=1 go test ./internal/claims -run TestFunctionComplexityStaysWithinLimit`.
 Its diff may only remove lines, lower numbers, or rename a moved function.
 
-The tests of `internal/hostcontrol` and `internal/requestdriver` still live in `cmd/factoryd` and call them through exported names.
+`internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `install-service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
+
+`internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `resume`, `approve`, `reject`, `cancel`, `worker`, the oracle, spec and plan jobs, the real ticket build), which use the same fixtures.
 
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as
@@ -235,11 +230,7 @@ user-specific absolute path.
 
 `make verify`, code review, and unit tests all validate logic in
 isolation. None of them run inside a real sandbox launched by the
-OpenShell gateway, against a real model route, with real git. Every serious bug found in this
-repo's build/gate/sandbox-runtime/conformity-review pipeline so far — a sandbox
-mount assumption that broke commits, a policy gate that could silently
-skip itself, a token budget that could overrun its own configured
-ceiling — was invisible to all three and only surfaced on a real run.
+OpenShell gateway, against a real model route, with real git.
 Passing review is evidence the *logic* is right; it is not evidence
 the *pipeline* works.
 
@@ -299,22 +290,18 @@ Track the goal here as **a live one-shot acceptance rate**, not
 reach an accepted, human-reviewable PR with zero manual intervention.
 Record dated runs of the broader (not just the fast standing pair)
 validation set as dated write-ups kept outside this repo — a rising number over
-successive runs is the actual signal this repository's pipeline is
-improving, since code review alone has no natural stopping point (a
-sufficiently adversarial pass always finds one more thing).
+successive runs is the signal this repository's pipeline is improving.
 
 `make baseline` (`scripts/baseline.py`) reads the run records under
 `BASELINE_DIRS` (default `~/buildgate` and `data`) and prints a one-shot
 acceptance rate over them, overall and per project, with rounds to green, the
 share of consecutive failed rounds that failed the same way, and the checks
 that quarantined runs. It counts every record it finds, smoke fixtures and
-fixtures built to fail included, so it is the live rate only for the projects
-that are real tickets: read the per-project rows or pass `--project`. It makes
-no model call and gates nothing; run it before and after a change meant to
-move one of those numbers, and compare like with like (its doc comment says
-which same-failure figure is recorded by the build and which is rebuilt from
-older records). `factoryd stats` shows the same numbers per repository, and
-per week, for the current data dir (live-smoke tickets left out unless `-all`);
+fixtures built to fail included: read the per-project rows or pass `--project`.
+It makes no model call and gates nothing; run it before and after a change
+meant to move one of those numbers, and compare like with like (see its doc
+comment). `factoryd stats` shows the same numbers per repository for the
+current data dir (USAGE_REFERENCE's "Is it getting better");
 `make baseline` stays for several data dirs and older record shapes.
 
 `make bar` (`scripts/bar.sh`) is the separate, standing measurement of the
@@ -334,10 +321,11 @@ live-validation runs.
 - Go 1.26, module `buildgate`. Follow existing package structure
   under `internal/` rather than introducing new top-level packages for a
   small feature.
-- Docs and comments in this repo are written dense and evidence-heavy on
-  purpose (dates, PR numbers, "found via review X" citations) — match
-  that register in normative docs (`safety-contract.md`, `CLAIMS.md`,
-  `containment-matrix.md`); README-style docs can be lighter.
+- Normative docs (`safety-contract.md`, `CLAIMS.md`,
+  `containment-matrix.md`) are dense and exact: the rule, its limits, the
+  test that enforces it, and no account of how it was found (a `CLAIMS.md`
+  row is the claim, its status and its tests; the contract holds the
+  mechanism). README-style docs can be lighter.
 - Don't add a way to run a coding-agent build outside the Docker sandbox
   (a host-execution mode, an "unsandboxed" flag/config, or similar
   escape hatch) — Docker containment is unconditional across every path

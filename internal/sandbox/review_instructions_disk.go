@@ -3,12 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"crypto/sha1" //nolint:gosec // a git blob id, compared for equality with the result commit's own
-	"encoding/hex"
-	"errors"
 	"fmt"
-	"hash"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -172,107 +167,6 @@ func (d *diskState) verify(ctx context.Context, e treeEntry) error {
 		return bad
 	}
 	return nil
-}
-
-func blobHasher(size int64) hash.Hash {
-	h := sha1.New() //nolint:gosec
-	fmt.Fprintf(h, "blob %d\x00", size)
-	return h
-}
-
-// crlfStrip passes its input on with the "\r" before every "\n" removed, and
-// fails (bad) on a "\n" without one or when its output would hold a "\r\n"
-// itself (the input had "\r\r\n"). A "\r" anywhere else passes unchanged.
-type crlfStrip struct {
-	w       io.Writer
-	pending bool // a "\r" is held back
-	last    byte // the last byte passed on
-	bad     bool
-}
-
-func (c *crlfStrip) Write(p []byte) (int, error) {
-	out := make([]byte, 0, len(p)+1)
-	emit := func(b byte) { out, c.last = append(out, b), b }
-	for _, b := range p {
-		switch {
-		case b == '\n' && !c.pending:
-			c.bad = true
-		case b == '\n':
-			c.pending = false
-			c.bad = c.bad || c.last == '\r'
-			emit('\n')
-		case b == '\r':
-			if c.pending {
-				emit('\r')
-			}
-			c.pending = true
-		default:
-			if c.pending {
-				emit('\r')
-				c.pending = false
-			}
-			emit(b)
-		}
-	}
-	_, err := c.w.Write(out)
-	return len(p), err
-}
-
-func (c *crlfStrip) flush() error {
-	if !c.pending {
-		return nil
-	}
-	c.pending = false
-	_, err := c.w.Write([]byte{'\r'})
-	return err
-}
-
-// fileHashesTo reports whether the size bytes of the file at abs are the blob
-// oid, or are it once the "\r" before each "\n" is removed (a checkout with
-// core.autocrlf or an eol attribute). The second form is accepted only when
-// every "\n" of the file has its "\r" and the blob itself holds no "\r\n": all
-// a build can add to such a file is that one carriage return per line, and a
-// lone "\r" elsewhere must match byte for byte. It streams, with no size cap.
-// The second form needs the blob size in the hash header, which only a first
-// pass can count, so a file the first pass does not match and that holds a
-// "\n" is read once more.
-func fileHashesTo(abs string, size int64, oid string) bool {
-	f, err := os.Open(abs)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	raw := blobHasher(size)
-	lines := &byteCounter{b: '\n'}
-	if n, err := io.Copy(io.MultiWriter(raw, lines), io.LimitReader(f, size+1)); err != nil || n != size {
-		return false
-	}
-	if hex.EncodeToString(raw.Sum(nil)) == oid {
-		return true
-	}
-	if lines.n == 0 {
-		return false
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return false
-	}
-	norm := blobHasher(size - lines.n)
-	cs := &crlfStrip{w: norm}
-	if n, err := io.Copy(cs, io.LimitReader(f, size+1)); err != nil || n != size || cs.flush() != nil || cs.bad {
-		return false
-	}
-	return hex.EncodeToString(norm.Sum(nil)) == oid
-}
-
-// byteCounter counts the bytes equal to b written to it.
-type byteCounter struct {
-	b byte
-	n int64
-}
-
-func (c *byteCounter) Write(p []byte) (int, error) {
-	c.n += int64(bytes.Count(p, []byte{c.b}))
-	return len(p), nil
 }
 
 func (d *diskState) visit(ctx context.Context, p string, de fs.DirEntry, err error) error {
@@ -517,77 +411,6 @@ func (d *diskState) describeFile(r removal, p string, de fs.DirEntry) (removal, 
 	d.bodyLeft -= int64(len(body))
 	r.body = plusLines(body)
 	return r, nil
-}
-
-// applyRemovals is pass two, the last step of a snapshot: it deletes the
-// collected entries, each only after every directory from the workspace root
-// to its parent is checked again to be a real directory. Last, every verified
-// entry must still exist. It returns the paths it removed, in order, with any
-// error: the one whose removal failed is not among them (of a directory that
-// could not be removed whole, some content may be gone). ctx is the caller's:
-// only its cancellation, checked between two removals, ends the step early.
-func applyRemovals(ctx context.Context, root string, removed []removal, verified []treeEntry) ([]string, error) {
-	var done []string
-	for _, r := range removed {
-		if err := ctx.Err(); err != nil {
-			return done, err
-		}
-		if err := requireRealDirs(root, strings.Split(path.Dir(r.path), "/"), false); err != nil {
-			return done, fmt.Errorf("remove %s: %w", strconv.Quote(r.path), err)
-		}
-		if err := os.RemoveAll(r.abs); err != nil {
-			return done, fmt.Errorf("remove %s: %w", strconv.Quote(r.path), err)
-		}
-		done = append(done, r.path)
-	}
-	for _, e := range verified {
-		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(e.path))); err != nil {
-			return done, fmt.Errorf("the removal of untracked instruction paths removed the committed %s", strconv.Quote(e.path))
-		}
-	}
-	return done, nil
-}
-
-// requireRealDirs checks, by Lstat, that every component of dirs below root
-// is an existing directory and not a link. With allowAbsent, the first absent
-// component ends the check: nothing exists below it to be redirected.
-func requireRealDirs(root string, dirs []string, allowAbsent bool) error {
-	cur := root
-	for i, c := range dirs {
-		if c == "." {
-			continue
-		}
-		cur = filepath.Join(cur, c)
-		info, err := os.Lstat(cur)
-		switch {
-		case errors.Is(err, fs.ErrNotExist) && allowAbsent:
-			return nil
-		case err != nil:
-			return fmt.Errorf("%s: %w", strconv.Quote(strings.Join(dirs[:i+1], "/")), err)
-		case !info.IsDir():
-			return fmt.Errorf("%s is not a real directory (a link or a file)", strconv.Quote(strings.Join(dirs[:i+1], "/")))
-		}
-	}
-	return nil
-}
-
-// checkMaskParents refuses a mask whose target lies below a link: a caller
-// creating the mountpoint would write through it. Every proper prefix of a
-// target must not be a symlink in the result tree and must be, on disk, a
-// real directory (or, for a mask over a path the result removed, absent).
-func (s *planState) checkMaskParents(root string, cands []*candidate) error {
-	for _, c := range cands {
-		parts := strings.Split(c.canon, "/")
-		for k := 1; k < len(parts); k++ {
-			if s.res.isLink(foldName(strings.Join(parts[:k], "/"))) {
-				return fmt.Errorf("review instructions: %s is a symlink in the result commit, above the instruction path %s", strconv.Quote(strings.Join(parts[:k], "/")), c.canon)
-			}
-		}
-		if err := requireRealDirs(root, parts[:len(parts)-1], len(c.res) == 0); err != nil {
-			return fmt.Errorf("review instructions: above the instruction path %s: %w", c.canon, err)
-		}
-	}
-	return nil
 }
 
 func plusLines(body []byte) []byte {

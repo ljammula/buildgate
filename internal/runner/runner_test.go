@@ -514,9 +514,9 @@ func TestGitDiffHelpersOnRealChange(t *testing.T) {
 		t.Errorf("GitDiffNameOnly = %v, want %v", files, want)
 	}
 
-	filesChanged, insertions, deletions, err := GitDiffShortStat(dir, base, result)
+	filesChanged, insertions, deletions, err := GitDiffShortStatIncludingWorktree(dir, base)
 	if err != nil {
-		t.Fatalf("GitDiffShortStat: %v", err)
+		t.Fatalf("GitDiffShortStatIncludingWorktree: %v", err)
 	}
 	if filesChanged != 2 {
 		t.Errorf("filesChanged = %d, want 2", filesChanged)
@@ -526,40 +526,6 @@ func TestGitDiffHelpersOnRealChange(t *testing.T) {
 	}
 	if deletions != 0 {
 		t.Errorf("deletions = %d, want 0 (no lines removed)", deletions)
-	}
-
-	diff, err := GitDiff(dir, base, result)
-	if err != nil {
-		t.Fatalf("GitDiff: %v", err)
-	}
-	if !strings.Contains(diff, "new.txt") || !strings.Contains(diff, "second.txt") {
-		t.Errorf("GitDiff output = %q, want it to mention both changed files", diff)
-	}
-	if !strings.Contains(diff, "+new file") {
-		t.Errorf("GitDiff output = %q, want it to include the actual added content, not just names/counts", diff)
-	}
-}
-
-// TestGitDiffOnNoChangeIsEmpty proves GitDiff returns an empty string, not
-// an error, when base and result are identical — the same convention
-// GitDiffShortStat/GitDiffNameOnly already establish for "nothing changed".
-func TestGitDiffOnNoChangeIsEmpty(t *testing.T) {
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	head, err := GitRevParseHEAD(dir)
-	if err != nil {
-		t.Fatalf("GitRevParseHEAD: %v", err)
-	}
-
-	diff, err := GitDiff(dir, head, head)
-	if err != nil {
-		t.Fatalf("GitDiff: %v", err)
-	}
-	if diff != "" {
-		t.Errorf("GitDiff(same, same) = %q, want empty", diff)
 	}
 }
 
@@ -1291,7 +1257,7 @@ func TestGitDiffShortStatIncludingWorktree(t *testing.T) {
 	}
 
 	// A committed change plus an uncommitted, untracked new file — the
-	// exact combination GitDiffShortStat's two-commit form would miss
+	// exact combination a two-commit `git diff --shortstat` would miss
 	// half of (the uncommitted part) and plain `git diff` would miss the
 	// other half of (the untracked new file, never diffed without being
 	// added first).
@@ -1334,59 +1300,8 @@ func TestGitDiffShortStatIncludingWorktree(t *testing.T) {
 	}
 }
 
-// TestGitDiffIncludingWorktree is GitDiffShortStatIncludingWorktree's own
-// test above, but for the content counterpart — the regression test for a
-// real P2 finding from review: a quarantined run's own evidence
-// collection deliberately leaves a failed build/verify's dirt uncommitted,
-// so a diff viewer comparing only BaseSHA..ResultSHA (both commits) would
-// report "no changes" or miss it entirely. Proves both halves
-// GitDiffShortStatIncludingWorktree's own test proves for the counts: the
-// committed change and the uncommitted untracked file both appear in the
-// diff content, and the real index is left untouched afterward.
-func TestGitDiffIncludingWorktree(t *testing.T) {
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	base, err := GitRevParseHEAD(dir)
-	if err != nil {
-		t.Fatalf("GitRevParseHEAD: %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked change\n"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	if err := GitCommitAll(dir, "commit tracked.txt"); err != nil {
-		t.Fatalf("GitCommitAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new file\n"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	diff, err := GitDiffIncludingWorktree(dir, base)
-	if err != nil {
-		t.Fatalf("GitDiffIncludingWorktree: %v", err)
-	}
-	if !strings.Contains(diff, "tracked.txt") || !strings.Contains(diff, "+tracked change") {
-		t.Errorf("diff = %q, want it to include the committed change", diff)
-	}
-	if !strings.Contains(diff, "untracked.txt") || !strings.Contains(diff, "+new file") {
-		t.Errorf("diff = %q, want it to include the still-uncommitted untracked file too", diff)
-	}
-
-	out, err := exec.Command("git", "-C", dir, "diff", "--cached", "--name-only").Output()
-	if err != nil {
-		t.Fatalf("git diff --cached: %v", err)
-	}
-	if len(out) != 0 {
-		t.Errorf("expected nothing staged after GitDiffIncludingWorktree, got: %s", out)
-	}
-}
-
-// TestGitDiffIncludingWorktreeToFile proves the streaming, file-writing
-// counterpart to GitDiffIncludingWorktree produces the same content on
-// disk, worktree-inclusive, when the diff fits comfortably under the cap.
+// TestGitDiffIncludingWorktreeToFile proves the streamed diff on disk is
+// worktree-inclusive when it fits comfortably under the cap.
 func TestGitDiffIncludingWorktreeToFile(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -1399,6 +1314,9 @@ func TestGitDiffIncludingWorktreeToFile(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked change\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked content\n"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
 	}
 
 	dest := filepath.Join(t.TempDir(), "diff.patch")
@@ -1415,6 +1333,23 @@ func TestGitDiffIncludingWorktreeToFile(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "+tracked change") {
 		t.Errorf("diff file = %q, want it to include the uncommitted change", got)
+	}
+	if !strings.Contains(string(got), "+untracked content") {
+		t.Errorf("diff file = %q, want it to include the untracked file", got)
+	}
+	staged, err := exec.Command("git", "-C", dir, "diff", "--cached", "--name-only").Output()
+	if err != nil {
+		t.Fatalf("git diff --cached: %v", err)
+	}
+	if strings.TrimSpace(string(staged)) != "" {
+		t.Errorf("staged after the diff = %q, want nothing staged", staged)
+	}
+	status, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--", "untracked.txt").Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(string(status)) != "?? untracked.txt" {
+		t.Errorf("status of the untracked file after the diff = %q, want it still untracked", status)
 	}
 }
 
@@ -1535,12 +1470,12 @@ func TestGitDiffHelpersOnNoChange(t *testing.T) {
 		t.Errorf("GitDiffNameOnly on identical SHAs = %v, want empty", files)
 	}
 
-	filesChanged, insertions, deletions, err := GitDiffShortStat(dir, head, head)
+	filesChanged, insertions, deletions, err := GitDiffShortStatIncludingWorktree(dir, head)
 	if err != nil {
-		t.Fatalf("GitDiffShortStat: %v", err)
+		t.Fatalf("GitDiffShortStatIncludingWorktree: %v", err)
 	}
 	if filesChanged != 0 || insertions != 0 || deletions != 0 {
-		t.Errorf("GitDiffShortStat on identical SHAs = (%d, %d, %d), want all zero", filesChanged, insertions, deletions)
+		t.Errorf("GitDiffShortStatIncludingWorktree on an unchanged worktree = (%d, %d, %d), want all zero", filesChanged, insertions, deletions)
 	}
 }
 

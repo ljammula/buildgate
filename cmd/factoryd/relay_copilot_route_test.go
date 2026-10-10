@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"buildgate/internal/meter"
@@ -9,19 +8,6 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sessionconfig"
 )
-
-// TestBuildTicketRunArgsForwardsNoRouteFlag proves buildTicketRunArgs
-// forwards nothing about the route to a drained entry's `factoryd run` --
-// the route/model/credential is resolved entirely by the child `factoryd
-// run` invocation from routes:/models:/roles: session config (see
-// resolveRequestJobRelaySpec and run_ticket.go's own route selection).
-func TestBuildTicketRunArgsForwardsNoRouteFlag(t *testing.T) {
-	cfg := requestdriver.WorkerConfig{}
-	args := strings.Join(requestdriver.BuildTicketRunArgs("data", &requestdriver.QueueEntry{}, cfg), " ")
-	if strings.Contains(args, "-relay-credential-mode") || strings.Contains(args, "-relay-worker-model-id") {
-		t.Fatalf("forwarded args %q named a removed per-route flag: routes:/models:/roles: is the only session-config schema", args)
-	}
-}
 
 // TestResolveRequestJobRelaySpecResolvesGitHubCopilotRoute is the
 // github-copilot analog of

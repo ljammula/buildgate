@@ -24,27 +24,6 @@ const transientRetryAttempts = 3
 // slice's length.
 var transientRetryBackoff = []time.Duration{2 * time.Second, 10 * time.Second}
 
-// nonRetryableInfraError marks an error as never transient, regardless of
-// what isTransientInfraError's own pattern-matching below would otherwise
-// conclude from its text — the explicit escape hatch the plan asked for,
-// so a caller that already knows an error is a deterministic policy
-// denial or validation failure (not an infra blip) can guarantee it is
-// never retried even if its message happens to collide with one of the
-// transient substrings.
-type nonRetryableInfraError struct{ err error }
-
-func (e *nonRetryableInfraError) Error() string { return e.err.Error() }
-func (e *nonRetryableInfraError) Unwrap() error { return e.err }
-
-// markNonRetryable wraps err so isTransientInfraError always reports it as
-// non-transient. A nil err passes through unchanged.
-func markNonRetryable(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &nonRetryableInfraError{err: err}
-}
-
 // isTransientInfraError reports whether err looks like a transient
 // infrastructure blip (a momentary timeout, connection refusal, or a
 // process-level EAGAIN/EINTR/EWOULDBLOCK) rather than a deterministic
@@ -55,10 +34,6 @@ func markNonRetryable(err error) error {
 // comment on retryTransientInfra for why that distinction matters here).
 func isTransientInfraError(err error) bool {
 	if err == nil {
-		return false
-	}
-	var marked *nonRetryableInfraError
-	if errors.As(err, &marked) {
 		return false
 	}
 	if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EINTR) || errors.Is(err, syscall.EWOULDBLOCK) {

@@ -43,12 +43,12 @@ func TestReadLedgerSkipsBlankAndCorruptLinesAndKeepsTheRest(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	records, err := ReadLedger(path)
+	records, err := ReadLedgerAll(path)
 	if err != nil {
-		t.Fatalf("ReadLedger: %v", err)
+		t.Fatalf("ReadLedgerAll: %v", err)
 	}
 	want := []LedgerRecord{
-		{InputTokens: 1, OutputTokens: 2, CostMicroUSD: 3, ReasoningEffort: "low"},
+		{TS: "a", InputTokens: 1, OutputTokens: 2, CostMicroUSD: 3, ReasoningEffort: "low"},
 		{InputTokens: 10, OutputTokens: 20, CostMicroUSD: 30},
 	}
 	if len(records) != len(want) || records[0] != want[0] || records[1] != want[1] {
@@ -57,8 +57,8 @@ func TestReadLedgerSkipsBlankAndCorruptLinesAndKeepsTheRest(t *testing.T) {
 }
 
 func TestReadLedgerMissingFileIsAnError(t *testing.T) {
-	records, err := ReadLedger(filepath.Join(t.TempDir(), "absent.jsonl"))
+	records, err := ReadLedgerAll(filepath.Join(t.TempDir(), "absent.jsonl"))
 	if err == nil || records != nil {
-		t.Fatalf("ReadLedger(absent) = %v, %v, want nil and an error", records, err)
+		t.Fatalf("ReadLedgerAll(absent) = %v, %v, want nil and an error", records, err)
 	}
 }
