@@ -236,3 +236,87 @@ func TestReclaimAppliesAQuarantinedResultWithoutReadingTheConfig(t *testing.T) {
 		t.Fatalf("state = %s, gates = %+v, want the result as the worker returned it", got.State, got.GateResults)
 	}
 }
+
+// reclaimRefusal is the one sentence a refused reclaim leaves for the
+// operator, as the gate result and the run's triage carry it.
+func reclaimRefusal(t *testing.T, got *run.Run) (command, triage string) {
+	t.Helper()
+	for _, g := range got.GateResults {
+		if g.Check == "canonical_verify" && g.ExitCode == -1 && len(g.Command) == 1 {
+			return g.Command[0], got.Triage
+		}
+	}
+	t.Fatalf("no refusal recorded: %+v", got.GateResults)
+	return "", ""
+}
+
+// The refusal says what the operator can do: which repository must hold
+// which commit, and what gets the result applied. It holds a short reason,
+// never git's own error text, and the repository path is whole or absent,
+// never cut by the sentence's length limit.
+func TestReclaimRefusalSaysWhatToDoAndNeverCutsThePath(t *testing.T) {
+	const nextStep = "factoryd override"
+	f := newReclaimFixture(t, "reclaim-moved", reclaimGateYML+reclaimSetupYML)
+	short := f.record.ProjectConfigCommitSHA[:12]
+	gone := "/nonexistent/repo"
+	f.record.RepositoryRoot = gone
+	got := f.reclaim(t, currentWorkerResult())
+	command, triage := reclaimRefusal(t, got)
+	for name, s := range map[string]string{"gate command": command, "triage": triage} {
+		for _, want := range []string{"repository not found", gone + " must hold commit " + short, nextStep} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s = %q, want it to hold %q", name, s, want)
+			}
+		}
+		for _, raw := range []string{"fatal:", "exit status", "cannot change to"} {
+			if strings.Contains(s, raw) {
+				t.Errorf("%s = %q holds git's own error text %q", name, s, raw)
+			}
+		}
+	}
+
+	// A path too long for the sentence is left out whole, and the sentence
+	// still ends with what to do.
+	long := newReclaimFixture(t, "reclaim-long-path", reclaimGateYML)
+	longPath := "/nonexistent/" + strings.Repeat("deep-directory-name/", 12) + "repo"
+	long.record.RepositoryRoot = longPath
+	_, triage = reclaimRefusal(t, long.reclaim(t, currentWorkerResult()))
+	if strings.Contains(triage, "/nonexistent") && !strings.Contains(triage, longPath) {
+		t.Errorf("triage = %q cuts the repository path", triage)
+	}
+	if !strings.Contains(triage, nextStep) || !strings.Contains(triage, "repository_root") {
+		t.Errorf("triage = %q, want the next step and where the path is recorded", triage)
+	}
+
+	// Each reason is one of a fixed few.
+	for want, change := range map[string]func(r *run.Run){
+		"commit not found":     func(r *run.Run) { r.ProjectConfigCommitSHA = strings.Repeat("0123", 10) },
+		"file differs":         func(r *run.Run) { r.ProjectConfigSHA256 = strings.Repeat("ab", 32) },
+		"no commit on the run": func(r *run.Run) { r.ProjectConfigCommitSHA = "" },
+	} {
+		c := newReclaimFixture(t, "reclaim-reason", reclaimGateYML)
+		change(c.record)
+		if command, _ := reclaimRefusal(t, c.reclaim(t, currentWorkerResult())); !strings.Contains(command, want) || strings.Contains(command, "exit status") {
+			t.Errorf("command = %q, want the reason %q and no raw error", command, want)
+		}
+	}
+}
+
+// What the refusal names works: an operator's override applies the result.
+func TestARefusedReclaimCanBeOverriddenToAccepted(t *testing.T) {
+	f := newReclaimFixture(t, "reclaim-override", reclaimGateYML)
+	f.record.RepositoryRoot = "/nonexistent/repo"
+	if got := f.reclaim(t, currentWorkerResult()); got.State != run.StateQuarantined {
+		t.Fatalf("state = %s, want quarantined", got.State)
+	}
+	if err := overrideMain(newTestDeps(t), []string{"-run", f.id, "-data-dir", f.dataDir, "-by", "operator", "-reason", "checked the result by hand", "-state", "accepted"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	got, err := run.Load(f.dataDir, f.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != run.StateAccepted || len(got.Overrides) != 1 {
+		t.Fatalf("state = %s, overrides = %+v, want accepted by one override", got.State, got.Overrides)
+	}
+}
