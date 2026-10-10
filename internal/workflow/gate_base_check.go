@@ -53,6 +53,20 @@ const gateBaseDirName = "gate-base"
 // of the rerun, since its retry would then be asked to trust the first run.
 const gateBaseCheckReserve = time.Minute
 
+// The waits of the rerun's host steps. gateBaseRemoveLockWait is how long
+// the removal after a rerun waits for the git metadata lock, inside
+// gateBaseCheckReserve, before it deletes the directory without it.
+// gateBaseSweepLockWait is the same for a retried Activity's sweep, which
+// the Activity itself waits for no longer than gateBaseSweepWait.
+const (
+	gateBaseRemoveLockWait = 30 * time.Second
+	gateBaseSweepLockWait  = 2 * time.Second
+	gateBaseSweepWait      = 5 * time.Second
+)
+
+// gateBaseHeartbeatInterval is how often the rerun heartbeats.
+const gateBaseHeartbeatInterval = activityHeartbeatInterval
+
 // gateBaseInterrupted is the reason checkpointed before the rerun starts; it
 // is what the run records when the rerun's worker did not live to finish it.
 const gateBaseInterrupted = "the rerun on the base commit did not finish: its worker stopped or its result could not be saved"
@@ -113,9 +127,13 @@ func gateBaseCommit(input RunWorkflowInput) (sha, unknown string) {
 }
 
 // sweepGateBaseWorktree removes the scratch worktree an earlier attempt of
-// this gate's Activity left when its worker died mid-rerun. Best effort: a
-// leftover costs disk, and the next rerun of the same gate clears it again.
-func (a *Activities) sweepGateBaseWorktree(ctx context.Context, input NamedGateActivityInput) {
+// this gate's Activity left when its worker died mid-rerun. It is called from
+// the Activity's completed-checkpoint return and must never hold that return
+// up: the removal runs on its own, takes the git metadata lock only if it is
+// free within gateBaseSweepLockWait (else it deletes the directory and leaves
+// the registration for the next prune), and the Activity waits for it no
+// longer than gateBaseSweepWait. Best effort: a leftover costs disk only.
+func (a *Activities) sweepGateBaseWorktree(input NamedGateActivityInput) {
 	scratch, err := gateBaseWorktreePath(a.logDirFor(input.RunWorkflowInput), input.Check)
 	if err != nil {
 		return
@@ -123,22 +141,36 @@ func (a *Activities) sweepGateBaseWorktree(ctx context.Context, input NamedGateA
 	if _, err := os.Lstat(scratch); err != nil {
 		return
 	}
-	if err := removeGateBaseWorktree(input.WorkspacePath, scratch); err != nil {
-		activity.GetLogger(ctx).Warn("a scratch worktree of an earlier base rerun could not be removed", "path", scratch, "error", err.Error())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), gateBaseSweepLockWait)
+		defer cancel()
+		_ = removeGateBaseWorktree(ctx, input.WorkspacePath, scratch)
+	}()
+	select {
+	case <-done:
+	case <-time.After(gateBaseSweepWait):
 	}
 }
 
-// removeGateBaseWorktree removes the scratch worktree and its registration in
-// the repository. A tree git will not remove (the gate's command left files
-// git cannot delete) is removed directly and its registration pruned.
-func removeGateBaseWorktree(workspace, scratch string) error {
-	err := wsisolation.RemoveWorktreeOnly(workspace, scratch)
+// removeGateBaseWorktree removes the scratch worktree and, when the git
+// metadata lock is free before ctx ends, its registration in the repository.
+// A tree git did not remove (the lock was busy, or the gate's command left
+// files git cannot delete) is deleted directly; a registration left behind
+// names a path that is gone and holds no branch, and the next prune drops it.
+func removeGateBaseWorktree(ctx context.Context, workspace, scratch string) error {
+	if _, err := os.Lstat(scratch); err != nil {
+		// Nothing was checked out: no lock is taken for nothing.
+		_ = os.Remove(filepath.Dir(scratch))
+		return nil
+	}
+	err := wsisolation.RemoveScratchWorktree(ctx, workspace, scratch)
 	if _, statErr := os.Lstat(scratch); statErr == nil {
 		if rmErr := os.RemoveAll(scratch); rmErr != nil {
 			return errors.Join(err, rmErr)
 		}
-		// The directory is gone: this drops the registration that is left.
-		return wsisolation.RemoveWorktreeOnly(workspace, scratch)
+		err = nil
 	}
 	// Removing the last worktree leaves the empty parent; a later run of
 	// the gate makes it again.
@@ -168,15 +200,39 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 
 // checkGateOnBase reruns a failed gate's command on the base commit and
 // returns what it showed. It returns no error: every failure of its own is a
-// "not checked" record.
+// "not checked" record. The Activity heartbeats for as long as it runs, its
+// host steps (the git metadata lock, the checkout, the removal) included:
+// another run of the repository may hold that lock for longer than the
+// Activity's heartbeat timeout.
 func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+	started := time.Now()
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		ticker := time.NewTicker(gateBaseHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: input.Check + "_base", Elapsed: time.Since(started)})
+			}
+		}
+	}()
+	return a.rerunGateOnBase(ctx, input, command, registrySpec)
+}
+
+// rerunGateOnBase is checkGateOnBase's work.
+func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
 	base, unknown := gateBaseCommit(input.RunWorkflowInput)
 	if base == "" {
 		return gateBaseNotChecked("", "%s", unknown)
 	}
 	// The rerun gets what is left of the gate's own time limit, less the
-	// reserve, as a deadline of its own: when it runs out the launch is
-	// stopped and torn down while the Activity still has time to finish.
+	// reserve, as a deadline of its own: when it runs out a wait for the git
+	// metadata lock ends, or the launch is stopped and torn down, while the
+	// Activity still has time to finish.
 	rerunCtx := ctx
 	if deadline, ok := ctx.Deadline(); ok {
 		left := time.Until(deadline) - gateBaseCheckReserve
@@ -192,18 +248,25 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 	if err != nil {
 		return gateBaseNotChecked(base, "resolve the scratch worktree's path: %v", err)
 	}
-	// A leftover of an earlier attempt would make the checkout fail.
-	_ = removeGateBaseWorktree(input.WorkspacePath, scratch)
+	// A leftover of an earlier attempt would make the checkout fail. Its
+	// registration, if any, is pruned by the checkout under the lock.
+	if err := os.RemoveAll(scratch); err != nil {
+		return gateBaseNotChecked(base, "remove an earlier scratch worktree: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(scratch), 0o750); err != nil {
 		return gateBaseNotChecked(base, "create the scratch worktree's directory: %v", err)
 	}
-	// Registered before the checkout: one that fails half-way is removed too.
+	// Registered before the checkout: one that fails half-way is removed
+	// too. The removal has its own short wait for the lock, inside the
+	// reserve, and is not cut short by the rerun's deadline.
 	defer func() {
-		if err := removeGateBaseWorktree(input.WorkspacePath, scratch); err != nil {
+		removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gateBaseRemoveLockWait)
+		defer cancel()
+		if err := removeGateBaseWorktree(removeCtx, input.WorkspacePath, scratch); err != nil {
 			activity.GetLogger(ctx).Warn("the base rerun's scratch worktree could not be removed", "path", scratch, "error", err.Error())
 		}
 	}()
-	if err := wsisolation.AddScratchWorktree(input.WorkspacePath, scratch, base); err != nil {
+	if err := wsisolation.AddScratchWorktree(rerunCtx, input.WorkspacePath, scratch, base); err != nil {
 		return gateBaseNotChecked(base, "check out the base commit in a scratch worktree: %v", err)
 	}
 	// As for the run's own worktree: the worker's identity writes through
@@ -222,16 +285,14 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 	// the gate's checkpoint already exists. The lease is still checked, so a
 	// superseded attempt launches nothing.
 	beforeAttempt := a.leaseChecked(ctx, a.checkpointDirFor(input.RunWorkflowInput), nil)
-	started := time.Now()
-	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: input.Check + "_base", Elapsed: time.Since(started)})
-	}, func() (runner.Result, error) {
-		if a.hasFakeRunner() {
-			return a.runWithRetriesFn()(rerunCtx, scratch, logPath, 1, beforeAttempt, nil, command[0], command[1:]...)
-		}
+	var result runner.Result
+	var runErr error
+	if a.hasFakeRunner() {
+		result, runErr = a.runWithRetriesFn()(rerunCtx, scratch, logPath, 1, beforeAttempt, nil, command[0], command[1:]...)
+	} else {
 		// nil relay, as for the gate itself: the rerun calls no model.
-		return a.runSandboxWithRetries(rerunCtx, onBase, logPath, 1, beforeAttempt, nil, nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
-	})
+		result, runErr = a.runSandboxWithRetries(rerunCtx, onBase, logPath, 1, beforeAttempt, nil, nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+	}
 	if runErr != nil {
 		return gateBaseNotChecked(base, "the gate could not be run on the base commit: %v", runErr)
 	}

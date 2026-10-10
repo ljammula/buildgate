@@ -32,11 +32,18 @@ var (
 // duration of one mutator only, and never call another function that takes it
 // while holding it (flock is not re-entrant across file descriptors).
 func lockGitMetadata(repoDir string) (unlock func(), err error) {
+	return lockGitMetadataContext(context.Background(), repoDir)
+}
+
+// lockGitMetadataContext is lockGitMetadata for a caller with a deadline of
+// its own: the wait ends when ctx does, and after gitMetadataLockTimeout at
+// the latest.
+func lockGitMetadataContext(ctx context.Context, repoDir string) (unlock func(), err error) {
 	commonDir, err := GitCommonDir(repoDir)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), gitMetadataLockTimeout)
+	ctx, cancel := context.WithTimeout(ctx, gitMetadataLockTimeout)
 	defer cancel()
 	file, err := flockFile(ctx, filepath.Join(commonDir, "factoryd-git.lock"), syscall.LOCK_EX, true, "git metadata lock")
 	if err != nil {

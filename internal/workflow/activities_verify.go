@@ -411,15 +411,15 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	if err := a.fenceEarlierAttempts(ctx, input.RunWorkflowInput, true); err != nil {
 		return VerifyActivityResult{}, err
 	}
-	// Before the checkpoint's early return: an attempt whose worker died
-	// during the rerun on the base commit left a completed checkpoint and
-	// the rerun's scratch worktree.
-	a.sweepGateBaseWorktree(ctx, input)
 	checkpoint, path, found, err := loadRetriedActivityCheckpoint[VerifyActivityResult](ctx, a.checkpointDirFor(input.RunWorkflowInput))
 	if err != nil {
 		return VerifyActivityResult{}, checkpointLoadError("load "+input.Check+" gate Activity checkpoint", err)
 	}
 	if found {
+		// An attempt whose worker died during the rerun on the base commit
+		// left this checkpoint and the rerun's scratch worktree. The sweep
+		// waits on nothing that could hold this return up.
+		a.sweepGateBaseWorktree(input)
 		if checkpoint.Error != "" {
 			errType := checkpoint.ErrorType
 			if errType == "" {
