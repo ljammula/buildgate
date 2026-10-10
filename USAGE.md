@@ -870,15 +870,17 @@ signal. The fields are defined in USAGE_REFERENCE's "Is it getting better".
 
 ## Repository memory
 
-A build that ends without passing may leave notes, one list of them "things
-worth knowing about this repository". Repository memory turns those notes into
+A build that ends without passing, or that passes only after a round that
+did not, may leave notes, one list of them "things worth knowing about this
+repository". Repository memory turns those notes into
 lines of the repository's own `AGENTS.md`, which every later agent reads, and
 only through you: you see the candidates, you propose some, you approve the
 request and you merge its pull request.
 
 ```text
-build ends without passing
-        |  its agent's "worth knowing" notes (kept in the run's handoff)
+build ends without passing, or passes after a failed round
+        |  its agent's "worth knowing" notes (kept in the run's handoff,
+        |  or beside an accepted run's record)
         v
 factoryd memory list        collects candidates; only you see them
         |

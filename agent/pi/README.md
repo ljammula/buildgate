@@ -12,6 +12,7 @@ and [`USAGE.md`](../../USAGE.md).
 | `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only oracles, the read-only `.factory/`, no history rewrites). Every later round continues the same harness session and is told what the round before it left (see "What a failed round hands the next one") | `-build-app-script` |
 | `round_feedback.py` | Pure helpers for that: the excerpt of a failing command's output, the names it reports failing, an id for "the same failure", the per-round history, and the note for a failure of the agent process itself | imported by `build_app.py` |
 | `saved_prompts.py` | `save_prompt(session_dir, name, text)`: writes a prompt handed to the harness to `<session folder>/prompts/<name>.md`, which the host empties before each launch and copies after it (the agent can write there too, so the copy is what the folder held) (0600; at most 2 MiB, 50 per launch; a failure never changes the turn). The host copies the folder into the run's or request's directory and redacts it there | imported by `build_app.py` |
+| `tree_guard.py` | Records a directory tree (every path: kind, permission bits, content hash or link target; bounded in entries, bytes and seconds), compares two records, and puts a changed tree back from copies. Used around the notes turn of a build that passed | imported by `build_app.py` |
 | `goal_pilot.py` | Spec/contract/ticket drafting | `-goal-pilot-script` |
 | `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |
 | `draft_spec.py` | Request driver's one-shot spec draft | `worker -draft-spec-script` |
@@ -53,6 +54,7 @@ freely, headings only together with their validator.
 | `build_corrective.history`, `.agent`, `.log`, `.stuck` | `build_app.py` (`corrective_prompt`: the rounds so far, a failure of the agent process, where the failing command's whole output is, the diagnose-first steps) | `{history}`; `{agent_notes}`; `{failure_log}`, `{failing}`; `{streak}` |
 | `build_escalation.prompt.md` | `build_app.py` (`build_escalation_prompt`) | `{spec_text}`, `{corrective}` |
 | `build_handoff_notes` | `build_app.py` (`run_notes_turn`: the one extra turn of a build that ends without passing) | none: literal text |
+| `build_passed_notes` | `build_app.py` (`run_notes_turn_after_pass`: the same turn for a build that passed after a round that did not; the worktree is recorded before and after it) | none: literal text |
 | `spec_conformity.command_outcome_rule`, `.formatting_rule`, `.json_contract`; `code_review.scope_rule`, `.severity_rule`, `.command_outcome_rule`, `.json_contract` | the three review prompts, shared | none: literal text (`load_text`), braces are plain characters |
 
 The review and build templates keep each paragraph on one line, as the

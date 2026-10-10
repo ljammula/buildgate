@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -74,6 +75,7 @@ import harness_adapters  # noqa: E402
 import prompt_templates  # noqa: E402
 import round_feedback  # noqa: E402
 import saved_prompts  # noqa: E402
+import tree_guard  # noqa: E402
 
 DEFAULT_ADAPTER = harness_adapters.get("pi")
 PI_ROOT = Path(__file__).resolve().parents[1]
@@ -1353,6 +1355,11 @@ CORRECTIVE_AGENT = prompt_templates.load("build_corrective.agent", ("agent_notes
 # copied out by the host and removed from the worktree before any later step
 # (SC-018), so nothing else here may carry the text.
 HANDOFF_NOTES_PROMPT = prompt_templates.load_text("build_handoff_notes")
+# The same turn for a build that failed a round and then passed: what its
+# agent found out is worth the most then. Its reply is kept only when the
+# workspace is, by this script's own comparison, the one the checks passed on
+# (run_notes_turn_after_pass).
+HANDOFF_NOTES_PASSED_PROMPT = prompt_templates.load_text("build_passed_notes")
 HANDOFF_NOTES_FILE = "handoff-notes.md"
 HANDOFF_NOTES_TIMEOUT_S = 180
 HANDOFF_NOTES_MIN_REMAINING_S = 300
@@ -1360,6 +1367,16 @@ HANDOFF_NOTES_MIN_REMAINING_S = 300
 # keeps a file of up to 16 KiB (evidence.maxAgentNotesBytes), so a larger one
 # was not written by this script.
 HANDOFF_NOTES_MAX_BYTES = 12_000
+# What the comparison around a passed build's notes turn leaves out: git's own
+# directory (read-only in the worker) and the harness session folder, which
+# the turn itself writes and the host removes when the build step returns.
+NOTES_TREE_EXCLUDE = (".git", ".pi-build-session")
+# Time kept back, beyond the turn's own, for recording the tree up to three
+# times (tree_guard.MAX_SECONDS each).
+PASSED_NOTES_GUARD_RESERVE_S = 60
+# The most file content copied aside so a changed tree can be put back: the
+# worker's temporary directory is memory.
+PASSED_NOTES_BACKUP_MAX_BYTES = 32 << 20
 # The launch's timeout in seconds, set by the host for the build launch only.
 # The container's wall clock is not consulted: the script measures its own
 # elapsed time on the monotonic clock against this budget.
@@ -2220,15 +2237,25 @@ def round_history(rounds: list[Round]) -> str:
 	])
 
 
+def passed_notes_reserve_s(last_checks_s: float) -> int:
+	"""Seconds of the time budget a passed build's notes turn must leave
+	beyond the turn itself: recording the tree, and running the build's checks
+	once more (half as long again as they last took) should the turn change it."""
+	return PASSED_NOTES_GUARD_RESERVE_S + math.ceil(1.5 * last_checks_s)
+
+
 def notes_turn_skip_reason(
 	*, result: "BuildResult", last_turn: dict | None, sonnet_fallback: bool, criteria_given: bool,
-	adapter, session_dir: Path, elapsed: float,
+	adapter, session_dir: Path, elapsed: float, reserve_s: int = 0,
 ) -> str:
-	"""Why the notes turn does not run, or "" when it does. It runs only for a
-	build that never passed, whose last agent turn finished cleanly in a
-	session that can be continued, with room left in the launch's time budget."""
-	if result.succeeded:
-		return "build passed"
+	"""Why the notes turn does not run, or "" when it does. It runs for a
+	build that never passed, and for one that passed after a round that did
+	not (never for one that passed in its first round: it has nothing to
+	hand on, and every green build would pay for a model call), whose last
+	agent turn finished cleanly in a session that can be continued, with room
+	left in the launch's time budget: reserve_s more for a build that passed."""
+	if result.succeeded and not any(r.blockers for r in result.rounds[:-1]):
+		return "build passed with no failed round"
 	if last_turn is None:
 		return "no round ran in this process"
 	if sonnet_fallback:
@@ -2249,8 +2276,8 @@ def notes_turn_skip_reason(
 		budget = int(os.environ.get(BUILD_TIME_BUDGET_ENV, ""))
 	except ValueError:
 		return "no build time budget"
-	if budget - elapsed < HANDOFF_NOTES_MIN_REMAINING_S:
-		return f"under {HANDOFF_NOTES_MIN_REMAINING_S} s of the build time budget left"
+	if budget - elapsed < HANDOFF_NOTES_MIN_REMAINING_S + reserve_s:
+		return f"under {HANDOFF_NOTES_MIN_REMAINING_S + reserve_s} s of the build time budget left"
 	return ""
 
 
@@ -2259,7 +2286,10 @@ def cut_utf8(text: str, limit: int) -> str:
 	return text.encode("utf-8", errors="replace")[:limit].decode("utf-8", errors="ignore")
 
 
-def run_notes_turn(workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None) -> dict:
+def run_notes_turn(
+	workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None,
+	*, prompt: str = HANDOFF_NOTES_PROMPT, read_only: bool = False,
+) -> dict:
 	"""Asks the build agent, once, in its own session, for notes. Returns the
 	record for BUILD_EVIDENCE.json (no text from the reply). The reply goes,
 	redacted and cut, to session_dir/HANDOFF_NOTES_FILE and nowhere else: not
@@ -2271,7 +2301,7 @@ def run_notes_turn(workspace: Path, session_dir: Path, adapter, env: dict, think
 	started = _monotonic()
 	notes_path = session_dir / HANDOFF_NOTES_FILE
 	try:
-		return _notes_turn(workspace, notes_path, session_dir, adapter, env, thinking, record, started)
+		return _notes_turn(workspace, notes_path, session_dir, adapter, env, thinking, record, started, prompt, read_only)
 	except Exception as exc:
 		try:
 			notes_path.unlink(missing_ok=True)
@@ -2282,11 +2312,17 @@ def run_notes_turn(workspace: Path, session_dir: Path, adapter, env: dict, think
 		return record
 
 
-def _notes_turn(workspace: Path, notes_path: Path, session_dir: Path, adapter, env: dict, thinking: str | None, record: dict, started: float) -> dict:
-	saved_prompts.save_prompt(session_dir, "build-notes", HANDOFF_NOTES_PROMPT)
+def _notes_turn(
+	workspace: Path, notes_path: Path, session_dir: Path, adapter, env: dict, thinking: str | None,
+	record: dict, started: float, prompt: str, read_only: bool,
+) -> dict:
+	saved_prompts.save_prompt(session_dir, "build-notes", prompt)
+	# read_only is passed only when asked for, so an adapter written before it
+	# existed keeps working for the turn of a build that did not pass.
+	extra = {"read_only": True} if read_only else {}
 	command = adapter.invocation(
-		workspace, prompt=HANDOFF_NOTES_PROMPT, session_dir=session_dir,
-		continue_session=True, thinking=thinking, load_repo_skills=False,
+		workspace, prompt=prompt, session_dir=session_dir,
+		continue_session=True, thinking=thinking, load_repo_skills=False, **extra,
 	)
 	fingerprint_before = workspace_fingerprint(workspace)
 	completed, timed_out = run_agent_streaming(
@@ -2306,6 +2342,150 @@ def _notes_turn(workspace: Path, notes_path: Path, session_dir: Path, adapter, e
 	with open(notes_path, "w", encoding="utf-8", errors="replace") as handle:
 		handle.write(body + "\n")
 	return record
+
+
+def _files_git_does_not_ignore(workspace: Path) -> list[str]:
+	"""The tracked and the untracked, not ignored files: the source a build
+	works on, which is what is worth copying aside. [] when git cannot say."""
+	try:
+		listed = subprocess.run(
+			["git", "-C", str(workspace), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+			capture_output=True, check=False, timeout=30,
+		)
+	except (OSError, subprocess.SubprocessError):
+		return []
+	if listed.returncode != 0:
+		return []
+	return [os.fsdecode(name) for name in listed.stdout.split(b"\0") if name]
+
+
+def run_notes_turn_after_pass(workspace: Path, session_dir: Path, adapter, env: dict, thinking: str | None) -> tuple[dict, bool]:
+	"""The notes turn of a build whose checks have passed. Returns the record
+	for BUILD_EVIDENCE.json and whether the caller must run the build's checks
+	again before it may report the build as passed.
+
+	The turn runs with the harness's tools (a read-only set is asked for where
+	the adapter has one, which is not relied on), so the guarantee is made
+	here: the workspace is recorded before the turn (tree_guard.record: every
+	path outside NOTES_TREE_EXCLUDE, ignored and untracked ones included, with
+	its kind, permission bits and content hash or link target) and again
+	after it. Equal records: the tree handed back is the tree that passed, and
+	the reply is kept. Anything else (a difference, or a tree that can no
+	longer be recorded): the reply is removed, the tree is put back where a
+	copy allows, and the caller verifies whatever tree is there now. A tree
+	too large or too slow to record is not given the turn at all."""
+	def skipped(reason: str) -> tuple[dict, bool]:
+		return {"ran": False, "skipped_reason": reason, "duration_s": 0.0, "after_pass": True}, False
+
+	try:
+		before = tree_guard.record(workspace, exclude=NOTES_TREE_EXCLUDE)
+	except tree_guard.TooLarge as exc:
+		return skipped(f"workspace too large to record: {exc}")
+	except Exception as exc:
+		return skipped(f"workspace could not be recorded: {type(exc).__name__}")
+	backup_dir = None
+	copies: dict[str, str] = {}
+	try:
+		backup_dir = tempfile.mkdtemp(prefix="factory-notes-tree-")
+		# A temporary directory inside the workspace would itself be a change.
+		if Path(backup_dir).resolve().is_relative_to(workspace.resolve()):
+			shutil.rmtree(backup_dir, ignore_errors=True)
+			backup_dir = None
+		else:
+			copies = tree_guard.backup(
+				workspace, before, _files_git_does_not_ignore(workspace), Path(backup_dir), max_bytes=PASSED_NOTES_BACKUP_MAX_BYTES,
+			)
+	except Exception:
+		copies = {}
+	try:
+		record = run_notes_turn(workspace, session_dir, adapter, env, thinking, prompt=HANDOFF_NOTES_PASSED_PROMPT, read_only=True)
+		record.update(after_pass=True, tree_entries=len(before.entries), tree_bytes=before.bytes, tree_record_s=round(before.seconds, 3))
+		discarded, changed, restored = _settle_tree_after_notes(workspace, before, copies)
+	finally:
+		if backup_dir is not None:
+			shutil.rmtree(backup_dir, ignore_errors=True)
+	if not discarded:
+		return record, False
+	notes_path = session_dir / HANDOFF_NOTES_FILE
+	try:
+		notes_path.unlink(missing_ok=True)
+	except OSError:
+		try:
+			os.chmod(session_dir, 0o700)
+			notes_path.unlink(missing_ok=True)
+		except OSError:
+			pass
+	# How many paths, never which: a name is text the turn chose.
+	record.update(discarded_reason=discarded, changed_paths=changed, tree_restored=restored)
+	return record, True
+
+
+def _settle_tree_after_notes(workspace: Path, before, copies: dict[str, str]) -> tuple[str, int, bool]:
+	"""Compares the workspace with `before`. Returns ("", 0, True) when it is
+	the same tree; otherwise why the reply is discarded, how many paths
+	differed, and whether the tree is, by a fresh record, back to `before`."""
+	try:
+		after = tree_guard.record(workspace, exclude=NOTES_TREE_EXCLUDE)
+	except Exception:
+		return "the workspace could not be compared after the turn", 0, False
+	changed = tree_guard.changed_paths(before, after)
+	if not changed:
+		return "", 0, True
+	try:
+		tree_guard.restore(workspace, before, after, copies)
+		restored = not tree_guard.changed_paths(before, tree_guard.record(workspace, exclude=NOTES_TREE_EXCLUDE))
+	except Exception:
+		restored = False
+	return "the turn changed the workspace", len(changed), restored
+
+
+def verify_again_after_notes_turn(
+	result: "BuildResult", workspace: Path, *, setup_commands: list[str], verify_command_override: str | None,
+	fast_check_command: str | None, oracle_command: str | None,
+) -> None:
+	"""Runs the build's own checks (setup, fast check, verify, reference
+	oracle) on the tree a notes turn left changed, so the build is never
+	reported as passed for a tree this script did not verify. This runs even
+	when the tree was put back: the copy it was put back from sat where the
+	turn could write.
+
+	When the checks fail, the build ends as one whose last round failed them:
+	that round's record takes the failure and no further round runs. A further
+	round would need another notes turn after it, and nothing would bound how
+	often a turn that changes the tree sends the build round again; ending
+	here runs the turn at most once per build. The host's own verify, gates
+	and reviews judge the committed result either way."""
+	rnd = result.rounds[-1]
+	print_progress({"stage": "agent", "event": "note", "detail": "the notes turn changed the workspace; running the build's checks again"})
+	try:
+		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
+			workspace, setup_commands=setup_commands, verify_command_override=verify_command_override,
+			fast_check_command=fast_check_command,
+		)
+		recorded_oracle_command, oracle_passed, oracle_tail = maybe_run_reference_oracle(
+			workspace, oracle_command=oracle_command, verify_passed=verify_passed,
+		)
+	except Exception as exc:
+		setup_failed, verify_command, verify_passed, verify_timed_out = None, rnd.verify_command, False, False
+		verify_tail = f"the checks could not be run again: {type(exc).__name__}"
+		fast_check_ran, fast_check_passed = False, None
+		recorded_oracle_command, oracle_passed, oracle_tail = None, None, ""
+	blockers, _ = round_blockers(
+		verify_passed=verify_passed, pi_failed=False, pi_timed_out=False, traces=[], review_policy="advisory",
+		fast_check_ran=fast_check_ran, fast_check_passed=fast_check_passed, oracle_passed=oracle_passed, setup_failed=setup_failed,
+	)
+	result.notes_turn["reverify_passed"] = not blockers
+	if not blockers:
+		return
+	rnd.verify_command, rnd.verify_passed, rnd.verify_timed_out, rnd.verify_output_tail = verify_command, verify_passed, verify_timed_out, verify_tail
+	rnd.fast_check_ran, rnd.fast_check_passed = fast_check_ran, fast_check_passed
+	rnd.oracle_command, rnd.oracle_passed, rnd.oracle_output_tail = recorded_oracle_command, oracle_passed, oracle_tail
+	rnd.blockers = list(blockers)
+	rnd.failure_signature = round_feedback.failure_signature(
+		blockers, "\n".join(part for part in (verify_tail if verify_passed is not True else "", oracle_tail if oracle_passed is False else "") if part), "",
+	)
+	result.succeeded = False
+	result.stopped_reason = f"the notes turn changed the workspace and its checks did not pass again; escalation required: {', '.join(blockers)}"
 
 
 def run_build(
@@ -2345,6 +2525,9 @@ def run_build(
 	except OSError:
 		pass
 	last_turn: dict | None = None
+	# How long the last round's setup, verify and oracle took: what running
+	# them once more after a notes turn would cost.
+	last_checks_s = 0.0
 
 	agents_md_git_blob = committed_agents_md_blob(workspace)
 	result = BuildResult(
@@ -2490,6 +2673,7 @@ def run_build(
 		autofix_record = run_autofix(workspace, autofix_commands or [], review_base_sha, feedback_dir, env)
 		note_autofix(round_index, autofix_record)
 
+		checks_started = _monotonic()
 		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
 			fast_check_command=fast_check_command, log_dir=feedback_dir,
@@ -2501,6 +2685,7 @@ def run_build(
 		recorded_oracle_command, oracle_passed, oracle_tail = maybe_run_reference_oracle(
 			workspace, oracle_command=oracle_command, verify_passed=verify_passed, log_dir=feedback_dir,
 		)
+		last_checks_s = _monotonic() - checks_started
 
 		agent_returncode = completed.returncode if completed else -1
 		# A nonzero pi exit means the CLI itself crashed, was invoked wrong, or
@@ -2679,11 +2864,21 @@ def run_build(
 			result=result, last_turn=last_turn, sonnet_fallback=sonnet_fallback,
 			criteria_given=spec_acceptance_criteria is not None, adapter=adapter, session_dir=session_dir,
 			elapsed=_monotonic() - started_monotonic,
+			reserve_s=passed_notes_reserve_s(last_checks_s) if result.succeeded else 0,
 		)
 	except Exception as exc:
 		skipped = f"notes turn failed: {type(exc).__name__}"
 	if skipped:
 		result.notes_turn = {"ran": False, "skipped_reason": skipped, "duration_s": 0.0}
+	elif result.succeeded:
+		# Passed after a failed round: the turn runs on a recorded tree, and a
+		# tree it changed is verified again before the build may stay passed.
+		result.notes_turn, verify_again = run_notes_turn_after_pass(workspace, session_dir, adapter, env, thinking)
+		if verify_again:
+			verify_again_after_notes_turn(
+				result, workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
+				fast_check_command=fast_check_command, oracle_command=oracle_command,
+			)
 	else:
 		result.notes_turn = run_notes_turn(workspace, session_dir, adapter, env, thinking)
 

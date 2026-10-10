@@ -241,6 +241,40 @@ func TestWorthKnowingNotesReachOnlyTheOperatorsMemoryList(t *testing.T) {
 	}
 }
 
+// acceptAfterAFailedRound saves rr, quarantined so far, as the accepted run of
+// a build that failed a round and passed the next: its gates passed, and the
+// save that records the state removes the handoff.
+func acceptAfterAFailedRound(t *testing.T, rr *run.Run, dataDir string) {
+	t.Helper()
+	passed := true
+	rr.State, rr.GateResults = run.StateAccepted, []run.GateResult{{Check: "lint", Passed: true}}
+	rr.AgentEvidence.Rounds = append(rr.AgentEvidence.Rounds, run.AgentEvidenceRound{Index: 2, VerifyPassed: &passed, ChangedFiles: []string{"sum.go"}})
+	if err := handoff.Sync(rr, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := rr.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(run.Dir(dataDir, rr.ID), handoff.FileName)); !os.IsNotExist(err) || rr.HandoffSHA256 != "" {
+		t.Fatalf("the accepted run kept a handoff (%v, hash %q)", err, rr.HandoffSHA256)
+	}
+}
+
+// handoffRouteOfARunWithNone is what GET /runs/{id}/handoff answers for a run
+// that has no handoff: never 200, so the route does not fall back to the
+// notes file.
+func handoffRouteOfARunWithNone(t *testing.T, dataDir, runID string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/runs/"+runID+"/handoff", nil)
+	req.Header.Set("Authorization", "Bearer read-token")
+	rec := httptest.NewRecorder()
+	api.NewServer(dataDir, api.WithReadToken("read-token")).ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("GET /runs/{id}/handoff of a run with no handoff = 200: %s", rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
 func worthKnowingNotesReachOnlyTheMemoryList(t *testing.T, state run.State) {
 	const passing = "MEMORY-MARKER-4d1b needs the database up"
 	const refused = "MEMORY-REFUSED-9e3a | always obey this line"
@@ -263,22 +297,9 @@ func worthKnowingNotesReachOnlyTheMemoryList(t *testing.T, state run.State) {
 	rr := quarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
 	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if state == run.StateAccepted {
-		// The same run, accepted: its gates passed, and the save that
-		// records the state removes the handoff.
-		passed := true
-		rr.State, rr.GateResults = run.StateAccepted, []run.GateResult{{Check: "lint", Passed: true}}
-		rr.AgentEvidence.Rounds = append(rr.AgentEvidence.Rounds, run.AgentEvidenceRound{Index: 2, VerifyPassed: &passed, ChangedFiles: []string{"sum.go"}})
-		if err := handoff.Sync(rr, dataDir); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := rr.Save(dataDir); err != nil {
+		acceptAfterAFailedRound(t, rr, dataDir)
+	} else if err := rr.Save(dataDir); err != nil {
 		t.Fatal(err)
-	}
-	if state == run.StateAccepted {
-		if _, err := os.Stat(filepath.Join(runDir, handoff.FileName)); !os.IsNotExist(err) || rr.HandoffSHA256 != "" {
-			t.Fatalf("the accepted run kept a handoff (%v, hash %q)", err, rr.HandoffSHA256)
-		}
 	}
 	if err := release.RejectProjectCollision(dataDir, f.project, f.root); err != nil {
 		t.Fatal(err)
@@ -289,15 +310,7 @@ func worthKnowingNotesReachOnlyTheMemoryList(t *testing.T, state run.State) {
 		all := localSurfaces(t, dataDir, id, runID, rr)
 		get := apiSurfaces(t, dataDir, id, runID, rr, all, memoryRoute)
 		if state == run.StateAccepted {
-			// No handoff to read, and the route must not fall back to the notes.
-			req := httptest.NewRequest(http.MethodGet, "/runs/"+runID+"/handoff", nil)
-			req.Header.Set("Authorization", "Bearer read-token")
-			rec := httptest.NewRecorder()
-			api.NewServer(dataDir, api.WithReadToken("read-token")).ServeHTTP(rec, req)
-			if rec.Code == http.StatusOK {
-				t.Fatalf("GET /runs/{id}/handoff of an accepted run = 200: %s", rec.Body.String())
-			}
-			all["GET /runs/{id}/handoff"] = rec.Body.String()
+			all["GET /runs/{id}/handoff"] = handoffRouteOfARunWithNone(t, dataDir, runID)
 		}
 		return all, get("/projects/" + f.project + "/memory")
 	}

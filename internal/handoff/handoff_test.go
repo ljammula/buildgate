@@ -531,6 +531,44 @@ func TestParseNotesOfNothingUsableIsNil(t *testing.T) {
 	}
 }
 
+// An accepted run's notes give up only the fifth heading, cleaned like every
+// value from a build, and only from a plain file of the retained size.
+func TestRepositoryNotesOfAcceptedRunReadsOnlyTheFifthHeading(t *testing.T) {
+	dir := t.TempDir()
+	if got := RepositoryNotesOfAcceptedRun(dir); got != nil {
+		t.Fatalf("no notes file gave %v", got)
+	}
+	notes := "What I did\n- changed sum.go\nMy current hypothesis\n- the cache key\n" +
+		"Things worth knowing about this repository\n- Run `make gen` first\x1b[31m\n- none\n- " + strings.Repeat("x", 600) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, evidence.AgentNotesFileName), []byte(notes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := RepositoryNotesOfAcceptedRun(dir)
+	if len(got) != 2 || got[0] != "Run 'make gen' first" || len(got[1]) > maxSentenceLen+3 {
+		t.Fatalf("items = %q, want the two cleaned items of the fifth heading", got)
+	}
+	for _, item := range got {
+		if strings.Contains(item, "sum.go") || strings.Contains(item, "cache key") || strings.ContainsAny(item, "\x1b`") {
+			t.Errorf("item %q carries another heading or an uncleaned character", item)
+		}
+	}
+	// A link in the file's place is not read.
+	linked := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, evidence.AgentNotesFileName), filepath.Join(linked, evidence.AgentNotesFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if got := RepositoryNotesOfAcceptedRun(linked); got != nil {
+		t.Errorf("a linked notes file gave %v", got)
+	}
+	// Nor a file with no fifth heading.
+	if err := os.WriteFile(filepath.Join(dir, evidence.AgentNotesFileName), []byte("What I did\n- changed sum.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := RepositoryNotesOfAcceptedRun(dir); len(got) != 0 {
+		t.Errorf("notes with no fifth heading gave %v", got)
+	}
+}
+
 // A canonical_verify recorded because the verify did not run the repository's
 // setup commands (a worker older than them) is the operator's: no build can
 // fix it, so it is never handed to one.

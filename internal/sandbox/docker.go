@@ -2019,6 +2019,7 @@ var HarnessSiblingModules = map[string]bool{
 	"prompt_templates.py":  true, // loads the *.prompt.md templates below
 	"round_feedback.py":    true, // imported by build_app.py
 	"saved_prompts.py":     true, // imported by build_app.py
+	"tree_guard.py":        true, // imported by build_app.py
 
 	// Run by harness_adapters.py's CopilotAdapter under node, around the
 	// Copilot CLI on a chatgpt-codex route.
@@ -2037,6 +2038,7 @@ var HarnessSiblingModules = map[string]bool{
 	"build_corrective.verify.prompt.md":                  true,
 	"build_escalation.prompt.md":                         true,
 	"build_handoff_notes.prompt.md":                      true,
+	"build_passed_notes.prompt.md":                       true,
 	"build_round_checklist.prompt.md":                    true,
 	"code_review.command_outcome_rule.prompt.md":         true,
 	"code_review.diff_inline.prompt.md":                  true,

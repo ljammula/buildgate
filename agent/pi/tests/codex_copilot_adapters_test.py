@@ -152,6 +152,14 @@ class CodexInvocationTests(unittest.TestCase):
 	def argv(self, *, cont=False, thinking=None, prompt="do it"):
 		return CODEX.invocation(Path("/work"), prompt=prompt, session_dir=self.session, continue_session=cont, thinking=thinking)
 
+	def test_a_read_only_turn_is_the_same_argv(self):
+		# Codex has no flag for it on `exec resume`: the build script's own
+		# comparison of the tree is what guards the turn.
+		with route():
+			plain = CODEX.invocation(Path("/work"), prompt="do it", session_dir=self.session, continue_session=True, thinking=None)
+			got = CODEX.invocation(Path("/work"), prompt="do it", session_dir=self.session, continue_session=True, thinking=None, read_only=True)
+		self.assertEqual(got, plain)
+
 	def test_fresh_round_argv_is_exactly_this(self):
 		with route():
 			got = self.argv()
@@ -355,6 +363,16 @@ class CopilotInvocationTests(unittest.TestCase):
 
 	def argv(self, *, cont=False, thinking=None, prompt="do it"):
 		return COPILOT.invocation(Path("/work"), prompt=prompt, session_dir=self.session, continue_session=cont, thinking=thinking)
+
+	def test_a_read_only_turn_denies_the_tools_that_write(self):
+		with route():
+			plain = self.argv()
+			got = COPILOT.invocation(Path("/work"), prompt="do it", session_dir=self.session, continue_session=True, thinking=None, read_only=True)
+		self.assertNotIn("--deny-tool=write", plain)
+		self.assertIn("--deny-tool=shell", got)
+		self.assertIn("--deny-tool=write", got)
+		self.assertIn("--allow-all-tools", got)
+		self.assertEqual(got[-2:], ["-p", "do it"])
 
 	@staticmethod
 	def session_id(argv):
