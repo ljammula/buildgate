@@ -1,16 +1,12 @@
 import { useProjectStats } from "@/api/runQueries";
 import { formatMedianAcceptedTokens } from "@/domain/cost";
 import type { ProjectStats } from "@/domain/project";
-import { projectStatsPath } from "@/routes/paths";
 import { Card } from "@/ui/Card";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Section } from "@/ui/PageLayout";
 import { StaleWarning } from "@/ui/StaleWarning";
-
-import { ProjectIdForm } from "./ProjectIdForm";
-import { useLoadProject } from "./useLoadProject";
 
 const NO_DATA = "No accepted runs yet";
 
@@ -61,23 +57,12 @@ function StatsBody({ stats }: { readonly stats: ProjectStats }) {
 /**
  * One project's figures. A failed refresh keeps the last data under a
  * warning; Retry is disabled while a refresh is in flight. Keyed by the
- * project in the screen, so another project starts from nothing.
+ * project, so another project starts from nothing.
  */
-export function ProjectStatsPanel({
-  project,
-  withForm = true,
-}: {
-  readonly project: string;
-  /** False inside a project's own row, where there is no other project to load. */
-  readonly withForm?: boolean;
-}) {
+export function ProjectStatsPanel({ project }: { readonly project: string }) {
   const query = useProjectStats(project);
-  const load = useLoadProject(project, projectStatsPath, () => void query.refetch());
   return (
     <>
-      {withForm ? (
-        <ProjectIdForm initial={project} loading={query.isFetching} onLoad={load} />
-      ) : null}
       {query.isFetching ? <Spinner label="Loading stats" /> : null}
       {query.data === undefined ? (
         query.error === null ? null : (

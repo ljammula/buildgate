@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import { statsRefreshMs } from "@/api/polling";
 import { useFactoryStats } from "@/api/runQueries";
 import { ApiError } from "@/domain/apiError";
@@ -11,6 +13,7 @@ import {
   statsEmpty,
 } from "@/domain/stats";
 import { escapeInvisible } from "@/domain/textEscape";
+import { projectsPath } from "@/routes/paths";
 import { cn } from "@/ui/cn";
 import { StaleWarning } from "@/ui/StaleWarning";
 import {
@@ -85,7 +88,13 @@ function NumbersTable({
             // The overall row and a project could share a name; the position cannot.
             <TableRow key={index} data-testid="numbers-row">
               <TableHeaderCell scope="row" className="text-fg border-b-0 text-sm">
-                {row.label}
+                {row.project === null ? (
+                  row.label
+                ) : (
+                  <Link to={projectsPath(row.project)} className="text-accent hover:underline">
+                    {row.label}
+                  </Link>
+                )}
               </TableHeaderCell>
               <TableCell numeric>{row.tickets}</TableCell>
               <TableCell numeric>{row.oneShot}</TableCell>

@@ -1,5 +1,5 @@
 import { createHttp } from "@/api/http";
-import { fetchConsoleConfig, getQueueRunStatus, listDaemons, listWorkspaces } from "@/api/ops";
+import { fetchConsoleConfig, getQueueRunStatus, listWorkspaces } from "@/api/ops";
 import { readFixtureText } from "@/test/fixtures";
 
 interface Call {
@@ -124,26 +124,6 @@ describe("fetchConsoleConfig", () => {
       const { fetch } = recordingFetch(() => json(body));
       expect(await fetchConsoleConfig(httpFor(fetch))).toEqual(disabled);
     }
-  });
-});
-
-describe("listDaemons", () => {
-  test("listDaemons sends the start token, which is what the server gates GET /daemons on", async () => {
-    const { fetch, calls } = recordingFetch(() => json("[]"));
-    await listDaemons(httpFor(fetch));
-    expect(calls[0]?.url).toBe("/daemons");
-    expect(calls[0]?.init.method).toBe("GET");
-    expect(calls[0]?.init.headers).toEqual({ Authorization: "Bearer start-t" });
-  });
-
-  test("decodes the fixture", async () => {
-    const { fetch } = recordingFetch(() => json(readFixtureText("api/daemons.json")));
-    const daemons = await listDaemons(httpFor(fetch));
-    expect(daemons).toHaveLength(1);
-    expect(daemons[0]?.repository).toBe("acme/app");
-    expect(daemons[0]?.state).toBe("running");
-    expect(daemons[0]?.pid).toBe(4242);
-    expect(daemons[0]?.heartbeatUpdatedAt).toBe("2026-09-10T09:00:00Z");
   });
 });
 

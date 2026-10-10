@@ -9,15 +9,7 @@ import {
 } from "@/domain/boardFilters";
 
 export type RequestBoardDeepLink =
-  | "none"
-  | "requestDetail"
-  | "runDetail"
-  | "projectRelease"
-  | "runList"
-  | "projectStats"
-  | "projectObservations"
-  | "ops"
-  | "newRequest";
+  "none" | "requestDetail" | "runDetail" | "runList" | "newRequest";
 
 export interface RequestBoardRouteConfig {
   readonly filters: RequestBoardFilters;
@@ -51,24 +43,8 @@ export function runDetailRoute(id: string): RequestBoardRouteConfig {
   return deepLink("runDetail", id);
 }
 
-export function projectReleaseRoute(project: string): RequestBoardRouteConfig {
-  return deepLink("projectRelease", project);
-}
-
 export function runListRoute(): RequestBoardRouteConfig {
   return deepLink("runList", null);
-}
-
-export function projectStatsRoute(project: string): RequestBoardRouteConfig {
-  return deepLink("projectStats", project);
-}
-
-export function projectObservationsRoute(project: string): RequestBoardRouteConfig {
-  return deepLink("projectObservations", project);
-}
-
-export function opsRoute(): RequestBoardRouteConfig {
-  return deepLink("ops", null);
 }
 
 export function newRequestRoute(): RequestBoardRouteConfig {
@@ -99,7 +75,6 @@ export function parseRoute(input: string | URL): RequestBoardRouteConfig {
   const url = urlFor(input);
   if (url.pathname === "/triage") return triageRoute();
   if (url.pathname === "/runs") return runListRoute();
-  if (url.pathname === "/ops") return opsRoute();
   // This must precede the generic request-id branch: "new" is a screen.
   if (url.pathname === "/requests/new") return newRequestRoute();
 
@@ -109,15 +84,6 @@ export function parseRoute(input: string | URL): RequestBoardRouteConfig {
   }
   if (segments.length === 2 && segments[0] === "runs") {
     return runDetailRoute(decodeSegment(segmentAt(segments, 1)));
-  }
-  if (segments.length === 3 && segments[0] === "projects" && segments[2] === "release") {
-    return projectReleaseRoute(decodeSegment(segmentAt(segments, 1)));
-  }
-  if (segments.length === 3 && segments[0] === "projects" && segments[2] === "stats") {
-    return projectStatsRoute(decodeSegment(segmentAt(segments, 1)));
-  }
-  if (segments.length === 3 && segments[0] === "projects" && segments[2] === "observations") {
-    return projectObservationsRoute(decodeSegment(segmentAt(segments, 1)));
   }
   return boardRoute(filtersFromSearchParams(url.searchParams));
 }
@@ -129,16 +95,8 @@ export function pathForRoute(route: RequestBoardRouteConfig): string {
       return `/requests/${encodeURIComponent(requiredDeepLinkId(route))}`;
     case "runDetail":
       return `/runs/${encodeURIComponent(requiredDeepLinkId(route))}`;
-    case "projectRelease":
-      return `/projects/${encodeURIComponent(requiredDeepLinkId(route))}/release`;
     case "runList":
       return "/runs";
-    case "projectStats":
-      return `/projects/${encodeURIComponent(requiredDeepLinkId(route))}/stats`;
-    case "projectObservations":
-      return `/projects/${encodeURIComponent(requiredDeepLinkId(route))}/observations`;
-    case "ops":
-      return "/ops";
     case "newRequest":
       return "/requests/new";
     case "none":
@@ -166,24 +124,8 @@ export function runPath(id: string): string {
   return pathForRoute(runDetailRoute(id));
 }
 
-export function projectReleasePath(project: string): string {
-  return pathForRoute(projectReleaseRoute(project));
-}
-
-export function projectStatsPath(project: string): string {
-  return pathForRoute(projectStatsRoute(project));
-}
-
-export function projectObservationsPath(project: string): string {
-  return pathForRoute(projectObservationsRoute(project));
-}
-
 export function runsPath(): string {
   return "/runs";
-}
-
-export function opsPath(): string {
-  return "/ops";
 }
 
 export function newRequestPath(): string {
@@ -199,8 +141,29 @@ export function triagePath(): string {
   return "/triage";
 }
 
-export function projectsPath(): string {
-  return "/app/projects";
+export type ProjectTab = "stats" | "release" | "trend" | "observations" | "memory";
+
+export const projectTabs: readonly ProjectTab[] = [
+  "stats",
+  "release",
+  "trend",
+  "observations",
+  "memory",
+];
+
+export function isProjectTab(value: string | null): value is ProjectTab {
+  return projectTabs.some((tab) => tab === value);
+}
+
+/**
+ * The Projects screen, optionally with one project's row open on a tab:
+ * `?project=<id>&tab=<tab>`; without a tab the row opens on Stats.
+ */
+export function projectsPath(project?: string, tab?: ProjectTab): string {
+  if (project === undefined || project === "") return "/app/projects";
+  const params = new URLSearchParams({ project });
+  if (tab !== undefined) params.set("tab", tab);
+  return `/app/projects?${params.toString()}`;
 }
 
 export function newRunPath(): string {
@@ -233,6 +196,7 @@ export const routePatterns = {
   runDetail: "/runs/:id",
   newRun: "/app/runs/new",
   projects: "/app/projects",
+  // These four only redirect to the Projects screen, so an old link still lands.
   projectStats: "/projects/:project/stats",
   projectObservations: "/projects/:project/observations",
   projectRelease: "/projects/:project/release",

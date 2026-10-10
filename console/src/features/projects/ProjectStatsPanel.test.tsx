@@ -1,22 +1,18 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { apiErrorResponse, json, renderApp } from "@/test/render";
 
-import { ProjectStatsScreen } from "./ProjectStatsScreen";
+import { ProjectStatsPanel } from "./ProjectStatsPanel";
 
 function renderStats(project: string, reply: () => Response, startToken?: string) {
-  return renderApp(<ProjectStatsScreen />, {
-    path: `/projects/${project}/stats`,
-    pattern: "/projects/:project/stats",
+  return renderApp(<ProjectStatsPanel project={project} />, {
     server: [{ on: `GET /projects/${project}/stats`, reply }],
     ...(startToken === undefined ? {} : { tokens: { startToken } }),
   });
 }
 
-// The project id arrives in the URL ; the Load button on the page is exercised by the
-// different-project navigation in the release screen's tests.
-test("entering a project id loads its acceptance-rate figures", async () => {
+test("a project's acceptance-rate figures load with the start token", async () => {
   const { server } = renderStats(
     "checkouts",
     () =>
@@ -79,10 +75,9 @@ test("a failed lookup is reported, not shown as a stale success", async () => {
   expect(screen.queryByText("Override rate (accepted)")).not.toBeInTheDocument();
 });
 
-test("a failed refresh keeps the last figures under a warning, and Retry waits for the refresh", async () => {
+test("a failed refresh keeps the last figures under a warning, and Retry is offered", async () => {
   let calls = 0;
-  let release: (() => void) | undefined;
-  const { server } = renderStats("checkouts", () => {
+  const { server, queryClient } = renderStats("checkouts", () => {
     calls += 1;
     return json({
       project: "checkouts",
@@ -94,15 +89,8 @@ test("a failed refresh keeps the last figures under a warning, and Retry waits f
   });
   expect(await screen.findByText("Override rate (accepted)")).toBeInTheDocument();
 
-  server.set("GET /projects/checkouts/stats", async () => {
-    await new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    return apiErrorResponse(500, "stats unreadable");
-  });
-  await userEvent.click(screen.getByRole("button", { name: "Load" }));
-  expect(screen.getByRole("button", { name: "Load" })).toBeDisabled();
-  release?.();
+  server.set("GET /projects/checkouts/stats", () => apiErrorResponse(500, "stats unreadable"));
+  void queryClient.refetchQueries();
 
   expect(await screen.findByText(/refresh failed: stats unreadable/)).toBeInTheDocument();
   expect(screen.getByText("Override rate (accepted)")).toBeInTheDocument();
@@ -145,7 +133,7 @@ test("a halted run and a quarantine cause each bring their block back", async ()
   expect(screen.getByRole("heading", { name: "Quarantined by cause" })).toBeInTheDocument();
 });
 
-test("the project id is the page title, with Stats as its section, and the facts sit in a card", async () => {
+test("the facts sit in a card", async () => {
   renderStats("checkouts", () =>
     json({
       project: "checkouts",
@@ -158,12 +146,42 @@ test("the project id is the page title, with Stats as its section, and the facts
       median_accepted_tokens: null,
     }),
   );
-  expect(await screen.findByRole("heading", { level: 1, name: "checkouts" })).toBeInTheDocument();
-  const header = screen.getByRole("banner");
-  expect(header).toHaveTextContent("Stats");
   const facts = (await screen.findByText("Total runs")).closest("dl");
   expect(facts?.parentElement).toHaveClass("border", "rounded-lg");
-  // The Project id field and its Load button stay.
-  expect(screen.getByLabelText("Project id")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument();
+  // The panel sits in its project's own row: there is no other project to load.
+  expect(screen.queryByLabelText("Project id")).not.toBeInTheDocument();
+});
+
+test("Retry is disabled while the refresh is in flight", async () => {
+  const body = {
+    project: "checkouts",
+    total_runs: 3,
+    accepted: 0,
+    accepted_via_override: 0,
+    halted: 1,
+  };
+  const { server, queryClient } = renderStats("checkouts", () => json(body));
+  expect(await screen.findByText("Override rate (accepted)")).toBeInTheDocument();
+  server.set("GET /projects/checkouts/stats", () => apiErrorResponse(500, "unreadable"));
+  void queryClient.refetchQueries();
+  const retry = await screen.findByRole("button", { name: "Retry" });
+
+  let finish: () => void = () => undefined;
+  server.set(
+    "GET /projects/checkouts/stats",
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = () => {
+          resolve(json(body));
+        };
+      }),
+  );
+  await userEvent.click(retry);
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+  });
+  finish();
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
 });

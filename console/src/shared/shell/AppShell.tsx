@@ -6,7 +6,6 @@ import {
   Monitor,
   Moon,
   Plus,
-  ServerCog,
   Sun,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
@@ -15,14 +14,7 @@ import { Link, matchPath, useLocation } from "react-router";
 import { useApi } from "@/api/ApiProvider";
 import { nextThemeMode, useThemeMode } from "@/platform/theme";
 import type { ThemeMode } from "@/platform/themeStore";
-import {
-  boardPath,
-  newRequestPath,
-  opsPath,
-  projectsPath,
-  runsPath,
-  triagePath,
-} from "@/routes/paths";
+import { boardPath, newRequestPath, projectsPath, runsPath, triagePath } from "@/routes/paths";
 import { BrandMark } from "@/ui/BrandMark";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
@@ -38,16 +30,13 @@ interface NavItem {
   readonly icon: ComponentType<{ className?: string }>;
   /** Match the path exactly: "/" would otherwise match every page. */
   readonly end?: boolean;
-  /** Other path patterns that belong to this item (a project's stats page is under Projects). */
-  readonly also?: readonly string[];
 }
 
 const navItems: readonly NavItem[] = [
   { to: boardPath(), label: "Mission Control", icon: LayoutDashboard, end: true },
   { to: triagePath(), label: "Triage", icon: ListChecks },
   { to: runsPath(), label: "Runs", icon: Activity },
-  { to: projectsPath(), label: "Projects", icon: FolderGit2, also: ["/projects/*"] },
-  { to: opsPath(), label: "Ops", icon: ServerCog },
+  { to: projectsPath(), label: "Projects", icon: FolderGit2 },
 ];
 
 // The toggle's names are fixed so operators and the browser walk find the same control.
@@ -117,10 +106,8 @@ export function AppShell({ children }: AppShellProps) {
               : `${needsYou} ${needsYou === 1 ? "request needs" : "requests need"} you.`}
         </p>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 max-md:flex-row">
-          {navItems.map(({ to, label, icon: Icon, end, also }) => {
-            const isActive = [to, ...(also ?? [])].some(
-              (path) => matchPath({ path, end: end ?? false }, pathname) !== null,
-            );
+          {navItems.map(({ to, label, icon: Icon, end }) => {
+            const isActive = matchPath({ path: to, end: end ?? false }, pathname) !== null;
             return (
               <Link
                 key={to}

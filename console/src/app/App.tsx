@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { BrowserRouter, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { ApiProvider } from "@/api/ApiProvider";
 import type { Http } from "@/api/http";
@@ -9,18 +9,16 @@ import type { ConsoleConfig } from "@/domain/ops";
 import { BoardScreen } from "@/features/board/BoardScreen";
 import { NewRequestScreen } from "@/features/new-request/NewRequestScreen";
 import { NewRunScreen } from "@/features/new-run/NewRunScreen";
-import { OpsScreen } from "@/features/ops/OpsScreen";
 import { ProjectListScreen } from "@/features/projects/ProjectListScreen";
-import { ProjectReleaseScreen } from "@/features/projects/ProjectReleaseScreen";
-import { ProjectObservationsScreen } from "@/features/projects/ProjectObservationsScreen";
-import { ProjectStatsScreen } from "@/features/projects/ProjectStatsScreen";
 import { RequestDetailScreen } from "@/features/request-detail/RequestDetailScreen";
 import { RunDetailScreen } from "@/features/run-detail/RunDetailScreen";
 import { RunListScreen } from "@/features/runs/RunListScreen";
 import { TriageScreen } from "@/features/triage/TriageScreen";
-import { routePatterns } from "@/routes/paths";
+import { projectsPath, routePatterns } from "@/routes/paths";
 import { AppShell } from "@/shared/shell/AppShell";
 import { TooltipProvider } from "@/ui/Tooltip";
+
+import { ProjectTabRedirect } from "./ProjectTabRedirect";
 
 export interface AppProps {
   readonly http: Http;
@@ -53,10 +51,14 @@ function AppRoutes() {
       <Route path={routePatterns.runDetail} element={<RunDetailScreen />} />
       <Route path={routePatterns.newRun} element={<NewRunScreen />} />
       <Route path={routePatterns.projects} element={<ProjectListScreen />} />
-      <Route path={routePatterns.projectStats} element={<ProjectStatsScreen />} />
-      <Route path={routePatterns.projectObservations} element={<ProjectObservationsScreen />} />
-      <Route path={routePatterns.projectRelease} element={<ProjectReleaseScreen />} />
-      <Route path={routePatterns.ops} element={<OpsScreen />} />
+      {/* Pages that no longer exist: an old link or bookmark lands on the Projects screen. */}
+      <Route path={routePatterns.projectStats} element={<ProjectTabRedirect tab="stats" />} />
+      <Route
+        path={routePatterns.projectObservations}
+        element={<ProjectTabRedirect tab="observations" />}
+      />
+      <Route path={routePatterns.projectRelease} element={<ProjectTabRedirect tab="release" />} />
+      <Route path={routePatterns.ops} element={<Navigate replace to={projectsPath()} />} />
       {/* An unknown path is the board, as the server serves the console for it. */}
       <Route path="*" element={<BoardScreen />} />
     </Routes>

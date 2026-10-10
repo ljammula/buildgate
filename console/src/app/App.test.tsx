@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { createHttp } from "@/api/http";
@@ -43,7 +43,6 @@ test("the main navigation links to every top-level screen", () => {
     ["Triage", "/triage"],
     ["Runs", "/runs"],
     ["Projects", "/app/projects"],
-    ["Ops", "/ops"],
   ]);
 });
 
@@ -67,4 +66,26 @@ test("the theme toggle cycles system, light, dark and applies each to the docume
 test("a console the server accepts no writes from says so", () => {
   renderApp("/", false);
   expect(screen.getByText("Read-only")).toBeInTheDocument();
+});
+
+test.each([
+  ["/ops", "/app/projects"],
+  ["/projects/app/stats", "/app/projects?project=app&tab=stats"],
+  ["/projects/app/release", "/app/projects?project=app&tab=release"],
+  ["/projects/app/observations", "/app/projects?project=app&tab=observations"],
+  ["/projects/my%20repo/release", "/app/projects?project=my+repo&tab=release"],
+])("the retired page %s redirects to %s", async (from, to) => {
+  renderApp(from);
+  await waitFor(() => {
+    expect(window.location.pathname + window.location.search).toBe(to);
+  });
+  expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+});
+
+test("a retired page replaces its history entry, so Back does not return to it", async () => {
+  renderApp("/projects/app/release");
+  await waitFor(() => {
+    expect(window.location.pathname).toBe("/app/projects");
+  });
+  expect(window.history.state).toMatchObject({ idx: 0 });
 });

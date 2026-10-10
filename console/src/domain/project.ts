@@ -1,6 +1,7 @@
 // Projects as the API lists them and the per-project figures a team lead
 // decides on: GET /projects, GET /projects/{project}/stats and
 // POST /projects/check.
+import { NO_VALUE } from "@/domain/noValue";
 import {
   type JsonObject,
   decodeList,
@@ -104,6 +105,18 @@ export function decodeProjectStats(o: JsonObject, at: string): ProjectStats {
 }
 
 /**
+ * "2 / 4", plus " · 50% via override" when the server gives an override rate;
+ * the no-value dash when the stats could not be read, never "0 / 0".
+ */
+export function acceptedText(stats: ProjectStats | null): string {
+  if (stats === null) return NO_VALUE;
+  const base = `${stats.accepted} / ${stats.totalRuns}`;
+  return stats.overrideRatePercent === null
+    ? base
+    : `${base} · ${stats.overrideRatePercent}% via override`;
+}
+
+/**
  * internal/api.ProjectCheckResult: one project-bootstrap structural check's
  * verdict, from POST /projects/check.
  */
@@ -138,4 +151,14 @@ export function decodeProjectCheckResponse(o: JsonObject, at: string): ProjectCh
     passed: reqBoolean(o, "passed", at),
     checks: objectList(o, "checks", at, decodeProjectCheckResult),
   };
+}
+
+/**
+ * Whether `id` can name a project in a console address. "." and ".." are
+ * refused: a browser folds them out of a request path, so the read would go
+ * to another route and answer under this project's name.
+ */
+export function isOpenableProjectId(id: string): boolean {
+  const trimmed = id.trim();
+  return trimmed !== "" && trimmed !== "." && trimmed !== "..";
 }

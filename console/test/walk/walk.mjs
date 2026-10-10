@@ -124,7 +124,6 @@ step("shell-navigation", async () => {
     ["Triage", "/triage", "Triage"],
     ["Runs", "/runs", "Runs"],
     ["Projects", "/app/projects", "Projects"],
-    ["Ops", "/ops", "Ops"],
     ["Mission Control", "/", "Mission Control"],
   ]) {
     await page
@@ -287,6 +286,17 @@ step("mission-control", async () => {
       `${overall.accepted}/${overall.tickets} (${Math.round(overall.accepted_rate * 100)}%)`,
     )
     .waitFor();
+  // A project's row names it with a link to its row on the Projects screen.
+  const projectLink = numbers.getByRole("link", { name: stats.projects[0].project, exact: true });
+  check(
+    (await projectLink.getAttribute("href")) ===
+      `/app/projects?project=${encodeURIComponent(stats.projects[0].project)}`,
+    "a Numbers project does not link to its Projects row",
+  );
+  check(
+    (await numbers.getByRole("link", { name: "Overall" }).count()) === 0,
+    "the Overall row is a link",
+  );
 
   // Activity: the newest move of any request leads.
   const activity = page.getByRole("region", { name: "Activity" }).getByTestId("activity-entry");
@@ -593,16 +603,41 @@ step("run-quarantined", async () => {
   );
 });
 
+/** The text of a project row's Accepted cell, from the server's own stats. */
+function acceptedCell(stats) {
+  const base = `${stats.accepted} / ${stats.total_runs}`;
+  return stats.override_rate_percent === null
+    ? base
+    : `${base} · ${stats.override_rate_percent}% via override`;
+}
+
 step("projects", async () => {
   await visit("/app/projects");
   await page.getByText("app", { exact: true }).first().waitFor();
-  // A row opens in place: its figures and its kill switch are two tabs.
+  // The row says what the server's own stats and release routes say.
+  const stats = (await api("/projects/app/stats", startHeaders)).body;
+  const release = (await api("/projects/app/release", startHeaders)).body;
+  const row = main().getByRole("row").filter({ hasText: "app" }).first();
+  await row.getByText(acceptedCell(stats), { exact: true }).waitFor();
+  await row
+    .getByText(release.kill_switch.engaged ? "Kill switch engaged" : "Kill switch clear", {
+      exact: true,
+    })
+    .waitFor();
+  check(
+    (await main().getByText("Daemons").count()) === 0,
+    "the worker's status is Mission Control's, not the Projects list's",
+  );
+  // A row opens in place, and the address says which row and tab.
   await main()
     .getByRole("button", { name: /^Show details for / })
     .first()
     .click();
-  const stats = (await api("/projects/app/stats", startHeaders)).body;
   await main().getByRole("tab", { name: "Stats", exact: true }).waitFor();
+  check(
+    new URL(page.url()).searchParams.get("project") === "app",
+    `an open row is not in the address: ${page.url()}`,
+  );
   await main()
     .getByRole("tabpanel")
     .getByText(String(stats.total_runs), { exact: true })
@@ -611,6 +646,10 @@ step("projects", async () => {
   // Trend: the chart is one named image above the table of the same weeks.
   const trend = (await api("/projects/app/trend")).body;
   await main().getByRole("tab", { name: "Trend", exact: true }).click();
+  check(
+    new URL(page.url()).searchParams.get("tab") === "trend",
+    `the selected tab is not in the address: ${page.url()}`,
+  );
   const panel = main().getByRole("tabpanel");
   await panel.getByRole("img", { name: /^One-shot acceptance rate: / }).waitFor();
   check(
@@ -624,29 +663,36 @@ step("projects", async () => {
   );
   await main().getByRole("tab", { name: "Release", exact: true }).click();
   await main().getByRole("tabpanel").getByText("incident 42").first().waitFor();
+  // Closing the row takes it out of the address.
+  await main()
+    .getByRole("button", { name: /^Hide details for / })
+    .first()
+    .click();
+  await page.waitForFunction(() => !window.location.search.includes("project="));
 });
 
 step("project-stats", async () => {
-  await visit("/projects/app/stats");
-  await heading("app", { level: 1 }).waitFor();
+  await visit("/app/projects?project=app&tab=stats");
   check(
     (await page
       .getByRole("navigation", { name: "Main" })
       .getByRole("link", { name: "Projects", exact: true })
       .getAttribute("aria-current")) === "page",
-    "Projects is not the current navigation item on a project's stats page",
+    "Projects is not the current navigation item",
   );
-  await page
-    .getByText(/every-field|Accepted|accepted/)
-    .first()
-    .waitFor();
   const stats = (await api("/projects/app/stats", startHeaders)).body;
-  await page.getByText(String(stats.total_runs), { exact: true }).first().waitFor();
+  const panel = main().getByRole("tabpanel");
+  await panel.getByText("Total runs", { exact: true }).waitFor();
+  await panel.getByText(String(stats.total_runs), { exact: true }).first().waitFor();
+  for (const [cause, count] of Object.entries(stats.quarantined_by_cause)) {
+    await panel.getByText(cause, { exact: true }).waitFor();
+    await panel.getByText(String(count), { exact: true }).first().waitFor();
+  }
 });
 
 step("project-observations", async () => {
-  await visit("/projects/app/observations");
-  // The page says what the server's own report says about the seeded runs.
+  await visit("/app/projects?project=app&tab=observations");
+  // The tab says what the server's own report says about the seeded runs.
   const report = (await api("/projects/app/observations")).body;
   await page.getByText(report.observations[0].what).first().waitFor();
   await page.getByText("idempotency_test.go:41: key reused across accounts").first().waitFor();
@@ -654,25 +700,46 @@ step("project-observations", async () => {
 });
 
 step("project-release", async () => {
-  await visit("/projects/app/release");
-  await page.getByText("incident 42").first().waitFor();
-  await page.getByText("operator@example.com").first().waitFor();
+  // The retired release page redirects to the row's Release tab.
+  await page.goto(`${base}/projects/app/release`);
+  await main().getByRole("tab", { name: "Release", exact: true }).waitFor();
+  const url = new URL(page.url());
+  check(
+    url.pathname === "/app/projects" &&
+      url.searchParams.get("project") === "app" &&
+      url.searchParams.get("tab") === "release",
+    `/projects/app/release went to ${page.url()}`,
+  );
+  const release = (await api("/projects/app/release", startHeaders)).body;
+  const panel = main().getByRole("tabpanel");
+  await panel
+    .getByText(release.kill_switch.engaged ? "Kill switch engaged" : "Kill switch clear", {
+      exact: true,
+    })
+    .waitFor();
+  await panel.getByText("incident 42").first().waitFor();
+  await panel.getByText("operator@example.com").first().waitFor();
+  // A project that never ran has no row, but its kill switch is read all the same.
+  await visit("/app/projects?project=never-ran&tab=release");
+  await main().getByRole("heading", { name: "never-ran", exact: true }).waitFor();
+  await main().getByText("No runs recorded for this project.", { exact: true }).waitFor();
+  const unlisted = (await api("/projects/never-ran/release", startHeaders)).body;
+  await main()
+    .getByRole("tabpanel")
+    .getByText(unlisted.kill_switch.engaged ? "Kill switch engaged" : "Kill switch clear", {
+      exact: true,
+    })
+    .waitFor();
 });
 
-step("ops", async () => {
-  await visit("/ops");
-  await page.getByText("app", { exact: true }).first().waitFor();
-  // The walk starts no worker, and the card says what the server's own route says.
-  const worker = (await api("/queue-run")).body;
-  await page
-    .getByRole("region", { name: "Daemons" })
-    .getByText(
-      worker.state === "alive" ? "Running" : worker.state === "stale" ? "Stale" : "Not running",
-      {
-        exact: true,
-      },
-    )
-    .waitFor();
+step("ops-redirect", async () => {
+  await page.goto(`${base}/ops`);
+  await heading("Projects", { level: 1 }).waitFor();
+  check(new URL(page.url()).pathname === "/app/projects", `/ops went to ${page.url()}`);
+  check(
+    (await page.getByRole("link", { name: "Ops", exact: true }).count()) === 0,
+    "the navigation still offers Ops",
+  );
   const refreshed = page.waitForResponse((r) => new URL(r.url()).pathname === "/projects");
   await button("Refresh").click();
   await refreshed;

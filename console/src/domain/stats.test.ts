@@ -49,6 +49,7 @@ test("the fixture's rows: overall first, then each project", () => {
   expect(numbersRows(fixture())).toEqual([
     {
       label: "Overall",
+      project: null,
       tickets: "3",
       oneShot: "1/3 (33%)",
       accepted: "2/3 (67%)",
@@ -59,6 +60,7 @@ test("the fixture's rows: overall first, then each project", () => {
     },
     {
       label: "app",
+      project: "app",
       tickets: "3",
       oneShot: "1/3 (33%)",
       accepted: "2/3 (67%)",
@@ -77,6 +79,7 @@ test("null rates and nothing spent read as –, never as 0%", () => {
   );
   expect(numbersRows(stats)[1]).toEqual({
     label: "idle",
+    project: "idle",
     tickets: "0",
     oneShot: "–",
     accepted: "–",
