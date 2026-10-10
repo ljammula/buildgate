@@ -179,7 +179,7 @@ func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
 	run := func(t *testing.T, dp *deps) (stdout, stderr string) {
 		t.Helper()
 		var out, errOut bytes.Buffer
-		if err := buildCABundleMain(dp, &out, &errOut); err != nil {
+		if err := buildCABundleMain(dp, nil, &out, &errOut); err != nil {
 			t.Fatalf("build-ca-bundle failed: %v", err)
 		}
 		return out.String(), errOut.String()
