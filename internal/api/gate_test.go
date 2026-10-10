@@ -16,7 +16,7 @@ import (
 
 const (
 	gateTestAddr     = "127.0.0.1:8090"
-	gateTestHost     = "console.example:8443"
+	gateTestHost     = "console.example:9443"
 	gateTestToken    = "gate-test-token"
 	gateTestOverride = "override-test-token"
 	gateTestStart    = "start-test-token"
@@ -332,10 +332,10 @@ func TestGateTokenWriteRecordsTheOperatorAndTheCredential(t *testing.T) {
 		}
 		return gateStatus(server, req)
 	}
-	if got := approve(true, "", "kanna (gate token)"); got != http.StatusBadRequest {
+	if got := approve(true, "", "alice (gate token)"); got != http.StatusBadRequest {
 		t.Errorf("a local caller claiming the gate token in by = %d, want 400", got)
 	}
-	if got := approve(false, gateTestToken, "kanna (gate token)"); got != http.StatusBadRequest {
+	if got := approve(false, gateTestToken, "alice (gate token)"); got != http.StatusBadRequest {
 		t.Errorf("a gate caller sending the suffix itself = %d, want 400", got)
 	}
 	if got := approve(false, gateTestToken, strings.Repeat("k", request.MaxEditByLen)); got != http.StatusBadRequest {
@@ -344,15 +344,15 @@ func TestGateTokenWriteRecordsTheOperatorAndTheCredential(t *testing.T) {
 	if reloaded, err := request.Load(dataDir, "req-1"); err != nil || reloaded.State != request.StateSpecReview {
 		t.Fatalf("request state = %v (err %v), want it untouched by the refused writes", reloaded.State, err)
 	}
-	if got := approve(false, gateTestToken, "kanna"); got != http.StatusOK {
+	if got := approve(false, gateTestToken, "alice"); got != http.StatusOK {
 		t.Fatalf("approve with the gate token = %d, want 200", got)
 	}
 	reloaded, err := request.Load(dataDir, "req-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if by := reloaded.History[len(reloaded.History)-1].By; by != "kanna (gate token)" {
-		t.Errorf("recorded by = %q, want %q", by, "kanna (gate token)")
+	if by := reloaded.History[len(reloaded.History)-1].By; by != "alice (gate token)" {
+		t.Errorf("recorded by = %q, want %q", by, "alice (gate token)")
 	}
 }
 
@@ -477,7 +477,7 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 	lastHistory := func(r *request.Request) string { return r.History[len(r.History)-1].By }
 	lastEdit := func(r *request.Request) string { return r.Edits[len(r.Edits)-1].By }
 	content := func(c string) string {
-		body, _ := json.Marshal(map[string]string{"by": "kanna", "content": c})
+		body, _ := json.Marshal(map[string]string{"by": "alice", "content": c})
 		return string(body)
 	}
 	cases := []struct {
@@ -488,14 +488,14 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 		body   string
 		by     func(r *request.Request) string
 	}{
-		{"reject", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/reject", `{"by":"kanna","reason":"redo the scope"}`, lastHistory},
-		{"retry", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateQuarantined, false) }, http.MethodPost, "/requests/req-1/retry", `{"by":"kanna","reason":"again"}`, lastHistory},
-		{"cancel", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/cancel", `{"by":"kanna","reason":"not needed"}`, lastHistory},
+		{"reject", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/reject", `{"by":"alice","reason":"redo the scope"}`, lastHistory},
+		{"retry", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateQuarantined, false) }, http.MethodPost, "/requests/req-1/retry", `{"by":"alice","reason":"again"}`, lastHistory},
+		{"cancel", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/cancel", `{"by":"alice","reason":"not needed"}`, lastHistory},
 		{"spec edit", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPut, "/requests/req-1/spec", content(validSpecMD), lastEdit},
 		{"ticket edit", func(t *testing.T, d string) { seedPlanReviewRequestWithTicket(t, d, "req-1") }, http.MethodPut, "/requests/req-1/tickets/1", content(validTicketMD), lastEdit},
 	}
 	for _, tc := range cases {
-		for _, via := range []struct{ token, want string }{{gateTestToken, "kanna (gate token)"}, {gateTestOverride, "kanna"}} {
+		for _, via := range []struct{ token, want string }{{gateTestToken, "alice (gate token)"}, {gateTestOverride, "alice"}} {
 			t.Run(tc.name+" by "+via.want, func(t *testing.T) {
 				dataDir := t.TempDir()
 				tc.seed(t, dataDir)
@@ -515,7 +515,7 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 					t.Errorf("recorded by = %q, want %q", got, via.want)
 				}
 				claimed := gateRequest(t, tc.method, tc.path, via.token, false)
-				claimed.Body = readCloser(strings.Replace(tc.body, `"kanna"`, `"mallory (gate token)"`, 1))
+				claimed.Body = readCloser(strings.Replace(tc.body, `"alice"`, `"mallory (gate token)"`, 1))
 				if got := gateStatus(server, claimed); got != http.StatusBadRequest {
 					t.Errorf("the same write claiming the suffix = %d, want 400", got)
 				}
