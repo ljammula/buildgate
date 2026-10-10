@@ -2,6 +2,7 @@ import { useProjectStats } from "@/api/runQueries";
 import { formatMedianAcceptedTokens } from "@/domain/cost";
 import type { ProjectStats } from "@/domain/project";
 import { projectStatsPath } from "@/routes/paths";
+import { Card } from "@/ui/Card";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -18,25 +19,29 @@ function StatsBody({ stats }: { readonly stats: ProjectStats }) {
   const causes = Object.entries(stats.quarantinedByCause);
   return (
     <>
-      <DescriptionList labelWidth="lg">
-        <DescriptionItem label="Project">
-          <span className="font-mono">{stats.project}</span>
-        </DescriptionItem>
-        <DescriptionItem label="Total runs">{stats.totalRuns}</DescriptionItem>
-        <DescriptionItem label="Accepted">{stats.accepted}</DescriptionItem>
-        {/* Nothing halted is the usual answer, and a row that says so is noise. */}
-        {stats.halted === 0 ? null : (
-          <DescriptionItem label="Halted">{stats.halted}</DescriptionItem>
-        )}
-        <DescriptionItem label="Override rate (accepted)">
-          {rate === null ? NO_DATA : `${rate}% (${stats.acceptedViaOverride} of ${stats.accepted})`}
-        </DescriptionItem>
-        <DescriptionItem label="Median accepted">
-          {stats.medianAcceptedTokens === null
-            ? NO_DATA
-            : formatMedianAcceptedTokens(stats.medianAcceptedTokens)}
-        </DescriptionItem>
-      </DescriptionList>
+      <Card className="p-4">
+        <DescriptionList labelWidth="lg">
+          <DescriptionItem label="Project">
+            <span className="font-mono">{stats.project}</span>
+          </DescriptionItem>
+          <DescriptionItem label="Total runs">{stats.totalRuns}</DescriptionItem>
+          <DescriptionItem label="Accepted">{stats.accepted}</DescriptionItem>
+          {/* Nothing halted is the usual answer, and a row that says so is noise. */}
+          {stats.halted === 0 ? null : (
+            <DescriptionItem label="Halted">{stats.halted}</DescriptionItem>
+          )}
+          <DescriptionItem label="Override rate (accepted)">
+            {rate === null
+              ? NO_DATA
+              : `${rate}% (${stats.acceptedViaOverride} of ${stats.accepted})`}
+          </DescriptionItem>
+          <DescriptionItem label="Median accepted">
+            {stats.medianAcceptedTokens === null
+              ? NO_DATA
+              : formatMedianAcceptedTokens(stats.medianAcceptedTokens)}
+          </DescriptionItem>
+        </DescriptionList>
+      </Card>
       {/* Absent, not "none recorded", when nothing was quarantined. */}
       {causes.length === 0 ? null : (
         <Section title="Quarantined by cause">

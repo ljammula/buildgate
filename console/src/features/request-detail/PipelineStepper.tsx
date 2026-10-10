@@ -8,10 +8,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { formatWhen } from "@/domain/elapsed";
 import type { RequestSummary } from "@/domain/request";
 import { DigestedText } from "@/shared/request/DigestedText";
-import { ElapsedText, useNow } from "@/ui/Time";
+import { RelativeTime } from "@/ui/RelativeTime";
+import { ElapsedText } from "@/ui/Time";
 import { cn } from "@/ui/cn";
 
 import {
@@ -32,15 +32,17 @@ const GLYPHS: Readonly<Record<StepStatus, { icon: LucideIcon; text: string; word
   stopped: { icon: Ban, text: "text-tone-danger", word: "stopped" },
 };
 
-function StepView({
-  step,
-  request,
-  now,
-}: {
-  step: PipelineStep;
-  request: RequestSummary;
-  now: Date;
-}) {
+/** When a step happened and, for a person's decision, who made it. */
+function StepWhen({ at, by }: { readonly at: string; readonly by: string }) {
+  return (
+    <p className="text-fg-muted text-xs">
+      <RelativeTime value={at} />
+      {isAutomatedActor(by) ? null : ` · ${by}`}
+    </p>
+  );
+}
+
+function StepView({ step, request }: { step: PipelineStep; request: RequestSummary }) {
   const glyph = GLYPHS[step.status];
   const Icon = glyph.icon;
   const emphasize = step.status !== "done" && step.status !== "pending";
@@ -66,14 +68,12 @@ function StepView({
             <ElapsedText since={request.enteredAt} />
           </p>
         ) : entry === null ? (
-          <p className="text-fg-muted text-xs">{formatWhen(request.enteredAt, now)}</p>
+          <p className="text-fg-muted text-xs">
+            <RelativeTime value={request.enteredAt} />
+          </p>
         ) : (
           <>
-            <p className="text-fg-muted text-xs">
-              {isAutomatedActor(entry.by)
-                ? formatWhen(entry.at, now)
-                : `${formatWhen(entry.at, now)} · ${entry.by}`}
-            </p>
+            <StepWhen at={entry.at} by={entry.by} />
             {entry.reason === "" ? null : (
               // A halt reason can run to a paragraph: its first sentence here,
               // the whole text one click away (it is on the page already, in
@@ -96,14 +96,13 @@ function StepView({
  * how a history maps onto the steps.
  */
 export function PipelineStepper({ request }: { readonly request: RequestSummary }) {
-  const now = useNow(60_000);
   const steps = pipelineSteps(request);
   const outcome = pipelineOutcome(request);
   return (
     <>
       <ol aria-label="Pipeline steps" className="flex flex-col">
         {steps.map((step) => (
-          <StepView key={step.step} step={step} request={request} now={now} />
+          <StepView key={step.step} step={step} request={request} />
         ))}
       </ol>
       {outcome === null ? null : (
@@ -118,11 +117,7 @@ export function PipelineStepper({ request }: { readonly request: RequestSummary 
           <div className="min-w-0 text-sm">
             <p className="font-semibold">{outcome.label}</p>
             {outcome.entry === null ? null : (
-              <p className="text-fg-muted text-xs">
-                {isAutomatedActor(outcome.entry.by)
-                  ? formatWhen(outcome.entry.at, now)
-                  : `${formatWhen(outcome.entry.at, now)} · ${outcome.entry.by}`}
-              </p>
+              <StepWhen at={outcome.entry.at} by={outcome.entry.by} />
             )}
             {outcome.entry === null ||
             outcome.entry.reason === "" ||

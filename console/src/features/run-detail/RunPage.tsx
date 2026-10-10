@@ -1,15 +1,13 @@
-import { ArrowRight } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
 import { useRun } from "@/api/runQueries";
 import { DiffPanel } from "@/features/run-detail/DiffPanel";
-import { LinkedRequestTitle } from "@/features/run-detail/LinkedRequestTitle";
+import { RunHeader } from "@/features/run-detail/RunHeader";
 import { ReleasePanel } from "@/features/run-detail/ReleasePanel";
 import { RunOverview } from "@/features/run-detail/RunOverview";
 import { useRunProgress } from "@/features/run-detail/useRunProgress";
-import { parseRunView, requestPath, runPath, runViewPath } from "@/routes/paths";
-import { Button } from "@/ui/Button";
+import { parseRunView, runPath, runViewPath } from "@/routes/paths";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Callout, Spinner } from "@/ui/Feedback";
 import { PageBody, PageHeader } from "@/ui/PageLayout";
@@ -52,22 +50,7 @@ export function RunPage({ id }: { id: string }) {
 
   return (
     <>
-      <PageHeader
-        title={run.ticket}
-        {...(run.requestId === ""
-          ? {}
-          : { description: <LinkedRequestTitle requestId={run.requestId} /> })}
-        actions={
-          run.requestId === "" ? null : (
-            <Button asChild>
-              <Link to={requestPath(run.requestId)}>
-                Open request
-                <ArrowRight aria-hidden="true" />
-              </Link>
-            </Button>
-          )
-        }
-      />
+      <RunHeader run={run} />
       <PageBody>
         {query.isError ? (
           <Callout tone="warning">

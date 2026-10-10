@@ -91,3 +91,10 @@ test("offers a jump-to-file chip list", async () => {
   });
   expect(scrolled[0]).toHaveTextContent("diff --git a/lib/b.dart b/lib/b.dart");
 });
+
+test("the panel adds no heading that repeats the Diff tab", async () => {
+  renderDiff(json({ diff: "+added line\n", truncated: false }));
+  await screen.findByText("+added line");
+  expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Diff" })).toBeInTheDocument();
+});

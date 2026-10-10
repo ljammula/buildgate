@@ -514,6 +514,11 @@ step("runs-list", async () => {
   for (const id of ["run-accepted", "run-quarantined", "run-running", "run-every-field"]) {
     await page.getByText(id, { exact: true }).first().waitFor();
   }
+  const headers = await page.getByRole("columnheader").allInnerTexts();
+  check(
+    headers.join("|") === "Run|Run ID|State|Activity|Elapsed|Created|Project",
+    `the runs list columns are ${headers.join("|")}`,
+  );
   await page
     .getByRole("row", { name: /run-accepted/ })
     .getByRole("link")
@@ -527,6 +532,9 @@ step("run-detail", async () => {
   await page.getByRole("list", { name: "Timeline stages" }).waitFor();
   await page.getByText("478.3k tokens").first().waitFor();
   await page.getByText("checkout/idempotency.go").first().waitFor();
+  // The header is the request page's shape: a way back, then the chip row.
+  await link("Back to Runs").waitFor();
+  await page.getByRole("button", { name: "Copy run id" }).first().waitFor();
   // The run links back to its request.
   await link("Open request").click();
   await page.waitForURL(/\/requests\/req-building$/);
@@ -620,6 +628,14 @@ step("projects", async () => {
 
 step("project-stats", async () => {
   await visit("/projects/app/stats");
+  await heading("app", { level: 1 }).waitFor();
+  check(
+    (await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects", exact: true })
+      .getAttribute("aria-current")) === "page",
+    "Projects is not the current navigation item on a project's stats page",
+  );
   await page
     .getByText(/every-field|Accepted|accepted/)
     .first()

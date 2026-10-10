@@ -89,12 +89,14 @@ export function RunListScreen() {
                   <TableHead>
                     <TableRow className="hover:bg-transparent">
                       <TableHeaderCell className="w-[22%]">Run</TableHeaderCell>
-                      <TableHeaderCell className="w-32">State</TableHeaderCell>
-                      <TableHeaderCell className="w-64">Project</TableHeaderCell>
-                      <TableHeaderCell className="w-24">Elapsed</TableHeaderCell>
+                      <TableHeaderCell className="w-40">Run ID</TableHeaderCell>
+                      <TableHeaderCell className="w-36">State</TableHeaderCell>
                       <TableHeaderCell className="w-48">Activity</TableHeaderCell>
+                      <TableHeaderCell numeric className="w-24">
+                        Elapsed
+                      </TableHeaderCell>
                       <TableHeaderCell className="w-44">Created</TableHeaderCell>
-                      <TableHeaderCell className="w-44">Run ID</TableHeaderCell>
+                      <TableHeaderCell className="w-80">Project</TableHeaderCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

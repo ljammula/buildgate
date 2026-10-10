@@ -8,6 +8,7 @@ import { Button } from "@/ui/Button";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
+import { Kbd } from "@/ui/Kbd";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 import { REQUEST_VERBS } from "@/domain/status";
 
@@ -101,7 +102,10 @@ export function TriageDetail({
             </Button>
           </div>
         ) : null}
-        <p className="text-fg-subtle text-xs">Keyboard: j/k move · a approve · r request changes</p>
+        <p className="text-fg-subtle text-xs">
+          Keyboard: <Kbd>j</Kbd>/<Kbd>k</Kbd> move · <Kbd>a</Kbd> approve · <Kbd>r</Kbd> request
+          changes
+        </p>
       </div>
     </div>
   );

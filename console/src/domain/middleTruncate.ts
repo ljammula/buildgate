@@ -21,3 +21,13 @@ export function middleTruncate(value: string, max: number): string {
 export function headTruncate(value: string, keep: number, mark = ""): string {
   return value.length > keep ? `${value.slice(0, keep)}${mark}` : value;
 }
+
+/**
+ * A path as its last `keep` segments behind a leading "…/": the end of a path
+ * says which project, the front only says whose home directory. A path with
+ * no more than `keep` segments is returned as is.
+ */
+export function shortPath(path: string, keep = 2): string {
+  const segments = path.split("/").filter((s) => s !== "");
+  return segments.length > keep ? `…/${segments.slice(-keep).join("/")}` : path;
+}

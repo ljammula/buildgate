@@ -25,7 +25,9 @@ export function AuditSection({ request }: { readonly request: RequestSummary }) 
   return (
     <Panel title="Audit">
       {request.approvedBy === "" ? null : (
-        <p className="text-sm">{approvedLine(request.approvedBy, request.approvedAt)}</p>
+        <p className="text-sm text-balance">
+          {approvedLine(request.approvedBy, request.approvedAt)}
+        </p>
       )}
       {stops.length === 0 ? null : (
         <ul data-testid="audit-stops" className="flex flex-col gap-2">

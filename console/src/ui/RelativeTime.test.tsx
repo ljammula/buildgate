@@ -19,7 +19,7 @@ describe("RelativeTime", () => {
     const el = screen.getByText("5m ago");
     expect(el.tagName).toBe("TIME");
     expect(el).toHaveAttribute("dateTime", "2026-09-18T11:00:00Z");
-    expect(el).toHaveAttribute("title", "2026-09-18 07:00:00");
+    expect(el).toHaveAttribute("title", "2026-09-18 07:00:00 -04:00");
   });
 
   test("an age over a day reads days and hours", () => {

@@ -6,6 +6,7 @@ import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { RequestStatusUnit } from "@/shared/request/RequestStatusUnit";
 import { requestPath } from "@/routes/paths";
 import { Button } from "@/ui/Button";
+import { Kbd } from "@/ui/Kbd";
 
 import { triageReason } from "./triageModel";
 
@@ -38,7 +39,7 @@ export function TriageOtherDetail({ request, now }: TriageOtherDetailProps) {
           </Button>
         </div>
         <p className="text-fg-subtle text-xs">
-          This one is decided on the request page. Keyboard: j/k move.
+          This one is decided on the request page. Keyboard: <Kbd>j</Kbd>/<Kbd>k</Kbd> move.
         </p>
       </div>
     </div>

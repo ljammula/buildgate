@@ -1,6 +1,7 @@
 import { useProjectRelease } from "@/api/runQueries";
 import type { ProjectReleaseView } from "@/domain/release";
 import { projectReleasePath } from "@/routes/paths";
+import { Card } from "@/ui/Card";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Spinner } from "@/ui/Feedback";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
@@ -25,18 +26,20 @@ function ReleaseBody({ release }: { readonly release: ProjectReleaseView }) {
   const { killSwitch } = release;
   return (
     <>
-      <DescriptionList labelWidth="lg">
-        <DescriptionItem label="Project">
-          <span className="font-mono">{release.project}</span>
-        </DescriptionItem>
-        <DescriptionItem label="State">
-          <KillSwitchChip engaged={killSwitch.engaged} />
-        </DescriptionItem>
-        <DescriptionItem label="Control">
-          Engage and disengage from the command line (factoryd kill-switch). It is deliberately not
-          a console action, so hitting it never depends on a healthy factoryd serve.
-        </DescriptionItem>
-      </DescriptionList>
+      <Card className="p-4">
+        <DescriptionList labelWidth="lg">
+          <DescriptionItem label="Project">
+            <span className="font-mono">{release.project}</span>
+          </DescriptionItem>
+          <DescriptionItem label="State">
+            <KillSwitchChip engaged={killSwitch.engaged} />
+          </DescriptionItem>
+          <DescriptionItem label="Control">
+            Engage and disengage from the command line (factoryd kill-switch). It is deliberately
+            not a console action, so hitting it never depends on a healthy factoryd serve.
+          </DescriptionItem>
+        </DescriptionList>
+      </Card>
       <Section title="History">
         {killSwitch.history.length === 0 ? (
           <p className="text-sm text-fg-muted">

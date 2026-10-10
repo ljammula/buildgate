@@ -51,9 +51,12 @@ describe("OpsScreen", () => {
     });
 
     expect(await screen.findByText("checkouts")).toBeInTheDocument();
-    expect(await screen.findByText(/Accepted 4 \/ 5 runs/)).toBeInTheDocument();
+    expect(await screen.findByText(/^4 \/ 5 runs/)).toBeInTheDocument();
+    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    expect(screen.getByText("Quarantined by cause")).toBeInTheDocument();
     expect(screen.getByText(/canonical_verify \(1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Median accepted: 478.3k tokens/)).toBeInTheDocument();
+    expect(screen.getByText("Median accepted")).toBeInTheDocument();
+    expect(screen.getByText(/478.3k tokens/)).toBeInTheDocument();
     expect(screen.getByText("Kill switch engaged")).toBeInTheDocument();
   });
 

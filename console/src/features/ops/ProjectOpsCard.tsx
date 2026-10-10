@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { projectReleasePath, projectStatsPath } from "@/routes/paths";
 import { Card } from "@/ui/Card";
+import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { KillSwitchChip } from "@/ui/StatusChip";
 
 import type { ProjectOpsRow } from "./useProjectOps";
@@ -37,23 +38,24 @@ export function ProjectOpsCard({ row }: ProjectOpsCardProps) {
       {stats === null ? (
         <p className="text-sm text-fg-muted">Stats unavailable for this project.</p>
       ) : (
-        <div className="flex flex-col gap-1 text-sm text-fg">
-          <p>
-            Accepted {stats.accepted} / {stats.totalRuns} runs
+        <DescriptionList>
+          <DescriptionItem label="Accepted">
+            {stats.accepted} / {stats.totalRuns} runs
             {stats.overrideRatePercent !== null
               ? `: ${stats.overrideRatePercent}% via override`
               : ""}
-          </p>
+          </DescriptionItem>
           {causes.length > 0 ? (
-            <p>
-              Quarantined by cause:{" "}
+            <DescriptionItem label="Quarantined by cause">
               {causes.map(([cause, count]) => `${cause} (${count})`).join(", ")}
-            </p>
+            </DescriptionItem>
           ) : null}
           {stats.medianAcceptedTokens !== null ? (
-            <p>Median accepted: {formatMedianAcceptedTokens(stats.medianAcceptedTokens)}</p>
+            <DescriptionItem label="Median accepted">
+              {formatMedianAcceptedTokens(stats.medianAcceptedTokens)}
+            </DescriptionItem>
           ) : null}
-        </div>
+        </DescriptionList>
       )}
     </Card>
   );

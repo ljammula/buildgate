@@ -5,7 +5,6 @@ import {
   formatElapsedCompact,
   formatAgeSeconds,
   formatLocalTimestamp,
-  formatWhen,
   relativeAge,
   stallChipDisplay,
   stallStatus,
@@ -93,7 +92,7 @@ describe("elapsedBetween", () => {
 
 describe("formatLocalTimestamp", () => {
   test("renders an RFC3339 UTC timestamp in local time", () => {
-    expect(formatLocalTimestamp("2026-09-18T11:00:00Z")).toBe("2026-09-18 07:00:00");
+    expect(formatLocalTimestamp("2026-09-18T11:00:00Z")).toBe("2026-09-18 07:00:00 -04:00");
   });
 
   test("falls back to the raw value when unparseable", () => {
@@ -102,6 +101,24 @@ describe("formatLocalTimestamp", () => {
 
   test("falls back to the raw (empty) value when empty", () => {
     expect(formatLocalTimestamp("")).toBe("");
+  });
+});
+
+describe("formatLocalTimestamp offset", () => {
+  test("names the local offset of the instant itself, daylight saving included", () => {
+    expect(formatLocalTimestamp("2026-01-18T11:00:00Z")).toBe("2026-01-18 06:00:00 -05:00");
+    expect(formatLocalTimestamp("2026-09-18T11:00:00Z")).toBe("2026-09-18 07:00:00 -04:00");
+  });
+  test("writes a half-hour zone as +05:30 and UTC as +00:00", () => {
+    const before = process.env.TZ;
+    try {
+      process.env.TZ = "Asia/Kolkata";
+      expect(formatLocalTimestamp("2026-09-18T11:00:00Z")).toBe("2026-09-18 16:30:00 +05:30");
+      process.env.TZ = "UTC";
+      expect(formatLocalTimestamp("2026-09-18T11:00:00Z")).toBe("2026-09-18 11:00:00 +00:00");
+    } finally {
+      process.env.TZ = before;
+    }
   });
 });
 
@@ -203,15 +220,5 @@ describe("formatAgeSeconds", () => {
 
   test("a negative age (clock skew) is 0s", () => {
     expect(formatAgeSeconds(-3_000)).toBe("0s");
-  });
-});
-
-describe("formatWhen", () => {
-  test("HH:mm on the same local day, 'MMM d HH:mm' otherwise, the raw text when unparseable", () => {
-    const now = new Date(2026, 8, 15, 12, 0, 0);
-    expect(formatWhen(new Date(2026, 8, 15, 9, 5).toISOString(), now)).toBe("09:05");
-    expect(formatWhen(new Date(2026, 8, 14, 23, 59).toISOString(), now)).toBe("Sep 14 23:59");
-    expect(formatWhen("not a time", now)).toBe("not a time");
-    expect(formatWhen("", now)).toBe("");
   });
 });

@@ -1,3 +1,5 @@
+import { cardAge, cardSince } from "@/domain/boardCard";
+import { formatLocalTimestamp } from "@/domain/elapsed";
 import type { RequestSummary } from "@/domain/request";
 import { RequestStageChip } from "@/shared/request/RequestStageChip";
 import { cn } from "@/ui/cn";
@@ -5,11 +7,13 @@ import { cn } from "@/ui/cn";
 export interface TriageListProps {
   readonly requests: readonly RequestSummary[];
   readonly focusedId: string;
+  /** The clock the waiting ages are counted against. */
+  readonly now: Date;
   readonly onFocus: (index: number) => void;
 }
 
 /** The queue, oldest wait first; the focused row is the one j/k, a and r act on. */
-export function TriageList({ requests, focusedId, onFocus }: TriageListProps) {
+export function TriageList({ requests, focusedId, now, onFocus }: TriageListProps) {
   return (
     <ul
       aria-label="Requests to review"
@@ -17,6 +21,8 @@ export function TriageList({ requests, focusedId, onFocus }: TriageListProps) {
     >
       {requests.map((request, index) => {
         const selected = request.id === focusedId;
+        const since = cardSince(request, "needsYou");
+        const age = cardAge(request, "needsYou", now);
         return (
           <li key={request.id}>
             <button
@@ -31,13 +37,31 @@ export function TriageList({ requests, focusedId, onFocus }: TriageListProps) {
                 selected ? "bg-accent-soft" : "hover:bg-surface-hover",
               )}
             >
-              <span className="min-w-0">
-                <span className="text-fg line-clamp-2 text-sm font-medium">
+              <span className="min-w-0 flex-1 truncate">
+                <span
+                  title={request.title !== "" ? request.title : request.id}
+                  className="text-fg block truncate text-sm font-medium"
+                >
                   {request.title !== "" ? request.title : request.id}
                 </span>
-                <span className="text-fg-muted block truncate text-xs">{request.project}</span>
+                <span className="text-fg-muted flex min-w-0 items-baseline gap-2 text-xs">
+                  {/* The id tells same-titled rows apart: it keeps its width, the project gives way. */}
+                  <span className="shrink-0 font-mono">{request.id}</span>
+                  <span className="min-w-0 truncate">{request.project}</span>
+                  {age === null ? null : (
+                    <time
+                      dateTime={since}
+                      title={formatLocalTimestamp(since)}
+                      className="text-fg-muted shrink-0 tabular-nums"
+                    >
+                      {age}
+                    </time>
+                  )}
+                </span>
               </span>
-              <RequestStageChip state={request.state} needsYou />
+              <span className="flex w-32 shrink-0 justify-end">
+                <RequestStageChip state={request.state} needsYou />
+              </span>
             </button>
           </li>
         );

@@ -269,9 +269,13 @@ test("shows the audit line when approvedBy/approvedAt are set", async () => {
   // Local time, so the test holds in any timezone the suite runs under.
   const local = new Date("2026-09-12T10:00:00Z");
   const two = (n: number) => String(n).padStart(2, "0");
+  const offsetMinutes = -local.getTimezoneOffset();
+  const offset = `${offsetMinutes < 0 ? "-" : "+"}${two(Math.trunc(Math.abs(offsetMinutes) / 60))}:${two(
+    Math.abs(offsetMinutes) % 60,
+  )}`;
   const stamp = `${local.getFullYear()}-${two(local.getMonth() + 1)}-${two(local.getDate())} ${two(
     local.getHours(),
-  )}:${two(local.getMinutes())}:00`;
+  )}:${two(local.getMinutes())}:00 ${offset}`;
   expect(screen.getByText(`Approved by jane at ${stamp}`)).toBeInTheDocument();
 });
 
@@ -299,9 +303,13 @@ test("shows the rejection history when rejections are present", async () => {
   await loaded("Rejected once");
   const local = new Date("2026-09-12T10:00:00Z");
   const two = (n: number) => String(n).padStart(2, "0");
+  const offsetMinutes = -local.getTimezoneOffset();
+  const offset = `${offsetMinutes < 0 ? "-" : "+"}${two(Math.trunc(Math.abs(offsetMinutes) / 60))}:${two(
+    Math.abs(offsetMinutes) % 60,
+  )}`;
   const stamp = `${local.getFullYear()}-${two(local.getMonth() + 1)}-${two(local.getDate())} ${two(
     local.getHours(),
-  )}:${two(local.getMinutes())}:00`;
+  )}:${two(local.getMinutes())}:00 ${offset}`;
 
   await userEvent.click(screen.getByRole("button", { name: "Requested changes (1)" }));
 

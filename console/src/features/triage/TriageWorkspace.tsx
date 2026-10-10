@@ -95,8 +95,8 @@ function TriageOther({ requests, focused, focusedIndex, now, onFocus }: FocusedP
     false,
   );
   return (
-    <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
-      <TriageList requests={requests} focusedId={focused.id} onFocus={onFocus} />
+    <div className="grid gap-4 lg:grid-cols-[26rem_minmax(0,1fr)]">
+      <TriageList requests={requests} focusedId={focused.id} now={now} onFocus={onFocus} />
       <TriageOtherDetail request={focused} now={now} />
     </div>
   );
@@ -148,8 +148,8 @@ function TriageDecidable({
     if (!open) onDeciding(null);
   };
   return (
-    <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
-      <TriageList requests={requests} focusedId={focused.id} onFocus={onFocus} />
+    <div className="grid gap-4 lg:grid-cols-[26rem_minmax(0,1fr)]">
+      <TriageList requests={requests} focusedId={focused.id} now={now} onFocus={onFocus} />
       <TriageDetail
         request={focused}
         detail={detail}

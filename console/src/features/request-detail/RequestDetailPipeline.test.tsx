@@ -266,13 +266,21 @@ describe("the order of the tickets and the plan", () => {
     ).toBe(true);
   });
 
-  test("Tickets lead the plan once tickets are building", async () => {
-    openRequest(body("building"));
+  test.each([
+    "building",
+    "pr_review",
+    "halted",
+    "quarantined",
+    "done",
+    "cancelled",
+    "resume_review",
+  ])("Tickets lead the plan in %s", async (state) => {
+    openRequest(body(state));
     await screen.findByRole("heading", { level: 1, name: "Order" });
     expect(
       before(
         screen.getByRole("region", { name: "Tickets" }),
-        // Folded to a disclosure once building: it is a heading, not a region.
+        // Folded to a disclosure outside review: it is a heading, not a region.
         screen.getByRole("heading", { name: "Ticket 1 plan" }),
       ),
     ).toBe(true);
@@ -283,9 +291,13 @@ describe("compare with a rejected revision", () => {
   const stamp = () => {
     const local = new Date("2026-09-10T09:00:00Z");
     const two = (n: number) => String(n).padStart(2, "0");
+    const offsetMinutes = -local.getTimezoneOffset();
+    const offset = `${offsetMinutes < 0 ? "-" : "+"}${two(Math.trunc(Math.abs(offsetMinutes) / 60))}:${two(
+      Math.abs(offsetMinutes) % 60,
+    )}`;
     return `${local.getFullYear()}-${two(local.getMonth() + 1)}-${two(local.getDate())} ${two(
       local.getHours(),
-    )}:${two(local.getMinutes())}:00`;
+    )}:${two(local.getMinutes())}:00 ${offset}`;
   };
 
   async function selectFirst() {

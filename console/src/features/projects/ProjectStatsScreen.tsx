@@ -17,7 +17,10 @@ export function ProjectStatsScreen() {
   const load = useLoadProject(project, projectStatsPath, () => undefined);
   return (
     <>
-      <PageHeader title="Project stats" />
+      <PageHeader
+        title={project === "" ? "Project stats" : project}
+        {...(project === "" ? {} : { description: "Stats" })}
+      />
       <PageBody>
         {project === "" ? (
           <ProjectIdForm initial="" loading={false} onLoad={load} />

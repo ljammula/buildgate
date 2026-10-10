@@ -151,6 +151,25 @@ describe("the Tickets card", () => {
     expect(screen.getByTestId("ticket-card-1")).toBeInTheDocument();
     expect(screen.queryByTestId("ticket-card-2")).not.toBeInTheDocument();
   });
+
+  test("draws each ticket as a row between dividers, not a card in the card", async () => {
+    openRequest(
+      requestWire({
+        state: "building",
+        title: "T",
+        tickets: [ticket({ runId: "run-1" }), ticket({ index: 2, runId: "run-2" })],
+      }),
+    );
+    await screen.findByRole("heading", { level: 1, name: "T" });
+
+    const list = screen.getByTestId("tickets-section").querySelector(".divide-y");
+    expect(list).toHaveClass("divide-border");
+    for (const index of [1, 2]) {
+      const row = screen.getByTestId(`ticket-card-${index}`);
+      expect(row.parentElement).toBe(list);
+      expect(row.className).not.toMatch(/\b(border|rounded-lg|bg-surface)\b/);
+    }
+  });
 });
 
 describe("foldsContent", () => {

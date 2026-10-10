@@ -130,38 +130,32 @@ function two(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+// "+05:30" / "-04:00": the Date's own offset from UTC, so the string names
+// the instant exactly and reads the same in any zone.
+function offsetText(date: Date): string {
+  const minutes = -date.getTimezoneOffset();
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(minutes);
+  return `${sign}${two(Math.trunc(abs / 60))}:${two(abs % 60)}`;
+}
+
 /**
- * Formats an RFC3339 `value` in local time as "YYYY-MM-DD HH:MM:SS": every
- * screen's own raw-UTC timestamp (found in the 2026-09-26 operator demo
- * showing UTC verbatim across the request, run and release screens) routes
- * through this one formatter rather than each keeping its own copy. Falls
- * back to the raw value verbatim for an empty or unparseable timestamp
- * rather than throwing.
+ * Formats an RFC3339 `value` as its exact local time with the UTC offset,
+ * "YYYY-MM-DD HH:MM:SS +HH:MM": the one rule for a time that is itself the
+ * information (an audit line, a decision, a hover). An age is not shown this
+ * way: it is ui/RelativeTime, with this string on hover. Every screen routes
+ * through this one formatter rather than keeping its own copy. Falls back to
+ * the raw value verbatim for an empty or unparseable timestamp rather than
+ * throwing.
  */
 export function formatLocalTimestamp(value: string): string {
   const parsed = tryParseTimestamp(value);
   if (parsed === null) return value;
   return (
     `${parsed.getFullYear()}-${two(parsed.getMonth() + 1)}-${two(parsed.getDate())} ` +
-    `${two(parsed.getHours())}:${two(parsed.getMinutes())}:${two(parsed.getSeconds())}`
+    `${two(parsed.getHours())}:${two(parsed.getMinutes())}:${two(parsed.getSeconds())} ` +
+    offsetText(parsed)
   );
-}
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/**
- * An RFC 3339 timestamp as local "HH:mm" when it falls on `now`'s day, or
- * "MMM d HH:mm" otherwise; the raw value when empty or unparseable.
- */
-export function formatWhen(at: string, now: Date): string {
-  const parsed = tryParseTimestamp(at);
-  if (parsed === null) return at;
-  const hm = `${two(parsed.getHours())}:${two(parsed.getMinutes())}`;
-  const sameDay =
-    parsed.getFullYear() === now.getFullYear() &&
-    parsed.getMonth() === now.getMonth() &&
-    parsed.getDate() === now.getDate();
-  return sameDay ? hm : `${MONTHS[parsed.getMonth()] ?? ""} ${parsed.getDate()} ${hm}`;
 }
 
 /** The full UTC value shown on hover next to a local time, as ISO-8601 with milliseconds. */

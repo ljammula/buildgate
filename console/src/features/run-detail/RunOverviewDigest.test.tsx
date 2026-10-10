@@ -197,7 +197,7 @@ describe("the facts card", () => {
     const updated = within(card).getByText(/ago$/);
     expect(updated.tagName).toBe("TIME");
     expect(updated).toHaveAttribute("dateTime", "2026-08-26T11:20:00Z");
-    expect(updated.getAttribute("title")).toMatch(/^2026-08-26 \d\d:20:00$/);
+    expect(updated.getAttribute("title")).toMatch(/^2026-08-26 \d\d:20:00 [+-]\d\d:\d\d$/);
   });
 });
 

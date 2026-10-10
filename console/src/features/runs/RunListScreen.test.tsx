@@ -203,5 +203,38 @@ test("the Created column reads a relative age, with the exact local time on hove
   const when = await screen.findByText("2h 05m ago");
   expect(when.tagName).toBe("TIME");
   expect(when).toHaveAttribute("dateTime", createdAt);
-  expect(when.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+  expect(when.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/);
+});
+
+test("columns read Run, Run ID, State, Activity, Elapsed, Created, Project, with Elapsed right-aligned", async () => {
+  renderApp(<RunListScreen />, {
+    server: [{ on: "GET /runs", reply: () => json([runJson()]) }, noRequests],
+  });
+  await screen.findByText("ticket-accepted");
+  const headers = screen.getAllByRole("columnheader");
+  expect(headers.map((h) => h.textContent)).toEqual([
+    "Run",
+    "Run ID",
+    "State",
+    "Activity",
+    "Elapsed",
+    "Created",
+    "Project",
+  ]);
+  expect(headers[4]).toHaveClass("text-right", "tabular-nums");
+  expect(screen.getByText("04:00").closest("td")).toHaveClass("text-right");
+});
+
+test("a long project path is shortened to its last two segments, whole on hover", async () => {
+  renderApp(<RunListScreen />, {
+    server: [
+      {
+        on: "GET /runs",
+        reply: () => json([runJson({ project_path: "/home/op/buildgate/walk/workspace" })]),
+      },
+      noRequests,
+    ],
+  });
+  const path = await screen.findByText("…/walk/workspace");
+  expect(path).toHaveAttribute("title", "/home/op/buildgate/walk/workspace");
 });

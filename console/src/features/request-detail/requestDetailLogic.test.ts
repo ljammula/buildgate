@@ -119,10 +119,20 @@ describe("next action", () => {
   });
 });
 
-test("tickets lead the content only once they build or stop", () => {
+test("tickets lead the content in every state but the three review states", () => {
   const tickets = [ticketWire({ index: 1 })];
-  expect(ticketsLeadContent(req("plan_review", { tickets }))).toBe(false);
-  for (const state of ["building", "pr_review", "halted", "quarantined"]) {
+  for (const state of ["spec_review", "oracle_review", "plan_review"]) {
+    expect(ticketsLeadContent(req(state, { tickets }))).toBe(false);
+  }
+  for (const state of [
+    "building",
+    "pr_review",
+    "halted",
+    "quarantined",
+    "done",
+    "cancelled",
+    "resume_review",
+  ]) {
     expect(ticketsLeadContent(req(state, { tickets }))).toBe(true);
   }
   expect(ticketsLeadContent(req("building"))).toBe(false);

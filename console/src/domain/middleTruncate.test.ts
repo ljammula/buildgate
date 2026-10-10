@@ -1,4 +1,4 @@
-import { headTruncate, middleTruncate } from "@/domain/middleTruncate";
+import { headTruncate, middleTruncate, shortPath } from "@/domain/middleTruncate";
 
 const long = "add-subtract-numbers-to-add-py-add-a-sub-20261005-225506";
 
@@ -28,5 +28,21 @@ describe("headTruncate", () => {
   test("returns a value within keep unchanged, with no mark", () => {
     expect(headTruncate("0e2df58c76e6", 12, "…")).toBe("0e2df58c76e6");
     expect(headTruncate("", 12, "…")).toBe("");
+  });
+});
+
+describe("shortPath", () => {
+  test("keeps the last two segments behind a leading ellipsis", () => {
+    expect(shortPath("/home/op/buildgate/console-polish-walk/workspace")).toBe(
+      "…/console-polish-walk/workspace",
+    );
+  });
+  test("keeps a path that is already short as it is", () => {
+    expect(shortPath("/repos/app")).toBe("/repos/app");
+    expect(shortPath("app")).toBe("app");
+    expect(shortPath("")).toBe("");
+  });
+  test("keeps the number of segments asked for", () => {
+    expect(shortPath("/a/b/c/d", 1)).toBe("…/d");
   });
 });

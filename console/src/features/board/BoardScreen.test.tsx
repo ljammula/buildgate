@@ -299,7 +299,7 @@ test("the Updated column reads a relative age with the exact local time on hover
   const when = within(row).getByText(/ago$/);
   expect(when).toHaveTextContent("3h 05m ago");
   expect(when.tagName).toBe("TIME");
-  expect(when.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+  expect(when.getAttribute("title")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/);
 });
 
 test("a building request with tickets shows the fan-out roll-up strip", async () => {

@@ -63,8 +63,7 @@ export function ReleasePanel({ runId }: { runId: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-fg">Release — {runId}</h2>
+      <div className="flex items-center justify-end gap-3">
         <IconButton label="Refresh" disabled={loading} onClick={() => void release.refetch()}>
           <RefreshCw aria-hidden="true" />
         </IconButton>
