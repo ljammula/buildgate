@@ -135,6 +135,14 @@ type Heartbeat struct {
 	// "static", the same convention SandboxDocker's own doc comment uses).
 	RouteCredentialMode string `json:"route_credential_mode,omitempty"`
 	RouteWorkerModel    string `json:"route_worker_model,omitempty"`
+	// GitHubLogin is whether the worker's own session could read a GitHub
+	// token when it started: GitHubLoginUsable, GitHubLoginUnusable, or ""
+	// when it could not tell (no gh on its PATH, or gh did not answer). A worker pushes branches
+	// and opens pull requests as itself, and a session can lack the login
+	// another session of the same user has (an ssh session on a Mac cannot
+	// read the login keychain), so doctor reads the worker's answer here
+	// rather than checking its own session.
+	GitHubLogin string `json:"github_login,omitempty"`
 	// ActiveRequests are the requests the daemon is running a job for right
 	// now (a drafting, planning or build job in flight); empty between jobs.
 	// It lets status and the console say what the other requests are queued
@@ -149,6 +157,12 @@ type Heartbeat struct {
 	// a worker.
 	TemporalAddress string `json:"temporal_address,omitempty"`
 }
+
+// The values of Heartbeat.GitHubLogin.
+const (
+	GitHubLoginUsable   = "usable"
+	GitHubLoginUnusable = "unusable"
+)
 
 // Worker reports whether hb was written by `factoryd worker` (it serves a
 // Temporal address) rather than an old process that is not a worker.

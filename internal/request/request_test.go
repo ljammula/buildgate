@@ -370,3 +370,53 @@ func TestJobSpendAddAccumulatesAcrossRedraft(t *testing.T) {
 		t.Errorf("first.Add(blank) Role/Model = %q/%q, want first's own carried through", got.Role, got.Model)
 	}
 }
+
+// TestJobSpendAddKeepsEachModelsShare covers a role whose model changes
+// between the summed attempts: the totals still sum, and Shares returns what
+// each role/model pair spent. Attempts on one model record no split.
+func TestJobSpendAddKeepsEachModelsShare(t *testing.T) {
+	local := &JobSpend{Role: "planning", Model: "model-local", InputTokens: 10, OutputTokens: 5}
+	sameModel := local.Add(&JobSpend{Role: "planning", Model: "model-local", InputTokens: 1, OutputTokens: 1})
+	if len(sameModel.ByModel) != 0 {
+		t.Errorf("ByModel = %+v after two attempts on one model, want none", sameModel.ByModel)
+	}
+	if got, want := sameModel.Shares(), []ModelSpend{{Role: "planning", Model: "model-local", InputTokens: 11, OutputTokens: 6}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Shares() = %+v, want %+v", got, want)
+	}
+
+	hosted := &JobSpend{Role: "planning", Model: "model-hosted", InputTokens: 100, OutputTokens: 50, CostMicroUSD: 7}
+	// An attempt that recorded no model is its own share, under no model.
+	unnamed := &JobSpend{Role: "planning", InputTokens: 3}
+	// The right-hand side carries a split of its own, as one planning pass
+	// that re-planned on another model does.
+	got := sameModel.Add(hosted.Add(unnamed).Add(local))
+	if got.InputTokens != 124 || got.OutputTokens != 61 || got.CostMicroUSD != 7 {
+		t.Errorf("totals = %+v, want input=124 output=61 cost=7", got)
+	}
+	if got.Model != "model-local" {
+		t.Errorf("Model = %q, want the latest attempt's", got.Model)
+	}
+	want := []ModelSpend{
+		{Role: "planning", Model: "model-local", InputTokens: 21, OutputTokens: 11},
+		{Role: "planning", Model: "model-hosted", InputTokens: 100, OutputTokens: 50, CostMicroUSD: 7},
+		{Role: "planning", InputTokens: 3},
+	}
+	if !reflect.DeepEqual(got.Shares(), want) {
+		t.Errorf("Shares() = %+v, want %+v", got.Shares(), want)
+	}
+	var sum ModelSpend
+	for _, share := range got.Shares() {
+		sum.InputTokens += share.InputTokens
+		sum.OutputTokens += share.OutputTokens
+		sum.CostMicroUSD += share.CostMicroUSD
+	}
+	if sum.InputTokens != got.InputTokens || sum.OutputTokens != got.OutputTokens || sum.CostMicroUSD != got.CostMicroUSD {
+		t.Errorf("shares sum to %+v, want the totals of %+v", sum, got)
+	}
+	if local.ByModel != nil || hosted.ByModel != nil || len(sameModel.ByModel) != 0 {
+		t.Error("Add changed one of its operands")
+	}
+	if (*JobSpend)(nil).Shares() != nil {
+		t.Error("nil.Shares() != nil")
+	}
+}

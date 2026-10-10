@@ -80,6 +80,7 @@ type forgeBoundary interface {
 	branchTip(ctx context.Context, workspaceDir string, branch string) (string, error)
 	fetchIssue(ctx context.Context, issueURL string) (string, string, int, error)
 	gitToplevel(dir string) (string, error)
+	githubLogin(ctx context.Context) string
 	insideGitWorkTree(dir string) bool
 	listReviewComments(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error)
 	markPullRequestReady(ctx context.Context, prURL string) error

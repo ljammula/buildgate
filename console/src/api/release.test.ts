@@ -23,6 +23,7 @@ const httpFor = (fetch: typeof globalThis.fetch, baseUrl = "") =>
     readToken: "read-t",
     startToken: "start-t",
     overrideToken: "override-t",
+    gateToken: "gate-t",
     fetch,
   });
 

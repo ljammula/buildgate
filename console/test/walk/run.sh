@@ -75,11 +75,14 @@ for id in req-spec-review req-halted; do
   sed -i '' "s/\"id\": \"$id\"/\"id\": \"$id-b\"/; s#requests/$id/#requests/$id-b/#g" \
     "$walk_dir/data/requests/$id-b/request.json"
 done
-# New request needs a workspace that is a git repository.
+# New request needs a workspace that is a git repository with an AGENTS.md
+# committed at its root.
 if [ ! -d "$walk_dir/workspace/.git" ]; then
   git -C "$walk_dir/workspace" init -q
+  printf '# Walk workspace\n\nNothing is built here.\n' >"$walk_dir/workspace/AGENTS.md"
+  git -C "$walk_dir/workspace" add AGENTS.md
   git -C "$walk_dir/workspace" -c user.name=walk -c user.email=walk@example.invalid \
-    commit -q --allow-empty -m "walk workspace"
+    commit -q -m "walk workspace"
 fi
 
 # Its own empty config directory: with the operator's, a machine that has a

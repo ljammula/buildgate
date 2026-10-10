@@ -68,7 +68,16 @@
       "skills_sha256": "every-field skills_sha256",
       "design_guide": "every-field design_guide",
       "design_guide_sha256": "every-field design_guide_sha256",
-      "at": "2026-09-10T09:00:00Z"
+      "at": "2026-09-10T09:00:00Z",
+      "by_model": [
+        {
+          "role": "every-field role",
+          "model": "every-field model",
+          "input_tokens": 3,
+          "output_tokens": 3,
+          "cost_micro_usd": 3
+        }
+      ]
     }
   },
   "plan_evidence": {
@@ -95,7 +104,16 @@
       "skills_sha256": "every-field skills_sha256",
       "design_guide": "every-field design_guide",
       "design_guide_sha256": "every-field design_guide_sha256",
-      "at": "2026-09-10T09:00:00Z"
+      "at": "2026-09-10T09:00:00Z",
+      "by_model": [
+        {
+          "role": "every-field role",
+          "model": "every-field model",
+          "input_tokens": 3,
+          "output_tokens": 3,
+          "cost_micro_usd": 3
+        }
+      ]
     }
   },
   "verify_command": "every-field verify_command",
@@ -177,7 +195,16 @@
       "skills_sha256": "every-field skills_sha256",
       "design_guide": "every-field design_guide",
       "design_guide_sha256": "every-field design_guide_sha256",
-      "at": "2026-09-10T09:00:00Z"
+      "at": "2026-09-10T09:00:00Z",
+      "by_model": [
+        {
+          "role": "every-field role",
+          "model": "every-field model",
+          "input_tokens": 3,
+          "output_tokens": 3,
+          "cost_micro_usd": 3
+        }
+      ]
     }
   },
   "oracle_skip_warning": "every-field oracle_skip_warning",

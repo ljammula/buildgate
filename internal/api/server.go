@@ -557,7 +557,9 @@ type Server struct {
 	console       http.Handler
 	overrideToken string
 	startToken    string
-	readToken     string
+	// gateToken is WithGateToken's source; nil while the gate is off.
+	gateToken func() GateToken
+	readToken string
 	// mcpToken supplies POST /mcp's bearer token (see WithMCPToken); nil or
 	// "" leaves the endpoint off.
 	mcpToken func() string
@@ -746,6 +748,12 @@ type consoleConfigView struct {
 	// this instead of gating its own buttons on a baked-in token that no
 	// shipped binary ever has.
 	WritesEnabled bool `json:"writes_enabled"`
+	// Gate says whether this console needs the gate token (WithGateToken):
+	// "off" when the request that fetched this needs none (the gate is off,
+	// or the console is on this machine), "accepted" when it carried the
+	// usable token, "required" otherwise. The console sends its stored gate
+	// token on this fetch and shows where to get one on "required".
+	Gate string `json:"gate"`
 	// ReleasePolicyWarning surfaces a release-policy denial in the
 	// console: non-empty
 	// exactly when s.releasePolicy.CanNeverAllow() -- the same condition
@@ -768,7 +776,8 @@ type consoleConfigView struct {
 func (s *Server) consoleConfig(w http.ResponseWriter, r *http.Request) {
 	view := consoleConfigView{
 		TemporalUIURL: s.temporalUIURL,
-		WritesEnabled: s.overrideToken == "" && s.loopbackSameOriginWrite(r),
+		WritesEnabled: (s.overrideToken == "" && s.loopbackSameOriginWrite(r)) || s.gateBearer(r),
+		Gate:          s.consoleGate(r),
 	}
 	if s.releasePolicy.CanNeverAllow() {
 		view.ReleasePolicyWarning = "release policy denies every PR unconditionally (release_max_files_changed/release_max_insertions is 0 or release_rollback_plan is empty) -- add release_max_files_changed, release_max_insertions, and release_rollback_plan to your session config (factoryd init-config's own scaffold now includes them)"
@@ -1084,8 +1093,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// but never treats an allowed host as loopback for
 	// loopbackSameOriginWrite's own no-token write relaxation; see that
 	// function's own doc comment.
-	if s.loopback && !s.hostAllowed(r) {
-		writeError(w, http.StatusForbidden, "Host header does not match this server's own loopback address (127.0.0.1, localhost, or [::1], with this server's own port) or a configured -allowed-host -- refused to defend against DNS rebinding")
+	// A request a proxy passed on must name an -allowed-host: its Host is the
+	// caller's own text, and "127.0.0.1:<port>" there is not this machine.
+	if s.loopback && (!s.hostAllowed(r) || (forwarded(r) && !s.allowedHosts[r.Host])) {
+		writeError(w, http.StatusForbidden, "Host header does not match this server's own loopback address (127.0.0.1, localhost, or [::1], with this server's own port) or a configured -allowed-host -- refused to defend against DNS rebinding. A request a reverse proxy passed on must keep its Host and name an -allowed-host")
 		return
 	}
 	if s.corsAllowOrigin != "" && s.corsAllowOrigin != "*" {
@@ -1768,6 +1779,8 @@ func (s *Server) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "read endpoint is not authorized")
 		return
 	}
+	r, stopWatching := s.whileAuthorizedToRead(r)
+	defer stopWatching()
 	loaded, err := s.loadRun(r.PathValue("id"))
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "run not found")
@@ -1841,6 +1854,8 @@ func (s *Server) streamRunProgress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "read endpoint is not authorized")
 		return
 	}
+	r, stopWatching := s.whileAuthorizedToRead(r)
+	defer stopWatching()
 	id := r.PathValue("id")
 	loaded, err := s.loadRun(id)
 	if errors.Is(err, os.ErrNotExist) {
@@ -2055,6 +2070,8 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "log endpoint is not authorized")
 		return
 	}
+	r, stopWatching := s.whileAuthorizedToRead(r)
+	defer stopWatching()
 	id := r.PathValue("id")
 	loaded, err := s.loadRun(id)
 	if errors.Is(err, os.ErrNotExist) {
@@ -2200,6 +2217,20 @@ type overrideRequest struct {
 	State  string `json:"state"`
 }
 
+// decodeOverrideRequest reads POST /runs/{id}/override's body. problem is the
+// refusal, "" when the body is usable. A name that carries the gate token's
+// suffix is refused: only the server writes that text, on a request write the
+// gate token authorized, and an override is never one.
+func decodeOverrideRequest(r *http.Request) (req overrideRequest, problem string) {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return req, "decode request body"
+	}
+	if strings.Contains(req.By, strings.TrimSpace(gateViaSuffix)) {
+		return req, badPrincipal
+	}
+	return req, ""
+}
+
 // overrideRun lets an operator move a quarantined run to a terminal state
 // (accepted or halted) over HTTP — the execution/override endpoint the
 // plan doc's Phase 1 status previously called out as missing, so a future
@@ -2217,9 +2248,9 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req overrideRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "decode request body")
+	req, problem := decodeOverrideRequest(r)
+	if problem != "" {
+		writeError(w, http.StatusBadRequest, problem)
 		return
 	}
 
@@ -2686,6 +2717,14 @@ func (a *modelUsageAccumulator) add(role, model string, tokens, costMicroUSD int
 	mu.CostMicroUSD += costMicroUSD
 }
 
+// addJobSpend records a drafting job's spend, one observation per
+// role/model pair that spent it (request.JobSpend.Shares).
+func (a *modelUsageAccumulator) addJobSpend(sp *request.JobSpend) {
+	for _, share := range sp.Shares() {
+		a.add(share.Role, share.Model, share.InputTokens+share.OutputTokens, share.CostMicroUSD)
+	}
+}
+
 // finish returns the accumulated entries sorted by role, then model --
 // deterministic regardless of the map iteration/first-seen order above,
 // so a caller (the console, `factoryd cost`) never has to sort this
@@ -2834,7 +2873,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			if sp.SpendPartial {
 				cs.Complete = false
 			}
-			acc.add(sp.Role, sp.Model, sp.InputTokens+sp.OutputTokens, sp.CostMicroUSD)
+			acc.addJobSpend(sp)
 		} else {
 			if v, ok := costFromUsage(req.SpecEvidence.Usage); ok {
 				cs.Spec = v
@@ -2871,7 +2910,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			if sp.SpendPartial {
 				cs.Complete = false
 			}
-			acc.add(sp.Role, sp.Model, sp.InputTokens+sp.OutputTokens, sp.CostMicroUSD)
+			acc.addJobSpend(sp)
 		} else {
 			if v, ok := costFromUsage(req.PlanEvidence.Usage); ok {
 				cs.Plan = v
@@ -2901,7 +2940,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 		if sp.SpendPartial {
 			cs.Complete = false
 		}
-		acc.add(sp.Role, sp.Model, sp.InputTokens+sp.OutputTokens, sp.CostMicroUSD)
+		acc.addJobSpend(sp)
 	}
 	// Runs: every run.Run record this request ever spent on, found by
 	// scanning dataDir/runs for RequestID == req.ID (runsByRequest, built
@@ -3481,6 +3520,8 @@ func (s *Server) streamRequestEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "requests endpoint is not authorized")
 		return
 	}
+	r, stopWatching := s.whileAuthorizedToRead(r)
+	defer stopWatching()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
@@ -3615,9 +3656,10 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "decode request body")
 		return
 	}
-	by := body.By
-	if by == "" {
-		by = requestAPIPrincipal
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
 	}
 	// ApproveShown, not Approve: the API must not pin oracle files the
 	// client never displayed (the CLI path stays unconditional).
@@ -3697,9 +3739,10 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "decode request body")
 		return
 	}
-	by := body.By
-	if by == "" {
-		by = requestAPIPrincipal
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
 	}
 	var (
 		loaded *request.Request
@@ -3775,9 +3818,10 @@ func (s *Server) retryRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "decode request body")
 		return
 	}
-	by := body.By
-	if by == "" {
-		by = requestAPIPrincipal
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
 	}
 	retry := request.Retry
 	switch body.From {
@@ -3830,9 +3874,10 @@ func (s *Server) resumeRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "decode request body")
 		return
 	}
-	by := body.By
-	if by == "" {
-		by = requestAPIPrincipal
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
 	}
 	from := body.From
 	if from == "" {
@@ -3909,9 +3954,10 @@ func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "decode request body")
 		return
 	}
-	by := body.By
-	if by == "" {
-		by = requestAPIPrincipal
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
 	}
 	unlock, err := request.Lock(s.dataDir, id)
 	if errors.Is(err, os.ErrNotExist) {
@@ -4098,7 +4144,12 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := s.saveOperatorEdit(loaded, body.By, specPath, content); err != nil {
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
+	}
+	if err := s.saveOperatorEdit(loaded, by, specPath, content); err != nil {
 		writeError(w, http.StatusInternalServerError, "write spec")
 		return
 	}
@@ -4180,7 +4231,12 @@ func (s *Server) updateRequestTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if err := s.saveOperatorEdit(loaded, body.By, ticketPath, content); err != nil {
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
+	}
+	if err := s.saveOperatorEdit(loaded, by, ticketPath, content); err != nil {
 		writeError(w, http.StatusInternalServerError, "write ticket")
 		return
 	}
@@ -4377,7 +4433,9 @@ func (s *Server) authorizeRequestWrite(r *http.Request) bool {
 	if s.overrideToken == "" && s.loopbackSameOriginWrite(r) && loopbackWriteHasJSONContentType(r) {
 		return true
 	}
-	return s.authorize(r, s.overrideToken)
+	// The gate token opens the same routes for a console that is not on
+	// this machine (WithGateToken); authorizeOverride never asks for it.
+	return s.authorize(r, s.overrideToken) || s.gateBearer(r)
 }
 
 // authorizeOverride reports whether r carries a valid "Authorization:
@@ -4447,7 +4505,7 @@ func (s *Server) hostAllowed(r *http.Request) bool {
 // this Server's own doc comment -- still work unauthenticated against the
 // data directory directly; only the HTTP surface tightened).
 func (s *Server) loopbackSameOriginWrite(r *http.Request) bool {
-	if !s.loopback || !s.hostMatchesLoopback(r) {
+	if !s.local(r) {
 		return false
 	}
 	origin := r.Header.Get("Origin")
@@ -4494,10 +4552,16 @@ func (s *Server) authorizeRead(r *http.Request) bool {
 	if mcpCaller(r) {
 		return true
 	}
+	// While the gate is on, a request that is not local reads with the
+	// gate token (or the read token, when one is set): the reads stay as
+	// they were only for the machine itself.
+	if s.gateRequired(r) {
+		return s.gateBearer(r) || s.authorize(r, s.readToken)
+	}
 	if s.readToken == "" {
 		return true
 	}
-	return s.authorize(r, s.readToken)
+	return s.authorize(r, s.readToken) || s.gateBearer(r)
 }
 
 func (s *Server) authorize(r *http.Request, token string) bool {

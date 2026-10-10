@@ -35,7 +35,14 @@ function fakeFetch(responders: ((init: RequestInit) => Response | Promise<Respon
 }
 
 const httpWith = (fetch: typeof globalThis.fetch, readToken: string | null = "read-secret") =>
-  createHttp({ baseUrl: "", readToken, startToken: null, overrideToken: null, fetch });
+  createHttp({
+    baseUrl: "",
+    readToken,
+    startToken: null,
+    overrideToken: null,
+    gateToken: null,
+    fetch,
+  });
 
 const stateFrame = (value: unknown) => `event: state\ndata: ${JSON.stringify(value)}\n\n`;
 

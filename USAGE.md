@@ -455,7 +455,31 @@ name, so limit who can reach the node with a tailnet ACL.
 |---|---|
 | `tailscale serve status` already shows `/` on port 443 | `tailscale serve --bg 8090` would replace it. Use another HTTPS port: `tailscale serve --bg --https=8443 http://127.0.0.1:8090` |
 | The tunnel is on a port other than 443 | The Host header carries the port, so name it: `-allowed-host <machine>.<tailnet>.ts.net:8443`. The bare name is refused with 403 |
-| Approve or reject from the other machine | The console is read-only under an `-allowed-host` name. Reach it as the server's own loopback address: `ssh -N -L 8090:127.0.0.1:8090 <machine>` (same port on both sides), then open `http://127.0.0.1:8090`. Or use `factoryd approve` on the machine itself |
+| Approve or reject from the other machine | On the host, `factoryd gate-token` prints a token and the fragment `#gate=<token>`. Open the console under its `-allowed-host` address with that fragment appended, for example `https://<machine>.<tailnet>.ts.net/#gate=<token>`. See [The console from another machine](#the-console-from-another-machine) |
+
+### The console from another machine
+
+```text
+host                                   other machine
+----                                   -------------
+factoryd serve -allowed-host <name>
+<reverse proxy> -> 127.0.0.1:<port>
+factoryd gate-token  -- prints -->     https://<name>/#gate=<token>   (open once per browser tab)
+                                       console reads, approves, rejects, edits, submits
+factoryd gate-token -rotate            the old link stops working at once
+```
+
+| Topic | What happens |
+|---|---|
+| What the token allows | Reading, and the request actions: submit, approve, reject, retry, resume, cancel, and editing a spec, ticket or oracle file |
+| What it never allows | Overriding a quarantined run, starting a single-ticket run or a daemon, the release routes, and `/mcp`. Those keep their own tokens, so the console's worker strip and release panels stay empty there |
+| Reads | While a gate token file exists, a console that is not on the host needs the token to read as well. Without it the console shows where to get the link |
+| On the host itself | `http://127.0.0.1:<port>` reads and writes with no token, gate token or not |
+| Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd gate-token` again and open the new link |
+| In the browser | Kept for the tab only and removed from the address bar. A new tab needs the link again. Treat the link as a password: it can stay in the browser's history |
+| Who the history names | The name you give the console, followed by `(gate token)` |
+| Stop it | `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the `-allowed-host` name need no token, and the console there cannot write) |
+| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing: behind one, run `serve` with `-override-token` (for writes) and `FACTORYD_API_READ_TOKEN` (for reads) |
 
 ## `.factory.yml` — commit per-repo defaults once
 
@@ -810,7 +834,7 @@ every request verb takes `-config`):
 | Cap a request's (or a month's) total spend | Session-config `request_token_budget`/`request_cost_budget_micro_usd` (one request's drafting + every ticket run + corrective/PR-review round) and `monthly_token_budget`/`monthly_cost_budget_micro_usd` (all requests in the data dir, current UTC calendar month) — 0/absent means unlimited. Unlike `meter_token_ceiling`/`meter_cost_ceiling_micro_usd` (a per-job ceiling the relay itself enforces mid-job), these are checked host-side before a job is launched at all; reaching one quarantines the request (`budget_exhausted:request`/`budget_exhausted:monthly`) naming the key, the spend, and the limit. `factoryd cost` prints the configured budgets and month-to-date spend once any are set |
 | Fail closed all future releases for a project | `factoryd kill-switch -project <p> -state engaged -by <you> -reason "..."` — CLI-only, works without `serve` |
 | Notification when a request waits with no `worker` alive | `factoryd status` and `factoryd serve` both check the heartbeat file each poll; the console board shows the same banner. Nothing notifies if neither is running |
-| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values (reads only; writes still need `-override-token`, except that an enabled MCP endpoint can submit a request there with its own token) |
+| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values. Reads need no token there unless a gate token exists; writes need the gate token (`factoryd gate-token`, [the console from another machine](#the-console-from-another-machine)) or `-override-token`; an enabled MCP endpoint can submit a request there with its own token. A request a reverse proxy passed on must name an `-allowed-host`, whatever its `Host` says |
 | Console link printed by `submit` / `factoryd console` | Built from `<data-dir>/console-address`, which a live `factoryd serve` writes for its data dir. `submit` and `factoryd console` start that `serve` when it is missing; with `FACTORYD_AUTOSTART=0` (or a `serve` that cannot start) `submit` prints how to get a link instead (or set `-console-base-url` / `FACTORYD_CONSOLE_URL`) |
 | Drive Buildgate from Copilot / Claude Code / Codex | `factoryd install-skill`, then ask in plain words: see "Drive Buildgate from a coding agent" above. `factoryd upgrade` refreshes the skill |
 | Drive Buildgate from an MCP client (Claude Code, Hermes, any other) | `factoryd mcp`, then add the printed endpoint and token to the client: see "Drive Buildgate from an MCP client" above |
@@ -1178,6 +1202,7 @@ What changes for a build:
 | A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
+| A request halts with `was accepted but the pull request could not be opened: git push ...: fatal: could not read Username for 'https://github.com'` | The worker runs in a session that cannot use the GitHub login. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token, so a worker started over ssh builds and then cannot push | `factoryd doctor` warns `worker's GitHub login` for such a worker, and the worker says so when it starts. Start it from a desktop terminal or with `factoryd install-service`, then `factoryd retry <id>` opens the pull request with no rebuild |
 | A change you installed has no effect on a request's builds | The worker was started before the install: it runs every build in its own process, with the code it started with | `factoryd doctor` warns `worker runs this factoryd`; `factoryd restart` (`make install` runs it, unless a request was building) |
 | A build fails on `<module>: 404 Not Found`, `could not read Username for 'https://github.com'` or `unrecognized import path` for a company module | The module is private, and either this machine's Go settings do not mark it so (no `go modules:` line in the run's log) or the host could not fetch it (a `go modules: N left out` line names it) | `go env -w GOPRIVATE=<its path prefix>` and make your own `go mod download` of the repository work on this machine, then `factoryd retry <id>` ([USAGE_REFERENCE.md § Private Go modules](USAGE_REFERENCE.md#private-go-modules)) |
 | `no request "<id>" under ...` for a request you submitted | The request was recorded in another data dir. Every command that resolves one prints `data dir: ... (source: ...)` first, and a `note:` when `data` in the current directory holds records it is not using. Usual causes: the request was submitted before the config had a `data_dir` (commands then used `data` in the directory they ran in), or with an explicit `-data-dir` | Set `data_dir:` in the session config to the folder that holds the request (the `note:` line prints it), then `factoryd restart` |

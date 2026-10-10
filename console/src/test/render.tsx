@@ -117,7 +117,9 @@ export interface RenderAppOptions {
   /** GET /console-config.json's answer. Default: writes enabled. */
   readonly config?: Partial<ConsoleConfig>;
   /** Tokens, to assert which one a route sends. Default: none configured. */
-  readonly tokens?: Partial<Pick<HttpConfig, "readToken" | "startToken" | "overrideToken">>;
+  readonly tokens?: Partial<
+    Pick<HttpConfig, "readToken" | "startToken" | "overrideToken" | "gateToken">
+  >;
 }
 
 export interface RenderAppResult extends RenderResult {
@@ -140,11 +142,13 @@ export function renderApp(ui: ReactElement, options: RenderAppOptions = {}): Ren
     readToken: null,
     startToken: null,
     overrideToken: null,
+    gateToken: null,
     ...options.tokens,
     fetch: server.fetch,
   });
   const config: ConsoleConfig = {
     writesEnabled: true,
+    gate: "off",
     temporalUiUrl: null,
     releasePolicyWarning: null,
     ...options.config,

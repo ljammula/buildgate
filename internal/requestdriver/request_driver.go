@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"buildgate/internal/codereview"
@@ -344,10 +345,9 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 // maxPlanningAttempts bounds AdvancePlanning's own automatic re-plan
 // (below) to exactly one retry within a single planning pass: an initial
 // drafting launch, plus at most one more when writeAndValidateDraftedTickets
-// rejects the plan as infeasible (errPlanInfeasible -- tests_added
-// infeasibility, a criterion naming a file no covering ticket may change,
-// or both at once). A second infeasible plan always halts -- this is a
-// bounded retry, not a loop.
+// refuses the plan and planRedraftable says the planner can fix it (an
+// infeasible plan, or a drafted plan whose content fails another check). A
+// second refused plan always halts -- this is a bounded retry, not a loop.
 const maxPlanningAttempts = 2
 
 // AdvancePlanning runs the plan-drafting job for r and either completes
@@ -381,10 +381,11 @@ const maxPlanningAttempts = 2
 // see CriterionFilesFeasible's own doc comment for that incident.
 // writeAndValidateDraftedTickets reports every infeasibility of either
 // class it finds in one message, so a single re-plan gets fed all of
-// them at once. Every other validation failure (missing Allowed-Files, an
-// unclaimed acceptance criterion, a Verify-Command drift, ...) still
-// halts on the very first attempt -- see maxPlanningAttempts's own doc
-// comment for the retry bound.
+// them at once. Every other content failure of a drafted plan (a ticket off
+// the format, missing Allowed-Files, an unclaimed acceptance criterion, a
+// Verify-Command drift, ...) gets the same single re-plan, told the check's
+// own message; a handed-over plan and an I/O error halt on the first
+// attempt -- see planRedraftable and maxPlanningAttempts.
 func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner PlanTicketsRunner, now time.Time) error {
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
@@ -495,7 +496,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		if validateErr == nil {
 			break
 		}
-		if attempt == maxPlanningAttempts || !errors.Is(validateErr, errPlanInfeasible) {
+		if attempt == maxPlanningAttempts || !planRedraftable(r, validateErr) {
 			_ = os.RemoveAll(ticketsDir)
 			// Keep what every attempt spent: `factoryd cost` reads it from
 			// PlanEvidence, and a halted plan's relay spend was real.
@@ -504,13 +505,13 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		}
 		_ = os.RemoveAll(ticketsDir)
 		r.Rejections = append(r.Rejections, request.Rejection{
-			By:        "factoryd",
+			By:        request.FactoryActor,
 			At:        now.UTC().Format(time.RFC3339Nano),
-			Reason:    validateErr.Error(),
+			Reason:    DraftHaltNote(validateErr.Error()),
 			FromState: request.StatePlanning,
 			ForStage:  request.StatePlanReview,
 		})
-		log.Printf("request %s: plan drafted but infeasible (%v) -- re-planning automatically", r.ID, validateErr)
+		log.Printf("request %s: drafted plan refused (%v) -- re-planning automatically", r.ID, validateErr)
 	}
 	// A request with an approved request-level oracle/ gets each ticket's own
 	// <NNN>.oracle/ derived from it (a no-op for every other request), so the
@@ -534,6 +535,20 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	// gets -- the operator is waiting on them from this moment.
 	RemindRequest(dataDir, r, now)
 	return r.Save(dataDir)
+}
+
+// planRedraftable reports whether a plan refused with err gets the one
+// automatic re-plan: an infeasible plan, or a plan the model drafted whose
+// content failed any other check (a ticket off the format, a missing header,
+// an unclaimed criterion), which the next draft is told in the refusal's own
+// words. A handed-over plan is the operator's and is never sent to the
+// model; an I/O error says nothing about the draft.
+func planRedraftable(r *request.Request, err error) bool {
+	if errors.Is(err, errPlanInfeasible) {
+		return true
+	}
+	var content *draftContentError
+	return !importsPlan(r) && errors.As(err, &content)
 }
 
 // importsPlan reports whether this planning attempt takes the tickets the
@@ -1876,8 +1891,8 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 // AdvancePlanning's one retry loop instead of duplicating it. Every other
 // validation failure this function can return (a bad heading, a missing
 // Allowed-Files/Required-Changed-Files, a Verify-Command drift, an
-// unclaimed acceptance criterion) is not wrapped with it, so
-// AdvancePlanning's errors.Is check only ever matches these two classes.
+// unclaimed acceptance criterion) is not wrapped with it; planRedraftable
+// decides which of those get the same retry.
 var errPlanInfeasible = errors.New("plan is infeasible")
 
 // writeAndValidateDraftedTickets writes each drafted ticket to ticketsDir
@@ -1890,8 +1905,7 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // individually validates that way, it checks that every criterion from 1
 // to criteriaCount is claimed by at least one ticket
 // (request.ValidatePlanCoverage), then runs the two infeasibility checks
-// that get a single automatic re-plan rather than an immediate halt (see
-// errPlanInfeasible): a ticket whose own declared Allowed-Files could
+// (errPlanInfeasible): a ticket whose own declared Allowed-Files could
 // never pass the tests_added gate (policy.TicketTestsAddedFeasible) --
 // found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
 // approved, and burned a full build round before quarantining on a
@@ -2037,15 +2051,41 @@ func criterionPathCovered(p string, allowed []string) bool {
 	return false
 }
 
+// criterionClauseRE splits a criterion's text into clauses: at a semicolon,
+// at a full stop that ends a sentence (one followed by white space), and at
+// the start of a list item on its own line.
+var criterionClauseRE = regexp.MustCompile(`;|\.\s+|\n\s*[-*]\s+`)
+
+// criterionUntouchedRE matches wording that says what a clause names does
+// not change.
+var criterionUntouchedRE = regexp.MustCompile(`(?i)(\b(untouched|unchanged|unmodified|unaltered|intact|(not|cannot|never)\s+(be\s+)?(modified|changed|touched|edited|altered|change|modify|touch|edit|alter)|without\s+(modifying|changing|touching|editing|altering)|no\s+changes?\s+to|left\s+as\s+(it\s+)?is)|n't\s+(be\s+)?(modified|changed|touched|edited|altered|change|modify|touch|edit|alter))\b`)
+
+// criterionChangeRE matches wording that says something does change, or
+// that limits what an "unchanged" covers. A path with such wording between
+// it and the end of its clause is not taken as untouched.
+var criterionChangeRE = regexp.MustCompile(`(?i)\b(chang\w*|modif\w*|add\w*|gain\w*|return\w*|new|creat\w*|updat\w*|implement\w*|export\w*|contain\w*|register\w*|render\w*|introduc\w*|includ\w*|extend\w*|replac\w*|remov\w*|delet\w*|renam\w*|otherwise|except\w*|other\s+than|apart\s+from|besides|only)\b`)
+
 // criterionNamedPaths returns the repo-relative file paths criterionText
-// names in backticks, in order, deduplicated -- see looksLikeRepoPath for
-// what counts as a path rather than a command or a bare identifier.
+// names in backticks as files its work changes, in order, deduplicated --
+// see looksLikeRepoPath for what counts as a path rather than a command or
+// a bare identifier. A path its clause says stays untouched
+// (criterionPathUntouched) is not one: no ticket has to be allowed to change
+// it, and asking for that would put a file the spec protects into
+// Allowed-Files. Clauses and their wording are read outside the backticks,
+// so a command's own punctuation or words decide nothing.
 func criterionNamedPaths(criterionText, workspace string) []string {
+	spans := criterionNamedPathRE.FindAllStringSubmatchIndex(criterionText, -1)
+	prose := []byte(criterionText)
+	for _, span := range spans {
+		for k := span[2]; k < span[3]; k++ {
+			prose[k] = 'x'
+		}
+	}
 	var paths []string
 	seen := make(map[string]bool)
-	for _, m := range criterionNamedPathRE.FindAllStringSubmatch(criterionText, -1) {
-		token := strings.TrimSpace(m[1])
-		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) {
+	for _, span := range spans {
+		token := strings.TrimSpace(criterionText[span[2]:span[3]])
+		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) || criterionPathUntouched(prose, span[2], span[3]) {
 			continue
 		}
 		seen[token] = true
@@ -2054,15 +2094,63 @@ func criterionNamedPaths(criterionText, workspace string) []string {
 	return paths
 }
 
+// criterionPathUntouched reports whether the clause around prose[from:to]
+// (a code span, in a criterion's text with every code span's content
+// blanked) says that file stays as it is. It does when the clause says so
+// after the path with no wording of a change from the path to the clause's
+// end ("`a.md`, the `b` suite and all handlers are untouched"), or says so
+// right before it ("no changes to `a.md`"). Any other clause leaves the
+// path checked: one that also says what changes ("`a.go` returns 404 and
+// existing responses are unchanged", "`a.go` is otherwise unchanged") is
+// about a file some ticket must be allowed to change.
+func criterionPathUntouched(prose []byte, from, to int) bool {
+	start, end := 0, len(prose)
+	for _, cut := range criterionClauseRE.FindAllIndex(prose, -1) {
+		if cut[1] <= from {
+			start = cut[1]
+		} else if cut[0] >= to {
+			end = cut[0]
+			break
+		}
+	}
+	// Blank the untouched wording itself, so "no changes to" is not read as
+	// wording of a change.
+	clause := append([]byte(nil), prose[start:end]...)
+	said := criterionUntouchedRE.FindAllIndex(clause, -1)
+	if len(said) == 0 {
+		return false
+	}
+	for _, m := range said {
+		for k := m[0]; k < m[1]; k++ {
+			clause[k] = ' '
+		}
+	}
+	if criterionChangeRE.Match(clause[to-start:]) {
+		return false
+	}
+	for _, m := range said {
+		if m[0] >= to-start {
+			return true
+		}
+		// Before the path: only when nothing but "the", "file" or a
+		// backtick stands between the wording and the path.
+		if between := strings.Trim(strings.NewReplacer("the", "", "file", "", "`", "").Replace(string(clause[m[1]:from-start])), " \t\n"); between == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // looksLikeRepoPath reports whether token -- one backticked span from an
 // acceptance criterion's own text -- names a repo-relative file, as
 // opposed to a shell command ("cd backend && go vet ./... && go test
 // ./..."), a glob (bare "./..."), or a bare identifier (a function or
 // tool name like "HandleInsights" or "habit_insights"). A token
 // containing whitespace is a command, never a single path. Otherwise it
-// counts as a path when it contains "/" and ends in a recognizable file
-// extension, or when it names a file that actually exists under
-// workspace (workspace == "" skips that fallback check entirely).
+// counts as a path when it contains "/" and ends in a file extension
+// (packageQualified tells "internal/domain.Calculate" from one), or when it
+// names a file that actually exists under workspace (workspace == "" skips
+// that fallback check entirely).
 func looksLikeRepoPath(token, workspace string) bool {
 	if strings.ContainsAny(token, " \t") {
 		return false
@@ -2071,7 +2159,7 @@ func looksLikeRepoPath(token, workspace string) bool {
 		return false
 	}
 	if strings.Contains(token, "/") {
-		if ext := path.Ext(token); ext != "" && ext != "." {
+		if ext := path.Ext(token); ext != "" && ext != "." && !packageQualified(token, ext, workspace) {
 			return true
 		}
 	}
@@ -2080,6 +2168,30 @@ func looksLikeRepoPath(token, workspace string) bool {
 	}
 	info, err := os.Stat(filepath.Join(workspace, token))
 	return err == nil && !info.IsDir()
+}
+
+// packageQualified reports whether token, whose last dot starts ext, reads
+// as a Go identifier qualified by its package's directory
+// ("internal/domain.Calculate", "internal/domain.Operation.Valid") and not as
+// a file with an extension: what follows the dot starts with an upper-case
+// letter, as an exported identifier does and a file extension rarely does,
+// or what precedes it is a directory of the workspace that holds Go files
+// (an unexported "internal/domain.calculate"). A dotfile ("web/.eslintrc")
+// and a ".go" name are always files. looksLikeRepoPath still counts such a
+// token as a path when a file of that name exists, so the cost of a wrong
+// guess here is one new file left unchecked, never a plan refused.
+func packageQualified(token, ext, workspace string) bool {
+	if path.Base(token) == ext || ext == ".go" {
+		return false
+	}
+	if first, _ := utf8.DecodeRuneInString(ext[1:]); unicode.IsUpper(first) {
+		return true
+	}
+	if workspace == "" {
+		return false
+	}
+	goFiles, err := filepath.Glob(filepath.Join(workspace, filepath.FromSlash(strings.TrimSuffix(token, ext)), "*.go"))
+	return err == nil && len(goFiles) > 0
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file

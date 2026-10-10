@@ -46,7 +46,7 @@ func TestResolveHITLReminderIntervalPrefersConfigPathOverDecoyDefault(t *testing
 // `factoryd status`'s own reader sees it as fresh while it is running.
 func TestStartWorkerHeartbeatWritesAndRefreshesHeartbeat(t *testing.T) {
 	dataDir := t.TempDir()
-	stop, err := startWorkerHeartbeat(context.Background(), dataDir, "", "", "", 1)
+	stop, err := startWorkerHeartbeat(context.Background(), dataDir, "", "", "", "", 1)
 	if err != nil {
 		t.Fatalf("startWorkerHeartbeat: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestHeartbeatCarriesTheResolvedRoute(t *testing.T) {
 	settings.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "luna"}}
 	cfg := requestdriver.WorkerConfig{Settings: settings}
 	mode, model := heartbeatRoute(cfg)
-	stop, err := startWorkerHeartbeat(context.Background(), dataDir, mode, model, "", 1)
+	stop, err := startWorkerHeartbeat(context.Background(), dataDir, mode, model, "", "", 1)
 	if err != nil {
 		t.Fatalf("startWorkerHeartbeat: %v", err)
 	}

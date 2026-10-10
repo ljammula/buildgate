@@ -42,6 +42,7 @@ const httpWith = (fetch: typeof globalThis.fetch) =>
     readToken: "read-t",
     startToken: "start-t",
     overrideToken: "override-t",
+    gateToken: "gate-t",
     fetch,
   });
 
@@ -56,7 +57,7 @@ const requestJson = (id: string, state: string) =>
   });
 
 const READ = { Authorization: "Bearer read-t" };
-const WRITE = { "Content-Type": "application/json", Authorization: "Bearer override-t" };
+const WRITE = { "Content-Type": "application/json", Authorization: "Bearer gate-t" };
 
 /** One recorded write: a fake that answers 200 with a request, and the body it was sent. */
 async function sentBy(send: (http: ReturnType<typeof httpWith>) => Promise<unknown>) {
@@ -132,7 +133,7 @@ describe("reads", () => {
 });
 
 describe("writes", () => {
-  test("createRequest sends the override token and only the fields that are set", async () => {
+  test("createRequest sends the gate token and only the fields that are set", async () => {
     const sent = await sentBy((http) =>
       createRequest(http, {
         workspace: "/repos/app",

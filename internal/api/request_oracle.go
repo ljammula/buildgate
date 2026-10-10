@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -176,9 +177,9 @@ func (s *Server) getTicketOracleFile(w http.ResponseWriter, r *http.Request) {
 // putRequestOracleFile serves PUT /requests/{id}/oracle/{name}: writes
 // RUN_COMMAND.txt only (any other name is 403), only at oracle_review (409
 // otherwise), under the request lock approval holds. Body: {"content": "..."}
-// like PUT /requests/{id}/spec (a "by" field is accepted and ignored: no
-// operator-edit history pattern exists to record it in). Gated like
-// approve/reject (override token).
+// like PUT /requests/{id}/spec. The request record keeps no entry for this
+// write, so "by" (writePrincipal) is logged, not recorded. Gated like
+// approve/reject (authorizeRequestWrite).
 func (s *Server) putRequestOracleFile(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequestWrite(r) {
 		writeError(w, http.StatusForbidden, "requests endpoint is not authorized")
@@ -196,6 +197,11 @@ func (s *Server) putRequestOracleFile(w http.ResponseWriter, r *http.Request) {
 	}
 	body, ok := decodeRequestContentBody(w, r)
 	if !ok {
+		return
+	}
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
 	// base_sha256 (if given) is checked inside SetOracleRunCommand
@@ -226,6 +232,9 @@ func (s *Server) putRequestOracleFile(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "write oracle file")
 	default:
+		// The request record has no entry for this write: the log line is
+		// the trace of who made it.
+		log.Printf("request %s: %s set by %q (sha256 %s)", id, name, by, sum)
 		writeJSON(w, http.StatusOK, requestOracleWriteView{Name: name, SHA256: sum})
 	}
 }

@@ -146,7 +146,8 @@ func operatorActions(r *request.Request) []Observation {
 	}
 	for i, rej := range r.Rejections {
 		stage := rej.Stage()
-		if !gateStage(stage) {
+		// A plan the factory's own checks refused is not an operator's action.
+		if !gateStage(stage) || rej.By == request.FactoryActor {
 			continue
 		}
 		out = append(out, Observation{

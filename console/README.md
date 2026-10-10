@@ -53,7 +53,7 @@ test/walk/run.sh       # the live walk: a real factoryd, a real browser, every s
 | The Go handler and its route | `internal/api/server.go` (and the operator docs the repository's `AGENTS.md` names)                                                                                                                               |
 | A fixture of its response    | One line in `contractRoutes()` in `internal/api/contract_fixtures_test.go`, then `FACTORYD_UPDATE_GOLDEN=1 go test ./internal/api -run TestConsoleContractFixtures`. The test fails until every GET route has one |
 | The type and decoder         | `src/domain/<resource>.ts`: `interface X` and `decodeX(o, at)`, with a test that decodes the fixture                                                                                                              |
-| The call                     | `src/api/<resource>.ts`: `getX(http, ..., signal)` naming the token kind its handler checks (`read`, `start` or `override`), with a test of the exact request it sends                                            |
+| The call                     | `src/api/<resource>.ts`: `getX(http, ..., signal)` naming the token kind its handler checks (`read`, `start`, `override`, or `gate` for a request write), with a test of the exact request it sends               |
 | The hook                     | `src/api/<resource>Queries.ts`: a query (key from `queryKeys`) or a mutation that caches the answer and invalidates what it changed                                                                               |
 
 ## Module layout

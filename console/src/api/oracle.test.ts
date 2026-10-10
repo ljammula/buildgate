@@ -30,11 +30,12 @@ const httpWith = (fetch: typeof globalThis.fetch) =>
     readToken: "read-t",
     startToken: "start-t",
     overrideToken: "override-t",
+    gateToken: "gate-t",
     fetch,
   });
 
 const READ = { Authorization: "Bearer read-t" };
-const WRITE = { "Content-Type": "application/json", Authorization: "Bearer override-t" };
+const WRITE = { "Content-Type": "application/json", Authorization: "Bearer gate-t" };
 const FILE_SHA = "0e2df58c76e6bce05db5cd535c182f7b4c09dc25dc1aa6b18d55a386529b20e6";
 
 describe("listings", () => {

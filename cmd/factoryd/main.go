@@ -588,6 +588,9 @@ func subcommands() map[string]subcommand {
 		"mcp": func(dp *deps, args []string) error {
 			return mcpMain(dp, os.Stdout, args)
 		},
+		"gate-token": func(dp *deps, args []string) error {
+			return gateTokenMain(dp, os.Stdout, args)
+		},
 		"memory": memoryMain,
 		"stats":  withoutDeps(statsMain),
 		"version": func(*deps, []string) error {

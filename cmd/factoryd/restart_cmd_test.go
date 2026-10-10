@@ -143,3 +143,49 @@ func TestRestartStartsTheWorkerAgainWhenTheConsoleWillNotStop(t *testing.T) {
 		t.Errorf("spawned %v, want only the worker: %q", h.spawned, want)
 	}
 }
+
+// A running worker whose session could not use the GitHub login when it
+// started (one started over ssh on a Mac) builds a ticket and then cannot
+// push it: doctor says so from the worker's own record, whatever the login of
+// the session doctor runs in.
+func TestDoctorReportsAWorkerThatCannotUseTheGitHubLogin(t *testing.T) {
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	dir := h.profiles.roots["default"]
+	write := func(pid int, login string) {
+		t.Helper()
+		now := time.Now().Format(time.RFC3339Nano)
+		hb := daemonheartbeat.Heartbeat{PID: pid, StartedAt: now, UpdatedAt: now, JobSlots: 1, TemporalAddress: "localhost:7233", Version: version, GitHubLogin: login}
+		if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dir), hb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if checks := doctorWorkerGitHubLoginChecks(dp, dir, time.Now()); len(checks) != 0 {
+		t.Fatalf("a data dir with no worker has the row: %+v", checks)
+	}
+	queuePID, _ := h.startDefaultProcesses()
+	for _, login := range []string{"", daemonheartbeat.GitHubLoginUsable} {
+		write(queuePID, login)
+		if checks := doctorWorkerGitHubLoginChecks(dp, dir, time.Now()); len(checks) != 0 {
+			t.Errorf("worker login %q: %+v, want no row", login, checks)
+		}
+	}
+	write(queuePID, daemonheartbeat.GitHubLoginUnusable)
+	checks := doctorWorkerGitHubLoginChecks(dp, dir, time.Now())
+	if len(checks) != 1 || checks[0].Err == nil || !checks[0].Advisory {
+		t.Fatalf("checks = %+v, want one warning row", checks)
+	}
+	// A heartbeat another process left is not the running worker's answer.
+	write(queuePID+100000, daemonheartbeat.GitHubLoginUnusable)
+	if stale := doctorWorkerGitHubLoginChecks(dp, dir, time.Now()); len(stale) != 0 {
+		t.Errorf("a heartbeat of a pid that is not the running worker: %+v, want no row", stale)
+	}
+	for _, want := range []string{"ssh session", "install-service", "factoryd retry"} {
+		if !strings.Contains(checks[0].Fix, want) {
+			t.Errorf("Fix = %q, want it to mention %q", checks[0].Fix, want)
+		}
+	}
+	if !strings.Contains(checks[0].Err.Error(), "push the branch") {
+		t.Errorf("Err = %v, want it to say what fails", checks[0].Err)
+	}
+}

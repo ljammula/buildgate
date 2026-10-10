@@ -774,6 +774,16 @@ func (sv *serveRun) listenAndServe() error {
 		if source() != "" {
 			log.Printf("MCP endpoint enabled at /mcp (token file %s; `factoryd mcp -disable` turns it off)", tokenPath)
 		}
+		// The gate token is read from its file beside the config the same
+		// way; with no config there is nowhere for that file to be, so the
+		// gate stays off.
+		gatePath := gateTokenPathFor(configPath)
+		serverOptions = append(serverOptions, api.WithGateToken(gateTokenSource(gatePath)))
+		if file := readGateFile(gatePath, time.Now()); file.present && file.token != "" {
+			log.Printf("gate token on (file %s, expires %s): a console that is not on this machine needs it to read", gatePath, file.expires.Format(time.RFC3339))
+		} else if file.present {
+			log.Printf("gate token on with no usable token (%s): no gate token opens a console that is not on this machine -- %s", file.reason, file.fix)
+		}
 	}
 	if *sv.temporalUIURL != "" {
 		serverOptions = append(serverOptions, api.WithTemporalUIURL(*sv.temporalUIURL))

@@ -368,3 +368,9 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: usage: factoryd build-ca-bundle
 stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 
+$ factoryd gate-token -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of gate-token:
+stderr:   -config string
+
