@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"buildgate/internal/codereview"
@@ -2146,9 +2147,10 @@ func criterionPathUntouched(prose []byte, from, to int) bool {
 // ./..."), a glob (bare "./..."), or a bare identifier (a function or
 // tool name like "HandleInsights" or "habit_insights"). A token
 // containing whitespace is a command, never a single path. Otherwise it
-// counts as a path when it contains "/" and ends in a recognizable file
-// extension, or when it names a file that actually exists under
-// workspace (workspace == "" skips that fallback check entirely).
+// counts as a path when it contains "/" and ends in a file extension
+// (packageQualified tells "internal/domain.Calculate" from one), or when it
+// names a file that actually exists under workspace (workspace == "" skips
+// that fallback check entirely).
 func looksLikeRepoPath(token, workspace string) bool {
 	if strings.ContainsAny(token, " \t") {
 		return false
@@ -2157,7 +2159,7 @@ func looksLikeRepoPath(token, workspace string) bool {
 		return false
 	}
 	if strings.Contains(token, "/") {
-		if ext := path.Ext(token); ext != "" && ext != "." {
+		if ext := path.Ext(token); ext != "" && ext != "." && !packageQualified(token, ext, workspace) {
 			return true
 		}
 	}
@@ -2166,6 +2168,24 @@ func looksLikeRepoPath(token, workspace string) bool {
 	}
 	info, err := os.Stat(filepath.Join(workspace, token))
 	return err == nil && !info.IsDir()
+}
+
+// packageQualified reports whether token, whose last dot starts ext, reads
+// as an identifier qualified by its package's directory
+// ("internal/domain.Calculate", "internal/domain.Operation.Valid") and not as
+// a file with an extension: what follows the dot starts with an upper-case
+// letter, as an exported identifier does and a file extension does not, or
+// what precedes it is a directory of the workspace. looksLikeRepoPath still
+// counts such a token as a path when a file of that name exists.
+func packageQualified(token, ext, workspace string) bool {
+	if first, _ := utf8.DecodeRuneInString(ext[1:]); unicode.IsUpper(first) {
+		return true
+	}
+	if workspace == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(workspace, strings.TrimSuffix(token, ext)))
+	return err == nil && info.IsDir()
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file

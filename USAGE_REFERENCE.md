@@ -724,7 +724,9 @@ reaches `plan_review`, if its own `Allowed-Files` could never satisfy
 plan-time check runs alongside it: for every approved-spec acceptance
 criterion, it collects the repo-relative file paths the criterion names in
 backticks and rejects the plan if a named path is in the `Allowed-Files`
-of no ticket that lists the criterion as covered. A path named in a
+of no ticket that lists the criterion as covered. A name such as
+`internal/domain.Calculate` (a package's directory, a dot, an identifier)
+is code, not a file, and is not checked. A path named in a
 clause that says it stays as it is (`untouched`, `unchanged`, `not
 modified`, `must not change`, `no changes to`) is not checked. A criterion covered by
 no ticket at all is left to the "unclaimed criterion" check. On either
