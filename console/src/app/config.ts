@@ -9,7 +9,7 @@ const text = (value: unknown): string => (typeof value === "string" ? value : ""
 /**
  * The HTTP configuration for this bundle. `storedStartToken` is the token
  * `factoryd serve` handed over in the URL fragment (platform/startToken);
- * `storedGateToken` is the one from a `factoryd gate-token` link
+ * `storedGateToken` is the one `factoryd gate-token` printed
  * (platform/gateToken).
  *
  * A production build talks to its own origin unless VITE_API_BASE_URL says

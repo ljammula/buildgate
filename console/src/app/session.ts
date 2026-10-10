@@ -21,7 +21,22 @@ export interface ConsoleSession {
   readonly gateLost: () => boolean;
   /** Calls `listener` when gateLost turns true. Returns the unsubscribe. */
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * Offers a gate token the operator pasted. It is stored for this tab only
+   * once the server has accepted it; the caller then starts the console
+   * again, which picks it up. Never throws, and stores nothing unless it
+   * resolves "accepted".
+   */
+  readonly offerToken: (token: string) => Promise<TokenOffer>;
 }
+
+/**
+ * What became of a pasted gate token: the server accepted it and it is
+ * stored; the server refused it; the server did not answer as a gated
+ * console (unreachable, or its gate was turned off meanwhile), which says
+ * nothing about the token; or this browser would not keep it for the tab.
+ */
+export type TokenOffer = "accepted" | "refused" | "no-answer" | "not-kept";
 
 export interface SessionInputs {
   /** The gate token the address bar carried (captureGateTokenFromLocation), not yet trusted. */
@@ -88,6 +103,17 @@ export async function startSession({
     http,
     config,
     storedTokenRefused,
+    offerToken: async (offered) => {
+      const token = offered.trim();
+      if (token === "") return "refused";
+      const answer = (await configFor(token)).gate;
+      if (answer === "off") return "no-answer";
+      if (answer !== "accepted") return "refused";
+      setStoredGateToken(token);
+      // Storage that is blocked drops the write without a word; starting
+      // again would then show this screen once more, with no reason.
+      return getStoredGateToken() === token ? "accepted" : "not-kept";
+    },
     gateLost: () => lost,
     subscribe: (listener) => {
       listeners.add(listener);

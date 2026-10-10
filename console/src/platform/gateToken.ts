@@ -1,11 +1,12 @@
-// The gate token arrives in a URL fragment (`factoryd gate-token` prints a link
-// ending in `#gate=<token>`), so it never reaches the server or an access log.
-// It is kept in sessionStorage, not localStorage: it opens a console reached
-// through a proxy, and it should not outlive the tab it was opened in.
+// The gate token reaches the console pasted into its gate screen
+// (app/GateScreen) or in a URL fragment (`#gate=<token>`), which never
+// reaches the server or an access log. It is kept in sessionStorage, not
+// localStorage: it opens a console reached through a proxy, and it should
+// not outlive the tab it was opened in.
 //
-// Capturing and storing are separate. A fragment is only a candidate until the
-// server accepts it, so a stale or mistyped link cannot replace a token that
-// works (app/session.ts decides).
+// Capturing and storing are separate. A pasted or linked token is only a
+// candidate until the server accepts it, so a stale or mistyped one cannot
+// replace a token that works (app/session.ts decides).
 
 const storageKey = "factoryGateToken";
 const fragmentKey = "gate";

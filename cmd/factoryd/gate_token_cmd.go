@@ -142,8 +142,9 @@ func newGateTokenFlags() (flags *flag.FlagSet, f gateTokenFlags) {
 }
 
 // gateTokenMain implements `factoryd gate-token`: the credential of a console
-// that is not on this machine. It prints the token and the fragment that
-// hands it to the console.
+// that is not on this machine. It prints the token, which the operator pastes
+// into the console's gate screen, and the fragment that hands it over in a
+// link.
 func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 	flags, f := newGateTokenFlags()
 	if err := flags.Parse(args); err != nil {
@@ -209,7 +210,7 @@ func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 	fmt.Fprintf(stdout, "Gate token: %s\n", file.token)
 	fmt.Fprintf(stdout, "Expires:    %s (in %s)\n", file.expires.Local().Format(time.RFC3339), file.expires.Sub(now).Round(time.Minute))
 	fmt.Fprintf(stdout, "Token file: %s\n", path)
-	fmt.Fprintf(stdout, "\nOpen the console under its -allowed-host address with this fragment appended:\n  #gate=%s\n", file.token)
+	fmt.Fprintf(stdout, "\nOpen the console under its -allowed-host address and paste the token into the field it shows.\nOr open it with this fragment appended, which puts the token in a link:\n  #gate=%s\n", file.token)
 	fmt.Fprintln(stdout, "\nIt lets that console read, and approve, reject, retry, resume, cancel, edit and submit requests. It cannot override a quarantined run, start a run or use /mcp.")
 	fmt.Fprintln(stdout, "While this file exists, a console that is not on this machine needs the token to read. `-rotate` replaces it at once, `-disable` leaves no gate token working, `-remove` turns the gate off.")
 	return nil
