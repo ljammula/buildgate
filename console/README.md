@@ -23,13 +23,16 @@ test/walk/run.sh       # the live walk: a real factoryd, a real browser, every s
 
 ## Checks, and what each one is for
 
-| Check                    | Run                                                                            | Catches                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| Unit and component tests | `npm run test`                                                                 | Logic and rendering, in isolation, against a fake server (`src/test/render.tsx`)                          |
-| Contract fixtures        | `go test ./internal/api -run TestConsoleContractFixtures`, then `npm run test` | A Go response shape the decoders cannot read                                                              |
-| Golden vectors           | The Go and Vitest suites                                                       | The server and the console disagreeing on a content hash, a token count or a spec/ticket structure check  |
-| Lint boundaries          | `npm run lint`                                                                 | A layer importing what it may not; HTML from untrusted text; `fetch` or `localStorage` in the wrong layer |
-| Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 42 steps, each write checked against the server's own record    |
+| Check                    | Run                                                                            | Catches                                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit and component tests | `npm run test`                                                                 | Logic and rendering, in isolation, against a fake server (`src/test/render.tsx`)                                                                                        |
+| Contract fixtures        | `go test ./internal/api -run TestConsoleContractFixtures`, then `npm run test` | A Go response shape the decoders cannot read                                                                                                                            |
+| Golden vectors           | The Go and Vitest suites                                                       | The server and the console disagreeing on a content hash, a token count or a spec/ticket structure check                                                                |
+| Lint boundaries          | `npm run lint`                                                                 | A layer importing what it may not; HTML from untrusted text; `fetch` or `localStorage` in the wrong layer                                                               |
+| Live walk                | `test/walk/run.sh`                                                             | What only a real server and browser show: 42 steps, each write checked against the server's own record                                                                  |
+| Theme tokens             | `npm run test` (`src/app/tokens.test.ts`)                                      | A token pair below its contrast bar; the pairs that miss today are listed in the test and only shrink                                                                   |
+| Screenshots              | `WALK_SCRIPT=shots.mjs test/walk/run.sh`                                       | Every screen in both themes; `WALK_VIEWPORTS=1440x900,960x900` photographs several sizes (file names gain the width)                                                    |
+| Board layout             | `WALK_SCRIPT=layout.mjs WALK_SEED=dense test/walk/run.sh`                      | Board start height, visible title length and unintended sideways overflow against fixed bars; exits 1 on a miss. `WALK_SEED=dense` adds twenty requests in two projects |
 
 `scripts/console-walk/run.sh` (repository root) is the second walk: one real request through drafting, review and a build against a model route, driven only from the console (it needs Docker, the OpenShell gateway and Temporal; its header lists them).
 
