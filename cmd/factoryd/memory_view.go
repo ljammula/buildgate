@@ -214,7 +214,8 @@ func repositoryRunsNewestFirst(dataDir, project, repoRoot string, limit int) []*
 }
 
 // repositoryNotes returns what a finished run's build agent said is worth
-// knowing about the repository, from the run's handoff. The handoff is read
+// knowing about the repository, from the run's handoff, as the agent wrote
+// it (backticks kept: the memory text rule judges them). The handoff is read
 // only against the hash and state the run record holds, so one changed after
 // the run recorded it yields nothing.
 func repositoryNotes(dataDir string, r *run.Run) []string {
@@ -225,7 +226,7 @@ func repositoryNotes(dataDir string, r *run.Run) []string {
 	if err != nil || doc.AgentNotes == nil {
 		return nil
 	}
-	return doc.AgentNotes.Repository
+	return doc.AgentNotes.MemoryCandidates()
 }
 
 // memoryRequestState is Reconcile's view of a request: known when its record

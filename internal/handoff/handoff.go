@@ -295,12 +295,20 @@ func firstNonEmpty(values ...string) string {
 // control characters or recognisable secrets (sanitize.Line), no backticks
 // (Markdown puts names inside them), at most limit runes.
 func clean(s string, limit int) string {
-	s = strings.ReplaceAll(sanitize.Line(s), "`", "'")
+	return backticksToQuotes(cleanKeepingBackticks(s, limit))
+}
+
+// cleanKeepingBackticks is clean without its last step: the value may still
+// hold backticks, so it is never inlined into Markdown.
+func cleanKeepingBackticks(s string, limit int) string {
+	s = sanitize.Line(s)
 	if runes := []rune(s); len(runes) > limit {
 		s = string(runes[:limit]) + "…"
 	}
 	return s
 }
+
+func backticksToQuotes(s string) string { return strings.ReplaceAll(s, "`", "'") }
 
 // cleanList is clean over at most n entries, dropping any that clean to
 // nothing. A nil list stays nil.

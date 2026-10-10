@@ -448,7 +448,13 @@ requires a new contract review and an updated machine-checkable test.
   under the fifth heading (things worth knowing about the repository) may
   also be listed to the operator as memory candidates, each only if it
   passes the memory text rule; they still reach no review, no planner and no
-  other ticket's build except under SC-020.
+  other ticket's build except under SC-020. That rule accepts a command only
+  inside backticks, so the handoff keeps one more copy of the fifth
+  heading's items for it alone (`repository_as_written`): each item as the
+  agent wrote it, backticks included, one line cleaned and cut like every
+  other value. The rule judges that text and nothing repairs it; the copy is
+  never rendered into the record a build is given, where every note still has
+  its backticks turned into quotes.
   A ticket rebuilt after `factoryd retry` is given the record of its own
   quarantined run on the same terms, and only while the ticket's spec is the
   one that run was built from.
