@@ -22,8 +22,9 @@ BUILD_CA_BUNDLE ?= $(eval export BUILD_CA_BUNDLE := $(shell go run ./cmd/factory
 # the certificate.
 CONSOLE_NPM_CA = $(if $(BUILD_CA_BUNDLE),NODE_EXTRA_CA_CERTS="$(abspath $(BUILD_CA_BUNDLE))")
 
-# go test -race over GO_PACKAGES, with cmd/factoryd (~9 minutes serially
-# under -race) split into parallel processes: see scripts/test-sharded.sh.
+# go test -race over GO_PACKAGES, with the slow packages (cmd/factoryd is ~9
+# minutes serially under -race) split into parallel processes: see
+# scripts/test-sharded.sh.
 test:
 	scripts/test-sharded.sh $(GO_PACKAGES)
 

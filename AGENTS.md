@@ -107,16 +107,19 @@ Test gotchas that have broken `main` before:
 
 - Judge `go test`/`make verify` by exit status and the full `--- FAIL` list,
   never by a head-truncated grep of the output.
-- `make verify` runs `cmd/factoryd` tests as 2 to 8 concurrent processes,
-  sized from the machine's cores and memory (`scripts/test-sharded.sh`;
-  `TEST_SHARDS=<n>` overrides): a fixture path, port or package global shared
-  across tests needs a per-process name, or tests that swap it run
-  sequentially. A test that starts a process waits for it to answer (30 s,
-  `waitForServeHealthy`), never a couple of seconds: under eight shards a
-  start is slow. Tests are dealt to shards on each run from the measured
-  seconds in `scripts/factoryd-test-timings.txt`; a new test needs no entry,
-  and `TEST_SHARDS_RECORD=1 make test` re-measures. The run fails if a test is
-  in zero or two shards. On a memory-tight machine,
+- `make verify` runs the slow packages (`cmd/factoryd`, `internal/sandbox`,
+  `internal/workflow`: `SHARDED_PACKAGES` in `scripts/test-sharded.sh`) as
+  shards, several processes of one test binary at once. The number of
+  processes is read from the machine on each run: 2 on a 16 GiB Mac (both
+  `cmd/factoryd`'s), up to half the cores where that much memory is free;
+  `TEST_SHARDS=<n>` overrides. In those packages a fixture path, port or
+  package global shared across tests needs a per-process name, or tests that
+  swap it run sequentially. A test that starts a process waits for it to
+  answer (30 s, `waitForServeHealthy`), never a couple of seconds: under many
+  shards a start is slow. Processes are dealt to packages, and tests to
+  shards, on each run from the measured seconds in `scripts/test-timings.txt`;
+  a new test needs no entry, and `TEST_SHARDS_RECORD=1 make test` re-measures.
+  The run fails if a test is in zero or two shards. On a memory-tight machine,
   `TEST_SHARDS_SEQUENTIAL=1 make verify` runs the shards one after another
   (slower, peak memory of one race binary).
 - `make verify-live` fails loudly without Docker and needs Temporal at
