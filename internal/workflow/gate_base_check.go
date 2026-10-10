@@ -82,7 +82,34 @@ func pendingGateBaseCheck(input NamedGateActivityInput, result runner.Result, ru
 	if runErr != nil || evidenceErr != nil || result.ExitCode == 0 || input.Check == policy.ReferenceOracleGateID {
 		return nil
 	}
-	return gateBaseNotChecked(input.effectiveDiffBase(), "%s", gateBaseInterrupted)
+	base, _ := gateBaseCommit(input.RunWorkflowInput)
+	return gateBaseNotChecked(base, "%s", gateBaseInterrupted)
+}
+
+// gateBaseCommit is the commit the ticket's work started from, when the run's
+// own input proves which it is; otherwise "" and why it is not known.
+//
+//   - A run given a diff base (a corrective build, a PR-review round, a retry
+//     that continues on the failed attempt's commit) names it: the ticket's
+//     base, whatever commit the run itself started from.
+//   - A run that adopts a halted run's worktree (ResumeFrom) or checks out an
+//     existing branch (OnBranch), with no diff base, starts from a commit that
+//     may already hold the ticket's work: a resumed corrective round's base is
+//     the failed attempt's own commit. A gate red there says nothing about
+//     the ticket's base, so the rerun is not made.
+//   - Any other run made its own branch at its base commit.
+func gateBaseCommit(input RunWorkflowInput) (sha, unknown string) {
+	switch {
+	case input.DiffBaseSHA != "":
+		return input.DiffBaseSHA, ""
+	case input.ResumeFrom != nil:
+		return "", "the run resumed an earlier run's worktree and names no diff base, so its base may already hold the ticket's work"
+	case input.OnBranch != "":
+		return "", "the run continues an existing branch and names no diff base, so its base may already hold the ticket's work"
+	case input.BaseSHA == "":
+		return "", "the run recorded no base commit"
+	}
+	return input.BaseSHA, ""
 }
 
 // sweepGateBaseWorktree removes the scratch worktree an earlier attempt of
@@ -143,9 +170,9 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 // returns what it showed. It returns no error: every failure of its own is a
 // "not checked" record.
 func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
-	base := input.effectiveDiffBase()
+	base, unknown := gateBaseCommit(input.RunWorkflowInput)
 	if base == "" {
-		return gateBaseNotChecked("", "the run recorded no base commit")
+		return gateBaseNotChecked("", "%s", unknown)
 	}
 	// The rerun gets what is left of the gate's own time limit, less the
 	// reserve, as a deadline of its own: when it runs out the launch is

@@ -522,7 +522,10 @@ type GateBaseCheck struct {
 	// Outcome is GateBaseFails, GateBasePasses or GateBaseNotChecked.
 	Outcome string `json:"outcome"`
 	// BaseSHA is the commit the command was rerun on: the run's diff base
-	// when it continues an earlier run's branch, else its own base commit.
+	// when it names one, else the base commit of a run that made its own
+	// branch there. Empty when the run's record does not prove where the
+	// ticket's work started (a resumed run, or a run on an existing branch,
+	// with no diff base): the rerun is then not made.
 	BaseSHA string `json:"base_sha,omitempty"`
 	// ExitCode is the command's exit code on the base commit; meaningful
 	// only when Outcome is not GateBaseNotChecked.

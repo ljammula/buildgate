@@ -699,13 +699,13 @@ a build, so the factory spends none on it.
 | | |
 |---|---|
 | When | Only after the gate failed, inside the gate's own step. A passing gate is never rerun. `reference_oracle`, `canonical_verify` (see the baseline verify) and `full_suite_verify` are not |
-| Which commit | The run's base commit. For a run that continues an earlier run's branch (a corrective build, a PR-review round, a `retry` on the failed attempt's branch): the ticket's own base (`diff_base_sha`), not the commit the round started from |
+| Which commit | The run's `diff_base_sha` when it has one (a corrective build, a PR-review round, a `retry` on the failed attempt's branch: the ticket's own base, not the commit the round started from); else the base commit of a run that made its own branch there. A run that resumed a halted run's worktree, or runs on an existing branch, with no diff base starts from a commit that may already hold the ticket's work: it is not rerun (`not_checked`) |
 | Where | A sandbox like the gate's own (same image, `setup:`, limits, registry proxy, Compose services, `.factory/` read-only from the trusted commit, no model route), on a scratch worktree of that commit under the run's directory (`gate-base/<check>`), removed afterwards. Never on the host, never in the run's worktree |
 | Time | What is left of the gate's own time limit, less one minute; with less than that left it is not started |
 | Record | `base_check` on the gate's entry in `run.json` `gate_results` (and `GET /runs/{id}`): `outcome`, `base_sha`, `exit_code`, `log_path`, `log_sha256`, `reason`. The gate's own `passed`, `exit_code` and `log_sha256` are the run on the result alone and never change |
 | `outcome: fails` | The handoff sorts the gate `operator`: the run's reason reads `<gate> fails on the base commit <sha> too, so no build can fix it: fix the gate command or the repository. No corrective build is started.` Fix it, then `factoryd retry <id>` |
 | `outcome: passes` | The build's changes (or a flaky command) fail the gate: sorted `corrective`, as a failed gate always was |
-| `outcome: not_checked` | The rerun reached no exit code (`reason`: no base commit on record, the commit could not be checked out, the sandbox could not start, time ran out, the worker stopped during it). Sorted `corrective`, as a failed gate always was |
+| `outcome: not_checked` | The rerun reached no exit code (`reason`: the run's record does not prove where the ticket's work started, the commit could not be checked out, the sandbox could not start, time ran out, the worker stopped during it). Sorted `corrective`, as a failed gate always was |
 | Cost | One more sandbox launch for each failed gate; with Compose services, the services come up and go down once more |
 
 `reference_oracle_command` should run a check the agent didn't author — a
