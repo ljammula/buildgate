@@ -23,6 +23,7 @@ const httpFor = (fetch: typeof globalThis.fetch) =>
     readToken: "read-t",
     startToken: "start-t",
     overrideToken: "override-t",
+    gateToken: "gate-t",
     fetch,
   });
 
@@ -51,6 +52,7 @@ describe("listProjects", () => {
       readToken: null,
       startToken: null,
       overrideToken: null,
+      gateToken: null,
       fetch,
     });
     await listProjects(http);

@@ -21,8 +21,8 @@ const requestPath = (id: string) => `/requests/${encodeURIComponent(id)}`;
  * GET /requests: every request currently on disk, oldest-submitted first
  * (see internal/request.List). Gated with the read token, the same as the
  * run reads: the request board works with read credentials, so this sends
- * the read token and not the override token that approve and reject, which
- * are separately gated write routes, still need.
+ * the read token and not the gate or override token that approve and reject,
+ * which are separately gated write routes, still need.
  */
 export async function listRequests(http: Http, signal?: AbortSignal): Promise<RequestSummary[]> {
   return decodeRequestList(await http.getJson("/requests", "read", signal), "GET /requests");
@@ -57,7 +57,8 @@ export interface CreateRequestOptions {
 /**
  * POST /requests: starts a request from the console instead of a terminal
  * `factoryd submit`. Gated the same way approve and reject are
- * (internal/api.Server.authorizeRequestWrite): the override token, not the
+ * (internal/api.Server.authorizeRequestWrite): the gate token, or the
+ * override token of a bundle built with one (token kind "gate"), not the
  * start token that starting a run uses, since this can only ever create a
  * new request in `submitted`, the same class of write approve and reject
  * already are, not POST /runs' stronger authorizeStart. The server
@@ -83,7 +84,7 @@ export async function createRequest(
     ...(options.by ? { by: options.by } : {}),
   };
   return decodeRequestSummary(
-    asObject(await http.sendJson("POST", "/requests", "override", body, signal), at),
+    asObject(await http.sendJson("POST", "/requests", "gate", body, signal), at),
     at,
   );
 }
@@ -132,10 +133,7 @@ export async function approveRequest(
           ...(hasHashes ? { expected_sha256: options.expectedSha256 } : {}),
         };
   return decodeRequestSummary(
-    asObject(
-      await http.sendJson("POST", `${requestPath(id)}/approve`, "override", body, signal),
-      at,
-    ),
+    asObject(await http.sendJson("POST", `${requestPath(id)}/approve`, "gate", body, signal), at),
     at,
   );
 }
@@ -183,10 +181,7 @@ export async function rejectRequest(
       : {}),
   };
   return decodeRequestSummary(
-    asObject(
-      await http.sendJson("POST", `${requestPath(id)}/reject`, "override", body, signal),
-      at,
-    ),
+    asObject(await http.sendJson("POST", `${requestPath(id)}/reject`, "gate", body, signal), at),
     at,
   );
 }
@@ -215,8 +210,8 @@ export interface UpdateRequestContentOptions {
  * editor. The server re-validates `content` against the same structural
  * check the drafting job itself applies, refusing with a 422
  * (ApiError.serverMessage carries the reason) rather than saving something
- * the pipeline would halt on later. Override-token gated, like approve and
- * reject. `base_sha256` is omitted when no base is given.
+ * the pipeline would halt on later. Gated like approve and reject (token
+ * kind "gate"). `base_sha256` is omitted when no base is given.
  */
 export async function updateRequestSpec(
   http: Http,
@@ -232,7 +227,7 @@ export async function updateRequestSpec(
     ...(options.by != null && options.by !== "" ? { by: options.by } : {}),
   };
   return decodeRequestSummary(
-    asObject(await http.sendJson("PUT", `${requestPath(id)}/spec`, "override", body, signal), at),
+    asObject(await http.sendJson("PUT", `${requestPath(id)}/spec`, "gate", body, signal), at),
     at,
   );
 }
@@ -259,7 +254,7 @@ export async function updateRequestTicket(
   };
   return decodeRequestSummary(
     asObject(
-      await http.sendJson("PUT", `${requestPath(id)}/tickets/${n}`, "override", body, signal),
+      await http.sendJson("PUT", `${requestPath(id)}/tickets/${n}`, "gate", body, signal),
       at,
     ),
     at,
@@ -298,7 +293,7 @@ export async function retryRequest(
     ...(options.fromScratch === true ? { from: "scratch" } : {}),
   };
   return decodeRequestSummary(
-    asObject(await http.sendJson("POST", `${requestPath(id)}/retry`, "override", body, signal), at),
+    asObject(await http.sendJson("POST", `${requestPath(id)}/retry`, "gate", body, signal), at),
     at,
   );
 }
@@ -326,10 +321,7 @@ export async function resumeRequest(
   const at = "POST /requests/{id}/resume";
   const body = { from: options.from, ...(options.by ? { by: options.by } : {}) };
   return decodeRequestSummary(
-    asObject(
-      await http.sendJson("POST", `${requestPath(id)}/resume`, "override", body, signal),
-      at,
-    ),
+    asObject(await http.sendJson("POST", `${requestPath(id)}/resume`, "gate", body, signal), at),
     at,
   );
 }
@@ -347,10 +339,7 @@ export async function cancelRequest(
   const at = "POST /requests/{id}/cancel";
   const body = { reason: options.reason, ...(options.by ? { by: options.by } : {}) };
   return decodeRequestSummary(
-    asObject(
-      await http.sendJson("POST", `${requestPath(id)}/cancel`, "override", body, signal),
-      at,
-    ),
+    asObject(await http.sendJson("POST", `${requestPath(id)}/cancel`, "gate", body, signal), at),
     at,
   );
 }

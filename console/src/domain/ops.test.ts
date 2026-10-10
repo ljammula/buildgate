@@ -16,6 +16,7 @@ test("GET /console-config.json decodes", () => {
     "GET /console-config.json",
   );
   expect(config.writesEnabled).toBe(false);
+  expect(config.gate).toBe("off");
   expect(config.temporalUiUrl).toBe("http://localhost:8233");
   expect(config.releasePolicyWarning).toMatch(/^release policy denies every PR unconditionally/);
 });
@@ -23,9 +24,28 @@ test("GET /console-config.json decodes", () => {
 test("a console config without the optional fields has them null", () => {
   expect(decodeConsoleConfig({ writes_enabled: true }, "GET /console-config.json")).toEqual({
     writesEnabled: true,
+    gate: "off",
     temporalUiUrl: null,
     releasePolicyWarning: null,
   });
+});
+
+test("a console config's gate is decoded, and a missing or unknown one is off", () => {
+  const gate = (body: Record<string, unknown>) =>
+    decodeConsoleConfig(body, "GET /console-config.json").gate;
+  expect(gate({ gate: "off" })).toBe("off");
+  expect(gate({ gate: "required" })).toBe("required");
+  expect(gate({ gate: "accepted", writes_enabled: true })).toBe("accepted");
+  expect(gate({})).toBe("off");
+  expect(gate({ gate: "" })).toBe("off");
+  expect(gate({ gate: "pending" })).toBe("off");
+  expect(gate({ gate: "Required" })).toBe("off");
+});
+
+test("a console config whose gate is not a string does not decode", () => {
+  expect(() => decodeConsoleConfig({ gate: true }, "GET /console-config.json")).toThrow(
+    /GET \/console-config\.json/,
+  );
 });
 
 test("GET /daemons decodes", () => {

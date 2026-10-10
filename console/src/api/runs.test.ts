@@ -33,7 +33,12 @@ function recordingFetch(respond: Responder) {
   return { fetch: fetch as unknown as typeof globalThis.fetch, calls };
 }
 
-const tokens = { readToken: "read-t", startToken: "start-t", overrideToken: "override-t" };
+const tokens = {
+  readToken: "read-t",
+  startToken: "start-t",
+  overrideToken: "override-t",
+  gateToken: "gate-t",
+};
 
 function httpFor(fetch: typeof globalThis.fetch, baseUrl = "") {
   return createHttp({ baseUrl, ...tokens, fetch });
@@ -45,6 +50,7 @@ function noTokenHttp(fetch: typeof globalThis.fetch) {
     readToken: null,
     startToken: null,
     overrideToken: null,
+    gateToken: null,
     fetch,
   });
 }

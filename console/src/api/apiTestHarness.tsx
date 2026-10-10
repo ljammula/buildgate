@@ -24,6 +24,7 @@ export function harness(routes: Route[]) {
     readToken: null,
     startToken: null,
     overrideToken: null,
+    gateToken: null,
     fetch,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -31,7 +32,12 @@ export function harness(routes: Route[]) {
     <QueryClientProvider client={client}>
       <ApiProvider
         http={http}
-        config={{ writesEnabled: true, temporalUiUrl: null, releasePolicyWarning: null }}
+        config={{
+          writesEnabled: true,
+          gate: "off",
+          temporalUiUrl: null,
+          releasePolicyWarning: null,
+        }}
       >
         {children}
       </ApiProvider>

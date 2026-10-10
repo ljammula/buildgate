@@ -1,6 +1,14 @@
 import { resolveHttpConfig } from "@/app/config";
 
-const none = { baseUrl: "", auth: "", start: "", override: "", read: "", storedStartToken: null };
+const none = {
+  baseUrl: "",
+  auth: "",
+  start: "",
+  override: "",
+  read: "",
+  storedStartToken: null,
+  storedGateToken: null,
+};
 
 test("with nothing configured every token is absent", () => {
   expect(resolveHttpConfig(none)).toEqual({
@@ -8,6 +16,7 @@ test("with nothing configured every token is absent", () => {
     readToken: null,
     startToken: null,
     overrideToken: null,
+    gateToken: null,
   });
 });
 
@@ -32,6 +41,7 @@ test("one auth token stands in for the start and override tokens, never the read
     readToken: null,
     startToken: "a",
     overrideToken: "a",
+    gateToken: null,
   });
 });
 
@@ -44,4 +54,19 @@ test("distinct start and override tokens stay distinct", () => {
 
 test("the stored start token never becomes the override token", () => {
   expect(resolveHttpConfig({ ...none, storedStartToken: "from-link" }).overrideToken).toBeNull();
+});
+
+test("the stored gate token is the gate token and stands in for no other", () => {
+  expect(resolveHttpConfig({ ...none, storedGateToken: "from-gate-link" })).toEqual({
+    baseUrl: "",
+    readToken: null,
+    startToken: null,
+    overrideToken: null,
+    gateToken: "from-gate-link",
+  });
+});
+
+test("no bundle token becomes the gate token", () => {
+  const config = resolveHttpConfig({ ...none, auth: "a", start: "s", override: "o", read: "r" });
+  expect(config.gateToken).toBeNull();
 });

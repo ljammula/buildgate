@@ -14,10 +14,14 @@ function renderApp(path: string, writesEnabled = true) {
     readToken: null,
     startToken: null,
     overrideToken: null,
+    gateToken: null,
     fetch,
   });
   return render(
-    <App http={http} config={{ writesEnabled, temporalUiUrl: null, releasePolicyWarning: null }} />,
+    <App
+      http={http}
+      config={{ writesEnabled, gate: "off", temporalUiUrl: null, releasePolicyWarning: null }}
+    />,
   );
 }
 

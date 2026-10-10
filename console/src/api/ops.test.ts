@@ -23,22 +23,28 @@ const httpFor = (fetch: typeof globalThis.fetch, baseUrl = "") =>
     readToken: "read-t",
     startToken: "start-t",
     overrideToken: "override-t",
+    gateToken: "gate-t",
     fetch,
   });
 
 const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
 
-const disabled = { writesEnabled: false, temporalUiUrl: null, releasePolicyWarning: null };
+const disabled = {
+  writesEnabled: false,
+  gate: "off",
+  temporalUiUrl: null,
+  releasePolicyWarning: null,
+};
 
 describe("fetchConsoleConfig", () => {
-  test("decodes the fixture and sends no credential", async () => {
+  test("decodes the fixture and sends the gate token alone", async () => {
     const { fetch, calls } = recordingFetch(() => json(readFixtureText("api/console-config.json")));
     const config = await fetchConsoleConfig(httpFor(fetch));
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("/console-config.json");
     expect(calls[0]?.init.method).toBe("GET");
-    expect(calls[0]?.init.headers).toEqual({});
+    expect(calls[0]?.init.headers).toEqual({ Authorization: "Bearer gate-t" });
     expect(config.writesEnabled).toBe(false);
     expect(config.temporalUiUrl).toBe("http://localhost:8233");
     expect(config.releasePolicyWarning).toContain("release policy denies every PR");
@@ -50,9 +56,50 @@ describe("fetchConsoleConfig", () => {
     expect(calls[0]?.url).toBe("http://factory.test/console-config.json");
     expect(config).toEqual({
       writesEnabled: true,
+      gate: "off",
       temporalUiUrl: null,
       releasePolicyWarning: null,
     });
+  });
+
+  test("with no gate token it sends no credential, whatever else is configured", async () => {
+    const { fetch, calls } = recordingFetch(() => json('{"gate":"required"}'));
+    const http = createHttp({
+      baseUrl: "",
+      readToken: "read-t",
+      startToken: "start-t",
+      overrideToken: "override-t",
+      gateToken: null,
+      fetch,
+    });
+    const config = await fetchConsoleConfig(http);
+    expect(calls[0]?.init.headers).toEqual({});
+    expect(config.gate).toBe("required");
+  });
+
+  test("decodes the server's answer to the gate token", async () => {
+    const { fetch } = recordingFetch(() => json('{"writes_enabled":true,"gate":"accepted"}'));
+    const config = await fetchConsoleConfig(httpFor(fetch));
+    expect(config.gate).toBe("accepted");
+    expect(config.writesEnabled).toBe(true);
+  });
+
+  test("a 403 here does not call the 403 hook of the Http it was given", async () => {
+    const { fetch } = recordingFetch(() => json('{"error":"forbidden"}', 403));
+    const onForbidden = vi.fn();
+    const http = createHttp(
+      {
+        baseUrl: "",
+        readToken: null,
+        startToken: null,
+        overrideToken: null,
+        gateToken: "gate-t",
+        fetch,
+      },
+      { onForbidden },
+    );
+    expect(await fetchConsoleConfig(http)).toEqual(disabled);
+    expect(onForbidden).not.toHaveBeenCalled();
   });
 
   test("a 404 from a server predating the route reads as writes not enabled", async () => {

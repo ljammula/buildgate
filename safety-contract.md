@@ -42,7 +42,8 @@ The trust boundaries are:
 | Control-plane API | `factoryd serve`'s daemon configuration (resource ceilings, release policy, sandbox image policy) | An authenticated `POST /runs` caller | A bearer token proves authentication, not trust. A caller-supplied field that selects what code runs inside the boundary is never accepted as given: `sandbox_image` is allow-listed by operator configuration (`-api-allowed-sandbox-images`), as `sandbox_docker` already is. No caller-supplied field can select host execution. |
 | Workstation queue | Docker containment (always applied) | `factoryd submit`/`worker` requests (each ticket build runs from an in-memory entry) | No path has host execution: every ticket build resolves to a configured, digest-pinned `-sandbox-image` (built from source, no built-in default) or is refused before any container launches. This holds for every entry point (bare `factoryd <run>`, `serve`, the API, Temporal), not just `worker`. |
 | Forge / PR review | Factory release policy and an operator-configured reviewer trust list | Branch pushes, draft-PR open, the `gh pr ready` flip, `gh pr edit --base` retargets, and reviewer comments | Each push, draft-PR open, and ready flip requires `release.Decision.Allowed`, re-checked immediately before the side effect — including a `factoryd retry` of a PR-open-only failure, which re-runs the decision against the run's frozen policy, verifies `refs/heads/<branch>` still equals the accepted `ResultSHA`, and pushes an explicit `<ResultSHA>:refs/heads/<branch>` refspec (the normal open path pins the same way). A reviewer comment triggers a corrective build only when its author is on the explicit `-pr-trusted-authors` allow-list; an ignore-list is not sufficient. A multi-ticket request's ticket N (N>1) draft PR may open stacked on ticket N-1's own still-open branch (`-pr-base`) rather than the default branch; `advancePRReadyOrApproved` refuses the ready flip while its base is another ticket's branch, and once ticket N-1 merges, `gh pr edit --base` retargets ticket N's PR onto ticket N-1's own base only after the ready flip's checks (a fresh `release.Decision.Allowed` and a PR head equal to that run's `ResultSHA`); a failed or refused retarget leaves the PR draft, is retried on the next poll, and never halts the request. |
-| Console loopback writes | `factoryd serve`'s bind address and the operator's own local processes | Any page loaded in the operator's browser | On loopback with no override token, request-write routes accept same-origin JSON without a token; `POST /runs/{id}/override` and start-class routes always need a token. See [Console loopback writes](#console-loopback-writes) below. |
+| Console loopback writes | `factoryd serve`'s bind address and the operator's own local processes | Any page loaded in the operator's browser, and any caller that reaches `serve` through a reverse proxy | On loopback with no override token, request-write routes accept same-origin JSON without a token from a request no proxy passed on; `POST /runs/{id}/override` and start-class routes always need a token. See [Console loopback writes](#console-loopback-writes) below. |
+| Gate token | The operator's `<config name>.gate-token` file (written by `factoryd gate-token`, mode 0600, beside the session config, one per profile, with an expiry) | A console that is not on the machine, and everything on the network path to it | The token opens the reads and the request writes and nothing else; while its file exists, a request that is not local needs it to read. See [Gate token](#gate-token) below. |
 | Console-originated request creation | The operator's `workspaces:` session-config list and the factory's data directory | `POST /requests` | Takes the request-write gate, never `authorizeStart`; `workspace` is never accepted as an arbitrary host path. See [Console-originated request creation](#console-originated-request-creation) below. |
 | MCP endpoint | The operator's `<config name>.mcp-token` file (created by `factoryd mcp`, mode 0600, beside the session config, one per profile) | `POST /mcp` and the model driving the MCP client | Off until the token file exists; every call needs the token, with no loopback relaxation. Its tools are reads and `POST /requests` only: no tool approves, rejects, retries, resumes, cancels, edits or overrides. See [MCP endpoint](#mcp-endpoint) below. |
 | Untrusted worker output | `internal/sanitize` | Agent-authored log/report text reaching triage, halt reasons, notifications, `status`, or the console | Text is stripped (ANSI/OSC, control and Unicode format characters, invalid UTF-8) and secret-redacted (`sanitize.Text`/`sanitize.Line`; Python mirror `build_app.redact`/`single_line`) before display, and shown as a quoted log excerpt, never as a factory verdict or claimed provenance — the log-writing process shares the worker's container and uid, so the factory cannot attest who wrote a given line. |
@@ -90,13 +91,20 @@ DNS-rebinding attacker reaching the loopback port through XHR, fetch, or a
 the same user can already forge these headers, or run `factoryd approve`/
 `cancel` directly against the data directory.
 
-Request writes (approve, reject, spec/ticket/oracle edits, retry, cancel,
-create; `internal/api.Server.authorizeRequestWrite`):
+Request writes (approve, reject, spec/ticket/oracle edits, retry, resume,
+cancel, create; `internal/api.Server.authorizeRequestWrite`):
 
 - Without a token, a request is accepted only when all of these hold:
-  - `Host` names this server's own loopback address and port
-    (`127.0.0.1`/`localhost`/`[::1]`, `hostMatchesLoopback`). This is the
-    DNS-rebinding defense.
+  - The request is local (`Server.local`): the server is bound to loopback,
+    `Host` names this server's own loopback address and port
+    (`127.0.0.1`/`localhost`/`[::1]`, `hostMatchesLoopback`), and no reverse
+    proxy passed the request on (`forwarded`: it carries none of
+    `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`,
+    `X-Real-Ip`, `Via`, or a `Tailscale-*` header). The `Host` check is the
+    DNS-rebinding defense. The proxy check is there because a proxy such as
+    `tailscale serve` keeps the caller's `Host` header: a caller on the
+    proxy's network can send the loopback address and a matching `Origin`
+    itself, and the headers the proxy adds are what it cannot remove.
   - `Origin` exactly matches that origin, or, when `Origin` is absent,
     `Sec-Fetch-Site` is exactly `same-origin`. A request with neither header
     is refused. This is the CSRF defense.
@@ -112,9 +120,17 @@ create; `internal/api.Server.authorizeRequestWrite`):
   (`Server.ServeHTTP`). `-allowed-host <host[:port]>` (`hostAllowed`) adds
   extra `Host` values for reads only, e.g. through an ssh tunnel, reverse
   proxy, or `tailscale serve`. The write relaxation still consults only
-  `hostMatchesLoopback`, so a write through an allowed host needs the token.
+  `Server.local`, so a write through an allowed host needs a token: the
+  override token or the [gate token](#gate-token).
   `POST /mcp` is reachable through an allowed host and can submit a request
   there, behind its own token ([MCP endpoint](#mcp-endpoint)).
+- A request a proxy passed on must name an `-allowed-host`: one whose `Host`
+  is the loopback address is refused on every route.
+- **Limit:** a forwarder that adds none of those headers (a TCP-level
+  forward, an ssh tunnel, a proxy set to rewrite `Host` to the loopback
+  address and add nothing) makes its callers local by this test. An ssh
+  tunnel needs a shell on the host, which is already the operator. Any other
+  such forwarder needs `-override-token`, which turns the relaxation off.
 
 Start-class routes (`POST /runs`, daemon lifecycle, and the `GET` release
 and stats routes; `authorizeStart`) get no relaxation. A missing or wrong
@@ -195,6 +211,24 @@ bearer token is always a 403. The token is handled as follows:
   the allow-list plus each workspace's verify-command hint. That is nothing
   `GET /requests` and the caller's own filesystem access don't already
   reveal.
+
+### Gate token
+
+The credential of a console that is not on the machine (`internal/api`'s
+`WithGateToken`, `cmd/factoryd`'s `gate_token_cmd.go`).
+
+| Property | Rule |
+|---|---|
+| What it opens | The read routes (`authorizeRead`) and the request writes (`authorizeRequestWrite`): create, approve, reject, retry, resume, cancel, and the spec, ticket and oracle-file edits. A request created with it may carry every field `POST /requests` accepts, a verify command included: it is the operator's credential, and the same holder approves the plan |
+| What it never opens | `POST /runs/{id}/override` (`authorizeOverride` compares against the override token only), the start-class routes (`authorizeStart`), and `POST /mcp` (`serveMCP` compares against the MCP token only). The MCP token and the start token open no gate route |
+| Who needs it | While the gate is on, a request that is not local (`Server.local`, above) reads only with the gate token, or the read token when one is set. The console's own files, `/console-config.json` and `/healthz` stay open: the page has to load to take the token from the URL fragment |
+| Local use | Unchanged by the gate: a local request reads and writes as [Console loopback writes](#console-loopback-writes) says |
+| The file | `<config name>.gate-token` beside the session config: the token and `expires <RFC 3339 time>`. Written beside and renamed into place, never through a symlink, never inside a git work tree. `serve` reads it on each request that needs it, with the start-token file's checks (not a symlink, a regular file, this user's, mode 0600) |
+| States | No file: the gate is off. A usable file: on. A file `serve` cannot use (it fails a check, is malformed, has expired, or holds `disabled`): **on with no token**, so a request that is not local can neither read nor write. A file that goes bad never reopens the reads it guarded |
+| One value, one class | A gate token equal to the override, start, read or MCP token is not usable |
+| Lifetime | 12 hours unless `-ttl` says otherwise (one minute to 30 days). `-rotate` replaces it: the old token is refused on the next request, and a stream opened with it ends at its next poll |
+| Who is recorded | A write the gate token alone authorized is recorded under the name the console sent (`api` when it sent none) with ` (gate token)` added by the server (`writePrincipal`). A request whose name already carries that text is refused, so only the server writes it. The name is the caller's claim; the suffix is what the server knows |
+| In the browser | The console takes the token from `#gate=<token>`, keeps it in `sessionStorage`, removes it from the address bar, and sends it only as an `Authorization` header. **Residuals:** the original link can remain in the browser's history; script running in the console's page could read `sessionStorage` (the console renders model-written text as text, never as HTML). The token's expiry, `-rotate`, and its having no override power bound both |
 
 ### MCP endpoint
 

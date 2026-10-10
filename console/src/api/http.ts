@@ -14,11 +14,18 @@ import { ApiError } from "@/domain/apiError";
 
 /**
  * Which credential a route is checked against on the server
- * (internal/api's WithReadToken, WithStartToken, WithOverrideToken). They
- * are separate and may be distinct, so each call names the one its route
- * uses.
+ * (internal/api's WithReadToken, WithStartToken, WithOverrideToken, and the
+ * gate token). They are separate and may be distinct, so each call names the
+ * one its route uses:
+ *
+ *   read      a read route: the read token, else the gate token
+ *   gate      a request write: the gate token, else the override token (a
+ *             bundle built with one keeps writing)
+ *   override  POST /runs/{id}/override: the override token only. The server
+ *             never accepts the gate token there, so it is never sent
+ *   start     the start token only, for the same reason
  */
-export type TokenKind = "read" | "start" | "override";
+export type TokenKind = "read" | "start" | "override" | "gate";
 
 export interface HttpConfig {
   /** Empty means same origin: the console is served by the factoryd it talks to. */
@@ -26,8 +33,25 @@ export interface HttpConfig {
   readonly readToken: string | null;
   readonly startToken: string | null;
   readonly overrideToken: string | null;
+  /**
+   * The operator's gate token (platform/gateToken): what lets a console
+   * opened through a proxy read and do request writes.
+   */
+  readonly gateToken: string | null;
   /** Injected in tests. */
   readonly fetch?: typeof fetch;
+}
+
+export interface HttpHooks {
+  /**
+   * Called for a 403 answer to a call the gate token was sent on (a read or
+   * a request write, streamed reads included). The server has no status of
+   * its own for a refused gate token, so a 403 is only a reason to ask it
+   * again (app/session.ts). A start-token or run-override route never gets
+   * the gate token and refuses a console that holds it alone, so its 403
+   * says nothing about the token and is not reported: the board polls one.
+   */
+  readonly onForbidden?: () => void;
 }
 
 export interface Http {
@@ -59,12 +83,15 @@ export interface Http {
 
 function tokenFor(config: HttpConfig, kind: TokenKind): string | null {
   switch (kind) {
+    // `||`, not `??`: an empty token is no token, and must not hide the other.
     case "read":
-      return config.readToken;
+      return config.readToken || config.gateToken;
     case "start":
       return config.startToken;
     case "override":
       return config.overrideToken;
+    case "gate":
+      return config.gateToken || config.overrideToken;
   }
 }
 
@@ -79,12 +106,18 @@ async function bodyText(response: Response): Promise<string> {
   return new TextDecoder("utf-8").decode(await response.arrayBuffer());
 }
 
-async function requireSuccess(response: Response): Promise<void> {
-  if (!response.ok) throw new ApiError(response.status, await bodyText(response));
-}
-
-export function createHttp(config: HttpConfig): Http {
+export function createHttp(config: HttpConfig, hooks: HttpHooks = {}): Http {
   const doFetch: typeof fetch = config.fetch ?? ((input, init) => fetch(input, init));
+  // Every method checks its response here, so the 403 hook sees every call.
+  const requireSuccess = async (response: Response, token: TokenKind): Promise<void> => {
+    if (response.ok) return;
+    const sentGateToken =
+      config.gateToken !== null &&
+      config.gateToken !== "" &&
+      tokenFor(config, token) === config.gateToken;
+    if (response.status === 403 && sentGateToken) hooks.onForbidden?.();
+    throw new ApiError(response.status, await bodyText(response));
+  };
   const url = (path: string) =>
     config.baseUrl === "" ? path : new URL(path, config.baseUrl).toString();
 
@@ -100,12 +133,12 @@ export function createHttp(config: HttpConfig): Http {
     url,
     async getJson(path, token, signal) {
       const response = await get(path, token, signal);
-      await requireSuccess(response);
+      await requireSuccess(response, token);
       return JSON.parse(await bodyText(response)) as unknown;
     },
     async getBytes(path, token, signal) {
       const response = await get(path, token, signal);
-      await requireSuccess(response);
+      await requireSuccess(response, token);
       return new Uint8Array(await response.arrayBuffer());
     },
     async sendJson(method, path, token, body, signal) {
@@ -115,13 +148,13 @@ export function createHttp(config: HttpConfig): Http {
         body: JSON.stringify(body),
         ...(signal ? { signal } : {}),
       });
-      await requireSuccess(response);
+      await requireSuccess(response, token);
       const text = await bodyText(response);
       return text.trim() === "" ? null : (JSON.parse(text) as unknown);
     },
     async openStream(path, token, signal) {
       const response = await get(path, token, signal);
-      await requireSuccess(response);
+      await requireSuccess(response, token);
       if (!response.body) throw new Error(`GET ${path}: the response has no body to stream`);
       return response.body;
     },

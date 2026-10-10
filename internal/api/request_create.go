@@ -124,9 +124,10 @@ func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	by := body.By
-	if by == "" {
-		by = requestAPIPrincipal
+	by, named := s.writePrincipal(r, body.By)
+	if !named {
+		writeError(w, http.StatusBadRequest, badPrincipal)
+		return
 	}
 
 	result, err := requestsubmit.Submit(requestsubmit.Params{

@@ -33,12 +33,27 @@ export function decodeWorkspaceHintList(value: unknown, at: string): WorkspaceHi
 }
 
 /**
- * GET /console-config.json: whether this server accepts an unauthenticated
- * write from this console's own origin, and the Temporal UI base URL when
- * configured.
+ * What the server says about the gate token the request for
+ * /console-config.json carried:
+ *
+ *   off       none is needed here: the feature is off, or the console is on
+ *             the machine itself
+ *   required  reads and writes here need one, and the request carried none,
+ *             or one that is invalid or expired
+ *   accepted  the request carried a valid one
+ */
+export type GateState = "off" | "required" | "accepted";
+
+/**
+ * GET /console-config.json: whether this server accepts a write from this
+ * console (from its own origin unauthenticated, or with the gate token the
+ * request carried), where the gate token stands, and the Temporal UI base
+ * URL when configured.
  */
 export interface ConsoleConfig {
   readonly writesEnabled: boolean;
+  /** "off" when the server omits it, as one that predates the gate token does. */
+  readonly gate: GateState;
   /** Null when the server has no -temporal-ui-url. */
   readonly temporalUiUrl: string | null;
   /**
@@ -50,10 +65,22 @@ export interface ConsoleConfig {
   readonly releasePolicyWarning: string | null;
 }
 
+// A value this console does not know reads as "off", like a missing one.
+// "required" replaces the whole app with the gate screen and forgets the
+// stored token, so it is shown only when the server says exactly that. The
+// server enforces the gate whatever is drawn here: reading a new value as
+// "off" costs at most a 403 on each call, shown with its reason, while
+// reading it as "required" would lock an operator out of a console that may
+// well be working.
+function decodeGateState(value: string): GateState {
+  return value === "required" || value === "accepted" ? value : "off";
+}
+
 // An absent field is null; a present one is kept as sent, "" included.
 export function decodeConsoleConfig(o: JsonObject, at: string): ConsoleConfig {
   return {
     writesEnabled: optBoolean(o, "writes_enabled", at),
+    gate: decodeGateState(optString(o, "gate", at)),
     temporalUiUrl: stringOrNull(o, "temporal_ui_url", at),
     releasePolicyWarning: stringOrNull(o, "release_policy_warning", at),
   };

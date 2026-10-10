@@ -455,7 +455,31 @@ name, so limit who can reach the node with a tailnet ACL.
 |---|---|
 | `tailscale serve status` already shows `/` on port 443 | `tailscale serve --bg 8090` would replace it. Use another HTTPS port: `tailscale serve --bg --https=8443 http://127.0.0.1:8090` |
 | The tunnel is on a port other than 443 | The Host header carries the port, so name it: `-allowed-host <machine>.<tailnet>.ts.net:8443`. The bare name is refused with 403 |
-| Approve or reject from the other machine | The console is read-only under an `-allowed-host` name. Reach it as the server's own loopback address: `ssh -N -L 8090:127.0.0.1:8090 <machine>` (same port on both sides), then open `http://127.0.0.1:8090`. Or use `factoryd approve` on the machine itself |
+| Approve or reject from the other machine | On the host, `factoryd gate-token` prints a token and the fragment `#gate=<token>`. Open the console under its `-allowed-host` address with that fragment appended, for example `https://<machine>.<tailnet>.ts.net/#gate=<token>`. See [The console from another machine](#the-console-from-another-machine) |
+
+### The console from another machine
+
+```text
+host                                   other machine
+----                                   -------------
+factoryd serve -allowed-host <name>
+<reverse proxy> -> 127.0.0.1:<port>
+factoryd gate-token  -- prints -->     https://<name>/#gate=<token>   (open once per browser tab)
+                                       console reads, approves, rejects, edits, submits
+factoryd gate-token -rotate            the old link stops working at once
+```
+
+| Topic | What happens |
+|---|---|
+| What the token allows | Reading, and the request actions: submit, approve, reject, retry, resume, cancel, and editing a spec, ticket or oracle file |
+| What it never allows | Overriding a quarantined run, starting a single-ticket run or a daemon, the release routes, and `/mcp`. Those keep their own tokens, so the console's worker strip and release panels stay empty there |
+| Reads | While a gate token file exists, a console that is not on the host needs the token to read as well. Without it the console shows where to get the link |
+| On the host itself | Nothing changes: `http://127.0.0.1:<port>` reads and writes as before |
+| Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd gate-token` again and open the new link |
+| In the browser | Kept for the tab only and removed from the address bar. A new tab needs the link again. Treat the link as a password: it can stay in the browser's history |
+| Who the history names | The name you give the console, followed by `(gate token)` |
+| Stop it | `factoryd gate-token -rotate` (new token), `-disable` (the remote console can neither read nor write), `-remove` (gate off: reads under the `-allowed-host` name are open again, writes are not possible) |
+| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local: run `serve` with `-override-token` behind one |
 
 ## `.factory.yml` — commit per-repo defaults once
 
@@ -810,7 +834,7 @@ every request verb takes `-config`):
 | Cap a request's (or a month's) total spend | Session-config `request_token_budget`/`request_cost_budget_micro_usd` (one request's drafting + every ticket run + corrective/PR-review round) and `monthly_token_budget`/`monthly_cost_budget_micro_usd` (all requests in the data dir, current UTC calendar month) — 0/absent means unlimited. Unlike `meter_token_ceiling`/`meter_cost_ceiling_micro_usd` (a per-job ceiling the relay itself enforces mid-job), these are checked host-side before a job is launched at all; reaching one quarantines the request (`budget_exhausted:request`/`budget_exhausted:monthly`) naming the key, the spend, and the limit. `factoryd cost` prints the configured budgets and month-to-date spend once any are set |
 | Fail closed all future releases for a project | `factoryd kill-switch -project <p> -state engaged -by <you> -reason "..."` — CLI-only, works without `serve` |
 | Notification when a request waits with no `worker` alive | `factoryd status` and `factoryd serve` both check the heartbeat file each poll; the console board shows the same banner. Nothing notifies if neither is running |
-| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values (reads only; writes still need `-override-token`, except that an enabled MCP endpoint can submit a request there with its own token) |
+| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `-allowed-host <host[:port]>` adds exact extra values. Reads are open there until a gate token exists; writes need the gate token (`factoryd gate-token`, [the console from another machine](#the-console-from-another-machine)) or `-override-token`; an enabled MCP endpoint can submit a request there with its own token. A request a reverse proxy passed on must name an `-allowed-host`, whatever its `Host` says |
 | Console link printed by `submit` / `factoryd console` | Built from `<data-dir>/console-address`, which a live `factoryd serve` writes for its data dir. `submit` and `factoryd console` start that `serve` when it is missing; with `FACTORYD_AUTOSTART=0` (or a `serve` that cannot start) `submit` prints how to get a link instead (or set `-console-base-url` / `FACTORYD_CONSOLE_URL`) |
 | Drive Buildgate from Copilot / Claude Code / Codex | `factoryd install-skill`, then ask in plain words: see "Drive Buildgate from a coding agent" above. `factoryd upgrade` refreshes the skill |
 | Drive Buildgate from an MCP client (Claude Code, Hermes, any other) | `factoryd mcp`, then add the printed endpoint and token to the client: see "Drive Buildgate from an MCP client" above |

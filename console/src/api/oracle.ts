@@ -102,7 +102,7 @@ export interface PutOracleRunCommandOptions {
 /**
  * PUT /requests/{id}/oracle/RUN_COMMAND.txt: the one oracle file the
  * console may edit, and only at oracle_review. A 422 carries the validation
- * reason in ApiError.serverMessage. Override-token gated. See
+ * reason in ApiError.serverMessage. A request write (token kind "gate"). See
  * updateRequestSpec (api/requests) for `baseSha256` and 409 handling.
  */
 export async function putRequestOracleRunCommand(
@@ -116,5 +116,5 @@ export async function putRequestOracleRunCommand(
     content,
     ...(options.baseSha256 != null ? { base_sha256: options.baseSha256 } : {}),
   };
-  await http.sendJson("PUT", `${requestPath(id)}/oracle/RUN_COMMAND.txt`, "override", body, signal);
+  await http.sendJson("PUT", `${requestPath(id)}/oracle/RUN_COMMAND.txt`, "gate", body, signal);
 }

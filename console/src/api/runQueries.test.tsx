@@ -63,7 +63,13 @@ describe("useRunRecord", () => {
 
   test("uses the key and guard useRun uses", () => {
     const options = runDetailOptions(
-      createHttp({ baseUrl: "", readToken: null, startToken: null, overrideToken: null }),
+      createHttp({
+        baseUrl: "",
+        readToken: null,
+        startToken: null,
+        overrideToken: null,
+        gateToken: null,
+      }),
       "run-1",
     );
     expect(options.queryKey).toEqual(queryKeys.runs.detail("run-1"));
