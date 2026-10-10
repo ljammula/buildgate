@@ -8,6 +8,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
@@ -16,7 +17,7 @@ import (
 // request's workflow does not start that ticket over on its own.
 func TestHaltRequestsOfLostRunsEntersResumeReviewOnlyForTheBuildingTicketsRequest(t *testing.T) {
 	dp := newTestDeps(t)
-	dataDir, reqID := buildingFixture(dp, t, 1)
+	dataDir, reqID := requestdrivertest.BuildingFixture(dp, t, 1)
 	r, err := request.Load(dataDir, reqID)
 	if err != nil {
 		t.Fatal(err)

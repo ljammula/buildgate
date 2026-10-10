@@ -16,6 +16,7 @@ import (
 	"buildgate/internal/oraclecanary"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
@@ -139,11 +140,11 @@ type draftFixture struct {
 
 func newDraftFixture(t *testing.T) *draftFixture {
 	t.Helper()
-	dataDir, id := oracleStageFixture(t, true)
+	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
 	if err := request.SaveText(dataDir, id, requestMDSentinel); err != nil {
 		t.Fatal(err)
 	}
-	r := loadRequest(t, dataDir, id)
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
 	mustWrite(t, filepath.Join(r.Workspace, "go.mod"), "module example.com/m\n\ngo 1.22\n")
 	script := filepath.Join(t.TempDir(), "draft_acceptance_oracles.py")
 	mustWrite(t, script, "# stub\n")
@@ -168,7 +169,7 @@ func newDraftFixture(t *testing.T) *draftFixture {
 
 func (f *draftFixture) run(t *testing.T) (request.OracleDraft, error) {
 	t.Helper()
-	r := loadRequest(t, f.dataDir, f.id)
+	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	r.OracleDraft = f.last
 	got, err := runOracleDraftJob(context.Background(), requestdriver.OracleDraftInput{
 		DataDir: f.dataDir, Request: r, Cfg: f.cfg, OracleDir: f.oracleDir,
@@ -243,7 +244,7 @@ func TestOracleDraftJobInputsAreApprovedCriteriaOnly(t *testing.T) {
 		b, _ = os.ReadFile(l.FeedbackPath)
 		feedbackText = string(b)
 	})
-	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: loadRequest(t, f.dataDir, f.id), Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: feedbackPath}
+	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: requestdrivertest.LoadRequest(t, f.dataDir, f.id), Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: feedbackPath}
 	if _, err := runOracleDraftJob(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestOracleDraftJobRefusesFeedbackThatIsRequestText(t *testing.T) {
 	f := newDraftFixture(t)
 	launched := false
 	stubLaunch(t, goDrafted(), func(oracleLaunch) { launched = true })
-	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: loadRequest(t, f.dataDir, f.id), Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: request.TextPath(f.dataDir, f.id)}
+	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: requestdrivertest.LoadRequest(t, f.dataDir, f.id), Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: request.TextPath(f.dataDir, f.id)}
 	if got, err := runOracleDraftJob(context.Background(), in); err != nil || got.Status != request.OracleDraftFailed {
 		t.Fatalf("job accepted request.md as its feedback file: %+v, %v", got, err)
 	}
@@ -316,7 +317,7 @@ func TestOracleDraftJobRefusesTamperedSpec(t *testing.T) {
 	f := newDraftFixture(t)
 	launched := false
 	stubLaunch(t, goDrafted(), func(oracleLaunch) { launched = true })
-	mustWrite(t, requestdriver.RequestSpecPath(f.dataDir, f.id), twoCriteriaSpec+"\nextra line\n")
+	mustWrite(t, requestdriver.RequestSpecPath(f.dataDir, f.id), requestdrivertest.TwoCriteriaSpec+"\nextra line\n")
 	if _, err := f.run(t); err == nil || launched {
 		t.Fatalf("tampered spec: err=%v launched=%v, want an error and no launch", err, launched)
 	}
@@ -999,10 +1000,10 @@ func TestOracleDraftLifecycleWithProductionRunner(t *testing.T) {
 	dp := newTestDeps(t)
 	f := newDraftFixture(t)
 	stubLaunch(t, goDrafted(), nil)
-	if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), runOracleDraftJob, failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runOracleDraftJob, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
-	got := loadRequest(t, f.dataDir, f.id)
+	got := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	if got.State != request.StateOracleReview || got.OracleDraft == nil || got.OracleDraft.Status != request.OracleDrafted {
 		t.Fatalf("state=%s draft=%+v, want oracle_review/drafted", got.State, got.OracleDraft)
 	}
@@ -1040,7 +1041,7 @@ func TestOracleDraftRejectRedraftPassesFeedbackOnly(t *testing.T) {
 	stubLaunch(t, goDrafted(), nil)
 	drive := func() {
 		t.Helper()
-		if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), runOracleDraftJob, failingBuildRunner(t)); err != nil {
+		if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runOracleDraftJob, requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1068,10 +1069,10 @@ func TestOracleDraftJobErrorStillLandsInReview(t *testing.T) {
 	dp := newTestDeps(t)
 	f := newDraftFixture(t)
 	stubLaunch(t, fakeScript{Err: errors.New("relay down")}, nil)
-	if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), runOracleDraftJob, failingBuildRunner(t)); err != nil {
+	if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runOracleDraftJob, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
-	got := loadRequest(t, f.dataDir, f.id)
+	got := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	if got.State != request.StateOracleReview || got.OracleDraft.Status != request.OracleDraftFailed || !strings.Contains(got.OracleDraft.Detail, "relay down") {
 		t.Fatalf("state=%s draft=%+v", got.State, got.OracleDraft)
 	}
@@ -1385,7 +1386,7 @@ func TestOracleDraftFailedRedraftQuarantinesRejectedDraft(t *testing.T) {
 	mustWrite(t, feedback, "## Oracle rejected\n\nno\n")
 
 	stubLaunch(t, fakeScript{Err: errors.New("relay down")}, nil)
-	r := loadRequest(t, f.dataDir, f.id)
+	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	r.OracleDraft = f.last
 	got, err := runOracleDraftJob(context.Background(), requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: r, Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: feedback})
 	if err != nil {
@@ -1450,33 +1451,6 @@ func TestOracleDraftNoneEligibleWithRunCommandTellsOperatorToDeleteIt(t *testing
 	}
 }
 
-// End to end through the driver: >12 KiB of cumulative rejections still hand
-// the drafter the NEWEST reason.
-func TestDriverFeedbackFileCarriesNewestReasonWhenOversize(t *testing.T) {
-	dp := newTestDeps(t)
-	dataDir, id := oracleStageFixture(t, true)
-	r := loadRequest(t, dataDir, id)
-	for i := 1; i <= 30; i++ {
-		reason := fmt.Sprintf("reason-%d %s", i, strings.Repeat("x", 1000))
-		r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: "2026-09-20T00:00:00Z", Reason: reason, FromState: request.StateOracleReview})
-	}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	var fed string
-	stub := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		b, _ := os.ReadFile(in.FeedbackPath)
-		fed = string(b)
-		return request.OracleDraft{Status: request.OracleNoneEligible}, nil
-	}
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), stub, failingBuildRunner(t)); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(fed, "reason-30 ") || len(fed) > requestdriver.MaxFeedbackBytes {
-		t.Errorf("feedback file: len=%d, has newest=%v", len(fed), strings.Contains(fed, "reason-30 "))
-	}
-}
-
 // A stopped daemon (cancelled context) leaves the request in oracle_drafting,
 // untouched, so the next pass re-runs the job.
 func TestOracleDraftCancelledContextLeavesRequestInDrafting(t *testing.T) {
@@ -1489,8 +1463,8 @@ func TestOracleDraftCancelledContextLeavesRequestInDrafting(t *testing.T) {
 		cancel()
 		return runner.Result{}, ctx.Err()
 	}
-	_ = driveRequests(dp, ctx, f.dataDir, f.cfg, failingSpecDraftRunner(t), failingPlanTicketsRunner(t), runOracleDraftJob, failingBuildRunner(t))
-	got := loadRequest(t, f.dataDir, f.id)
+	_ = driveRequests(dp, ctx, f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runOracleDraftJob, requestdrivertest.FailingBuildRunner(t))
+	got := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	if got.State != request.StateOracleDrafting || got.OracleDraft != nil {
 		t.Fatalf("state=%s draft=%+v, want oracle_drafting untouched", got.State, got.OracleDraft)
 	}
@@ -1543,7 +1517,7 @@ func TestLaunchOracleDraftScriptStagesAndTranslatesCriteriaAndFeedback(t *testin
 	cfg := requestdriver.WorkerConfig{SandboxImage: "worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
 	cfg.Settings.SandboxDocker = docker
 	cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize = "4g", "2", "256m"
-	job := loadRequest(t, f.dataDir, f.id)
+	job := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	_, err := launchOracleDraftScript(context.Background(), cfg, job, oracleLaunch{
 		DataDir: t.TempDir(), Script: f.cfg.OracleDraftScript, Workspace: f.workspace,
 		CriteriaPath: criteria, FeedbackPath: feedback,

@@ -205,6 +205,7 @@ that name an allow-list.
 | `internal/openshell` | The `sandbox.Runtime` over the OpenShell gateway: turns a `sandbox.SandboxRequest` into the gateway's sandbox spec, workload template and network policy, pushes a route's credential, and reads Docker's view of a sandbox's containers. The only package that imports the OpenShell Go SDK | Allow-list: `sandbox`. Reaches the gateway through the SDK's client interface, plus its own `RouteReadiness` interface for the one call the SDK lacks, and Docker through its own `Containers` interface. Its `Live` tests run only with `OPENSHELL_LIVE=1` against a running gateway |
 | `internal/sandbox/sandboxtest` | A worker-like `sandbox.Runtime` for the tests of packages that launch through one | Allow-list: `sandbox`. Imported by tests only |
 | `internal/hostcontrol/hostcontroltest` | The fake `docker` and `colima` on disk, a test CA and a worker heartbeat, for the tests of `hostcontrol` and of the commands that call it | Allow-list: `daemonheartbeat`. Never `hostcontrol`, whose in-package tests import it. Imported by tests only |
+| `internal/requestdriver/requestdrivertest` | The request, run and resume fixtures (records on disk, stub runners for the model jobs and the ticket build, stand-ins for the resume checks) for the tests of `requestdriver` and of the commands that call it | Allow-list: `forge`, `handoff`, `release`, `request`, `requestdriver`, `run`, `testfixture`, `workspace`. Never `cmd` or `hostcontrol`. A fixture that needs a `requestdriver.Deps` takes the caller's fake. Imported by tests only (`TestRequestdrivertestIsATestsOnlyPackage`) |
 
 Rules for a new boundary:
 
@@ -227,7 +228,7 @@ Its diff may only remove lines, lower numbers, or rename a moved function.
 
 `internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `install-service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
 
-The unit tests of `internal/requestdriver` live in its own package (`requestdriver_test`, on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse); a test that also needs a `cmd/factoryd` command, the worker, a model job or a fixture the command tests share stays in `cmd/factoryd`.
+`internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `resume`, `approve`, `reject`, `cancel`, `worker`, the oracle, spec and plan jobs, the real ticket build), which use the same fixtures.
 
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as

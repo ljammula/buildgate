@@ -16,6 +16,7 @@ import (
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/meter"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
@@ -175,15 +176,6 @@ func TestWorkerConfigRejectsMalformedModelExtraJSON(t *testing.T) {
 			t.Fatalf("err = %v, want it to name the malformed models.m.extra_json field", err)
 		}
 	}
-}
-
-func containsArg(args []string, name, value string) bool {
-	for i, a := range args {
-		if a == name && i+1 < len(args) && args[i+1] == value {
-			return true
-		}
-	}
-	return false
 }
 
 // isolateSessionConfig points the default session-config lookup at an
@@ -493,7 +485,7 @@ func TestLoadWorkerConfigResolvesTheTemporalAddress(t *testing.T) {
 		t.Fatalf("cfg.temporalAddress = %q, want the auto-started address", cfg.TemporalAddress)
 	}
 	entry := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-	if args := requestdriver.BuildTicketRunArgs("data", entry, cfg); !containsArg(args, "-temporal-address", "127.0.0.1:1234") {
+	if args := requestdriver.BuildTicketRunArgs("data", entry, cfg); !requestdrivertest.ContainsArg(args, "-temporal-address", "127.0.0.1:1234") {
 		t.Errorf("args = %v, want -temporal-address 127.0.0.1:1234", args)
 	}
 }
