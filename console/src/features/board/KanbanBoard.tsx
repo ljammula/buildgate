@@ -12,6 +12,7 @@ import {
 import { triagePath } from "@/routes/paths";
 import { cn } from "@/ui/cn";
 
+import { columnMarks } from "./columnMarks";
 import { FilterChip } from "./FilterChip";
 import { KanbanLane, columnWidthClass } from "./KanbanLane";
 import { OlderHiddenNote } from "./OlderHiddenNote";
@@ -40,6 +41,12 @@ export interface KanbanBoardProps {
   readonly now: Date;
   readonly onShowAllDone: () => void;
   readonly className?: string;
+}
+
+/** A column's icon, in its tone: decoration, the heading's words name the column. */
+function ColumnIcon({ column }: { column: BoardColumn }) {
+  const { icon: Icon, text } = columnMarks[column];
+  return <Icon aria-hidden className={cn("size-4 shrink-0", text)} />;
 }
 
 /**
@@ -124,7 +131,9 @@ export function KanbanBoard({
         tabIndex={0}
         className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden focus-visible:outline-2 focus-visible:-outline-offset-2"
       >
-        <div className="flex h-full min-w-fit flex-col gap-1.5">
+        {/* One lane: each heading sits on its column, as one panel. Several: the
+            headings stay on top and each lane's cells are panels of their own. */}
+        <div className={cn("flex h-full min-w-fit flex-col", laned && "gap-1")}>
           <div className="flex shrink-0 gap-3">
             {columns.map((column) => (
               <div
@@ -133,11 +142,17 @@ export function KanbanBoard({
                 data-narrow={isNarrowColumn(column, board.counts) || undefined}
                 className={cn(
                   columnWidthClass(column, isNarrowColumn(column, board.counts)),
-                  "flex flex-col gap-1 px-2",
+                  "flex flex-col gap-0.5 border px-2 py-0.5",
+                  laned ? "rounded-md" : "rounded-t-md",
+                  columnMarks[column].band,
                 )}
               >
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <h2 className="text-fg text-sm font-semibold">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <h2
+                    title={columnMarks[column].meaning}
+                    className="text-fg flex items-center gap-1.5 text-sm font-semibold whitespace-nowrap"
+                  >
+                    <ColumnIcon column={column} />
                     {boardColumnLabels[column]}{" "}
                     <span className="text-fg-muted font-normal">{`(${board.counts[column]})`}</span>
                   </h2>

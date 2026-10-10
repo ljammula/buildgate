@@ -1516,13 +1516,35 @@ describe("a long Needs you column", () => {
     expect(card("req-old-3")).toBeInTheDocument();
   });
 
+  test("every column is a panel under a heading band in its own tone, an empty one included", async () => {
+    renderApp(<BoardScreen />, { server: server(many) });
+    await screen.findByTestId("card-req-stuck");
+    // The band's tint is the column's tone; the heading says whose move it is on hover.
+    expect(screen.getByTestId("column-needsYou")).toHaveClass("border", "bg-tone-warning-soft/60");
+    expect(screen.getByTestId("column-building")).toHaveClass("border", "bg-tone-info-soft/60");
+    expect(screen.getByTestId("column-done")).toHaveClass("border", "bg-tone-success-soft/60");
+    const heading = screen.getByRole("heading", { level: 2, name: /^Needs you/ });
+    expect(heading).toHaveAttribute(
+      "title",
+      "Waiting on you: a review to pass, or something stuck to unblock",
+    );
+    // One lane: the panel hangs from its band. The empty column is a panel too.
+    for (const column of ["Needs you", "Drafting"]) {
+      expect(within(board()).getByRole("list", { name: column })).toHaveClass(
+        "border",
+        "rounded-b-md",
+        "border-t-0",
+      );
+    }
+  });
+
   test("an empty column is a narrow strip with its heading and count; a column with a card is not", async () => {
     renderApp(<BoardScreen />, { server: server(many) });
     await screen.findByTestId("card-req-stuck");
     const narrow = (column: string) => screen.getByTestId(`column-${column}`);
     for (const column of ["drafting", "prReview", "done"]) {
       expect(narrow(column)).toHaveAttribute("data-narrow", "true");
-      expect(narrow(column)).toHaveClass("w-28", "shrink-0");
+      expect(narrow(column)).toHaveClass("w-36", "shrink-0");
     }
     for (const column of ["needsYou", "building"]) {
       expect(narrow(column)).not.toHaveAttribute("data-narrow");
@@ -1537,7 +1559,7 @@ describe("a long Needs you column", () => {
         .map((heading) => heading.textContent),
     ).toEqual(["Drafting (0)", "Needs you (8)", "Building (1)", "PR review (0)", "Done (0)"]);
     // The cells under them are as wide as their headers.
-    expect(within(board()).getByRole("list", { name: "Done" })).toHaveClass("w-28");
+    expect(within(board()).getByRole("list", { name: "Done" })).toHaveClass("w-36");
     // An empty column is not a slab: no sunken background, no height of its own.
     expect(within(board()).getByRole("list", { name: "Done" })).not.toHaveClass(
       "bg-surface-sunken",
@@ -1557,7 +1579,7 @@ describe("a long Needs you column", () => {
     const alpha = await screen.findByRole("region", { name: "Project alpha" });
     // Building is empty in alpha and holds a card in beta: full width in both lanes.
     expect(within(alpha).getByRole("list", { name: "Building" })).toHaveClass("flex-1");
-    expect(within(alpha).getByRole("list", { name: "Done" })).toHaveClass("w-28");
+    expect(within(alpha).getByRole("list", { name: "Done" })).toHaveClass("w-36");
     expect(screen.getByTestId("column-building")).not.toHaveAttribute("data-narrow");
   });
 

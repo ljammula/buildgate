@@ -10,7 +10,9 @@
 # WALK_SCRIPT picks what drives the browser: walk.mjs (default) or shots.mjs,
 # which only photographs every screen in both themes (at the sizes in
 # WALK_VIEWPORTS), or layout.mjs, which measures the board against the bars in
-# its header and exits 1 when one fails. WALK_SEED=dense adds twenty more
+# its header and exits 1 when one fails. WALK_SEED=demo is the dense seed with
+# a worker that is alive and running one request and a release policy that is
+# set, for pictures of a board at work. WALK_SEED=dense adds twenty more
 # requests in two projects (seed-dense.mjs); the default seed is what walk.mjs
 # is written against. It starts nothing but its own
 # `factoryd serve` on WALK_PORT (default 18090) with FACTORYD_AUTOSTART=0, and
@@ -79,7 +81,7 @@ for id in req-spec-review req-halted; do
   sed -i '' "s/\"id\": \"$id\"/\"id\": \"$id-b\"/; s#requests/$id/#requests/$id-b/#g" \
     "$walk_dir/data/requests/$id-b/request.json"
 done
-if [ "${WALK_SEED:-}" = dense ]; then
+if [ "${WALK_SEED:-}" = dense ] || [ "${WALK_SEED:-}" = demo ]; then
   node "$root/console/test/walk/seed-dense.mjs" "$walk_dir"
 fi
 # New request needs a workspace that is a git repository with an AGENTS.md
@@ -96,6 +98,15 @@ fi
 # stable start token (quickstart, install-service) prints no "#t=" link, and
 # the walk would run under that operator's session config.
 mkdir -p "$walk_dir/config"
+if [ "${WALK_SEED:-}" = demo ]; then
+  mkdir -p "$walk_dir/config/factoryd"
+  printf '%s\n' 'release_max_files_changed: 25' 'release_max_insertions: 1000' \
+    'release_rollback_plan: "git revert the merge commit on main"' \
+    >"$walk_dir/config/factoryd/config.yml"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '{"repository":"acme/app","task_queue":"factoryd","pid":%s,"started_at":"%s","updated_at":"%s","active_requests":["req-building"],"job_slots":2}\n' \
+    "$$" "$now" "$now" >"$walk_dir/data/daemon-heartbeat-queue-run.json"
+fi
 XDG_CONFIG_HOME="$walk_dir/config" "$walk_dir/factoryd" serve -addr "127.0.0.1:$port" -data-dir "$walk_dir/data" \
   >"$walk_dir/serve.log" 2>&1 &
 server_pid=$!
