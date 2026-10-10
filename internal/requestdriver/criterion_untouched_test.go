@@ -66,8 +66,10 @@ func TestCriterionFilesFeasibleReadsAQualifiedIdentifierAsCode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "docs/NOTES.MD"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"docs/NOTES.MD", "internal/domain/domain.go"} {
+		if err := os.WriteFile(filepath.Join(workspace, file), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	allowed := []string{"internal/domain/domain.go"}
 	tickets := []string{habitTicket("make verify", allowed, allowed, 1)}
@@ -81,6 +83,11 @@ func TestCriterionFilesFeasibleReadsAQualifiedIdentifierAsCode(t *testing.T) {
 		{"`internal/handler/calc.go` maps the error.", []string{"internal/handler/calc.go"}},
 		// A real file whose extension is upper case is still a file.
 		{"`docs/NOTES.MD` gains a line.", []string{"docs/NOTES.MD"}},
+		// A new file beside a directory of the same name, and a new
+		// dotfile, are files: neither directory is a Go package.
+		{"`web/app.js` loads the bundle.", []string{"web/app.js"}},
+		{"`web/.eslintrc` enables the rule.", []string{"web/.eslintrc"}},
+		{"`internal/domain.go` is added.", []string{"internal/domain.go"}},
 	}
 	for _, withWorkspace := range []bool{true, false} {
 		for _, tc := range cases {

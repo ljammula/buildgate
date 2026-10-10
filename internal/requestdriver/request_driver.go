@@ -2171,21 +2171,27 @@ func looksLikeRepoPath(token, workspace string) bool {
 }
 
 // packageQualified reports whether token, whose last dot starts ext, reads
-// as an identifier qualified by its package's directory
+// as a Go identifier qualified by its package's directory
 // ("internal/domain.Calculate", "internal/domain.Operation.Valid") and not as
 // a file with an extension: what follows the dot starts with an upper-case
-// letter, as an exported identifier does and a file extension does not, or
-// what precedes it is a directory of the workspace. looksLikeRepoPath still
-// counts such a token as a path when a file of that name exists.
+// letter, as an exported identifier does and a file extension rarely does,
+// or what precedes it is a directory of the workspace that holds Go files
+// (an unexported "internal/domain.calculate"). A dotfile ("web/.eslintrc")
+// and a ".go" name are always files. looksLikeRepoPath still counts such a
+// token as a path when a file of that name exists, so the cost of a wrong
+// guess here is one new file left unchecked, never a plan refused.
 func packageQualified(token, ext, workspace string) bool {
+	if path.Base(token) == ext || ext == ".go" {
+		return false
+	}
 	if first, _ := utf8.DecodeRuneInString(ext[1:]); unicode.IsUpper(first) {
 		return true
 	}
 	if workspace == "" {
 		return false
 	}
-	info, err := os.Stat(filepath.Join(workspace, strings.TrimSuffix(token, ext)))
-	return err == nil && info.IsDir()
+	goFiles, err := filepath.Glob(filepath.Join(workspace, filepath.FromSlash(strings.TrimSuffix(token, ext)), "*.go"))
+	return err == nil && len(goFiles) > 0
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file

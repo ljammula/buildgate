@@ -417,19 +417,28 @@ func runWorkerStaleCheck(dataDir string, now time.Time) {
 // githubLoginTimeout bounds the worker's startup check of its GitHub login.
 const githubLoginTimeout = 15 * time.Second
 
-// githubLogin reports whether this process can use the GitHub login: `gh
-// auth status` by exit status alone, never its output. "" when gh is not on
-// PATH (doctor's own row covers a missing gh).
+// githubLogin reports whether this process can read a GitHub token: `gh auth
+// token` by exit status alone, its output discarded. That command reads what
+// a push uses (the keychain, or GH_TOKEN), asks no server, and is not failed
+// by another account or host with a stale login. "" (not known) when gh is
+// not on PATH (doctor's own row covers a missing gh) or did not answer in
+// time.
 func (impl realForge) githubLogin(ctx context.Context) string {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, githubLoginTimeout)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "gh", "auth", "status").Run(); err != nil {
+	err := exec.CommandContext(ctx, "gh", "auth", "token").Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return daemonheartbeat.GitHubLoginUsable
+	case ctx.Err() == nil && errors.As(err, &exit):
 		return daemonheartbeat.GitHubLoginUnusable
+	default:
+		return ""
 	}
-	return daemonheartbeat.GitHubLoginUsable
 }
 
 // workerGitHubLoginFix is what to do about a worker whose session cannot use
@@ -437,21 +446,28 @@ func (impl realForge) githubLogin(ctx context.Context) string {
 const workerGitHubLoginFix = "start the worker from a session that has the login: a desktop terminal, or `factoryd install-service`. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token; if this session should have its own login, run `gh auth login` in it. Then `factoryd retry <id>` opens the pull request of a request that halted on it, with no rebuild"
 
 // doctorWorkerGitHubLoginChecks is the row for a running worker of dataDir
-// whose own session could not use the GitHub login when it started: its
+// whose own session could not read a GitHub token when it started: its
 // builds are accepted and then cannot be pushed. No row when no worker runs,
-// when it did not check, or when its login works: doctor's own gh row covers
-// the session doctor runs in, which can differ from the worker's.
+// when the heartbeat is another process's, when the worker could not tell, or
+// when its login works: doctor's own gh row covers the session doctor runs
+// in, which can differ from the worker's. A warning, not a failure: the
+// worker checks github.com, and cannot know at startup which host each
+// repository pushes to.
 func doctorWorkerGitHubLoginChecks(dp *deps, dataDir string, now time.Time) []doctorCheck {
-	if dataDir == "" || len(hostcontrol.WorkerPIDs(dp, dataDir, now)) == 0 {
+	if dataDir == "" {
 		return nil
 	}
 	hb, err := daemonheartbeat.Read(workerHeartbeatPath(dataDir))
 	if err != nil || hb.GitHubLogin != daemonheartbeat.GitHubLoginUnusable {
 		return nil
 	}
+	if pid, fresh := hostcontrol.WorkerHeartbeatPID(dataDir, now); !fresh || pid != hb.PID || !hostcontrol.AliveFactoryd(dp, pid) {
+		return nil
+	}
 	return []doctorCheck{{
-		Name: "worker's GitHub login",
-		Err:  fmt.Errorf("the running worker (pid %d) could not use the GitHub login when it started (`gh auth status` failed in its session): it will build and accept a ticket, then fail to push the branch and open the pull request", hb.PID),
-		Fix:  workerGitHubLoginFix,
+		Name:     "worker's GitHub login",
+		Advisory: true,
+		Err:      fmt.Errorf("the running worker (pid %d) could not read a GitHub token when it started (`gh auth token` failed in its session): it will build and accept a ticket, then fail to push the branch and open the pull request", hb.PID),
+		Fix:      workerGitHubLoginFix,
 	}}
 }

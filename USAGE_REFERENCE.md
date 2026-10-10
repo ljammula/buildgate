@@ -725,8 +725,10 @@ plan-time check runs alongside it: for every approved-spec acceptance
 criterion, it collects the repo-relative file paths the criterion names in
 backticks and rejects the plan if a named path is in the `Allowed-Files`
 of no ticket that lists the criterion as covered. A name such as
-`internal/domain.Calculate` (a package's directory, a dot, an identifier)
-is code, not a file, and is not checked. A path named in a
+`internal/domain.Calculate` (a Go package's directory, a dot, an
+identifier) is code, not a file, and is not checked unless a file of that
+name exists: it is told by an upper-case letter after the dot, or by the
+part before the dot being a directory that holds Go files. A path named in a
 clause that says it stays as it is (`untouched`, `unchanged`, `not
 modified`, `must not change`, `no changes to`) is not checked. A criterion covered by
 no ticket at all is left to the "unclaimed criterion" check. On either

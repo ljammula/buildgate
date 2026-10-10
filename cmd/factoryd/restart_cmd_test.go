@@ -172,8 +172,13 @@ func TestDoctorReportsAWorkerThatCannotUseTheGitHubLogin(t *testing.T) {
 	}
 	write(queuePID, daemonheartbeat.GitHubLoginUnusable)
 	checks := doctorWorkerGitHubLoginChecks(dp, dir, time.Now())
-	if len(checks) != 1 || checks[0].Err == nil || checks[0].Advisory {
-		t.Fatalf("checks = %+v, want one failing row", checks)
+	if len(checks) != 1 || checks[0].Err == nil || !checks[0].Advisory {
+		t.Fatalf("checks = %+v, want one warning row", checks)
+	}
+	// A heartbeat another process left is not the running worker's answer.
+	write(queuePID+100000, daemonheartbeat.GitHubLoginUnusable)
+	if stale := doctorWorkerGitHubLoginChecks(dp, dir, time.Now()); len(stale) != 0 {
+		t.Errorf("a heartbeat of a pid that is not the running worker: %+v, want no row", stale)
 	}
 	for _, want := range []string{"ssh session", "install-service", "factoryd retry"} {
 		if !strings.Contains(checks[0].Fix, want) {
