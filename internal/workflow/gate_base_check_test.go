@@ -347,3 +347,53 @@ func TestBaseRerunIsNotStartedWithTooLittleOfTheGatesTimeLimitLeft(t *testing.T)
 	}
 	f.assertRunUntouched()
 }
+
+// The rerun is made only when the run's record proves which commit the
+// ticket's work started from. A run that adopts a halted run's worktree, or
+// that checks out an existing branch with no diff base, starts from a commit
+// that may already hold the ticket's work (a resumed corrective round starts
+// from the failed attempt's own commit): a gate red there says nothing about
+// the base, so nothing is launched and the gate stays corrective.
+func TestBaseRerunIsNotMadeWhenTheRunsBaseMayAlreadyHoldTheTicketsWork(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		arrange func(f *gateBaseFixture)
+	}{
+		{"a resumed run", func(f *gateBaseFixture) {
+			f.input.BaseSHA = f.result
+			f.input.ResumeFrom = &ResumeFrom{RunID: "lost-run", WorktreePath: f.repo, Branch: "factoryd/t", BaseSHA: f.result}
+		}},
+		{"a run on an existing branch with no diff base", func(f *gateBaseFixture) {
+			f.input.BaseSHA, f.input.OnBranch = f.result, "factoryd/t"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGateBaseFixture(t, 5, 5)
+			tc.arrange(f)
+			res := f.runGate("lint", "")
+			bc := res.BaseCheck
+			if bc == nil || bc.Outcome != run.GateBaseNotChecked || !strings.Contains(bc.Reason, "may already hold the ticket's work") {
+				t.Fatalf("base check = %+v, want not_checked: the run's base may already hold the ticket's work", bc)
+			}
+			if len(f.launched) != 1 {
+				t.Errorf("%d launch(es), want the gate's own only", len(f.launched))
+			}
+			if res.Result.ExitCode != 5 {
+				t.Errorf("the gate's exit code = %d, want 5", res.Result.ExitCode)
+			}
+			f.assertRunUntouched()
+		})
+	}
+}
+
+// A run on an existing branch that names its diff base (a corrective build, a
+// PR-review round, a retry continuing on the failed attempt's commit) is
+// rerun on that diff base: the ticket's own base.
+func TestBaseRerunOfARunOnABranchWithADiffBaseUsesTheDiffBase(t *testing.T) {
+	f := newGateBaseFixture(t, 1, 0)
+	f.input.DiffBaseSHA, f.input.BaseSHA, f.input.OnBranch = f.base, f.result, "factoryd/t"
+	res := f.runGate("lint", "")
+	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base || len(f.launched) != 2 {
+		t.Errorf("base check = %+v after %d launch(es), want passes on the diff base %s", bc, len(f.launched), f.base)
+	}
+}

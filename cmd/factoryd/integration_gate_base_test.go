@@ -165,3 +165,61 @@ func TestIntegrationPassingGateIsNotRerunOnTheBaseCommit(t *testing.T) {
 		t.Errorf("a passing gate left a gate-base directory in the run directory")
 	}
 }
+
+// attemptOnBranch runs the fixture's ticket once: a gate that only the
+// build's change fails quarantines it, leaving the attempt's commit on its
+// branch. It returns that run.
+func attemptOnBranch(t *testing.T, ws, dataDir string) *run.Run {
+	t.Helper()
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil, nil, dataDir)
+	if first.State != run.StateQuarantined || first.Branch == "" || first.ResultSHA == "" {
+		t.Fatalf("first attempt: state %q branch %q result %q, want a quarantined run with a commit on its branch", first.State, first.Branch, first.ResultSHA)
+	}
+	return first
+}
+
+// A run that continues the failed attempt's branch and names the ticket's
+// base as its diff base (what a corrective build, a PR-review round and a
+// retry on the attempt's commit are all started with) is rerun on the
+// ticket's base, where the gate passes: not on the attempt's commit it
+// started from, where the gate is already red because of the ticket's work.
+func TestIntegrationGateBaseRerunOfARunContinuingABranchUsesTheTicketsBase(t *testing.T) {
+	ws, base := gateBaseFixture(t, "! grep -q fake_build_app content.txt")
+	dataDir := t.TempDir()
+	first := attemptOnBranch(t, ws, dataDir)
+
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil,
+		[]string{"-on-branch", first.Branch, "-diff-base", base}, dataDir)
+	if second.State != run.StateQuarantined || second.BaseSHA != first.ResultSHA {
+		t.Fatalf("second attempt: state %q base %q, want quarantined, started from the first attempt's commit %s", second.State, second.BaseSHA, first.ResultSHA)
+	}
+	baseCheck := recordedBaseCheck(t, dataDir, second.ID, "repo-house_rule")
+	if baseCheck["outcome"] != "passes" || baseCheck["base_sha"] != base {
+		t.Errorf("base_check = %v, want outcome passes on the ticket's base %s", baseCheck, base)
+	}
+	if doc, check := handoffCheck(t, dataDir, second, "repo-house_rule"); check.Bin != handoff.BinCorrective || doc.Next != handoff.BinCorrective {
+		t.Errorf("repo-house_rule is sorted %q, next %q; want both %q", check.Bin, doc.Next, handoff.BinCorrective)
+	}
+}
+
+// The same continuing run with no diff base has no record of where the
+// ticket's work started: its own base is the failed attempt's commit. The
+// gate is not rerun there, and stays a failure a corrective build is given.
+func TestIntegrationGateBaseRerunIsNotMadeOnABranchWithNoDiffBase(t *testing.T) {
+	ws, _ := gateBaseFixture(t, "! grep -q fake_build_app content.txt")
+	dataDir := t.TempDir()
+	first := attemptOnBranch(t, ws, dataDir)
+
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\n", "60s", nil,
+		[]string{"-on-branch", first.Branch}, dataDir)
+	if second.State != run.StateQuarantined {
+		t.Fatalf("second attempt: state %q, want quarantined (gates: %+v)", second.State, second.GateResults)
+	}
+	baseCheck := recordedBaseCheck(t, dataDir, second.ID, "repo-house_rule")
+	if baseCheck["outcome"] != "not_checked" {
+		t.Errorf("base_check = %v, want not_checked: the run started from the failed attempt's commit", baseCheck)
+	}
+	if doc, check := handoffCheck(t, dataDir, second, "repo-house_rule"); check.Bin != handoff.BinCorrective || doc.Next != handoff.BinCorrective {
+		t.Errorf("repo-house_rule is sorted %q, next %q; want both %q: a corrective build was denied for a failure the ticket's own work introduced", check.Bin, doc.Next, handoff.BinCorrective)
+	}
+}
