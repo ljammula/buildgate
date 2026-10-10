@@ -229,11 +229,13 @@ func Build(r *run.Run, dataDir string) Document {
 //     records (triage.BuildStoppedBySetup: the meter counted nothing and
 //     nothing was committed): BinOperator. Every build from that commit
 //     runs the same commands first and ends there too;
-//   - a named or repository gate whose command also failed when rerun on the
-//     commit the ticket's work started from (run.GateBaseCheck): no build can
-//     make it pass, so it is the operator's (BinOperator) and no corrective
-//     build is spent on it. A rerun that passed, or could not be made, leaves
-//     the gate where BinOf puts it. The reference oracle is never rerun.
+//   - a named or repository gate whose command failed the same way when rerun
+//     on the commit the ticket's work started from (run.GateBaseFailsSame): no
+//     build can make it pass, so it is the operator's (BinOperator) and no
+//     corrective build is spent on it. A rerun that failed in another way
+//     (the ticket's job may be to fix that gate), that passed, or that could
+//     not be made, leaves the gate where BinOf puts it. The reference oracle
+//     is never rerun.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case failsOnBase(r, finding.Check):
@@ -253,11 +255,11 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 }
 
 // failsOnBase reports whether the failed gate triage reported for check (the
-// first failed result of that name) also failed on the base commit.
+// first failed result of that name) failed the same way on the base commit.
 func failsOnBase(r *run.Run, check string) bool {
 	for _, g := range r.GateResults {
 		if g.Check == check && !g.Passed {
-			return g.FailsOnBase()
+			return g.FailsSameOnBase()
 		}
 	}
 	return false

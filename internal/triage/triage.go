@@ -196,24 +196,50 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		// suffixReserve isn't itself consulted.
 		return fitTriageSuffix(s, suffix)
 	default:
-		if g.FailsOnBase() {
-			return failsOnBaseSentence(g)
+		if g.FailsSameOnBase() {
+			return failsSameOnBaseSentence(g)
+		}
+		if g.FailedDifferentlyOnBase() {
+			return alreadyFailingOnBase(g.Check, triageLogGate(r, g.Check, len(alreadyFailingOnBaseSuffix(g))), alreadyFailingOnBaseSuffix(g))
 		}
 		return triageLogGate(r, g.Check, 0)
 	}
 }
 
-// failsOnBaseSentence words a command gate that failed on the build's result
-// and, rerun, on the commit the ticket's work started from
-// (run.GateBaseCheck): no build can make it pass, so the sentence tells the
-// operator what to change and that nothing was spent on trying. Every word is
-// the factory's; the check's name and the commit come from the run record.
-func failsOnBaseSentence(g run.GateResult) string {
-	base := g.BaseCheck.BaseSHA
+// shortBaseSHA is the base commit of g's rerun as a sentence names it.
+func shortBaseSHA(g run.GateResult) string {
+	base := sanitize.Line(g.BaseCheck.BaseSHA)
 	if len(base) > 12 {
 		base = base[:12]
 	}
-	return fmt.Sprintf("%s fails on the base commit %s too, so no build can fix it: fix the gate command or the repository. No corrective build is started.", g.Check, base)
+	return base
+}
+
+// failsSameOnBaseSentence words a command gate that failed on the build's
+// result and, rerun, the same way on the commit the ticket's work started
+// from (run.GateBaseFailsSame): no build can make it pass, so the sentence
+// tells the operator what to change and that nothing was spent on trying.
+// Every word is the factory's; the check's name and the commit come from the
+// run record.
+func failsSameOnBaseSentence(g run.GateResult) string {
+	return fmt.Sprintf("%s fails the same way on the base commit %s, so no build can fix it: fix the gate command or the repository. No corrective build is started.", g.Check, shortBaseSHA(g))
+}
+
+// alreadyFailingOnBaseSuffix is the factory's sentence added to the finding
+// of a gate that was already failing on the base commit in another way
+// (run.GateBaseFailsDifferently): part of what fails predates the attempt.
+func alreadyFailingOnBaseSuffix(g run.GateResult) string {
+	return fmt.Sprintf(". The gate was already failing on the base commit %s, in another way.", shortBaseSHA(g))
+}
+
+// alreadyFailingOnBase joins a gate's own sentence and that suffix, which is
+// never cut; with no sentence of its own the gate is simply said to have
+// failed.
+func alreadyFailingOnBase(check, sentence, suffix string) string {
+	if sentence == "" {
+		sentence = check + " failed"
+	}
+	return fitTriageSuffix(sentence, suffix)
 }
 
 // specSnapshotPathFor is the durable, factory-written copy of the

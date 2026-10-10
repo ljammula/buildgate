@@ -508,10 +508,13 @@ requires a new contract review and an updated machine-checkable test.
   repository gate that never ran, a build that a repository setup command
   stopped before its first agent turn (by the meter's count of zero and an
   unchanged commit, never by the sandbox's exit status or log), a named or
-  repository gate that also failed when the factory reran it on the commit
+  repository gate that failed the
+  same way (the same exit code and the same failing lines of output) when
+  the factory reran it on the commit
   the ticket's work started from (no build can make it pass; the rerun is
-  evidence on the gate's result and never changes whether the gate passed)
-  and any check with no bin never do,
+  evidence on the gate's result and never changes whether the gate passed; a gate already failing there in
+  another way stays one a build is told about, with a factory-written
+  sentence saying so) and any check with no bin never do,
   and a halt never does. A check on the diff of an attempt that committed nothing
   (canonical verification never passed) is not judged either way. Such a
   build is a new run on the quarantined run's branch, started after the

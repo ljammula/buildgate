@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"go.temporal.io/sdk/activity"
 
 	"buildgate/internal/evidence"
+	"buildgate/internal/observation"
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
@@ -22,9 +24,11 @@ import (
 
 // A named or repository gate that fails on the build's result is rerun once on
 // the commit the ticket's work started from, inside the gate's own Activity
-// (RunNamedGateActivity): a gate that fails there too cannot be fixed by any
-// build, and the handoff sorts it as the operator's instead of spending a
-// corrective build on it (handoff.binFor).
+// (RunNamedGateActivity): a gate that fails there the same way (sameGateFailure)
+// cannot be fixed by any build, and the handoff sorts it as the operator's
+// instead of spending a corrective build on it (handoff.binFor). A gate that
+// was already failing there in another way stays a failure a build is given:
+// turning that gate green may be the ticket's job.
 //
 // The rerun is evidence about the gate, never part of its verdict:
 //
@@ -52,6 +56,20 @@ const gateBaseDirName = "gate-base"
 // checkpoint saved again inside it. The Activity must never time out because
 // of the rerun, since its retry would then be asked to trust the first run.
 const gateBaseCheckReserve = time.Minute
+
+// The waits of the rerun's host steps. gateBaseRemoveLockWait is how long
+// the removal after a rerun waits for the git metadata lock, inside
+// gateBaseCheckReserve, before it deletes the directory without it.
+// gateBaseSweepLockWait is the same for a retried Activity's sweep, which
+// the Activity itself waits for no longer than gateBaseSweepWait.
+const (
+	gateBaseRemoveLockWait = 30 * time.Second
+	gateBaseSweepLockWait  = 2 * time.Second
+	gateBaseSweepWait      = 5 * time.Second
+)
+
+// gateBaseHeartbeatInterval is how often the rerun heartbeats.
+const gateBaseHeartbeatInterval = activityHeartbeatInterval
 
 // gateBaseInterrupted is the reason checkpointed before the rerun starts; it
 // is what the run records when the rerun's worker did not live to finish it.
@@ -82,13 +100,44 @@ func pendingGateBaseCheck(input NamedGateActivityInput, result runner.Result, ru
 	if runErr != nil || evidenceErr != nil || result.ExitCode == 0 || input.Check == policy.ReferenceOracleGateID {
 		return nil
 	}
-	return gateBaseNotChecked(input.effectiveDiffBase(), "%s", gateBaseInterrupted)
+	base, _ := gateBaseCommit(input.RunWorkflowInput)
+	return gateBaseNotChecked(base, "%s", gateBaseInterrupted)
+}
+
+// gateBaseCommit is the commit the ticket's work started from, when the run's
+// own input proves which it is; otherwise "" and why it is not known.
+//
+//   - A run given a diff base (a corrective build, a PR-review round, a retry
+//     that continues on the failed attempt's commit) names it: the ticket's
+//     base, whatever commit the run itself started from.
+//   - A run that adopts a halted run's worktree (ResumeFrom) or checks out an
+//     existing branch (OnBranch), with no diff base, starts from a commit that
+//     may already hold the ticket's work: a resumed corrective round's base is
+//     the failed attempt's own commit. A gate red there says nothing about
+//     the ticket's base, so the rerun is not made.
+//   - Any other run made its own branch at its base commit.
+func gateBaseCommit(input RunWorkflowInput) (sha, unknown string) {
+	switch {
+	case input.DiffBaseSHA != "":
+		return input.DiffBaseSHA, ""
+	case input.ResumeFrom != nil:
+		return "", "the run resumed an earlier run's worktree and names no diff base, so its base may already hold the ticket's work"
+	case input.OnBranch != "":
+		return "", "the run continues an existing branch and names no diff base, so its base may already hold the ticket's work"
+	case input.BaseSHA == "":
+		return "", "the run recorded no base commit"
+	}
+	return input.BaseSHA, ""
 }
 
 // sweepGateBaseWorktree removes the scratch worktree an earlier attempt of
-// this gate's Activity left when its worker died mid-rerun. Best effort: a
-// leftover costs disk, and the next rerun of the same gate clears it again.
-func (a *Activities) sweepGateBaseWorktree(ctx context.Context, input NamedGateActivityInput) {
+// this gate's Activity left when its worker died mid-rerun. It is called from
+// the Activity's completed-checkpoint return and must never hold that return
+// up: the removal runs on its own, takes the git metadata lock only if it is
+// free within gateBaseSweepLockWait (else it deletes the directory and leaves
+// the registration for the next prune), and the Activity waits for it no
+// longer than gateBaseSweepWait. Best effort: a leftover costs disk only.
+func (a *Activities) sweepGateBaseWorktree(input NamedGateActivityInput) {
 	scratch, err := gateBaseWorktreePath(a.logDirFor(input.RunWorkflowInput), input.Check)
 	if err != nil {
 		return
@@ -96,22 +145,36 @@ func (a *Activities) sweepGateBaseWorktree(ctx context.Context, input NamedGateA
 	if _, err := os.Lstat(scratch); err != nil {
 		return
 	}
-	if err := removeGateBaseWorktree(input.WorkspacePath, scratch); err != nil {
-		activity.GetLogger(ctx).Warn("a scratch worktree of an earlier base rerun could not be removed", "path", scratch, "error", err.Error())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), gateBaseSweepLockWait)
+		defer cancel()
+		_ = removeGateBaseWorktree(ctx, input.WorkspacePath, scratch)
+	}()
+	select {
+	case <-done:
+	case <-time.After(gateBaseSweepWait):
 	}
 }
 
-// removeGateBaseWorktree removes the scratch worktree and its registration in
-// the repository. A tree git will not remove (the gate's command left files
-// git cannot delete) is removed directly and its registration pruned.
-func removeGateBaseWorktree(workspace, scratch string) error {
-	err := wsisolation.RemoveWorktreeOnly(workspace, scratch)
+// removeGateBaseWorktree removes the scratch worktree and, when the git
+// metadata lock is free before ctx ends, its registration in the repository.
+// A tree git did not remove (the lock was busy, or the gate's command left
+// files git cannot delete) is deleted directly; a registration left behind
+// names a path that is gone and holds no branch, and the next prune drops it.
+func removeGateBaseWorktree(ctx context.Context, workspace, scratch string) error {
+	if _, err := os.Lstat(scratch); err != nil {
+		// Nothing was checked out: no lock is taken for nothing.
+		_ = os.Remove(filepath.Dir(scratch))
+		return nil
+	}
+	err := wsisolation.RemoveScratchWorktree(ctx, workspace, scratch)
 	if _, statErr := os.Lstat(scratch); statErr == nil {
 		if rmErr := os.RemoveAll(scratch); rmErr != nil {
 			return errors.Join(err, rmErr)
 		}
-		// The directory is gone: this drops the registration that is left.
-		return wsisolation.RemoveWorktreeOnly(workspace, scratch)
+		err = nil
 	}
 	// Removing the last worktree leaves the empty parent; a later run of
 	// the gate makes it again.
@@ -130,7 +193,7 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 		return gateResult
 	}
 	checked := gateResult
-	checked.BaseCheck = a.checkGateOnBase(ctx, input, command, registrySpec)
+	checked.BaseCheck = a.checkGateOnBase(ctx, input, gateResult.Result, command, registrySpec)
 	checkpoint.Result = checked
 	if err := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); err != nil {
 		activity.GetLogger(ctx).Warn("the base rerun's result could not be saved; the gate keeps its recorded result", "check", input.Check, "error", err.Error())
@@ -141,15 +204,88 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 
 // checkGateOnBase reruns a failed gate's command on the base commit and
 // returns what it showed. It returns no error: every failure of its own is a
-// "not checked" record.
-func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
-	base := input.effectiveDiffBase()
+// "not checked" record. The Activity heartbeats for as long as it runs, its
+// host steps (the git metadata lock, the checkout, the removal) included:
+// another run of the repository may hold that lock for longer than the
+// Activity's heartbeat timeout.
+func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+	started := time.Now()
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		ticker := time.NewTicker(gateBaseHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: input.Check + "_base", Elapsed: time.Since(started)})
+			}
+		}
+	}()
+	return a.rerunGateOnBase(ctx, input, gate, command, registrySpec)
+}
+
+// gateFailureTailBytes bounds how much of each log's end is read to compare
+// two failures of a gate.
+const gateFailureTailBytes = 256 << 10
+
+// sameGateFailure reports whether a gate's command failed on the base commit
+// (onBase) the same way as on the build's result (onResult): the same exit
+// code, and the same lines reporting a failure at the end of its output.
+// Those lines are observation.Excerpt of the log's end, the function the
+// handoff picks a failed gate's lines with: it drops terminal colour and
+// trailing space and keeps only the lines that report a failure (with the
+// indented lines under each), so a passing package's timing or a progress
+// line never makes two failures differ. What changes from run to run on a
+// failing line itself (volatileText) is blanked before the two are compared.
+// Two logs with no output at all are the same failure.
+func sameGateFailure(onResult, onBase runner.Result) bool {
+	if onResult.ExitCode != onBase.ExitCode {
+		return false
+	}
+	return gateFailureSignature(onResult.LogPath) == gateFailureSignature(onBase.LogPath)
+}
+
+// gateFailureSignature is what two failures of a gate are compared by: the
+// failing lines of the log's end with volatile text blanked. It is compared
+// only; what is recorded and shown is the log and its excerpt as they are.
+func gateFailureSignature(logPath string) string {
+	lines := strings.Split(observation.Excerpt(readFileTail(logPath, gateFailureTailBytes)), "\n")
+	for i, line := range lines {
+		lines[i] = volatileText.ReplaceAllString(line, "N")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// volatileText matches what changes between two runs of the same failing
+// command without the failure being a different one: hex addresses,
+// durations, timestamps, UUIDs and temporary paths. It mirrors _VOLATILE in
+// agent/pi/scripts/round_feedback.py, which failure_signature blanks to tell
+// whether two build rounds failed the same way; keep the two in step, and
+// blank no more here than there. Plain numbers stay: "got 3, want 9" and
+// "got 8, want 9" are different failures, and so are two line numbers. A
+// looser pattern is the unsafe direction: it would call a failure the build
+// introduced the same as the base's and hand it to the operator. Like the
+// Python, it is applied to one line at a time.
+var volatileText = regexp.MustCompile(
+	`0x[0-9a-fA-F]+` +
+		`|\b\d+(?:\.\d+)?\s?(?:ns|µs|us|ms|s|m|h)\b` +
+		`|\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*` +
+		`|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b` +
+		`|(?:/private)?(?:/tmp|/var/folders|/var/tmp)/\S+`)
+
+// rerunGateOnBase is checkGateOnBase's work.
+func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+	base, unknown := gateBaseCommit(input.RunWorkflowInput)
 	if base == "" {
-		return gateBaseNotChecked("", "the run recorded no base commit")
+		return gateBaseNotChecked("", "%s", unknown)
 	}
 	// The rerun gets what is left of the gate's own time limit, less the
-	// reserve, as a deadline of its own: when it runs out the launch is
-	// stopped and torn down while the Activity still has time to finish.
+	// reserve, as a deadline of its own: when it runs out a wait for the git
+	// metadata lock ends, or the launch is stopped and torn down, while the
+	// Activity still has time to finish.
 	rerunCtx := ctx
 	if deadline, ok := ctx.Deadline(); ok {
 		left := time.Until(deadline) - gateBaseCheckReserve
@@ -165,18 +301,25 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 	if err != nil {
 		return gateBaseNotChecked(base, "resolve the scratch worktree's path: %v", err)
 	}
-	// A leftover of an earlier attempt would make the checkout fail.
-	_ = removeGateBaseWorktree(input.WorkspacePath, scratch)
+	// A leftover of an earlier attempt would make the checkout fail. Its
+	// registration, if any, is pruned by the checkout under the lock.
+	if err := os.RemoveAll(scratch); err != nil {
+		return gateBaseNotChecked(base, "remove an earlier scratch worktree: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(scratch), 0o750); err != nil {
 		return gateBaseNotChecked(base, "create the scratch worktree's directory: %v", err)
 	}
-	// Registered before the checkout: one that fails half-way is removed too.
+	// Registered before the checkout: one that fails half-way is removed
+	// too. The removal has its own short wait for the lock, inside the
+	// reserve, and is not cut short by the rerun's deadline.
 	defer func() {
-		if err := removeGateBaseWorktree(input.WorkspacePath, scratch); err != nil {
+		removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gateBaseRemoveLockWait)
+		defer cancel()
+		if err := removeGateBaseWorktree(removeCtx, input.WorkspacePath, scratch); err != nil {
 			activity.GetLogger(ctx).Warn("the base rerun's scratch worktree could not be removed", "path", scratch, "error", err.Error())
 		}
 	}()
-	if err := wsisolation.AddScratchWorktree(input.WorkspacePath, scratch, base); err != nil {
+	if err := wsisolation.AddScratchWorktree(rerunCtx, input.WorkspacePath, scratch, base); err != nil {
 		return gateBaseNotChecked(base, "check out the base commit in a scratch worktree: %v", err)
 	}
 	// As for the run's own worktree: the worker's identity writes through
@@ -195,22 +338,23 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 	// the gate's checkpoint already exists. The lease is still checked, so a
 	// superseded attempt launches nothing.
 	beforeAttempt := a.leaseChecked(ctx, a.checkpointDirFor(input.RunWorkflowInput), nil)
-	started := time.Now()
-	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: input.Check + "_base", Elapsed: time.Since(started)})
-	}, func() (runner.Result, error) {
-		if a.hasFakeRunner() {
-			return a.runWithRetriesFn()(rerunCtx, scratch, logPath, 1, beforeAttempt, nil, command[0], command[1:]...)
-		}
+	var result runner.Result
+	var runErr error
+	if a.hasFakeRunner() {
+		result, runErr = a.runWithRetriesFn()(rerunCtx, scratch, logPath, 1, beforeAttempt, nil, command[0], command[1:]...)
+	} else {
 		// nil relay, as for the gate itself: the rerun calls no model.
-		return a.runSandboxWithRetries(rerunCtx, onBase, logPath, 1, beforeAttempt, nil, nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
-	})
+		result, runErr = a.runSandboxWithRetries(rerunCtx, onBase, logPath, 1, beforeAttempt, nil, nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+	}
 	if runErr != nil {
 		return gateBaseNotChecked(base, "the gate could not be run on the base commit: %v", runErr)
 	}
 	check := &run.GateBaseCheck{Outcome: run.GateBasePasses, BaseSHA: base, ExitCode: result.ExitCode, LogPath: result.LogPath}
 	if result.ExitCode != 0 {
-		check.Outcome = run.GateBaseFails
+		check.Outcome = run.GateBaseFailsDifferently
+		if sameGateFailure(gate, result) {
+			check.Outcome = run.GateBaseFailsSame
+		}
 	}
 	// A log that cannot be hashed leaves the outcome standing without one.
 	check.LogSHA256, _ = evidence.SHA256File(result.LogPath)

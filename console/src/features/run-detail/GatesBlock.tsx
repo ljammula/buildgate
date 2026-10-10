@@ -41,7 +41,7 @@ function GateRow({ gate }: { readonly gate: GateResult }) {
           text={onBase}
           className={cn(
             "basis-full",
-            gate.baseCheck?.outcome === "fails" ? "font-medium text-fg" : "text-fg-muted",
+            gate.baseCheck?.outcome === "fails_same" ? "font-medium text-fg" : "text-fg-muted",
           )}
         />
       )}

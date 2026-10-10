@@ -152,7 +152,7 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 		}
 		result := VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: exitCode}}
 		if exitCode != 0 {
-			result.BaseCheck = &run.GateBaseCheck{Outcome: run.GateBaseFails, BaseSHA: "base-sha", ExitCode: 1}
+			result.BaseCheck = &run.GateBaseCheck{Outcome: run.GateBaseFailsSame, BaseSHA: "base-sha", ExitCode: 1}
 		}
 		return result, nil
 	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
@@ -174,8 +174,8 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 	// The gate Activity's rerun on the base commit reaches the run's gate
 	// result; a gate that passed has none.
 	for _, g := range result.GateResults {
-		if want := g.Check == "security_audit"; g.FailsOnBase() != want {
-			t.Errorf("%s: fails on base = %v, want %v (%+v)", g.Check, g.FailsOnBase(), want, g.BaseCheck)
+		if want := g.Check == "security_audit"; g.FailsSameOnBase() != want {
+			t.Errorf("%s: fails the same way on base = %v, want %v (%+v)", g.Check, g.FailsSameOnBase(), want, g.BaseCheck)
 		}
 	}
 	seen := map[string]run.GateResult{}
