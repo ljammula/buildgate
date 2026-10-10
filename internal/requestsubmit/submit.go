@@ -51,8 +51,14 @@ func GitToplevel(dir string) (string, error) {
 // AgentsFilePrompt is the prompt every AGENTS.md refusal hands the operator
 // for their own coding agent (Claude Code, Copilot, Codex): buildgate does
 // not write the file, since nothing in it would have been checked by a
-// person.
-const AgentsFilePrompt = "Write " + run.RootInstructionFile + " at the root of this repository for coding agents: its setup, test, build and lint commands (run each one and keep only what works), its layout, and the conventions a change must follow. Keep it short and exact."
+// person. It names the sources (the README, the contributing guide, the build
+// files) because a file written from the directory listing alone states
+// commands that do not pass and rules the project never set.
+const AgentsFilePrompt = "Write " + run.RootInstructionFile + " at the root of this repository for coding agents. " +
+	"First read README.md, the contributing guide if there is one, and the build files (Makefile, package manifest, CI workflows). " +
+	"Then give its setup, test, build and lint commands (run each one and keep only what works), its layout, and the rules a change must follow, " +
+	"taking each from those files or from what you ran and guessing none. " +
+	"Run the repository's own formatter or linter over the file. Keep it short and exact."
 
 // RequireAgentsFile refuses a repository whose root AGENTS.md is missing or
 // holds only whitespace at HEAD: that file is how every harness learns the
