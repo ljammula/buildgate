@@ -548,7 +548,7 @@ func TestRepositoryNotesOfAcceptedRunReadsOnlyTheFifthHeading(t *testing.T) {
 		t.Fatalf("items = %q, want the two cleaned items of the fifth heading, backticks kept for the memory text rule", got)
 	}
 	for _, item := range got {
-		if strings.Contains(item, "sum.go") || strings.Contains(item, "cache key") || strings.ContainsAny(item, "\x1b`") {
+		if strings.Contains(item, "sum.go") || strings.Contains(item, "cache key") || strings.ContainsAny(item, "\x1b") {
 			t.Errorf("item %q carries another heading or an uncleaned character", item)
 		}
 	}
