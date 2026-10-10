@@ -546,7 +546,7 @@ func (f *memFix) proposal(requestID string) memory.Proposal {
 }
 
 // The expected file is hand-written for each shape of AGENTS.md: text before
-// and after with no section, a section with a human line, and no file.
+// and after with no section, and a section with a human line.
 func TestMemoryProposeRendersTheExpectedFile(t *testing.T) {
 	line := "- Run `make gen` before `make test`."
 	begin, end, heading := memory.BeginMarker, memory.EndMarker, memory.SectionHeading
@@ -562,7 +562,6 @@ func TestMemoryProposeRendersTheExpectedFile(t *testing.T) {
 			strPtr("# Guide\n\n" + begin + "\n" + heading + "\n\n- Keep *this* line as a person wrote it\n" + end + "\n\n## After\n\nMore text.\n"),
 			"# Guide\n\n" + begin + "\n" + heading + "\n\n- Keep *this* line as a person wrote it\n" + line + "\n" + end + "\n\n## After\n\nMore text.\n",
 		},
-		"no AGENTS.md": {nil, begin + "\n" + heading + "\n\n" + line + "\n" + end + "\n"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -780,8 +779,35 @@ func TestMemoryRequestPlanIsItsOneTicket(t *testing.T) {
 	}
 }
 
+// A memory request does not create the AGENTS.md every request needs: the
+// refusal is submit's, and it leaves no request and no proposed line.
+func TestMemoryProposeIsRefusedWithoutAnAgentsFile(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"no file":         nil,
+		"whitespace only": {"AGENTS.md": " \n\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newMemFix(t, files)
+			l := f.add("Use go 1.26")
+			if _, err := f.propose(nil, l.ID); err == nil || !strings.Contains(err.Error(), "AGENTS.md") || !strings.Contains(err.Error(), "setup, test, build and lint commands") {
+				t.Fatalf("propose = %v, want the refusal naming AGENTS.md and its fix", err)
+			} else if strings.Contains(err.Error(), "submit the memory request") {
+				t.Fatalf("propose = %v: refused only at the submit, after a request id was claimed", err)
+			}
+			if requests, err := request.List(f.data); err != nil || len(requests) != 0 {
+				t.Fatalf("requests after a refused propose = %v (%v), want none", requests, err)
+			}
+			for _, lesson := range f.lessons() {
+				if lesson.State == memory.StateProposed {
+					t.Errorf("lesson %s is proposed after a refused propose", lesson.ID)
+				}
+			}
+		})
+	}
+}
+
 func TestMemoryProposeIsRefusedWhileAMemoryRequestIsOpen(t *testing.T) {
-	f := newMemFix(t, nil)
+	f := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n"})
 	first, second := f.add("Use go 1.26"), f.add("The tests need the database up")
 	id, err := f.propose(nil, first.ID)
 	if err != nil {
@@ -830,7 +856,7 @@ func proposalFiles(t *testing.T, f *memFix) []string {
 }
 
 func TestMemoryProposeLeavesNothingBehindWhenSubmitFails(t *testing.T) {
-	f := newMemFix(t, nil)
+	f := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n"})
 	// A data directory inside the workspace is a submission no request
 	// accepts; everything before the submit works.
 	f.data = filepath.Join(f.root, "data")
@@ -906,7 +932,7 @@ func TestProposalNeverExceedsFiveChanges(t *testing.T) {
 }
 
 func TestMemoryProposeWithNoIDsTakesTheMostSeen(t *testing.T) {
-	f := newMemFix(t, nil)
+	f := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n"})
 	f.quarantinedRunWithNotes("run-a", worthKnowing("Seen twice", "Seen once"))
 	f.quarantinedRunWithNotes("run-b", worthKnowing("Seen twice"))
 	for i := 1; i <= 5; i++ {
@@ -920,7 +946,7 @@ func TestMemoryProposeWithNoIDsTakesTheMostSeen(t *testing.T) {
 	if len(ch) != 5 || ch[0].Line != "- Seen twice." || ch[1].Line != "- Seen once." || strings.Join(ch[0].Runs, ",") != "run-a,run-b" {
 		t.Fatalf("changes = %+v", ch)
 	}
-	empty := newMemFix(t, nil)
+	empty := newMemFix(t, map[string]string{"AGENTS.md": "# Guide\n"})
 	if _, err := empty.propose(nil); err == nil || !strings.Contains(err.Error(), "no candidate to propose") {
 		t.Fatalf("propose with no candidate = %v", err)
 	}

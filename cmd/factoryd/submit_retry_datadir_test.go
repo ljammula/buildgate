@@ -19,7 +19,7 @@ func TestSubmitMainUsesSessionConfigDataDir(t *testing.T) {
 	writeDataDirSessionConfig(t, configPath, dataDir)
 
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 
@@ -47,7 +47,7 @@ func TestSubmitMainExplicitDataDirWinsOverSessionConfig(t *testing.T) {
 
 	explicitDir := t.TempDir()
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 

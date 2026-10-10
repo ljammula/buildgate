@@ -120,8 +120,19 @@ factoryd quickstart ~/code/your-repo "Add X to Y"
 factoryd quickstart -issue https://github.com/you/repo/issues/42 ~/code/your-repo
 ```
 
-`<repo-path>` must already be a git checkout (`.` if omitted). Nothing
-needs starting by hand: `quickstart` (like `submit`) starts Temporal,
+`<repo-path>` must already be a git checkout (`.` if omitted) with an
+`AGENTS.md` committed at its root: the file every coding agent reads for the
+repo's setup, test, build and lint commands. `quickstart`, `submit`, a single-ticket run and
+`doctor -target-repo` refuse a repo where it is missing or empty at `HEAD`
+(an uncommitted file does not count), before any setup or model call; no flag
+or config key skips this. The refusal carries a prompt for your own coding
+agent to write the file; review what it writes, then commit it:
+
+```text
+Write AGENTS.md at the root of this repository for coding agents: its setup, test, build and lint commands (run each one and keep only what works), its layout, and the conventions a change must follow. Keep it short and exact.
+```
+
+Nothing needs starting by hand: `quickstart` (like `submit`) starts Temporal,
 a `worker` and `serve` when they are missing, and prints the console link.
 One command sequences everything below, prompting only where a real decision
 is needed, and stops at the first human gate (`spec_review`) with the
@@ -213,6 +224,7 @@ the target: it says so and changes nothing.
 
 | Step | What happens | Manual equivalent |
 |---|---|---|
+| Check the repo's `AGENTS.md` | Refuses, before anything else, a repo with no `AGENTS.md` committed at its root, printing a prompt to generate one | Have your coding agent write it from that prompt, review it, commit it |
 | Check setup | Docker, images, model route, mounts | `factoryd doctor` |
 | Scaffold onboarding docs | Interactive: asks whether to write `spec/spec.md`/`spec/contract.md`/`ARCHITECTURE.md` if missing; `-non-interactive` skips the prompt and uses the `brownfield` preflight profile instead (or pass `-scaffold` to write them unconditionally) | `factoryd onboard -project <name> -root <repo> -write-factory-yml` |
 | Pick a model route | Detects an existing Codex/Copilot/Anthropic login and offers it first (`-route` to pick explicitly: `openai`/`anthropic`/`copilot`/`chatgpt-codex`); lists models, picks a usable one, warns on a weak model | `factoryd init-config`, edit, `factoryd doctor -list-models` |
@@ -467,7 +479,9 @@ from `quickstart` above (which assumes an existing checkout):
 | 7 | Repeat 1-6 for ticket 2+, adding `-prior-run <ticket-1-run-id>` | Each ticket's run chains from the last |
 
 No separate `git init` needed — `intake` already committed `spec/` into
-`-pilot-dir` and scaffolded an empty, gitignored `workspace/`.
+`-pilot-dir` and scaffolded an empty, gitignored `workspace/`. It writes no
+`AGENTS.md`: commit one at the pilot dir's root before step 5, or the run is
+refused.
 Every build runs at the *whole repo's*
 worktree root, not confined to `workspace/` — `workspace/` only lets
 `factoryd` derive the project root. Assumes `-pilot-dir`/`-workspace`'s
@@ -483,6 +497,9 @@ factoryd \
   -ticket-file ~/code/calc-app/spec/tickets/001-*.md \
   -verify-command "make verify"
 ```
+
+A run starts only on a repository with an `AGENTS.md` committed at its root,
+the same check `submit` makes; `-skip-project-check` does not skip it.
 
 **`-spec` is the *ticket's own* spec** — same file as `-ticket-file`,
 never `spec/spec.md`. `-spec`'s content (not `-ticket-file`'s) is what's
@@ -527,7 +544,8 @@ nothing adds to it because a repository's compose file names an image.
 `factoryd doctor -target-repo <path> -fix` and `factoryd quickstart` name
 each registry prefix the repo's images need and add them to the config
 only when you answer yes (`-fix -yes` for no prompt); `factoryd doctor -target-repo <path>` prints the same
-verdict (alongside what `submit` would refuse: no verify command, or the
+verdict (alongside what `submit` would refuse: no verify command, no
+`AGENTS.md` committed at the repo root, or the
 project-bootstrap preflight under the repo's `.factory.yml` profile), each service's `BG_SERVICE_*` variables, the `localhost` ports
 (failing when the sandbox image predates `bg-forward`), and a warning when
 the worker's and sidecars' memory limits add up past Docker's. A ticket that edits the
@@ -902,7 +920,7 @@ pull request                you merge it; the line is in force from then on
 | Look at one | `factoryd memory show -workspace ~/code/app <id>` | The line, the runs that said it, its history |
 | Write your own | `factoryd memory add -workspace ~/code/app "The integration tests need the database up"` | A candidate from you, under the same text rule (USAGE_REFERENCE has the rule); a command goes inside backticks, quoted for your shell |
 | Discard one | `factoryd memory drop -workspace ~/code/app -reason "wrong" <id>` | It is never proposed; runs that repeat it are still counted |
-| Propose | `factoryd memory propose -workspace ~/code/app <id> <id>` (no id: the most seen that fit) | One request, at most five changes, waiting at `spec_review`. Its spec ends with the whole `AGENTS.md` it will produce |
+| Propose | `factoryd memory propose -workspace ~/code/app <id> <id>` (no id: the most seen that fit) | One request, at most five changes, waiting at `spec_review`. Its spec ends with the whole `AGENTS.md` it will produce. Refused, like any request, when the repo has no `AGENTS.md` at `HEAD`: a memory request adds to that file and does not create it |
 | Approve | `factoryd approve <request-id>`, twice (spec, then plan) | The ticket is built in the sandbox like any other |
 | Merge | Merge its pull request | A reviewer's comment on it starts no corrective build: to change a line, close it, `factoryd cancel <request-id>` and propose again |
 | Remove a line | `factoryd memory propose -workspace ~/code/app -remove "- The exact line."` | A memory request that takes the line out. A full section refuses `propose` until you name a line to remove |
@@ -1127,6 +1145,7 @@ What changes for a build:
 | Run or request halted: `halted (operator finding): .factory/ cannot be mounted read-only: ...` | Every sandbox that runs a repository command mounts `.factory/` read-only as the commit `.factory.yml` was read from holds it. The directory at that commit, or the worktree's entry of that name, has a shape the mount cannot carry: the worktree lacks the directory, it is a file or a symlink, another spelling (`.Factory`) exists, or the committed directory holds a symlink or a submodule | Fix what the sentence names (USAGE_REFERENCE, "The `.factory/` directory"), commit, then `factoryd retry <id>` |
 | A gate or the verify command fails with `Read-only file system` under `.factory/` | A repository command writes into `.factory/` (a cache, a report, `chmod +x`) | Write to a gitignored directory or `/tmp`; commit the executable bit instead of setting it at run time |
 | Quarantine names a gate but not why it failed | Nothing wrong — the triage sentence quotes the first compile/test failure line from that gate's log | Read the run's full log for the rest |
+| `quickstart`, `submit` or a single-ticket run refuses: `<repo> has no AGENTS.md committed at its root`, `AGENTS.md at HEAD of <repo> is empty` or `... is not a regular file`, or `<repo> is not a git checkout with a commit at HEAD`; `doctor -target-repo` fails its `AGENTS.md for <repo>` row; the console's New request form and the MCP `submit_request` tool answer with the same line | The repo's root `AGENTS.md` is missing, empty, only in the working tree, or a symlink. It is read from git at `HEAD`, by that exact name, as a regular file. `onboard`, `init` and `quickstart -scaffold` do not write it | Run the prompt the message prints in the repo with your coding agent (Quick start has it), review the `AGENTS.md` it writes, commit it, then run the command again |
 | Request halts at preflight for a repo | Repo has no `.factory.yml` (strict preflight profile) | `factoryd onboard -project <name> -root <repo> -write-factory-yml`, commit, resubmit |
 | `factoryd doctor` warns the release policy denies every PR unconditionally | `release_max_files_changed`/`release_max_insertions` is `0` or `release_rollback_plan` is empty | Add all three to `config.yml` (`init-config`'s scaffold has usable defaults; `quickstart` writes them into a fresh config automatically) |
 | Status shows "accepted, awaiting pull request" | Every ticket's build was accepted but no PR exists (`-open-pull-request=false`, a release-policy denial, or the PR failed to open) | Merge the branch by hand, or `factoryd retry <id>` — re-opens just the PR if the release decision now allows it, otherwise rebuilds |

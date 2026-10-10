@@ -24,6 +24,7 @@ import (
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/release"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
@@ -1163,6 +1164,13 @@ func (tr *ticketRun) checkProject() error {
 	}
 	if _, err := os.Stat(*tr.workspace); err != nil {
 		return fmt.Errorf("workspace: %w", err)
+	}
+	// The check submit runs, for a run started without one and for a
+	// request whose repository lost the file since: no build starts on a
+	// repository with no AGENTS.md committed at its root. Not part of the
+	// project-bootstrap preflight, so -skip-project-check does not skip it.
+	if err := requestsubmit.RequireAgentsFile(*tr.workspace); err != nil {
+		return fmt.Errorf("run not started: %w", err)
 	}
 	if !*tr.skipProjectCheck {
 		if *tr.requestTicket {

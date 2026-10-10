@@ -280,7 +280,10 @@ func runTests(m *testing.M) int {
 // newFixtureRepo creates a hermetic git repo with one tracked file and an
 // initial commit, so HEAD exists and the workspace starts clean.
 func newFixtureRepo(t *testing.T) string {
-	return testfixture.NewGitRepo(t)
+	t.Helper()
+	repo := testfixture.NewGitRepo(t)
+	testfixture.CommitAgentsFile(t, repo)
+	return repo
 }
 
 // xdgOnlySandboxDockerOverride writes a session config setting
@@ -445,5 +448,6 @@ func newFixtureRepoWithoutBootstrapScaffold(t *testing.T) string {
 	}
 	run("add", "-A")
 	run("commit", "-q", "-m", "init")
+	testfixture.CommitAgentsFile(t, dir)
 	return dir
 }

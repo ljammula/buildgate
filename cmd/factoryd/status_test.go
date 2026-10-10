@@ -486,7 +486,7 @@ func TestStatusMainShowsRequestsAboveRuns(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
 	workspace := t.TempDir()
-	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
 preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
