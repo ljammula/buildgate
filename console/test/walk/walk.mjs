@@ -163,6 +163,12 @@ async function showView(name) {
 }
 
 const board = () => page.getByRole("region", { name: "Board" });
+
+/** A group shows its first three cards: open every "+N more", so each card is on the page. */
+async function showWholeGroups() {
+  const more = board().getByRole("button", { name: /^\+\d+ more$/ });
+  while ((await more.count()) > 0) await more.first().click();
+}
 const card = (id) => page.getByTestId(`card-${id}`);
 
 // The states of each board column, as the server names them. A pr_review
@@ -234,8 +240,19 @@ step("mission-control", async () => {
       { exact: true },
     )
     .waitFor();
-  const queued = listed.filter((r) => r.queue_position !== undefined).length;
-  await health.getByText(String(queued), { exact: true }).first().waitFor();
+  if (worker.state === "alive") {
+    const queued = listed.filter((r) => r.queue_position !== undefined).length;
+    await health.getByText("Queued").waitFor();
+    await health.getByText(String(queued), { exact: true }).first().waitFor();
+  } else {
+    // No live worker, no queue: the strip never says "Queued 0" over
+    // requests that nothing is advancing.
+    check((await health.getByText("Queued").count()) === 0, "a queue length is shown with no live worker");
+    const jobStates = ["submitted", "spec_drafting", "oracle_drafting", "planning", "building"];
+    if (listed.some((r) => jobStates.includes(r.state))) {
+      await health.getByTestId("health-need-worker").waitFor();
+    }
+  }
   await health.getByText("Last transition").waitFor();
 
   // The numbers are GET /stats's.
@@ -316,6 +333,7 @@ step("mission-control-window", async () => {
     inFlight.some((r) => Date.parse(r.updated_at) < weekAgo),
     "the seeded data has no old request in flight",
   );
+  await showWholeGroups();
   for (const r of inFlight) await card(r.id).waitFor();
   await page.getByTestId("numbers-window").getByText("Last 7 days").waitFor();
   // The note's control widens the window.
@@ -361,12 +379,26 @@ step("mission-control-review", async () => {
       .count()) === 0,
     "a card offers Approve",
   );
+  // A Needs-you card is compact: its controls open while it is hovered or
+  // holds the focus.
   for (const id of ["req-spec-review", "req-plan-review", "req-oracle-review"]) {
+    await card(id).hover();
     await card(id).getByRole("link", { name: "Review", exact: true }).waitFor();
     await card(id).getByRole("button", { name: "Request changes", exact: true }).waitFor();
   }
+  // The keyboard reaches them too: Tab from the title lands on Review.
+  await card("req-spec-review").getByRole("link").first().focus();
+  await page.keyboard.press("Tab");
+  check(
+    await card("req-spec-review")
+      .getByRole("link", { name: "Review", exact: true })
+      .evaluate((node) => node === document.activeElement),
+    "Tab from a card's title does not reach Review",
+  );
+  await board().getByRole("link", { name: "Open in Triage", exact: true }).waitFor();
   // Request changes opens its dialog from the card; cancelled, it sends nothing.
   const before = await request("req-spec-review");
+  await card("req-spec-review").hover();
   await card("req-spec-review")
     .getByRole("button", { name: "Request changes", exact: true })
     .click();
@@ -381,6 +413,7 @@ step("mission-control-review", async () => {
     "a cancelled dialog changed the request",
   );
   // Review lands where the spec is shown and Approve is.
+  await card("req-spec-review").hover();
   await card("req-spec-review").getByRole("link", { name: "Review", exact: true }).click();
   await page.waitForURL(/\/requests\/req-spec-review$/);
   await page.getByText("Acceptance criteria (2)").waitFor();

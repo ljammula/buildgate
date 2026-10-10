@@ -90,3 +90,15 @@ test("the fixture list yields its moves; a request with no history yields none",
     recentActivity([decodeRequestSummary(requestJson({ id: "x", state: "done" }), "t")]),
   ).toEqual([]);
 });
+
+test("a move the caller's test of its time leaves out is dropped before the cap", () => {
+  const history = Array.from({ length: 20 }, (_, i) =>
+    move("a", `s${i}`, `2026-09-10T09:${String(i).padStart(2, "0")}:00Z`),
+  );
+  const early = recentActivity(
+    [withHistory("req-a", "Alpha", history)],
+    15,
+    (at) => at < "2026-09-10T09:03:00Z",
+  );
+  expect(early.map((entry) => entry.to)).toEqual(["s2", "s1", "s0"]);
+});

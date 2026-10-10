@@ -6,6 +6,7 @@ import {
 } from "@/platform/boardPrefs";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   window.localStorage.clear();
 });
 
@@ -36,4 +37,31 @@ test("unreadable stored lanes read as none collapsed", () => {
   }
   window.localStorage.setItem("factoryBoardCollapsedLanes", '["api", 3, null]');
   expect(getCollapsedLanes()).toEqual(["api"]);
+});
+
+test("storage that throws reads as nothing stored and never throws", () => {
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  expect(getStoredBoardView()).toBeNull();
+  expect(getCollapsedLanes()).toEqual([]);
+  expect(() => {
+    setStoredBoardView("list");
+    setCollapsedLanes(["api"]);
+  }).not.toThrow();
+});
+
+test("a browser that refuses localStorage itself reads as nothing stored", () => {
+  vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+  expect(getStoredBoardView()).toBeNull();
+  expect(getCollapsedLanes()).toEqual([]);
+  expect(() => {
+    setStoredBoardView("board");
+    setCollapsedLanes([]);
+  }).not.toThrow();
 });

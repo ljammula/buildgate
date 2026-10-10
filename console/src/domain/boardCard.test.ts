@@ -190,6 +190,10 @@ describe("needsYouAsk", () => {
     expect(needsYouAsk(wire({ id: "a", state: "security_review" }))).toBe(
       "This request waits on you.",
     );
+    // An invisible character in the server's text is shown, not obeyed.
+    expect(
+      needsYouAsk(wire({ id: "a", state: "security_review" }, { next_action: "Sign\u202eoff" })),
+    ).not.toContain("\u202e");
   });
 });
 

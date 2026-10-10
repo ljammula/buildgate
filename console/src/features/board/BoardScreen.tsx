@@ -7,7 +7,12 @@ import { useRequestBoard } from "@/api/requestQueries";
 import { useQueueRunStatus } from "@/api/runQueries";
 import { activityLimit, recentActivity } from "@/domain/activity";
 import { buildBoard, showsNeedsYou, visibleColumns } from "@/domain/boardColumns";
-import { activityInBoardWindow, applyBoardWindow, boardWindowLabel } from "@/domain/boardWindow";
+import {
+  applyBoardWindow,
+  boardWindowLabel,
+  instantInBoardWindow,
+  scopeLabel,
+} from "@/domain/boardWindow";
 import { distinctProjects, matchesRequestBoardFilters } from "@/domain/boardFilters";
 import { factoryHealth } from "@/domain/health";
 import { needsHumanCount, sortedRequests } from "@/domain/requestOrder";
@@ -56,7 +61,8 @@ export function BoardScreen() {
   const controls = useBoardFilters();
   const freshness = useBoardFreshness(live, streamError, failedAttempts);
   const now = useNow(30_000);
-  const [view, setView] = useBoardView();
+  const boardView = useBoardView();
+  const { view } = boardView;
   const collapsedLanes = useCollapsedLanes();
   const [showCancelled, setShowCancelled] = useState(false);
 
@@ -78,9 +84,11 @@ export function BoardScreen() {
   );
   // The window only ever takes finished requests out: what waits on the
   // factory or the operator is in view at any age.
+  // The list always draws cancelled requests; the board only on request.
+  const cancelledInView = view === "list" || showCancelled;
   const { shown: visible, olderHidden } = useMemo(
-    () => applyBoardWindow(matching, days, now),
-    [matching, days, now],
+    () => applyBoardWindow(matching, days, now, cancelledInView),
+    [matching, days, now, cancelledInView],
   );
   const sections = useMemo(() => {
     const sorted = sortedRequests(visible);
@@ -96,13 +104,19 @@ export function BoardScreen() {
     () => factoryHealth(queueRun.data ?? null, requests ?? []),
     [queueRun.data, requests],
   );
+  // Activity (and the numbers) follow the project filter and the window, not
+  // the search box or the section filter: they are about the factory, not
+  // about the cards in view. Moves outside the window are dropped before
+  // the sort.
+  const { projects } = controls.filters;
   const activity = useMemo(
     () =>
-      activityInBoardWindow(recentActivity(requests ?? [], Infinity), days, now).slice(
-        0,
+      recentActivity(
+        (requests ?? []).filter((r) => projects.size === 0 || projects.has(r.project)),
         activityLimit,
+        (at) => instantInBoardWindow(at, days, now),
       ),
-    [requests, days, now],
+    [requests, projects, days, now],
   );
   const showAllTime = (): void => {
     controls.selectDays("all");
@@ -113,7 +127,7 @@ export function BoardScreen() {
   };
   const headerActions = (
     <>
-      <ViewToggle view={view} onChange={setView} />
+      <ViewToggle view={view} onChange={boardView.choose} />
       <Button
         variant="ghost"
         size="icon"
@@ -184,7 +198,8 @@ export function BoardScreen() {
                 canWrite={canWrite}
                 now={now}
                 onShowAllDone={() => {
-                  setView("list");
+                  // For this visit: following a link is not choosing List.
+                  boardView.showOnce("list");
                   controls.selectSection("finished");
                 }}
               />
@@ -210,10 +225,10 @@ export function BoardScreen() {
               </div>
             )}
             <div className="grid shrink-0 items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <NumbersPanel days={days} className="max-h-44" />
+              <NumbersPanel days={days} projects={projects} className="max-h-44" />
               <ActivityPanel
                 entries={activity}
-                windowLabel={boardWindowLabel(days)}
+                windowLabel={scopeLabel(boardWindowLabel(days), projects)}
                 className="max-h-44"
               />
             </div>

@@ -80,12 +80,21 @@ function numbersRow(label: string, metrics: TrendMetrics): NumbersRow {
   };
 }
 
-/** "Overall" first, then one row per project in the server's order. */
-export function numbersRows(stats: FactoryStats): NumbersRow[] {
-  return [
-    numbersRow("Overall", stats.overall.overall),
-    ...stats.projects.map((report) => numbersRow(report.project, report.overall)),
-  ];
+/**
+ * "Overall" first, then one row per project in the server's order. With
+ * projects chosen in the toolbar (`projects` not empty) only their rows: the
+ * overall row is every project's, which the filter has put out of view.
+ */
+export function numbersRows(
+  stats: FactoryStats,
+  projects: ReadonlySet<string> = new Set(),
+): NumbersRow[] {
+  const perProject = stats.projects
+    .filter((report) => projects.size === 0 || projects.has(report.project))
+    .map((report) => numbersRow(report.project, report.overall));
+  return projects.size === 0
+    ? [numbersRow("Overall", stats.overall.overall), ...perProject]
+    : perProject;
 }
 
 /** No ticket has a finished run anywhere: there is no number to show yet. */

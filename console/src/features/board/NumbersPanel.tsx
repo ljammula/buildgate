@@ -2,7 +2,7 @@ import { statsRefreshMs } from "@/api/polling";
 import { useFactoryStats } from "@/api/runQueries";
 import { ApiError } from "@/domain/apiError";
 import type { BoardWindowDays } from "@/domain/boardFilters";
-import { boardWindowLabel, statsSince } from "@/domain/boardWindow";
+import { boardWindowLabel, scopeLabel, statsSince } from "@/domain/boardWindow";
 import { type FactoryStats, numbersRows, statsEmpty } from "@/domain/stats";
 import { escapeInvisible } from "@/domain/textEscape";
 import { cn } from "@/ui/cn";
@@ -17,8 +17,15 @@ import {
   TableRow,
 } from "@/ui/Table";
 
-function NumbersTable({ stats }: { readonly stats: FactoryStats }) {
-  if (statsEmpty(stats)) {
+function NumbersTable({
+  stats,
+  projects,
+}: {
+  readonly stats: FactoryStats;
+  readonly projects: ReadonlySet<string>;
+}) {
+  const rows = numbersRows(stats, projects);
+  if (statsEmpty(stats) || rows.length === 0) {
     return (
       <p className="text-fg-muted text-sm">
         No ticket has a finished run yet: the numbers appear with the first one.
@@ -50,7 +57,7 @@ function NumbersTable({ stats }: { readonly stats: FactoryStats }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {numbersRows(stats).map((row, index) => (
+          {rows.map((row, index) => (
             // The overall row and a project could share a name; the position cannot.
             <TableRow key={index} data-testid="numbers-row">
               <TableHeaderCell scope="row" className="text-fg border-b-0 text-sm">
@@ -77,6 +84,12 @@ function NumbersTable({ stats }: { readonly stats: FactoryStats }) {
 export interface NumbersPanelProps {
   /** The window the numbers are over. */
   readonly days: BoardWindowDays;
+  /**
+   * The toolbar's project filter: its projects' rows only; empty is every
+   * project and the overall row. The search box does not apply: the numbers
+   * are per project, not per request.
+   */
+  readonly projects: ReadonlySet<string>;
   readonly className?: string;
 }
 
@@ -87,7 +100,7 @@ export interface NumbersPanelProps {
  * such route (a 404) shows no section at all: an older factoryd is not an
  * error on the home screen.
  */
-export function NumbersPanel({ days, className }: NumbersPanelProps) {
+export function NumbersPanel({ days, projects, className }: NumbersPanelProps) {
   const query = useFactoryStats(statsSince(days), statsRefreshMs);
   const missingRoute = query.error instanceof ApiError && query.error.status === 404;
   if (query.data === undefined && (query.error === null || missingRoute)) return null;
@@ -96,7 +109,7 @@ export function NumbersPanel({ days, className }: NumbersPanelProps) {
       <h2 className="text-fg flex shrink-0 items-baseline gap-2 text-base font-semibold">
         Numbers
         <span data-testid="numbers-window" className="text-fg-muted text-xs font-normal">
-          {boardWindowLabel(days)}
+          {scopeLabel(boardWindowLabel(days), projects)}
         </span>
       </h2>
       {query.error === null ? null : (
@@ -111,7 +124,7 @@ export function NumbersPanel({ days, className }: NumbersPanelProps) {
             : "Showing the last numbers loaded -- refresh failed:"}
         </StaleWarning>
       )}
-      {query.data === undefined ? null : <NumbersTable stats={query.data} />}
+      {query.data === undefined ? null : <NumbersTable stats={query.data} projects={projects} />}
     </section>
   );
 }

@@ -12,6 +12,7 @@ import {
 } from "@/domain/request";
 import { safeHttpUrl } from "@/domain/safeUrl";
 import { stateLabel } from "@/domain/status";
+import { escapeInvisible } from "@/domain/textEscape";
 
 /** One ticket's pull request on a card. */
 export interface CardPullRequest {
@@ -78,8 +79,10 @@ export function needsYouAsk(request: RequestSummary): string {
   if (requestAwaitingPullRequest(request)) return "Open its pull request: retry, or merge by hand.";
   const fixed = Object.hasOwn(ASKS, request.state) ? ASKS[request.state] : undefined;
   if (fixed !== undefined) return fixed;
+  // The server's text can quote agent-written text: shown as text, with
+  // nothing invisible in it, like the alert's reason.
   return request.nextAction !== ""
-    ? digestText(request.nextAction, 120).head
+    ? escapeInvisible(digestText(request.nextAction, 120).head)
     : "This request waits on you.";
 }
 

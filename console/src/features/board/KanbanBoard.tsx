@@ -1,8 +1,19 @@
-import { type Board, type BoardColumn, boardColumnLabels } from "@/domain/boardColumns";
+import { useState } from "react";
+import { Link } from "react-router";
+
+import {
+  type Board,
+  type BoardColumn,
+  activeGroup,
+  boardColumnLabels,
+  groupChips,
+  isNarrowColumn,
+} from "@/domain/boardColumns";
+import { triagePath } from "@/routes/paths";
 import { cn } from "@/ui/cn";
 
 import { FilterChip } from "./FilterChip";
-import { KanbanLane, columnClass } from "./KanbanLane";
+import { KanbanLane, columnWidthClass } from "./KanbanLane";
 import { OlderHiddenNote } from "./OlderHiddenNote";
 import type { CollapsedLanes } from "./useCollapsedLanes";
 
@@ -48,11 +59,21 @@ export function KanbanBoard({
   className,
 }: KanbanBoardProps) {
   const laned = board.lanes.length > 1;
+  // The summary chips of Needs you, over every lane. The one pressed is view
+  // state for this visit: not stored, not in the URL.
+  const chips = groupChips(
+    "needsYou",
+    board.lanes.flatMap((lane) => lane.cells.needsYou.requests),
+  );
+  const [pressedGroup, setPressedGroup] = useState<string | null>(null);
+  const onlyGroup = activeGroup(pressedGroup, chips);
   const lanes = board.lanes.map((lane) => (
     <KanbanLane
       key={lane.project}
       lane={lane}
       columns={columns}
+      counts={board.counts}
+      onlyGroup={onlyGroup}
       headed={laned}
       collapsed={collapsedLanes.isCollapsed(lane.project)}
       onToggle={() => {
@@ -88,11 +109,55 @@ export function KanbanBoard({
         <div className="flex h-full min-w-fit flex-col gap-2">
           <div className="flex shrink-0 gap-3">
             {columns.map((column) => (
-              <div key={column} className={cn(columnClass, "flex flex-col gap-0.5 px-2")}>
-                <h2 className="text-fg text-sm font-semibold">
-                  {boardColumnLabels[column]}{" "}
-                  <span className="text-fg-muted font-normal">{`(${board.counts[column]})`}</span>
-                </h2>
+              <div
+                key={column}
+                data-testid={`column-${column}`}
+                data-narrow={isNarrowColumn(column, board.counts) || undefined}
+                className={cn(
+                  columnWidthClass(isNarrowColumn(column, board.counts)),
+                  "flex flex-col gap-1 px-2",
+                )}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                  <h2 className="text-fg text-sm font-semibold">
+                    {boardColumnLabels[column]}{" "}
+                    <span className="text-fg-muted font-normal">{`(${board.counts[column]})`}</span>
+                  </h2>
+                  {/* Triage is the screen for deciding one after another. */}
+                  {column === "needsYou" && board.counts.needsYou > 0 ? (
+                    <Link to={triagePath()} className="text-accent text-xs hover:underline">
+                      Open in Triage
+                    </Link>
+                  ) : null}
+                </div>
+                {column === "needsYou" && chips.length > 1 ? (
+                  <div
+                    role="group"
+                    aria-label="Needs you groups"
+                    className="flex flex-wrap items-center gap-1"
+                  >
+                    {/* Pressing the chip in force, or All, shows every group again. */}
+                    <FilterChip
+                      pressed={onlyGroup === null}
+                      onPressedChange={() => {
+                        setPressedGroup(null);
+                      }}
+                    >
+                      All
+                    </FilterChip>
+                    {chips.map((chip) => (
+                      <FilterChip
+                        key={chip.label}
+                        pressed={onlyGroup === chip.label}
+                        onPressedChange={() => {
+                          setPressedGroup(onlyGroup === chip.label ? null : chip.label);
+                        }}
+                      >
+                        {`${chip.short} ${chip.count}`}
+                      </FilterChip>
+                    ))}
+                  </div>
+                ) : null}
                 {column === "done" ? (
                   <OlderHiddenNote count={olderHidden} onShowAllTime={onShowAllTime} />
                 ) : null}
@@ -116,7 +181,10 @@ export function KanbanBoard({
                 <ul
                   key={column}
                   aria-label={boardColumnLabels[column]}
-                  className={cn(columnClass, "bg-surface-sunken min-h-14 rounded-md p-2")}
+                  className={cn(
+                    columnWidthClass(isNarrowColumn(column, board.counts)),
+                    "bg-surface-sunken min-h-14 rounded-md p-2",
+                  )}
                 />
               ))}
             </div>

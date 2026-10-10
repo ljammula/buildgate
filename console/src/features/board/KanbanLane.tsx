@@ -1,18 +1,40 @@
 import { ChevronRight } from "lucide-react";
 import { useId } from "react";
 
-import { type BoardColumn, type BoardLane, boardColumnLabels } from "@/domain/boardColumns";
+import {
+  type BoardColumn,
+  type BoardLane,
+  boardColumnLabels,
+  cardsAcross,
+  columnGroups,
+  isGroupedColumn,
+  isNarrowColumn,
+} from "@/domain/boardColumns";
+import type { RequestSummary } from "@/domain/request";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 
 import { KanbanCard } from "./KanbanCard";
+import { KanbanGroup } from "./KanbanGroup";
 
-/** The width every column keeps, header and cell alike, so lanes line up and a narrow screen scrolls sideways. */
+/** The width every column with cards keeps, header and cell alike, so lanes line up and a narrow screen scrolls sideways. */
 export const columnClass = "w-0 min-w-56 flex-1";
+
+/** A column with no card in view: a strip, so the others share its width. */
+export const narrowColumnClass = "w-28 shrink-0";
+
+/** The width class of a column, for its header and for each lane's cell. */
+export function columnWidthClass(narrow: boolean): string {
+  return narrow ? narrowColumnClass : columnClass;
+}
 
 export interface KanbanLaneProps {
   readonly lane: BoardLane;
   readonly columns: readonly BoardColumn[];
+  /** Cards per column over every lane: a column is narrow only when empty in all of them. */
+  readonly counts: Readonly<Record<BoardColumn, number>>;
+  /** The Needs-you group a summary chip chose; null shows every group. */
+  readonly onlyGroup: string | null;
   /**
    * Several lanes are drawn: this one gets its project heading and collapse
    * button, and the lanes scroll together. Alone, the lane fills the board
@@ -29,12 +51,16 @@ export interface KanbanLaneProps {
 }
 
 /**
- * One project's row of cards: a list per column. With several projects it is
- * a named region with a button that folds it; with one it is the bare row.
+ * One project's row of cards: a list per column, the cards of Needs you and
+ * Drafting under their sub-headings (`columnGroups`). With several projects
+ * it is a named region with a button that folds it; with one it is the bare
+ * row.
  */
 export function KanbanLane({
   lane,
   columns,
+  counts,
+  onlyGroup,
   headed,
   collapsed,
   onToggle,
@@ -44,6 +70,18 @@ export function KanbanLane({
   onShowAllDone,
 }: KanbanLaneProps) {
   const cellsId = useId();
+  const waiting = lane.cells.needsYou.requests.length;
+  const card = (request: RequestSummary, column: BoardColumn) => (
+    <KanbanCard
+      key={request.id}
+      request={request}
+      column={column}
+      compact={isGroupedColumn(column)}
+      now={now}
+      showProject={showProject}
+      canWrite={canWrite}
+    />
+  );
   const cells = (
     <div
       id={cellsId}
@@ -56,25 +94,35 @@ export function KanbanLane({
           <ul
             key={column}
             aria-label={boardColumnLabels[column]}
+            data-narrow={isNarrowColumn(column, counts) || undefined}
             // A lone lane's column is its own scroll box: focusable, so the
             // keyboard can scroll it.
             {...(headed ? {} : { tabIndex: 0 })}
             className={cn(
-              columnClass,
+              columnWidthClass(isNarrowColumn(column, counts)),
               "bg-surface-sunken flex min-h-14 flex-col gap-2 rounded-md p-2",
               !headed && "overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2",
             )}
           >
-            {cell.requests.map((request) => (
-              <KanbanCard
-                key={request.id}
-                request={request}
-                column={column}
-                now={now}
-                showProject={showProject}
-                canWrite={canWrite}
-              />
-            ))}
+            {columnGroups(column, cell.requests).map((group) => {
+              const { label } = group;
+              if (label === null) return group.requests.map((request) => card(request, column));
+              // A chip chose one group of Needs you: the others are out of
+              // view until it is pressed again, and that one is shown whole.
+              const chosen = column === "needsYou" ? onlyGroup : null;
+              if (chosen !== null && chosen !== label) return null;
+              return (
+                <KanbanGroup
+                  key={label}
+                  group={{ ...group, label }}
+                  // One level below the column's heading, or the lane's when there is one.
+                  headingLevel={headed ? "h4" : "h3"}
+                  alone={chosen === label}
+                  across={cardsAcross(column, columns, counts)}
+                  renderCard={(request) => card(request, column)}
+                />
+              );
+            })}
             {cell.more > 0 ? (
               <li className="text-fg-muted flex shrink-0 items-center justify-between gap-2 px-1 text-xs">
                 <span>{`${cell.more} more not shown`}</span>
@@ -92,7 +140,7 @@ export function KanbanLane({
   return (
     <section aria-label={`Project ${lane.project}`} className="flex shrink-0 flex-col gap-1.5">
       {/* Stays at the top of the lanes' scroll box while its cards pass under it. */}
-      <h3 className="bg-bg sticky top-0 z-20 text-sm">
+      <h3 className="bg-bg sticky top-0 z-20 flex items-center gap-2 text-sm">
         <button
           type="button"
           aria-expanded={!collapsed}
@@ -106,6 +154,15 @@ export function KanbanLane({
           />
           {lane.project} <span className="text-fg-muted font-normal">{`(${lane.count})`}</span>
         </button>
+        {/* A folded lane must not hide that something in it waits on the operator. */}
+        {collapsed && waiting > 0 ? (
+          <span
+            data-testid="lane-needs-you"
+            className="text-tone-warning border-tone-warning-border bg-tone-warning-soft rounded-full border px-2 py-0.5 text-xs font-medium"
+          >
+            {waiting === 1 ? "1 needs you" : `${waiting} need you`}
+          </span>
+        ) : null}
       </h3>
       {cells}
     </section>

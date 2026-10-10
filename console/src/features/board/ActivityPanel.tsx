@@ -2,13 +2,14 @@ import { Link } from "react-router";
 
 import type { ActivityEntry } from "@/domain/activity";
 import { stateLabel } from "@/domain/status";
+import { escapeInvisible } from "@/domain/textEscape";
 import { requestPath } from "@/routes/paths";
 import { cn } from "@/ui/cn";
 import { RelativeTime } from "@/ui/RelativeTime";
 
 export interface ActivityPanelProps {
   readonly entries: readonly ActivityEntry[];
-  /** "Last 7 days": the window the moves are from. */
+  /** "Last 7 days", "Last 7 days · alpha": the window and the projects the moves are from. */
   readonly windowLabel: string;
   readonly className?: string;
 }
@@ -50,7 +51,7 @@ export function ActivityPanel({ entries, windowLabel, className }: ActivityPanel
                 {`${stateLabel(entry.from)} → ${stateLabel(entry.to)}`}
               </span>
               <span aria-hidden>·</span>
-              <span>{`by ${entry.by}`}</span>
+              <span>{`by ${escapeInvisible(entry.by)}`}</span>
               <span aria-hidden>·</span>
               <RelativeTime value={entry.at} />
             </span>

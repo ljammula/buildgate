@@ -5,7 +5,9 @@ import {
   applyBoardWindow,
   boardWindowChoiceLabel,
   boardWindowLabel,
+  instantInBoardWindow,
   requestInBoardWindow,
+  scopeLabel,
   statsSince,
 } from "@/domain/boardWindow";
 import { decodeRequestSummary } from "@/domain/request";
@@ -82,11 +84,27 @@ test("applyBoardWindow takes out only old finished requests and counts them", ()
     requestSummary({ id: "old-cancelled", state: "cancelled", updatedAt: threeWeeksAgo }),
     requestSummary({ id: "new-done", state: "done", updatedAt: twoDaysAgo }),
   ];
-  const week = applyBoardWindow(requests, 7, now);
+  const week = applyBoardWindow(requests, 7, now, true);
   expect(week.shown.map((r) => r.id)).toEqual(["waiting", "building", "new-done"]);
   expect(week.olderHidden).toBe(2);
-  expect(applyBoardWindow(requests, 30, now).olderHidden).toBe(0);
-  expect(applyBoardWindow(requests, "all", now).shown).toHaveLength(5);
+  expect(applyBoardWindow(requests, 30, now, true).olderHidden).toBe(0);
+  expect(applyBoardWindow(requests, "all", now, true).shown).toHaveLength(5);
+  // A cancelled request the view would not draw anyway is not promised by the note.
+  const boardWeek = applyBoardWindow(requests, 7, now, false);
+  expect(boardWeek.olderHidden).toBe(1);
+  expect(boardWeek.shown.map((r) => r.id)).toEqual(["waiting", "building", "new-done"]);
+});
+
+test("the scope label names the window, and the projects when some are chosen", () => {
+  expect(scopeLabel("Last 7 days", new Set())).toBe("Last 7 days");
+  expect(scopeLabel("All time", new Set(["web", "api"]))).toBe("All time · api, web");
+});
+
+test("an instant is judged against the window's edge", () => {
+  expect(instantInBoardWindow(twoDaysAgo, 7, now)).toBe(true);
+  expect(instantInBoardWindow(threeWeeksAgo, 7, now)).toBe(false);
+  expect(instantInBoardWindow(threeWeeksAgo, "all", now)).toBe(true);
+  expect(instantInBoardWindow("", 7, now)).toBe(true);
 });
 
 test("activity keeps the moves made inside the window", () => {

@@ -21,16 +21,19 @@ export const activityLimit = 15;
 /**
  * The newest `limit` moves, newest first. Moves at the same instant keep the
  * order they were made in, last made first, so a request's own history never
- * reads backwards.
+ * reads backwards. `include` drops a move by its time before anything is
+ * sorted (the board's time window), so a long history costs one pass.
  */
 export function recentActivity(
   requests: readonly RequestSummary[],
   limit = activityLimit,
+  include: (at: string) => boolean = () => true,
 ): ActivityEntry[] {
   const all: { entry: ActivityEntry; order: number }[] = [];
   for (const request of requests) {
     const title = requestShortTitle(request);
     request.history.forEach((move, index) => {
+      if (!include(move.at)) return;
       all.push({
         entry: {
           requestId: request.id,

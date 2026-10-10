@@ -2,14 +2,14 @@
 // only: the Done column (done and cancelled requests), the activity feed and
 // the numbers. Time is a parameter; nothing here reads the clock.
 import type { ActivityEntry } from "@/domain/activity";
-import { columnForRequest } from "@/domain/boardColumns";
+import { columnForRequest, isCancelledRequest } from "@/domain/boardColumns";
 import type { BoardWindowDays } from "@/domain/boardFilters";
 import type { RequestSummary } from "@/domain/request";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
 /** Whether the instant `at` is inside the window ending at `now`. An unreadable time is kept in view. */
-function instantInWindow(at: string, days: BoardWindowDays, now: Date): boolean {
+export function instantInBoardWindow(at: string, days: BoardWindowDays, now: Date): boolean {
   if (days === "all") return true;
   const ms = Date.parse(at);
   return Number.isNaN(ms) || ms >= now.getTime() - days * dayMs;
@@ -28,23 +28,38 @@ export function requestInBoardWindow(
   now: Date,
 ): boolean {
   if (columnForRequest(request) !== "done") return true;
-  return instantInWindow(request.updatedAt, days, now);
+  return instantInBoardWindow(request.updatedAt, days, now);
 }
 
 export interface WindowedRequests {
   readonly shown: readonly RequestSummary[];
-  /** Finished requests the window left out. */
+  /**
+   * Finished requests the window left out that widening it would bring into
+   * view: the count beside "older hidden".
+   */
   readonly olderHidden: number;
 }
 
-/** `requests` with the finished ones outside the window taken out, and how many that was. */
+/**
+ * `requests` with the finished ones outside the window taken out, and how
+ * many of those "All time" would show. `cancelledInView` says whether a
+ * cancelled request is drawn at all (the board draws them only behind Show
+ * cancelled; the list always does): one that would stay out of view either
+ * way is not counted, so the note never promises more than appears.
+ */
 export function applyBoardWindow(
   requests: readonly RequestSummary[],
   days: BoardWindowDays,
   now: Date,
+  cancelledInView: boolean,
 ): WindowedRequests {
-  const shown = requests.filter((request) => requestInBoardWindow(request, days, now));
-  return { shown, olderHidden: requests.length - shown.length };
+  const shown: RequestSummary[] = [];
+  let olderHidden = 0;
+  for (const request of requests) {
+    if (requestInBoardWindow(request, days, now)) shown.push(request);
+    else if (cancelledInView || !isCancelledRequest(request)) olderHidden += 1;
+  }
+  return { shown, olderHidden };
 }
 
 /** The moves made inside the window. */
@@ -53,7 +68,7 @@ export function activityInBoardWindow(
   days: BoardWindowDays,
   now: Date,
 ): ActivityEntry[] {
-  return entries.filter((entry) => instantInWindow(entry.at, days, now));
+  return entries.filter((entry) => instantInBoardWindow(entry.at, days, now));
 }
 
 /** `since` for GET /stats, in the form the trend route takes: "7d", "30d"; null (omitted) for all. */
@@ -69,4 +84,13 @@ export function boardWindowChoiceLabel(days: BoardWindowDays): string {
 /** What a panel under the window is headed with: "Last 7 days", "All time". */
 export function boardWindowLabel(days: BoardWindowDays): string {
   return days === "all" ? "All time" : `Last ${days} days`;
+}
+
+/**
+ * What the Numbers and Activity headings say they cover: the window, and the
+ * projects chosen in the toolbar when there are any ("Last 7 days · alpha,
+ * beta"). The search box is not part of it: those panels do not follow it.
+ */
+export function scopeLabel(windowLabel: string, projects: ReadonlySet<string>): string {
+  return projects.size === 0 ? windowLabel : `${windowLabel} · ${[...projects].sort().join(", ")}`;
 }

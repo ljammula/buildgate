@@ -24,8 +24,18 @@ export interface FactoryHealth {
   /** Jobs running and the worker's capacity; null unless a live worker reports its slots. */
   readonly slots: { readonly busy: number; readonly total: number } | null;
   readonly running: readonly RunningJob[];
-  /** Requests waiting for a worker slot (those the server gave a queue position). */
-  readonly queued: number;
+  /**
+   * Requests waiting for a slot of a live worker (those the server gave a
+   * queue position). Null unless the worker is alive: the server gives no
+   * position without one, and "0 queued" behind a dead worker would read as
+   * nothing waiting.
+   */
+  readonly queued: number | null;
+  /**
+   * Requests in a state only a worker can advance, whatever the worker's
+   * state: what is stuck when there is none.
+   */
+  readonly needWorker: number;
   /** When any request last changed state; null when no request has a history. */
   readonly lastTransitionAt: string | null;
 }
@@ -52,6 +62,17 @@ function runningJob(id: string, requests: readonly RequestSummary[]): RunningJob
   };
 }
 
+// The states only a worker's job advances (the Go side's
+// queueRunDependentState): reviews wait on the operator, terminal states on
+// nothing.
+const JOB_STATES: ReadonlySet<string> = new Set([
+  "submitted",
+  "spec_drafting",
+  "oracle_drafting",
+  "planning",
+  "building",
+]);
+
 /** The newest `at` over every request's history; null when there is none. */
 export function lastTransitionAt(requests: readonly RequestSummary[]): string | null {
   let latest: string | null = null;
@@ -77,7 +98,8 @@ export function factoryHealth(
         ? { busy: active.length, total: status.jobSlots }
         : null,
     running: active.map((id) => runningJob(id, requests)),
-    queued: requests.filter((r) => r.queuePosition !== null).length,
+    queued: worker?.alive === true ? requests.filter((r) => r.queuePosition !== null).length : null,
+    needWorker: requests.filter((r) => JOB_STATES.has(r.state)).length,
     lastTransitionAt: lastTransitionAt(requests),
   };
 }

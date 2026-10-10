@@ -112,3 +112,18 @@ test("spend names dollars only when a cost was recorded", () => {
     ),
   ).toBe("$2.50");
 });
+
+test("with projects chosen, only their rows: the overall row is every project's", () => {
+  const stats = decodeFactoryStats(
+    {
+      overall: report("", metrics({ tickets: 5 })),
+      projects: [report("alpha", metrics({ tickets: 2 })), report("beta", metrics({ tickets: 3 }))],
+    },
+    at,
+  );
+  expect(numbersRows(stats).map((row) => row.label)).toEqual(["Overall", "alpha", "beta"]);
+  expect(numbersRows(stats, new Set(["beta"])).map((row) => [row.label, row.tickets])).toEqual([
+    ["beta", "3"],
+  ]);
+  expect(numbersRows(stats, new Set(["gone"]))).toEqual([]);
+});
