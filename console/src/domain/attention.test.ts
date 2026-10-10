@@ -67,13 +67,19 @@ test("the input map is never changed", () => {
   expect(seen.get("req-1")).toBe(t1);
 });
 
-test("the content is the ask, the project and the title, tagged by id and state", () => {
+test("the content is the ask, the project and the title, tagged by the notification it is", () => {
   expect(
-    notificationContent(request({ last_ask: "Spec ready for your review", project: "checkouts" })),
+    notificationContent(
+      request({
+        last_ask: "Spec ready for your review",
+        project: "checkouts",
+        last_notified_at: t1,
+      }),
+    ),
   ).toEqual({
     title: "Spec ready for your review",
     body: "checkouts: Add a coupon field",
-    tag: "req-1:spec_review",
+    tag: `req-1:${t1}`,
   });
 });
 
@@ -81,6 +87,6 @@ test("with no ask or project the title falls back and the body is the request ti
   expect(notificationContent(request({ project: "" }))).toEqual({
     title: "Buildgate: a request needs you",
     body: "Add a coupon field",
-    tag: "req-1:spec_review",
+    tag: "req-1:",
   });
 });

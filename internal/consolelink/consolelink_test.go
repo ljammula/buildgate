@@ -1,6 +1,11 @@
 package consolelink
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
 
 func TestBaseURLPrecedence(t *testing.T) {
 	t.Setenv(EnvVar, "")
@@ -90,5 +95,80 @@ func TestDeepLinks(t *testing.T) {
 	}
 	if got := RunURL("", "run-1"); got != "" {
 		t.Errorf("RunURL(empty base) = %q, want empty", got)
+	}
+}
+
+func TestRemoteBaseURLHoldsOnlyWhileItsHostRecordExists(t *testing.T) {
+	dataDir := t.TempDir()
+	hostRecord := filepath.Join(t.TempDir(), "profile.remote-console")
+	if err := os.WriteFile(hostRecord, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := RemoteBaseURL(dataDir); got != "" {
+		t.Fatalf("RemoteBaseURL with nothing recorded = %q", got)
+	}
+	if err := RecordRemoteBaseURL(dataDir, "https://console.example:8443", hostRecord); err != nil {
+		t.Fatal(err)
+	}
+	if got := RemoteBaseURL(dataDir); got != "https://console.example:8443" {
+		t.Errorf("RemoteBaseURL = %q", got)
+	}
+	if got := RequestURL(RemoteBaseURL(dataDir), "req-1"); got != "https://console.example:8443/requests/req-1" {
+		t.Errorf("request link = %q", got)
+	}
+	if err := os.Remove(hostRecord); err != nil {
+		t.Fatal(err)
+	}
+	if got := RemoteBaseURL(dataDir); got != "" {
+		t.Errorf("RemoteBaseURL after the remote console was turned off = %q, want none", got)
+	}
+}
+
+func TestRemoteBaseURLRefusesAnythingButAnHTTPSHost(t *testing.T) {
+	hostRecord := filepath.Join(t.TempDir(), "profile.remote-console")
+	if err := os.WriteFile(hostRecord, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range []string{
+		"http://console.example",
+		"https://user:secret@console.example",
+		"https://console.example/#gate=secret",
+		"https://console.example/?t=secret",
+		"https://console.example/elsewhere",
+		"console.example",
+	} {
+		dataDir := t.TempDir()
+		if err := RecordRemoteBaseURL(dataDir, base, hostRecord); err != nil {
+			t.Fatal(err)
+		}
+		if got := RemoteBaseURL(dataDir); got != "" {
+			t.Errorf("RemoteBaseURL for %q = %q, want none", base, got)
+		}
+	}
+}
+
+func TestTabNotifierIsPresentOnlyWhileFresh(t *testing.T) {
+	dataDir := t.TempDir()
+	if TabNotifierPresent(dataDir) {
+		t.Fatal("present with nothing recorded")
+	}
+	if err := TouchTabNotifier(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if !TabNotifierPresent(dataDir) {
+		t.Fatal("not present right after a touch")
+	}
+	old := time.Now().Add(-2 * TabNotifierFresh)
+	if err := os.Chtimes(filepath.Join(dataDir, tabNotifierFile), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if TabNotifierPresent(dataDir) {
+		t.Error("still present after the serve that touched it stopped")
+	}
+	if err := TouchTabNotifier(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if !TabNotifierPresent(dataDir) {
+		t.Error("a touch of an old record did not refresh it")
 	}
 }

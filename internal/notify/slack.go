@@ -33,18 +33,20 @@ func (s SlackNotifier) Notify(ctx context.Context, n Notification) error {
 
 	header := n
 	header.Ticket = escapeSlackMentions(n.Ticket)
+	header.Subject = escapeSlackMentions(n.Subject)
 	text := fmt.Sprintf("factoryd: %s\nreason: %s", subject(header), escapeSlackMentions(n.Reason))
 	// Next/Link give the operator one clickable next action instead of
 	// leaving them to reconstruct it from the reason text -- Slack's own
 	// <url|text> syntax renders a hyperlinked "Next" line when both are
 	// present.
+	link := channelLink(n)
 	switch {
-	case n.Next != "" && n.Link != "":
-		text += fmt.Sprintf("\nnext: <%s|%s>", n.Link, escapeSlackMentions(n.Next))
+	case n.Next != "" && link != "":
+		text += fmt.Sprintf("\nnext: <%s|%s>", link, escapeSlackMentions(n.Next))
 	case n.Next != "":
 		text += fmt.Sprintf("\nnext: %s", escapeSlackMentions(n.Next))
-	case n.Link != "":
-		text += fmt.Sprintf("\n%s", n.Link)
+	case link != "":
+		text += fmt.Sprintf("\n%s", link)
 	}
 
 	body, err := json.Marshal(slackPayload{Text: text})

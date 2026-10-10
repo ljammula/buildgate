@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	temporalworker "go.temporal.io/sdk/worker"
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
+	"buildgate/internal/consolelink"
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/workflow"
@@ -111,6 +114,7 @@ const requestHeartbeatInterval = 20 * time.Second
 // for as long as the step runs, so a worker that dies mid-step is noticed,
 // and a cancel of the activity cancels the step.
 func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (string, error) {
+	a.ensureConsole()
 	r, err := request.Load(a.dataDir, id)
 	if err != nil {
 		return "", fmt.Errorf("load request %s: %w", id, err)
@@ -186,8 +190,24 @@ func heartbeatUntilDone(ctx context.Context, interval time.Duration) func() {
 	return func() { close(done) }
 }
 
+// ensureConsole starts this data dir's `serve` when none answers, so that
+// the notification a step ends in has a page to link to. It does nothing
+// under FACTORYD_AUTOSTART=0 or without a session config; a notification
+// then has no link and says to run `factoryd console`.
+func (a *requestActivities) ensureConsole() {
+	if consolelink.ServeAddress(a.dataDir) != "" || !hostcontrol.AutostartEnabled() || a.cfg.SessionConfigPath == "" {
+		return
+	}
+	binaryPath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	hostcontrol.EnsureServe(a.dp, log.Writer(), binaryPath, a.cfg.SessionConfigPath, a.dataDir)
+}
+
 // RemindRequest sends request id's review reminder when one is due.
 func (a *requestActivities) RemindRequest(_ context.Context, id string) error {
+	a.ensureConsole()
 	return requestdriver.RemindIfDue(a.dataDir, id, a.cfg.HitlReminderInterval, time.Now)
 }
 

@@ -1109,6 +1109,17 @@ type NotificationRecord struct {
 	// console base URL is configured. Omitempty for the same reason as
 	// Next.
 	Link string `json:"link,omitempty"`
+	// Ask is the headline of a request's notification: what is asked of the
+	// operator ("Spec ready for your review"). Empty on a run's own
+	// notification.
+	Ask string `json:"ask,omitempty"`
+	// Subject names the request Ask is about, as the console does: its
+	// project and title.
+	Subject string `json:"subject,omitempty"`
+	// RemoteLink is Link through the address `factoryd remote-console`
+	// recorded, for a channel read on another machine (Slack, Discord).
+	// Empty while the remote console is off. It carries no token.
+	RemoteLink string `json:"remote_link,omitempty"`
 }
 
 // Override is the auditable record of a human changing a quarantined run's

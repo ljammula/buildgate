@@ -26,6 +26,7 @@ import (
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/meter"
 	"buildgate/internal/modelrole"
+	"buildgate/internal/notify"
 	"buildgate/internal/prices"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -521,7 +522,31 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	if c, ok := doctorCheckTLSInterception(ctx, dp, fix); ok {
 		checks = append(checks, c)
 	}
+	if runtime.GOOS == "darwin" && os.Getenv(notify.DesktopNotificationsEnvironmentVariable) != "0" {
+		_, err := exec.LookPath("terminal-notifier")
+		checks = append(checks, doctorCheckNotificationClick(err == nil))
+	}
 	return checks, nil
+}
+
+// doctorCheckNotificationClick reports whether a desktop notification's
+// click can open the request it is about: only terminal-notifier gives a
+// banner a click action. Advisory: without it the banner still says what is
+// asked, and an open console tab raises its own notification.
+//
+// Whether macOS allows terminal-notifier's banners is not something a check
+// can read without sending one; `doctor -notify-test` sends one and reports.
+func doctorCheckNotificationClick(haveTerminalNotifier bool) doctorCheck {
+	const name = "notification click"
+	if haveTerminalNotifier {
+		return doctorCheck{Name: name}
+	}
+	return doctorCheck{
+		Name:     name,
+		Err:      errors.New("terminal-notifier is not on PATH: clicking a desktop notification does nothing"),
+		Fix:      "`brew install terminal-notifier` (`make install` does it), allow it in System Settings -> Notifications, then `factoryd doctor -notify-test`",
+		Advisory: true,
+	}
 }
 
 // doctorApplyPathFixEnvVar opts a real `factoryd doctor -fix` invocation

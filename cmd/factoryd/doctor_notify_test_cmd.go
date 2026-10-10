@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"buildgate/internal/notify"
@@ -60,15 +61,31 @@ func doctorNotifyTestMain(dataDir string) error {
 		// command's own mechanism determination above wrong.
 		RunDir: dataDir,
 	}
+	if mechanism == "terminal-notifier" {
+		// Sent here, not through DesktopNotifier, which falls back to
+		// osascript without a word: this command exists to say which
+		// mechanism works.
+		out, err := exec.Command("terminal-notifier", "-title", "factoryd", "-message", n.Reason, "-execute", "open "+shellQuoteForNotifyTest(dataDir)).CombinedOutput()
+		if err != nil {
+			fmt.Printf("terminal-notifier could not show a notification: %s\n", sanitizeFirstLine(out, err))
+			fmt.Println("fix: System Settings -> Notifications -> terminal-notifier -> Allow Notifications, alert style Banners or Alerts. Until then factoryd shows the plain osascript banner, whose click does nothing.")
+			return nil
+		}
+		fmt.Println("sent a test desktop notification via: terminal-notifier (its click opens the data directory)")
+		fmt.Println("confirm you actually saw a notification banner: macOS can also hide one that was accepted (Focus, alert style None).")
+		return nil
+	}
 	if err := (notify.DesktopNotifier{}).Notify(context.Background(), n); err != nil {
 		return fmt.Errorf("send test notification: %w", err)
 	}
 
 	fmt.Printf("sent a test desktop notification via: %s\n", mechanism)
-	if mechanism == "terminal-notifier" {
-		fmt.Println("known silent-failure caveat: terminal-notifier is its own bundle id and needs separate approval the first time it fires; until approved it fails with NO signal at all (indistinguishable from a delivered notification you simply didn't notice).")
-		fmt.Println("check: System Settings -> Notifications -> terminal-notifier -> Allow Notifications (and that Alert Style isn't set to None).")
-	}
 	fmt.Println("confirm you actually saw a notification banner -- this command has no way to detect delivery itself.")
 	return nil
+}
+
+// shellQuoteForNotifyTest single-quotes s for terminal-notifier's -execute,
+// which runs its value through `sh -c`.
+func shellQuoteForNotifyTest(s string) string {
+	return `'` + strings.ReplaceAll(s, `'`, `'"'"'`) + `'`
 }

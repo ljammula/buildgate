@@ -211,7 +211,16 @@ func DispatchSlack(n Notification) {
 // ever one "webhook" here: the local machine itself. DesktopNotifier.Notify
 // already never errors, so there is nothing here to discard but the
 // (always-nil) return value.
-func DispatchDesktop(n Notification) {
+//
+// A request's notification (one with an Ask) is not shown while a console
+// tab on this machine raises dataDir's request notifications itself
+// (consolelink.TabNotifierPresent): the operator gets one notification, the
+// tab's, whose click brings that tab to the front. A run's own notification
+// is always shown: no tab raises it.
+func DispatchDesktop(dataDir string, n Notification) {
+	if n.Ask != "" && consolelink.TabNotifierPresent(dataDir) {
+		return
+	}
 	desktopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = (DesktopNotifier{}).Notify(desktopCtx, n)
 	cancel()
@@ -292,7 +301,7 @@ func (p *pendingCounter) zeroReached() <-chan struct{} {
 // chance to fire before the flush gave up, defeating them as fallback
 // channels entirely. Concurrent, the worst case is ~5s: the slowest
 // single channel, not their sum.
-func DispatchExternal(n Notification) {
+func DispatchExternal(dataDir string, n Notification) {
 	pendingDispatches.add()
 	go func() {
 		defer pendingDispatches.done()
@@ -300,7 +309,7 @@ func DispatchExternal(n Notification) {
 		channels.Add(3)
 		go func() { defer channels.Done(); DispatchDiscord(n) }()
 		go func() { defer channels.Done(); DispatchSlack(n) }()
-		go func() { defer channels.Done(); DispatchDesktop(n) }()
+		go func() { defer channels.Done(); DispatchDesktop(dataDir, n) }()
 		channels.Wait()
 	}()
 }

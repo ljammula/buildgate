@@ -22,6 +22,7 @@
   "waiting_since": "2026-09-10T09:00:00Z",
   "last_notified_at": "2026-09-10T09:00:00Z",
   "notify_count": 3,
+  "last_ask": "every-field last_ask",
   "ticket_index": 1,
   "ticket_count": 1,
   "error": "every-field error",
@@ -233,6 +234,7 @@
           "every-field blockers"
         ]
       },
+      "notified_pr": "every-field notified_pr",
       "seen_thread_ids": [
         "every-field seen_thread_ids"
       ],

@@ -322,7 +322,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 | Clean up after a killed run | `factoryd reconcile -workspace <path> -data-dir <dir>` |
 
 Every command and flag: [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
-Watching, costs, budgets and desktop notifications:
+Watching, costs, budgets and notifications:
 [USAGE.md § Observe and control](USAGE.md#observe-and-control).
 
 ## Build & test

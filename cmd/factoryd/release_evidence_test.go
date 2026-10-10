@@ -856,7 +856,7 @@ func TestOpenEvidencePullRequestNeverFailsTheRunOnOpenerError(t *testing.T) {
 // generic status hint.
 func TestNotifyAcceptedRunNextIsPRURLWhenSet(t *testing.T) {
 	dataDir := t.TempDir()
-	n := notifyAcceptedRun(dataDir, "run-1", "012", "https://github.com/acme/widgets/pull/7", "")
+	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "https://github.com/acme/widgets/pull/7", "")
 
 	if n.Next != "https://github.com/acme/widgets/pull/7" {
 		t.Errorf("Next = %q, want the pull request URL", n.Next)
@@ -868,7 +868,7 @@ func TestNotifyAcceptedRunNextIsPRURLWhenSet(t *testing.T) {
 // naming the run, rather than an empty field.
 func TestNotifyAcceptedRunNextIsStatusHintWithoutPR(t *testing.T) {
 	dataDir := t.TempDir()
-	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "")
+	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "", "")
 
 	if n.Next == "" || !strings.Contains(n.Next, "run-1") {
 		t.Errorf("Next = %q, want a non-empty hint naming run-1", n.Next)
@@ -882,12 +882,12 @@ func TestNotifyAcceptedRunLinkUsesConsoleURL(t *testing.T) {
 	dataDir := t.TempDir()
 
 	t.Setenv(consoleLinkEnvVar, "")
-	if n := notifyAcceptedRun(dataDir, "run-1", "012", "", ""); n.Link != "" {
+	if n := notifyAcceptedRun(dataDir, "run-1", "012", "", "", ""); n.Link != "" {
 		t.Errorf("Link = %q, want empty when %s is unset", n.Link, consoleLinkEnvVar)
 	}
 
 	t.Setenv(consoleLinkEnvVar, "https://console.example")
-	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "")
+	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "", "")
 	if want := "https://console.example/runs/run-1"; n.Link != want {
 		t.Errorf("Link = %q, want %q", n.Link, want)
 	}
@@ -904,7 +904,7 @@ func TestRecordAcceptedRunSideEffectsUnlockedPersistsPRURLAndNotification(t *tes
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	n := notifyAcceptedRun(dataDir, "run-1", "012", "https://github.com/acme/widgets/pull/7", "")
+	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "https://github.com/acme/widgets/pull/7", "")
 
 	recordAcceptedRunSideEffects(dataDir, r, "https://github.com/acme/widgets/pull/7", n, false)
 
@@ -950,7 +950,7 @@ func TestRecordAcceptedRunSideEffectsLockedMutatesRDirectly(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "")
+	n := notifyAcceptedRun(dataDir, "run-1", "012", "", "", "")
 
 	recordAcceptedRunSideEffects(dataDir, r, "", n, true)
 
@@ -1193,7 +1193,7 @@ func TestRecordReleaseDecisionAndOpenerGate(t *testing.T) {
 	if !strings.Contains(reason, "release policy denied") {
 		t.Errorf("releasePullRequestWithheldReason = %q, want it to clearly say the release policy denied it", reason)
 	}
-	n := notifyAcceptedRun(dataDir, r.ID, r.Ticket, prURL, reason)
+	n := notifyAcceptedRun(dataDir, r.ID, r.Ticket, "", prURL, reason)
 	if !strings.Contains(n.Reason, "pull request withheld: release policy denied") {
 		t.Errorf("notification Reason = %q, want it to distinguish a policy denial from an opener failure", n.Reason)
 	}

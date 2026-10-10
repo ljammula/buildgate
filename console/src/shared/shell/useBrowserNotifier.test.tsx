@@ -85,7 +85,7 @@ test("a tab that is the notifier opens the stream with notifier=1, and says noth
   await waitFor(() => {
     expect(server.sent("GET /requests/events?notifier=1")).toHaveLength(1);
   });
-  // The board's first stream opens before this tab holds the lock, so it is the plain one.
+  // The board's own stream is the plain one: only the shell's says notifier.
   expect(server.sent("GET /requests/events")).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Notifications on" })).toBeInTheDocument();
   expect(made).toHaveLength(0);
@@ -124,7 +124,7 @@ test("a later notification raises one, and a click opens that request's page", a
   expect(made[0]!.title).toBe("Spec ready for your review");
   expect(made[0]!.options).toEqual({
     body: "checkouts: Add a coupon field",
-    tag: "req-1:spec_review",
+    tag: `req-1:${second}`,
   });
   made[0]!.onclick?.();
   expect(focus).toHaveBeenCalled();
@@ -145,7 +145,7 @@ test("with the preference off, the stream has no notifier parameter and nothing 
   expect(made).toHaveLength(0);
 });
 
-test("turning notifications on asks for permission, stores the choice and reopens the stream with notifier=1", async () => {
+test("turning notifications on asks for permission, stores the choice and opens the notifier stream; turning them off closes it", async () => {
   stubNotifications("default");
   const Fake = window.Notification as unknown as {
     permission: string;
@@ -166,9 +166,42 @@ test("turning notifications on asks for permission, stores the choice and reopen
   await userEvent.click(screen.getByRole("button", { name: "Notifications on" }));
   expect(await screen.findByRole("button", { name: "Turn on notifications" })).toBeInTheDocument();
   expect(getNotificationsPreference()).toBe(false);
+  // Off again: no second notifier stream is opened, and the board's is untouched.
+  expect(server.sent("GET /requests/events?notifier=1")).toHaveLength(1);
+  expect(server.sent("GET /requests/events")).toHaveLength(1);
+});
+
+test("the notifier stream is held on a screen with no stream of its own, and its frames raise", async () => {
+  const made = stubNotifications("granted");
+  setNotificationsPreference(true);
+  const routes = list(first).filter((route) => route.on !== "GET /requests/events?notifier=1");
+  const frame = (lastNotifiedAt: string) =>
+    requestJson({
+      id: "req-1",
+      state: "spec_review",
+      title: "Add a coupon field",
+      project: "checkouts",
+      lastNotifiedAt,
+      lastAsk: "Spec ready for your review",
+    });
+  const { server } = renderApp(
+    <AppShell>
+      <p>ops</p>
+    </AppShell>,
+    {
+      server: [
+        ...routes,
+        {
+          on: "GET /requests/events?notifier=1",
+          reply: sseResponse("state", [frame(first), frame(second)]),
+        },
+      ],
+    },
+  );
   await waitFor(() => {
-    expect(server.sent("GET /requests/events")).toHaveLength(2);
+    expect(made).toHaveLength(1);
   });
+  expect(server.sent("GET /requests/events")).toHaveLength(0);
 });
 
 test("a blocked browser shows the note and never the notifier parameter", async () => {

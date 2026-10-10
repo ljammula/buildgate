@@ -690,7 +690,7 @@ func save(r *run.Run, dataDir string, cause ...error) error {
 	// DispatchExternal itself dispatches asynchronously: see the matching
 	// comment in release_and_evidence.go's notifyAcceptedRun.
 	if dispatchHalt {
-		notify.DispatchExternal(haltNotification)
+		dispatchRunNotification(dataDir, r.RequestID, haltNotification)
 	}
 	// "finished" progress-feed line (progress-contract.md) for a run that
 	// just reached a terminal state. save is the single function nearly

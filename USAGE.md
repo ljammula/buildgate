@@ -891,21 +891,65 @@ The console's home screen: what the factory is doing, and what each request wait
 
 The queue place and the build's stage come from the server (`queue_position` and `build` on `GET /requests`, `active_requests` and `job_slots` on `GET /queue-run`), so the console and `factoryd status` agree. From another machine it is the same screen: [the console from another machine](#the-console-from-another-machine).
 
-### Desktop notifications
+### Notifications
 
-On macOS, `factoryd` notifies when a run halts, is quarantined, or is
-accepted (`FACTORYD_DESKTOP_NOTIFICATIONS=0` opts out).
+`factoryd` notifies when a request starts waiting on you. Each notification
+says what is asked and of which request, and has one action: its click opens
+that request's own page in the console, where the text is shown and the
+decision is made. No notification approves anything, and no link in one
+carries a token.
 
-| Setup | Banner |
-|---|---|
-| Default | A plain `osascript` banner; clicking it does nothing useful |
-| [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) on `PATH` (`brew install terminal-notifier`) | Adds a "Next: ..." line. Clicking opens the run's console page when `FACTORYD_CONSOLE_URL` is set, else the run directory in Finder |
+| A request... | Headline | Sent |
+|---|---|---|
+| reaches `spec_review` | Spec ready for your review | On entry, then every `hitl_reminder_interval` while it waits |
+| reaches `oracle_review` | Acceptance tests ready for your review | Same |
+| reaches `plan_review` | Plan ready for your review | Same |
+| reaches `resume_review` | A step was lost: choose how to continue | Same |
+| is halted | Halted: needs you | Once, with the reason |
+| is quarantined | Quarantined: needs you | Once, with the reason. A quarantined build the factory follows with a corrective round of its own sends nothing |
+| has a pull request ready to merge | Pull request ready to merge | Once per pull request head |
+| has a pull request ready for review and not yet ready to merge | Pull request ready for your review | Once per head, and never after "ready to merge" for that head |
+| had a PR-review round that was not accepted | Review round quarantined (or halted): pull request needs you | Once per round |
 
-`terminal-notifier` shows nothing until macOS approves it:
+A run started on its own (`factoryd run`, no request) notifies when it halts,
+is quarantined or is accepted, and its click opens the run's page. A run that
+is a request's ticket sends nothing itself: the request's notification covers
+it.
 
-1. Fire it once so macOS lists it: `terminal-notifier -title factoryd -message test -execute "open /tmp"`.
-2. System Settings → Notifications → `terminal-notifier` (`fr.julienxx.oss.terminal-notifier`): Allow Notifications on, alert style Banners or Alerts (not None), Show in Notification Center on.
-3. Re-run step 1; clicking the banner should open `/tmp`.
+```text
+a request starts waiting on you
+        |
+        v
+<data-dir>/requests/<id>/notifications.log   one JSON line, always, first
+        |
+        +--> a console tab with notifications on    browser notification;
+        |    (this machine or another)              click: that tab comes to
+        |                                           the front on the request
+        +--> desktop banner on the host             held back while a console
+        |                                           tab on the host notifies
+        +--> Slack / Discord, when configured       link to the request's page
+```
+
+| Channel | Turn it on | Its click |
+|---|---|---|
+| Console tab | "Turn on notifications" at the bottom of the console's sidebar, once per browser (it asks the browser's permission). With several tabs of one console open, one of them notifies; when it closes, another takes over | Brings that tab to the front and opens the request's page |
+| Desktop banner (macOS) | On by default; `FACTORYD_DESKTOP_NOTIFICATIONS=0` turns it off | With [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) on `PATH`: opens the request's page in the browser. Without it: nothing, and the banner's text says to open the console |
+| Slack | `FACTORYD_SLACK_WEBHOOK_URLS` (comma-separated incoming-webhook URLs) in the worker's environment | The request's page: at the `factoryd remote-console` address while that is on, else the host's own address |
+| Discord | `FACTORYD_DISCORD_WEBHOOK_URLS`, the same way | Same |
+
+The link is the page of the `serve` of the request's own data dir. When none
+is running, the worker starts one (not under `FACTORYD_AUTOSTART=0`; the
+notification then has no link). `FACTORYD_CONSOLE_URL` overrides the address.
+
+`make install` installs `terminal-notifier` with Homebrew when it is missing.
+macOS shows nothing from it until you allow it:
+
+1. `factoryd doctor -notify-test` sends one banner and says so if macOS refused it.
+2. System Settings → Notifications → `terminal-notifier`: Allow Notifications on, alert style Banners or Alerts.
+3. Run step 1 again; clicking the banner opens the data directory.
+
+Until then the plain banner is shown, with the same text and no click.
+`factoryd doctor` warns when `terminal-notifier` is missing.
 
 ### Profiles
 

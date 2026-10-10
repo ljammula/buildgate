@@ -11,7 +11,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import type { Http } from "@/api/http";
@@ -25,7 +25,6 @@ import {
   getRequestTicketOracleFile,
   putRequestOracleRunCommand,
 } from "@/api/oracle";
-import { useIsNotifier } from "@/api/notifierContext";
 import { requestListRefreshMs } from "@/api/polling";
 import { isOracleKey, isUnderRequest, queryKeys } from "@/api/queryKeys";
 import {
@@ -152,7 +151,6 @@ export function useRequestBoard(): RequestBoard {
   const [live, setLive] = useState(false);
   const [streamError, setStreamError] = useState<ApiError | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
-  const notifier = useIsNotifier();
 
   const query = useQuery({
     ...requestListOptions(http),
@@ -160,33 +158,61 @@ export function useRequestBoard(): RequestBoard {
   });
 
   useEffect(() => {
-    const unsubscribe = watchRequests(
-      http,
-      {
-        onValue: (request) => {
-          cacheRequest(client, request, false);
-        },
-        onError: (error) => {
-          setLive(false);
-          setStreamError(error);
-        },
-        onConnectionChange: (connected) => {
-          setLive(connected);
-          // A stream that opens again has recovered: the error banner goes.
-          if (connected) setStreamError(null);
-          setFailedAttempts((count) => (connected ? 0 : count + 1));
-        },
+    const unsubscribe = watchRequests(http, {
+      onValue: (request) => {
+        cacheRequest(client, request, false);
       },
-      {},
-      { notifier },
-    );
+      onError: (error) => {
+        setLive(false);
+        setStreamError(error);
+      },
+      onConnectionChange: (connected) => {
+        setLive(connected);
+        // A stream that opens again has recovered: the error banner goes.
+        if (connected) setStreamError(null);
+        setFailedAttempts((count) => (connected ? 0 : count + 1));
+      },
+    });
     return () => {
       unsubscribe();
       setLive(false);
     };
-  }, [http, client, notifier]);
+  }, [http, client]);
 
   return { query, live, streamError, failedAttempts };
+}
+
+/**
+ * The stream a tab holds while it raises the requests' browser
+ * notifications: `GET /requests/events?notifier=1`, on every screen. The
+ * parameter is what tells the server a tab does the job, so the host's own
+ * banner stands down for as long as this stream is open. Each frame also
+ * refreshes the list cache and is handed to `onRequest`. A stream that ends
+ * for good (a rotated token) is left ended: the list's own polling goes on,
+ * and the host's banner comes back.
+ */
+export function useNotifierStream(active: boolean, onRequest: (request: RequestSummary) => void) {
+  const { http } = useApi();
+  const client = useQueryClient();
+  const handler = useRef(onRequest);
+  useEffect(() => {
+    handler.current = onRequest;
+  }, [onRequest]);
+  useEffect(() => {
+    if (!active) return undefined;
+    return watchRequests(
+      http,
+      {
+        onValue: (request) => {
+          cacheRequest(client, request, false);
+          handler.current(request);
+        },
+        onError: () => undefined,
+      },
+      {},
+      { notifier: true },
+    );
+  }, [active, http, client]);
 }
 
 /**
@@ -218,25 +244,19 @@ export function useRequest(id: string): UseQueryResult<RequestSummary> {
 export function useRequestDetailEvents(id: string): void {
   const { http } = useApi();
   const client = useQueryClient();
-  const notifier = useIsNotifier();
   useEffect(() => {
-    const unsubscribe = watchRequests(
-      http,
-      {
-        onValue: (event) => {
-          if (event.id !== id) return;
-          const current = client.getQueryData<RequestSummary>(queryKeys.requests.detail(id));
-          if (current?.updatedAt === event.updatedAt && current.state === event.state) return;
-          void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id), exact: true });
-        },
-        onError: () => undefined,
-        onConnectionChange: () => undefined,
+    const unsubscribe = watchRequests(http, {
+      onValue: (event) => {
+        if (event.id !== id) return;
+        const current = client.getQueryData<RequestSummary>(queryKeys.requests.detail(id));
+        if (current?.updatedAt === event.updatedAt && current.state === event.state) return;
+        void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id), exact: true });
       },
-      {},
-      { notifier },
-    );
+      onError: () => undefined,
+      onConnectionChange: () => undefined,
+    });
     return unsubscribe;
-  }, [http, client, id, notifier]);
+  }, [http, client, id]);
 }
 
 export function useRequestRevisions(id: string, enabled = true): UseQueryResult<RevisionSummary[]> {

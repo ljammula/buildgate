@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"buildgate/internal/consolelink"
 	"buildgate/internal/consoleweb"
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/handoff"
@@ -2422,7 +2423,7 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		// on its own goroutine and returns immediately, so this handler
 		// is never blocked on it.
 		if dispatchHalt {
-			notify.DispatchExternal(haltNotification)
+			notify.DispatchExternal(s.dataDir, haltNotification)
 		}
 		// Found via Codex review of PR #45: an override to accepted is
 		// exactly the AllowOverrides=true case internal/release.MergePolicy
@@ -3689,6 +3690,23 @@ func (s *Server) streamRequestEvents(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
+	// A console tab that raises the requests' notifications itself says so
+	// with ?notifier=1. While such a stream from this machine is open, the
+	// host's own banner for a request stands down
+	// (notify.DispatchDesktop), so the operator gets one notification.
+	// Only a request that would pass the loopback write's local and
+	// same-origin checks counts: a page of another origin, or a caller
+	// through a proxy, cannot silence the host's banner.
+	tabNotifies := r.URL.Query().Get("notifier") == "1" && s.loopbackSameOriginWrite(r)
+	touchTabNotifier := func() {
+		if !tabNotifies {
+			return
+		}
+		if err := consolelink.TouchTabNotifier(s.dataDir); err != nil {
+			log.Printf("stream requests: record the notifying console tab: %v", err)
+		}
+	}
+	touchTabNotifier()
 	if err := emitChanged(); err != nil {
 		return
 	}
@@ -3699,6 +3717,7 @@ func (s *Server) streamRequestEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			touchTabNotifier()
 			if err := emitChanged(); err != nil {
 				return
 			}

@@ -32,6 +32,12 @@ type Notification = run.NotificationRecord
 // names the request -- a run-only header rendered those as
 // "run  () -> awaiting_pr", hiding which request needed the operator.
 func subject(n Notification) string {
+	if n.Ask != "" {
+		if n.Subject == "" {
+			return fmt.Sprintf("%s (request %s)", n.Ask, n.RequestID)
+		}
+		return fmt.Sprintf("%s: %s (request %s)", n.Ask, n.Subject, n.RequestID)
+	}
 	if n.RequestID != "" {
 		return fmt.Sprintf("request %s -> %s", n.RequestID, n.State)
 	}
@@ -64,4 +70,13 @@ func (l LogNotifier) Notify(ctx context.Context, n Notification) error {
 		return fmt.Errorf("sync notification log: %w", err)
 	}
 	return nil
+}
+
+// channelLink is the link a channel read on any machine (Slack, Discord)
+// carries: the remote console's when one is recorded, else the local one.
+func channelLink(n Notification) string {
+	if n.RemoteLink != "" {
+		return n.RemoteLink
+	}
+	return n.Link
 }

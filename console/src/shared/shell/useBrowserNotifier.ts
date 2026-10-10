@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { needsYouPollMs } from "@/api/polling";
-import { useRequests } from "@/api/requestQueries";
+import { useNotifierStream, useRequests } from "@/api/requestQueries";
 import { type SeenNotifications, attend, notificationContent } from "@/domain/attention";
+import type { RequestSummary } from "@/domain/request";
 import {
   type NotificationSupport,
   getNotificationsPreference,
@@ -28,7 +29,9 @@ export interface BrowserNotifier {
 
 /**
  * Raises a browser notification when a request starts waiting on the
- * operator, from the request list the shell already keeps current. Of several
+ * operator. While this tab is the one raising them it holds the notifier
+ * stream on every screen (useNotifierStream), which is also what makes the
+ * host's own banner stand down. Of several
  * tabs of this console only the one holding the notifier lock raises them; a
  * click on one focuses that tab and opens the request's page. Every tab
  * records what it has seen, so a tab that becomes the notifier does not
@@ -55,9 +58,10 @@ export function useBrowserNotifier(): BrowserNotifier {
   const navigate = useNavigate();
   const { data } = useRequests(needsYouPollMs);
   const seen = useRef<SeenNotifications>(new Map());
-  useEffect(() => {
-    if (data === undefined) return;
-    for (const request of data) {
+  // The list the shell polls and the notifier stream's frames both pass
+  // through here; `seen` is what keeps one ask from being raised twice.
+  const consider = useCallback(
+    (request: RequestSummary) => {
       const attention = attend(seen.current, request);
       seen.current = attention.seen;
       if (attention.raise && active) {
@@ -65,8 +69,13 @@ export function useBrowserNotifier(): BrowserNotifier {
           void navigate(requestPath(request.id));
         });
       }
-    }
-  }, [data, active, navigate]);
+    },
+    [active, navigate],
+  );
+  useEffect(() => {
+    data?.forEach(consider);
+  }, [data, consider]);
+  useNotifierStream(active, consider);
 
   return {
     support,

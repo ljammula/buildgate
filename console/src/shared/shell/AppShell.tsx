@@ -13,7 +13,6 @@ import type { ComponentType, ReactNode } from "react";
 import { Link, NavLink } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
-import { NotifierContext } from "@/api/notifierContext";
 import { nextThemeMode, useThemeMode } from "@/platform/theme";
 import type { ThemeMode } from "@/platform/themeStore";
 import {
@@ -174,9 +173,7 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
       </aside>
-      <main className="min-w-0">
-        <NotifierContext.Provider value={notifier.active}>{children}</NotifierContext.Provider>
-      </main>
+      <main className="min-w-0">{children}</main>
     </div>
   );
 }

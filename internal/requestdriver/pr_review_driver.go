@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
 	"buildgate/internal/release"
@@ -829,6 +828,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 	// next ticket, even though it visibly blocks readiness (found via
 	// review, GitHub Codex App, PR #154 round 2).
 	ticket.MergeReadiness = checkMergeReadiness(dataDir, ticket, state, now)
+	notifyPullRequestWaiting(dataDir, r, ticket, now)
 	if state.ReviewDecision == forge.ReviewDecisionApproved && len(state.BlocksReadyThreads) == 0 {
 		ticket.PRState = "approved"
 		if err := r.Save(dataDir); err != nil {
@@ -1635,27 +1635,16 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 // RemindRequest's own network dispatch does, and returns without touching
 // r or ticket -- the caller (RunCorrectiveRound) owns saving both.
 func notifyRoundOutcome(dataDir string, r *request.Request, ticket *request.Ticket, roundIndex int, outcome request.RoundOutcome, errText string, now time.Time) {
-	reason := fmt.Sprintf("%s ticket %d/%d: corrective review round %d %s -- pull request %s needs attention", r.ID, ticket.Index, r.TicketCount, roundIndex, outcome, ticket.PRURL)
+	detail := fmt.Sprintf("Ticket %d/%d: corrective review round %d was %s; pull request %s needs attention", ticket.Index, r.TicketCount, roundIndex, outcome, ticket.PRURL)
 	if errText != "" {
-		reason += ": " + errText
+		detail += ": " + errText
 	}
-	delivered := true
-	n := notify.Notification{
-		RequestID: r.ID,
-		Reason:    reason,
-		State:     run.State(r.State),
-		SentAt:    now.UTC().Format(time.RFC3339Nano),
-		Delivered: &delivered,
-		Next:      fmt.Sprintf("review %s", ticket.PRURL),
-		Link:      consolelink.RequestURL(consolelink.BaseURL("", dataDir), r.ID),
-	}
-	notifyCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	notifyErr := (notify.LogNotifier{Path: RequestNotificationLogPath(dataDir, r.ID)}).Notify(notifyCtx, n)
-	cancel()
-	if notifyErr != nil {
-		n.DeliveryError = notifyErr.Error()
-	}
-	notify.DispatchExternal(n)
+	n := prepareRequestNotification(dataDir, r, requestNotice{
+		Ask:    fmt.Sprintf("Review round %s: pull request needs you", outcome),
+		Detail: detail,
+		Next:   fmt.Sprintf("review %s", ticket.PRURL),
+	}, now)
+	notify.DispatchExternal(dataDir, n)
 }
 
 // fenceVerbatim wraps text in a Markdown code fence longer than any run of

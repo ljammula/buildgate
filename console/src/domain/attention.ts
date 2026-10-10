@@ -43,7 +43,10 @@ export function attend(seen: SeenNotifications, request: RequestSummary): Attent
 export interface NotificationContent {
   readonly title: string;
   readonly body: string;
-  /** Replaces a notification with the same tag instead of stacking a second one. */
+  /**
+   * One per notification the server sent: a second tab raising the same one
+   * replaces it, and a later reminder for the same request alerts again.
+   */
   readonly tag: string;
 }
 
@@ -53,5 +56,5 @@ const fallbackTitle = "Buildgate: a request needs you";
 export function notificationContent(request: RequestSummary): NotificationContent {
   const title = request.lastAsk === "" ? fallbackTitle : request.lastAsk;
   const body = request.project === "" ? request.title : `${request.project}: ${request.title}`;
-  return { title, body, tag: `${request.id}:${request.state}` };
+  return { title, body, tag: `${request.id}:${request.lastNotifiedAt}` };
 }

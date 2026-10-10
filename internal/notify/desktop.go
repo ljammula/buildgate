@@ -37,11 +37,7 @@ var desktopNotifierLookPath = func() (string, error) {
 // desktopClickNotifierLookPath resolves the optional terminal-notifier
 // binary -- a package-level var, mirroring desktopNotifierLookPath, so a
 // test can simulate it being present or absent without touching the
-// machine's real PATH. install.sh best-effort installs it (never fatal
-// if Homebrew or the install itself is unavailable) but factoryd doesn't
-// require it -- this lookup, not install.sh, is the actual gate; see
-// DesktopNotifier's own doc comment for why it stays best-effort rather
-// than a hard dependency.
+// machine's real PATH.
 var desktopClickNotifierLookPath = func() (string, error) {
 	return exec.LookPath("terminal-notifier")
 }
@@ -93,51 +89,24 @@ func desktopIconPath() string {
 	return path
 }
 
-// DesktopNotifier shows a single macOS desktop notification, via
-// terminal-notifier when it's on PATH and the run has a directory to
-// point at, falling back to plain osascript otherwise. It is a
-// best-effort, out-of-band channel alongside LogNotifier — the durable
-// audit trail — not a replacement for it, and per the Notifier contract
-// it never errors: every failure mode (opted out, wrong OS, no notifier
-// binary on PATH, the command itself failing) is a silent no-op.
+// DesktopNotifier shows a single macOS desktop notification. It is a
+// best-effort, out-of-band channel alongside LogNotifier (the durable audit
+// trail), and per the Notifier contract it never errors: every failure mode
+// (opted out, wrong OS, no notifier binary on PATH, the command itself
+// failing) is a silent no-op.
 //
-// The osascript fallback is not clickable, by design decision rather
-// than oversight (raised 2026-09-11: "clicking the notification takes me
-// nowhere" — clicking it foregrounded a blank Script Editor window,
-// which is macOS's fallback "activate the sender" behavior for a
-// notification attributed to bare osascript, since display notification
-// has no click-action primitive at all for anything to attach). Fixed
-// there by making the run directory path -- already in n.Reason -- land
-// in a readable subtitle/body split instead of one truncated line.
+// terminal-notifier, when it is on PATH and the notification has somewhere
+// to send a click, gives the banner its one action: `open <n.Link>` (the
+// console page of the request or run), or `open <n.RunDir>` (Finder) when no
+// console is known. It is its own application to macOS and shows nothing
+// until allowed in System Settings -> Notifications; it exits non-zero then,
+// and the osascript banner is shown instead.
 //
-// terminal-notifier is the click-action path: `open <n.Link>` (the
-// console's own deep link to the run or request, when a console base URL
-// is configured -- see cmd/factoryd's resolveConsoleBaseURL/
-// consoleRunURL and internal/notify's own consoleRunLink), so the click
-// lands the operator on the run/request itself, opened in a browser.
-// Falls back to `open <n.RunDir>` (Finder) when no console URL is known,
-// so a click always reveals something rather than nothing.
+// osascript's `display notification` has no click action at all: clicking it
+// foregrounds Script Editor. Its text is therefore the whole message.
 //
-// install.sh best-effort installs terminal-notifier via Homebrew (never
-// fatal if Homebrew or the brew install itself is unavailable — see its
-// own comment there), but it is still not a hard requirement of
-// factoryd, and deliberately not added to cmd/factoryd/doctor.go's
-// checks (unlike dockerBinary, which is load-bearing): this channel's
-// own reason for existing ("no terminal open on any run") is a wake-up
-// tap for an engineer who may not even be at the machine — click
-// behavior is moot for that reader, and
-// Discord/Slack (see halt.go's DispatchDiscord/DispatchSlack) are the
-// channels that actually reach them regardless. So doctor.go has
-// nothing to say about it either way; this lookup is the only gate.
-//
-// One trade worth knowing before relying on it: unlike osascript (which
-// rides on an already-trusted system helper), terminal-notifier is its
-// own bundle id and needs separate approval in System Settings →
-// Notifications the first time it fires; until approved it fails with
-// no signal at all — worse than "click does nothing" for a channel
-// whose contract is "never errors" (silent failure here is
-// indistinguishable from "opted out" or "no halts happened"). install.sh
-// prints a one-time reminder about this when it installs the binary.
+// `make install` installs terminal-notifier with Homebrew when it is
+// missing, and `factoryd doctor` says when a click would do nothing.
 type DesktopNotifier struct{}
 
 // Notify shows a desktop notification for n, or silently does nothing
@@ -151,25 +120,12 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 		return nil
 	}
 
-	subtitle := subject(n)
-
-	// message states the reason and, when the notification carries a
-	// Next, the one action the operator should take -- so the banner
-	// itself is the answer, not just a pointer at a directory to go dig
-	// through.
-	message := n.Reason
-	if n.Next != "" {
-		message = fmt.Sprintf("%s. Next: %s", n.Reason, n.Next)
-	}
+	title, subtitle, message := desktopText(n)
 
 	// target is what a click opens: the console page when one is known
-	// (Link), else the run's own directory -- preferring the console
-	// since it lands the operator on the request/run itself rather than
-	// Finder. Preferred notifier: terminal-notifier, so the banner is
-	// clickable at all; but only when there's actually somewhere to
-	// send the click -- a notification predating RunDir/Link (see
-	// run.NotificationRecord) falls straight through to the osascript
-	// path below instead of firing a dead click target.
+	// (Link), else the run's own directory. A notification with neither
+	// goes straight to osascript: terminal-notifier would show a banner
+	// whose click does nothing.
 	target := n.Link
 	if target == "" {
 		target = n.RunDir
@@ -182,16 +138,24 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 			// shell-quoted here, not just passed as a literal argv
 			// element the way -title/-subtitle/-message safely are.
 			args := []string{
-				"-title", "factoryd",
+				"-title", title,
 				"-subtitle", subtitle,
 				"-message", message,
 				"-execute", "open " + shellQuoteSingle(target),
 			}
+			if n.RequestID != "" {
+				// One banner per request: a later one replaces the earlier.
+				args = append(args, "-group", "buildgate-"+n.RequestID)
+			}
 			if icon := desktopIconPath(); icon != "" {
 				args = append(args, "-contentImage", icon)
 			}
-			_ = exec.CommandContext(ctx, clickPath, args...).Run()
-			return nil
+			// terminal-notifier exits non-zero when macOS does not allow
+			// its notifications: the osascript banner below is then the
+			// one the operator sees.
+			if exec.CommandContext(ctx, clickPath, args...).Run() == nil {
+				return nil
+			}
 		}
 	}
 
@@ -200,15 +164,33 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 		return nil
 	}
 
+	// This banner has no click action: a request's says where to go.
+	if n.Ask != "" {
+		message += " Open the console to act on it (`factoryd console`)."
+	}
 	// Split across subtitle and body rather than one flattened line:
 	// macOS truncates a long single-line banner, and message is where
-	// the operator's actual next step lives -- but a single line
-	// "run RUN_ID (TICKET) -> STATE: <message>" buried that path past
-	// the point macOS clips it.
-	script := fmt.Sprintf(`display notification "%s" with title "factoryd" subtitle "%s"`,
-		escapeAppleScriptString(message), escapeAppleScriptString(subtitle))
+	// the operator's actual next step lives.
+	script := fmt.Sprintf(`display notification "%s" with title "%s" subtitle "%s"`,
+		escapeAppleScriptString(message), escapeAppleScriptString(title), escapeAppleScriptString(subtitle))
 	_ = exec.CommandContext(ctx, path, "-e", script).Run()
 	return nil
+}
+
+// desktopText is a banner's three lines. A request's notification leads
+// with what is asked and names the request as the console does; its click,
+// not its text, is how the operator gets there, so it carries no command.
+// A run's own notification states the reason and, when it has one, the one
+// action to take.
+func desktopText(n Notification) (title, subtitle, message string) {
+	if n.Ask != "" {
+		return n.Ask, n.Subject, n.Reason
+	}
+	message = n.Reason
+	if n.Next != "" {
+		message = fmt.Sprintf("%s. Next: %s", n.Reason, n.Next)
+	}
+	return "factoryd", subject(n), message
 }
 
 // escapeAppleScriptString escapes s for safe interpolation inside a
