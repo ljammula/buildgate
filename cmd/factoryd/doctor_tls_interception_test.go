@@ -1,50 +1,17 @@
 package main
 
 import (
+	"buildgate/internal/hostcontrol/hostcontroltest"
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"errors"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
-
-// testRootCA returns a self-signed CA certificate and its PEM.
-func testRootCA(t *testing.T, commonName string) (*x509.Certificate, []byte) {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: commonName},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-}
 
 // tlsInterceptionDeps is a test deps whose host sees root as the signer of
 // the probe host and ships shipped as its public roots, with the session
@@ -64,7 +31,7 @@ func tlsInterceptionDeps(t *testing.T, root *x509.Certificate, shipped []byte) *
 }
 
 func TestDoctorTLSInterceptionPassesOnAShippedRoot(t *testing.T) {
-	public, publicPEM := testRootCA(t, "Public Root")
+	public, publicPEM := hostcontroltest.RootCA(t, "Public Root")
 	dp := tlsInterceptionDeps(t, public, publicPEM)
 	check, ok := doctorCheckTLSInterception(context.Background(), dp, true)
 	if !ok || check.Err != nil || check.Use != "" {
@@ -76,8 +43,8 @@ func TestDoctorTLSInterceptionPassesOnAShippedRoot(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionWarnsAndNamesWhatToPass(t *testing.T) {
-	_, publicPEM := testRootCA(t, "Public Root")
-	proxy, _ := testRootCA(t, "Corp Proxy CA")
+	_, publicPEM := hostcontroltest.RootCA(t, "Public Root")
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	dp := tlsInterceptionDeps(t, proxy, publicPEM)
 	check, ok := doctorCheckTLSInterception(context.Background(), dp, false)
 	if !ok || check.Err == nil || !check.Advisory {
@@ -95,8 +62,8 @@ func TestDoctorTLSInterceptionWarnsAndNamesWhatToPass(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionFixWritesTheBundleAndPrintsTheCommand(t *testing.T) {
-	public, publicPEM := testRootCA(t, "Public Root")
-	proxy, _ := testRootCA(t, "Corp Proxy CA")
+	public, publicPEM := hostcontroltest.RootCA(t, "Public Root")
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	dp := tlsInterceptionDeps(t, proxy, publicPEM)
 	check, ok := doctorCheckTLSInterception(context.Background(), dp, true)
 	want := "BUILD_CA_BUNDLE=" + buildCABundlePath() + " make install"
@@ -125,9 +92,9 @@ func TestDoctorTLSInterceptionFixWritesTheBundleAndPrintsTheCommand(t *testing.T
 }
 
 func TestDoctorTLSInterceptionFixReplacesABundleOfAnotherProxy(t *testing.T) {
-	_, publicPEM := testRootCA(t, "Public Root")
-	old, oldPEM := testRootCA(t, "Old Proxy CA")
-	proxy, _ := testRootCA(t, "Corp Proxy CA")
+	_, publicPEM := hostcontroltest.RootCA(t, "Public Root")
+	old, oldPEM := hostcontroltest.RootCA(t, "Old Proxy CA")
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	dp := tlsInterceptionDeps(t, proxy, publicPEM)
 	if err := writeBuildCABundle(buildCABundlePath(), oldPEM); err != nil {
 		t.Fatal(err)
@@ -148,7 +115,7 @@ func TestDoctorTLSInterceptionFixReplacesABundleOfAnotherProxy(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionUntrustedProxyNamesTheManualStep(t *testing.T) {
-	proxy, publicPEM := testRootCA(t, "Corp Proxy CA")
+	proxy, publicPEM := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	dp := tlsInterceptionDeps(t, proxy, publicPEM)
 	fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
 		return nil, x509.UnknownAuthorityError{Cert: proxy}
@@ -160,7 +127,7 @@ func TestDoctorTLSInterceptionUntrustedProxyNamesTheManualStep(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionSkippedWhenNothingToCheckAgainst(t *testing.T) {
-	proxy, publicPEM := testRootCA(t, "Corp Proxy CA")
+	proxy, publicPEM := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	t.Run("host unreachable", func(t *testing.T) {
 		dp := tlsInterceptionDeps(t, proxy, publicPEM)
 		fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
@@ -207,8 +174,8 @@ func TestRealTLSRootReportsASignerThisMachineDoesNotTrust(t *testing.T) {
 // intercepted network and empty in every other case, and the command never
 // fails.
 func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
-	public, publicPEM := testRootCA(t, "Public Root")
-	proxy, _ := testRootCA(t, "Corp Proxy CA")
+	public, publicPEM := hostcontroltest.RootCA(t, "Public Root")
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	run := func(t *testing.T, dp *deps) (stdout, stderr string) {
 		t.Helper()
 		var out, errOut bytes.Buffer

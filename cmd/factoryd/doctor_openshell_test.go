@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/hostcontrol/hostcontroltest"
 	"context"
 	"errors"
 	"io"
@@ -52,7 +53,7 @@ func TestDoctorOpenShellImagesWarnWhenAPinnedImageIsMissing(t *testing.T) {
 	if c.Err == nil || !c.Advisory || !strings.Contains(c.Fix, "make openshell-images") {
 		t.Fatalf("check = %+v, want an advisory failure fixed by make openshell-images", c)
 	}
-	for _, image := range []string{wantGatewayImage, wantSandboxImage, wantSupervisorImage} {
+	for _, image := range []string{hostcontroltest.GatewayImage, hostcontroltest.SandboxImage, hostcontroltest.SupervisorImage} {
 		if !strings.Contains(c.Err.Error(), image) {
 			t.Errorf("error %q does not name %s", c.Err, image)
 		}
