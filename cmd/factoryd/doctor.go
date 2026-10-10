@@ -2721,13 +2721,11 @@ func resolveConfiguredDataDir(explicit bool, dataDir, configPath string) string 
 }
 
 // doctorCheckDataDirOutsideWorkspace reproduces run_ticket.go's own
-// fail-closed -data-dir/-workspace containment guard (around line 600
-// there, using the identical canonicalPath/pathWithin helpers from
-// validate.go -- not run_ticket.go's later dataDirInsideWorkspace, a
-// different variable computed only for evidence-path redirection, not the
-// guard itself) as an advance doctor check, so `factoryd doctor -workspace
-// .` no longer reports green right before the very next real run fails
-// closed on this. An empty dataDir is treated as nothing to check, not a
+// fail-closed -data-dir/-workspace containment guard (through the same
+// dataDirInsideWorkspace of validate.go, which calls
+// requestsubmit.DataDirInsideWorkspace) as an advance doctor check, so
+// `factoryd doctor -workspace .` no longer reports green right before the
+// very next real run fails closed on this. An empty dataDir is treated as nothing to check, not a
 // false failure -- worker's own doctorChecksFor caller has no
 // -data-dir-equivalent value to thread through today.
 func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
@@ -2737,7 +2735,7 @@ func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
 	}
 	// Shares run_ticket.go's own real, pre-run guard via
 	// dataDirInsideWorkspace (validate.go) rather than a second,
-	// hand-synced copy of the same canonicalPath+pathWithin logic -- see
+	// hand-synced copy of the same containment check -- see
 	// that function's own doc comment for why (found via code review,
 	// 2026-09-14).
 	inside, _, dataAbs, err := dataDirInsideWorkspace(workspace, dataDir)

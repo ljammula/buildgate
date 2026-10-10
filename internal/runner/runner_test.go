@@ -1315,6 +1315,9 @@ func TestGitDiffIncludingWorktreeToFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked change\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked content\n"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
 
 	dest := filepath.Join(t.TempDir(), "diff.patch")
 	truncated, err := GitDiffIncludingWorktreeToFile(dir, base, dest, MaxStoredDiffBytes)
@@ -1330,6 +1333,23 @@ func TestGitDiffIncludingWorktreeToFile(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "+tracked change") {
 		t.Errorf("diff file = %q, want it to include the uncommitted change", got)
+	}
+	if !strings.Contains(string(got), "+untracked content") {
+		t.Errorf("diff file = %q, want it to include the untracked file", got)
+	}
+	staged, err := exec.Command("git", "-C", dir, "diff", "--cached", "--name-only").Output()
+	if err != nil {
+		t.Fatalf("git diff --cached: %v", err)
+	}
+	if strings.TrimSpace(string(staged)) != "" {
+		t.Errorf("staged after the diff = %q, want nothing staged", staged)
+	}
+	status, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--", "untracked.txt").Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(string(status)) != "?? untracked.txt" {
+		t.Errorf("status of the untracked file after the diff = %q, want it still untracked", status)
 	}
 }
 

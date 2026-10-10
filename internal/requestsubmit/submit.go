@@ -145,16 +145,11 @@ type Result struct {
 	RepositoryRoot string
 }
 
-// pathWithin and canonicalPath are deliberately small, standalone copies
-// of cmd/factoryd/validate.go's own pathWithin/canonicalPath rather than
-// an import of that (main, unimportable) package. Both are thin, stable
-// wrappers -- canonicalPath is a one-line delegation to
-// workspace.CanonicalPath, pathWithin is pure filepath.Rel logic with no
-// project-specific policy in it -- so unlike dataDirInsideWorkspace and
-// applyProjectConfigDefaults below (the actual submission-validation
-// policy this package exists to keep singular), duplicating these two
-// carries negligible drift risk. If either ever needs to change, both
-// copies are one `grep -rn func pathWithin\|func canonicalPath` away.
+// canonicalPath is a one-line delegation to workspace.CanonicalPath, the
+// same one cmd/factoryd/validate.go's canonicalPath makes (that package is
+// main, so it cannot be imported). pathWithin is pure filepath.Rel logic
+// with no project-specific policy in it; DataDirInsideWorkspace below is
+// its one caller, and cmd/factoryd reaches it through that function.
 func canonicalPath(path string) (string, error) {
 	return workspace.CanonicalPath(path)
 }
