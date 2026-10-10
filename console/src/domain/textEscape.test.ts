@@ -90,4 +90,10 @@ test("text is offered for copying only when it pastes exactly as it reads", () =
   expect(pastesAsShown("factoryd ‮retry")).toBe(false);
   expect(pastesAsShown("a\nrm -rf x")).toBe(false);
   expect(pastesAsShown("a\rb")).toBe(false);
+  // A no-break space and a tab read as a space; a variation selector reads as nothing.
+  expect(pastesAsShown("factoryd retry\u00a0req-1")).toBe(false);
+  expect(pastesAsShown("factoryd\tretry")).toBe(false);
+  expect(pastesAsShown("req\ufe0f-1")).toBe(false);
+  // Not ASCII: selectable by hand, not offered as a button.
+  expect(pastesAsShown("~/proj\u00e9t/spec.md")).toBe(false);
 });

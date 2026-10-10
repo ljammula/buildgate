@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
 
+import { pastesAsShown } from "@/domain/textEscape";
 import { IconButton } from "@/ui/IconButton";
 import { cn } from "@/ui/cn";
 import { useCopied } from "@/ui/useCopied";
@@ -18,6 +19,9 @@ export interface CopyButtonProps {
 /** An icon-only copy button: the Copy glyph, then a check and the name "Copied". */
 export function CopyButton({ text, label, size = "md", writeText, className }: CopyButtonProps) {
   const { copied, copy } = useCopied(writeText);
+  // No button for text that would paste as something other than it reads:
+  // the one gate for every copy control in the console.
+  if (!pastesAsShown(text)) return null;
   const name = copied ? "Copied" : label;
   const glyph = copied ? (
     <Check aria-hidden="true" className={size === "sm" ? "size-3" : undefined} />

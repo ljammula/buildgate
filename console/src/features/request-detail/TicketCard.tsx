@@ -111,12 +111,15 @@ export function TicketCard({
           ) : (
             <span className="font-mono">{ticket.prUrl}</span>
           )}{" "}
-          <CopyButton
-            size="sm"
-            text={ticket.prUrl}
-            label="Copy pull request link"
-            className="align-middle"
-          />
+          {/* The address the link opens, and only when it is one: never a string that is not http(s). */}
+          {prHref === null ? null : (
+            <CopyButton
+              size="sm"
+              text={prHref}
+              label="Copy pull request link"
+              className="align-middle"
+            />
+          )}
         </p>
       )}
       <MergeReadinessLine ticket={ticket} />

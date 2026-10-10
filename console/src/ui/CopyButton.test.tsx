@@ -27,3 +27,13 @@ describe.each(["sm", "md"] as const)("CopyButton size %s", (size) => {
     expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
 });
+
+test("no button is drawn for text that would not paste as it reads", () => {
+  const { container } = render(
+    <TooltipProvider>
+      <CopyButton text={"factoryd retry req-1"} label="Copy command" />
+      <CopyButton size="sm" text={"a\nrm -rf x"} label="Copy other" />
+    </TooltipProvider>,
+  );
+  expect(container.querySelector("button")).toBeNull();
+});
