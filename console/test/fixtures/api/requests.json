@@ -109,6 +109,13 @@
       "accepted_tickets": 1,
       "cost_per_accepted_ticket_micro_usd": 1512000
     },
+    "build": {
+      "run_id": "run-running",
+      "ticket": 2,
+      "tickets": 2,
+      "stage": "build",
+      "stalled": true
+    },
     "active_job": {
       "stage": "build",
       "role": "execution",

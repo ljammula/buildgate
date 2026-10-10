@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 
 import type { RequestSummary } from "@/domain/request";
+import { Callout } from "@/ui/Feedback";
 import { Field, Textarea } from "@/ui/Input";
 
 import { FlowDialog } from "./FlowDialog";
@@ -15,6 +16,12 @@ export interface ReasonFlowProps {
   readonly children?: ReactNode;
   /** The reason may be left empty: something in `children` carries the feedback instead. */
   readonly reasonOptional?: boolean;
+  /**
+   * Why nothing may be sent any more (the request changed under the dialog).
+   * Shown above the buttons, with confirm disabled; the typed reason and
+   * notes stay on screen so the operator can copy them.
+   */
+  readonly blocked?: ReactNode;
   readonly pending: boolean;
   readonly error: unknown;
   readonly onOpenChange: (open: boolean) => void;
@@ -36,6 +43,7 @@ export function ReasonFlow({
   description,
   children,
   reasonOptional = false,
+  blocked,
   pending,
   error,
   onOpenChange,
@@ -45,8 +53,9 @@ export function ReasonFlow({
   const [reason, setReason] = useState("");
   const trimmed = reason.trim();
   const missing = trimmed === "" && !reasonOptional;
+  const isBlocked = blocked !== undefined && blocked !== null;
   async function confirm() {
-    if (missing) return;
+    if (missing || isBlocked) return;
     try {
       const updated = await write(trimmed);
       onDone?.(updated);
@@ -63,7 +72,7 @@ export function ReasonFlow({
       {...(description === undefined ? {} : { description })}
       confirmLabel={confirmLabel}
       tone={tone}
-      confirmDisabled={missing}
+      confirmDisabled={missing || isBlocked}
       pending={pending}
       error={error}
       onConfirm={() => void confirm()}
@@ -79,6 +88,11 @@ export function ReasonFlow({
         />
       </Field>
       {children}
+      {isBlocked ? (
+        <Callout tone="warning" data-testid="flow-blocked">
+          {blocked}
+        </Callout>
+      ) : null}
     </FlowDialog>
   );
 }

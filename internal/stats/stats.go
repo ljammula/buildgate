@@ -580,3 +580,33 @@ func ParseBucketDays(text string) (int, error) {
 	}
 	return n, nil
 }
+
+// Overview is one Report per project, by name, and one over every project's
+// runs: what `factoryd stats` prints with no project and GET /stats returns.
+type Overview struct {
+	Overall  Report   `json:"overall"`
+	Projects []Report `json:"projects"`
+}
+
+// ComputeOverview builds the Overview of runs. project names the repository
+// a run belongs to.
+func ComputeOverview(runs []*run.Run, opts Options, project func(*run.Run) string) Overview {
+	byProject := map[string][]*run.Run{}
+	for _, r := range runs {
+		name := project(r)
+		byProject[name] = append(byProject[name], r)
+	}
+	names := make([]string, 0, len(byProject))
+	for name := range byProject {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	overview := Overview{Projects: []Report{}}
+	for _, name := range names {
+		o := opts
+		o.Project = name
+		overview.Projects = append(overview.Projects, Compute(byProject[name], o))
+	}
+	overview.Overall = Compute(runs, opts)
+	return overview
+}

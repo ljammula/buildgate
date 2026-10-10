@@ -710,6 +710,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /projects/{project}/trend", s.getProjectTrend)
 	s.mux.HandleFunc("GET /projects/{project}/memory", s.getProjectMemory)
 	s.mux.HandleFunc("POST /runs/{id}/override", s.overrideRun)
+	s.mux.HandleFunc("GET /stats", s.getStats)
 	s.mux.HandleFunc("GET /requests", s.listRequests)
 	s.mux.HandleFunc("POST /requests", s.createRequest)
 	s.mux.HandleFunc("GET /workspaces", s.listWorkspaces)
@@ -1373,6 +1374,11 @@ type WorkerStatus struct {
 	// LastHeartbeat is the heartbeat's UpdatedAt (RFC3339Nano), or "" when
 	// State is "absent".
 	LastHeartbeat string `json:"last_heartbeat"`
+	// ActiveRequests are the requests the worker runs a job for right now,
+	// and JobSlots how many jobs it runs at once; both absent unless State
+	// is "alive".
+	ActiveRequests []string `json:"active_requests,omitempty"`
+	JobSlots       int      `json:"job_slots,omitempty"`
 }
 
 // getWorkerStatus serves GET /queue-run. Read-only; gated by
@@ -1393,7 +1399,7 @@ func (s *Server) getWorkerStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, WorkerStatus{State: "stale", LastHeartbeat: hb.UpdatedAt})
 		return
 	}
-	writeJSON(w, http.StatusOK, WorkerStatus{State: "alive", LastHeartbeat: hb.UpdatedAt})
+	writeJSON(w, http.StatusOK, WorkerStatus{State: "alive", LastHeartbeat: hb.UpdatedAt, ActiveRequests: hb.ActiveRequests, JobSlots: max(hb.JobSlots, 1)})
 }
 
 // ProjectSummary is one entry in GET /projects's response: a distinct
@@ -2558,12 +2564,68 @@ type requestSummaryView struct {
 	// this one waits its turn (request.WaitingOn, the same function
 	// `factoryd status` uses, so the console and CLI agree) (C5).
 	WaitingOn string `json:"waiting_on,omitempty"`
+	// QueuePosition is this request's place among the requests that wait
+	// their turn (request.QueuePositions: oldest submitted first, an
+	// estimate), from 1; 0 when it is not waiting or no worker is alive.
+	QueuePosition int `json:"queue_position,omitempty"`
+	// Build is where the ticket build of a building request stands, from its
+	// run's own progress record; nil for a request that is not building or
+	// whose build has not started a run yet.
+	Build *buildProgressView `json:"build,omitempty"`
 	// ActiveJob is the request's running drafting job, read from its own
 	// file (request.LoadActiveJob), never from request.json.
 	ActiveJob *request.ActiveJob `json:"active_job,omitempty"`
 	// NextAction: see requestDetailView.NextAction. Derived in memory from
 	// the loaded request, so a list of N requests costs no extra reads.
 	NextAction string `json:"next_action,omitempty"`
+}
+
+// buildProgressView is requestSummaryView's "build": the run a building
+// request is on, and what runViewFor reports of its progress, so the board
+// shows it without a call per request. It carries no timestamp: the list is
+// compared whole to decide what the event stream sends, and a time that
+// moves with every progress note would send the request on every poll.
+type buildProgressView struct {
+	RunID string `json:"run_id"`
+	// Ticket is the 1-based ticket being built, of Tickets.
+	Ticket  int `json:"ticket"`
+	Tickets int `json:"tickets"`
+	// Stage, Round and MaxRounds are the run's current stage and build
+	// round; "" and 0 until its progress record names them.
+	Stage     string `json:"stage,omitempty"`
+	Round     int    `json:"round,omitempty"`
+	MaxRounds int    `json:"max_rounds,omitempty"`
+	Stalled   bool   `json:"stalled,omitempty"`
+}
+
+// buildProgressFor is req's buildProgressView: the run its current ticket
+// records (the driver keeps Ticket.RunID on the run it started last), while
+// that run has not reached a terminal state. Nil before the ticket has a
+// run, and once its run has ended and the next has not started.
+func (s *Server) buildProgressFor(req *request.Request, runs []*run.Run) *buildProgressView {
+	if req.State != request.StateBuilding || req.TicketIndex < 1 || req.TicketIndex > len(req.Tickets) {
+		return nil
+	}
+	runID := req.Tickets[req.TicketIndex-1].RunID
+	var current *run.Run
+	for _, candidate := range runs {
+		if candidate != nil && candidate.ID == runID {
+			current = candidate
+		}
+	}
+	if runID == "" || current == nil || current.TerminalConfirmed() {
+		return nil
+	}
+	view := s.runViewFor(current)
+	return &buildProgressView{
+		RunID:     current.ID,
+		Ticket:    req.TicketIndex,
+		Tickets:   req.TicketCount,
+		Stage:     view.CurrentStage,
+		Round:     view.CurrentRound,
+		MaxRounds: view.MaxRounds,
+		Stalled:   view.Stalled,
+	}
 }
 
 // CostSummary is requestSummaryView's own "cost_summary" field: a
@@ -3472,8 +3534,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "list requests")
 		return
 	}
-	active, slots := daemonheartbeat.WorkerActiveRequests(s.dataDir, time.Now())
-	waiting := request.WaitingOn(requests, active, slots)
+	queue := s.requestQueueFor(requests)
 	// One dataDir/runs scan for every request in this list, not one per
 	// request -- see run.ListByRequestID's own doc comment. computeCostSummary
 	// (via requestSummaryViewFor) looks each request's runs up in this
@@ -3484,7 +3545,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]requestSummaryView, 0, len(requests))
 	for _, req := range requests {
-		views = append(views, s.requestSummaryViewFor(req, waiting[req.ID], runsByRequest))
+		views = append(views, s.requestSummaryViewFor(req, queue, runsByRequest))
 	}
 	writeJSON(w, http.StatusOK, views)
 }
@@ -3497,7 +3558,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 // its whole batch of requests (listRequests, streamRequestEvents) -- see
 // computeCostSummary's own doc comment for why this is passed through
 // rather than each request's cost summary re-scanning dataDir/runs.
-func (s *Server) requestSummaryViewFor(req *request.Request, waitingOn string, runsByRequest map[string][]*run.Run) requestSummaryView {
+func (s *Server) requestSummaryViewFor(req *request.Request, queue requestQueue, runsByRequest map[string][]*run.Run) requestSummaryView {
 	// The board needs no edit history, and each edit carries its diff: only
 	// GET /requests/{id} sends them.
 	listed := *req
@@ -3508,9 +3569,32 @@ func (s *Server) requestSummaryViewFor(req *request.Request, waitingOn string, r
 		CostSummary: s.computeCostSummary(req, runsByRequest),
 		ActiveJob:   request.LoadActiveJob(s.dataDir, req.ID),
 		NextAction:  req.NextAction(),
+		Build:       s.buildProgressFor(req, runsByRequest[req.ID]),
 	}
-	view.WaitingOn = waitingOn
+	view.WaitingOn = queue.waitingOn[req.ID]
+	view.QueuePosition = queue.position[req.ID]
 	return view
+}
+
+// requestQueue is what the worker's heartbeat says of the requests' turns:
+// per request id, the request it waits on and its place in the queue.
+type requestQueue struct {
+	waitingOn map[string]string
+	position  map[string]int
+}
+
+// requestQueueFor reads the worker's heartbeat once for requests, which must
+// be in request.List's order.
+func (s *Server) requestQueueFor(requests []*request.Request) requestQueue {
+	now := time.Now()
+	active, slots := daemonheartbeat.WorkerActiveRequests(s.dataDir, now)
+	queue := requestQueue{waitingOn: request.WaitingOn(requests, active, slots)}
+	// A place in the queue means something only while a worker takes
+	// requests from it.
+	if hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(s.dataDir)); err == nil && !daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
+		queue.position = request.QueuePositions(requests, active, slots)
+	}
+	return queue
 }
 
 // streamRequestEvents serves GET /requests/events: an SSE "state" event
@@ -3573,8 +3657,7 @@ func (s *Server) streamRequestEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		active, slots := daemonheartbeat.WorkerActiveRequests(s.dataDir, time.Now())
-		waiting := request.WaitingOn(requests, active, slots)
+		queue := s.requestQueueFor(requests)
 		// One scan per poll tick for every request, not one per request
 		// -- same reasoning as listRequests above.
 		runsByRequest, err := run.ListByRequestID(s.dataDir)
@@ -3582,7 +3665,7 @@ func (s *Server) streamRequestEvents(w http.ResponseWriter, r *http.Request) {
 			log.Printf("stream requests: list runs: %v", err)
 		}
 		for _, req := range requests {
-			view := s.requestSummaryViewFor(req, waiting[req.ID], runsByRequest)
+			view := s.requestSummaryViewFor(req, queue, runsByRequest)
 			b, err := json.Marshal(view)
 			if err != nil {
 				return err

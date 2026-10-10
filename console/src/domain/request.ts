@@ -437,6 +437,37 @@ function decodeResumeInfo(o: JsonObject, at: string): ResumeInfo {
 }
 
 /**
+ * The running build of a `building` request, as the list carries it (Go's
+ * requestBuildView): which ticket, and where that ticket's run is. The
+ * server computes it once; a card never fetches the run.
+ */
+export interface RequestBuild {
+  readonly runId: string;
+  /** The 1-based ticket being built, of `tickets`. */
+  readonly ticket: number;
+  readonly tickets: number;
+  /** The run's current stage ("build", "verify"); "" before the first progress event. */
+  readonly stage: string;
+  /** The build/verify round under way; 0 when the server sent none. */
+  readonly round: number;
+  readonly maxRounds: number;
+  /** The server's own stalled verdict (internal/progress.Stalled); never re-derived here. */
+  readonly stalled: boolean;
+}
+
+function decodeRequestBuild(o: JsonObject, at: string): RequestBuild {
+  return {
+    runId: optString(o, "run_id", at),
+    ticket: numberOr(o, "ticket", at, 0),
+    tickets: numberOr(o, "tickets", at, 0),
+    stage: optString(o, "stage", at),
+    round: numberOr(o, "round", at, 0),
+    maxRounds: numberOr(o, "max_rounds", at, 0),
+    stalled: optBoolean(o, "stalled", at),
+  };
+}
+
+/**
  * An operator-submitted request (`internal/request.Request`) moving through
  * the brownfield pipeline's own state machine (`submitted -> spec_drafting
  * -> spec_review -> planning -> plan_review -> building -> pr_review ->
@@ -550,6 +581,13 @@ export interface RequestSummary {
    * unless currently quarantined for that reason.
    */
   readonly quarantineCheck: string | null;
+  /**
+   * This request's place (from 1) among the requests waiting for a worker
+   * slot; null unless it is waiting. GET /requests and its event stream only.
+   */
+  readonly queuePosition: number | null;
+  /** The build under way; null unless the request is building and its run has started. */
+  readonly build: RequestBuild | null;
 }
 
 /**
@@ -624,6 +662,8 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     draftOracles: optBoolean(o, "draft_oracles", at),
     waitingOn: stringOrNull(o, "waiting_on", at),
     quarantineCheck: stringOrNull(o, "quarantine_check", at),
+    queuePosition: optNumber(o, "queue_position", at),
+    build: optObject(o, "build", at, decodeRequestBuild),
   };
 }
 

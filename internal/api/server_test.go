@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -313,7 +314,7 @@ func TestGetWorkerStatusAbsent(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if want := (WorkerStatus{State: "absent"}); got != want {
+	if want := (WorkerStatus{State: "absent"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("WorkerStatus = %+v, want %+v", got, want)
 	}
 }
@@ -338,7 +339,7 @@ func TestGetWorkerStatusAlive(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if want := (WorkerStatus{State: "alive", LastHeartbeat: now}); got != want {
+	if want := (WorkerStatus{State: "alive", LastHeartbeat: now, JobSlots: 1}); !reflect.DeepEqual(got, want) {
 		t.Errorf("WorkerStatus = %+v, want %+v", got, want)
 	}
 }
@@ -364,7 +365,7 @@ func TestGetWorkerStatusStale(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if want := (WorkerStatus{State: "stale", LastHeartbeat: old}); got != want {
+	if want := (WorkerStatus{State: "stale", LastHeartbeat: old}); !reflect.DeepEqual(got, want) {
 		t.Errorf("WorkerStatus = %+v, want %+v", got, want)
 	}
 }

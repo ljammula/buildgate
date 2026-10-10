@@ -828,7 +828,7 @@ every request verb takes `-config`):
 
 | What | How |
 |---|---|
-| Watch every request, approve/reject | `factoryd serve`, open the printed URL (`console: http://<addr>/#t=<token>`) — embedded in the binary, same origin as the API. Request board is the landing screen; "Runs" reaches the per-run view |
+| Watch every request, approve/reject | `factoryd serve`, open the printed URL (`console: http://<addr>/#t=<token>`) — embedded in the binary, same origin as the API. [Mission Control](#mission-control) is the landing screen; "Runs" reaches the per-run view |
 | New run, release/stats, Operations without a build-time token | The `#t=<token>` fragment in `serve`'s printed URL is captured into the browser on first load and reused thereafter. Changes on every `serve` restart — re-open the newly printed link. `quickstart`/`install-service` instead generate a *stable* token file, reused across restarts; `factoryd console [-open]` reprints it |
 | Quick offline run summary | `factoryd status` — first line `profile: <name> (<config path>) · data dir <dir>` (`-json`: `profile`, `config_path`), then one line per run/request: id, project, ticket, state, elapsed, cost, PR URL or halt/quarantine reason. `-project`, `-state`, `-n` (default 20), `-json`. On `chatgpt-codex`/`github-copilot`, cost reads `(API-price est.; billed to your subscription)` (aggregates: `(includes subscription-billed runs; API-price est.)`). While `worker` is alive, also prints `worker route: <credential-mode> · <worker-model>` — which subscription is billed; the route itself is daemon-wide, changed by the operator via `worker`/`quickstart -route`, not per request |
 | Remove buildgate from this machine | `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]`: stops everything `stop -all` does, then removes the launchd services, the Temporal containers (`docker compose -p buildgate down`), the OpenShell gateway and meter containers (`docker compose -p buildgate-openshell down`), the `factoryd-local-registry` container, the images `make install` built (`localhost:5050/{buildgate-worker,factoryd-meter,factoryd-registry-proxy,buildgate-pifork,project-worker}:local`), the `buildgate` skill in `~/.agents/skills` and `~/.claude/skills` (only a real directory holding a `SKILL.md`; a symlink is left), and the `factoryd` binary. Only steps whose target exists are listed. If a daemon cannot be stopped (a request is building) nothing else is removed; `-force` cancels the build. `~/.config/factoryd` and `~/buildgate` stay unless `-purge` (also drops the Temporal volumes and the gateway's state; you type `purge` to confirm). With `-purge` the gateway's own state on the Docker VM (`/var/lib/openshell`: its database, keys and stored credentials) is deleted too, through a throwaway container of the worker image run before that image is removed; if the image is already gone it prints the manual command (`colima ssh -- sudo rm -rf /var/lib/openshell`) instead. Reinstall with `make install` |
@@ -853,6 +853,43 @@ every request verb takes `-config`):
 
 Every command and flag:
 [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
+
+### Mission Control
+
+The console's home screen: what the factory is doing, and what each request waits on.
+
+```text
++-- health ---------------------------------------------------------------+
+| worker alive, 2 slots | running: <request>, ticket 2/3, round 1, verify  |
+| 3 queued | last move 2m ago                                              |
++-------------+---------------+-------------+-------------+---------------+
+| Drafting    | Needs you (2) | Building    | PR review   | Done          |
++-------------+---------------+-------------+-------------+---------------+
+| project A ...................................................... collapse |
+| [card]      | [card]        | [card]      |             | [card] [card] |
+| project B ...................................................... collapse |
+|             | [card]        |             | [card]      |               |
++-------------+---------------+-------------+-------------+---------------+
+| numbers: tickets, one-shot, accepted, rounds, spend | activity: last moves |
++-----------------------------------------------------+----------------------+
+```
+
+| Part | Shows |
+|---|---|
+| Health | Whether a `worker` is alive, how many jobs it runs at once, the request it is on (for a build: ticket, round, stage, and a stalled marker after 5 minutes of silence), how many requests wait, and how long ago anything last moved. With no worker alive it shows no queue length: it says how many requests are waiting for a worker and not advancing |
+| Columns | Who has to act. **Drafting**: submitted, drafting a spec or oracles, planning. **Needs you**: a spec, oracle or plan review, a lost step, a halt, a quarantine, and a pull request that waits on you. **Building**: a ticket build. **PR review**: the factory still has work on a pull request. **Done**: finished; cancelled requests behind "Show cancelled" |
+| Groups | Needs you is grouped in pipeline order: Spec review, Oracle review, Plan review, PR ready, Stuck (halted, quarantined, a lost step), the longest wait first in each. Chips under the heading show one group at a time, each group lists its three oldest with "+N more" for the rest, and **Open in Triage** leads to the screen for deciding one after another. Drafting is grouped into Spec and oracles, and Planning |
+| Lanes | One per project when the data dir has more than one; each collapses, and the browser remembers it. A folded lane still shows how many of its requests need you |
+| A card | In Needs you and Drafting, compact: title, stage and age, with the rest and its controls shown on hover or keyboard focus. Elsewhere: the request's title and how long it has been in its column. Waiting behind another request: its place in the queue, oldest submitted first (an estimate: the worker takes jobs in the order they became ready). Building: ticket n of m, round and stage. Halted or quarantined: the first line of the reason |
+| Acting | A card opens its request. A card waiting on a spec, oracle or plan review has **Review**, which opens the request where the text is and where you approve, and **Request changes**, the same dialog as on the request page. A card never approves and cards do not drag: a gate is passed on the page that shows what you are approving |
+| Numbers | Per project and overall, what `factoryd stats` prints (tickets, one-shot rate, accepted rate, median rounds, top quarantine check, spend and cost per accepted ticket) |
+| Activity | The latest moves across every request: which request, from and to, by whom, when |
+| Window | **7 days** (the default), **30 days** or **All**, kept in the link (`?days=30`, `?days=all`). It narrows what is finished: the Done column, cancelled requests, Activity and Numbers. It never hides a request that is drafting, building, in PR review or waiting on you, however old. Done says how many older ones it hides |
+| One screen | The board fits the window: each column scrolls by itself under its heading (with project lanes, the lanes scroll together under sticky lane headings), a column with nothing in it narrows to a strip, and Activity scrolls in its own box |
+| Project filter | Narrows the board, Numbers and Activity to the chosen projects. Search narrows the board only |
+| List | The Board / List switch shows the same requests as a list in three sections; the browser remembers the choice |
+
+The queue place and the build's stage come from the server (`queue_position` and `build` on `GET /requests`, `active_requests` and `job_slots` on `GET /queue-run`), so the console and `factoryd status` agree. From another machine it is the same screen: [the console from another machine](#the-console-from-another-machine).
 
 ### Desktop notifications
 
@@ -901,7 +938,8 @@ fresh images unless `FACTORYD_CONFIG` names some.
 ## Is it getting better?
 
 `factoryd stats` answers it per repository from the run records of the current
-data dir; the console's **Trend** tab on a project shows the same numbers, with the
+data dir. [Mission Control](#mission-control) shows the same table, and the
+console's **Trend** tab on a project shows the same numbers per week, with the
 one-shot rate of each week drawn as a line above the table (a week with no
 ticket is a gap).
 

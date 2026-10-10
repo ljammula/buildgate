@@ -10,6 +10,12 @@ export const runListRefreshMs = 5_000;
 /** The sidebar's "needs you" count: a poll of the request list, no stream. */
 export const needsYouPollMs = 10_000;
 
+/** Mission Control's poll of `GET /queue-run`: what the worker is on now. */
+export const queueRunPollMs = 10_000;
+
+/** Mission Control's poll of `GET /stats`: numbers that move once per finished run. */
+export const statsRefreshMs = 60_000;
+
 /** How long a query's data counts as fresh when its own options say nothing. */
 export const defaultQueryStaleTimeMs = 2_000;
 

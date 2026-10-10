@@ -9,12 +9,16 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/progress"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/stats"
 )
 
 // seedApprovableRequestTicket is the same well-formed plan ticket
@@ -2615,5 +2619,202 @@ func TestRetryRequestHandlerFrom(t *testing.T) {
 				t.Errorf("saved state %s, from scratch %v; want %s, %v", saved.State, saved.RetryFromScratch, want.state, want.fromScratch)
 			}
 		})
+	}
+}
+
+// seedQueueFixture is a data dir whose worker is building req-building
+// (ticket 2 of 3, in its second run) while three requests wait behind it, in
+// the order they were submitted, and one sits at a gate.
+func seedQueueFixture(t *testing.T) string {
+	t.Helper()
+	dataDir := t.TempDir()
+	now := time.Now()
+	for i, r := range []struct {
+		id    string
+		state request.State
+	}{
+		{"req-building", request.StateBuilding},
+		{"req-second", request.StatePlanning},
+		{"req-third", request.StateSpecDrafting},
+		{"req-fourth", request.StateBuilding},
+		{"req-review", request.StateSpecReview},
+	} {
+		if err := request.SaveText(dataDir, r.id, "text of "+r.id); err != nil {
+			t.Fatal(err)
+		}
+		req := request.New(r.id, "/repos/app", "app", request.Source{Kind: request.SourceText}, now.Add(time.Duration(i)*time.Second))
+		req.State = r.state
+		if r.state == request.StateBuilding {
+			req.TicketIndex, req.TicketCount = 2, 3
+			req.Tickets = []request.Ticket{{Index: 1}, {Index: 2}, {Index: 3}}
+		}
+		if r.id == "req-building" {
+			req.Tickets[0].RunID, req.Tickets[1].RunID = "req-building-001-a", "req-building-002-b"
+		}
+		if err := req.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An earlier, finished run of the building request, its current one, and
+	// a newer run of the same request that is no ticket's (a run lost and
+	// kept for resume): the build shown is the current ticket's own run.
+	seedRun(t, dataDir, run.Run{ID: "req-building-002-lost", RequestID: "req-building", State: run.StateSliceRunning, CreatedAt: now.Add(time.Hour).UTC().Format(time.RFC3339Nano)})
+	seedRun(t, dataDir, run.Run{ID: "req-building-001-a", RequestID: "req-building", State: run.StateAccepted, HaltConfirmed: true, CreatedAt: now.Add(-time.Hour).UTC().Format(time.RFC3339Nano)})
+	seedRun(t, dataDir, run.Run{ID: "req-building-002-b", RequestID: "req-building", State: run.StateSliceRunning, CreatedAt: now.UTC().Format(time.RFC3339Nano)})
+	for _, e := range []progress.Event{
+		{Source: "factory", Stage: "build", Event: "start"},
+		{Source: "worker", Stage: "round", Event: "start", Round: 2, MaxRounds: 4},
+	} {
+		if err := progress.Append(progress.Path(dataDir, "req-building-002-b"), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp := now.Format(time.RFC3339Nano)
+	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dataDir), daemonheartbeat.Heartbeat{PID: os.Getpid(), StartedAt: stamp, UpdatedAt: stamp, ActiveRequests: []string{"req-building"}, JobSlots: 1}); err != nil {
+		t.Fatal(err)
+	}
+	return dataDir
+}
+
+// queueFixtureRow is what the tests below read of one GET /requests item.
+type queueFixtureRow struct {
+	ID            string             `json:"id"`
+	WaitingOn     string             `json:"waiting_on"`
+	QueuePosition int                `json:"queue_position"`
+	Build         *buildProgressView `json:"build"`
+}
+
+func listQueueFixture(t *testing.T, dataDir string) map[string]queueFixtureRow {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/requests", nil))
+	var got []queueFixtureRow
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil || recorder.Code != http.StatusOK {
+		t.Fatalf("GET /requests: %d %v: %s", recorder.Code, err, recorder.Body.String())
+	}
+	rows := map[string]queueFixtureRow{}
+	for _, r := range got {
+		rows[r.ID] = r
+	}
+	return rows
+}
+
+// TestListRequestsCarriesQueuePositionAndBuildProgress: the board reads each
+// request's place in the queue from the list, with no call per request: the
+// waiting requests are numbered from 1 in the order they were submitted.
+func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
+	rows := listQueueFixture(t, seedQueueFixture(t))
+	positions := map[string]int{}
+	for id, r := range rows {
+		positions[id] = r.QueuePosition
+		if (r.QueuePosition > 0) != (r.WaitingOn != "") {
+			t.Errorf("%s: queue_position %d with waiting_on %q, want both or neither", id, r.QueuePosition, r.WaitingOn)
+		}
+	}
+	want := map[string]int{"req-building": 0, "req-second": 1, "req-third": 2, "req-fourth": 3, "req-review": 0}
+	if !reflect.DeepEqual(positions, want) {
+		t.Errorf("queue positions = %v, want %v", positions, want)
+	}
+}
+
+// TestListRequestsGivesNoQueuePositionWithoutALiveWorker: a place in the
+// queue is reported only while a worker takes requests from it.
+func TestListRequestsGivesNoQueuePositionWithoutALiveWorker(t *testing.T) {
+	dataDir := seedQueueFixture(t)
+	if err := os.Remove(daemonheartbeat.WorkerPath(dataDir)); err != nil {
+		t.Fatal(err)
+	}
+	for id, r := range listQueueFixture(t, dataDir) {
+		if r.QueuePosition != 0 {
+			t.Errorf("%s: queue_position %d with no worker, want none", id, r.QueuePosition)
+		}
+	}
+}
+
+// TestListRequestsCarriesTheRunningBuildsStage: a building request whose run
+// has started carries that run's ticket, stage and round; a request that is
+// not building, or whose build has no run yet, carries none.
+func TestListRequestsCarriesTheRunningBuildsStage(t *testing.T) {
+	rows := listQueueFixture(t, seedQueueFixture(t))
+	want := buildProgressView{RunID: "req-building-002-b", Ticket: 2, Tickets: 3, Stage: "build", Round: 2, MaxRounds: 4}
+	build := rows["req-building"].Build
+	if build == nil || *build != want {
+		t.Fatalf("build of the building request = %+v, want %+v", build, want)
+	}
+	for _, id := range []string{"req-second", "req-fourth", "req-review"} {
+		if rows[id].Build != nil {
+			t.Errorf("%s: build = %+v, want none (not building, or no run yet)", id, rows[id].Build)
+		}
+	}
+}
+
+// TestGetWorkerStatusNamesWhatAnAliveWorkerRuns: GET /queue-run carries the
+// requests the worker runs a job for and its job slots.
+func TestGetWorkerStatusNamesWhatAnAliveWorkerRuns(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	NewServer(seedQueueFixture(t)).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/queue-run", nil))
+	var status WorkerStatus
+	if err := json.Unmarshal(recorder.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "alive" || !reflect.DeepEqual(status.ActiveRequests, []string{"req-building"}) || status.JobSlots != 1 {
+		t.Errorf("worker status = %+v, want alive on req-building with 1 slot", status)
+	}
+}
+
+// TestGetStatsReportsEveryProjectAndTheirSum: GET /stats is a read route
+// with one report per project and one over all of them.
+func TestGetStatsReportsEveryProjectAndTheirSum(t *testing.T) {
+	dataDir := t.TempDir()
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, r := range []run.Run{
+		{ID: "alpha-001", Ticket: "alpha-001", Project: "alpha", State: run.StateAccepted},
+		{ID: "alpha-002", Ticket: "alpha-002", Project: "alpha", State: run.StateQuarantined},
+		{ID: "beta-001", Ticket: "beta-001", Project: "beta", State: run.StateAccepted},
+		{ID: stats.SmokePrefix + "x-1", Ticket: stats.SmokePrefix + "x-1", Project: "beta", State: run.StateAccepted},
+	} {
+		r.CreatedAt = at
+		seedRun(t, dataDir, r)
+	}
+	get := func(server *Server, path, token string) (int, stats.Overview) {
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, requestActionFor(t, http.MethodGet, path, token, ""))
+		var overview stats.Overview
+		_ = json.Unmarshal(recorder.Body.Bytes(), &overview)
+		return recorder.Code, overview
+	}
+	code, overview := get(NewServer(dataDir), "/stats", "")
+	if code != http.StatusOK || overview.Overall.Overall.Tickets != 3 || overview.Overall.Overall.Accepted != 2 {
+		t.Fatalf("GET /stats = %d, overall %+v; want 3 tickets, 2 accepted (the live-smoke ticket left out)", code, overview.Overall.Overall)
+	}
+	if len(overview.Projects) != 2 || overview.Projects[0].Project != "alpha" || overview.Projects[0].Overall.Tickets != 2 || overview.Projects[1].Project != "beta" || overview.Projects[1].Overall.Tickets != 1 {
+		t.Errorf("projects = %+v, want alpha with 2 tickets then beta with 1", overview.Projects)
+	}
+	if _, all := get(NewServer(dataDir), "/stats?all=1", ""); all.Overall.Overall.Tickets != 4 {
+		t.Errorf("all=1: %d tickets, want 4", all.Overall.Overall.Tickets)
+	}
+	for _, off := range []string{"0", "false"} {
+		if _, some := get(NewServer(dataDir), "/stats?all="+off, ""); some.Overall.Overall.Tickets != 3 {
+			t.Errorf("all=%s: %d tickets, want 3", off, some.Overall.Overall.Tickets)
+		}
+	}
+	// since narrows it to the tickets begun in the window.
+	seedRun(t, dataDir, run.Run{ID: "alpha-000", Ticket: "alpha-000", Project: "alpha", State: run.StateAccepted, CreatedAt: time.Now().Add(-20 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)})
+	if _, month := get(NewServer(dataDir), "/stats?since=30d", ""); month.Overall.Overall.Tickets != 4 {
+		t.Errorf("since=30d: %d tickets, want 4", month.Overall.Overall.Tickets)
+	}
+	if _, week := get(NewServer(dataDir), "/stats?since=7d", ""); week.Overall.Overall.Tickets != 3 || week.Overall.Since == "" {
+		t.Errorf("since=7d: %d tickets (since %q), want 3 and the window echoed", week.Overall.Overall.Tickets, week.Overall.Since)
+	}
+	if code, _ := get(NewServer(dataDir), "/stats?since=soon", ""); code != http.StatusBadRequest {
+		t.Errorf("since=soon = %d, want 400", code)
+	}
+	// Gated like every read.
+	gated := NewServer(dataDir, WithReadToken("read-token"))
+	if code, _ := get(gated, "/stats", ""); code != http.StatusForbidden {
+		t.Errorf("GET /stats with a read token set and none sent = %d, want 403", code)
+	}
+	if code, _ := get(gated, "/stats", "read-token"); code != http.StatusOK {
+		t.Errorf("GET /stats with the read token = %d, want 200", code)
 	}
 }

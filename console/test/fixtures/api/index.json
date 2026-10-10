@@ -63,6 +63,13 @@
     "content_type": "application/json"
   },
   {
+    "pattern": "GET /stats",
+    "path": "/stats",
+    "file": "stats.json",
+    "status": 200,
+    "content_type": "application/json"
+  },
+  {
     "pattern": "GET /daemons",
     "path": "/daemons",
     "file": "daemons.json",

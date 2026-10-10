@@ -20,6 +20,7 @@ import {
   getProjectObservations,
   getProjectStats,
   getProjectTrend,
+  getStats,
   listProjects,
 } from "@/api/projects";
 import { queryKeys } from "@/api/queryKeys";
@@ -45,6 +46,7 @@ import type { ProjectMemory } from "@/domain/memory";
 import type { ProjectTrend } from "@/domain/trend";
 import type { ObservationReport } from "@/domain/observation";
 import type { QueueRunStatus, WorkspaceHint } from "@/domain/ops";
+import type { FactoryStats } from "@/domain/stats";
 import type { ProjectCheckResponse, ProjectStats, ProjectSummary } from "@/domain/project";
 import type { ProjectReleaseView, ReleaseView } from "@/domain/release";
 import { type Run, type RunDiff, runIsTerminal } from "@/domain/run";
@@ -263,6 +265,23 @@ export function useProjectTrend(project: string): UseQueryResult<ProjectTrend> {
   return useQuery({
     queryKey: queryKeys.projects.trend(project),
     queryFn: ({ signal }) => getProjectTrend(http, project, signal),
+  });
+}
+
+/**
+ * GET /stats, the numbers of every project over one window (`since`: "7d",
+ * "30d", or null for all time). `refetchIntervalMs` keeps a screen that stays
+ * open current; a failed refresh keeps the last answer.
+ */
+export function useFactoryStats(
+  since: string | null,
+  refetchIntervalMs?: number,
+): UseQueryResult<FactoryStats> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.ops.stats(since),
+    queryFn: ({ signal }) => getStats(http, since, signal),
+    ...(refetchIntervalMs === undefined ? {} : { refetchInterval: refetchIntervalMs }),
   });
 }
 

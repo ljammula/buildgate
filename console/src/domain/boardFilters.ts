@@ -133,8 +133,27 @@ function sectionFromQueryValue(value: string): RequestBoardSection | null {
 }
 
 /**
+ * How far back finished work is shown: the last 7 days (the default), the
+ * last 30, or all of it. `domain/boardWindow.ts` holds what it applies to.
+ */
+export type BoardWindowDays = 7 | 30 | "all";
+
+export const boardWindowChoices: readonly BoardWindowDays[] = [7, 30, "all"];
+
+export const defaultBoardWindowDays: BoardWindowDays = 7;
+
+// `days=30`, `days=all`; absent (or anything else) is the default of 7, so an
+// older link, which has no `days`, opens on the default window.
+function daysFromQueryValue(value: string | null): BoardWindowDays {
+  if (value === "all") return "all";
+  if (value === "30") return 30;
+  return defaultBoardWindowDays;
+}
+
+/**
  * The request board's filter state: a project multi-select, an optional
- * single section filter, and free-text search. Immutable and round-trips
+ * single section filter, free-text search, and the time window on finished
+ * work. Immutable and round-trips
  * through a URL query string via filtersFromSearchParams/toQueryParameters so
  * the board's filters survive a reload and are shareable -- no server-side
  * filtering, no persistence beyond the URL itself.
@@ -148,12 +167,15 @@ export interface RequestBoardFilters {
   /** Null means "every section". */
   readonly section: RequestBoardSection | null;
   readonly search: string;
+  /** The window on finished work; never a filter on work in flight. */
+  readonly days: BoardWindowDays;
 }
 
 export const emptyRequestBoardFilters: RequestBoardFilters = {
   projects: new Set(),
   section: null,
   search: "",
+  days: defaultBoardWindowDays,
 };
 
 /** Value equality: the project set compares by members, not identity. */
@@ -162,7 +184,8 @@ export function requestBoardFiltersEqual(a: RequestBoardFilters, b: RequestBoard
     a.projects.size === b.projects.size &&
     [...a.projects].every((p) => b.projects.has(p)) &&
     a.section === b.section &&
-    a.search === b.search
+    a.search === b.search &&
+    a.days === b.days
   );
 }
 
@@ -185,6 +208,7 @@ export function filtersFromSearchParams(params: URLSearchParams): RequestBoardFi
     projects: new Set(params.getAll("project").filter((p) => p !== "")),
     section: groupParam === null ? null : sectionFromQueryValue(groupParam),
     search: params.get("q") ?? "",
+    days: daysFromQueryValue(params.get("days")),
   };
 }
 
@@ -205,13 +229,15 @@ export function toQueryParameters(
   if (filters.projects.size > 0) out.project = [...filters.projects].sort();
   if (filters.section !== null) out.group = SECTION_QUERY_VALUES[filters.section];
   if (filters.search !== "") out.q = filters.search;
+  if (filters.days !== defaultBoardWindowDays) out.days = String(filters.days);
   return out;
 }
 
 /**
- * True when `request` matches every active filter in `filters` -- pure
+ * True when `request` matches the project, section and search filters -- pure
  * client-side filtering over already-fetched data; does not add a
- * server-side filter.
+ * server-side filter. The time window (`days`) is not applied here: it only
+ * ever hides finished work, and `domain/boardWindow.ts` decides that.
  */
 export function matchesRequestBoardFilters(
   request: RequestSummary,

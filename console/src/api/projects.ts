@@ -1,6 +1,7 @@
 import { type Http } from "@/api/http";
 import { asObject } from "@/domain/decode";
 import { type ProjectMemory, decodeProjectMemory } from "@/domain/memory";
+import { type FactoryStats, decodeFactoryStats } from "@/domain/stats";
 import { type ProjectTrend, decodeProjectTrend } from "@/domain/trend";
 import { type ObservationReport, decodeObservationReport } from "@/domain/observation";
 import {
@@ -114,4 +115,21 @@ export async function getProjectTrend(
   const at = "GET /projects/{project}/trend";
   const json = await http.getJson(`/projects/${encodeURIComponent(project)}/trend`, "read", signal);
   return decodeProjectTrend(asObject(json, at), at);
+}
+
+/**
+ * GET /stats: the trend report over every project and one per project, for
+ * Mission Control's numbers. `since` is the window in the form the trend
+ * route takes ("7d", "30d"); null leaves it out, which is all time. Read
+ * token, unlike the start-token-gated per-project stats route; it changes
+ * nothing and calls no model.
+ */
+export async function getStats(
+  http: Http,
+  since: string | null,
+  signal?: AbortSignal,
+): Promise<FactoryStats> {
+  const at = "GET /stats";
+  const path = since === null ? "/stats" : `/stats?since=${encodeURIComponent(since)}`;
+  return decodeFactoryStats(asObject(await http.getJson(path, "read", signal), at), at);
 }

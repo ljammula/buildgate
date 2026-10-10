@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { setStoredBoardView } from "@/platform/boardPrefs";
 import { type FakeRoute, apiErrorResponse, json, renderApp, sseResponse } from "@/test/render";
 
 import { BoardScreen } from "./BoardScreen";
@@ -19,6 +20,19 @@ function board(requests: RequestOptions[], extra: FakeRoute[] = []): FakeRoute[]
     ...extra,
   ];
 }
+
+// These are the List view's tests: Mission Control opens on the board unless
+// the browser remembers the list (MissionControl.test.tsx has the board's).
+beforeEach(() => {
+  setStoredBoardView("list");
+  // The builders' requests are dated 2026-09-10: "now" is that morning, so
+  // the default 7-day window on finished work holds all of them. Only the
+  // clock's reading is faked; timers run as usual.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-09-10T10:00:00Z") });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const costSummary = (extra: Record<string, unknown>) => ({
   spec: 0,
@@ -546,7 +560,7 @@ test("an event from the stream updates a row in place", async () => {
 test("Refresh is a button named Refresh", async () => {
   renderApp(<BoardScreen />, { server: board([]) });
   await screen.findByText("No requests found.");
-  expect(screen.getByRole("heading", { level: 1, name: "Requests" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Mission Control" })).toBeInTheDocument();
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });

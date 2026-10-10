@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -42,12 +41,6 @@ func newStatsFlags() statsFlags {
 	f.configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
 	plainFlagUsage(flags)
 	return f
-}
-
-// statsOverview is `factoryd stats -json` without -project.
-type statsOverview struct {
-	Overall  stats.Report   `json:"overall"`
-	Projects []stats.Report `json:"projects"`
 }
 
 // statsMain implements `factoryd stats`: whether the factory is getting
@@ -92,7 +85,7 @@ func statsRun(args []string, w io.Writer, now time.Time) error {
 		printProjectStats(w, report)
 		return nil
 	}
-	overview := buildStatsOverview(runs, opts)
+	overview := stats.ComputeOverview(runs, opts, release.ProjectOf)
 	if *f.jsonOutput {
 		return encodeJSON(w, overview)
 	}
@@ -114,29 +107,6 @@ func projectRuns(runs []*run.Run, project string) []*run.Run {
 		}
 	}
 	return out
-}
-
-// buildStatsOverview computes one report per project, by name, and one over
-// every project's runs.
-func buildStatsOverview(runs []*run.Run, opts stats.Options) statsOverview {
-	byProject := map[string][]*run.Run{}
-	for _, r := range runs {
-		name := release.ProjectOf(r)
-		byProject[name] = append(byProject[name], r)
-	}
-	names := make([]string, 0, len(byProject))
-	for name := range byProject {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	overview := statsOverview{Projects: []stats.Report{}}
-	for _, name := range names {
-		o := opts
-		o.Project = name
-		overview.Projects = append(overview.Projects, stats.Compute(byProject[name], o))
-	}
-	overview.Overall = stats.Compute(runs, opts)
-	return overview
 }
 
 // share prints part of whole as "3/8 (38%)", "-" when there is no whole.
@@ -161,7 +131,7 @@ func topCount(counts []stats.Count) string {
 	return fmt.Sprintf("%s (%d)", counts[0].Name, counts[0].Runs)
 }
 
-func printStatsOverview(w io.Writer, o statsOverview) {
+func printStatsOverview(w io.Writer, o stats.Overview) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "PROJECT\tTICKETS\tONE-SHOT\tACCEPTED\tMEDIAN ROUNDS\tTOP QUARANTINE CHECK")
 	row := func(name string, r stats.Report) {
