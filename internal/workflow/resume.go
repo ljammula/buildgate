@@ -44,31 +44,46 @@ type ResumeFrom struct {
 }
 
 // roundState is the part of build_app.py's round-state file the host reads:
-// the HEAD it recorded and the rounds it completed.
+// the HEAD it recorded, the rounds it completed, and whether the last of them
+// passed.
 type roundState struct {
 	Head               *string `json:"head"`
 	LastCompletedRound int     `json:"last_completed_round"`
+	Passed             bool    `json:"passed"`
+	Rounds             []struct {
+		Blockers []string `json:"blockers"`
+	} `json:"rounds"`
+}
+
+// passedLastRound is build_app.py's own rule (load_round_state) for a state
+// with no round left to run: it says the build passed, it holds one record
+// per completed round, and the last of them recorded no blocker. The script
+// runs no round for such a state, whatever the round budget.
+func (s roundState) passedLastRound() bool {
+	n := len(s.Rounds)
+	return s.Passed && n >= 1 && n == s.LastCompletedRound && len(s.Rounds[n-1].Blockers) == 0
 }
 
 // readRoundState reads the round-state file in worktree. found is false when
 // the file does not exist; a file that exists but cannot be parsed is an
-// error. head is "" when the file recorded none.
-func readRoundState(worktree string) (head string, lastRound int, found bool, err error) {
+// error. head is "" when the file recorded none. passed reports a state whose
+// last round passed (passedLastRound).
+func readRoundState(worktree string) (head string, lastRound int, passed, found bool, err error) {
 	b, err := os.ReadFile(filepath.Join(worktree, RoundStateFileName))
 	if errors.Is(err, os.ErrNotExist) {
-		return "", 0, false, nil
+		return "", 0, false, false, nil
 	}
 	if err != nil {
-		return "", 0, true, err
+		return "", 0, false, true, err
 	}
 	var state roundState
 	if err := json.Unmarshal(b, &state); err != nil {
-		return "", 0, true, err
+		return "", 0, false, true, err
 	}
 	if state.Head != nil {
 		head = strings.TrimSpace(*state.Head)
 	}
-	return head, state.LastCompletedRound, true, nil
+	return head, state.LastCompletedRound, state.passedLastRound(), true, nil
 }
 
 // NewResumeFrom builds the resume input for halted, which must already have
@@ -125,7 +140,11 @@ func worktreeGit(dir string, args ...string) (string, error) {
 //	(d) specSHA256, when non-empty, equals the halted run's recorded ticket
 //	    spec hash: a resume continues the same ticket, not an edited one
 //	(e) maxRounds, when positive, exceeds the round state's completed rounds:
-//	    build_app.py refuses a resume with no round left
+//	    build_app.py refuses a resume with no round left. A state whose last
+//	    round passed needs none (the launch was lost after the pass, during
+//	    the notes turn or before the script ended) and is not refused: the
+//	    script then runs no round and no notes turn, and checks the tree
+//	    again if the notes turn had started
 func CheckResumePreconditions(ctx context.Context, dataDir, dockerBinary, haltedRunID, specSHA256 string, maxRounds int) (ok bool, reasons []string, err error) {
 	r, err := run.Load(dataDir, haltedRunID)
 	if err != nil {
@@ -159,7 +178,7 @@ func CheckResumePreconditions(ctx context.Context, dataDir, dockerBinary, halted
 		reasons = append(reasons, fmt.Sprintf("the worktree of run %s has no readable HEAD: %v", haltedRunID, headErr))
 		return false, reasons, nil
 	}
-	recorded, lastRound, found, stateErr := readRoundState(worktree)
+	recorded, lastRound, passed, found, stateErr := readRoundState(worktree)
 	recordedWhat := "the HEAD its round state recorded"
 	switch {
 	case stateErr != nil:
@@ -168,7 +187,7 @@ func CheckResumePreconditions(ctx context.Context, dataDir, dockerBinary, halted
 	case !found || recorded == "":
 		recorded, recordedWhat = r.BaseSHA, "the run's base commit (it wrote no round state)"
 	}
-	if maxRounds > 0 && found && lastRound >= maxRounds {
+	if maxRounds > 0 && found && lastRound >= maxRounds && !passed {
 		reasons = append(reasons, fmt.Sprintf("the round state of run %s records %d completed round(s), but the resumed run allows only %d: no round is left to run; rebuild instead", haltedRunID, lastRound, maxRounds))
 	}
 	if recorded == "" {
