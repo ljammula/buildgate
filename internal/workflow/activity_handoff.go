@@ -333,8 +333,8 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 // quotes the notes and which nothing reads once the build has returned (a
 // later resume of this worktree starts at round 1 on the kept files, as one
 // with no round state does). A copy that fails loses the evidence, never the
-// step; a file that cannot be removed fails the build step, so no review
-// runs beside it.
+// step. Whatever is at either name is removed (removeWhateverIsAt); only a
+// removal that fails fails the build step, so no review runs beside it.
 func (a *Activities) takeRoundNotesOut(ctx context.Context, input RunWorkflowInput) error {
 	if logDir := a.logDirFor(input); logDir != "" {
 		if _, err := evidence.RetainBuildEvidence(input.WorkspacePath, filepath.Join(logDir, evidence.BuildEvidenceFileName)); err != nil {
@@ -342,9 +342,31 @@ func (a *Activities) takeRoundNotesOut(ctx context.Context, input RunWorkflowInp
 		}
 	}
 	for _, name := range []string{evidence.BuildEvidenceFileName, RoundStateFileName} {
-		if err := os.Remove(filepath.Join(input.WorkspacePath, name)); err != nil && !os.IsNotExist(err) {
+		if err := removeWhateverIsAt(filepath.Join(input.WorkspacePath, name)); err != nil {
 			return fmt.Errorf("remove the finished build's %s from the worktree before any later step: %w", name, err)
 		}
+	}
+	return nil
+}
+
+// removeWhateverIsAt deletes path without following a link: a file or a link
+// is unlinked, and a directory (which only the build agent can have put at
+// one of the build script's file names) is removed with all it holds, its
+// folders made writable first as removeBuildSession does. Nothing there is
+// not an error.
+func removeWhateverIsAt(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return removeBuildSession(path)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }

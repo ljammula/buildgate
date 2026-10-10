@@ -139,26 +139,56 @@ func TestALostBuildKeepsItsRoundStateInTheWorktree(t *testing.T) {
 	}
 }
 
-// An evidence file the host cannot remove (here a directory with content in
-// its place) fails the build step: no review is launched beside it.
-func TestRunBuildActivityFailsWhenTheEvidenceFileCannotLeaveTheWorktree(t *testing.T) {
+// A directory planted where the evidence file or the round-state file goes
+// (only the build agent can do it) does not fail the build step: the host
+// removes whatever is at those names, a directory with all it holds, and
+// follows no link while doing so.
+func TestRunBuildActivityRemovesADirectoryPlantedAtTheEvidenceOrRoundStateName(t *testing.T) {
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"ok"}}
 	activities, input, _ := runtimeActivities(t, rt)
+	outside := filepath.Join(t.TempDir(), "outside")
+	writeFile(t, filepath.Join(outside, "kept.txt"), "host content\n")
+	names := []string{"BUILD_EVIDENCE.json", RoundStateFileName}
 	build := &Activities{
 		LogDir: activities.LogDir,
 		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
-			writeFile(t, filepath.Join(input.WorkspacePath, "BUILD_EVIDENCE.json", "inner.json"), roundNotesMarker)
+			for _, name := range names {
+				planted := filepath.Join(input.WorkspacePath, name)
+				writeFile(t, filepath.Join(planted, "sub", "inner.json"), roundNotesMarker)
+				if err := os.Symlink(outside, filepath.Join(planted, "link")); err != nil {
+					t.Fatal(err)
+				}
+				// A folder the build left unwritable is still removed.
+				if err := os.Chmod(filepath.Join(planted, "sub"), 0o500); err != nil {
+					t.Fatal(err)
+				}
+			}
 			return runner.Result{}, nil
 		},
 	}
+	t.Cleanup(func() {
+		for _, name := range names {
+			_ = os.Chmod(filepath.Join(input.WorkspacePath, name, "sub"), 0o700)
+		}
+	})
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(build.RunBuildActivity)
-	_, err := env.ExecuteActivity(build.RunBuildActivity, input)
-	if err == nil || !strings.Contains(err.Error(), "BUILD_EVIDENCE.json from the worktree") {
-		t.Errorf("RunBuildActivity err = %v, want the step to fail on the evidence file it could not remove", err)
+	if _, err := env.ExecuteActivity(build.RunBuildActivity, input); err != nil {
+		t.Fatalf("RunBuildActivity: %v, want the step to finish", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(activities.LogDir, "BUILD_EVIDENCE.json")); !os.IsNotExist(statErr) {
-		t.Errorf("a directory in the evidence file's place was kept (%v)", statErr)
+	for _, name := range names {
+		if _, err := os.Lstat(filepath.Join(input.WorkspacePath, name)); !os.IsNotExist(err) {
+			t.Errorf("%s is still in the worktree (%v)", name, err)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(outside, "kept.txt")); err != nil || string(got) != "host content\n" {
+		t.Errorf("the link's target outside the worktree = %q, %v, want it untouched", got, err)
+	}
+	if found := filesHolding(t, input.WorkspacePath, roundNotesMarker); len(found) != 0 {
+		t.Errorf("%v still hold the planted text", found)
+	}
+	if _, err := os.Stat(filepath.Join(activities.LogDir, "BUILD_EVIDENCE.json")); !os.IsNotExist(err) {
+		t.Errorf("a directory in the evidence file's place was kept as evidence (%v)", err)
 	}
 }
