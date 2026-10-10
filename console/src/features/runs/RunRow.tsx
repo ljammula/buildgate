@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { runIsTerminalForDisplay } from "@/domain/run";
 import type { Run } from "@/domain/run";
 import type { RequestSummary } from "@/domain/request";
+import { stageLabels } from "@/domain/runDetail";
 import { runPath } from "@/routes/paths";
 import { TableCell, TableRow } from "@/ui/Table";
 import { ShortPath } from "@/ui/ShortPath";
@@ -47,7 +48,11 @@ export function RunRow({ run, request }: RunRowProps) {
       <TableCell className="text-xs text-fg-muted">
         {terminal ? null : (
           <span>
-            {run.currentStage === null || run.currentStage === "" ? "starting" : run.currentStage}
+            {run.currentStage === null || run.currentStage === ""
+              ? "starting"
+              : Object.hasOwn(stageLabels, run.currentStage)
+                ? stageLabels[run.currentStage]
+                : run.currentStage}
             {" · last activity "}
             <ElapsedText since={run.lastProgressAt ?? run.createdAt} className="font-mono" /> ago
           </span>

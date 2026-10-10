@@ -12,6 +12,7 @@ import { Callout } from "@/ui/Feedback";
 import { CompactId } from "@/ui/CompactId";
 import { CopyableCommand } from "@/ui/CopyableCommand";
 import { Disclosure } from "@/ui/Disclosure";
+import { TextWithCode } from "@/ui/TextWithCode";
 import { REQUEST_VERBS } from "@/domain/status";
 
 import { quarantinedTicket, recoveryPlan } from "./requestDetailLogic";
@@ -135,7 +136,7 @@ export function RecoveryCallout({
           title={explanation.truncated ? plan.explanation : undefined}
           className="text-fg-muted text-xs break-words whitespace-pre-wrap"
         >
-          {explanation.head}
+          <TextWithCode text={explanation.head} />
         </p>
         {/* One closed place for every other way out: the whole explanation
             when it was cut, the terminal equivalent of the lead action, and
@@ -147,7 +148,9 @@ export function RecoveryCallout({
           testId="recovery-more"
         >
           {explanation.truncated ? (
-            <p className="break-words whitespace-pre-wrap">{plan.explanation}</p>
+            <p className="break-words whitespace-pre-wrap">
+              <TextWithCode text={plan.explanation} />
+            </p>
           ) : null}
           <CopyableCommand command={plan.cliEquivalent} />
           {plan.overrideTicket === null ? null : (

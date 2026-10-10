@@ -5,6 +5,7 @@ import { Badge } from "@/ui/Badge";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Section } from "@/ui/PageLayout";
 import { KillSwitchChip, StatusChip } from "@/ui/StatusChip";
+import { TextWithCode } from "@/ui/TextWithCode";
 import { LocalTimeText } from "@/ui/Time";
 
 /**
@@ -70,7 +71,7 @@ export function ReleaseDetails({ release }: { release: ReleaseView }) {
               ) : (
                 decision.reasons.map((reason, i) => (
                   <DescriptionItem key={i} label="Reason">
-                    {reason}
+                    <TextWithCode text={reason} />
                   </DescriptionItem>
                 ))
               )}

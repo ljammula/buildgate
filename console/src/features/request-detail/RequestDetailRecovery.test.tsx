@@ -588,7 +588,13 @@ describe("reading order when a request stops", () => {
     );
     await heading("Stopped");
 
-    expect(screen.getByTestId("recovery-explanation")).toHaveTextContent(next);
+    const explanation = screen.getByTestId("recovery-explanation");
+    // The commands are drawn as code, the backticks dropped.
+    expect(explanation).toHaveTextContent(next.replaceAll("`", ""));
+    expect([...explanation.querySelectorAll("code")].map((c) => c.textContent)).toEqual([
+      "factoryd retry req-1",
+      "factoryd/add-a-min-3c0e1ad229a3",
+    ]);
   });
 
   test("a long plain explanation beside a cause shows its first sentence, the whole one in the disclosure", async () => {

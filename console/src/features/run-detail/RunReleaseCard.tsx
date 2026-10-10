@@ -3,6 +3,7 @@ import { statusForReleaseDecision } from "@/domain/status";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Section } from "@/ui/PageLayout";
 import { StatusChip } from "@/ui/StatusChip";
+import { TextWithCode } from "@/ui/TextWithCode";
 
 export interface RunReleaseCardProps {
   readonly runId: string;
@@ -40,7 +41,7 @@ export function RunReleaseCard({ runId, accepted }: RunReleaseCardProps) {
             {decision.reasons[0] === undefined ? null : (
               <DescriptionItem label="Why">
                 <span title={decision.reasons.join("\n")} className="line-clamp-3">
-                  {decision.reasons[0]}
+                  <TextWithCode text={decision.reasons[0]} />
                 </span>
               </DescriptionItem>
             )}
