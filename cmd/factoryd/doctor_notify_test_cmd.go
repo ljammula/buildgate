@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -23,7 +24,33 @@ func doctorRegisterNotifyTestFlag(flags *flag.FlagSet) *bool {
 	return flags.Bool("notify-test", false, "send one real desktop test notification, report which mechanism delivered it (terminal-notifier or osascript) and the known silent-failure caveat, then exit -- does not run the rest of doctor's checks. Not part of a default `factoryd doctor` run since it pops real UI")
 }
 
-// doctorNotifyTestMain implements `factoryd doctor -notify-test`.
+// notifyTestClickTarget is the directory the test notification's click
+// opens: the data directory a real notification's would, as an absolute
+// path. terminal-notifier runs the click's `open` from its own working
+// directory, so a relative path (the -data-dir default is "data") opens
+// nothing there.
+func notifyTestClickTarget(flags *flag.FlagSet, dataDir, configPath string) (string, error) {
+	explicit := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "data-dir" {
+			explicit = true
+		}
+	})
+	return filepath.Abs(resolveConfiguredDataDir(explicit, dataDir, configPath))
+}
+
+// doctorNotifyTest runs `factoryd doctor -notify-test` for the parsed
+// doctor flags.
+func doctorNotifyTest(flags *flag.FlagSet, dataDir, configPath string) error {
+	target, err := notifyTestClickTarget(flags, dataDir, configPath)
+	if err != nil {
+		return err
+	}
+	return doctorNotifyTestMain(target)
+}
+
+// doctorNotifyTestMain sends the test notification, with dataDir as what
+// its click opens.
 // It determines which mechanism internal/notify.DesktopNotifier.Notify
 // will actually use -- mirroring that function's own documented
 // precedence (terminal-notifier when present and there's a click target,

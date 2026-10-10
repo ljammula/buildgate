@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -36,5 +37,32 @@ func TestDoctorNotifyTestMainNeverErrors(t *testing.T) {
 	t.Parallel()
 	if err := doctorNotifyTestMain(t.TempDir()); err != nil {
 		t.Fatalf("doctorNotifyTestMain: %v", err)
+	}
+}
+
+// TestNotifyTestClickTargetIsTheConfiguredDataDirAsAnAbsolutePath: the
+// click runs `open <target>` from terminal-notifier's working directory,
+// where the unresolved -data-dir default ("data") names nothing, so a
+// click on the test notification did nothing.
+func TestNotifyTestClickTargetIsTheConfiguredDataDirAsAnAbsolutePath(t *testing.T) {
+	defaultPath := isolateSessionConfig(t)
+	writeSessionConfig(t, defaultPath, "data_dir: /configured/data\n")
+
+	flags, _, _, _, _, _, _, _, dataDir, _, _, _, _, _, _, _, _, _, configPath := newDoctorFlags()
+	if err := flags.Parse(nil); err != nil {
+		t.Fatalf("flags.Parse: %v", err)
+	}
+	got, err := notifyTestClickTarget(flags, *dataDir, *configPath)
+	if err != nil || got != "/configured/data" {
+		t.Errorf("notifyTestClickTarget with no -data-dir = %q, %v, want the session config's data_dir", got, err)
+	}
+
+	flags, _, _, _, _, _, _, _, dataDir, _, _, _, _, _, _, _, _, _, configPath = newDoctorFlags()
+	if err := flags.Parse([]string{"-data-dir", "relative/data"}); err != nil {
+		t.Fatalf("flags.Parse: %v", err)
+	}
+	got, err = notifyTestClickTarget(flags, *dataDir, *configPath)
+	if err != nil || !filepath.IsAbs(got) || filepath.Base(got) != "data" {
+		t.Errorf("notifyTestClickTarget(-data-dir relative/data) = %q, %v, want that directory as an absolute path", got, err)
 	}
 }
