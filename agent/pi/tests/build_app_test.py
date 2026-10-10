@@ -3487,7 +3487,7 @@ class NotesTurnTests(unittest.TestCase):
 		failed = (subprocess.CompletedProcess([], 1, "", ""), False)
 		errored = (subprocess.CompletedProcess([], 0, assistant_stdout("", stopReason="error", errorMessage="boom"), ""), False)
 		cases = {
-			"build passed": (dict(passing=True), "build passed"),
+			"build passed": (dict(passing=True), "build passed with no failed round"),
 			"last turn timed out": (dict(round_result=(None, True)), "last turn timed out"),
 			"last turn exited non-zero": (dict(round_result=failed), "last turn exited non-zero"),
 			"last turn errored": (dict(round_result=errored), "last turn errored"),
@@ -3862,3 +3862,348 @@ class RoundStateTests(unittest.TestCase):
 					build_app.write_round_state(root, last_completed_round=0, next_prompt="p", escalation_prompt="", rounds=[])
 			self.assertEqual(list((root / ".pi-build-session").iterdir()), [])
 			self.assertFalse((root / build_app.ROUND_STATE_FILE).exists())
+
+
+def tree_of(root: Path) -> dict:
+	"""Every path under root outside .git and the build's session folder:
+	its kind, permission bits and content (or link target)."""
+	import stat as stat_module
+	out = {}
+	for directory, dirs, files in os.walk(root):
+		rel_dir = os.path.relpath(directory, root)
+		if rel_dir == ".":
+			dirs[:] = [d for d in dirs if d not in (".git", ".pi-build-session")]
+		for name in dirs + files:
+			path = os.path.join(directory, name)
+			rel = os.path.relpath(path, root)
+			info = os.lstat(path)
+			if stat_module.S_ISLNK(info.st_mode):
+				out[rel] = ("link", os.readlink(path))
+			elif stat_module.S_ISDIR(info.st_mode):
+				out[rel] = ("dir", stat_module.S_IMODE(info.st_mode))
+			else:
+				with open(path, "rb") as handle:
+					out[rel] = ("file", stat_module.S_IMODE(info.st_mode), handle.read())
+	return out
+
+
+class PassedNotesTurnTests(unittest.TestCase):
+	"""A build that failed a round and then passed gets the notes turn too,
+	and hands back exactly the tree its checks passed on."""
+
+	def _run(self, *, verify=(False, True), during_notes=None, budget=3600, elapsed=0, reply=NOTES_REPLY, adapter=None, notes_result=None):
+		"""Runs a build whose successive verifications give `verify`: one
+		agent round per entry up to the first pass, then the notes turn, then
+		(only if the script verifies again) the entries after it."""
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory).resolve()
+			init_repo_with_commit(root)
+			(root / ".gitignore").write_text("ignored/\n")
+			(root / "tracked.txt").write_text("tracked\n")
+			(root / "tool.sh").write_text("#!/bin/sh\n")
+			os.chmod(root / "tool.sh", 0o755)
+			(root / "pkg").mkdir()
+			(root / "pkg" / "lib.go").write_text("package pkg\n")
+			subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+			subprocess.run(["git", "commit", "-m", "files"], cwd=root, check=True, capture_output=True)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			rounds = list(verify).index(True) + 1 if True in verify else len(verify)
+			verify_left = [("make verify", ok, False, "" if ok else "boom", False, None) for ok in verify]
+			if notes_result is None:
+				notes_result = (subprocess.CompletedProcess([], 0, assistant_stdout(reply), ""), False)
+			calls = []
+			seen = {}
+
+			def verification(*args, **kwargs):
+				return verify_left.pop(0)
+
+			def stream(command, *, cwd=None, timeout=None, env=None, on_event=None):
+				calls.append({"command": command, "timeout": timeout, "on_event": on_event})
+				index = len(calls)
+				if index <= rounds:
+					(root / "cache.go").write_text(f"round {index}\n")
+					(root / "new.txt").write_text(f"untracked {index}\n")
+					(root / "ignored").mkdir(exist_ok=True)
+					(root / "ignored" / "out.bin").write_bytes(b"\x00built %d" % index)
+					passed = verify[index - 1]
+					completed, timed_out = subprocess.CompletedProcess([], 0, pi_output("clean" if passed else "flagged", "x"), ""), False
+				else:
+					seen["before_notes"] = tree_of(root)
+					seen["verifications_before_notes"] = len(verify) - len(verify_left)
+					if during_notes is not None:
+						during_notes(root)
+					completed, timed_out = notes_result
+				if on_event is not None and completed is not None:
+					for line in (completed.stdout or "").splitlines():
+						on_event(line)
+				return completed, timed_out
+
+			environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+			if budget is not None:
+				environ[build_app.BUILD_TIME_BUDGET_ENV] = str(budget)
+			extra = {}
+			if adapter is not None:
+				extra["adapter"] = adapter
+			out, err = io.StringIO(), io.StringIO()
+			with (
+				mock.patch.dict(os.environ, environ, clear=True),
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", side_effect=verification),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
+				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
+				mock.patch.object(build_app, "_process_started", 0.0),
+				contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
+			):
+				result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1, **extra)
+				after = tree_of(root)
+				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
+				return {
+					"result": result, "calls": calls, "out": out.getvalue(), "err": err.getvalue(),
+					"notes": notes_file.read_text() if notes_file.exists() else None,
+					"prompts": {f.stem: f.read_text() for f in (root / ".pi-build-session" / "prompts").glob("*.md")},
+					"before_notes": seen.get("before_notes"), "after": after,
+					"verifications": len(verify) - len(verify_left),
+					"verifications_before_notes": seen.get("verifications_before_notes"),
+					"evidence": build_app.write_evidence_json(result).read_text(),
+					"report": build_app.write_report(result).read_text(),
+				}
+
+	def test_a_build_that_passes_after_a_failed_round_gets_the_notes_turn(self):
+		ran = self._run()
+		self.assertTrue(ran["result"].succeeded)
+		self.assertEqual(len(ran["calls"]), 3, "two rounds, then the notes turn")
+		self.assertEqual(ran["notes"], NOTES_REPLY)
+		turn = ran["result"].notes_turn
+		self.assertEqual((turn["ran"], turn["skipped_reason"]), (True, ""))
+		self.assertTrue(turn["after_pass"])
+		self.assertNotIn("discarded_reason", turn)
+		notes_call = ran["calls"][-1]
+		self.assertEqual(notes_call["command"][-1], build_app.HANDOFF_NOTES_PASSED_PROMPT)
+		self.assertNotEqual(build_app.HANDOFF_NOTES_PASSED_PROMPT, build_app.HANDOFF_NOTES_PROMPT)
+		self.assertIn("This build passed its checks", build_app.HANDOFF_NOTES_PASSED_PROMPT)
+		self.assertIn("Do not change, create or delete any file and do not run any command", build_app.HANDOFF_NOTES_PASSED_PROMPT)
+		self.assertIn("--continue", notes_call["command"])
+		self.assertEqual(notes_call["timeout"], 180)
+		self.assertIsNone(notes_call["on_event"]("anything"))
+		# The same saved-prompt name as the turn of a build that did not pass.
+		self.assertEqual(set(ran["prompts"]), {"build-round-1", "build-round-2", "build-notes"})
+		self.assertEqual(ran["prompts"]["build-notes"], build_app.HANDOFF_NOTES_PASSED_PROMPT)
+		# The tree that passed is the tree handed back, and it was not verified again.
+		self.assertEqual(ran["after"], ran["before_notes"])
+		self.assertEqual(ran["verifications"], 2)
+		evidence = json.loads(ran["evidence"])["notes_turn"]
+		self.assertEqual((evidence["ran"], evidence["after_pass"]), (True, True))
+		self.assertGreater(evidence["tree_entries"], 5)
+		for name, text in (("evidence", ran["evidence"]), ("report", ran["report"]), ("stdout", ran["out"]), ("stderr", ran["err"])):
+			self.assertNotIn(NOTES_MARKER, text, name)
+
+	def test_the_five_headings_are_the_ones_the_host_parses(self):
+		for prompt in (build_app.HANDOFF_NOTES_PROMPT, build_app.HANDOFF_NOTES_PASSED_PROMPT):
+			for heading in (
+				"What I did", "What I tried that did not work, and why", "My current hypothesis",
+				"What is left to do, in order", "Things worth knowing about this repository",
+			):
+				self.assertIn("\n" + heading + "\n", prompt)
+
+	def test_a_build_that_passes_in_its_first_round_gets_no_notes_turn(self):
+		ran = self._run(verify=(True,))
+		self.assertTrue(ran["result"].succeeded)
+		self.assertEqual(len(ran["calls"]), 1)
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(ran["result"].notes_turn["ran"], False)
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "build passed with no failed round")
+		self.assertNotIn("build-notes", ran["prompts"])
+
+	def test_the_turn_asks_the_harness_for_read_only_tools_where_it_has_them(self):
+		ran = self._run()
+		command = ran["calls"][-1]["command"]
+		self.assertEqual(command[command.index("--tools") + 1], "read,grep,find,ls")
+		for round_call in ran["calls"][:-1]:
+			self.assertNotIn("--tools", round_call["command"])
+
+	def test_a_turn_that_changes_the_tree_loses_its_notes_and_the_tree_is_put_back(self):
+		def replace_by_link(root):
+			(root / "tracked.txt").unlink()
+			os.symlink("/etc/hosts", root / "tracked.txt")
+
+		def nested(root):
+			(root / "deep" / "er").mkdir(parents=True)
+			(root / "deep" / "er" / "x.go").write_text("package x\n")
+
+		def directory_for_file(root):
+			(root / "pkg" / "lib.go").unlink()
+			(root / "pkg" / "lib.go").mkdir()
+			(root / "pkg" / "lib.go" / "inner").write_text("x\n")
+
+		cases = {
+			"a tracked file changed": lambda root: (root / "tracked.txt").write_text("edited\n"),
+			"a tracked file changed to text of the same length": lambda root: (root / "tracked.txt").write_text("trackeD\n"),
+			"a file the build changed is changed again": lambda root: (root / "cache.go").write_text("round 3\n"),
+			"an untracked file added": lambda root: (root / "late.go").write_text("package late\n"),
+			"an untracked file changed": lambda root: (root / "new.txt").write_text("other\n"),
+			"an ignored file added": lambda root: (root / "ignored" / "more.bin").write_bytes(b"more"),
+			"an empty directory added": lambda root: (root / "emptydir").mkdir(),
+			"a nested directory added": nested,
+			"a mode changed": lambda root: os.chmod(root / "tracked.txt", 0o755),
+			"an executable bit dropped": lambda root: os.chmod(root / "tool.sh", 0o644),
+			"the mode of an ignored file changed": lambda root: os.chmod(root / "ignored" / "out.bin", 0o600),
+			"a file replaced by a symlink": replace_by_link,
+			"a file replaced by a directory": directory_for_file,
+			"a tracked file deleted": lambda root: (root / "tracked.txt").unlink(),
+			"a directory deleted": lambda root: __import__("shutil").rmtree(root / "pkg"),
+		}
+		for name, change in cases.items():
+			with self.subTest(name):
+				ran = self._run(during_notes=change, verify=(False, True, True))
+				turn = ran["result"].notes_turn
+				self.assertIsNone(ran["notes"], "the notes of a turn that changed the tree are discarded")
+				self.assertEqual(turn["discarded_reason"], "the turn changed the workspace")
+				self.assertGreaterEqual(turn["changed_paths"], 1)
+				self.assertTrue(turn["tree_restored"])
+				self.assertEqual(ran["after"], ran["before_notes"])
+				# Verified again all the same, after the tree was put back.
+				self.assertEqual((ran["verifications_before_notes"], ran["verifications"]), (2, 3))
+				self.assertTrue(turn["reverify_passed"])
+				self.assertTrue(ran["result"].succeeded)
+				self.assertEqual(len(ran["calls"]), 3)
+				evidence = json.loads(ran["evidence"])["notes_turn"]
+				self.assertEqual(evidence["discarded_reason"], "the turn changed the workspace")
+				self.assertNotIn(NOTES_MARKER, ran["evidence"])
+
+	def test_a_change_that_cannot_be_put_back_is_verified_as_it_stands(self):
+		# An ignored file is recorded and compared, and not copied.
+		def change(root):
+			(root / "ignored" / "out.bin").write_bytes(b"other")
+
+		ran = self._run(during_notes=change, verify=(False, True, True))
+		turn = ran["result"].notes_turn
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(turn["discarded_reason"], "the turn changed the workspace")
+		self.assertFalse(turn["tree_restored"])
+		self.assertNotEqual(ran["after"], ran["before_notes"])
+		self.assertEqual(ran["verifications"], 3)
+		self.assertTrue(turn["reverify_passed"])
+		self.assertTrue(ran["result"].succeeded)
+
+	def test_a_changed_tree_that_fails_its_checks_ends_the_build_as_not_passed(self):
+		for name, change in {
+			"put back": lambda root: (root / "tracked.txt").write_text("edited\n"),
+			"not put back": lambda root: (root / "ignored" / "out.bin").write_bytes(b"other"),
+		}.items():
+			with self.subTest(name):
+				ran = self._run(during_notes=change, verify=(False, True, False))
+				result = ran["result"]
+				self.assertFalse(result.succeeded)
+				self.assertIn("notes turn changed the workspace", result.stopped_reason)
+				self.assertIsNone(ran["notes"])
+				self.assertEqual(result.notes_turn["reverify_passed"], False)
+				# No further round: the turn runs once and the loop is over.
+				self.assertEqual(len(ran["calls"]), 3)
+				self.assertEqual(ran["verifications"], 3)
+				last = result.rounds[-1]
+				self.assertEqual(len(result.rounds), 2)
+				self.assertIs(last.verify_passed, False)
+				self.assertEqual(last.blockers, ["canonical verification failed"])
+				self.assertEqual(last.verify_output_tail, "boom")
+				evidence = json.loads(ran["evidence"])
+				self.assertFalse(evidence["succeeded"])
+				self.assertEqual(evidence["rounds"][-1]["blockers"], ["canonical verification failed"])
+
+	def test_a_failed_or_empty_turn_leaves_the_build_passed_and_the_tree_checked(self):
+		failed = (subprocess.CompletedProcess([], 1, "", ""), False)
+		for name, kwargs in {
+			"non-zero exit": dict(notes_result=failed),
+			"timed out": dict(notes_result=(None, True)),
+			"empty reply": dict(reply=""),
+		}.items():
+			with self.subTest(name):
+				ran = self._run(**kwargs)
+				self.assertTrue(ran["result"].succeeded)
+				self.assertIsNone(ran["notes"])
+				self.assertEqual(ran["after"], ran["before_notes"])
+				self.assertEqual(ran["verifications"], 2)
+		# A turn that fails and changed the tree is still caught.
+		ran = self._run(notes_result=failed, during_notes=lambda root: (root / "late.go").write_text("x\n"), verify=(False, True, True))
+		self.assertEqual(ran["after"], ran["before_notes"])
+		self.assertEqual(ran["verifications"], 3)
+		self.assertTrue(ran["result"].succeeded)
+
+	def test_an_exception_inside_the_turn_still_leaves_a_checked_tree(self):
+		real = build_app.DEFAULT_ADAPTER
+
+		class Raising:
+			def __getattr__(self, name):
+				return getattr(real, name)
+
+			def parse(self, stdout):
+				if stdout and "What I did" in stdout:
+					raise ValueError(f"cannot parse {NOTES_MARKER}")
+				return real.parse(stdout)
+
+		ran = self._run(adapter=Raising(), during_notes=lambda root: (root / "tracked.txt").write_text("edited\n"), verify=(False, True, True))
+		turn = ran["result"].notes_turn
+		self.assertEqual(turn["skipped_reason"], "notes turn failed: ValueError")
+		self.assertEqual(turn["discarded_reason"], "the turn changed the workspace")
+		self.assertEqual(ran["after"], ran["before_notes"])
+		self.assertEqual(ran["verifications"], 3)
+		self.assertNotIn(NOTES_MARKER, ran["evidence"])
+
+	def test_the_turn_is_skipped_without_time_for_it_and_for_checking_again(self):
+		needed = build_app.HANDOFF_NOTES_MIN_REMAINING_S + build_app.PASSED_NOTES_GUARD_RESERVE_S
+		ran = self._run(budget=1000, elapsed=1000 - needed + 1)
+		self.assertTrue(ran["result"].succeeded)
+		self.assertEqual(len(ran["calls"]), 2)
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], f"under {needed} s of the build time budget left")
+		ran = self._run(budget=1000, elapsed=1000 - needed)
+		self.assertEqual(len(ran["calls"]), 3)
+		self.assertEqual(ran["notes"], NOTES_REPLY)
+		ran = self._run(budget=None)
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "no build time budget")
+
+	def test_time_for_the_checks_to_run_again_is_kept_back(self):
+		self.assertEqual(build_app.passed_notes_reserve_s(0.0), build_app.PASSED_NOTES_GUARD_RESERVE_S)
+		self.assertEqual(build_app.passed_notes_reserve_s(100.2), build_app.PASSED_NOTES_GUARD_RESERVE_S + 151)
+
+	def test_the_turn_is_skipped_when_the_tree_is_too_large_to_record(self):
+		with mock.patch.object(build_app.tree_guard, "MAX_ENTRIES", 3):
+			ran = self._run()
+		self.assertTrue(ran["result"].succeeded)
+		self.assertEqual(len(ran["calls"]), 2, "never run unguarded")
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "workspace too large to record: more than 3 entries")
+
+	def test_the_turn_is_skipped_when_the_tree_cannot_be_recorded(self):
+		with mock.patch.object(build_app.tree_guard, "record", side_effect=PermissionError("x")):
+			ran = self._run()
+		self.assertEqual(len(ran["calls"]), 2)
+		self.assertEqual(ran["result"].notes_turn["skipped_reason"], "workspace could not be recorded: PermissionError")
+		self.assertTrue(ran["result"].succeeded)
+
+	def test_a_tree_that_cannot_be_recorded_after_the_turn_is_verified_again(self):
+		real = build_app.tree_guard.record
+		count = []
+
+		def record(*args, **kwargs):
+			count.append(1)
+			if len(count) > 1:
+				raise OSError("gone")
+			return real(*args, **kwargs)
+
+		with mock.patch.object(build_app.tree_guard, "record", side_effect=record):
+			ran = self._run(verify=(False, True, True))
+		turn = ran["result"].notes_turn
+		self.assertIsNone(ran["notes"])
+		self.assertEqual(turn["discarded_reason"], "the workspace could not be compared after the turn")
+		self.assertFalse(turn["tree_restored"])
+		self.assertEqual(ran["verifications"], 3)
+		self.assertTrue(ran["result"].succeeded)
+
+	def test_a_build_that_never_passed_keeps_its_own_prompt_and_no_guard(self):
+		ran = self._run(verify=(False, False, False))
+		self.assertFalse(ran["result"].succeeded)
+		self.assertEqual(ran["calls"][-1]["command"][-1], build_app.HANDOFF_NOTES_PROMPT)
+		self.assertNotIn("--tools", ran["calls"][-1]["command"])
+		self.assertNotIn("after_pass", ran["result"].notes_turn)
+		self.assertEqual(ran["notes"], NOTES_REPLY)
