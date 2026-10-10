@@ -2035,11 +2035,11 @@ func TestAdvancePlanningHashMismatchHaltsNamingSpec(t *testing.T) {
 	}
 }
 
-// TestRemindDueRequestsSendsImmediateThenEveryInterval is the plan's own
+// TestRemindIfDueSendsImmediateThenEveryInterval is the plan's own
 // required fake-clock test: a request left in spec_review for 31 minutes
 // with a 15m reminder interval produces exactly three notifications --
 // immediate (t+0), t+15m, and t+30m -- never a fourth at t+31m.
-func TestRemindDueRequestsSendsImmediateThenEveryInterval(t *testing.T) {
+func TestRemindIfDueSendsImmediateThenEveryInterval(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
 		t.Fatal(err)
@@ -2066,8 +2066,8 @@ func TestRemindDueRequestsSendsImmediateThenEveryInterval(t *testing.T) {
 	interval := 15 * time.Minute
 	for minute := 1; minute <= 31; minute++ {
 		clock = base.Add(time.Duration(minute) * time.Minute)
-		if err := requestdriver.RemindDueRequests(dataDir, interval, now); err != nil {
-			t.Fatalf("remindDueRequests at t+%dm: %v", minute, err)
+		if err := requestdriver.RemindIfDue(dataDir, "req-1", interval, now); err != nil {
+			t.Fatalf("RemindIfDue at t+%dm: %v", minute, err)
 		}
 	}
 
@@ -2086,12 +2086,12 @@ func TestRemindDueRequestsSendsImmediateThenEveryInterval(t *testing.T) {
 	}
 }
 
-// TestRemindDueRequestsStopsAfterApproval is the plan's own "approval
+// TestRemindIfDueStopsAfterApproval is the plan's own "approval
 // stops reminders within one tick" requirement: once Approve has moved
 // the request out of spec_review (clearing its reminder state, see
-// internal/request.Approve), the next remindDueRequests call, even well
+// internal/request.Approve), the next RemindIfDue call, even well
 // past the interval, sends nothing.
-func TestRemindDueRequestsStopsAfterApproval(t *testing.T) {
+func TestRemindIfDueStopsAfterApproval(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
 		t.Fatal(err)
@@ -2115,21 +2115,21 @@ func TestRemindDueRequestsStopsAfterApproval(t *testing.T) {
 	}
 
 	afterInterval := base.Add(time.Hour)
-	if err := requestdriver.RemindDueRequests(dataDir, 15*time.Minute, func() time.Time { return afterInterval }); err != nil {
-		t.Fatalf("remindDueRequests after approval: %v", err)
+	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return afterInterval }); err != nil {
+		t.Fatalf("RemindIfDue after approval: %v", err)
 	}
 	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 1 {
 		t.Errorf("notifications.log lines after approval = %d, want 1 (only the pre-approval reminder, none since)", got)
 	}
 }
 
-// TestRemindDueRequestsIsRestartSafe is the plan's own restart-safety
+// TestRemindIfDueIsRestartSafe is the plan's own restart-safety
 // requirement: a request whose LastNotifiedAt is only 5 minutes old, read
 // fresh off disk by a brand-new process (simulated here by simply calling
-// remindDueRequests directly, with no prior in-process state at all),
+// RemindIfDue directly, with no prior in-process state at all),
 // sends nothing under a 15m interval -- a restart never re-sends an
 // already-current reminder.
-func TestRemindDueRequestsIsRestartSafe(t *testing.T) {
+func TestRemindIfDueIsRestartSafe(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
 		t.Fatal(err)
@@ -2145,8 +2145,8 @@ func TestRemindDueRequestsIsRestartSafe(t *testing.T) {
 	}
 
 	restartNow := base.Add(5 * time.Minute)
-	if err := requestdriver.RemindDueRequests(dataDir, 15*time.Minute, func() time.Time { return restartNow }); err != nil {
-		t.Fatalf("remindDueRequests: %v", err)
+	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return restartNow }); err != nil {
+		t.Fatalf("RemindIfDue: %v", err)
 	}
 	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 0 {
 		t.Errorf("notifications.log lines = %d, want 0 (last reminder only 5m old, restart must not re-send)", got)

@@ -118,7 +118,7 @@ func TestOracleDraftingWithoutRejectionsHasNoFeedbackPath(t *testing.T) {
 
 // oracle_review is a human-wait state: it is reminded like spec_review and
 // plan_review, and the reminder names oracle/ and the approve command.
-func TestRemindDueRequestsRemindsOracleReview(t *testing.T) {
+func TestRemindIfDueRemindsOracleReview(t *testing.T) {
 	t.Parallel()
 	dataDir := t.TempDir()
 	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
@@ -130,7 +130,7 @@ func TestRemindDueRequestsRemindsOracleReview(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdriver.RemindDueRequests(dataDir, 15*time.Minute, func() time.Time { return base }); err != nil {
+	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return base }); err != nil {
 		t.Fatal(err)
 	}
 	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 1 {

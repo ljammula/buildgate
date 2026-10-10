@@ -1704,7 +1704,7 @@ func retryReason(r *Request, operatorReason string) string {
 // ClearReminderState resets WaitingSince/LastNotifiedAt/NotifyCount -- the
 // HITL-reminder bookkeeping a review state accumulates -- so that
 // leaving a review state, by any path, never leaves a stale dedupe key
-// for the reminder ticker (cmd/factoryd's own remindDueRequests) to keep
+// for the reminder ticker (requestdriver.RemindIfDue) to keep
 // matching against. Called by Approve and Reject (approve.go) once their
 // own state transition has succeeded.
 func (r *Request) ClearReminderState() {
