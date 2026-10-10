@@ -1,3 +1,5 @@
+import { shellJoin } from "@/domain/shellQuote";
+import { escapeInvisible, pastesAsShown } from "@/domain/textEscape";
 import { useState } from "react";
 
 import { formatElapsedCompact, formatLocalTimestamp, elapsedBetween } from "@/domain/elapsed";
@@ -72,8 +74,15 @@ export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
           </Button>
           {commandOpen ? (
             <p className="mt-1 flex items-start gap-1 font-mono text-xs break-all">
-              {attempt.command.join(" ")}
-              <CopyButton size="sm" text={attempt.command.join(" ")} label="Copy attempt command" />
+              {/* Quoted as a shell reads it, so the line shown is the line that runs. */}
+              {escapeInvisible(shellJoin(attempt.command))}
+              {pastesAsShown(shellJoin(attempt.command)) ? (
+                <CopyButton
+                  size="sm"
+                  text={shellJoin(attempt.command)}
+                  label="Copy attempt command"
+                />
+              ) : null}
             </p>
           ) : null}
         </div>

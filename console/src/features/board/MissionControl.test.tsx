@@ -52,6 +52,8 @@ const buttonNames = (root: HTMLElement) =>
   within(root)
     .queryAllByRole("button")
     .map((b) => b.getAttribute("aria-label") ?? "");
+// A card's only buttons besides its decision controls: the copy buttons for its id and its pull requests.
+const isCardCopy = (name: string) => /^Copy (request id|pull request link) /.test(name);
 const columnHeadings = () =>
   screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
 
@@ -392,7 +394,7 @@ describe("deciding from a card", () => {
     await screen.findByTestId("card-req-plan-review");
     for (const id of ["req-quarantined", "req-halted", "req-every-field", "req-building"]) {
       // Only copy buttons (the id, a pull request link) sit on such a card.
-      expect(buttonNames(card(id)).filter((name) => !name.startsWith("Copy "))).toEqual([]);
+      expect(buttonNames(card(id)).filter((name) => !isCardCopy(name))).toEqual([]);
       expect(within(card(id)).queryByRole("link", { name: "Review" })).not.toBeInTheDocument();
     }
   });
@@ -400,7 +402,7 @@ describe("deciding from a card", () => {
   test("a console that cannot write still links to the review, and offers no write", async () => {
     renderApp(<BoardScreen />, { server: fixtureServer(), config: { writesEnabled: false } });
     const specCard = await screen.findByTestId("card-req-spec-review");
-    expect(buttonNames(specCard).filter((name) => !name.startsWith("Copy "))).toEqual([]);
+    expect(buttonNames(specCard).filter((name) => !isCardCopy(name))).toEqual([]);
     expect(within(specCard).getByRole("link", { name: "Review" })).toHaveAttribute(
       "href",
       "/requests/req-spec-review",

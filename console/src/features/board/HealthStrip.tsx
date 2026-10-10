@@ -9,7 +9,7 @@ import { CopyButton } from "@/ui/CopyButton";
 import { Callout } from "@/ui/Feedback";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StallChip } from "@/ui/Time";
-import { TextWithCode } from "@/ui/TextWithCode";
+import { TextWithCode, splitBackticks } from "@/ui/TextWithCode";
 import { toneClasses } from "@/ui/tone";
 
 import { sentenceCase } from "./boardModel";
@@ -66,6 +66,13 @@ export function HealthStrip({ health, live, workerWarning, onRetryWorker }: Heal
           <div className="flex items-center justify-between gap-3">
             <span className="min-w-0">
               <TextWithCode text={sentenceCase(workerWarning)} />
+              {/* The sentence names the command when it can; when it does not, it is still at hand. */}
+              {splitBackticks(workerWarning).some((part) => part.code) ? null : (
+                <>
+                  {" "}
+                  <TextWithCode text={`\`${workerCommand}\``} />
+                </>
+              )}
             </span>
             <Button size="sm" className="shrink-0" onClick={onRetryWorker}>
               Check again

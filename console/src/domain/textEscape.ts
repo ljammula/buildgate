@@ -146,3 +146,13 @@ export function decodeUtf8Escaping(bytes: ArrayLike<number>): string {
   }
   return out;
 }
+
+/**
+ * Whether `text` pastes into a terminal as exactly what it reads as: nothing
+ * in it is drawn as an escape, and it is one line. A copy button is offered
+ * only for such text, so the operator never pastes a character they were not
+ * shown, or a second command behind a line break.
+ */
+export function pastesAsShown(text: string): boolean {
+  return text !== "" && !/[\r\n]/.test(text) && escapeInvisible(text) === text;
+}

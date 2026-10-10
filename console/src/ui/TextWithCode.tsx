@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 
+import { escapeInvisible, pastesAsShown } from "@/domain/textEscape";
 import { cn } from "@/ui/cn";
 import { CopyButton } from "@/ui/CopyButton";
 
@@ -53,10 +54,12 @@ export function TextWithCode({ text, className, copy = true, writeText }: TextWi
               className,
             )}
           >
-            {part.value}
+            {/* Server and agent text: a hidden character is drawn as its escape. */}
+            {escapeInvisible(part.value)}
           </code>
         );
-        if (!copy) return <Fragment key={index}>{code}</Fragment>;
+        // Copied only when the paste is exactly what is read here.
+        if (!copy || !pastesAsShown(part.value)) return <Fragment key={index}>{code}</Fragment>;
         const button = (
           <CopyButton
             size="sm"

@@ -8,6 +8,7 @@
 // expanded with content whose hash matches the listing's, and the hashes sent
 // are those of the bytes received. A collapsed file counts as not shown, and
 // so does everything while the listing is stale (a failed reload).
+import { pastesAsShown } from "@/domain/textEscape";
 import { Check, RefreshCw } from "lucide-react";
 
 import { useApi } from "@/api/ApiProvider";
@@ -147,11 +148,14 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
           </p>
           <div data-testid="oracle-proposed-command" className="flex items-start gap-1">
             <EscapedText text={listing.proposedCommand} className="font-mono text-xs" />
-            <CopyButton
-              size="sm"
-              text={listing.proposedCommand}
-              label="Copy suggested RUN_COMMAND.txt"
-            />
+            {/* Offered only when the paste is exactly the line shown. */}
+            {pastesAsShown(listing.proposedCommand) ? (
+              <CopyButton
+                size="sm"
+                text={listing.proposedCommand}
+                label="Copy suggested RUN_COMMAND.txt"
+              />
+            ) : null}
           </div>
         </div>
       ) : null}

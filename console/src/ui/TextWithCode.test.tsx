@@ -92,3 +92,23 @@ describe("copy buttons", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
+
+test("a code span with a hidden character or a line break is shown escaped and offers no copy", () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  const { container } = render(
+    <p>
+      <TextWithCode
+        text={"run `factoryd retry\u200b req-1` or `a\nrm -rf x`, then `factoryd worker`"}
+        writeText={writeText}
+      />
+    </p>,
+  );
+  const codes = [...container.querySelectorAll("code")].map((c) => c.textContent);
+  // The zero-width space is drawn as its escape, not hidden.
+  expect(codes[0]).toBe("factoryd retry\\u{200B} req-1");
+  expect(codes[2]).toBe("factoryd worker");
+  // Only the span that pastes as it reads has a copy button.
+  expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
+    "Copy factoryd worker",
+  ]);
+});

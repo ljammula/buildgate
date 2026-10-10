@@ -1,4 +1,9 @@
-import { decodeUtf8Escaping, escapeInvisible, segmentEscapes } from "@/domain/textEscape";
+import {
+  decodeUtf8Escaping,
+  escapeInvisible,
+  segmentEscapes,
+  pastesAsShown,
+} from "@/domain/textEscape";
 
 describe("decodeUtf8Escaping", () => {
   const show = (bytes: number[]): string => escapeInvisible(decodeUtf8Escaping(bytes));
@@ -74,4 +79,15 @@ describe("escapeInvisible", () => {
   test("a hidden character inside a word is visible", () => {
     expect(escapeInvisible("go‮test")).toBe(String.raw`go\u{202E}test`);
   });
+});
+
+test("text is offered for copying only when it pastes exactly as it reads", () => {
+  expect(pastesAsShown("factoryd retry req-1")).toBe(true);
+  expect(pastesAsShown("https://github.com/acme/app/pull/7")).toBe(true);
+  expect(pastesAsShown("")).toBe(false);
+  // A zero-width space, a right-to-left override, a line break.
+  expect(pastesAsShown("factoryd retry​ req-1")).toBe(false);
+  expect(pastesAsShown("factoryd ‮retry")).toBe(false);
+  expect(pastesAsShown("a\nrm -rf x")).toBe(false);
+  expect(pastesAsShown("a\rb")).toBe(false);
 });
