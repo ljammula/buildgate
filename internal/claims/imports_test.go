@@ -428,3 +428,25 @@ func TestFindForbiddenImportChainCatchesAViolation(t *testing.T) {
 		t.Fatalf("findForbiddenImportChain flagged a clean graph with no forbidden edge: %v", chain)
 	}
 }
+
+// TestHostcontroltestIsATestsOnlyLeaf: internal/hostcontrol/hostcontroltest
+// holds the fake docker and colima the tests of hostcontrol and of
+// cmd/factoryd share. It must not import hostcontrol (hostcontrol's own
+// in-package tests import it), and no shipped code may import it: the graph
+// is built from non-test files only, so any importer in it is shipped code.
+func TestHostcontroltestIsATestsOnlyLeaf(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const testPkg = "buildgate/internal/hostcontrol/hostcontroltest"
+	requirePackage(t, g, testPkg)
+	for imp := range buildgateImports(g, testPkg) {
+		if imp != "buildgate/internal/daemonheartbeat" {
+			t.Errorf("hostcontroltest imports only daemonheartbeat among buildgate packages: %s imports %s", testPkg, imp)
+		}
+	}
+	for pkg, imports := range g {
+		if imports[testPkg] {
+			t.Errorf("hostcontroltest is imported by tests only: non-test code of %s imports it", pkg)
+		}
+	}
+}

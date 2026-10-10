@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/hostcontrol/hostcontroltest"
 	"bytes"
 	"encoding/json"
 	"os"
@@ -41,17 +42,7 @@ func newProfileFixture(t *testing.T, names ...string) *profileFixture {
 
 func writeFreshHeartbeatWithoutAddress(t *testing.T, dataDir string, pid int, active string) {
 	t.Helper()
-	hb := daemonheartbeat.Heartbeat{
-		PID:       pid,
-		StartedAt: time.Now().Format(time.RFC3339Nano),
-		UpdatedAt: time.Now().Format(time.RFC3339Nano),
-	}
-	if active != "" {
-		hb.ActiveRequests = []string{active}
-	}
-	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dataDir), hb); err != nil {
-		t.Fatal(err)
-	}
+	hostcontroltest.WriteWorkerHeartbeat(t, dataDir, pid, active)
 }
 
 // writeFreshWorkerHeartbeat is a worker's heartbeat: the worker one plus

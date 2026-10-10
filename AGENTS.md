@@ -204,6 +204,7 @@ that name an allow-list.
 | `internal/meter` | The spend meter the OpenShell supervisor calls for every model request (`cmd/factoryd-meter`): ceilings, sliding windows, pricing, per-format usage parsers, reasoning-effort ranking, each sandbox's usage ledger (`Account`, `Ledger`); also the route host pins and the host-side Copilot model listing and token exchange | Allow-list: its own generated `middlewarepb`. Imports no other buildgate package. `internal/claims/imports_test.go` enforces it |
 | `internal/openshell` | The `sandbox.Runtime` over the OpenShell gateway: turns a `sandbox.SandboxRequest` into the gateway's sandbox spec, workload template and network policy, pushes a route's credential, and reads Docker's view of a sandbox's containers. The only package that imports the OpenShell Go SDK | Allow-list: `sandbox`. Reaches the gateway through the SDK's client interface, plus its own `RouteReadiness` interface for the one call the SDK lacks, and Docker through its own `Containers` interface. Its `Live` tests run only with `OPENSHELL_LIVE=1` against a running gateway |
 | `internal/sandbox/sandboxtest` | A worker-like `sandbox.Runtime` for the tests of packages that launch through one | Allow-list: `sandbox`. Imported by tests only |
+| `internal/hostcontrol/hostcontroltest` | The fake `docker` and `colima` on disk, a test CA and a worker heartbeat, for the tests of `hostcontrol` and of the commands that call it | Allow-list: `daemonheartbeat`. Never `hostcontrol`, whose in-package tests import it. Imported by tests only |
 
 Rules for a new boundary:
 
@@ -224,9 +225,9 @@ After splitting or moving a listed function, regenerate the baseline with
 `CLAIMS_UPDATE_COMPLEXITY_BASELINE=1 go test ./internal/claims -run TestFunctionComplexityStaysWithinLimit`.
 Its diff may only remove lines, lower numbers, or rename a moved function.
 
-The tests of `internal/hostcontrol` and `internal/requestdriver` still live in `cmd/factoryd` and call them through exported names.
+The tests of `internal/requestdriver` still live in `cmd/factoryd` and call it through exported names.
 
-Of `internal/hostcontrol`'s, the tests that need only a fake `hostcontrol.Deps` are in the package itself, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`); the ones in `cmd/factoryd` are of a command on the way to it, or need a fixture the command tests share (`colimaFake`, `openShellFixture`) or the real `WorkerServiceState` or `ServeStartToken`.
+`internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `install-service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
 
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as
