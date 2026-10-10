@@ -143,7 +143,7 @@ func doctorMain(dp *deps, args []string) error {
 		return err
 	}
 	if *notifyTest {
-		return doctorNotifyTestMain(*dataDir)
+		return doctorNotifyTest(flags, *dataDir, *configPath)
 	}
 
 	registryProxyImageExplicit := false
