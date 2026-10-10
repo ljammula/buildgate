@@ -192,9 +192,10 @@ on the ticket with kind `corrective`. `-review-corrective-rounds` is one
 budget per ticket build for this round and the review round together; `0`
 disables both. Not eligible: `tests_added` on a committed diff, a review that
 gave no verdict, an unknown check, a repository gate the worker never ran, a
-check whose step a `setup:` command stopped (the build before its first agent
-turn, the verify, a gate: every build of the ticket runs the same commands
-first, so the finding is the operator's), a
+build a `setup:` command stopped before its first agent turn (decided only by
+the factory's own records: the meter counted no token for the build and the
+run's result is the commit it started from; a resumed run, and a setup failure
+in the verify or a gate, are sorted as the failed check they are), a
 halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
@@ -622,7 +623,7 @@ workspace; the command of the step follows only when all passed:
 |---|---|
 | Runs before | The baseline verify; the build (by the build script: once before the first agent turn, and again before each round's fast check and verify, output in `setup.log`, each command with a 10-minute limit); canonical verify; the full suite; each named and repo gate; the oracle canary; the reruns after an oracle commit |
 | Never runs in | Review sandboxes (they hold a model route); drafting and planning jobs |
-| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and the run reads `build did not start; setup command failed: "<command>"`. A run quarantined by a check whose step a setup command stopped is sorted for the operator and gets no corrective build, on a first build and on a corrective one. In the build a setup command gets 10 minutes |
+| A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and its log names the command. When the meter counted no token for the build and nothing was committed, the run reads `the build stopped before its first agent turn: ...`, is sorted for the operator and gets no corrective build, on a first build and on a corrective one; the exit status and the log line alone decide nothing. In the build a setup command gets 10 minutes |
 | Cost | It runs once per sandbox: a run with N gates runs it at least N+1 more times. Nothing is cached between sandboxes |
 | Network | Whatever the step already has: none for verify and gates beyond the registry proxy and Compose sidecars; in the build, the model route. `setup:` is given to no planner or reviewer; a setup command that fails inside a build round is named, with its output, to that build's own agent |
 | Background processes | A setup command that times out is stopped with everything in its process group. One that returns leaves what it started in the background running for that step. Do not rely on that for services: declare them as Compose services, which every step that needs them gets |
