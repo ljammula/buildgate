@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"buildgate/internal/requestsubmit"
 )
 
 // commandFlagSet returns the real *flag.FlagSet for a `factoryd <cmd>`
@@ -216,4 +218,16 @@ func sortedKeys(m map[string]commandFlagSet) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// USAGE.md shows the prompt an AGENTS.md refusal prints, so an operator can
+// copy it before they ever hit the refusal; it is the constant, word for word.
+func TestUsageShowsTheAgentsFilePromptTheRefusalPrints(t *testing.T) {
+	usage, err := os.ReadFile("../../USAGE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(usage), "\n"+requestsubmit.AgentsFilePrompt+"\n") {
+		t.Errorf("USAGE.md does not hold the AGENTS.md prompt on a line of its own:\n%s", requestsubmit.AgentsFilePrompt)
+	}
 }

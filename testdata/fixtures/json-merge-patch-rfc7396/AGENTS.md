@@ -1,11 +1,16 @@
 # AGENTS.md
 
-A Go module with one package: RFC 7396 JSON Merge Patch in `merge.go`. No
-dependencies outside the standard library.
+A Go module with one package, `mergepatch`, for RFC 7396 JSON Merge Patch.
+`merge.go` declares `MergePatch`, which panics until it is implemented. No
+dependencies outside the standard library, and no README.
 
-- Setup: none. The Go toolchain named in `go.mod` is all it needs.
+## Commands
+
+- Setup: none beyond Go. `go.mod` names the version.
 - Build: `go build ./...`
+- Vet: `go vet ./...`
 - Test: `go test .`
-- Lint: `go vet ./...`
+- Reference oracle: `go test ./verify/... -run TestRFC7396MergePatchOracle -v`
+  (`.factory.yml`). It fails while `MergePatch` is unimplemented.
 
-`verify/` holds the reference oracle test. Do not edit it.
+Do not edit `verify/`: it is the oracle an implementation is judged by.

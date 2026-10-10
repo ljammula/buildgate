@@ -129,7 +129,7 @@ or config key skips this. The refusal carries a prompt for your own coding
 agent to write the file; review what it writes, then commit it:
 
 ```text
-Write AGENTS.md at the root of this repository for coding agents: its setup, test, build and lint commands (run each one and keep only what works), its layout, and the conventions a change must follow. Keep it short and exact.
+Write AGENTS.md at the root of this repository for coding agents. First read README.md, the contributing guide if there is one, and the build files (Makefile, package manifest, CI workflows). Then give its setup, test, build and lint commands (run each one and keep only what works), its layout, and the rules a change must follow, taking each from those files or from what you ran and guessing none. Run the repository's own formatter or linter over the file. Keep it short and exact.
 ```
 
 Nothing needs starting by hand: `quickstart` (like `submit`) starts Temporal,
