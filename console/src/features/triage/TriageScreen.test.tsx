@@ -347,7 +347,7 @@ test("the focused request's facts are one meta line, and the text under review s
   });
 
   const meta = await screen.findByTestId("triage-meta");
-  expect(meta).toHaveTextContent("app · 478.3k tokens · 1 prior rejection");
+  expect(meta).toHaveTextContent("app · 478.3k tokens · 1 earlier change request");
   expect(screen.queryByText(/Usage so far/)).not.toBeInTheDocument();
   expect(screen.queryByText(/^Project:/)).not.toBeInTheDocument();
   const artifact = await screen.findByTestId("triage-artifact-content");

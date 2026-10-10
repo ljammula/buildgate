@@ -42,7 +42,7 @@ describe("stallChipDisplay", () => {
   test("stalled chip when stalled", () => {
     expect(stallChipDisplay({ stalled: true, waitingReason: null })).toEqual({
       kind: "stalled",
-      label: "stalled",
+      label: "Stalled",
       tone: "danger",
       icon: "triangle_alert",
     });
@@ -53,7 +53,7 @@ describe("stallChipDisplay", () => {
       stallChipDisplay({ stalled: false, waitingReason: "behind 1 run(s) on foo/bar" }),
     ).toEqual({
       kind: "waiting",
-      label: "waiting: behind 1 run(s) on foo/bar",
+      label: "Waiting: behind 1 run(s) on foo/bar",
       tone: "warning",
       icon: "hourglass",
     });

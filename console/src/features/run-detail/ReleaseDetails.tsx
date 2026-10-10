@@ -29,8 +29,8 @@ export function ReleaseDetails({ release }: { release: ReleaseView }) {
             <>
               <DescriptionItem label="Decision">
                 <Badge tone="danger">
-                  release decision could not be recorded: {recordingFailure.error} -- fix and
-                  `factoryd retry`
+                  release decision could not be recorded: {recordingFailure.error}; fix, then run{" "}
+                  <code className="font-mono">factoryd retry</code>
                 </Badge>
               </DescriptionItem>
               <DescriptionItem label="Failed at">

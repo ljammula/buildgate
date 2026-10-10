@@ -155,7 +155,7 @@ export function AppShell({ children }: AppShellProps) {
               title={
                 canWrite
                   ? "This console can approve, reject and start work."
-                  : "This server accepts no writes from this console. Open the link printed by `factoryd serve`, or use the CLI."
+                  : "This server accepts no writes from this console. Open the link printed by factoryd serve, or use the CLI."
               }
             >
               <span

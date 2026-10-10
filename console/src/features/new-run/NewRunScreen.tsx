@@ -57,7 +57,7 @@ export function NewRunScreen() {
           <CardBody className="p-0">
             <form onSubmit={submit} noValidate className="flex flex-col">
               <div className="border-b border-border px-4 py-3">
-                <h2 className="text-sm font-semibold text-fg">Start a bounded run</h2>
+                <h2 className="text-sm font-semibold text-fg">Run one ticket</h2>
                 <p className="mt-1 text-sm text-fg-muted">
                   Provide the ticket and the repository execution locations. The run will appear in
                   the detail view after factoryd accepts it.

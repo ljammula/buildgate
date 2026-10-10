@@ -120,8 +120,8 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
     <div data-testid="oracle-review-panel" className="flex flex-col items-stretch gap-3">
       {listingQuery.isError ? (
         <StaleWarning error={listingQuery.error} detail="callout" testId="oracle-stale-listing">
-          The files below are the last listing that loaded and may be out of date -- Approve is
-          disabled until Reload files succeeds.
+          The files below are the last listing that loaded and may be out of date: Approve is
+          disabled until Reload oracle files succeeds.
         </StaleWarning>
       ) : null}
       {listing.draftStatus !== "" ? (
@@ -129,7 +129,7 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
           <EscapedText
             className="text-sm"
             text={`Oracle draft: ${oracleDraftStatusLabel(listing.draftStatus)}${
-              listing.draftDetail === "" ? "" : ` -- ${listing.draftDetail}`
+              listing.draftDetail === "" ? "" : `: ${listing.draftDetail}`
             }`}
           />
         </div>
@@ -142,7 +142,7 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
       {listing.proposedCommand !== "" ? (
         <div className="flex flex-col gap-1">
           <p className="text-fg-muted text-xs">
-            Suggested RUN_COMMAND.txt (a suggestion only -- not written to the file):
+            Suggested RUN_COMMAND.txt (a suggestion only; not written to the file):
           </p>
           <div data-testid="oracle-proposed-command">
             <EscapedText text={listing.proposedCommand} className="font-mono text-xs" />
@@ -161,12 +161,12 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
           <p data-testid="oracle-review-hint" className="text-sm">
             Before approving: check the errors.Is/sentinel assertions (never against a second,
             freshly-constructed error) and whether the oracle reaches beyond its own target
-            file/package -- a diff_scope quarantine naming a file only touched to satisfy this
-            oracle means the oracle may be wrong, not the build.
+            file/package. A diff_scope quarantine naming a file only touched to satisfy this oracle
+            means the oracle may be wrong, not the build.
           </p>
           <div>
             <h3 className="text-sm font-semibold">
-              {`Files (${shown.size} of ${listing.files.length} shown) -- open every one to enable Approve`}
+              {`Files (${shown.size} of ${listing.files.length} shown): open every one to enable Approve`}
             </h3>
             {listing.files.map((file) => (
               <OracleFileTile
@@ -208,7 +208,7 @@ export function OracleReviewPanel({ request, canAct, onApprove }: OracleReviewPa
         </Button>
         <Button disabled={listingQuery.isFetching} onClick={() => void reload()}>
           <RefreshCw aria-hidden="true" />
-          Reload files
+          Reload oracle files
         </Button>
         {unseen > 0 ? (
           <span data-testid="oracle-unseen-hint" className="text-sm">

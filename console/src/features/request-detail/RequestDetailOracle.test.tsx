@@ -50,7 +50,7 @@ const approve = () => screen.getByRole("button", { name: /^Approve/ });
 
 async function ready() {
   await screen.findByRole("heading", { level: 1, name: "T" });
-  await screen.findByRole("button", { name: "Reload files" });
+  await screen.findByRole("button", { name: "Reload oracle files" });
 }
 
 describe("oracle_review", () => {
@@ -196,7 +196,7 @@ describe("oracle_review", () => {
     );
     await ready();
     expect(
-      screen.getByText("Oracle draft: Drafting failed -- model returned no manifest"),
+      screen.getByText("Oracle draft: Drafting failed: model returned no manifest"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("oracle-proposed-command")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
@@ -225,7 +225,7 @@ describe("oracle_drafting", () => {
 
     expect(screen.getByTestId("oracle-drafting-section")).toBeInTheDocument();
     expect(screen.getByText(/Drafting acceptance-test oracles/)).toBeInTheDocument();
-    expect(screen.getByText("Previous pass: Drafting failed -- timeout")).toBeInTheDocument();
+    expect(screen.getByText("Previous pass: Drafting failed: timeout")).toBeInTheDocument();
     expect(screen.queryByTestId("oracle-review-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
   });

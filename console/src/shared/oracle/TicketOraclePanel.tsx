@@ -121,8 +121,8 @@ export function TicketOraclePanel({ request, onChanged }: TicketOraclePanelProps
       </p>
       {failure !== undefined ? (
         <StaleWarning error={failure} detail="callout" testId="oracle-stale-listing">
-          The files below are the last listing that loaded and may be out of date -- Approve is
-          disabled until Reload files succeeds.
+          The files below are the last listing that loaded and may be out of date: Approve is
+          disabled until Reload oracle files succeeds.
         </StaleWarning>
       ) : null}
       {withProblems.map((g) => (

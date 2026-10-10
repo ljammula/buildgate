@@ -71,7 +71,7 @@ test("run list row shows a waiting chip for a queued run", async () => {
   });
   expect(await screen.findByTestId("waiting-chip")).toBeInTheDocument();
   expect(screen.queryByTestId("stalled-chip")).not.toBeInTheDocument();
-  expect(screen.getByText(/waiting: behind 1 run\(s\)/)).toBeInTheDocument();
+  expect(screen.getByText(/Waiting: behind 1 run\(s\)/)).toBeInTheDocument();
 });
 
 test("run list row shows current stage and last activity", async () => {

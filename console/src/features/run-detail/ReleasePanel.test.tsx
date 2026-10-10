@@ -158,6 +158,6 @@ test("a failed release fetch is reported, not shown as allowed", async () => {
 
   // GET /runs/{id}/release is start-token-gated: a 403 carries the start-token guidance.
   expect(await screen.findByText("Not authorized")).toBeInTheDocument();
-  expect(screen.getByText(/factoryd serve/)).toBeInTheDocument();
+  expect(screen.getByText(/the token changes every restart/)).toBeInTheDocument();
   expect(screen.queryByText("Allowed")).not.toBeInTheDocument();
 });

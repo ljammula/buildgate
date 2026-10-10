@@ -11,14 +11,14 @@ describe("StallChip", () => {
   test("renders the stalled chip when Run.stalled is true", () => {
     render(<StallChip run={{ stalled: true, waitingReason: null }} />);
     expect(screen.getByTestId("stalled-chip")).toHaveAttribute("data-tone", "danger");
-    expect(screen.getByText("stalled")).toBeInTheDocument();
+    expect(screen.getByText("Stalled")).toBeInTheDocument();
     expect(screen.queryByTestId("waiting-chip")).not.toBeInTheDocument();
   });
 
   test("renders the waiting chip, not stalled, when waitingReason is set and Run.stalled is false", () => {
     render(<StallChip run={{ stalled: false, waitingReason: "behind 1 run(s) on foo/bar" }} />);
     expect(screen.getByTestId("waiting-chip")).toHaveAttribute("data-tone", "warning");
-    expect(screen.getByText("waiting: behind 1 run(s) on foo/bar")).toBeInTheDocument();
+    expect(screen.getByText("Waiting: behind 1 run(s) on foo/bar")).toBeInTheDocument();
     expect(screen.queryByTestId("stalled-chip")).not.toBeInTheDocument();
   });
 

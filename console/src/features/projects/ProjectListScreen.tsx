@@ -25,7 +25,7 @@ import { ProjectRowDetails } from "./ProjectRowDetails";
 /**
  * Every project already run against (derived from run history), so another
  * run does not mean retyping its paths. A row opens the new-run form
- * pre-filled through the query string (see NewRunScreen); "Custom run" opens
+ * pre-filled through the query string (see NewRunScreen); "New run" opens
  * it blank, for a project never run before.
  */
 export function ProjectListScreen() {
@@ -40,7 +40,7 @@ export function ProjectListScreen() {
           <Button asChild variant="primary" size="sm">
             <Link to={newRunPath()}>
               <Plus aria-hidden="true" />
-              Custom run
+              New run
             </Link>
           </Button>
         }

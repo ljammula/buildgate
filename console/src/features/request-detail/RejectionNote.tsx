@@ -32,14 +32,14 @@ function AnchoredChangeBody({ change }: { readonly change: AnchoredChange }) {
   if (change.movedTo !== null) {
     return (
       <p className="text-tone-warning text-xs">
-        {`Unchanged since you rejected: the same text is now number ${change.movedTo}.`}
+        {`Unchanged since you asked for changes: the same text is now number ${change.movedTo}.`}
       </p>
     );
   }
   if (change.before === change.after) {
     return (
       <p className="text-tone-warning text-xs">
-        Unchanged since you rejected: the text is the same.
+        Unchanged since you asked for changes: the text is the same.
       </p>
     );
   }

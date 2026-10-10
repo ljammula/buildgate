@@ -423,7 +423,7 @@ test("send back defaults to plan and sends the target", async () => {
       ],
     },
   );
-  expect(await screen.findByRole("radio", { name: "Back to planning" })).toBeChecked();
+  expect(await screen.findByRole("radio", { name: "To planning" })).toBeChecked();
   await userEvent.type(screen.getByLabelText("Reason"), "diff_scope: allow the contract test");
   await userEvent.click(screen.getByRole("button", { name: "Send back" }));
   await waitFor(() => {
@@ -451,8 +451,8 @@ test("Send back defaults to spec when the server disallows the plan target (can_
       ],
     },
   );
-  expect(await screen.findByRole("radio", { name: "Back to planning" })).toBeDisabled();
-  expect(screen.getByRole("radio", { name: "Back to spec drafting" })).toBeChecked();
+  expect(await screen.findByRole("radio", { name: "To planning" })).toBeDisabled();
+  expect(screen.getByRole("radio", { name: "To spec" })).toBeChecked();
   await userEvent.type(screen.getByLabelText("Reason"), "reword");
   await userEvent.click(screen.getByRole("button", { name: "Send back" }));
   await waitFor(() => {
@@ -469,8 +469,8 @@ test("a spec_conformity quarantine starts on spec even when plan is allowed", as
     quarantine_check: "spec_conformity",
   });
   renderApp(<Host request={request} render={(props) => <SendBackDialog {...props} />} />);
-  expect(await screen.findByRole("radio", { name: "Back to spec drafting" })).toBeChecked();
-  expect(screen.getByRole("radio", { name: "Back to planning" })).toBeEnabled();
+  expect(await screen.findByRole("radio", { name: "To spec" })).toBeChecked();
+  expect(screen.getByRole("radio", { name: "To planning" })).toBeEnabled();
 });
 
 function lost(step: string): RequestSummary {
@@ -492,7 +492,7 @@ test.each([
     "round",
     "spec_drafting",
     "Rerun this step",
-    "Run the lost Drafting spec step again.",
+    "Run the lost Spec drafting step again.",
     "Rerun step",
   ],
 ])("resume from=%s on a lost %s step", async (from, step, title, body, confirm) => {

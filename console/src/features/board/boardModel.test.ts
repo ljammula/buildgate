@@ -24,7 +24,7 @@ describe("queueRunWarning", () => {
       now,
     );
     expect(text).toBe(
-      "worker is not running (last heartbeat 5m ago) -- requests won't advance; start `factoryd worker`",
+      "worker is not running (last heartbeat 5m ago): requests won't advance; start `factoryd worker`",
     );
   });
 
@@ -39,7 +39,7 @@ describe("queueRunWarning", () => {
 
   test("stale without a parseable heartbeat has no age", () => {
     expect(queueRunWarning({ state: "stale", lastHeartbeat: "" }, [], now)).toBe(
-      "worker is not running -- requests won't advance; start `factoryd worker`",
+      "worker is not running: requests won't advance; start `factoryd worker`",
     );
   });
 

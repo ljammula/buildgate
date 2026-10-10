@@ -48,7 +48,7 @@ export function TriageDetail({
     request.ticketCount > 0 ? `Ticket ${request.ticketIndex} / ${request.ticketCount}` : "",
     cost === null ? "" : formatUsageFigure(cost),
     request.rejections.length > 0
-      ? `${request.rejections.length} prior ${request.rejections.length === 1 ? "rejection" : "rejections"}`
+      ? `${request.rejections.length} earlier ${request.rejections.length === 1 ? "change request" : "change requests"}`
       : "",
   ].filter((part) => part !== "");
   const content = detail === null ? "" : artifactContent(detail);

@@ -48,7 +48,7 @@ test("Edit disables Approve and Request changes while the editor is open, and sa
   expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
   expect(
     screen.getByText(
-      "Approve/Request changes are disabled while an edit is open -- Save or Cancel it first.",
+      "Approve/Request changes are disabled while an edit is open. Save or Cancel it first.",
     ),
   ).toBeInTheDocument();
 
@@ -159,7 +159,7 @@ test("the approve confirm dialog uses the server-supplied approve_next_state ins
   );
   await ready();
   await userEvent.click(approveButton());
-  expect(await screen.findByText("Spec review → Drafting oracles")).toBeInTheDocument();
+  expect(await screen.findByText("Spec review → Oracle drafting")).toBeInTheDocument();
 });
 
 test("a 409 conflict on saving a spec edit fetches and diffs the current server content, and 'Discard mine and reload' drops the unsaved edit", async () => {

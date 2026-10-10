@@ -232,7 +232,7 @@ await say("Sent back for a redraft, with the note on record");
 
 // Plan review.
 await visit("/requests/req-plan-review");
-await scrollTo(main().getByRole("region", { name: "Changes since you rejected" }));
+await scrollTo(main().getByRole("region", { name: "Changes since you asked for changes" }));
 await say("A redraft opens on what changed: your note, against its section", 3400);
 await say("And whether the drafter was given the note", 2600);
 await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
@@ -275,7 +275,7 @@ await visit("/requests/req-halted");
 await say("Halted: what stopped it and the command that resumes it", 3200);
 
 await visit("/ops");
-await say("Operations: queue, daemon and kill-switch state per project", 3000);
+await say("Ops: queue, daemon and kill-switch state per project", 3000);
 await page.getByRole("button", { name: /^Theme:/ }).click();
 await pause(500);
 await page.getByRole("button", { name: /^Theme:/ }).click();

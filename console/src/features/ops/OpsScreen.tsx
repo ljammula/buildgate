@@ -40,8 +40,9 @@ export function OpsScreen() {
         {startTokenFailure ? (
           <Callout tone="danger">
             One or more projects&apos; stats/release could not be read (401/403). Open the console
-            link `factoryd serve` printed in its own log/terminal output just now (ends in `#t=...`)
-            -- the start token changes every restart.
+            link <code className="font-mono">factoryd serve</code> printed in its own log/terminal
+            output just now (ends in <code className="font-mono">#t=...</code>). The start token
+            changes every restart.
           </Callout>
         ) : null}
         <div className="flex flex-col gap-3">
@@ -56,7 +57,7 @@ export function OpsScreen() {
   return (
     <>
       <PageHeader
-        title="Operations"
+        title="Ops"
         actions={
           <IconButton label="Refresh" onClick={() => void refresh()}>
             <RefreshCw aria-hidden="true" />

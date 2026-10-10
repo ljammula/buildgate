@@ -55,7 +55,7 @@ test("empty project list still offers a custom run", async () => {
 
   expect(await screen.findByText(/No projects yet/)).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("link", { name: "Custom run" }));
+  await userEvent.click(screen.getByRole("link", { name: "New run" }));
 
   expect(await screen.findByText("Navigated to /app/runs/new")).toBeInTheDocument();
   expect(location()).toBe("/app/runs/new");

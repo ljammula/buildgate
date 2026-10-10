@@ -55,7 +55,7 @@ export function Timeline({ run, events, error }: TimelineProps) {
       {strip.lastActivity !== null && stalled ? (
         <Callout tone="danger" data-testid="stall-explanation">
           Stalled: nothing has been reported for {strip.lastActivity}. The worker may have stopped;
-          check that `factoryd worker` is running.
+          check that <code className="font-mono">factoryd worker</code> is running.
         </Callout>
       ) : null}
       {strip.latest !== null ? (

@@ -127,7 +127,7 @@ export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardPr
               <>
                 <ArrowRight aria-hidden="true" className="text-fg-subtle size-3" />
                 <CompactId value={run.resultSha} max={14} label="result SHA" />
-                {run.committedByFactoryd ? <Badge>committed by factoryd</Badge> : null}
+                {run.committedByFactoryd ? <Badge>Committed by factoryd</Badge> : null}
               </>
             )}
           </div>

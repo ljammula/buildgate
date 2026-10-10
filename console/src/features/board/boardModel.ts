@@ -31,12 +31,12 @@ export function queueRunWarning(
   if (status.state === "stale") {
     const age = heartbeatAge(status.lastHeartbeat, now);
     const suffix = age === null ? "" : ` (last heartbeat ${age} ago)`;
-    return `worker is not running${suffix} -- requests won't advance; start \`factoryd worker\``;
+    return `worker is not running${suffix}: requests won't advance; start \`factoryd worker\``;
   }
   if (status.state === "absent") {
     if (!requests.some((r) => workerJobStates.has(r.state))) return null;
     return (
-      "no worker has run against this data dir -- requests won't advance; " +
+      "no worker has run against this data dir: requests won't advance; " +
       "start `factoryd worker`"
     );
   }

@@ -54,7 +54,10 @@ test("shows a spinner while loading, then the not-found error with the way back"
 
   renderApp(<RequestDetailScreen />, { path: "/requests/missing", pattern: "/requests/:id" });
   expect(await screen.findByRole("alert")).toHaveTextContent("Not found");
-  expect(screen.getByRole("link", { name: "Back to board" })).toHaveAttribute("href", "/");
+  expect(screen.getByRole("link", { name: "Back to Mission Control" })).toHaveAttribute(
+    "href",
+    "/",
+  );
   expect(screen.getByRole("heading", { level: 1, name: "Request detail" })).toBeInTheDocument();
 });
 
@@ -130,7 +133,7 @@ test("a ticket card shows a waiting chip for its queued run", async () => {
   );
   await loaded();
   expect(await screen.findByTestId("waiting-chip")).toHaveTextContent(
-    "waiting: behind 1 run(s) on foo/bar",
+    "Waiting: behind 1 run(s) on foo/bar",
   );
   expect(screen.queryByTestId("stalled-chip")).not.toBeInTheDocument();
 });
@@ -300,7 +303,7 @@ test("shows the rejection history when rejections are present", async () => {
     local.getHours(),
   )}:${two(local.getMinutes())}:00`;
 
-  await userEvent.click(screen.getByRole("button", { name: "Rejection history (1)" }));
+  await userEvent.click(screen.getByRole("button", { name: "Requested changes (1)" }));
 
   const history = screen.getByTestId("rejection-history");
   expect(
@@ -328,7 +331,7 @@ test("a send-back note reads as sent back, with the stage it feeds", async () =>
     }),
   );
   await loaded("T");
-  await userEvent.click(screen.getByRole("button", { name: "Rejection history (1)" }));
+  await userEvent.click(screen.getByRole("button", { name: "Requested changes (1)" }));
   expect(
     screen.getByText("Sent back by bob at x (from quarantined, for plan_review)"),
   ).toBeInTheDocument();
@@ -519,7 +522,10 @@ test("the header shows the state, the running job and how long the request has w
 test("a back link returns to the board", async () => {
   openRequest(requestWire({ state: "done", title: "T" }));
   await loaded("T");
-  expect(screen.getByRole("link", { name: "Back to board" })).toHaveAttribute("href", "/");
+  expect(screen.getByRole("link", { name: "Back to Mission Control" })).toHaveAttribute(
+    "href",
+    "/",
+  );
 });
 
 test("a request in pr_review shows the server's next step: what its pull request waits on", async () => {

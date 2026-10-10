@@ -139,7 +139,7 @@ describe("leaving with unsaved text", () => {
     const view = await openEditor({ current: specReview() });
     await typeIn("unsaved");
 
-    await userEvent.click(screen.getByRole("link", { name: "Back to board" }));
+    await userEvent.click(screen.getByRole("link", { name: "Back to Mission Control" }));
     const dialog = await screen.findByRole("dialog", { name: "Leave this page?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Stay and keep editing" }));
     await waitFor(() => {
@@ -148,7 +148,7 @@ describe("leaving with unsaved text", () => {
     expect(editor()).toHaveValue("unsaved");
     expect(view.location()).toBe("/requests/req-1");
 
-    await userEvent.click(screen.getByRole("link", { name: "Back to board" }));
+    await userEvent.click(screen.getByRole("link", { name: "Back to Mission Control" }));
     await userEvent.click(
       within(await screen.findByRole("dialog")).getByRole("button", { name: "Leave and discard" }),
     );
@@ -159,7 +159,7 @@ describe("leaving with unsaved text", () => {
 
   test("a link does not ask when nothing was changed", async () => {
     const view = await openEditor({ current: specReview() });
-    await userEvent.click(screen.getByRole("link", { name: "Back to board" }));
+    await userEvent.click(screen.getByRole("link", { name: "Back to Mission Control" }));
     await waitFor(() => {
       expect(view.location()).toBe("/");
     });

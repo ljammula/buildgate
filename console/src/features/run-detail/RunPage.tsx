@@ -71,7 +71,7 @@ export function RunPage({ id }: { id: string }) {
       <PageBody>
         {query.isError ? (
           <Callout tone="warning">
-            Showing the last loaded run -- refresh failed. The page may be stale.
+            Showing the last loaded run. The refresh failed, so the page may be stale.
           </Callout>
         ) : null}
         <Tabs
@@ -85,9 +85,9 @@ export function RunPage({ id }: { id: string }) {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             {run.diffAvailable || view === "diff" ? (
-              <TabsTrigger value="diff">View diff</TabsTrigger>
+              <TabsTrigger value="diff">Diff</TabsTrigger>
             ) : null}
-            <TabsTrigger value="release">View release decision</TabsTrigger>
+            <TabsTrigger value="release">Release</TabsTrigger>
           </TabsList>
           <TabsContent value="overview">
             <RunOverview

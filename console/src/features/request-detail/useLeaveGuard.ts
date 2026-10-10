@@ -25,7 +25,7 @@ function guardState(base: unknown): Record<string, unknown> {
  * under `BrowserRouter`, which has no navigation blockers (`useBlocker` needs
  * a data router), so each way out is caught where it happens:
  * - closing or reloading the tab: `beforeunload`;
- * - an in-app link (Back to board, the sidebar): a capture-phase click listener
+ * - an in-app link (Back to Mission Control, the sidebar): a capture-phase click listener
  *   holds the navigation and replays it on Leave;
  * - the browser's Back button: a guard history entry sits above the page's own,
  *   so Back lands on the page again and the question is asked; Leave then goes

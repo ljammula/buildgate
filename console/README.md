@@ -171,12 +171,13 @@ quiet surfaces, colour reserved for state.
 
 ### Where a change goes
 
-| Change                 | Touch                                                                                                 |
-| ---------------------- | ----------------------------------------------------------------------------------------------------- |
-| A theme                | One block of ramp values in `app/styles.css` plus one entry in the theme list of `app/tokens.test.ts` |
-| A status icon          | One entry in `ui/statusIcons` and its name in `domain/status.ts`'s `StatusIcon`                       |
-| A state's icon or tone | `domain/status.ts`                                                                                    |
-| A board group          | Its rule in `domain/boardColumns.ts` (match order, draw order, one-state flag)                        |
+| Change                           | Touch                                                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| A theme                          | One block of ramp values in `app/styles.css` plus one entry in the theme list of `app/tokens.test.ts` |
+| A status icon                    | One entry in `ui/statusIcons` and its name in `domain/status.ts`'s `StatusIcon`                       |
+| A state's icon or tone           | `domain/status.ts`                                                                                    |
+| A board group                    | Its rule in `domain/boardColumns.ts` (match order, draw order, one-state flag)                        |
+| A state's label or a verb's word | `domain/status.ts` (`REQUEST_STATES`, `REQUEST_VERBS`); every screen reads them from there            |
 
 ## Fixtures shared with Go
 

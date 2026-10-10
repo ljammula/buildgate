@@ -1,6 +1,7 @@
 // What one card of the Mission Control board says, per column. Pure: every
 // fact is read from the request list's own record, never fetched per card.
 import type { BoardColumn } from "@/domain/boardColumns";
+import { stageLabels } from "@/domain/runDetail";
 import { digestText } from "@/domain/digest";
 import { formatAgeCompact } from "@/domain/elapsed";
 import {
@@ -128,9 +129,11 @@ function buildingLines(request: RequestSummary): string[] {
       : build.maxRounds > 0
         ? `Round ${build.round} of ${build.maxRounds}`
         : `Round ${build.round}`;
-  return [`Ticket ${build.ticket} of ${build.tickets}`, round, build.stage].filter(
-    (line) => line !== "",
-  );
+  return [
+    `Ticket ${build.ticket} of ${build.tickets}`,
+    round,
+    (Object.hasOwn(stageLabels, build.stage) ? stageLabels[build.stage] : undefined) ?? build.stage,
+  ].filter((line) => line !== "");
 }
 
 function reviewRoundsLine(prs: readonly CardPullRequest[]): string[] {
