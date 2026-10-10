@@ -456,15 +456,24 @@ requires a new contract review and an updated machine-checkable test.
   again after it (every path outside `.git` and the session folder, tracked,
   untracked and ignored: kind, permission bits, and the SHA-256 of a file's
   content or a link's target), and keeps the reply only when the two records
-  are equal. Otherwise it removes the reply, puts the tree back where it holds
-  a copy, and runs the build's own setup, verify and oracle again on the tree
-  as it then is; if they fail the build ends as not passed, its last round
-  recorded as failed, and no further round runs, so one build runs the turn at
-  most once. A tree too large to record is not given the turn. This is the
-  build script's own claim inside the sandbox, where it and the agent are one
-  user: the host commits the worktree only after the build step has returned,
-  and its own verify, gates and reviews judge that commit exactly as for a
-  build with no notes turn. The factory copies the reply out of the
+  are equal. Otherwise it removes the reply and puts back what it can recreate
+  exactly (a changed file it holds no intact copy of is left as it stands,
+  never deleted); a third record equal to the first leaves the build passed,
+  and only a tree that cannot be shown equal has the build's own setup,
+  verify and oracle run on it again: if they fail the build ends as not
+  passed, its last round recorded as failed, and no further round runs, so one
+  build runs the turn at most once. A tree too large to record is not given
+  the turn, and a launch lost during the turn is resumed with no further round
+  or turn and its tree checked again. What the records show is the tree at the
+  moment of the last one, no more: a process the turn left running can write
+  afterwards, exactly as after any build round. This is the build script's
+  own claim inside the sandbox, where it and the agent are one user, and the
+  host relies on none of it: it commits the worktree only after the build step
+  has returned, and its own verify, gates and reviews judge that commit
+  exactly as for a build with no notes turn. The notes file exists after
+  either turn only if the script wrote it from the turn's reply, redacted and
+  cut: whatever is at its path is removed before the turn and after it. The
+  factory copies the reply out of the
   session folder before removing it, splits it into one-line items cleaned and
   capped like every other value, and stores them in the handoff apart from its
   own facts and after them. They are labelled the agent's view, never decide a
