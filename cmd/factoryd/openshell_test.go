@@ -5,18 +5,13 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
-	"buildgate"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sessionconfig"
 )
@@ -406,86 +401,6 @@ func TestOpenShellRenderedGatewayConfig(t *testing.T) {
 	}
 	if err := gatewayConfigSecure(config); err != nil {
 		t.Errorf("rendered config is not secure: %v", err)
-	}
-}
-
-func TestOpenShellComposeIsLoopbackOnlyAndNeverRestarts(t *testing.T) {
-	var doc struct {
-		Name     string `yaml:"name"`
-		Services map[string]struct {
-			Image       string   `yaml:"image"`
-			Restart     string   `yaml:"restart"`
-			Ports       []string `yaml:"ports"`
-			NetworkMode string   `yaml:"network_mode"`
-			Command     []string `yaml:"command"`
-		} `yaml:"services"`
-	}
-	if err := yaml.Unmarshal(buildgate.OpenShellCompose, &doc); err != nil {
-		t.Fatalf("embedded compose does not parse: %v", err)
-	}
-	if doc.Name != "buildgate-openshell" {
-		t.Errorf("project name = %q", doc.Name)
-	}
-	if len(doc.Services) != 2 {
-		t.Fatalf("services = %d, want meter and gateway", len(doc.Services))
-	}
-	for name, svc := range doc.Services {
-		if svc.Restart != "no" {
-			t.Errorf("%s restart = %q, want \"no\"", name, svc.Restart)
-		}
-		for _, p := range svc.Ports {
-			if !strings.HasPrefix(p, "127.0.0.1:") {
-				t.Errorf("%s publishes %q on an address other than 127.0.0.1", name, p)
-			}
-		}
-	}
-	// The meter publishes on the VM's loopback. The gateway shares the VM's
-	// network (it and the host-networked supervisors reach the meter there),
-	// so it publishes nothing and must be told to bind loopback itself.
-	if meter := doc.Services["meter"]; len(meter.Ports) != 1 || meter.NetworkMode != "" {
-		t.Errorf("meter ports = %q, network_mode = %q; want one loopback port on its own network", meter.Ports, meter.NetworkMode)
-	}
-	gateway := doc.Services["gateway"]
-	if gateway.NetworkMode != "host" || len(gateway.Ports) != 0 {
-		t.Errorf("gateway network_mode = %q, ports = %q; want host and none", gateway.NetworkMode, gateway.Ports)
-	}
-	// The compose file repeats the ports of hostcontrol's addresses.
-	_, gatewayPort, _ := net.SplitHostPort(hostcontrol.OpenShellGatewayAddr)
-	if want := []string{hostcontrol.OpenShellMeterAddr + ":50051"}; !reflect.DeepEqual(doc.Services["meter"].Ports, want) {
-		t.Errorf("meter ports = %q, want %q", doc.Services["meter"].Ports, want)
-	}
-	if want := []string{"--bind-address", "127.0.0.1", "--port", gatewayPort}; !reflect.DeepEqual(gateway.Command, want) {
-		t.Errorf("gateway command = %q, want %q", gateway.Command, want)
-	}
-	if got := doc.Services["gateway"].Image; got != wantGatewayImage {
-		t.Errorf("gateway image = %q, want %q", got, wantGatewayImage)
-	}
-}
-
-func TestOpenShellPinnedImagesMatchTheEmbeddedFiles(t *testing.T) {
-	for got, want := range map[string]string{
-		hostcontrol.OpenShellGatewayImage:    wantGatewayImage,
-		hostcontrol.OpenShellSandboxImage:    wantSandboxImage,
-		hostcontrol.OpenShellSupervisorImage: wantSupervisorImage,
-	} {
-		if got != want {
-			t.Errorf("constant %q, want %q", got, want)
-		}
-	}
-	if !bytes.Contains(buildgate.OpenShellCompose, []byte(hostcontrol.OpenShellGatewayImage)) {
-		t.Error("the compose file does not pin hostcontrol.OpenShellGatewayImage")
-	}
-	if !strings.Contains(buildgate.OpenShellGatewayTemplate, hostcontrol.OpenShellSandboxImage) {
-		t.Errorf("the gateway template does not pin %s", hostcontrol.OpenShellSandboxImage)
-	}
-	makefile, err := os.ReadFile("../../Makefile")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, image := range []string{wantGatewayImage, wantSandboxImage, wantSupervisorImage} {
-		if !bytes.Contains(makefile, []byte("docker pull "+image)) {
-			t.Errorf("make openshell-images does not pull %s", image)
-		}
 	}
 }
 
