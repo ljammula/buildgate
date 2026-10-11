@@ -82,16 +82,16 @@ export function AppShell({ children }: AppShellProps) {
   const notifier = useBrowserNotifier();
   const { pathname } = useLocation();
   return (
-    <div className="grid min-h-screen grid-cols-[14rem_minmax(0,1fr)] max-md:grid-cols-1">
-      <aside className="sticky top-0 flex h-screen flex-col gap-3 border-r border-border bg-surface p-3 max-md:static max-md:h-auto">
+    <div className="grid min-h-screen grid-cols-[14rem_minmax(0,1fr)] max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_minmax(0,1fr)]">
+      <aside className="sticky top-0 flex h-screen flex-col gap-3 border-r border-border bg-surface p-3 max-md:static max-md:h-auto max-md:flex-row max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-r-0 max-md:border-b max-md:px-4 max-md:py-2">
         <Link
           to={boardPath()}
-          className="flex h-8 items-center gap-2.5 rounded-md px-1.5 font-semibold tracking-tight text-fg"
+          className="flex h-8 items-center gap-2.5 rounded-md px-1.5 font-semibold tracking-tight text-fg max-md:mr-auto"
         >
           <BrandMark className="size-6" />
           Buildgate
         </Link>
-        <Button asChild variant="primary" className="w-full">
+        <Button asChild variant="primary" className="w-full max-md:w-auto">
           <Link to={newRequestPath()}>
             <Plus aria-hidden />
             New request
@@ -105,7 +105,10 @@ export function AppShell({ children }: AppShellProps) {
               ? "Nothing is waiting on you."
               : `${needsYou} ${needsYou === 1 ? "request needs" : "requests need"} you.`}
         </p>
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 max-md:flex-row">
+        <nav
+          aria-label="Main"
+          className="flex flex-1 flex-col gap-0.5 max-md:order-last max-md:flex-none max-md:basis-full max-md:flex-row max-md:overflow-x-auto"
+        >
           {navItems.map(({ to, label, icon: Icon, end }) => {
             const isActive = matchPath({ path: to, end: end ?? false }, pathname) !== null;
             return (
@@ -114,13 +117,16 @@ export function AppShell({ children }: AppShellProps) {
                 to={to}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg",
+                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2.5 whitespace-nowrap text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg max-md:gap-1.5 max-md:px-2",
                   isActive && "bg-surface-hover font-medium text-fg",
                 )}
               >
                 <Icon
                   aria-hidden
-                  className={cn("size-4", isActive ? "text-accent" : "text-fg-subtle")}
+                  className={cn(
+                    "size-4 max-md:hidden",
+                    isActive ? "text-accent" : "text-fg-subtle",
+                  )}
                 />
                 {label}
                 {to === triagePath() ? <NavCount count={needsYou} /> : null}
@@ -128,14 +134,14 @@ export function AppShell({ children }: AppShellProps) {
             );
           })}
         </nav>
-        <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <div className="flex flex-col gap-2 border-t border-border pt-3 max-md:order-last max-md:min-w-0 max-md:basis-full max-md:flex-row max-md:items-center max-md:justify-between max-md:border-t-0 max-md:pt-0 max-md:whitespace-nowrap">
           <NotificationToggle
             support={notifier.support}
             on={notifier.on}
             onTurnOn={notifier.turnOn}
             onTurnOff={notifier.turnOff}
           />
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 max-md:shrink-0">
             <span
               className={cn(
                 "flex items-center gap-1.5 px-1.5 text-xs",

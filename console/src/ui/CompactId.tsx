@@ -31,7 +31,7 @@ export function CompactId({
   const truncated = short !== value;
   return (
     <span className={cn("inline-flex min-w-0 max-w-full items-center gap-1 font-mono", className)}>
-      <span title={value} className="whitespace-nowrap">
+      <span title={value} className="whitespace-nowrap max-md:min-w-0 max-md:truncate">
         {truncated ? (
           <>
             <span aria-hidden="true">{short}</span>
