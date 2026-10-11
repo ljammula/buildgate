@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/sanitize"
 	"buildgate/internal/ticketspec"
 )
 
@@ -21,8 +22,11 @@ import (
 // can be wrong, and a wrong refusal costs the whole request. A human who
 // agrees with a note requests changes with it as the feedback.
 //
-// A note is one line built from a criterion's number, a file name and
-// ticket file names. It never quotes the spec's prose.
+// A note is one line built from a criterion's number, a file's name and a
+// ticket's file name. The file's name is one the workspace has, or an
+// Allowed-Files entry as its ticket wrote it; it is never a token of the
+// spec that matched neither, and never the spec's prose. Every name is
+// cleaned and bounded before it is stored (noteName).
 
 // maxReviewNotes is how many notes a review shows before "and N more".
 const maxReviewNotes = 10
@@ -38,9 +42,14 @@ type PlanTicket struct {
 // RefreshReviewNotes sets r.ReviewNotes to the notes on what r's current
 // review gate shows, read from the request's files: SpecReviewNotes in
 // spec_review, PlanReviewNotes in plan_review, none in any other state. A
-// file that cannot be read gives no note. The caller saves r. It is called
-// when a draft reaches its review and after each edit made there, so the
-// notes are those of the text under review.
+// file that cannot be read gives no note. The caller saves r, or does not:
+// reading is cheap (the spec, the tickets, a few directory listings), so
+// every place that shows the notes (the API's request view, `factoryd
+// watch`, quickstart) calls this on the request it just loaded and shows
+// the notes of the files as they are now, whoever edited them and how. The
+// stored copy, set when a draft reaches its review and after an edit made
+// through RecordEdit, is what a reader of request.json and the reminder's
+// count see.
 func (r *Request) RefreshReviewNotes(dataDir string) {
 	r.ReviewNotes = nil
 	if r.State != StateSpecReview && r.State != StatePlanReview {
@@ -83,7 +92,8 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 // specContent that reads as a rule for the git commit's message
 // (isCommitMessageCriterion). The factory writes the commit, and a merge
 // rewrites its subject, so the human decides whether such a criterion
-// stays; the conformity review is told to pass it either way
+// stays; the conformity review is told not to judge a requirement on that
+// text, and to judge the rest of the criterion as usual
 // (spec_conformity.command_outcome_rule). The criterion is never removed
 // or renumbered here: "the consumer commits the offset and logs the message
 // id" was once deleted from a spec by this reading.
@@ -105,7 +115,9 @@ func SpecReviewNotes(specContent string) []string {
 // (criteria[0] is criterion 1) against the plan's tickets and returns:
 //
 //   - "criterion N names `F`, which ticket T may change, but the tickets
-//     covering criterion N may not": the criterion names, in backticks, a
+//     covering criterion N may not" (for a file the workspace does not have,
+//     `F` is the ticket's own Allowed-Files entry, or "a new file under"
+//     its directory entry): the criterion names, in backticks, a
 //     file (criterionPlan.repoFile) that is in the Allowed-Files of a ticket
 //     that does not list the criterion as covered, and in those of no
 //     ticket that does. Only names and ticket headers are read, no wording.
@@ -209,24 +221,54 @@ func (pl criterionPlan) criterionNotes(n int, text string, covering []string, li
 		if !ok || criterionPathCovered(name, covering) {
 			continue
 		}
-		if owner := pl.otherOwner(name, lists); owner != "" {
-			notes = append(notes, fmt.Sprintf("criterion %d names `%s`, which ticket %s may change, but the tickets covering criterion %d may not", n, name, owner, n))
+		if owner, entry := pl.otherOwner(name, lists); owner != "" {
+			named := "`" + noteName(name) + "`"
+			if !exists {
+				// Not a file the workspace has: the note names what the
+				// ticket's own header says, never the spec's token.
+				named = "`" + noteName(entry) + "`"
+				if entry != name && !strings.HasSuffix(entry, "/"+name) {
+					named = "a new file under " + named
+				}
+			}
+			notes = append(notes, fmt.Sprintf("criterion %d names %s, which ticket %s may change, but the tickets covering criterion %d may not", n, named, noteName(owner), n))
 		} else if exists && criterionClauseAround(prose, span[0], span[1]).saysFileChanges() {
-			notes = append(notes, fmt.Sprintf("criterion %d says `%s` changes, but no ticket may change it", n, name))
+			notes = append(notes, fmt.Sprintf("criterion %d says `%s` changes, but no ticket may change it", n, noteName(name)))
 		}
 	}
 	return notes
 }
 
+// maxNoteNameLen is the most runes of a file's or a ticket's name a note
+// holds, the bound internal/handoff puts on a name.
+const maxNoteNameLen = 200
+
+// noteName makes name, a file's or a ticket's, fit to stand in a stored
+// note: one line with no control or formatting characters and no
+// recognisable secret (sanitize.Line), no backtick (a note puts names in
+// them), at most maxNoteNameLen runes.
+func noteName(name string) string {
+	name = strings.ReplaceAll(sanitize.Line(name), "`", "'")
+	if runes := []rune(name); len(runes) > maxNoteNameLen {
+		name = string(runes[:maxNoteNameLen]) + "…"
+	}
+	return name
+}
+
 // otherOwner returns the file name of the first ticket outside lists whose
-// Allowed-Files cover name, or "".
-func (pl criterionPlan) otherOwner(name string, lists map[int]bool) string {
-	for i, ticket := range pl.tickets {
-		if !lists[i] && criterionPathCovered(name, ticket.Allowed) {
-			return ticket.Name
+// Allowed-Files cover name, and the entry of them that does; or "", "".
+func (pl criterionPlan) otherOwner(name string, lists map[int]bool) (ticket, entry string) {
+	for i, t := range pl.tickets {
+		if lists[i] {
+			continue
+		}
+		for _, entry := range t.Allowed {
+			if criterionPathCovered(name, []string{entry}) {
+				return t.Name, entry
+			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // criterionPathCovered reports whether allowed covers p, a path an

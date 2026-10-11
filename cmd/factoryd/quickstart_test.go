@@ -1076,18 +1076,35 @@ func TestQuickstartReportRequestStatePlanReview(t *testing.T) {
 	}
 }
 
-// TestQuickstartReportRequestStatePrintsTheReviewNotes: at a spec or plan
-// review the factory's notes are printed under the approve command, one a
-// line, as advice.
+// TestQuickstartReportRequestStatePrintsTheReviewNotes: at a review the
+// factory's notes are printed under the approve command, one a line, and
+// they are those of the spec as it is on disk now, not the copy stored on
+// the request when the draft arrived (the operator may have edited the file
+// since).
 func TestQuickstartReportRequestStatePrintsTheReviewNotes(t *testing.T) {
-	for _, state := range []request.State{request.StateSpecReview, request.StatePlanReview} {
-		r := &request.Request{ID: "req-2", State: state, ReviewNotes: []string{"criterion 2 names `a.go`, which ticket 001.spec.md may change", "and 3 more"}}
+	spec := func(criteria string) string {
+		return "# Spec\n\n## Problem\n\nx\n\n## Scope\n\nx\n\n## Non-goals\n\nx\n\n## Affected services and packages\n\nx\n\n## Acceptance criteria\n\n" +
+			criteria + "\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
+	}
+	for criteria, want := range map[string]string{
+		"1. It works.\n2. The commit message names the ticket.\n": "\nnote: criterion 2 reads as a rule for the commit message, which the factory writes; keep, edit or remove it\n",
+		"1. It works.\n": "",
+	} {
+		dataDir := t.TempDir()
+		r := &request.Request{ID: "req-2", State: request.StateSpecReview, ReviewNotes: []string{"a note on a text that is gone"}}
+		if err := os.MkdirAll(request.Dir(dataDir, r.ID), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(request.SpecPath(dataDir, r.ID), []byte(spec(criteria)), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		var out bytes.Buffer
-		if err := quickstartReportRequestState(t.TempDir(), r, &out); err != nil {
+		if err := quickstartReportRequestState(dataDir, r, &out); err != nil {
 			t.Fatalf("quickstartReportRequestState: %v", err)
 		}
-		if got := out.String(); !strings.Contains(got, "\nnote: criterion 2 names `a.go`, which ticket 001.spec.md may change\nnote: and 3 more\n") {
-			t.Errorf("%s: output = %q, want each note on its own line", state, got)
+		got := out.String()
+		if strings.Contains(got, "gone") || !strings.Contains(got, want) || (want == "" && strings.Contains(got, "note:")) {
+			t.Errorf("criteria %q: output = %q, want the notes of the spec on disk (%q)", criteria, got, want)
 		}
 	}
 }

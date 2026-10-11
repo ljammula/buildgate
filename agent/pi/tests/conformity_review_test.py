@@ -202,6 +202,11 @@ class SpecConformityPromptTest(unittest.TestCase):
 		prompt = build_app.spec_conformity_prompt(["1. `make verify` passes."], "abc123")
 		self.assertIn("cannot run to completion here", prompt)
 		self.assertIn("answer \"clean\" unless the diff itself shows a concrete defect", prompt)
+		# Only the text of the commit's message is left unjudged: the rest of
+		# such a criterion, and what "the commit" does to the code, is judged.
+		self.assertIn("judge every other part of the same criterion as usual, and flag the criterion if any judged part is not met", prompt)
+		self.assertIn("is a product requirement and is judged in full", prompt)
+		self.assertNotIn("criterion about the commit itself", prompt)
 		self.assertIn("1. `make verify` passes.", prompt)
 		self.assertIn("abc123", prompt)
 

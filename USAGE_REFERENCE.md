@@ -750,14 +750,21 @@ request (`review_notes` in `request.json` and `GET /requests/{id}`), shown
 in the console's Review panel and by `factoryd watch`, counted in the
 review reminder. A note never refuses, re-plans or rewrites anything, and
 approval does not look at it. To act on one, request changes with it as
-the feedback. Notes are read again after each edit made at the gate, and
-at most ten are shown.
+the feedback. The console's request page, `factoryd watch` and quickstart
+read the notes from the spec and tickets as they are on disk each time
+they show them, so an edit made in the console or in an editor is covered;
+`review_notes` in `request.json` is the copy from when the draft arrived
+or was last edited in the console. At most ten are shown. A note names a
+file the repository has or an `Allowed-Files` entry as its ticket wrote it
+(for a new file under a ticket's directory entry: `a new file under
+<entry>`), cleaned to one line and cut at 200 characters; it never repeats
+other text of the spec.
 
 | Gate | Note | When |
 |---|---|---|
 | `plan_review` | `criterion N names <file>, which ticket T may change, but the tickets covering criterion N may not` | The criterion names, in backticks, a file that is in the `Allowed-Files` of a ticket that does not list the criterion as covered, and in those of no ticket that does. Only names and ticket headers are read: any wording earns it |
 | `plan_review` | `criterion N says <file> changes, but no ticket may change it` | The file exists, no ticket may change it, and the words around its name say it changes (`adds`, `gains`, `new`, `updated`, `removed` ...) without denying it (`no`, `not`, `unchanged`) or only referring to it (`already`, `pattern`, `like`, `from`) |
-| `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review is told to pass such a criterion, since it sees only the diff |
+| `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review, which sees only the diff, is told not to judge a requirement on the commit's text and to judge every other part of the criterion as usual |
 
 A backticked name is a file when a file of exactly that name exists
 (`tests/x.py::test_y` and `a.go:42` name that file; letter case counts

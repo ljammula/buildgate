@@ -51,6 +51,11 @@ class CombinedReviewPromptTests(unittest.TestCase):
 		# Task A: every existing conformity rule.
 		self.assertIn("1. Widget exists", prompt)
 		self.assertIn("cannot run to completion here", prompt)  # command-outcome rule
+		# Only the text of the commit's message is left unjudged: the rest of
+		# such a criterion, and what "the commit" does to the code, is judged.
+		self.assertIn("judge every other part of the same criterion as usual, and flag the criterion if any judged part is not met", prompt)
+		self.assertIn("is a product requirement and is judged in full", prompt)
+		self.assertNotIn("criterion about the commit itself", prompt)
 		self.assertIn("Pure formatting or lint drift", prompt)  # formatting rule
 		self.assertIn("using each criterion's exact text", prompt)  # exact-echo instruction
 

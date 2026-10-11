@@ -3515,6 +3515,12 @@ func resolveTicketSpecPath(dataDir, id, specPath string) string {
 // don't vanish from the console's detail screen depending on which of
 // those three endpoints last touched it.
 func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Request) requestDetailView {
+	// The view shows the spec and tickets as they are on disk now, so its
+	// notes are read from those same files, not from the copy stored when
+	// the draft arrived: an edit made outside the console is covered too.
+	if loaded.State == request.StateSpecReview || loaded.State == request.StatePlanReview {
+		loaded.RefreshReviewNotes(dataDir)
+	}
 	specPath := request.SpecPath(dataDir, id)
 	view := requestDetailView{
 		Request:      loaded,
