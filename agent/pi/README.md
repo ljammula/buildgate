@@ -20,7 +20,7 @@ and [`USAGE.md`](../../USAGE.md).
 | `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`) | `worker -draft-oracles-script` |
 | `conformity_review.py` | Bounded per-criterion spec-conformity review | — |
 | `code_review.py` | Standalone AI code review (`-code-review-policy off\|advisory\|required`) | — |
-| `combined_review.py` | Runs conformity review and code review in one pass when both are enabled for a run. An answer that lacks one review is asked for that review alone, and a failed or unparseable turn is run again: one further turn at most, told nothing of the first. The two turns share the one turn's 20 minutes: the retry gets what is left and is skipped under 5 minutes, and a turn the spend meter stopped is never retried. Before the retry, the first turn's evidence is written and everything in `.pi-combined-review-session` but its `prompts` folder is removed (no link followed), so the retry, in `.pi-combined-review-session/retry`, cannot read the first transcript. Both evidence files then carry a `retry` line saying what was asked again and why, or why nothing was, and the retry's prompt is saved beside the first as `review-code-retry`, `review-conformity-retry` or `review-combined-retry` | — |
+| `combined_review.py` | Runs conformity review and code review in one pass when both are enabled for a run. An answer that lacks one review is asked for that review alone, and a failed or unparseable turn is run again: one further turn at most, told nothing of the first. The two turns share the one turn's 20 minutes: the retry gets what is left and is skipped under 5 minutes, and a turn the spend meter stopped, or the model provider's own usage limit refused, is never retried. Before the retry, the first turn's evidence is written and everything in `.pi-combined-review-session` but its `prompts` folder is removed (no link followed), so the retry, in `.pi-combined-review-session/retry`, cannot read the first transcript. Both evidence files then carry a `retry` line saying what was asked again and why, or why nothing was, and the retry's prompt is saved beside the first as `review-code-retry`, `review-conformity-retry` or `review-combined-retry` | — |
 
 `tests/` holds one `pytest`-compatible suite per script.
 
@@ -97,6 +97,29 @@ in the opening prompt. Only the build script takes it; no review script does.
   fields, URL passwords) and `build_app.single_line` mirror Go's
   `internal/sanitize`. Anything reaching an operator surface (`factoryd
   status`, notifications, the console) goes through them.
+- **A failed verify is run once more.** When a round's verify command
+  fails after a turn that finished, `build_app.py` runs it a second time
+  before asking the model (`rerun_failed_verify`): a timing-sensitive test of
+  the target repository that fails under load otherwise costs a model round
+  that changes nothing. A pass makes the round's verify a pass; a second
+  failure is the round's, with that run's output. No second run, and the
+  first failure stands, when:
+
+  | Case | `skipped_reason` in the round's `verify_rerun` |
+  |---|---|
+  | Verify timed out, was not reached, or the turn failed | no record |
+  | The command could not start (exit 126 or 127) | `the command could not start (exit N)` |
+  | The round's checks changed the workspace (its fingerprint outside the session folder differs from the one before them): a second run would judge a tree the first one made | `the round's checks changed files in the workspace` |
+  | The fingerprint could not be taken | `the workspace could not be compared ...` |
+  | The time budget, less 60 s, has under 30 s or under 1.5 times the first run left | `under N s of the build time budget left` |
+
+  The second run's timeout is what the budget has left less 60 s, at most the
+  verify command's 20 minutes. The round's `verify_rerun` in
+  `BUILD_EVIDENCE.json` (`ran`, `passed`, `skipped_reason`, `first_failing`),
+  a `verify rerun` line in `BUILD_REPORT.md` and a round note in the progress
+  feed say what happened; the first run's output stays in the round's
+  feedback folder as `verify-first-run.log`. Only this in-loop check: the
+  factory's gates after the build run once each, as before.
 - **gofmt.** After a round's verify passes, `build_app.py` runs `gofmt -w`
   on changed `.go` files only (`gofmt_changed_files`), inside the
   sandbox. No-op when `gofmt` is absent or no `.go` file changed.

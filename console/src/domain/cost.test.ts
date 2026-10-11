@@ -52,6 +52,7 @@ function costSummary(overrides: Partial<CostSummary> = {}): CostSummary {
     subscriptionBilled: false,
     tokens: null,
     tokensComplete: true,
+    estimated: false,
     byModel: [],
     acceptedTickets: 0,
     costPerAcceptedTicketMicroUsd: 0,
@@ -169,6 +170,21 @@ describe("formatUsageSummary", () => {
         }),
       ),
     ).toBe("gpt-5.6-luna +1 more · 479.3k tokens");
+  });
+
+  test("marks an estimated figure as an upper bound, and a lower bound as before", () => {
+    const models = [modelUsage({ model: "gpt-5.6-luna", tokens: 500 })];
+    const estimated = costSummary({ tokens: 500, byModel: models, estimated: true });
+    expect(formatUsageSummary(estimated)).toBe("gpt-5.6-luna · ≤ 500 tokens");
+    expect(formatUsageTokens(estimated)).toBe("≤ 500 tokens");
+    expect(formatUsageLines(estimated)[0]).toBe("gpt-5.6-luna · ≤ 500 tokens");
+    expect(formatUsageTokens(costSummary({ tokens: 500, tokensComplete: false }))).toBe(
+      "≥ 500 tokens",
+    );
+    expect(
+      formatUsageTokens(costSummary({ tokens: 500, tokensComplete: false, estimated: true })),
+    ).toBe("about 500 tokens");
+    expect(formatUsageTokens(costSummary({ tokens: 500 }))).toBe("500 tokens");
   });
 
   test('prefixes with "≥ " when tokensComplete is false', () => {

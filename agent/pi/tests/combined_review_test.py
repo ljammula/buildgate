@@ -51,6 +51,11 @@ class CombinedReviewPromptTests(unittest.TestCase):
 		# Task A: every existing conformity rule.
 		self.assertIn("1. Widget exists", prompt)
 		self.assertIn("cannot run to completion here", prompt)  # command-outcome rule
+		# Only the text of the commit's message is left unjudged: the rest of
+		# such a criterion, and what "the commit" does to the code, is judged.
+		self.assertIn("judge every other part of the same criterion as usual, and flag the criterion if any judged part is not met", prompt)
+		self.assertIn("is a product requirement and is judged in full", prompt)
+		self.assertNotIn("criterion about the commit itself", prompt)
 		self.assertIn("Pure formatting or lint drift", prompt)  # formatting rule
 		self.assertIn("using each criterion's exact text", prompt)  # exact-echo instruction
 
@@ -509,7 +514,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 
 	def test_a_turn_the_spend_meter_stopped_is_not_asked_again(self):
 		deny = '403 {"middleware":"meter","reason_code":"%s","detail":"x"}'
-		errors = [deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited", '429 "token budget exceeded"']
+		errors = [deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited"]
 		for error in errors:
 			with self.subTest(error=error):
 				conformity, review, turns, root = self._run([failed_turn(error)])
@@ -517,11 +522,62 @@ class CombinedReviewRetryTests(unittest.TestCase):
 				self.assertFalse(review["available"])
 				self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
 				self.assertEqual(review["error"], conformity["error"])
-				self.assertIn("reason_code" if "meter" in error else "429", review["error"])
+				self.assertIn("reason_code", review["error"])
 				for evidence in (conformity, review):
 					self.assertIn("not asked again", evidence["retry"])
 					self.assertIn("the spend meter stopped the first turn", evidence["retry"])
 				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+
+	def test_a_providers_own_rate_limit_is_asked_again_once(self):
+		# A provider's 429 is not the spend meter's denial: the turn gets the
+		# one retry any failed turn gets, in what is left of the same budget.
+		errors = [c["error"] for c in self._stop_causes() if "provider's own" in c["name"]]
+		self.assertGreaterEqual(len(errors), 5)
+		for error in errors:
+			with self.subTest(error=error):
+				ticks = iter([0.0, 60.0])
+				conformity, review, turns, root = self._run(
+					[failed_turn(error), answer({"criteria": VERDICTS, "findings": []})], clock=lambda: next(ticks),
+				)
+				self.assertEqual(len(turns), 2)
+				self.assertTrue(review["available"])
+				self.assertLessEqual(60 + turns[1]["timeout"], 20 * 60)
+				for evidence in (conformity, review):
+					self.assertNotIn("not asked again", evidence["retry"])
+					self.assertNotIn("spend meter", evidence["retry"])
+				self.assertEqual(sorted(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
+
+	def test_a_turn_the_providers_usage_limit_refused_is_not_asked_again(self):
+		# The codex CLI's message as captured live (2026-10-11), when the
+		# turn was asked again and refused again.
+		error = next(c["error"] for c in self._stop_causes() if c["stopped_by"] == "provider_usage_limit")
+		conformity, review, turns, root = self._run([failed_turn(error)])
+		self.assertEqual(len(turns), 1)
+		self.assertFalse(review["available"])
+		self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
+		self.assertEqual(review["error"], error)
+		for evidence in (conformity, review):
+			self.assertIn("not asked again", evidence["retry"])
+			self.assertIn("the model provider's usage limit was reached", evidence["retry"])
+			self.assertNotIn("spend meter", evidence["retry"])
+		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+
+	@staticmethod
+	def _stop_causes() -> list[dict]:
+		return json.loads((Path(__file__).parent / "fixtures" / "review_stop_causes.json").read_text())
+
+	def test_stop_causes_are_named_as_the_host_names_them(self):
+		# internal/codereview's TestStopCausesFixture reads the same file.
+		cases = self._stop_causes()
+		self.assertTrue(cases)
+		for case in cases:
+			with self.subTest(case=case["name"]):
+				self.assertEqual(combined_review.stop_cause(case["error"]), case["stopped_by"])
+				if case["stopped_by"] == "provider_usage_limit":
+					self.assertEqual(build_app.provider_limit_resets_at(case["error"]), case["resets_at"])
+					self.assertEqual(build_app.model_stop(["connection reset", case["error"]]), {"code": "provider_usage_limit", "resets_at": case["resets_at"]})
+				elif not case["stopped_by"]:
+					self.assertIsNone(build_app.model_stop([case["error"]]))
 
 	def test_a_denial_code_outside_the_meters_body_is_an_ordinary_failure(self):
 		self.assertEqual(combined_review.meter_stop('{"reason_code":"budget_exceeded"}'), "")

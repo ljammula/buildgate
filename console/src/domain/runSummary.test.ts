@@ -85,6 +85,7 @@ describe("runTokensText", () => {
     ];
     expect(runTokensText(run({ by_model: models }))).toBe("1.5k tokens");
     expect(runTokensText(run({ by_model: models, tokens_complete: false }))).toBe("≥ 1.5k tokens");
+    expect(runTokensText(run({ by_model: models, estimated: true }))).toBe("≤ 1.5k tokens");
   });
 
   test("no usage recorded is null", () => {

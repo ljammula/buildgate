@@ -87,6 +87,7 @@ each `daemon` child it runs.
 | `worker` start after a kill -9 | With the drain lock held, it reclaims every nonterminal run whose owner is gone: the pid in the run's `sandbox-owner.pid` no longer exists (a live pid, no marker, or a terminal run is never touched). Each is halted with the triage "the factoryd process running this build stopped mid-run", its Temporal workflow is terminated if still `Running` (unreachable Temporal: the run is left for the next start), and its worker, supervisor, registry-proxy and compose containers are removed; its ticket rebuilds as a new run. One log line per run. |
 | Paths colima does not share | colima should share only `~/buildgate` read-write and your repositories read-only (USAGE.md, "Data directory and colima"), so a data dir or workspace anywhere else — `/tmp`, `~/.cache` — fails inside the sandbox ("does not appear to share ... into its containers"). `doctor -workspace <dir>` probes the workspace and data dir; `worker` and `factoryd <run>` preflights probe the data dir when it already exists. `doctor -fix` can repoint `data_dir` to `~/buildgate/data`. `mkdir -p` the data dir before a first bare `factoryd` run. On macOS `doctor` also warns (`Docker VM does not share all of $HOME`) while the VM still sees all of `$HOME`. |
 | Correct work quarantined as all-"unavailable" | A slow/local model's conformity review can time out or return unparseable output; under `-conformity-policy required` (default) every criterion reads `unavailable` and blocks. If `agent_evidence.stopped_reason` lists every criterion as unmet, retry with `-conformity-policy advisory` (flag or `conformity_policy` key). The verdict is still recorded. |
+| The model provider's usage limit ran out mid-request | A review it refused quarantines the request with check `review_unavailable` and the reason "the model provider's usage limit was reached (it said to try again at 3:11 AM, by the worker container's clock) during the review"; a build it refused fails `canonical_verify` with "the build stopped: the model provider's usage limit was reached (...); retry after it resets". Nothing was judged. Run `factoryd retry <id>` after that time (the worker container's clock is UTC unless the image sets another). The time is shown only when the provider's message gave a plain time of day; no session-config budget governs this limit. Recognised from the codex CLI's message ("You've hit your usage limit"); another harness's wording reads as a review that gave no verdict, or a build whose model route was unreachable. |
 | Configured image is out of date with its own source | `factoryd doctor`/`quickstart` compare each configured image's stamped build-inputs label against the checkout named by `image_source_root` (session config, written by `factoryd configure-images`) and warn (never fail) when it's stale; `quickstart` offers to rebuild, `worker`/`serve` print one warning line at startup. Run `make install` in that checkout to rebuild. No `image_source_root` recorded (or the checkout is unreadable): nothing is checked. |
 
 ## Request lifecycle
@@ -159,10 +160,11 @@ review findings to address" section (each blocking finding's file:line,
 severity, summary and failure scenario) when code_review was flagged,
 rebuilt via `-on-branch`/`-diff-base` against the quarantined run's own
 branch/base SHA, through every gate again including a fresh, independent
-review. A review that gave no verdict (the reviewer timed out or returned
-nothing parseable) is not actionable and gets no round: the request
-quarantines with check `review_unavailable`, saying the build was not
-judged; otherwise the quarantine names `code_review` when that gate
+review. A review that gave no verdict (the reviewer timed out, returned
+nothing parseable, or had its model calls refused by the spend meter or by
+the model provider's own usage limit) is not actionable and gets no round:
+the request quarantines with check `review_unavailable`, saying the build
+was not judged and which of these it was when the run records it; otherwise the quarantine names `code_review` when that gate
 failed, else `spec_conformity`. Accepted opens the PR and advances exactly like an ordinary
 first-build acceptance; quarantined or halted again quarantines the
 request as usual. A budget greater than `1` runs up to that many
@@ -398,7 +400,7 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 | Edited in the console | At `spec_review` and `plan_review` the console's Edit saves the file in place. Each save is recorded on the request: who, when, the changed lines, and the replaced text as a revision (the request page's Audit lists them). If you then reject that stage, the changed lines go to the planning model with your feedback, marked to be kept; an edit you approve reaches no model, since nothing redrafts the file |
 | Not in the skeleton | Hand the document over as the request (`-request-file`) and review the spec Buildgate drafts from it |
 | Ticket format | Header lines `Verify-Command:` (the request's verify command, exactly), `Allowed-Files:`, `Required-Changed-Files:` (with at least one test file, or a `Tests-Required: no -- <reason>` line), then `## Goal`, `## Plan` with `### Files to touch`, `### Steps`, `### Tests to add`, `### Acceptance criteria covered` (criterion numbers, one per list item), `## Out of scope` A file the ticket moves or renames is a change to both paths: list the old path and the new one in `Allowed-Files:` (the changed-file list names both, for `diff_scope`, required files and protected paths alike) |
-| Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (verify command, allowed files, the tests rule, criterion feasibility). A handed-over plan that fails one halts the request with the reason, or, when the factory judges it infeasible, is revised by the planning model with that reason as feedback |
+| Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (ticket format, verify command, allowed files, criteria coverage, the tests rule). A handed-over plan that fails one halts the request with the reason, or, when it fails the tests rule, is revised by the planning model with that reason as feedback. What the factory reads from a criterion's prose is a note at `plan_review`, never a refusal |
 | `-plan-dir` alone | Refused: tickets name the criteria of the spec they plan |
 | A halted hand-over | `factoryd retry` takes the same document again and halts the same way. Send it back with a reason instead (`factoryd reject -to plan -reason "..." <id>`, or `-to spec`): the model then revises your document to fix it. Or `cancel`, correct the file and submit again |
 | Spec changed after hand-over | If you reject the spec and the revision changes its criteria, your tickets are still taken on the first planning pass and must still cover them. Sending a request back to spec after a plan exists discards the plan's revisions and its feedback: the tickets as you handed them over are taken again |
@@ -725,26 +727,53 @@ the release decision). Unset falls back to
 `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust); this
 gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
-`tests_added` and it declares no `Tests-Required` opt-out. A second
-plan-time check runs alongside it: for every approved-spec acceptance
-criterion, it collects the repo-relative file paths the criterion names in
-backticks and rejects the plan if a named path is in the `Allowed-Files`
-of no ticket that lists the criterion as covered. A name such as
-`internal/domain.Calculate` (a Go package's directory, a dot, an
-identifier) is code, not a file, and is not checked unless a file of that
-name exists: it is told by an upper-case letter after the dot, or by the
-part before the dot being a directory that holds Go files. A path named in a
-clause that says it stays as it is (`untouched`, `unchanged`, `not
-modified`, `must not change`, `no changes to`) is not checked. A criterion covered by
-no ticket at all is left to the "unclaimed criterion" check. On either
-rejection the request driver re-plans once, feeding every infeasibility
-found back to the planner as feedback before the request reaches a human;
-if the redrafted plan is still infeasible, the request halts. A plan the
-planning model drafted that fails any other check (a ticket off the
-format, a missing header, another verify command, an unclaimed criterion)
-is re-planned once the same way, with the check's message as the feedback;
-a second refused plan halts the request. A handed-over plan that fails
-such a check halts at once.
+`tests_added` and it declares no `Tests-Required` opt-out.
+
+What refuses a drafted plan reads its structure only, never the meaning
+of its prose:
+
+| Refusal | Reads |
+|---|---|
+| A ticket off the format | The ticket's headings, in order (`## Goal` ... `## Out of scope`), and its header lines |
+| Another verify command | The ticket's `Verify-Command:` line against the request's verify command, as text |
+| No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
+| An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's numbered criteria |
+| The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
+
+A plan the planning model drafted that fails one is re-planned once, with
+the check's message as the feedback; a second refused plan halts the
+request. A handed-over plan is re-planned only for the tests rule; any
+other failure halts it at once.
+
+What the factory reads from prose is a **review note**: one line on the
+request (`review_notes` in `request.json` and `GET /requests/{id}`), shown
+in the console's Review panel and by `factoryd watch`, counted in the
+review reminder. A note never refuses, re-plans or rewrites anything, and
+approval does not look at it. To act on one, request changes with it as
+the feedback. The console's request page, `factoryd watch` and quickstart
+read the notes from the spec and tickets as they are on disk each time
+they show them, so an edit made in the console or in an editor is covered;
+`review_notes` in `request.json` is the copy from when the draft arrived
+or was last edited in the console. At most ten are shown. A note names a
+file the repository has or an `Allowed-Files` entry as its ticket wrote it
+(for a new file under a ticket's directory entry: `a new file under
+<entry>`), cleaned to one line and cut at 200 characters; it never repeats
+other text of the spec.
+
+| Gate | Note | When |
+|---|---|---|
+| `plan_review` | `criterion N names <file>, which ticket T may change, but the tickets covering criterion N may not` | The criterion names, in backticks, a file that is in the `Allowed-Files` of a ticket that does not list the criterion as covered, and in those of no ticket that does. Only names and ticket headers are read: any wording earns it |
+| `plan_review` | `criterion N says <file> changes, but no ticket may change it` | The file exists, no ticket may change it, and the words around its name say it changes (`adds`, `gains`, `new`, `updated`, `removed` ...) without denying it (`no`, `not`, `unchanged`) or only referring to it (`already`, `pattern`, `like`, `from`) |
+| `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review, which sees only the diff, is told not to judge a requirement on the commit's text and to judge every other part of the criterion as usual |
+
+A backticked name is a file when a file of exactly that name exists
+(`tests/x.py::test_y` and `a.go:42` name that file; letter case counts
+on every file system), or when it is a new path that some ticket's
+`Allowed-Files` cover. A command, a glob, a URL or URL path, `key=value`,
+a version (`HTTP/1.1`), a media type, a route template
+(`users/{id}.json`), a path outside the repository, an import path and a
+Go identifier qualified by its package (`internal/domain.Calculate`) are
+not files.
 
 Real correctness coverage is `-conformity-policy`'s
 per-criterion review (default `required`, no `.factory.yml` key) plus the
@@ -779,7 +808,9 @@ reviews is asked for that review alone, and a failed or unparseable call is
 made again: one further call at most, in the same sandbox, told nothing of the
 first and unable to read its transcript. The two calls share the 20 minutes
 one call gets, so the review takes no longer; the second is skipped when under
-5 minutes are left or when the spend meter stopped the first. Both evidence
+5 minutes are left, when the spend meter stopped the first (its own deny body,
+never wording alone: a provider's `429` rate limit is asked again), or when the
+model provider's usage limit refused it. Both evidence
 files then hold a `retry` line saying what was asked again and why, or why
 nothing was.
 
@@ -1507,7 +1538,7 @@ oldest first, empty ones kept, at most 26 (the newest).
 | Field | Definition | Against `scripts/baseline.py` |
 |---|---|---|
 | `tickets` | Series counted | Same |
-| `one_shot`, `one_shot_rate` | Series with one run only, accepted, no override or rescue, at most one recorded round | baseline counts a first run accepted with no override or rescue, whatever followed or however many rounds it took |
+| `one_shot`, `one_shot_rate` | Series with one run only, accepted, no override or rescue, at most one recorded round. A round whose verify command failed and passed when the build ran it a second time on the unchanged workspace is a passed round, here and in `rounds_to_green` and a project's observations; the round's `verify_rerun` in the run's `BUILD_EVIDENCE.json` records it | baseline counts a first run accepted with no override or rescue, whatever followed or however many rounds it took |
 | `accepted`, `accepted_rate` | Series whose last run is accepted | Not in baseline |
 | `rounds_to_green` | Over accepted series that recorded a round: rounds summed across all its runs; `median` (mean of the two middle values for an even count) and nearest-rank `p90` | baseline takes the rounds of each accepted run |
 | `failed_round_pairs` | Consecutive failed rounds within one run | Same |

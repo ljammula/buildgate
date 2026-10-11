@@ -8,13 +8,11 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"buildgate/internal/codereview"
@@ -191,32 +189,6 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
-	// Mechanical backstop for draft_spec.py's own prompt instruction not
-	// to draft a commit-message/subject criterion in the first place --
-	// see StripCommitMessageCriteria's own doc comment for why. Applied
-	// here, before the spec is ever persisted or shown to the operator at
-	// spec_review, so every later reader (the human approving it, the
-	// ticket-planning prompt, SpecAcceptanceCriteriaCount) sees the same
-	// already-renumbered document -- never a criterion a human approved
-	// that some other layer silently never checks.
-	if stripped, removed := request.StripCommitMessageCriteria(specMD); removed > 0 {
-		log.Printf("request %s: stripped %d commit-message acceptance criterion(criteria) from the drafted spec", r.ID, removed)
-		specMD = stripped
-		// Re-validate after stripping, before persisting anything: found
-		// via adversarial review, 2026-09-17 -- ValidateSpecSkeleton only
-		// requires the "## Acceptance criteria" section to have at least
-		// one non-blank line, not a valid numbered item, so a draft whose
-		// ONLY criterion was commit-message-related passed the check
-		// above but would leave zero numbered criteria after stripping.
-		// Without this, that invalid spec.md would still be written to
-		// disk and reach spec_review, only to fail confusingly much later
-		// (SpecAcceptanceCriteria erroring during ticket planning or
-		// build) instead of HaltRequest reporting the real reason here,
-		// where the actual cause is known.
-		if err := request.ValidateSpecSkeleton(specMD); err != nil {
-			return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md has no acceptance criteria left after removing %d commit-message criterion(criteria): %v", removed, err), now)
-		}
-	}
 	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
 		return fmt.Errorf("write spec: %w", err)
 	}
@@ -234,6 +206,9 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	if err := r.CompleteSpecDrafting(now); err != nil {
 		return err
 	}
+	// What the factory's reading of the spec found is advice for the review
+	// (request.SpecReviewNotes): it changes nothing in the document.
+	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: spec_drafting -> spec_review (spec drafted)", r.ID)
 	// State first, then the reminder, then save again: a crash between
 	// the two saves costs at most one duplicate reminder (the ticker
@@ -375,13 +350,12 @@ const maxPlanningAttempts = 2
 // factory-authored Rejection (By: "factoryd") so the request's history
 // shows why a second launch happened, feeds the same reason back to
 // plan_tickets.py as plan_review-rejection feedback (request.PlanFeedback),
-// and re-launches once. A second class of infeasibility joined the first
-// live (Flutter + Go app habit-insights request, 2026-09-28): a spec criterion naming files
-// owned by several tickets, but listed as covered by only one of them --
-// see CriterionFilesFeasible's own doc comment for that incident.
-// writeAndValidateDraftedTickets reports every infeasibility of either
-// class it finds in one message, so a single re-plan gets fed all of
-// them at once. Every other content failure of a drafted plan (a ticket off
+// and re-launches once. writeAndValidateDraftedTickets reports every such
+// ticket it finds in one message, so a single re-plan gets fed all of them
+// at once. Only checks over a plan's structure refuse it or re-plan it: a
+// criterion that names a file its covering tickets may not change is read
+// from the spec's prose, so it is a note at plan_review
+// (request.PlanReviewNotes). Every other content failure of a drafted plan (a ticket off
 // the format, missing Allowed-Files, an unclaimed acceptance criterion, a
 // Verify-Command drift, ...) gets the same single re-plan, told the check's
 // own message; a handed-over plan and an I/O error halt on the first
@@ -426,16 +400,10 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	if err != nil {
 		return fmt.Errorf("read approved spec: %w", err)
 	}
-	// criteriaTexts (rather than a second call to
-	// SpecAcceptanceCriteriaCount, which itself just counts this same
-	// parse's own result) also feeds CriterionFilesFeasible below, which
-	// needs each criterion's verbatim text to find the repo paths it
-	// names.
-	criteriaTexts, err := request.SpecAcceptanceCriteria(string(specBytes))
+	criteriaCount, err := request.SpecAcceptanceCriteriaCount(string(specBytes))
 	if err != nil {
 		return HaltRequest(dataDir, r, fmt.Sprintf("approved spec.md: %v", err), now)
 	}
-	criteriaCount := len(criteriaTexts)
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 
 	runner = withPlanImport(runner)
@@ -492,7 +460,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
 			return fmt.Errorf("create tickets dir: %w", err)
 		}
-		requestTickets, validateErr = writeAndValidateDraftedTickets(ticketsDir, tickets, criteriaCount, verifyCommand, testPatterns, criteriaTexts, r.Workspace)
+		requestTickets, validateErr = writeAndValidateDraftedTickets(ticketsDir, tickets, criteriaCount, verifyCommand, testPatterns)
 		if validateErr == nil {
 			break
 		}
@@ -527,6 +495,10 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	if err := r.CompletePlanning(now); err != nil {
 		return err
 	}
+	// A criterion that names a file its covering tickets may not change is
+	// a note for the review (request.PlanReviewNotes), never a refusal or a
+	// re-plan: that reading of the spec's prose can be wrong.
+	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: planning -> plan_review (plan drafted: %d ticket(s))", r.ID, r.TicketCount)
 	if err := r.Save(dataDir); err != nil {
 		return err
@@ -1097,13 +1069,22 @@ func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *ru
 // (found live 2026-10-08: a review 1.18M tokens long, cut off by the
 // 1M-token hourly budget, was reported as having timed out or returned
 // nothing).
+//
+// The provider's own usage limit is named too, with the time it said to try
+// again at when the run recorded one: no setting governs it, and the
+// operator's move is to retry after that time (found live 2026-10-11: the
+// ChatGPT route's allowance ran out mid-request and each review was
+// reported as having given no verdict).
 func noVerdictCause(runRecord *run.Run) string {
-	code := ""
+	code, resetsAt := "", ""
 	if runRecord != nil {
-		code = runRecord.SpecConformityStoppedBy
+		code, resetsAt = runRecord.SpecConformityStoppedBy, runRecord.SpecConformityResetsAt
 		if runRecord.CodeReview != nil && runRecord.CodeReview.StoppedBy != "" {
-			code = runRecord.CodeReview.StoppedBy
+			code, resetsAt = runRecord.CodeReview.StoppedBy, runRecord.CodeReview.ResetsAt
 		}
+	}
+	if code == codereview.CodeProviderUsageLimit {
+		return codereview.ProviderLimitCause(resetsAt) + " during the review"
 	}
 	settings, ok := codereview.StopSettings(code)
 	if !ok {
@@ -1891,13 +1872,11 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 
 // errPlanInfeasible sentinels a writeAndValidateDraftedTickets failure
 // that gets a single automatic re-plan rather than an immediate halt --
-// see AdvancePlanning's own doc comment and maxPlanningAttempts. Two
-// checks wrap their failures with it: a ticket whose Allowed-Files could
-// never satisfy the tests_added gate (policy.TicketTestsAddedFeasible),
-// and a spec criterion naming a file no ticket covering it may change
-// (CriterionFilesFeasible) -- generalised from the single
-// tests_added-only sentinel #340/#343 first added, so both share
-// AdvancePlanning's one retry loop instead of duplicating it. Every other
+// see AdvancePlanning's own doc comment and maxPlanningAttempts. One check
+// wraps its failures with it: a ticket whose Allowed-Files could never
+// satisfy the tests_added gate (policy.TicketTestsAddedFeasible), which
+// reads the ticket's header lines and the project's test patterns and no
+// prose. Every other
 // validation failure this function can return (a bad heading, a missing
 // Allowed-Files/Required-Changed-Files, a Verify-Command drift, an
 // unclaimed acceptance criterion) is not wrapped with it; planRedraftable
@@ -1913,25 +1892,24 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // a different command than the one planning resolved. Once every ticket
 // individually validates that way, it checks that every criterion from 1
 // to criteriaCount is claimed by at least one ticket
-// (request.ValidatePlanCoverage), then runs the two infeasibility checks
-// (errPlanInfeasible): a ticket whose own declared Allowed-Files could
+// (request.ValidatePlanCoverage), then reports the infeasible tickets
+// (errPlanInfeasible): one whose own declared Allowed-Files could
 // never pass the tests_added gate (policy.TicketTestsAddedFeasible) --
 // found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
 // approved, and burned a full build round before quarantining on a
 // tests_added failure its own Allowed-Files made structurally
-// unavoidable -- and a spec criterion naming a file no ticket covering it
-// may change (CriterionFilesFeasible; see its own doc comment for the
-// live incident that motivated it). Both classes are collected across
-// every ticket/criterion rather than returned on the first hit, so a
-// single re-plan is fed every infeasibility found, not just the first.
+// unavoidable. They are collected across every ticket rather than returned
+// on the first hit, so a single re-plan is fed every one found. Every check
+// here reads a ticket's structure (headings, header lines, criterion
+// numbers), never the meaning of its prose: what the factory reads from
+// prose is a note at the review (request.PlanReviewNotes).
 // Every other validation failure returns immediately, naming the failing
 // ticket's filename; the caller (AdvancePlanning) removes ticketsDir on
 // any failure path so a halted request's directory doesn't keep
 // half-valid ticket files around.
-func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string, criteriaTexts []string, workspace string) ([]request.Ticket, error) {
+func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string) ([]request.Ticket, error) {
 	requestTickets := make([]request.Ticket, 0, len(tickets))
 	contents := make([]string, 0, len(tickets))
-	allowedByTicket := make([][]string, 0, len(tickets))
 	var infeasible []string
 	for i, ticket := range tickets {
 		ticketPath := filepath.Join(ticketsDir, ticket.Filename)
@@ -1971,241 +1949,14 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		}
 		requestTickets = append(requestTickets, request.Ticket{Index: i + 1, SpecPath: ticketPath})
 		contents = append(contents, ticket.Content)
-		allowedByTicket = append(allowedByTicket, allowed)
 	}
 	if err := request.ValidatePlanCoverage(criteriaCount, contents); err != nil {
 		return nil, contentErr(err)
 	}
-	infeasible = append(infeasible, CriterionFilesFeasible(criteriaTexts, contents, allowedByTicket, workspace)...)
 	if len(infeasible) > 0 {
 		return nil, contentErr(fmt.Errorf("%s: %w", strings.Join(infeasible, "; "), errPlanInfeasible))
 	}
 	return requestTickets, nil
-}
-
-// criterionNamedPathRE matches a Markdown inline-code span in an
-// acceptance criterion's own text, e.g. "`backend/internal/habit/insights.go`".
-var criterionNamedPathRE = regexp.MustCompile("`([^`]+)`")
-
-// CriterionFilesFeasible checks every approved-spec criterion in
-// criteriaTexts (1-indexed by position: criteriaTexts[0] is criterion 1)
-// against the UNION of Allowed-Files of the tickets that list it as
-// covered -- ticketContents[i] is one ticket's full content,
-// allowedByTicket[i] its own parsed Allowed-Files, both in the same order
-// writeAndValidateDraftedTickets built them in. It returns one reason
-// string per named path that union does not cover, across every
-// criterion, for writeAndValidateDraftedTickets to fold into a single
-// errPlanInfeasible alongside any tests_added infeasibilities. A
-// criterion covered by no ticket at all is left to
-// request.ValidatePlanCoverage's own "unclaimed" error -- not flagged
-// again here.
-//
-// Found live (Flutter + Go app habit-insights request, 2026-09-28,
-// data/requests/feature-habit-insights-endpoint-and-mcp-20260928-121607):
-// approved spec criterion 12 named files owned by three different
-// tickets (the handler's HandleInsights, insights.go, and the
-// habit_insights MCP tool), but the plan listed it as covered only by the
-// ticket owning the MCP tool file. The handler ticket built and merged
-// with no invalid/not-found HandleInsights test -- criterion 12 wasn't
-// its listed concern -- and the MCP-tool ticket's build and its
-// corrective round were both flagged for exactly that missing coverage,
-// a defect it could never fix: those handler tests are outside its own
-// Allowed-Files. ~$6 spent before the request quarantined. This check
-// catches that shape at plan-drafting time, before the plan ever reaches
-// plan_review.
-func CriterionFilesFeasible(criteriaTexts []string, ticketContents []string, allowedByTicket [][]string, workspace string) []string {
-	coveringAllowed := make(map[int][]string, len(criteriaTexts))
-	for i, content := range ticketContents {
-		numbers, err := request.TicketCoveredCriteria(content)
-		if err != nil {
-			continue // unparseable; ValidateTicketPlan already rejects this ticket elsewhere.
-		}
-		for _, n := range numbers {
-			coveringAllowed[n] = append(coveringAllowed[n], allowedByTicket[i]...)
-		}
-	}
-
-	var reasons []string
-	for i, text := range criteriaTexts {
-		n := i + 1
-		allowed, ok := coveringAllowed[n]
-		if !ok {
-			continue // no ticket covers it -- ValidatePlanCoverage's own concern, not this check's.
-		}
-		for _, p := range criterionNamedPaths(text, workspace) {
-			if !criterionPathCovered(p, allowed) {
-				reasons = append(reasons, fmt.Sprintf("criterion %d names %s but no ticket covering it may change it -- add the criterion to the ticket that owns %s, or split the criterion", n, p, p))
-			}
-		}
-	}
-	return reasons
-}
-
-// criterionPathCovered reports whether allowed covers p, a path an
-// acceptance criterion names. A criterion may name a path relative to a
-// module root rather than the repository root: Flutter + Go app's spec named
-// `cmd/server/main.go` for the file every ticket lists as
-// backend/cmd/server/main.go, and the literal comparison rejected a correct
-// plan twice and halted the request (2026-09-28). An Allowed-Files entry
-// ending in "/"+p is that same file. A rooted name (`/static/site.css`,
-// counted because that file exists) is the file without its leading slash.
-func criterionPathCovered(p string, allowed []string) bool {
-	p = strings.TrimPrefix(p, "/")
-	if policy.PathCoveredByAllowed(p, allowed) {
-		return true
-	}
-	for _, a := range allowed {
-		if strings.HasSuffix(a, "/"+p) {
-			return true
-		}
-	}
-	return false
-}
-
-// criterionClauseRE splits a criterion's text into clauses: at a semicolon,
-// at a full stop that ends a sentence (one followed by white space), and at
-// the start of a list item on its own line.
-var criterionClauseRE = regexp.MustCompile(`;|\.\s+|\n\s*[-*]\s+`)
-
-// criterionUntouchedRE matches wording that says what a clause names does
-// not change.
-var criterionUntouchedRE = regexp.MustCompile(`(?i)(\b(untouched|unchanged|unmodified|unaltered|intact|(not|cannot|never)\s+(be\s+)?(modified|changed|touched|edited|altered|change|modify|touch|edit|alter)|without\s+(modifying|changing|touching|editing|altering)|no\s+changes?\s+to|left\s+as\s+(it\s+)?is)|n't\s+(be\s+)?(modified|changed|touched|edited|altered|change|modify|touch|edit|alter))\b`)
-
-// criterionChangeRE matches wording that says something does change, or
-// that limits what an "unchanged" covers. A path with such wording between
-// it and the end of its clause is not taken as untouched.
-var criterionChangeRE = regexp.MustCompile(`(?i)\b(chang\w*|modif\w*|add\w*|gain\w*|return\w*|new|creat\w*|updat\w*|implement\w*|export\w*|contain\w*|register\w*|render\w*|introduc\w*|includ\w*|extend\w*|replac\w*|remov\w*|delet\w*|renam\w*|otherwise|except\w*|other\s+than|apart\s+from|besides|only)\b`)
-
-// criterionNamedPaths returns the repo-relative file paths criterionText
-// names in backticks as files its work changes, in order, deduplicated --
-// see looksLikeRepoPath for what counts as a path rather than a command or
-// a bare identifier. A path its clause says stays untouched
-// (criterionPathUntouched) is not one: no ticket has to be allowed to change
-// it, and asking for that would put a file the spec protects into
-// Allowed-Files. Clauses and their wording are read outside the backticks,
-// so a command's own punctuation or words decide nothing.
-func criterionNamedPaths(criterionText, workspace string) []string {
-	spans := criterionNamedPathRE.FindAllStringSubmatchIndex(criterionText, -1)
-	prose := []byte(criterionText)
-	for _, span := range spans {
-		for k := span[2]; k < span[3]; k++ {
-			prose[k] = 'x'
-		}
-	}
-	var paths []string
-	seen := make(map[string]bool)
-	for _, span := range spans {
-		token := strings.TrimSpace(criterionText[span[2]:span[3]])
-		if token == "" || seen[token] || !looksLikeRepoPath(token, workspace) || criterionPathUntouched(prose, span[2], span[3]) {
-			continue
-		}
-		seen[token] = true
-		paths = append(paths, token)
-	}
-	return paths
-}
-
-// criterionPathUntouched reports whether the clause around prose[from:to]
-// (a code span, in a criterion's text with every code span's content
-// blanked) says that file stays as it is. It does when the clause says so
-// after the path with no wording of a change from the path to the clause's
-// end ("`a.md`, the `b` suite and all handlers are untouched"), or says so
-// right before it ("no changes to `a.md`"). Any other clause leaves the
-// path checked: one that also says what changes ("`a.go` returns 404 and
-// existing responses are unchanged", "`a.go` is otherwise unchanged") is
-// about a file some ticket must be allowed to change.
-func criterionPathUntouched(prose []byte, from, to int) bool {
-	start, end := 0, len(prose)
-	for _, cut := range criterionClauseRE.FindAllIndex(prose, -1) {
-		if cut[1] <= from {
-			start = cut[1]
-		} else if cut[0] >= to {
-			end = cut[0]
-			break
-		}
-	}
-	// Blank the untouched wording itself, so "no changes to" is not read as
-	// wording of a change.
-	clause := append([]byte(nil), prose[start:end]...)
-	said := criterionUntouchedRE.FindAllIndex(clause, -1)
-	if len(said) == 0 {
-		return false
-	}
-	for _, m := range said {
-		for k := m[0]; k < m[1]; k++ {
-			clause[k] = ' '
-		}
-	}
-	if criterionChangeRE.Match(clause[to-start:]) {
-		return false
-	}
-	for _, m := range said {
-		if m[0] >= to-start {
-			return true
-		}
-		// Before the path: only when nothing but "the", "file" or a
-		// backtick stands between the wording and the path.
-		if between := strings.Trim(strings.NewReplacer("the", "", "file", "", "`", "").Replace(string(clause[m[1]:from-start])), " \t\n"); between == "" {
-			return true
-		}
-	}
-	return false
-}
-
-// looksLikeRepoPath reports whether token -- one backticked span from an
-// acceptance criterion's own text -- names a repo-relative file, as
-// opposed to a shell command ("cd backend && go vet ./... && go test
-// ./..."), a glob (bare "./..."), or a bare identifier (a function or
-// tool name like "HandleInsights" or "habit_insights"). A token
-// containing whitespace is a command, never a single path. Otherwise it
-// counts as a path when it contains "/" and ends in a file extension
-// (packageQualified tells "internal/domain.Calculate" from one), or when it
-// names a file that actually exists under workspace (workspace == "" skips
-// that fallback check entirely). A token that starts with "/" is a URL path
-// or an absolute path ("/files/a/b/c.txt", a request a router serves), one
-// with "=" a value ("path=docs/img/logo.png") and one with "://" a URL:
-// none is repo-relative, so each counts only when such a file exists.
-func looksLikeRepoPath(token, workspace string) bool {
-	if strings.ContainsAny(token, " \t") {
-		return false
-	}
-	if strings.ContainsAny(token, "*?") || strings.Contains(token, "...") {
-		return false
-	}
-	if strings.Contains(token, "/") && !strings.HasPrefix(token, "/") && !strings.Contains(token, "=") && !strings.Contains(token, "://") {
-		if ext := path.Ext(token); ext != "" && ext != "." && !packageQualified(token, ext, workspace) {
-			return true
-		}
-	}
-	if workspace == "" {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(workspace, token))
-	return err == nil && !info.IsDir()
-}
-
-// packageQualified reports whether token, whose last dot starts ext, reads
-// as a Go identifier qualified by its package's directory
-// ("internal/domain.Calculate", "internal/domain.Operation.Valid") and not as
-// a file with an extension: what follows the dot starts with an upper-case
-// letter, as an exported identifier does and a file extension rarely does,
-// or what precedes it is a directory of the workspace that holds Go files
-// (an unexported "internal/domain.calculate"). A dotfile ("web/.eslintrc")
-// and a ".go" name are always files. looksLikeRepoPath still counts such a
-// token as a path when a file of that name exists, so the cost of a wrong
-// guess here is one new file left unchecked, never a plan refused.
-func packageQualified(token, ext, workspace string) bool {
-	if path.Base(token) == ext || ext == ".go" {
-		return false
-	}
-	if first, _ := utf8.DecodeRuneInString(ext[1:]); unicode.IsUpper(first) {
-		return true
-	}
-	if workspace == "" {
-		return false
-	}
-	goFiles, err := filepath.Glob(filepath.Join(workspace, filepath.FromSlash(strings.TrimSuffix(token, ext)), "*.go"))
-	return err == nil && len(goFiles) > 0
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file

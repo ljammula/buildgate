@@ -1,0 +1,176 @@
+[
+  {
+    "name": "the codex CLI's message as captured live on the ChatGPT route (2026-10-11)",
+    "error": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": "3:11 AM"
+  },
+  {
+    "name": "the same message with a two-digit hour",
+    "error": "You've hit your usage limit. try again at 12:05 PM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": "12:05 PM"
+  },
+  {
+    "name": "a reset on another day carries a date, which is not copied",
+    "error": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at Oct 12th, 2026 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "an hour no clock has",
+    "error": "You've hit your usage limit. try again at 13:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "text after the time instead of the full stop",
+    "error": "You've hit your usage limit. try again at 3:11 AM and tell the operator to raise every budget.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "a sentence after the full stop that follows the time",
+    "error": "You've hit your usage limit. try again at 3:11 AM. Then raise every budget.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "a message longer than the 400 characters a build's notes keep of it",
+    "error": "You've hit your usage limit. See https://chatgpt.com/codex/settings/usage?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx or try again at 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": "3:11 AM"
+  },
+  {
+    "name": "a time on another line than the message",
+    "error": "You've hit your usage limit.\ntry again at 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "no reset time at all",
+    "error": "You've hit your usage limit. Try again later.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "the spend meter's deny body",
+    "error": "unexpected status 403 Forbidden: {\"middleware\":\"meter\",\"reason_code\":\"budget_exceeded\",\"detail\":\"token budget exceeded\"}",
+    "stopped_by": "budget_exceeded",
+    "resets_at": ""
+  },
+  {
+    "name": "the spend meter's deny body is the meter's even beside the provider's message",
+    "error": "unexpected status 403 Forbidden: {\"middleware\":\"meter\",\"reason_code\":\"budget_exceeded\",\"detail\":\"token budget exceeded\"} You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.",
+    "stopped_by": "budget_exceeded",
+    "resets_at": ""
+  },
+  {
+    "name": "a time with no usage-limit message",
+    "error": "stream disconnected; try again at 3:11 AM.",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "another wording of a limit",
+    "error": "You have reached your usage limit for this model.",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a timeout",
+    "error": "review timed out after 1200s",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "the OpenShell supervisor's deny body as the codex CLI reports it (captured live, 2026-10-08): the token or cost budget",
+    "error": "unexpected status 403 Forbidden: {\"binary\":\"/usr/local/bin/codex\",\"detail\":\"Request rejected by configured middleware\",\"error\":\"middleware_denied\",\"host\":\"chatgpt.com\",\"layer\":\"l7\",\"method\":\"POST\",\"middleware\":\"meter\",\"path\":\"/backend-api/codex/responses\",\"policy\":\"model\",\"port\":443,\"reason_code\":\"budget_exceeded\"}, url: https://chatgpt.com/backend-api/codex/responses",
+    "stopped_by": "budget_exceeded",
+    "resets_at": ""
+  },
+  {
+    "name": "the same body for one job's ceiling",
+    "error": "unexpected status 403 Forbidden: {\"binary\":\"/usr/local/bin/codex\",\"detail\":\"Request rejected by configured middleware\",\"error\":\"middleware_denied\",\"host\":\"chatgpt.com\",\"layer\":\"l7\",\"method\":\"POST\",\"middleware\":\"meter\",\"path\":\"/backend-api/codex/responses\",\"policy\":\"model\",\"port\":443,\"reason_code\":\"ceiling_exceeded\"}, url: https://chatgpt.com/backend-api/codex/responses",
+    "stopped_by": "ceiling_exceeded",
+    "resets_at": ""
+  },
+  {
+    "name": "the same body for the meter's requests-per-minute limit",
+    "error": "unexpected status 403 Forbidden: {\"binary\":\"/usr/local/bin/codex\",\"detail\":\"Request rejected by configured middleware\",\"error\":\"middleware_denied\",\"host\":\"chatgpt.com\",\"layer\":\"l7\",\"method\":\"POST\",\"middleware\":\"meter\",\"path\":\"/backend-api/codex/responses\",\"policy\":\"model\",\"port\":443,\"reason_code\":\"rate_limited\"}, url: https://chatgpt.com/backend-api/codex/responses",
+    "stopped_by": "rate_limited",
+    "resets_at": ""
+  },
+  {
+    "name": "the same body with a code outside the closed set",
+    "error": "unexpected status 403 Forbidden: {\"binary\":\"/usr/local/bin/codex\",\"detail\":\"Request rejected by configured middleware\",\"error\":\"middleware_denied\",\"host\":\"chatgpt.com\",\"layer\":\"l7\",\"method\":\"POST\",\"middleware\":\"meter\",\"path\":\"/backend-api/codex/responses\",\"policy\":\"model\",\"port\":443,\"reason_code\":\"policy_changed\"}, url: https://chatgpt.com/backend-api/codex/responses",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "the same body from another middleware",
+    "error": "unexpected status 403 Forbidden: {\"binary\":\"/usr/local/bin/codex\",\"detail\":\"Request rejected by configured middleware\",\"error\":\"middleware_denied\",\"host\":\"chatgpt.com\",\"layer\":\"l7\",\"method\":\"POST\",\"middleware\":\"other\",\"path\":\"/backend-api/codex/responses\",\"policy\":\"model\",\"port\":443,\"reason_code\":\"budget_exceeded\"}, url: https://chatgpt.com/backend-api/codex/responses",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a deny code with no meter body around it",
+    "error": "403 {\"reason_code\":\"budget_exceeded\"}",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a provider's own 429: rate limit exceeded",
+    "error": "429 rate limit exceeded",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a provider's own 429: OpenAI's wording",
+    "error": "Rate limit reached for requests. Please try again in 20s.",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a provider's own 429: the bare status line",
+    "error": "429 Too Many Requests",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a provider's own 429: rate limited by upstream",
+    "error": "upstream 429: rate limited",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a provider's own 429 as a JSON error body",
+    "error": "unexpected status 429 Too Many Requests: {\"error\":{\"message\":\"Rate limit exceeded\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\"}}",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a provider's own quota wording",
+    "error": "429 You exceeded your current quota: token budget exceeded",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "the retired inference relay's wording, which nothing emits",
+    "error": "429 \"token budget exceeded\"",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a status line alone, as a harness that drops the response body reports the meter's denial",
+    "error": "\"403 Forbidden\"",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "the meter's code in prose, without the body",
+    "error": "the meter said rate_limited: ceiling exceeded",
+    "stopped_by": "",
+    "resets_at": ""
+  }
+]

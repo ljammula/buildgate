@@ -7,6 +7,7 @@ import { TextWithCode } from "@/ui/TextWithCode";
 
 import { Panel } from "./Panel";
 import { ticketOracleAnchorId } from "./ReviewActions";
+import { ReviewNotes, hasReviewNotes } from "./ReviewNotes";
 import { type RequestDialogs, awaitsTicketOracle } from "./useRequestDialogs";
 
 export interface ReviewSectionProps {
@@ -18,8 +19,9 @@ export interface ReviewSectionProps {
 
 /**
  * The review notes and the oracle files an approval pins: why Approve is
- * unavailable, the oracle_review panel (which owns its Approve), and the
- * plan_review ticket-oracle panel (which Approve waits for).
+ * unavailable, the factory's notes on the spec or plan, the oracle_review
+ * panel (which owns its Approve), and the plan_review ticket-oracle panel
+ * (which Approve waits for).
  */
 export function ReviewSection({
   request,
@@ -33,6 +35,7 @@ export function ReviewSection({
     !detailLoaded ||
     request.state === "oracle_review" ||
     awaitsTicketOracle(request) ||
+    hasReviewNotes(request) ||
     anyEditorOpen;
   // A card with nothing in it (a spec review the operator can already act on) is noise.
   if (!hasContent) return null;
@@ -51,6 +54,7 @@ export function ReviewSection({
           Loading the full spec/plan content before enabling approve/reject...
         </p>
       ) : null}
+      <ReviewNotes request={request} />
       {request.state === "oracle_review" ? (
         <OracleReviewPanel
           key={`oracle-review-${request.id}`}

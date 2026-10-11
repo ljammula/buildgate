@@ -1,0 +1,5 @@
+{
+ "verify_command": "go test ./...",
+ "project": "lo",
+ "tickets": 1
+}

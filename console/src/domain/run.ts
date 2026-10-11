@@ -480,11 +480,17 @@ export interface Run {
    */
   readonly byModel: readonly ModelUsage[];
   /**
-   * False when `byModel` is a lower bound (runView.TokensComplete): a
-   * crash-recovered relay spend, or an evidence round with no usable token
-   * figure. Absent on an older server decodes as true.
+   * False when `byModel` is a lower bound (runView.TokensComplete): an
+   * evidence round with no usable token figure. Absent on an older server
+   * decodes as true.
    */
   readonly tokensComplete: boolean;
+  /**
+   * True when `byModel` holds the meter's worst-case estimate for a model
+   * request that ended without a usage report (runView.Estimated): the
+   * figures may over-state.
+   */
+  readonly estimated: boolean;
   /**
    * The -reference-oracle-dir this run was launched with: "" for a run with
    * no oracle stage or one predating the field. Hides the commit_oracles and
@@ -534,6 +540,7 @@ export function decodeRun(o: JsonObject, at: string): Run {
     temporalWorkflowId: optString(o, "temporal_workflow_id", at),
     byModel: objectList(o, "by_model", at, decodeModelUsage),
     tokensComplete: optBoolean(o, "tokens_complete", at, true),
+    estimated: optBoolean(o, "estimated", at),
     referenceOracleDir: optString(o, "reference_oracle_dir", at),
     composePhases: objectList(o, "compose_phases", at, decodeComposePhase),
   };

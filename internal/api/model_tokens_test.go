@@ -246,41 +246,47 @@ func TestComputeCostSummaryByModelDistinctOrdered(t *testing.T) {
 	}
 }
 
-// TestAddRunModelUsagePartialRelaySpendIsLowerBound covers a run whose relay
-// crashed and whose spend was recovered from its usage ledger
-// (run.Attempt.RelaySpendPartial): the tokens still count, but the rollup
-// must report them as a lower bound, never a confirmed total.
-func TestAddRunModelUsagePartialRelaySpendIsLowerBound(t *testing.T) {
+// TestAddRunModelUsageMarksAnEstimatedSpend covers a run with a model
+// request that ended without a usage report, charged the meter's worst-case
+// estimate (run.Attempt.RelaySpendPartial): the tokens still count and none
+// is missing, so the rollup is complete, and it is marked estimated, since
+// it may over-state. It is not a lower bound.
+func TestAddRunModelUsageMarksAnEstimatedSpend(t *testing.T) {
 	r := &run.Run{Attempts: []run.Attempt{
 		{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayConsumedInputTokens: 800, RelayConsumedOutputTokens: 200, RelaySpendPartial: true},
 	}}
 	acc := newModelUsageAccumulator()
-	if complete := addRunModelUsage(r, acc); complete {
-		t.Fatalf("addRunModelUsage complete = true, want false for partial relay spend")
+	if complete, estimated := addRunModelUsage(r, acc); !complete || !estimated {
+		t.Fatalf("addRunModelUsage = complete %v, estimated %v, want true, true", complete, estimated)
 	}
 	want := []ModelUsage{{Model: "gpt-5.6-luna", Tokens: 1000}}
 	if got := acc.finish(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ByModel = %+v, want %+v", got, want)
 	}
+	// A run with no token figure at all is still a lower bound, and not an
+	// estimate.
+	if complete, estimated := addRunModelUsage(&run.Run{}, newModelUsageAccumulator()); complete || estimated {
+		t.Fatalf("a run with no figures: complete %v, estimated %v, want false, false", complete, estimated)
+	}
 }
 
-// TestRunViewForReportsTokensLowerBound covers the run detail route: the
-// view must carry addRunModelUsage's completeness flag, so the console can
-// render a crash-recovered run's tokens as "≥" there too, not only inside a
-// request's cost_summary.
-func TestRunViewForReportsTokensLowerBound(t *testing.T) {
+// TestRunViewForReportsAnEstimatedSpend covers the run detail route: the
+// view carries both of addRunModelUsage's flags, so the console marks such
+// a run's tokens as an upper bound there too, not only inside a request's
+// cost_summary.
+func TestRunViewForReportsAnEstimatedSpend(t *testing.T) {
 	s := NewServer(t.TempDir())
 	partial := s.runViewFor(&run.Run{ID: "r", State: run.StateAccepted, Attempts: []run.Attempt{
 		{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayConsumedInputTokens: 10, RelaySpendPartial: true},
 	}})
-	if partial.TokensComplete {
-		t.Fatalf("TokensComplete = true, want false for partial relay spend")
+	if !partial.TokensComplete || !partial.Estimated {
+		t.Fatalf("TokensComplete %v, Estimated %v, want true, true for a spend holding an estimate", partial.TokensComplete, partial.Estimated)
 	}
 	confirmed := s.runViewFor(&run.Run{ID: "r", State: run.StateAccepted, Attempts: []run.Attempt{
 		{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayConsumedInputTokens: 10},
 	}})
-	if !confirmed.TokensComplete {
-		t.Fatalf("TokensComplete = false, want true for confirmed relay spend")
+	if !confirmed.TokensComplete || confirmed.Estimated {
+		t.Fatalf("TokensComplete %v, Estimated %v, want true, false for an all-metered spend", confirmed.TokensComplete, confirmed.Estimated)
 	}
 }
 
@@ -295,7 +301,7 @@ func TestAddRunModelUsageGroupsByRoleAndModel(t *testing.T) {
 		{Kind: "spec_conformity", Role: "review", RelayWorkerModelID: "gpt-5.6-luna", RelayConsumedInputTokens: 20, RelayConsumedOutputTokens: 10, RelayConsumedCostMicroUSD: 300},
 	}}
 	acc := newModelUsageAccumulator()
-	if complete := addRunModelUsage(r, acc); !complete {
+	if complete, _ := addRunModelUsage(r, acc); !complete {
 		t.Fatalf("addRunModelUsage complete = false, want true")
 	}
 	want := []ModelUsage{

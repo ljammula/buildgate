@@ -87,6 +87,11 @@ export interface CostSummary {
   readonly tokens: number | null;
   /** False when `tokens` is a lower bound. */
   readonly tokensComplete: boolean;
+  /**
+   * True when the figures hold the meter's worst-case estimate for a model
+   * request that ended without a usage report: they may over-state.
+   */
+  readonly estimated: boolean;
   /** Sorted by role then model; empty when nothing recorded a model id. */
   readonly byModel: readonly ModelUsage[];
   /** 0 also from a server that predates the field. */
@@ -106,6 +111,7 @@ export function decodeCostSummary(o: JsonObject, at: string): CostSummary {
     subscriptionBilled: optBoolean(o, "subscription_billed", at),
     tokens: optNumber(o, "tokens", at),
     tokensComplete: optBoolean(o, "tokens_complete", at),
+    estimated: optBoolean(o, "estimated", at),
     byModel: objectList(o, "by_model", at, decodeModelUsage),
     acceptedTickets: numberOr(o, "accepted_tickets", at, 0),
     costPerAcceptedTicketMicroUsd: numberOr(o, "cost_per_accepted_ticket_micro_usd", at, 0),

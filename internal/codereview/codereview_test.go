@@ -2,6 +2,7 @@ package codereview
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -251,5 +252,73 @@ func TestParseResultRecordsTheMeterDenyThatStoppedTheReview(t *testing.T) {
 				t.Errorf("StoppedBy = %q, want %q", got.StoppedBy, tc.want)
 			}
 		})
+	}
+}
+
+// The provider's own usage limit is a cause of its own, told apart from the
+// spend meter's denial, and the reset time is kept only in the one shape of
+// a time of day. agent/pi/tests/combined_review_test.py reads the same
+// fixture, so the build scripts and the host name each text alike.
+func TestStopCausesFixture(t *testing.T) {
+	data, err := os.ReadFile("../../agent/pi/tests/fixtures/review_stop_causes.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name      string `json:"name"`
+		Error     string `json:"error"`
+		StoppedBy string `json:"stopped_by"`
+		ResetsAt  string `json:"resets_at"`
+	}
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("no cases in the fixture")
+	}
+	sawProvider, sawMeter := false, false
+	for _, tc := range cases {
+		sawProvider = sawProvider || tc.StoppedBy == CodeProviderUsageLimit
+		_, isMeter := StopSettings(tc.StoppedBy)
+		sawMeter = sawMeter || isMeter
+		t.Run(tc.Name, func(t *testing.T) {
+			if got := StoppedBy(tc.Error); got != tc.StoppedBy {
+				t.Errorf("StoppedBy = %q, want %q", got, tc.StoppedBy)
+			}
+			evidence, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "required", "available": false, "error": tc.Error})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := ParseResult(evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.StoppedBy != tc.StoppedBy || got.ResetsAt != tc.ResetsAt {
+				t.Errorf("ParseResult: StoppedBy %q ResetsAt %q, want %q %q", got.StoppedBy, got.ResetsAt, tc.StoppedBy, tc.ResetsAt)
+			}
+			code, resetsAt := EvidenceStoppedBy(evidence)
+			if code != tc.StoppedBy || resetsAt != tc.ResetsAt {
+				t.Errorf("EvidenceStoppedBy = %q, %q, want %q, %q", code, resetsAt, tc.StoppedBy, tc.ResetsAt)
+			}
+		})
+	}
+	if !sawProvider || !sawMeter {
+		t.Errorf("the fixture must hold a provider-limit case and a meter case (provider %v, meter %v)", sawProvider, sawMeter)
+	}
+}
+
+// The sentence shows a reset time only when it is exactly a time of day: a
+// run record is read back from disk, and nothing else in it is echoed.
+func TestProviderLimitCauseShowsOnlyATimeOfDay(t *testing.T) {
+	if got := ProviderLimitCause("3:11 AM"); !strings.Contains(got, "try again at 3:11 AM") || !strings.Contains(got, "the model provider's usage limit was reached") {
+		t.Errorf("ProviderLimitCause = %q", got)
+	}
+	for _, bad := range []string{"", "3:11 AM; run this", "25:00 PM", "tomorrow", "3:11 AM\n"} {
+		if got := ProviderLimitCause(bad); strings.Contains(got, "try again at") || !strings.Contains(got, "the model provider's usage limit was reached") {
+			t.Errorf("ProviderLimitCause(%q) = %q, want no time shown", bad, got)
+		}
+	}
+	if _, isSetting := StopSettings(CodeProviderUsageLimit); isSetting {
+		t.Error("the provider's limit is governed by no session-config setting")
 	}
 }

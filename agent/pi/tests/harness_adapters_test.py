@@ -296,6 +296,7 @@ class PiforkThroughSharedOrchestrationTests(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as root:
 			workspace, spec = self._workspace_and_spec(root)
 			model_commands = []
+			tree = lambda name: ("head", "", name, ())
 
 			def fake_run_agent_streaming(command, **kwargs):
 				model_commands.append(command)
@@ -303,8 +304,11 @@ class PiforkThroughSharedOrchestrationTests(unittest.TestCase):
 
 			with (
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=fake_run_agent_streaming),
-				mock.patch.object(build_app, "workspace_fingerprint", side_effect=[("before-1",), ("after-1",), ("before-2",), ("after-2",)]),
+				# The third is the rerun's own look at the tree, unchanged since the turn.
+				mock.patch.object(build_app, "workspace_fingerprint", side_effect=[tree("before-1"), tree("after-1"), tree("after-1"), tree("before-2"), tree("after-2")]),
 				mock.patch.object(build_app, "run_verification", side_effect=[
+					("make verify", False, False, "first failure", False, None),
+					# A failed verify is run once more before the next round.
 					("make verify", False, False, "first failure", False, None),
 					("make verify", True, False, "", False, None),
 				]),

@@ -131,7 +131,7 @@ func formatTokenCount(n int64) string {
 // relay-spend evidence `factoryd status` already reports -- rather than
 // recomputing it from a model/provider price list AgentEvidence doesn't
 // carry. Returns "" (omit the cost segment) when nothing was recorded,
-// including a partial (relay exited abnormally) total: RoundSummary's
+// including a total that holds an estimate (spendEstimateNote): RoundSummary's
 // one-line note has no room for that caveat, so it only ever shows a cost
 // it can state plainly.
 func buildCostUSD(r *run.Run) string {

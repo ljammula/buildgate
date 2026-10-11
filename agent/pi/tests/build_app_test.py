@@ -53,6 +53,26 @@ def agent_invocation_calls(mock_) -> list:
 	return [call for call in mock_.call_args_list if call.args and call.args[0] and call.args[0][0] in ("pi", "claude")]
 
 
+def failing_again_when_rerun(verification):
+	"""A run_verification side_effect for run_build tests written with one
+	result per round's checks (a list, or a callable): the second run of a
+	failed verify (rerun_failed_verify's call, the only one that passes no
+	fast_check_command) gets the failure it follows once more, without taking
+	a result or calling the callable. Such a test's failure is a real one, not
+	a flake; VerifyRerunTests covers the rerun itself."""
+	results = iter(verification) if not callable(verification) else None
+	last = []
+
+	def side_effect(*args, **kwargs):
+		if "fast_check_command" not in kwargs and last:
+			return last[-1]
+		result = next(results) if results is not None else verification(*args, **kwargs)
+		last.append(result)
+		return result
+
+	return side_effect
+
+
 def scripted_pi_stream(completions, writes=None):
 	"""A run_agent_streaming side_effect for run_build tests: pops the next
 	canned CompletedProcess from `completions` for each local pi-round
@@ -697,6 +717,53 @@ class BuildAppTests(unittest.TestCase):
 		self.assertEqual(len(agent_invocation_calls(run)), 1)
 		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.stopped_reason)
 
+	def test_a_build_the_providers_usage_limit_refused_says_so(self):
+		limit = next(
+			c["error"] for c in json.loads((Path(__file__).parent / "fixtures" / "review_stop_causes.json").read_text())
+			if c["stopped_by"] == "provider_usage_limit"
+		)
+		for message, named in ((limit, True), ("connection refused", False)):
+			with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
+				root = Path(directory)
+				spec = root / "spec.md"
+				spec.write_text("Fix the cache")
+				errored_output = json.dumps({
+					"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": message},
+				})
+				with (
+					mock.patch.object(build_app, "ensure_git_repo"),
+					mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "", False, None)),
+					mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, errored_output, ""), False)),
+				):
+					result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1)
+				self.assertEqual(len(result.rounds), 1)
+				self.assertTrue(result.stopped_reason.startswith("model route unreachable (1/1 assistant turns errored)"))
+				self.assertEqual(result.stopped_reason.endswith(": the model provider's usage limit was reached"), named)
+				# The host reads this code (internal/triage), never the notes.
+				self.assertEqual(result.model_stop, {"code": "provider_usage_limit", "resets_at": "3:11 AM"} if named else None)
+
+	def test_a_model_that_writes_the_providers_sentence_records_no_model_stop(self):
+		# The sentence in the model's own final message, with no error from
+		# the harness, is text like any other: a no-change round.
+		sentence = "You've hit your usage limit. try again at 9:59 PM."
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			said = json.dumps({
+				"type": "message_end",
+				"message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": sentence}]},
+			})
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "", False, None)),
+				mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, said, ""), False)),
+			):
+				result = build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1)
+		self.assertFalse(result.succeeded)
+		self.assertIsNone(result.model_stop)
+		self.assertNotIn("usage limit", result.stopped_reason)
+
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
@@ -1226,7 +1293,7 @@ class SetupCommandTests(unittest.TestCase):
 		with (
 			mock.patch.object(build_app, "ensure_git_repo"),
 			mock.patch.object(build_app, "sh", side_effect=recording_sh),
-			mock.patch.object(build_app, "run_verification", side_effect=lambda *a, **k: results.pop(0)) as verification,
+			mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(lambda *a, **k: results.pop(0))) as verification,
 			mock.patch.object(build_app, "corrective_prompt", wraps=build_app.corrective_prompt) as prompt,
 			mock.patch.object(build_app, "run_agent_streaming", side_effect=lambda *a, **k: (subprocess.CompletedProcess([], 0, pi_output("clean"), ""), False)),
 		):
@@ -1248,7 +1315,7 @@ class SetupCommandTests(unittest.TestCase):
 			spec.write_text("Fix the cache")
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", side_effect=verification),
+				mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verification)),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=lambda *a, **k: (subprocess.CompletedProcess([], 0, pi_output("clean"), ""), False)),
 			):
 				build_app.run_build(
@@ -1432,7 +1499,7 @@ class AutofixCommandTests(unittest.TestCase):
 
 		with (
 			mock.patch.object(build_app, "sh", side_effect=recording_sh),
-			mock.patch.object(build_app, "run_verification", side_effect=verify or (lambda *a, **k: ("make verify", False, False, "boom", False, None))),
+			mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verify or (lambda *a, **k: ("make verify", False, False, "boom", False, None)))),
 			mock.patch.object(build_app, "run_agent_streaming", side_effect=agent_turn),
 		):
 			return build_app.run_build(
@@ -2485,7 +2552,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 			verify_results = [("make verify", i >= rounds - 1, False, "boom", False, None) for i in range(rounds + 1)]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", side_effect=verify_results),
+				mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verify_results)),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, writes)) as run,
 			):
 				build_app.run_build(root, spec, max_rounds=rounds, timeout_minutes=1, handoff=handoff, earlier_attempt=earlier_attempt, baseline_failure=baseline_failure)
@@ -2541,7 +2608,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 			verify_results = [("make verify", False, False, "boom", False, None), ("make verify", True, False, "", False, None)]
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", side_effect=verify_results),
+				mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verify_results)),
 				mock.patch.object(build_app, "write_round_state", side_effect=capture),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, writes)) as run,
 			):
@@ -3334,6 +3401,304 @@ class WorkspaceDiffTest(unittest.TestCase):
 		self.assertIn("x" * build_app._DIFF_TRUNCATE_LIMIT, formatted)
 
 
+class VerifyRerunTests(unittest.TestCase):
+	"""A failed in-loop verify is run once more on the unchanged tree before a
+	model round is spent on it. Seen live four times on one repository
+	(2026-10-10): timing-sensitive tests (TestSynchronize, TestWaitFor) failed
+	under machine load in round 1 and passed in round 2 with no file changed."""
+
+	FAILED = "--- FAIL: TestWaitFor (0.01s)\n--- FAIL: TestSynchronize (0.02s)\nFAIL"
+
+	def _build(self, results, *, max_rounds=2, returncodes=(), turns=None):
+		"""Runs a build whose verify gives `results` in order (a passing
+		result ever after), with no time budget set. Returns the result, the
+		verify calls' keyword arguments, the agent prompts, the progress
+		events, the evidence, the report and round 1's saved logs by name."""
+		calls, events = [], []
+		results = list(results)
+
+		def verification(workspace, **kwargs):
+			index = len(calls)
+			calls.append(kwargs)
+			if "outcome" in kwargs and index < len(returncodes):
+				kwargs["outcome"]["returncode"] = returncodes[index]
+			result = results[index] if index < len(results) else ("make verify", True, False, "", False, None)
+			if result[1] is False and kwargs.get("log_dir") is not None:
+				kwargs["log_dir"].mkdir(parents=True, exist_ok=True)
+				(kwargs["log_dir"] / "verify.log").write_text(f"run {index + 1}: {result[3]}\n")
+			return result
+
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(spec_dir) / "spec.md"
+			spec.write_text("Fix the cache")
+			turns = turns or [subprocess.CompletedProcess([], 0, pi_output("clean"), "")] * max_rounds
+			writes = [lambda i=i: (root / "cache.go").write_text(f"round {i}\n") for i in range(len(turns))]
+			environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", side_effect=verification),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(turns, writes)) as run,
+				mock.patch.object(build_app, "print_progress", side_effect=events.append),
+				mock.patch.dict(os.environ, environ, clear=True),
+			):
+				result = build_app.run_build(root, spec, max_rounds=max_rounds, timeout_minutes=1)
+				evidence = json.loads(build_app.write_evidence_json(result).read_text())
+				report = build_app.write_report(result).read_text()
+			logs = {path.name: path.read_text() for path in (root / ".pi-build-session" / "feedback" / "round-1").glob("*.log")}
+			prompts = [call.args[0][-1] for call in agent_invocation_calls(run)]
+		return result, calls, prompts, events, evidence, report, logs
+
+	def test_a_verify_that_passes_when_run_again_costs_no_model_round(self):
+		result, calls, prompts, events, evidence, report, logs = self._build([("go test ./...", False, False, self.FAILED, False, None)])
+		self.assertTrue(result.succeeded)
+		self.assertEqual(len(result.rounds), 1)
+		self.assertEqual(len(prompts), 1)
+		self.assertEqual(len(calls), 2)
+		# The rerun is the same command alone, under run_verification's own timeout.
+		self.assertEqual(calls[1]["verify_command_override"], "go test ./...")
+		self.assertNotIn("fast_check_command", calls[1])
+		rnd = result.rounds[0]
+		self.assertIs(rnd.verify_passed, True)
+		self.assertEqual(rnd.blockers, [])
+		self.assertEqual(rnd.failure_log, "")
+		want = {"ran": True, "passed": True, "skipped_reason": "", "first_failing": ["TestWaitFor", "TestSynchronize"]}
+		self.assertEqual(rnd.verify_rerun, want)
+		self.assertEqual(evidence["rounds"][0]["verify_rerun"], want)
+		self.assertIs(evidence["rounds"][0]["verify_passed"], True)
+		self.assertIn("- verify rerun: the first run failed (TestWaitFor, TestSynchronize) and a second run on the unchanged tree passed", report)
+		# The first run's output is kept, under a name no later failure is given.
+		self.assertEqual(sorted(logs), ["verify-first-run.log"])
+		self.assertIn("run 1", logs["verify-first-run.log"])
+		notes = [e["detail"] for e in events if e.get("event") == "note" and e.get("stage") == "round"]
+		self.assertEqual(len(notes), 2)
+		self.assertIn("running it once more", notes[0])
+		self.assertIn("passed when run again", notes[1])
+		self.assertNotIn("TestWaitFor", " ".join(notes))
+		ends = [e for e in events if e.get("stage") == "round" and e.get("event") == "end"]
+		self.assertEqual([e["outcome"] for e in ends], ["pass"])
+
+	def test_a_verify_that_fails_twice_is_answered_with_the_second_runs_output(self):
+		second = "--- FAIL: TestCacheEvicts (0.00s)\nFAIL"
+		result, calls, prompts, events, evidence, report, logs = self._build([
+			("go test ./...", False, False, self.FAILED, False, None),
+			("go test ./...", False, False, second, False, None),
+		])
+		self.assertEqual(len(calls), 3)
+		self.assertEqual(len(prompts), 2)
+		rnd = result.rounds[0]
+		self.assertIs(rnd.verify_passed, False)
+		self.assertEqual(rnd.verify_output_tail, second)
+		self.assertEqual(rnd.blockers, ["canonical verification failed"])
+		self.assertEqual(rnd.failure_log, ".pi-build-session/feedback/round-1/verify.log")
+		self.assertIn("run 2", logs["verify.log"])
+		self.assertIn("TestCacheEvicts", prompts[1])
+		self.assertNotIn("TestWaitFor", prompts[1])
+		self.assertEqual(rnd.verify_rerun, {"ran": True, "passed": False, "skipped_reason": "", "first_failing": ["TestWaitFor", "TestSynchronize"]})
+		self.assertIn("- verify rerun: failed again on the unchanged tree", report)
+		self.assertIsNone(result.rounds[1].verify_rerun)
+		self.assertNotIn("verify_rerun", evidence["rounds"][1])
+
+	def test_a_rerun_that_times_out_is_a_timed_out_verify(self):
+		result, calls, _, _, _, _, _ = self._build([
+			("go test ./...", False, False, self.FAILED, False, None),
+			("go test ./...", False, True, "verification command timed out after 20 minutes: go test ./...", False, None),
+		], max_rounds=1)
+		self.assertEqual(len(calls), 2)
+		self.assertIs(result.rounds[0].verify_timed_out, True)
+		self.assertIs(result.rounds[0].verify_passed, False)
+
+	def test_no_rerun_for_a_verify_that_timed_out_could_not_start_or_did_not_run(self):
+		cases = [
+			("timed out", ("go test ./...", False, True, "timed out", False, None), (), None),
+			("not found", ("go test ./...", False, False, "bash: go: command not found", False, None), (127,), "the command could not start (exit 127)"),
+			("not executable", ("./check.sh", False, False, "Permission denied", False, None), (126,), "the command could not start (exit 126)"),
+			("fast check failed", (None, None, False, "[FAST CHECK] failed", True, False), (), None),
+			("no command", (None, None, False, "", False, None), (), None),
+		]
+		for name, first, returncodes, reason in cases:
+			with self.subTest(case=name):
+				result, calls, _, events, evidence, report, _ = self._build([first, first], max_rounds=1, returncodes=returncodes)
+				self.assertEqual(len(calls), 1)
+				rnd = result.rounds[0]
+				if reason is None:
+					self.assertIsNone(rnd.verify_rerun)
+					self.assertNotIn("verify_rerun", evidence["rounds"][0])
+					self.assertNotIn("verify rerun", report)
+				else:
+					self.assertEqual(rnd.verify_rerun, {"ran": False, "passed": None, "skipped_reason": reason, "first_failing": []})
+					self.assertIn(f"- verify rerun: not run ({reason})", report)
+					self.assertTrue(any(reason in e.get("detail", "") for e in events))
+
+	def test_no_rerun_after_an_agent_turn_that_failed(self):
+		turns = [subprocess.CompletedProcess([], 1, pi_output("clean"), "")]
+		result, calls, _, _, _, _, _ = self._build([("go test ./...", False, False, self.FAILED, False, None)], max_rounds=1, turns=turns)
+		self.assertEqual(len(calls), 1)
+		self.assertIsNone(result.rounds[0].verify_rerun)
+
+	def test_no_rerun_when_too_little_of_the_time_budget_is_left(self):
+		# The first run of the checks took 100 s: a second needs 150 s and 60 s in hand.
+		for left, reruns in ((209, False), (210, True)):
+			with self.subTest(left=left):
+				ticks = {"now": 1000.0}
+
+				def clock():
+					return ticks["now"]
+
+				def first_run_takes_100s(index):
+					if index == 0:
+						ticks["now"] += 100.0
+
+				calls = []
+				results = [("go test ./...", False, False, self.FAILED, False, None)]
+
+				def verification(workspace, **kwargs):
+					first_run_takes_100s(len(calls))
+					calls.append(kwargs)
+					return results[len(calls) - 1] if len(calls) <= len(results) else ("go test ./...", True, False, "", False, None)
+
+				with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+					root = Path(directory)
+					init_repo_with_commit(root)
+					spec = Path(spec_dir) / "spec.md"
+					spec.write_text("Fix the cache")
+					turn = subprocess.CompletedProcess([], 0, pi_output("clean"), "")
+					with (
+						mock.patch.object(build_app, "ensure_git_repo"),
+						mock.patch.object(build_app, "run_verification", side_effect=verification),
+						mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([turn], [lambda: (root / "cache.go").write_text("x\n")])),
+						mock.patch.object(build_app, "_monotonic", side_effect=clock),
+						mock.patch.dict(os.environ, {build_app.BUILD_TIME_BUDGET_ENV: str(1100 + left)}),
+					):
+						result = build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1, started_monotonic=0.0)
+				rnd = result.rounds[0]
+				self.assertEqual(len(calls), 2 if reruns else 1)
+				if reruns:
+					self.assertEqual(rnd.verify_rerun["ran"], True)
+					self.assertTrue(result.succeeded)
+				else:
+					self.assertEqual(rnd.verify_rerun, {
+						"ran": False, "passed": None, "skipped_reason": "under 210 s of the build time budget left",
+						"first_failing": ["TestWaitFor", "TestSynchronize"],
+					})
+					self.assertIs(rnd.verify_passed, False)
+
+	def _real_verify_build(self, command_for, *, budget=None, clock=None):
+		"""One round with the real run_verification over command_for(outside)
+		in a real repository. Returns the result, how often the command ran
+		(it appends to outside/runs), round 1's saved logs, the progress
+		events and the report."""
+		events = []
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(outside) / "spec.md"
+			spec.write_text("Fix the cache")
+			turn = subprocess.CompletedProcess([], 0, pi_output("clean"), "")
+			environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+			if budget is not None:
+				environ[build_app.BUILD_TIME_BUDGET_ENV] = str(budget)
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([turn], [lambda: (root / "cache.go").write_text("x\n")])),
+				mock.patch.object(build_app, "print_progress", side_effect=events.append),
+				mock.patch.object(build_app, "_monotonic", side_effect=clock) if clock else contextlib.nullcontext(),
+				mock.patch.dict(os.environ, environ, clear=True),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=1, timeout_minutes=1, verify_command_override=command_for(Path(outside)),
+					started_monotonic=0.0 if clock else None,
+				)
+				report = build_app.write_report(result).read_text()
+			runs = (Path(outside) / "runs").read_text().count("run\n") if (Path(outside) / "runs").exists() else 0
+			logs = {path.name: path.read_text() for path in (root / ".pi-build-session" / "feedback" / "round-1").glob("*.log")}
+		return result, runs, logs, events, report
+
+	def test_a_verify_whose_first_run_changed_the_tree_is_not_passed_by_a_second(self):
+		# The first run writes the file it then finds: a second run would pass
+		# on a tree the first one made, not on the one the round is judged on.
+		generating = lambda outside: f"echo run >> {outside}/runs; test -f golden.txt || {{ echo generated > golden.txt; echo '--- FAIL: TestGolden (0.00s)'; exit 1; }}"
+		result, runs, logs, events, report = self._real_verify_build(generating)
+		rnd = result.rounds[0]
+		self.assertEqual(runs, 1)
+		self.assertFalse(result.succeeded)
+		self.assertIs(rnd.verify_passed, False)
+		self.assertEqual(rnd.blockers, ["canonical verification failed"])
+		self.assertIn("TestGolden", rnd.verify_output_tail)
+		reason = "the round's checks changed files in the workspace"
+		self.assertEqual(rnd.verify_rerun, {"ran": False, "passed": None, "skipped_reason": reason, "first_failing": ["TestGolden"]})
+		self.assertEqual(rnd.failure_log, ".pi-build-session/feedback/round-1/verify.log")
+		self.assertEqual(sorted(logs), ["verify.log"])
+		self.assertIn(f"- verify rerun: not run ({reason})", report)
+		self.assertFalse(any("unchanged tree" in e.get("detail", "") for e in events))
+		# The same failure with nothing written in the workspace is run again, and passes.
+		flaky = lambda outside: f"echo run >> {outside}/runs; test -f {outside}/seen || {{ touch {outside}/seen; echo '--- FAIL: TestGolden (0.00s)'; exit 1; }}"
+		result, runs, logs, _, _ = self._real_verify_build(flaky)
+		self.assertEqual(runs, 2)
+		self.assertTrue(result.succeeded)
+		self.assertEqual(result.rounds[0].verify_rerun, {"ran": True, "passed": True, "skipped_reason": "", "first_failing": ["TestGolden"]})
+		self.assertEqual(sorted(logs), ["verify-first-run.log"])
+		# A tree that cannot be compared is not shown to be unchanged.
+		with tempfile.TemporaryDirectory() as not_a_repository:
+			self.assertIn("could not be compared", build_app.verify_rerun_tree_reason(Path(not_a_repository), ("head", "", "", ())))
+
+	def test_the_second_run_gets_no_more_time_than_the_budget_has_left(self):
+		allowance = lambda left, first: build_app.verify_rerun_allowance(returncode=1, first_run_s=first, elapsed=1000.0 - left)
+		with mock.patch.dict(os.environ, {build_app.BUILD_TIME_BUDGET_ENV: "1000"}):
+			# 60 s are kept back; under 30 s of timeout, or under 1.5 times the first run, nothing runs.
+			self.assertEqual(allowance(70, 0), ("under 90 s of the build time budget left", 0))
+			self.assertEqual(allowance(89, 0), ("under 90 s of the build time budget left", 0))
+			self.assertEqual(allowance(90, 0), ("", 30))
+			self.assertEqual(allowance(209, 100), ("under 210 s of the build time budget left", 0))
+			self.assertEqual(allowance(700, 100), ("", 640))
+			self.assertEqual(allowance(5000, 100), ("", 20 * 60))
+		environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+		with mock.patch.dict(os.environ, environ, clear=True):
+			self.assertEqual(allowance(0, 100), ("", 20 * 60))
+		# The timeout reaches the command: with 92 s left the second run is started with 32 s.
+		timeouts = []
+		real_sh = build_app.sh
+
+		def recording_sh(args, **kwargs):
+			if args[:1] == ["bash"]:
+				timeouts.append(kwargs.get("timeout"))
+			return real_sh(args, **kwargs)
+
+		failing = lambda outside: "echo '--- FAIL: TestSlow (0.00s)'; exit 1"
+		with mock.patch.object(build_app, "sh", side_effect=recording_sh):
+			result, _, _, _, _ = self._real_verify_build(failing, budget=1000, clock=lambda: 908.0)
+		self.assertEqual(timeouts, [20 * 60, 32])
+		self.assertEqual(result.rounds[0].verify_rerun["ran"], True)
+		with tempfile.TemporaryDirectory() as directory:
+			_, passed, timed_out, tail, _, _ = build_app.run_verification(Path(directory), verify_command_override="sleep 5", verify_timeout_s=1)
+		self.assertEqual((passed, timed_out), (False, True))
+		self.assertTrue(tail.startswith("verification command timed out after 1 s: sleep 5"), tail)
+
+	def test_run_verification_reports_the_commands_exit_status(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			for command, want in (("true", 0), ("exit 3", 3), ("no-such-command-xyz", 127)):
+				outcome = {}
+				build_app.run_verification(root, verify_command_override=command, outcome=outcome)
+				self.assertEqual(outcome, {"returncode": want})
+
+	def test_the_rerun_record_survives_a_resume_and_a_forged_one_is_refused(self):
+		record = {"ran": True, "passed": True, "skipped_reason": "", "first_failing": ["TestWaitFor"]}
+		item = {"index": 1, "verify_rerun": record}
+		self.assertEqual(build_app.round_from_state(item, 1).verify_rerun, record)
+		self.assertIsNone(build_app.round_from_state({"index": 1}, 1).verify_rerun)
+		self.assertIsNone(build_app.round_from_state({"index": 1, "verify_rerun": None}, 1).verify_rerun)
+		long = build_app.round_from_state({"index": 1, "verify_rerun": {**record, "skipped_reason": "x" * 900, "first_failing": ["n" * 900] * 90, "extra": "dropped"}}, 1).verify_rerun
+		self.assertEqual(sorted(long), ["first_failing", "passed", "ran", "skipped_reason"])
+		self.assertLessEqual(len(long["skipped_reason"]), 200)
+		self.assertLessEqual(len(long["first_failing"]), build_app.round_feedback.MAX_FAILING_NAMES)
+		self.assertLessEqual(len(long["first_failing"][0]), 200)
+		for forged in ("yes", {"ran": "yes"}, {"ran": True, "passed": 1}, {"ran": True, "first_failing": [7]}, {"ran": True, "skipped_reason": 3}):
+			with self.subTest(forged=forged), self.assertRaises(ValueError):
+				build_app.round_from_state({"index": 1, "verify_rerun": forged}, 1)
+
+
 class RedactAndSingleLineTests(unittest.TestCase):
 	"""Found in a round-2 adversarial review: plan_tickets.py/draft_spec.py's
 	pi-stderr hint is the first thing to put pi's own stderr into an
@@ -3757,7 +4122,7 @@ class RoundStateTests(unittest.TestCase):
 			snapshots.append(json.loads((workspace / build_app.ROUND_STATE_FILE).read_text()))
 
 		with (
-			mock.patch.object(build_app, "run_verification", side_effect=verify_results),
+			mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verify_results)),
 			mock.patch.object(build_app, "run_agent_streaming", side_effect=agent),
 			mock.patch.object(build_app, "write_round_state", side_effect=spy),
 		):
@@ -4053,7 +4418,7 @@ class PassedNotesTurnTests(unittest.TestCase):
 			with (
 				mock.patch.dict(os.environ, environ, clear=True),
 				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", side_effect=verification),
+				mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verification)),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
 				mock.patch.object(build_app, "_process_started", 0.0),
@@ -4391,7 +4756,7 @@ class ResumeAfterPassTests(unittest.TestCase):
 		with (
 			mock.patch.dict(os.environ, environ, clear=True),
 			mock.patch.object(build_app, "ensure_git_repo"),
-			mock.patch.object(build_app, "run_verification", side_effect=verification),
+			mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verification)),
 			mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 			mock.patch.object(build_app, "_monotonic", return_value=0.0),
 			mock.patch.object(build_app, "_process_started", 0.0),

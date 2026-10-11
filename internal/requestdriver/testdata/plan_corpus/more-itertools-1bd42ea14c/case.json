@@ -1,0 +1,5 @@
+{
+ "verify_command": "python -m unittest",
+ "project": "more-itertools",
+ "tickets": 1
+}

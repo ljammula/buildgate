@@ -1,0 +1,16 @@
+.copywrite.hcl
+.github/CODEOWNERS
+.github/pull_request_template.md
+AGENTS.md
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE
+Makefile
+README.md
+constraint.go
+constraint_test.go
+go.mod
+version.go
+version_collection.go
+version_collection_test.go
+version_test.go

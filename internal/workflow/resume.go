@@ -83,6 +83,28 @@ var roundRecordFields = map[string]int{
 	"fast_check_ran": jsonBool, "fast_check_passed": jsonBool | jsonNull,
 	"oracle_command": jsonString | jsonNull, "oracle_passed": jsonBool | jsonNull, "oracle_output_tail": jsonString,
 	"failure_signature": jsonString, "failure_log": jsonString, "agent_notes": jsonString, "autofix": jsonObject | jsonNull,
+	"verify_rerun": jsonObject | jsonNull,
+}
+
+// verifyRerunFields are the fields build_app.py's _verify_rerun_from_state
+// type-checks inside a round record's verify_rerun object; first_failing is
+// a list of strings.
+var verifyRerunFields = map[string]int{"ran": jsonBool, "passed": jsonBool | jsonNull, "skipped_reason": jsonString}
+
+// verifyRerunAccepted reports whether item's verify_rerun is one the script
+// accepts: absent, null, or an object whose known fields have their kinds.
+func verifyRerunAccepted(item map[string]any) bool {
+	rerun, isObject := item["verify_rerun"].(map[string]any)
+	if !isObject {
+		return true
+	}
+	for key, kinds := range verifyRerunFields {
+		if !fieldIs(rerun, key, kinds) {
+			return false
+		}
+	}
+	_, ok := stringList(rerun, "first_failing")
+	return ok
 }
 
 // roundStateMaxPromptBytes is build_app.py's ROUND_STATE_MAX_PROMPT_BYTES.
@@ -171,6 +193,9 @@ func roundRecordAccepted(v any, position int) (blockers int, ok bool) {
 		}
 	}
 	if _, ok := stringList(item, "changed_files"); !ok {
+		return 0, false
+	}
+	if !verifyRerunAccepted(item) {
 		return 0, false
 	}
 	return stringList(item, "blockers")

@@ -102,11 +102,20 @@ SESSION_DIR = ".pi-combined-review-session"
 RETRY_SESSION_SUBDIR = "retry"
 
 # How the spend meter's denial reads in a turn's error: the OpenShell
-# supervisor's deny body, matched as codereview.StoppedBy matches it on the Go
-# side, and the wording of a harness that rewords it. A turn the meter stopped
-# is not retried: the second call would be denied as well.
+# supervisor's deny body, naming the meter as the middleware and one of the
+# meter's own deny codes. Exactly codereview.StoppedBy's match on the Go side
+# (meterDenyCodes), and tests/fixtures/review_stop_causes.json holds both to
+# it. A turn the meter stopped is not retried: the second call would be denied
+# as well. Nor is a turn the model provider's own usage limit refused
+# (build_app.provider_usage_limit). Wording alone is never the meter's: a
+# provider's own 429 ("rate limit exceeded") is a failed turn like any other
+# and is asked again once, and a harness that reports the denial without its
+# body (a bare status line) is asked again too, and denied again.
+METER_DENY_MIDDLEWARE = '"middleware":"meter"'
 METER_DENY_CODES = ("budget_exceeded", "ceiling_exceeded", "rate_limited")
-METER_DENY_WORDINGS = ("budget exceeded", "ceiling exceeded", "rate limited", "rate limit exceeded")
+
+# stop_cause's name for a turn the provider's usage limit refused.
+PROVIDER_USAGE_LIMIT = build_app.PROVIDER_USAGE_LIMIT
 
 # What a retry asks for, by the part of the first answer that was missing.
 RETRY_COMBINED, RETRY_CONFORMITY, RETRY_CODE_REVIEW = "combined", "conformity", "code_review"
@@ -189,16 +198,22 @@ def missing_part(verdicts: list[dict], available: bool, error: str) -> tuple[str
 
 
 def meter_stop(error: str) -> str:
-	"""What in error says the spend meter stopped the turn, or ""."""
-	if '"middleware":"meter"' in error:
-		for code in METER_DENY_CODES:
-			if f'"reason_code":"{code}"' in error:
-				return code
-	lowered = error.lower()
-	for wording in METER_DENY_WORDINGS:
-		if wording in lowered:
-			return wording
+	"""The meter's deny code in error when error holds the meter's own deny
+	body, or ""."""
+	if METER_DENY_MIDDLEWARE not in error:
+		return ""
+	for code in METER_DENY_CODES:
+		if f'"reason_code":"{code}"' in error:
+			return code
 	return ""
+
+
+def stop_cause(error: str) -> str:
+	"""What in error says a second call would be refused as the first was:
+	meter_stop's answer, PROVIDER_USAGE_LIMIT for the provider's own usage
+	limit, or "". The meter's denial is looked for first, as
+	codereview.StoppedBy does on the Go side."""
+	return meter_stop(error) or (PROVIDER_USAGE_LIMIT if build_app.provider_usage_limit(error) else "")
 
 
 def retry_timeout_minutes(part: str, started: float) -> int:
@@ -288,8 +303,8 @@ def run_combined_review(
 	folder of its own (fresh_retry_session_dir) and not a word about the
 	first turn, whose transcript is removed before it starts. The two turns
 	together get the COMBINED_REVIEW_TIMEOUT_MINUTES the one turn had
-	(retry_timeout_minutes), a turn the spend meter stopped is not retried
-	(meter_stop), and the first turn's evidence is written to the workspace
+	(retry_timeout_minutes), a turn the spend meter stopped or the provider's
+	usage limit refused is not retried (stop_cause), and the first turn's evidence is written to the workspace
 	before the retry starts, so a retry killed from outside leaves what the
 	first turn alone would have.
 
@@ -329,11 +344,13 @@ def run_combined_review(
 	if not part:
 		return conformity, review
 
-	denied = meter_stop(error)
+	stopped = stop_cause(error)
 	timeout_minutes = retry_timeout_minutes(part, started)
 	retry_session = None
-	if denied:
-		skipped = f"the spend meter stopped the first turn ({denied}) and would stop a second"
+	if stopped == PROVIDER_USAGE_LIMIT:
+		skipped = "the model provider's usage limit was reached and it would refuse a second call as well"
+	elif stopped:
+		skipped = f"the spend meter stopped the first turn ({stopped}) and would stop a second"
 	elif not timeout_minutes:
 		skipped = (
 			f"under {RETRY_MIN_MINUTES} of the review's {COMBINED_REVIEW_TIMEOUT_MINUTES} minutes were left"

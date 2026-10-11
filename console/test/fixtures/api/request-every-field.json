@@ -154,6 +154,9 @@
   "draft_oracles": true,
   "spec_imported": true,
   "plan_imported": true,
+  "review_notes": [
+    "every-field review_notes"
+  ],
   "draft_halt": {
     "stage": "",
     "reason": "every-field reason",
@@ -271,6 +274,7 @@
     "total": 0.000009,
     "currency": "usd",
     "complete": false,
+    "estimated": true,
     "tokens": 18,
     "tokens_complete": false,
     "by_model": [

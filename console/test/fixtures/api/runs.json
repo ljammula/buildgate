@@ -447,6 +447,10 @@
       "model": "every-field model",
       "succeeded": true,
       "stopped_reason": "every-field stopped_reason",
+      "model_stop": {
+        "code": "every-field code",
+        "resets_at": "2026-09-10T09:00:00Z"
+      },
       "rounds": [
         {
           "index": 3,
@@ -626,6 +630,7 @@
       }
     ],
     "spec_conformity_stopped_by": "every-field spec_conformity_stopped_by",
+    "spec_conformity_resets_at": "2026-09-10T09:00:00Z",
     "code_review": {
       "policy": "every-field policy",
       "available": true,
@@ -638,7 +643,8 @@
           "failure_scenario": "every-field failure_scenario"
         }
       ],
-      "stopped_by": "every-field stopped_by"
+      "stopped_by": "every-field stopped_by",
+      "resets_at": "2026-09-10T09:00:00Z"
     },
     "reference_oracle_dir": "every-field reference_oracle_dir",
     "oracles_not_committed_by_request": true,
@@ -726,6 +732,7 @@
         "cost_micro_usd": 3
       }
     ],
-    "tokens_complete": false
+    "tokens_complete": true,
+    "estimated": true
   }
 ]

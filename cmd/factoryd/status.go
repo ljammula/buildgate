@@ -271,10 +271,9 @@ func buildRequestStatusEntries(requests []*request.Request, active []string, slo
 // statusCostMicroUSD sums the relay spend recorded across every attempt --
 // the only durable spend/usage evidence a run carries (see
 // Attempt.RelayConsumedCostMicroUSD's own doc comment). Zero when the run
-// never had a relay, or its relay was never cleaned up successfully.
-// partial is true when any attempt's total is a best-effort recovery from
-// its usage ledger, not a confirmed final spend -- see
-// Attempt.RelaySpendPartial's own doc comment.
+// made no metered model request. partial is true when any attempt's total
+// holds the meter's estimate for a model request that ended without a usage
+// report -- see Attempt.RelaySpendPartial's own doc comment.
 func statusCostMicroUSD(r *run.Run) (total int64, partial bool) {
 	for _, a := range r.Attempts {
 		total += a.RelayConsumedCostMicroUSD
@@ -365,7 +364,7 @@ func buildStatusEntry(r *run.Run, now time.Time) statusEntry {
 	if costMicroUSD, partial := statusCostMicroUSD(r); costMicroUSD > 0 || partial {
 		entry.CostUSD = fmt.Sprintf("%.4f", float64(costMicroUSD)/1e6)
 		if partial {
-			entry.CostUSD += " (partial, relay exited abnormally)"
+			entry.CostUSD += " (" + spendEstimateNote + ")"
 		}
 		if run.SubscriptionBilled(r.Attempts) {
 			entry.CostUSD += subscriptionCostSuffix

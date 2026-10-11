@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/progress"
 	"buildgate/internal/request"
@@ -809,5 +810,73 @@ func TestStatusMainPrintsFullRequestIDsThatShareAPrefix(t *testing.T) {
 		if !strings.Contains(out, id) {
 			t.Errorf("status output = %q, want full id %q", out, id)
 		}
+	}
+}
+
+// A spend total that holds the meter's estimate for a model request that
+// ended without a usage report says exactly that, wherever it is shown. No
+// relay process exists to have exited, and how many requests went unreported
+// is not recorded on an attempt, so neither is claimed.
+func TestASpendTotalHoldingAnEstimateSaysWhatHappened(t *testing.T) {
+	const want = "a model request ended without a usage report"
+	attempts := []run.Attempt{{Kind: "build", RelayConsumedInputTokens: 900, RelayConsumedOutputTokens: 100, RelayConsumedCostMicroUSD: 1_230_000, RelaySpendPartial: true}}
+	entry := buildStatusEntry(&run.Run{ID: "run-1", Attempts: attempts}, time.Now())
+	cost, tokens, partial := relaySpendSummary(attempts)
+	line := relaySpendLine(cost, tokens, partial, false)
+	if !strings.HasPrefix(entry.CostUSD, "1.2300 (an estimate: ") || !strings.HasPrefix(line, "$1.2300, 1000 tokens (an estimate: ") {
+		t.Errorf("status cost %q, evidence line %q: want the total first, marked an estimate", entry.CostUSD, line)
+	}
+	for name, got := range map[string]string{"status": entry.CostUSD, "evidence": line} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%s = %q, want it to contain %q", name, got, want)
+		}
+		for _, not := range []string{"relay", "exited", "abnormally", "partial"} {
+			if strings.Contains(got, not) {
+				t.Errorf("%s = %q, must not say %q", name, got, not)
+			}
+		}
+	}
+
+	attempts[0].RelaySpendPartial = false
+	exact := buildStatusEntry(&run.Run{ID: "run-1", Attempts: attempts}, time.Now())
+	cost, tokens, partial = relaySpendSummary(attempts)
+	if exact.CostUSD != "1.2300" || strings.Contains(relaySpendLine(cost, tokens, partial, false), "estimate") {
+		t.Errorf("all-metered spend: status cost %q, evidence line %q", exact.CostUSD, relaySpendLine(cost, tokens, partial, false))
+	}
+}
+
+// The conformity review's evidence, as the review script wrote it when the
+// provider's usage limit refused its model calls (captured live 2026-10-11),
+// is recorded on the run as that cause and its reset time; evidence without
+// it clears both.
+func TestConformityEvidenceRecordsTheProvidersUsageLimit(t *testing.T) {
+	dataDir := t.TempDir()
+	const id = "run-provider-limit"
+	if err := os.MkdirAll(run.Dir(dataDir, id), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(errText string) {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{
+			"schema_version": 1, "conformity_policy": "required", "succeeded": false, "error": errText,
+			"review_verdicts": []map[string]string{{"criterion": "1. a", "verdict": "unavailable", "detail": "no-review-verdict"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(run.Dir(dataDir, id), "CONFORMITY_EVIDENCE.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &run.Run{ID: id, SpecConformityConfigured: true}
+	write("You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.")
+	loadSpecConformityVerdicts(r, dataDir, id)
+	if r.SpecConformityStoppedBy != codereview.CodeProviderUsageLimit || r.SpecConformityResetsAt != "3:11 AM" {
+		t.Errorf("StoppedBy %q, ResetsAt %q", r.SpecConformityStoppedBy, r.SpecConformityResetsAt)
+	}
+	write("review timed out after 1200s")
+	loadSpecConformityVerdicts(r, dataDir, id)
+	if r.SpecConformityStoppedBy != "" || r.SpecConformityResetsAt != "" {
+		t.Errorf("after a timeout: StoppedBy %q, ResetsAt %q, want both cleared", r.SpecConformityStoppedBy, r.SpecConformityResetsAt)
 	}
 }

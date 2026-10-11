@@ -22,6 +22,7 @@ package codereview
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"buildgate/internal/meter"
@@ -123,37 +124,98 @@ func StopSettings(code string) (string, bool) {
 	return settings, ok
 }
 
-// StoppedBy returns which meterDenyCodes entry errText reports from the
-// meter, or "". errText is a review script's record of its model client's
-// error (the `error` field of CODE_REVIEW_EVIDENCE.json and
-// CONFORMITY_EVIDENCE.json), which for the codex harness carries the
-// OpenShell supervisor's deny body verbatim; a harness that rewords it gets
-// "" and the plain "gave no verdict". The text is the review container's
-// and so untrusted: only its match against this closed set is kept. A
-// reviewer that forges one sends the operator to the budget settings and
-// the spend report, which show the truth.
+// CodeProviderUsageLimit is the StoppedBy code for a review whose model
+// calls the provider itself refused: the account's own usage allowance ran
+// out. No budget setting governs it; it ends when the provider resets it.
+const CodeProviderUsageLimit = "provider_usage_limit"
+
+// providerLimitPhrase is the fixed start of the codex CLI's message for a
+// model request the provider refused because the account's usage limit was
+// reached, the one signal of it that reaches a host record: the upstream's
+// status and error type are seen by neither the meter nor the build scripts.
+// agent/pi/scripts/build_app.py's PROVIDER_LIMIT_PHRASE is the same text, and
+// agent/pi/tests/fixtures/review_stop_causes.json holds both to it.
+const providerLimitPhrase = "You've hit your usage limit"
+
+// providerLimitResets finds the time of day the same message says to try
+// again at: on the phrase's own line, hours and minutes on a twelve-hour
+// clock, then the full stop that ends the text (only white space may
+// follow). A date, a zone, a further sentence or any other wording matches
+// nothing. build_app.py's _PROVIDER_LIMIT_RESETS is the same expression.
+var providerLimitResets = regexp.MustCompile(regexp.QuoteMeta(providerLimitPhrase) + `[^\n]{0,400}?try again at (` + timeOfDay + `)\.\s*$`)
+
+// timeOfDay is the one shape of reset time that is ever shown.
+const timeOfDay = `(?:1[0-2]|[1-9]):[0-5][0-9] [AP]M`
+
+var wholeTimeOfDay = regexp.MustCompile(`^` + timeOfDay + `$`)
+
+// StoppedBy returns what errText reports stopped a review's model calls: the
+// meterDenyCodes entry the spend meter refused them with,
+// CodeProviderUsageLimit when the provider did, or "". errText is a review
+// script's record of its model client's error (the `error` field of
+// CODE_REVIEW_EVIDENCE.json and CONFORMITY_EVIDENCE.json), which for the
+// codex harness carries the OpenShell supervisor's deny body verbatim, or
+// the codex CLI's own sentence for the provider's limit; a harness that
+// rewords either gets "" and the plain "gave no verdict". The text is the
+// review container's and so untrusted: only its match against this closed
+// set is kept. A reviewer that forges one sends the operator to the budget
+// settings and the spend report, or to a later retry, which show the truth.
 func StoppedBy(errText string) string {
-	if !strings.Contains(errText, `"middleware":"meter"`) {
-		return ""
-	}
-	for _, code := range meterDenyCodes {
-		if strings.Contains(errText, `"reason_code":"`+code+`"`) {
-			return code
+	if strings.Contains(errText, `"middleware":"meter"`) {
+		for _, code := range meterDenyCodes {
+			if strings.Contains(errText, `"reason_code":"`+code+`"`) {
+				return code
+			}
 		}
+	}
+	if strings.Contains(errText, providerLimitPhrase) {
+		return CodeProviderUsageLimit
 	}
 	return ""
 }
 
-// EvidenceStoppedBy is StoppedBy over a review evidence file's own `error`
-// field; "" for a file that does not decode.
-func EvidenceStoppedBy(data []byte) string {
+// ProviderLimitResetsAt returns the time of day the provider's usage-limit
+// message in text says to try again at ("3:11 AM"), "" when the text has no
+// such message or its time is not exactly that shape. The clock is the
+// worker container's. Only the matched time is returned, never text around
+// it.
+func ProviderLimitResetsAt(text string) string {
+	m := providerLimitResets.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// ProviderLimitCause is the factory's sentence for model calls the provider's
+// usage limit stopped; resetsAt is ProviderLimitResetsAt's or "". A value of
+// any other shape (a run record is read back from disk) is not shown.
+func ProviderLimitCause(resetsAt string) string {
+	if !wholeTimeOfDay.MatchString(resetsAt) {
+		return "the model provider's usage limit was reached (its message gave no reset time buildgate could read)"
+	}
+	return fmt.Sprintf("the model provider's usage limit was reached (it said to try again at %s, by the worker container's clock)", resetsAt)
+}
+
+// EvidenceStoppedBy is StoppedBy, and ProviderLimitResetsAt for a review the
+// provider's limit stopped, over a review evidence file's own `error` field;
+// "" for a file that does not decode.
+func EvidenceStoppedBy(data []byte) (code, resetsAt string) {
 	var file struct {
 		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
-		return ""
+		return "", ""
 	}
-	return StoppedBy(file.Error)
+	return stop(file.Error)
+}
+
+func stop(errText string) (code, resetsAt string) {
+	code = StoppedBy(errText)
+	if code == CodeProviderUsageLimit {
+		resetsAt = ProviderLimitResetsAt(errText)
+	}
+	return code, resetsAt
 }
 
 // evidenceFindingRaw mirrors code_review.py's own JSON finding shape.
@@ -216,7 +278,7 @@ func ParseResult(data []byte) (run.CodeReviewResult, error) {
 		Findings:  findings,
 	}
 	if !file.Available {
-		result.StoppedBy = StoppedBy(file.Error)
+		result.StoppedBy, result.ResetsAt = stop(file.Error)
 	}
 	return result, nil
 }

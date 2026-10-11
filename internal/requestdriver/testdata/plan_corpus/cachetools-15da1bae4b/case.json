@@ -1,0 +1,5 @@
+{
+ "verify_command": "python -m pip install -q -e . pytest && python -m pytest -q tests",
+ "project": "cachetools",
+ "tickets": 1
+}

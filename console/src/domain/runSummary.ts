@@ -1,7 +1,7 @@
 // The run page's one-line digests: what each closed block holds and whether
 // anything in it failed. A failure opens its block and sorts it first; a pass
 // stays a line. Time is a parameter.
-import { formatTokenCount } from "@/domain/cost";
+import { formatTokenCount, tokenBoundPrefix } from "@/domain/cost";
 import { elapsedBetween, formatElapsedCompact } from "@/domain/elapsed";
 import type { Attempt, BaselineVerify, ComposePhase, GateResult, Run } from "@/domain/run";
 import { composeServiceAddress } from "@/domain/run";
@@ -98,11 +98,13 @@ function runTokens(run: Pick<Run, "byModel">): number | null {
   return run.byModel.reduce((sum, m) => sum + m.tokens, 0);
 }
 
-/** "478.3k tokens", with a lower-bound mark when the figure is incomplete; null with no figure. */
-export function runTokensText(run: Pick<Run, "byModel" | "tokensComplete">): string | null {
+/** "478.3k tokens", with tokenBoundPrefix's mark when the figure is not exact; null with no figure. */
+export function runTokensText(
+  run: Pick<Run, "byModel" | "tokensComplete" | "estimated">,
+): string | null {
   const tokens = runTokens(run);
   if (tokens === null) return null;
-  return `${run.tokensComplete ? "" : "≥ "}${formatTokenCount(tokens)} tokens`;
+  return `${tokenBoundPrefix(run.tokensComplete, run.estimated)}${formatTokenCount(tokens)} tokens`;
 }
 
 /**

@@ -1076,6 +1076,39 @@ func TestQuickstartReportRequestStatePlanReview(t *testing.T) {
 	}
 }
 
+// TestQuickstartReportRequestStatePrintsTheReviewNotes: at a review the
+// factory's notes are printed under the approve command, one a line, and
+// they are those of the spec as it is on disk now, not the copy stored on
+// the request when the draft arrived (the operator may have edited the file
+// since).
+func TestQuickstartReportRequestStatePrintsTheReviewNotes(t *testing.T) {
+	spec := func(criteria string) string {
+		return "# Spec\n\n## Problem\n\nx\n\n## Scope\n\nx\n\n## Non-goals\n\nx\n\n## Affected services and packages\n\nx\n\n## Acceptance criteria\n\n" +
+			criteria + "\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
+	}
+	for criteria, want := range map[string]string{
+		"1. It works.\n2. The commit message names the ticket.\n": "\nnote: criterion 2 reads as a rule for the commit message, which the factory writes; keep, edit or remove it\n",
+		"1. It works.\n": "",
+	} {
+		dataDir := t.TempDir()
+		r := &request.Request{ID: "req-2", State: request.StateSpecReview, ReviewNotes: []string{"a note on a text that is gone"}}
+		if err := os.MkdirAll(request.Dir(dataDir, r.ID), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(request.SpecPath(dataDir, r.ID), []byte(spec(criteria)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := quickstartReportRequestState(dataDir, r, &out); err != nil {
+			t.Fatalf("quickstartReportRequestState: %v", err)
+		}
+		got := out.String()
+		if strings.Contains(got, "gone") || !strings.Contains(got, want) || (want == "" && strings.Contains(got, "note:")) {
+			t.Errorf("criteria %q: output = %q, want the notes of the spec on disk (%q)", criteria, got, want)
+		}
+	}
+}
+
 func TestQuickstartReportRequestStateHalted(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-3", State: request.StateHalted, Error: "relay upstream unreachable"}

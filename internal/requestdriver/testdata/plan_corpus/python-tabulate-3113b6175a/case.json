@@ -1,0 +1,5 @@
+{
+ "verify_command": "python -m pip install -q -e . pytest numpy pandas \"wcwidth>=0.6.0\" && python -m pytest -q",
+ "project": "python-tabulate",
+ "tickets": 1
+}

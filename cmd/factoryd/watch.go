@@ -790,6 +790,7 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 			continue
 		case request.StateSpecReview:
 			fmt.Fprintf(out, "Review the drafted spec, then run: factoryd approve %s\n", r.ID)
+			printReviewNotes(out, dataDir, r)
 			return nil
 		case request.StateOracleReview:
 			fmt.Fprintf(out, "Review or hand-write %s/%s (leave it absent or empty to skip), then run: factoryd approve %s\n", request.Dir(dataDir, r.ID), request.RequestOracleDirName, r.ID)
@@ -800,6 +801,7 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 			return nil
 		case request.StatePlanReview:
 			fmt.Fprintf(out, "Review the drafted plan, then run: factoryd approve %s\n", r.ID)
+			printReviewNotes(out, dataDir, r)
 			return nil
 		case request.StateResumeReview:
 			// A lost step waits on a human decision, like a review gate:
@@ -932,4 +934,17 @@ func renderRequestHeader(r *request.Request) string {
 		ticket = fmt.Sprintf("%d/%d", r.TicketIndex, r.TicketCount)
 	}
 	return fmt.Sprintf("request %s · %s · %s · ticket %s", r.ID, r.Project, r.State, ticket)
+}
+
+// printReviewNotes prints the factory's notes on what r's review gate
+// shows, one a line, read now from the request's files
+// (request.Request.RefreshReviewNotes): a spec or a ticket edited on disk
+// since the draft has the notes of its text as it is. r is not saved. They
+// are advice: the operator approves, or requests changes with a note as
+// the feedback.
+func printReviewNotes(out io.Writer, dataDir string, r *request.Request) {
+	r.RefreshReviewNotes(dataDir)
+	for _, note := range r.ReviewNotes {
+		fmt.Fprintf(out, "note: %s\n", sanitize.Line(note))
+	}
 }
