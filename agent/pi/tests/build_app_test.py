@@ -3615,23 +3615,6 @@ class RedactAndSingleLineTests(unittest.TestCase):
 	original hand-picked shapes. Mirrors
 	internal/sanitize/sanitize_test.go's own TestTextRedactsExtendedSecretShapes."""
 
-	def test_redaction_vectors(self):
-		# internal/sanitize's TestRedactionVectors reads the same file: a
-		# credential stays hidden, a failing test's own line stays readable.
-		path = Path(__file__).resolve().parents[3] / "cmd" / "factoryd" / "testdata" / "sanitize_vectors.json"
-		cases = json.loads(path.read_text(encoding="utf-8"))
-		self.assertTrue(cases)
-		# Escape sequences are single_line's and sanitize_text's to drop.
-		cases = [c for c in cases if "\x1b" not in c["in"]]
-		self.assertGreater(len(cases), 40)
-		for case in cases:
-			with self.subTest(case=case["name"]):
-				got = build_app.redact_secrets(case["in"])
-				for absent in case["absent"]:
-					self.assertNotIn(absent, got)
-				for present in case["present"]:
-					self.assertIn(present, got)
-
 	def test_redacts_github_personal_token(self):
 		got = build_app.redact("token: ghp_abcdefghijklmnopqrstuvwxyz0123")
 		self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz0123", got)

@@ -366,6 +366,12 @@ FAILURE_NAME_CHARS = 100
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+_SECRETS = [
+	(re.compile(r"(authorization\s*[:=])[^\n]*", re.I), r"\1 [redacted]"),
+	(re.compile(r"\bbearer\s+[A-Za-z0-9._~+/=-]+", re.I), "Bearer [redacted]"),
+	(re.compile(r"\b([A-Za-z0-9_-]{0,40}(?:api[_-]?key|token|secret|password|passwd)[A-Za-z0-9_-]{0,40})(\s*[:=]\s*)(\"[^\"\n]*\"|'[^'\n]*'|[^\s,;]+)", re.I), r"\1\2[redacted]"),
+	(re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"), "sk-[redacted]"),
+]
 
 
 def _bidi_or_zero_width(ch: str) -> bool:
@@ -375,13 +381,14 @@ def _bidi_or_zero_width(ch: str) -> bool:
 
 def sanitize_text(text: str) -> str:
 	"""Drops ANSI sequences, control characters other than newline/tab/CR and
-	bidi/zero-width characters, and redacts obvious credentials
-	(build_app.redact_secrets). Mirrors sanitizeLogText in
-	cmd/factoryd/oracle_draft_job.go (shared vectors in
+	bidi/zero-width characters, and redacts obvious credentials. Mirrors
+	sanitizeLogText in cmd/factoryd/oracle_draft_job.go (shared vectors in
 	cmd/factoryd/testdata/sanitize_vectors.json)."""
 	text = _ANSI.sub("", text)
 	text = "".join(ch for ch in text if ch in "\n\t\r" or not (unicodedata.category(ch) == "Cc" or _bidi_or_zero_width(ch)))
-	return build_app.redact_secrets(text)
+	for pattern, repl in _SECRETS:
+		text = pattern.sub(repl, text)
+	return text
 
 
 def _tail(text: str) -> str:

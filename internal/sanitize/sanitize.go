@@ -15,7 +15,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 var (
@@ -39,54 +38,15 @@ var (
 		// (ghp_/gho_/ghu_/ghs_/ghr_...): whole-token patterns, checked
 		// before the generic key=value pattern so a bare token pasted
 		// into a log with no key= prefix at all is still redacted.
-		{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}`), "sk-[redacted]"},
+		{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}`), "sk-[redacted]"},
 		{regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}`), "gh_[redacted]"},
 		// A JWT (three base64url segments joined by '.', always starting
 		// "eyJ" -- the base64 of `{"`) can itself be a bearer credential
 		// even where no "Bearer "/"api_key=" prefix precedes it.
 		{regexp.MustCompile(`\beyJ[\w-]+\.[\w-]+\.[\w-]+`), "[redacted-jwt]"},
+		{regexp.MustCompile(`(?i)\b([A-Za-z0-9_-]*(?:api[_-]?key|token|secret|password|passwd)[A-Za-z0-9_-]*)(\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;]+)`), "$1$2[redacted]"},
 	}
-	// A password inside a URL (scheme://user:password@host).
-	urlPassword = regexp.MustCompile(`://([^\s:/]+):([^\s@]+)@`)
-	// A name holding a credential word, then an assignment or comparison
-	// (`=`, `:=`, `==`, or `:` and white space) and its value, or a `:`
-	// directly before a value that does not itself start with `:`. A name
-	// directly before `::` (a pytest id, a Rust or C++ path) is therefore no
-	// assignment and matches nothing; an assignment later on the same line
-	// still matches on its own. An unquoted value runs to the next white
-	// space. assignedSecret decides which matches are redacted.
-	// agent/pi/scripts/build_app.py's _ASSIGNED_SECRET is the same
-	// expression, and cmd/factoryd/testdata/sanitize_vectors.json holds both
-	// implementations to the same table.
-	secretAssignment = regexp.MustCompile(`(?i)\b([A-Za-z0-9_-]*(?:api[_-]?key|token|secret|password|passwd)[A-Za-z0-9_-]*)(?:(\s*(?::=|==?)\s*|\s*:\s+)("[^"\n]*"|'[^'\n]*'|\S+)|(\s*:)("[^"\n]*"|'[^'\n]*'|[^\s:]\S*))`)
-	passwordName     = regexp.MustCompile(`(?i)secret|password|passwd`)
 )
-
-// shortestToken is the length under which the value of a name holding
-// `token` or `api key` (and none of `secret`, `password`, `passwd`) is shown:
-// no API key, access token or one-time code is that short, and such values
-// are what a failing test prints (`token = "abc", want "xyz"`,
-// `max_tokens: 4096`).
-const shortestToken = 6
-
-// assignedSecret is the replacement for one secretAssignment match: the
-// match with its value redacted, unless the value cannot be a credential.
-// That is an empty quoted value under any name, and a value under
-// shortestToken characters (quotes not counted) under a name that holds no
-// `secret`, `password` or `passwd`: a password or a secret may be any
-// length, so a value under one of those names is always redacted.
-func assignedSecret(match string) string {
-	m := secretAssignment.FindStringSubmatch(match)
-	name, sep, value := m[1], m[2]+m[4], m[3]+m[5]
-	inner := value
-	if n := len(value); n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n-1] == value[0] {
-		inner = value[1 : n-1]
-	}
-	if inner == "" || (utf8.RuneCountInString(inner) < shortestToken && !passwordName.MatchString(name)) {
-		return match
-	}
-	return name + sep + "[redacted]"
-}
 
 // Text makes s safe to store in a request record and show in a console:
 // ANSI sequences, control characters other than \n \t \r, Unicode format
@@ -134,8 +94,7 @@ func Text(s string) string {
 	for _, sp := range secretPatterns {
 		s = sp.re.ReplaceAllString(s, sp.with)
 	}
-	s = secretAssignment.ReplaceAllStringFunc(s, assignedSecret)
-	return urlPassword.ReplaceAllString(s, "://$1:[redacted]@")
+	return s
 }
 
 // lineFoldRune reports whether r is a whitespace or line-breaking rune

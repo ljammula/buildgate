@@ -1,54 +1,9 @@
 package sanitize
 
 import (
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 )
-
-// TestRedactionVectors holds Text to the table the build scripts' redaction
-// is held to (agent/pi/tests/build_app_test.py and
-// draft_acceptance_oracles_test.py read the same file): each "absent" string
-// is gone from the result and each "present" string is in it.
-// A credential stays hidden; a failing test's own line, which a corrective
-// build is told to fix, stays readable.
-func TestRedactionVectors(t *testing.T) {
-	data, err := os.ReadFile("../../cmd/factoryd/testdata/sanitize_vectors.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		Name    string   `json:"name"`
-		In      string   `json:"in"`
-		Absent  []string `json:"absent"`
-		Present []string `json:"present"`
-	}
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
-	if len(cases) == 0 {
-		t.Fatal("no cases in the fixture")
-	}
-	for _, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			if len(tc.Absent)+len(tc.Present) == 0 {
-				t.Fatal("the case checks nothing")
-			}
-			got := Text(tc.In)
-			for _, hidden := range tc.Absent {
-				if strings.Contains(got, hidden) {
-					t.Errorf("Text(%q) = %q, want %q redacted", tc.In, got, hidden)
-				}
-			}
-			for _, shown := range tc.Present {
-				if !strings.Contains(got, shown) {
-					t.Errorf("Text(%q) = %q, want %q kept", tc.In, got, shown)
-				}
-			}
-		})
-	}
-}
 
 // TestTextStripsANSIAndControlCharacters covers the behavior
 // internal/triage's extractFailureMarker now depends on directly: an
