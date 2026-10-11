@@ -26,6 +26,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
+	"buildgate/internal/sessionconfig"
 	"buildgate/internal/ticketspec"
 )
 
@@ -736,7 +737,8 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// run that was kept in turn is no longer the ticket's recorded run.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d: could not discard a kept worktree before rebuilding: %v", ticket.Index, err), now)
 	}
-	args, err := BuildRequestBuildArgs(dataDir, r, *ticket, cfg)
+	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
+	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -782,6 +784,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// build itself, only findOwningRequest's fast path for this run.
 		startedRun.RequestID = r.ID
 		startedRun.EarlierAttemptOf = recordOf
+		startedRun.Escalated = escalated
 		if err := startedRun.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, startedRun.ID, err)
 		}
@@ -1417,13 +1420,14 @@ type correctiveLaunch struct {
 // record nothing: the request left building while the round ran (err nil),
 // the worker was asked to stop mid-round (the round is unrecorded and its
 // budget unspent), or the outcome could not be read.
-func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf string) (launched correctiveLaunch, stop bool, err error) {
+func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf string, escalated bool) (launched correctiveLaunch, stop bool, err error) {
 	var startedRunID string
 	runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
 		startedRunID = started.ID
 		ticket.RunID = started.ID
 		started.RequestID = r.ID
 		started.EarlierAttemptOf = recordOf
+		started.Escalated = escalated
 		if err := started.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
 		}
@@ -1508,7 +1512,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if argValueOf(args, "-earlier-attempt") != "" {
 			recordOf = current.ID
 		}
-		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf)
+		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, executionEscalation(cfg) != nil)
 		if stop {
 			return true, err
 		}
@@ -1808,11 +1812,17 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 // -on-branch/-diff-base make the round build on the quarantined run's own
 // branch, measured against the ticket's original base, on every execution
 // path (direct, -temporal-address, -repository).
+//
+// With roles.execution.escalation configured the round's build runs on that
+// model at that level (escalate), whatever model the request picked. Both
+// automatic rounds are built here, the review round and the check round; a
+// PR-review round (runRoundAttempt) is not, and stays on the role's model.
 func BuildReviewCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, addendumPath, roundID, branch, diffBase string) ([]string, error) {
 	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, addendumPath)
 	if err != nil {
 		return nil, err
 	}
+	escalate(entry, cfg)
 	return append(BuildTicketRunArgs(dataDir, entry, cfg), "-on-branch", branch, "-diff-base", diffBase), nil
 }
 
@@ -2578,6 +2588,13 @@ func requestInstructionBase(dataDir string, r *request.Request, ticket request.T
 // proven against the real flag set by
 // TestBuildRequestBuildArgsIsAcceptedByRunMainWithReadysOwnFlagSet.
 func BuildRequestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig) ([]string, error) {
+	return requestBuildArgs(dataDir, r, ticket, cfg, false)
+}
+
+// requestBuildArgs is BuildRequestBuildArgs, on roles.execution.escalation
+// when escalated: the build takes the place of an escalated one that never
+// finished (replacesEscalatedBuild).
+func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, escalated bool) ([]string, error) {
 	buildSpecPath, err := writeTicketBuildSpecFile(dataDir, r, ticket)
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
@@ -2586,7 +2603,53 @@ func BuildRequestBuildArgs(dataDir string, r *request.Request, ticket request.Ti
 	if err != nil {
 		return nil, err
 	}
+	if escalated {
+		escalate(entry, cfg)
+	}
 	return BuildTicketRunArgs(dataDir, entry, cfg), nil
+}
+
+// executionEscalation is roles.execution.escalation of the worker's session
+// config, nil when it has none.
+func executionEscalation(cfg WorkerConfig) *sessionconfig.Escalation {
+	if cfg.Settings.Roles == nil || cfg.Settings.Roles.Execution == nil {
+		return nil
+	}
+	return cfg.Settings.Roles.Execution.Escalation
+}
+
+// escalate puts entry's build on roles.execution.escalation: its model, at
+// its level (its own thinking, else the role's). It replaces the model the
+// request picked (`submit -model execution=...`) for this one build. With no
+// escalation configured entry is unchanged.
+func escalate(entry *QueueEntry, cfg WorkerConfig) {
+	if executionEscalation(cfg) == nil {
+		return
+	}
+	entry.ExecutionModel = cfg.Settings.Roles.Execution.EscalationModel()
+	entry.ExecutionThinking = cfg.Settings.Roles.Execution.EscalationThinking()
+}
+
+// replacesEscalatedBuild reports whether the build AdvanceBuilding is about
+// to start takes the place of one that ran on the escalation and never
+// finished: the ticket's last run (the lost run of a `factoryd resume`,
+// resumeRunID) is this request's, halted, and recorded as escalated
+// (run.Run.Escalated). That build, resumed in the kept worktree or started
+// again (`resume -from scratch`, `retry`), runs on the escalation as the lost
+// one did, and is recorded as escalated in turn. A rebuild after a round
+// that finished and quarantined is not this: it is the operator's retry, on
+// the role's model. The escalation is the one configured now; with none the
+// build is an ordinary one.
+func replacesEscalatedBuild(dataDir string, r *request.Request, ticket *request.Ticket, resumeRunID string, cfg WorkerConfig) bool {
+	lastID := ticket.RunID
+	if resumeRunID != "" {
+		lastID = resumeRunID
+	}
+	if lastID == "" || executionEscalation(cfg) == nil {
+		return false
+	}
+	previous, err := run.Load(dataDir, lastID)
+	return err == nil && previous.RequestID == r.ID && previous.State == run.StateHalted && previous.Escalated
 }
 
 // WriteTicketCriteriaFile writes the subset of the approved spec's

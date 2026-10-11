@@ -90,6 +90,67 @@ func TestRunMainWithReadyExecutionModelRefusedInLegacyMode(t *testing.T) {
 	}
 }
 
+// routesModeSessionConfigWithEscalation is
+// routesModeSessionConfigNoRelayImage plus a second allowed model, "sol", as
+// the role's escalation at high.
+const routesModeSessionConfigWithEscalation = `routes:
+  litellm:
+    credential_mode: static
+    upstream: https://litellm.example.invalid
+    credential_env: RELAY_IMAGE_TEST_KEY
+models:
+  luna:
+    id: gpt-5.6-luna
+    routes: [litellm]
+    reasoning: true
+  sol:
+    id: gpt-5.6-sol
+    routes: [litellm]
+    reasoning: true
+roles:
+  execution:
+    model: luna
+    thinking: medium
+    allowed: [luna, sol]
+    escalation:
+      model: sol
+      thinking: high
+`
+
+// TestRunMainWithReadyAcceptsTheEscalationModelAndItsLevel: a run may name
+// roles.execution.escalation's model with the escalation's level; both reach route selection, which fails only on the
+// unset credential. A level the config does not give the run's model is
+// refused before any route is tried, and so is any level with no roles.
+func TestRunMainWithReadyAcceptsTheEscalationModelAndItsLevel(t *testing.T) {
+	base := []string{"-ticket", "t", "-workspace", "/does/not/exist", "-spec", "/does/not/exist"}
+	run := func(config string, extra ...string) error {
+		dp := newTestDeps(t)
+		path := isolateSessionConfig(t)
+		if config != "" {
+			writeSessionConfig(t, path, config)
+		}
+		return runMainWithReady(dp, context.Background(), append(append([]string(nil), base...), extra...), nil)
+	}
+	if err := run(routesModeSessionConfigWithEscalation, "-execution-model", "sol", "-execution-thinking", "high"); !errors.Is(err, modelrole.ErrNoRouteAvailable) {
+		t.Errorf("escalation's model at its level: err = %v, want modelrole.ErrNoRouteAvailable (accepted, its route tried)", err)
+	}
+	for name, extra := range map[string][]string{
+		"the escalation's level on the role's model": {"-execution-thinking", "high"},
+		"a level the config does not name":           {"-execution-model", "sol", "-execution-thinking", "low"},
+	} {
+		err := run(routesModeSessionConfigWithEscalation, extra...)
+		if err == nil || errors.Is(err, modelrole.ErrNoRouteAvailable) || !strings.Contains(err.Error(), "-execution-thinking") {
+			t.Errorf("%s: err = %v, want -execution-thinking refused before a route is tried", name, err)
+		}
+	}
+	if err := run(routesModeSessionConfigNoRelayImage, "-execution-model", "sol"); err == nil || !strings.Contains(err.Error(), "-execution-model") {
+		t.Errorf("a model outside allowed: err = %v, want -execution-model sol refused", err)
+	}
+	if err := run("", "-execution-thinking", "high"); err == nil || !strings.Contains(err.Error(), "-execution-thinking") {
+		t.Errorf("no roles: err = %v, want -execution-thinking refused", err)
+	}
+}
+
 // TestRunMainWithReadyExplicitBuildScriptGetsARouteOnlyWithAnExecutionRole
 // proves modelRouteNeeded for an explicit -build-app-script: with no
 // roles.execution it is an offline build and no route is selected (the run

@@ -15,6 +15,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
+	"buildgate/internal/sessionconfig"
 	"buildgate/internal/store"
 )
 
@@ -53,6 +54,39 @@ func TestBuildRequestBuildArgsIsAcceptedByRunMainWithReadysOwnFlagSet(t *testing
 	}
 	if strings.Contains(err.Error(), "not defined") {
 		t.Fatalf("runMainWithReady rejected an argv buildRequestBuildArgs produced: %v", err)
+	}
+}
+
+// TestBuildReviewCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet: the
+// argv of an automatic corrective round on roles.execution.escalation,
+// -execution-thinking included, parses through the run's real flag set.
+func TestBuildReviewCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet(t *testing.T) {
+	dp := newTestDeps(t)
+	isolateSessionConfig(t)
+	specPath := filepath.Join(t.TempDir(), "001.spec.md")
+	if err := os.WriteFile(specPath, []byte("Verify-Command: make verify\n\n## Goal\n\ndo the thing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &request.Request{ID: "req-1", Workspace: t.TempDir(), Project: "payments"}
+	ticket := request.Ticket{Index: 1, SpecPath: specPath}
+	cfg := requestdriver.WorkerConfig{BuildAppScript: "/harness/build_app.py", SandboxImage: "registry.example/org/img@sha256:deadbeef"}
+	cfg.Settings.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{
+		Model: "luna", Allowed: []string{"luna", "sol"}, Escalation: &sessionconfig.Escalation{Model: "sol", Thinking: "high"},
+	}}
+
+	args, err := requestdriver.BuildReviewCorrectiveArgs(t.TempDir(), r, ticket, cfg, specPath, "req-1-001-conformity1", "some-branch", strings.Repeat("0", 40))
+	if err != nil {
+		t.Fatalf("BuildReviewCorrectiveArgs: %v", err)
+	}
+	if requestdrivertest.ArgValue(args, "-execution-model") != "sol" || requestdrivertest.ArgValue(args, "-execution-thinking") != "high" {
+		t.Fatalf("argv = %v, want -execution-model sol -execution-thinking high", args)
+	}
+	err = runMainWithReady(dp, context.Background(), args, nil)
+	if err == nil {
+		t.Fatal("runMainWithReady = nil, want the error it stops at")
+	}
+	if strings.Contains(err.Error(), "not defined") {
+		t.Fatalf("runMainWithReady rejected an argv BuildReviewCorrectiveArgs produced: %v", err)
 	}
 }
 

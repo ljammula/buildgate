@@ -174,7 +174,10 @@ gate also failed, or the run halted rather than quarantined. Counted
 separately from `-max-review-rounds`' own PR-review-round cap, so neither
 budget can consume the other's rounds. The budget is per ticket and is not
 reset by `factoryd retry`: a ticket that already used its rounds gets none
-on a rebuild, because a human chose that retry.
+on a rebuild, because a human chose that retry. With
+`roles.execution.escalation` configured, every automatic corrective build
+(this one and the one for other checks below) runs on the escalation's
+model and level instead of the first build's; see "Model routes".
 
 **Corrective builds for other checks.** A ticket run quarantined by checks
 other than the two reviews alone is followed by a corrective build when its
@@ -1080,6 +1083,41 @@ roles:
   already own; a choice outside `allowed` is refused, naming the
   rejected model and the allowed list, and is refused outright with no
   `routes:`/`models:`/`roles:` session config at all.
+- `roles.execution.escalation` (optional) is the model a ticket's automatic
+  corrective builds run on, chosen by this fixed rule and never by a model:
+
+  ```yaml
+  roles:
+    execution:
+      model: luna
+      thinking: max
+      allowed: [luna, sol]
+      escalation:
+        model: sol        # a models: key listed in allowed
+        thinking: high    # optional; default: the role's own thinking
+  ```
+
+  | Build | Model and level |
+  |---|---|
+  | A ticket's first build | `roles.execution.model` (or the request's `submit -model execution=...`) at `roles.execution.thinking` |
+  | An automatic corrective build, after a review or after another check (see "review_corrective_rounds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
+  | The build that takes the place of an automatic corrective build that never finished (`factoryd resume`, `resume -from scratch`, `retry` after a halt) | `escalation.model` at `escalation.thinking`, as configured when it starts |
+  | A rebuild after `factoryd retry` of a ticket whose corrective round finished quarantined | As a first build: the retry is the operator's, not an automatic corrective build |
+  | A PR-review round (a reviewer's comments) | As a first build |
+  | Planning and review jobs | Their own role, always |
+
+  `escalation.model` must be listed in `roles.execution.allowed`; a config
+  where it is not is refused, saying to add it. Every check of an allowed
+  model therefore covers it (routes, harness api, the role's `thinking`, the
+  review-independence rule), and a request may pick it with
+  `submit -model execution=...`. `escalation.thinking` is checked against
+  that model (`reasoning: true`, and a `thinking_level_map` entry for
+  `xhigh`/`max`). Only `roles.execution` may set `escalation`. `doctor`
+  checks its route as `roles.execution.escalation`. With no `escalation` every build runs as
+  the first one does. The worker passes the choice to the build as
+  `run -execution-model <escalation.model> -execution-thinking <level>`;
+  `-execution-thinking` accepts only `roles.execution.thinking`, or, with the
+  escalation's model, the escalation's level.
 - The coding-agent CLI (the harness: `pi` by default, or `pifork`, `codex`,
   `copilot`) is chosen
   per role: `roles.<role>.harness`, with `allowed_harnesses` the closed set a

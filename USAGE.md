@@ -819,6 +819,28 @@ same choice for a bare `factoryd` run, and is refused outright in legacy (no
 `routes:`/`models:`/`roles:`) mode, which has no `allowed` list to
 validate against. See USAGE_REFERENCE.md § Model routes.
 
+**A stronger model for corrective builds**: `roles.execution.escalation`
+(optional) names the model, and optionally the thinking level, of a
+ticket's automatic corrective builds.
+
+| Build | Runs on |
+|---|---|
+| A ticket's first build | `roles.execution.model`, or the request's `-model execution=...` |
+| An automatic corrective build (after a review or another check) | `escalation.model` at `escalation.thinking`, replacing the request's `-model execution=...` for that build |
+| A PR-review round, planning, review | Unchanged |
+
+```yaml
+roles:
+  execution:
+    model: luna
+    thinking: max
+    allowed: [luna, sol]                         # the escalation's model must be listed
+    escalation: { model: sol, thinking: high }   # thinking defaults to the role's
+```
+
+`quickstart` and `init-config` do not write it. See USAGE_REFERENCE.md §
+Model routes for the checks it gets and the lost-build case.
+
 Full command reference for `submit`/`watch`/`status`/`approve`/`reject`/
 `retry`/`cancel`/`worker` (flags, `-data-dir`/`-config` resolution;
 every request verb takes `-config`):

@@ -614,22 +614,65 @@ func checkRoutingRole(s Settings, roleName string, rc *RoleConfig) error {
 		if err != nil {
 			return err
 		}
-		if rc.Thinking == "" || rc.Thinking == "off" {
-			continue
-		}
-		if !validThinkingLevels[rc.Thinking] {
-			return fmt.Errorf("roles.%s: thinking %q is not a supported level (want one of off, minimal, low, medium, high, xhigh, max)", roleName, rc.Thinking)
-		}
-		if !model.Reasoning {
-			return fmt.Errorf("roles.%s: thinking %q needs models.%s.reasoning: true (Pi sends no reasoning effort at all without it)", roleName, rc.Thinking, name)
-		}
-		if rc.Thinking == "xhigh" || rc.Thinking == "max" {
-			if model.ThinkingLevelMap[rc.Thinking] == "" {
-				return fmt.Errorf("roles.%s: thinking %q needs models.%s.thinking_level_map.%s (Pi silently clamps an undeclared level to high)", roleName, rc.Thinking, name, rc.Thinking)
-			}
+		if err := checkThinking("roles."+roleName, rc.Thinking, name, model); err != nil {
+			return err
 		}
 	}
+	if err := checkRoleEscalation(s, roleName, rc); err != nil {
+		return err
+	}
 	return checkRoleHarness(roleName, rc, s.Routes, s.Models)
+}
+
+// checkThinking refuses a reasoning-effort level the model would not be sent
+// as asked: an unknown level, any level on a model without reasoning: true,
+// and xhigh or max without a thinking_level_map entry (Pi clamps those to
+// high without saying so). "" and "off" always pass. context names the
+// setting in the error, modelName the models: entry.
+func checkThinking(context, thinking, modelName string, model Model) error {
+	if thinking == "" || thinking == "off" {
+		return nil
+	}
+	if !validThinkingLevels[thinking] {
+		return fmt.Errorf("%s: thinking %q is not a supported level (want one of off, minimal, low, medium, high, xhigh, max)", context, thinking)
+	}
+	if !model.Reasoning {
+		return fmt.Errorf("%s: thinking %q needs models.%s.reasoning: true (Pi sends no reasoning effort at all without it)", context, thinking, modelName)
+	}
+	if thinking == "xhigh" || thinking == "max" {
+		if model.ThinkingLevelMap[thinking] == "" {
+			return fmt.Errorf("%s: thinking %q needs models.%s.thinking_level_map.%s (Pi silently clamps an undeclared level to high)", context, thinking, modelName, thinking)
+		}
+	}
+	return nil
+}
+
+// checkRoleEscalation validates roles.execution.escalation: its model is in
+// the role's allowed set, so a model resolves only within that set and every
+// check an allowed model gets (routes, harness api, the role's level, review
+// independence) covers it, and the level a corrective build runs at
+// (EscalationThinking) is one that model is sent as asked. Only the
+// execution role has corrective builds, so any other role setting it is
+// refused.
+func checkRoleEscalation(s Settings, roleName string, rc *RoleConfig) error {
+	if rc.Escalation == nil {
+		return nil
+	}
+	context := fmt.Sprintf("roles.%s.escalation", roleName)
+	if roleName != "execution" {
+		return fmt.Errorf("%s: only roles.execution has an escalation (it is the model of a ticket's automatic corrective builds)", context)
+	}
+	if rc.Escalation.Model == "" {
+		return fmt.Errorf("%s: model is required", context)
+	}
+	if allowed := resolveAllowed(rc); !slices.Contains(allowed, rc.Escalation.Model) {
+		return fmt.Errorf("%s: model %q is not in roles.%s.allowed %v; add it to allowed", context, rc.Escalation.Model, roleName, allowed)
+	}
+	model, err := checkRoutingModel(s, context, rc.Escalation.Model)
+	if err != nil {
+		return err
+	}
+	return checkThinking(context, rc.EscalationThinking(), rc.Escalation.Model, model)
 }
 
 // checkReviewBackendDiffers refuses a review model that resolves to the same
@@ -660,6 +703,39 @@ func checkReviewBackendDiffers(s Settings) error {
 		}
 	}
 	return nil
+}
+
+// ValidateRunExecution checks one run's -execution-model and
+// -execution-thinking. The model is one a request may pick
+// (ValidateRequestModels): a member of roles.execution.allowed, as the
+// escalation's model always is. The level is one this config names for that
+// model: roles.execution.thinking, or, on the escalation's model, the
+// escalation's level; a Worker binds a run's level to the same two
+// (modelrole.CheckRouteBinding). An empty value is not checked.
+func ValidateRunExecution(s Settings, model, thinking string) error {
+	var rc *RoleConfig
+	if s.Roles != nil {
+		rc = s.Roles.Execution
+	}
+	if model != "" {
+		if err := ValidateRequestModels(s, map[string]string{"execution": model}); err != nil {
+			return fmt.Errorf("-execution-model: %w", err)
+		}
+	}
+	if thinking == "" {
+		return nil
+	}
+	if rc == nil || rc.Model == "" {
+		return errors.New("-execution-thinking: roles.execution is not configured, so there is no level to choose")
+	}
+	runModel := model
+	if runModel == "" {
+		runModel = rc.Model
+	}
+	if thinking == rc.Thinking || (runModel == rc.EscalationModel() && thinking == rc.EscalationThinking()) {
+		return nil
+	}
+	return fmt.Errorf("-execution-thinking: %q is not a level this config gives model %q (roles.execution.thinking, or roles.execution.escalation's level on the escalation's model)", thinking, runModel)
 }
 
 // ValidateRequestModels checks a request's own per-request model picks

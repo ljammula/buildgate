@@ -1238,6 +1238,35 @@ var doctorRoleSpecs = []struct {
 	{"review", modelrole.RoleReview},
 }
 
+// doctorRoleSelection is one selection doctorRoutesModeChecks resolves the
+// way a run does: role's model, or model when it names another one. label
+// is what its check rows say after "roles.".
+type doctorRoleSelection struct {
+	name  string
+	role  modelrole.Role
+	label string
+	model string
+}
+
+// doctorRoleSelections is each role's own model, and after the execution
+// role its escalation model. That model is in roles.execution.allowed, and
+// an allowed model is otherwise selected only when a request picks it; an
+// automatic corrective build runs on this one with no one having picked it,
+// so its route is checked like a role's default.
+func doctorRoleSelections(settings sessionconfig.Settings) []doctorRoleSelection {
+	var selections []doctorRoleSelection
+	for _, spec := range doctorRoleSpecs {
+		selections = append(selections, doctorRoleSelection{name: spec.name, role: spec.role, label: spec.name})
+		if spec.role != modelrole.RoleExecution || settings.Roles == nil {
+			continue
+		}
+		if model := settings.Roles.Execution.EscalationModel(); model != "" {
+			selections = append(selections, doctorRoleSelection{name: spec.name, role: spec.role, label: spec.name + ".escalation", model: model})
+		}
+	}
+	return selections
+}
+
 // doctorRoleConfigured mirrors modelrole.RoleConfigured (unexported to
 // that package) against s directly, since doctorRoutesModeChecks needs
 // to know whether a role is configured before calling SelectRoute, not
@@ -1265,7 +1294,8 @@ func doctorRoleConfigured(s sessionconfig.Settings, roleName string) bool {
 // same "no other role's model" rule), so the check list this produces
 // mirrors the real selection a run would make -- an allowed-list model
 // or fallback route SelectRoute would never actually pick is never
-// probed here. Each sel.Skipped entry becomes its own Advisory row
+// probed here. roles.execution.escalation's model is selected too
+// (doctorRoleSelections), as "roles.execution.escalation". Each sel.Skipped entry becomes its own Advisory row
 // ("roles.<role>: route <r> skipped: <reason>") -- a fallback route with
 // a failing credential is expected, ordinary operation, not a doctor
 // failure, as long as SOME route for that role still resolves. A
@@ -1386,7 +1416,7 @@ func doctorRoutesModeChecks(ctx context.Context, in doctorInputs, image string) 
 	if err != nil {
 		return []doctorCheck{{Name: "harness", Err: err}}
 	}
-	for _, spec := range doctorRoleSpecs {
+	for _, spec := range doctorRoleSelections(settings) {
 		if !doctorRoleConfigured(settings, spec.name) {
 			continue
 		}
@@ -1395,10 +1425,10 @@ func doctorRoutesModeChecks(ctx context.Context, in doctorInputs, image string) 
 		// default: a per-request pick from allowed_harnesses would otherwise
 		// first fail at the build.
 		for _, hd := range roleSets[spec.name] {
-			sel, err := modelrole.SelectRoute(settings, spec.role, "", hd.Name, "", doctorRouteCredentialProbe)
+			sel, err := modelrole.SelectRoute(settings, spec.role, spec.model, hd.Name, "", doctorRouteCredentialProbe)
 			if err != nil {
 				checks = append(checks, doctorCheck{
-					Name: fmt.Sprintf("roles.%s: route selection", spec.name),
+					Name: fmt.Sprintf("roles.%s: route selection", spec.label),
 					Err:  err,
 					Fix:  doctorRouteCredentialFix(settings, err),
 				})
@@ -1409,7 +1439,7 @@ func doctorRoutesModeChecks(ctx context.Context, in doctorInputs, image string) 
 					break // the same skips were already reported for the default
 				}
 				checks = append(checks, doctorCheck{
-					Name:     fmt.Sprintf("roles.%s: route %s skipped", spec.name, skip.Route),
+					Name:     fmt.Sprintf("roles.%s: route %s skipped", spec.label, skip.Route),
 					Err:      errors.New(skip.Reason),
 					Advisory: true,
 				})
@@ -1421,7 +1451,7 @@ func doctorRoutesModeChecks(ctx context.Context, in doctorInputs, image string) 
 			seenPair[key] = true
 			harnessDescriptor, err := harness.Lookup(sel.Harness)
 			if err != nil {
-				checks = append(checks, doctorCheck{Name: fmt.Sprintf("roles.%s: harness", spec.name), Err: err})
+				checks = append(checks, doctorCheck{Name: fmt.Sprintf("roles.%s: harness", spec.label), Err: err})
 				continue
 			}
 

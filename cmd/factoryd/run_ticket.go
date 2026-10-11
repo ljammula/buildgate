@@ -174,6 +174,7 @@ type runFlags struct {
 	referenceOracleInLoopRetry   *bool
 	sandboxImage                 *string
 	executionModel               *string
+	executionThinking            *string
 	registryProxy                *bool
 	registryProxyImage           *string
 	composeServices              *bool
@@ -250,6 +251,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.referenceOracleInLoopRetry = flags.Bool("reference-oracle-in-loop-retry", false, "opt-in: also bind-mount -reference-oracle-dir read-only into the build phase's own container (every round, not just the post-build gate) and pass -reference-oracle-command to build_app.py's own --reference-oracle-command, so a failing round gets the same targeted-retry treatment a canonical-verify failure already gets, instead of only being caught by the separate, one-shot post-build reference_oracle named gate. Meaningless without -reference-oracle-command/-reference-oracle-dir/-reference-oracle-mount-path also set. Default false: an operator who already configured the post-build gate alone (the pairing -reference-oracle-command's own help text recommends) gets identical behavior to before this flag existed -- the oracle content is never exposed to the writable, agent-controlled build-phase container unless this is explicitly set. Works on the direct path and on -temporal-address/-repository alike: on the Temporal paths the oracle directory must be reachable on whichever Worker executes the build (the same constraint -workspace already has), and only the oracle command/path travel in Workflow input, never oracle content")
 	f.sandboxImage = flags.String("sandbox-image", "", "run build and verify inside this Docker image. Must be digest-pinned (name@sha256:...) -- a mutable tag is rejected. Docker containment is unconditional -- there is no host-execution opt-out -- but there is no built-in default image either: run `make install` (builds every image from source and records it via `factoryd configure-images`) or pass this explicitly")
 	f.executionModel = flags.String("execution-model", "", "choose the execution-role model for this one run: must be a member of roles.execution.allowed (or roles.execution.model itself). Empty keeps roles.execution.model, today's default. Requires routes:/models:/roles: session config -- refused outright in legacy -relay-* mode, which has no allowed list to validate against")
+	f.executionThinking = flags.String("execution-thinking", "", "run this one build at this reasoning-effort level instead of roles.execution.thinking: the level roles.execution.escalation gives its model (its own thinking, else the role's), with -execution-model naming that model. Empty keeps roles.execution.thinking. The worker passes both for a ticket's automatic corrective build")
 	f.executionHarness = flags.String("execution-harness", "", "choose the execution-role coding-agent harness for this one run: must be a member of roles.execution.allowed_harnesses (or roles.execution.harness itself). Empty keeps roles.execution.harness (default pi). Requires roles: session config")
 	f.registryProxy = flags.Bool("registry-proxy", false, "launch a per-run read-only caching package-registry proxy alongside build_app.py's sandboxed worker (see the registry_proxy_*_upstream session-config keys). Requires -sandbox-image. Default-on for the default, model-backed build_app.py: left unset (and unconfigured via the registry_proxy session-config key), this is on whenever -build-app-script is not explicit -- a sandboxed run needing a dependency the canonical image doesn't bake would otherwise have the model fake it rather than fail loudly. Pass -registry-proxy=false to opt out explicitly")
 	f.registryProxyImage = flags.String("registry-proxy-image", "", "digest-pinned Docker image for the registry proxy, used when -registry-proxy is set; only used with -registry-proxy. No built-in default -- run `make install` or pass this explicitly")
@@ -314,6 +316,7 @@ type ticketRun struct {
 	sandboxImage                          *string
 	executionModel                        *string
 	executionHarness                      *string
+	executionThinkingChoice               *string
 	registryProxy                         *bool
 	registryProxyImage                    *string
 	composeServices                       *bool
@@ -487,7 +490,7 @@ func (tr *ticketRun) parseFlags() error {
 	tr.referenceOracleDir = tr.rf.referenceOracleDir
 	tr.noCommitOracles = tr.rf.noCommitOracles
 	tr.referenceOracleMountPath, tr.referenceOracleInLoopRetry, tr.sandboxImage = tr.rf.referenceOracleMountPath, tr.rf.referenceOracleInLoopRetry, tr.rf.sandboxImage
-	tr.executionModel, tr.executionHarness = tr.rf.executionModel, tr.rf.executionHarness
+	tr.executionModel, tr.executionHarness, tr.executionThinkingChoice = tr.rf.executionModel, tr.rf.executionHarness, tr.rf.executionThinking
 	tr.registryProxy, tr.registryProxyImage, tr.composeServices, tr.egressCABundle, tr.dataDir = tr.rf.registryProxy, tr.rf.registryProxyImage, tr.rf.composeServices, tr.rf.egressCABundle, tr.rf.dataDir
 	tr.requireDeclaredScope, tr.temporalAddress, tr.repository, tr.runID, tr.priorRun = tr.rf.requireDeclaredScope, tr.rf.temporalAddress, tr.rf.repository, tr.rf.runID, tr.rf.priorRun
 	tr.skipProjectCheck, tr.architectureRequiredSections, tr.preflightProfile, tr.requestTicket, tr.ticketFile, tr.openPullRequest = tr.rf.skipProjectCheck, tr.rf.architectureRequiredSections, tr.rf.preflightProfile, tr.rf.requestTicket, tr.rf.ticketFile, tr.rf.openPullRequest
@@ -571,11 +574,9 @@ func (tr *ticketRun) parseFlags() error {
 	// -relay-* mode (no roles.execution.allowed at all), so it is
 	// refused outright here rather than silently ignored or left to
 	// SelectRoute's own, unrelated "roles.execution.model is not
-	// configured" error further down.
-	if *tr.executionModel != "" {
-		if err := sessionconfig.ValidateRequestModels(tr.settings, map[string]string{"execution": *tr.executionModel}); err != nil {
-			return fmt.Errorf("-execution-model: %w", err)
-		}
+	// configured" error further down. -execution-thinking likewise.
+	if err := sessionconfig.ValidateRunExecution(tr.settings, *tr.executionModel, *tr.executionThinkingChoice); err != nil {
+		return err
 	}
 	// -execution-harness mirrors -execution-model: a per-run pick within
 	// roles.execution.allowed_harnesses, refused in a session with no roles.
@@ -745,6 +746,9 @@ func (tr *ticketRun) selectRoleRoutes() error {
 	tr.execSelection = &sel
 	logRouteSkips("execution", tr.execSelection)
 	tr.executionThinking = sel.Thinking
+	if *tr.executionThinkingChoice != "" {
+		tr.executionThinking = *tr.executionThinkingChoice
+	}
 
 	if tr.settings.Roles != nil && tr.settings.Roles.Review != nil {
 		revSel, err := modelrole.SelectRoute(tr.settings, modelrole.RoleReview, "", "", "", routeCredentialProbe)

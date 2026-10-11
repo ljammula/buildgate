@@ -353,10 +353,10 @@ func SelectRoute(s sessionconfig.Settings, r Role, choice, harnessChoice string,
 
 // candidateModelNames is the closed set of models: entries role's own
 // roles.<role>.model/roles.<role>.allowed may resolve to, in that
-// order, each name appearing at most once -- rc.Model always first
-// (today's only per-request choice), then rc.Allowed in its own
-// declared order for a future per-request choice within that set. nil
-// rc (role unconfigured) yields no candidates at all.
+// order, each name appearing at most once -- rc.Model always first, then
+// rc.Allowed in its own declared order. roles.execution.escalation's model
+// is one of them (sessionconfig.ValidateRouting). nil rc (role
+// unconfigured) yields no candidates at all.
 func candidateModelNames(rc *sessionconfig.RoleConfig) []string {
 	if rc == nil {
 		return nil
@@ -484,10 +484,12 @@ func compareBoundRelayPolicy(routeName string, p, expected sandbox.RoutePolicy) 
 // thinking is the submitter's own resolved Pi reasoning-effort level for
 // this same role (RunWorkflowInput.Thinking for role Execution,
 // RunWorkflowInput.ReviewThinking for a routed role Review) and must
-// equal roleConfig(s, role).Thinking exactly -- this Worker's own
-// roles.<role>.thinking, never the submitter's own claimed value, is
-// what actually reaches build_app.py/conformity_review.py/code_review.py's
-// --thinking, so the two must never be allowed to silently diverge.
+// equal a level this Worker's own config gives the bound model exactly:
+// roleConfig(s, role).Thinking, or, when the bound model is
+// roles.execution.escalation's, that escalation's level
+// (RoleConfig.EscalationThinking). The submitted value is what reaches
+// build_app.py/conformity_review.py/code_review.py's --thinking, so it is
+// never one this Worker's config does not name for that model.
 func CheckRouteBinding(s sessionconfig.Settings, role Role, p sandbox.RoutePolicy, thinking string) error {
 	if p.Route == "" {
 		return fmt.Errorf("modelrole: CheckRouteBinding requires a policy naming a route")
@@ -497,7 +499,7 @@ func CheckRouteBinding(s sessionconfig.Settings, role Role, p sandbox.RoutePolic
 	if len(candidates) == 0 {
 		return fmt.Errorf("modelrole: roles.%s is not configured on this Worker", role)
 	}
-	if thinking != rc.Thinking {
+	if thinking != rc.Thinking && (rc.Escalation == nil || thinking != rc.EscalationThinking()) {
 		return fmt.Errorf("modelrole: roles.%s: policy's thinking does not match this Worker's own roles.%s.thinking", role, role)
 	}
 	routes, models, err := s.Routing()
@@ -508,34 +510,37 @@ func CheckRouteBinding(s sessionconfig.Settings, role Role, p sandbox.RoutePolic
 	if !ok {
 		return fmt.Errorf("modelrole: roles.%s: route %q is not configured on this Worker", role, p.Route)
 	}
-	var matched sessionconfig.Model
-	found := false
+	// Every candidate the policy could be of is tried, since two models:
+	// entries may share a route and an id; the error is the first one's.
+	var firstErr error
 	for _, name := range candidates {
 		model, ok := models[name]
-		if !ok {
+		if !ok || !slices.Contains(model.Routes, p.Route) || model.EffectiveID(p.Route) != p.WorkerModelID {
 			continue
 		}
-		hasRoute := false
-		for _, r := range model.Routes {
-			if r == p.Route {
-				hasRoute = true
-				break
-			}
+		err := checkBoundModel(s, role, rc, name, model, route, p, thinking)
+		if err == nil {
+			return nil
 		}
-		if !hasRoute {
-			continue
+		if firstErr == nil {
+			firstErr = err
 		}
-		if model.EffectiveID(p.Route) != p.WorkerModelID {
-			continue
-		}
-		matched = model
-		found = true
-		break
 	}
-	if !found {
-		return fmt.Errorf("modelrole: roles.%s: policy's WorkerModelID does not match any of role's configured models on route %q", role, p.Route)
+	if firstErr != nil {
+		return firstErr
 	}
-	expected, err := relayPolicyForRoute(s, matched, p.Route, route)
+	return fmt.Errorf("modelrole: roles.%s: policy's WorkerModelID does not match any of role's configured models on route %q", role, p.Route)
+}
+
+// checkBoundModel is CheckRouteBinding for one candidate model the policy
+// names: thinking is the level this Worker's config gives that model
+// (roles.<role>.thinking, or the escalation's level on the escalation's
+// model), and p is the policy this Worker would itself build for it.
+func checkBoundModel(s sessionconfig.Settings, role Role, rc *sessionconfig.RoleConfig, name string, model sessionconfig.Model, route sessionconfig.Route, p sandbox.RoutePolicy, thinking string) error {
+	if thinking != rc.Thinking && (name != rc.EscalationModel() || thinking != rc.EscalationThinking()) {
+		return fmt.Errorf("modelrole: roles.%s: policy's thinking does not match this Worker's own level for the policy's model", role)
+	}
+	expected, err := relayPolicyForRoute(s, model, p.Route, route)
 	if err != nil {
 		return fmt.Errorf("modelrole: roles.%s: %w", role, err)
 	}
