@@ -92,11 +92,17 @@ in the opening prompt. Only the build script takes it; no review script does.
   `build_app.model_route_errors` extracts these; `exited_zero_hint`
   turns them into a redacted single-line hint for both drafting scripts'
   failure reasons. `build_app.py` itself prints `Model route error: ...`.
-- **Sanitising log text.** `build_app.redact` (secret shapes: bearer
-  tokens, `sk-`/`gh*_` keys, JWTs, `key=value` and JSON credential
-  fields, URL passwords) and `build_app.single_line` mirror Go's
-  `internal/sanitize`. Anything reaching an operator surface (`factoryd
-  status`, notifications, the console) goes through them.
+- **Sanitising log text.** `build_app.redact` (secret shapes:
+  `Authorization` lines, bearer tokens, `sk-`/`gh*_` keys, JWTs,
+  `name=value` and JSON credential fields, URL passwords) and
+  `build_app.single_line` mirror Go's `internal/sanitize`, expression for
+  expression; `cmd/factoryd/testdata/sanitize_vectors.json` holds both to
+  one table. Anything reaching an operator surface (`factoryd status`,
+  notifications, the console) goes through them. A failing test's own line
+  stays readable: a name directly before `::` (`TestToken::test_refresh`)
+  is no assignment, an empty quoted value is shown, and so is a value under
+  6 characters whose name holds `token` or `api key` but no `secret`,
+  `password` or `passwd` (`token = "abc", want "xyz"`, `max_tokens: 4096`).
 - **gofmt.** After a round's verify passes, `build_app.py` runs `gofmt -w`
   on changed `.go` files only (`gofmt_changed_files`), inside the
   sandbox. No-op when `gofmt` is absent or no `.go` file changed.

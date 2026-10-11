@@ -309,36 +309,83 @@ def model_stop(route_errors: list[str]) -> dict | None:
 	return None
 
 
-def redact(output: str, limit: int = 3000) -> str:
-	import re
+# redact's patterns, in order: whole-line and whole-token credentials first,
+# so a later, more general pattern cannot leave part of a value behind. The
+# same expressions, in the same order, as internal/sanitize.Text's (Go);
+# cmd/factoryd/testdata/sanitize_vectors.json holds both to one table.
+_SECRET_PATTERNS = (
+	# An Authorization header or assignment: the rest of its line.
+	(re.compile(r"(?i)(authorization\s*[:=])[^\n]*"), r"\1 [redacted]"),
+	# A bearer credential with no header name before it.
+	(re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer [redacted]"),
+	# JSON-quoted credential fields ("api_key": "..."), whose closing quote
+	# keeps the assignment pattern below from seeing the name: a model
+	# client's stderr can be a JSON error body, and it reaches an
+	# operator-facing halt reason.
+	(re.compile(r'(?i)"(api_key|access_token|refresh_token|authorization)"(\s*:\s*)"[^"]*"'), r'"\1"\2"[redacted]"'),
+	# OpenAI-style secret keys and GitHub tokens with nothing naming them.
+	(re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"), "sk-[redacted]"),
+	(re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "gh_[redacted]"),
+	# A JWT: three base64url segments joined by '.', the first starting
+	# "eyJ" (the base64 of `{"`).
+	(re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+"), "[redacted-jwt]"),
+)
 
-	redacted = re.sub(r"(?i)(authorization:\s*bearer\s+)\S+", r"\1<redacted>", output)
-	# JSON-quoted credential fields ("api_key": "...") -- the generic
-	# key=value pattern below requires the key itself to be bare word
-	# characters immediately followed by [=:], which a JSON key's own
-	# closing quote defeats. Found in a round-2 adversarial review: this
-	# change is the first to put pi's own stderr -- which can be a
-	# JSON error body from a relay/API failure -- into an operator-facing
-	# halt reason, so redaction here must cover more than the original
-	# hand-picked shapes. Mirrors internal/sanitize.Text's own secretPatterns
-	# (Go), extended identically.
-	redacted = re.sub(
-		r'(?i)"(api_key|access_token|refresh_token|authorization)"(\s*:\s*)"[^"]*"',
-		r'"\1"\2"<redacted>"',
-		redacted,
-	)
-	# OpenAI-style secret keys and GitHub tokens: whole-token patterns,
-	# checked before the generic key=value pattern so a bare token pasted
-	# with no key= prefix at all is still redacted.
-	redacted = re.sub(r"sk-[A-Za-z0-9_-]{16,}", "sk-<redacted>", redacted)
-	redacted = re.sub(r"gh[pousr]_[A-Za-z0-9]{20,}", "gh_<redacted>", redacted)
-	# A JWT (three base64url segments joined by '.', always starting "eyJ"
-	# -- the base64 of `{"`) can itself be a bearer credential even where
-	# no "Bearer "/"api_key=" prefix precedes it.
-	redacted = re.sub(r"eyJ[\w-]+\.[\w-]+\.[\w-]+", "<redacted-jwt>", redacted)
-	redacted = re.sub(r"(?i)\b(password|passwd|token|secret|api[_-]?key)\s*[=:]\s*[^\s]+", r"\1=<redacted>", redacted)
-	redacted = re.sub(r"://([^\s:/]+):([^\s@]+)@", r"://\1:<redacted>@", redacted)
-	return redacted.strip()[-limit:]
+# A name holding a credential word, then an assignment or comparison (`=`,
+# `:=`, `==`, or `:` and white space) and its value, or a `:` directly before
+# a value that does not itself start with `:`. A name directly before `::` (a
+# pytest id, a Rust or C++ path) is therefore no assignment and matches
+# nothing; an assignment later on the same line still matches on its own. An
+# unquoted value runs to the next white space. _assigned_secret decides which
+# matches are redacted. internal/sanitize's secretAssignment is the same
+# expression.
+_ASSIGNED_SECRET = re.compile(
+	r"(?i)\b([A-Za-z0-9_-]*(?:api[_-]?key|token|secret|password|passwd)[A-Za-z0-9_-]*)"
+	r"""(?:(\s*(?::=|==?)\s*|\s*:\s+)("[^"\n]*"|'[^'\n]*'|\S+)|(\s*:)("[^"\n]*"|'[^'\n]*'|[^\s:]\S*))"""
+)
+_PASSWORD_NAME = re.compile(r"(?i)secret|password|passwd")
+
+# The length under which the value of a name holding `token` or `api key`
+# (and none of `secret`, `password`, `passwd`) is shown: no API key, access
+# token or one-time code is that short, and such values are what a failing
+# test prints (`token = "abc", want "xyz"`, `max_tokens: 4096`).
+SHORTEST_TOKEN = 6
+
+# A password inside a URL (scheme://user:password@host).
+_URL_PASSWORD = re.compile(r"://([^\s:/]+):([^\s@]+)@")
+
+
+def _assigned_secret(match) -> str:
+	"""The replacement for one _ASSIGNED_SECRET match: the match with its
+	value redacted, unless the value cannot be a credential. That is an empty
+	quoted value under any name, and a value under SHORTEST_TOKEN characters
+	(quotes not counted) under a name that holds no `secret`, `password` or
+	`passwd`: a password or a secret may be any length, so a value under one
+	of those names is always redacted."""
+	name = match.group(1)
+	sep = match.group(2) or match.group(4)
+	value = match.group(3) or match.group(5)
+	inner = value[1:-1] if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0] else value
+	if not inner or (len(inner) < SHORTEST_TOKEN and not _PASSWORD_NAME.search(name)):
+		return match.group(0)
+	return f"{name}{sep}[redacted]"
+
+
+def redact_secrets(text: str) -> str:
+	"""text with recognisable credentials replaced and nothing else changed:
+	internal/sanitize.Text's redaction. It leaves a failing test's own line
+	readable (see _assigned_secret) and redacts whenever a value could be a
+	credential."""
+	for pattern, replacement in _SECRET_PATTERNS:
+		text = pattern.sub(replacement, text)
+	text = _ASSIGNED_SECRET.sub(_assigned_secret, text)
+	return _URL_PASSWORD.sub(r"://\1:[redacted]@", text)
+
+
+def redact(output: str, limit: int = 3000) -> str:
+	"""redact_secrets(output), stripped and cut to its last limit characters:
+	what is shown to an operator and fed to a later build."""
+	return redact_secrets(output).strip()[-limit:]
 
 
 def exited_zero_hint(errors: list[str]) -> str:

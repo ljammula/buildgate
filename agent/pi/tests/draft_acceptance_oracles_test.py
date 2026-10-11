@@ -274,11 +274,12 @@ class FailureReportTests(unittest.TestCase):
 	def test_sanitize_shared_vectors_agree_with_the_go_side(self):
 		vectors = json.loads((Path(__file__).resolve().parents[3] / "cmd" / "factoryd" / "testdata" / "sanitize_vectors.json").read_text(encoding="utf-8"))
 		for vec in vectors:
-			got = draft_acceptance_oracles.sanitize_text(vec["in"])
-			for absent in vec["absent"]:
-				self.assertNotIn(absent, got)
-			for present in vec["present"]:
-				self.assertIn(present, got)
+			with self.subTest(case=vec["name"]):
+				got = draft_acceptance_oracles.sanitize_text(vec["in"])
+				for absent in vec["absent"]:
+					self.assertNotIn(absent, got)
+				for present in vec["present"]:
+					self.assertIn(present, got)
 
 	def test_report_failure_bounds_and_sanitises_model_controlled_text(self):
 		import contextlib

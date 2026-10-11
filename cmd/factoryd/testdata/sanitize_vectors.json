@@ -1,5 +1,6 @@
 [
  {
+  "name": "terminal escapes, control and bidi characters are dropped",
   "in": "ok \u001b[31mred\u001b[0m \u0007bell \u202eevil\u200b",
   "absent": [
    "\u001b",
@@ -15,6 +16,7 @@
   ]
  },
  {
+  "name": "an authorization header loses the rest of its line",
   "in": "Authorization: Bearer abc.def-123\nnext",
   "absent": [
    "abc.def-123"
@@ -26,6 +28,7 @@
   ]
  },
  {
+  "name": "a bearer credential",
   "in": "header Bearer tok_XYZ.1",
   "absent": [
    "tok_XYZ"
@@ -35,6 +38,7 @@
   ]
  },
  {
+  "name": "an api key assignment and an sk- key under a key name",
   "in": "api_key=hunter2 and OPENAI_API_KEY: sk-abcdef123456789",
   "absent": [
    "hunter2",
@@ -45,12 +49,436 @@
   ]
  },
  {
+  "name": "tabs and line ends are kept",
   "in": "keep\ttab\nand\r\nlines",
   "absent": [],
   "present": [
    "keep\ttab",
    "\n",
    "\r"
+  ]
+ },
+ {
+  "name": "authorization header, bearer",
+  "in": "Authorization: Bearer sk-abcdefgh12345678",
+  "absent": [
+   "abcdefgh12345678"
+  ],
+  "present": []
+ },
+ {
+  "name": "authorization header, basic",
+  "in": "Authorization: Basic dXNlcjpodW50ZXIy",
+  "absent": [
+   "dXNlcjpodW50ZXIy"
+  ],
+  "present": []
+ },
+ {
+  "name": "authorization assignment",
+  "in": "authorization=ApiKey 0123456789abcdef",
+  "absent": [
+   "0123456789abcdef"
+  ],
+  "present": []
+ },
+ {
+  "name": "a bearer credential with no header name",
+  "in": "sent Bearer abcdef0123456789 upstream",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": [
+   "upstream"
+  ]
+ },
+ {
+  "name": "json api_key field",
+  "in": "{\"api_key\": \"abcdef0123456789\"}",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "json api_key field with a short value",
+  "in": "{\"api_key\": \"abc\"}",
+  "absent": [
+   "\"abc\""
+  ],
+  "present": []
+ },
+ {
+  "name": "json access_token field",
+  "in": "{\"access_token\":\"abcdef0123456789\"}",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "json refresh_token field",
+  "in": "{\"refresh_token\": \"abcdef0123456789\"}",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "json authorization field",
+  "in": "{\"Authorization\": \"Bearer abcdef0123456789\"}",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "an sk- key with nothing naming it",
+  "in": "failed with sk-abcdefgh12345678 in the log",
+  "absent": [
+   "abcdefgh12345678"
+  ],
+  "present": [
+   "in the log"
+  ]
+ },
+ {
+  "name": "a github personal token",
+  "in": "token: ghp_abcdefghijklmnopqrstuvwxyz0123",
+  "absent": [
+   "ghp_abcdefghijklmnopqrstuvwxyz0123"
+  ],
+  "present": []
+ },
+ {
+  "name": "a github oauth token with nothing naming it",
+  "in": "ghu_abcdefghijklmnopqrstuvwxyz0123456789",
+  "absent": [
+   "ghu_abcdefghijklmnopqrstuvwxyz0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "a jwt",
+  "in": "Set-Cookie: session=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+  "absent": [
+   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+  ],
+  "present": []
+ },
+ {
+  "name": "an environment assignment",
+  "in": "GITHUB_TOKEN=abcdef0123456789abcdef",
+  "absent": [
+   "abcdef0123456789abcdef"
+  ],
+  "present": []
+ },
+ {
+  "name": "a six-character token",
+  "in": "token=abc123",
+  "absent": [
+   "abc123"
+  ],
+  "present": []
+ },
+ {
+  "name": "an api key after a colon",
+  "in": "api-key: 0123456789abcdef",
+  "absent": [
+   "0123456789abcdef"
+  ],
+  "present": []
+ },
+ {
+  "name": "an api key with no space after the colon",
+  "in": "X-Api-Key:0123456789abcdef",
+  "absent": [
+   "0123456789abcdef"
+  ],
+  "present": []
+ },
+ {
+  "name": "a quoted token of credential length",
+  "in": "token = \"abcdef0123456789\", want \"xyz\"",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": [
+   "want \"xyz\""
+  ]
+ },
+ {
+  "name": "a short assignment in Go",
+  "in": "token := \"abcdef0123456789\"",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "a comparison with a value of credential length",
+  "in": "if api_key == 'abcdef0123456789':",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "a password of any length",
+  "in": "password=abc",
+  "absent": [
+   "=abc"
+  ],
+  "present": []
+ },
+ {
+  "name": "a short quoted password",
+  "in": "password = \"abc\", want \"xyz\"",
+  "absent": [
+   "\"abc\""
+  ],
+  "present": [
+   "want \"xyz\""
+  ]
+ },
+ {
+  "name": "a quoted password with spaces",
+  "in": "db_password: \"my pass phrase\" set",
+  "absent": [
+   "my pass phrase",
+   "pass phrase"
+  ],
+  "present": [
+   "set"
+  ]
+ },
+ {
+  "name": "a short secret",
+  "in": "client_secret: xyz",
+  "absent": [
+   "xyz"
+  ],
+  "present": []
+ },
+ {
+  "name": "a passwd",
+  "in": "passwd=hunter2",
+  "absent": [
+   "hunter2"
+  ],
+  "present": []
+ },
+ {
+  "name": "a password that starts with a colon",
+  "in": "password=:hunter2",
+  "absent": [
+   "hunter2"
+  ],
+  "present": []
+ },
+ {
+  "name": "a password after a colon and a space that starts with a colon",
+  "in": "password: :hunter2",
+  "absent": [
+   "hunter2"
+  ],
+  "present": []
+ },
+ {
+  "name": "a password with a comma in it",
+  "in": "password=hunter2,more",
+  "absent": [
+   "hunter2",
+   "more"
+  ],
+  "present": []
+ },
+ {
+  "name": "a token on the line after its name",
+  "in": "token:\nabcdef0123456789",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": []
+ },
+ {
+  "name": "an assignment after a test id on the same line",
+  "in": "tests/test_auth.py::TestToken::test_refresh password=hunter2",
+  "absent": [
+   "hunter2"
+  ],
+  "present": [
+   "tests/test_auth.py::TestToken::test_refresh"
+  ]
+ },
+ {
+  "name": "a token of credential length after a test id",
+  "in": "pkg::Token::new token=abcdef0123456789",
+  "absent": [
+   "abcdef0123456789"
+  ],
+  "present": [
+   "pkg::Token::new"
+  ]
+ },
+ {
+  "name": "a password in a URL",
+  "in": "clone https://bob:hunter2hunter2@example.com/r.git failed",
+  "absent": [
+   "hunter2hunter2"
+  ],
+  "present": [
+   "https://bob:",
+   "@example.com/r.git failed"
+  ]
+ },
+ {
+  "name": "a pytest id through a class named for a token",
+  "in": "FAILED tests/test_auth.py::TestToken::test_refresh - AssertionError: assert 1 == 2",
+  "absent": [],
+  "present": [
+   "FAILED tests/test_auth.py::TestToken::test_refresh - AssertionError: assert 1 == 2"
+  ]
+ },
+ {
+  "name": "a pytest id through names with every keyword",
+  "in": "tests/test_secret.py::TestPassword::test_api_key::test_passwd PASSED",
+  "absent": [],
+  "present": [
+   "tests/test_secret.py::TestPassword::test_api_key::test_passwd PASSED"
+  ]
+ },
+ {
+  "name": "a Rust test path",
+  "in": "test auth::token::tests::refresh ... FAILED",
+  "absent": [],
+  "present": [
+   "test auth::token::tests::refresh ... FAILED"
+  ]
+ },
+ {
+  "name": "a C++ qualified name",
+  "in": "Token::refresh() threw std::runtime_error",
+  "absent": [],
+  "present": [
+   "Token::refresh() threw std::runtime_error"
+  ]
+ },
+ {
+  "name": "a Go failure line with a short got-value",
+  "in": "    auth_test.go:42: token = \"abc\", want \"xyz\"",
+  "absent": [],
+  "present": [
+   "    auth_test.go:42: token = \"abc\", want \"xyz\""
+  ]
+ },
+ {
+  "name": "a Go failure line with an empty got-value",
+  "in": "    auth_test.go:42: password = \"\", want \"xyz\"",
+  "absent": [],
+  "present": [
+   "    auth_test.go:42: password = \"\", want \"xyz\""
+  ]
+ },
+ {
+  "name": "an empty single-quoted secret",
+  "in": "assert secret == ''",
+  "absent": [],
+  "present": [
+   "assert secret == ''"
+  ]
+ },
+ {
+  "name": "a short unquoted token",
+  "in": "next token: EOF",
+  "absent": [],
+  "present": [
+   "next token: EOF"
+  ]
+ },
+ {
+  "name": "token counts",
+  "in": "input_tokens=1200 output_tokens=30 max_tokens: 4096",
+  "absent": [],
+  "present": [
+   "input_tokens=1200 output_tokens=30 max_tokens: 4096"
+  ]
+ },
+ {
+  "name": "a comparison with a short value",
+  "in": "assert token == 'abc'",
+  "absent": [],
+  "present": [
+   "assert token == 'abc'"
+  ]
+ },
+ {
+  "name": "a Go test name",
+  "in": "--- FAIL: TestSecretRotation (0.01s)",
+  "absent": [],
+  "present": [
+   "--- FAIL: TestSecretRotation (0.01s)"
+  ]
+ },
+ {
+  "name": "a file named for a token",
+  "in": "tests/test_token.py:12: in test_refresh",
+  "absent": [],
+  "present": [
+   "tests/test_token.py:12: in test_refresh"
+  ]
+ },
+ {
+  "name": "a hyphenated word that ends in sk",
+  "in": "the risk-assessment-procedure-check failed",
+  "absent": [],
+  "present": [
+   "the risk-assessment-procedure-check failed"
+  ]
+ },
+ {
+  "name": "a word that holds eyJ",
+  "in": "the heyJude.a.b fixture",
+  "absent": [],
+  "present": [
+   "the heyJude.a.b fixture"
+  ]
+ },
+ {
+  "name": "a five-character token",
+  "in": "refresh_token = \"abcde\", want \"vwxyz\"",
+  "absent": [],
+  "present": [
+   "refresh_token = \"abcde\", want \"vwxyz\""
+  ]
+ },
+ {
+  "name": "a six-digit one-time code",
+  "in": "token: 123456",
+  "absent": [
+   "123456"
+  ],
+  "present": []
+ },
+ {
+  "name": "a seven-character api key",
+  "in": "api_key=hunter2",
+  "absent": [
+   "hunter2"
+  ],
+  "present": [
+   "api_key=[redacted]"
+  ]
+ },
+ {
+  "name": "a short sk- key with nothing naming it",
+  "in": "sent sk-Zq1x7y8wKp upstream",
+  "absent": [
+   "Zq1x7y8wKp"
+  ],
+  "present": [
+   "upstream"
   ]
  }
 ]
