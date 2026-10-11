@@ -356,7 +356,7 @@ type Attempt struct {
 // alias's own worker_model_extra_json (RouteSpec.WorkerModelExtraJSON,
 // JSON-object-shaped text; "" or unparseable is treated as an empty
 // object) -- the same source sessionconfig.Settings.ValidateRoles reads
-// via alias.WorkerModelExtraJSON["thinkingLevelMap"]. Pi (0.84.4)
+// via alias.WorkerModelExtraJSON["thinkingLevelMap"]. Pi (1.1.0)
 // translates a level through thinkingLevelMap whenever the map declares
 // a non-empty string for it (a model-specific rename, e.g. "max" ->
 // "xhigh") and otherwise sends the level unchanged -- which, for xhigh/

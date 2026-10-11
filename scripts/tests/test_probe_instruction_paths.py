@@ -152,6 +152,18 @@ class Fixture(unittest.TestCase):
 		self.assertNotIn("AGENTS.md", fixture["unprobed"])
 		self.assertIn(".mcp.json", fixture["unprobed"])
 
+	def test_a_path_only_a_kept_entry_lists_is_not_unprobed(self):
+		turns = {"review": {"outcomes": {"agents": "request"}}}
+		cands = [{"slug": "agents", "path": "AGENTS.md", "table_path": "AGENTS.md", "kind": "text"}]
+		result = {"candidates": cands, "harnesses": {"pi": {"version": "0.9.1", "turns": turns}}}
+		old = {n: {"version": "1.2.3", "source": "probed", "paths": ["AGENTS.md"]} for n in probe.HARNESSES}
+		old["copilot"]["paths"] = ["AGENTS.md", ".github/hooks"]
+		old["codex"] = {"version": "1.2.3", "source": "documented", "paths": ["AGENTS.md", ".pi"]}
+		fixture = probe.fixture_from_result(result, TABLE, old)
+		self.assertNotIn(".github/hooks", fixture["unprobed"])
+		self.assertIn(".pi", fixture["unprobed"])
+		self.assertIn(".mcp.json", fixture["unprobed"])
+
 	def test_versions_are_read_from_the_images_own_text(self):
 		self.assertEqual(probe.parse_version("codex-cli 0.154.0"), "0.154.0")
 		self.assertEqual(probe.parse_version("GitHub Copilot CLI 1.0.88."), "1.0.88")
