@@ -66,9 +66,7 @@ func workerMain(dp *deps, args []string) error {
 	// stopped mid-build leaves that run's workflow, record and containers
 	// behind. Halt them, and put the requests they were building in resume_review, before taking
 	// new work, so no workflow starts that ticket over on its own: a human decides.
-	reclaimed := reclaimDeadOwnerRuns(dp, context.Background(), dataDir, cfg.Settings.SandboxDocker, cfg.TemporalAddress)
-	haltedIDs := haltRequestsOfLostRuns(dataDir, reclaimed)
-	reclaimDeadRequestJobs(context.Background(), dataDir, cfg.Settings.SandboxDocker)
+	_, haltedIDs := reclaimLostWork(dp, context.Background(), dataDir, cfg.Settings.SandboxDocker, cfg.TemporalAddress)
 
 	jobsQueue, lightQueue, err := requestTaskQueues(dataDir)
 	if err != nil {

@@ -342,7 +342,7 @@ func StopOpenShell(dp Deps, ctx context.Context, w io.Writer, dataDirs []string,
 	active, listErr := ActiveBuilds(dp, ctx, dataDirs, now)
 	switch {
 	case len(active) > 0:
-		fmt.Fprintf(w, "openshell: not stopped, in use by %s\n", strings.Join(active, ", "))
+		fmt.Fprintf(w, "openshell: not stopped, in use by %s (`factoryd doctor` names each sandbox's run and data dir, and `factoryd doctor -fix` removes one whose build is gone)\n", strings.Join(active, ", "))
 		return false, errors.New("OpenShell left running: a build is using it")
 	case listErr != nil:
 		fmt.Fprintf(w, "openshell: not stopped, cannot tell whether a build is using it: %s\n", sanitize.Line(listErr.Error()))

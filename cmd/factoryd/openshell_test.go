@@ -31,6 +31,8 @@ func newOpenShellFixture(t *testing.T) *openShellFixture {
 	t.Helper()
 	dp := newTestDeps(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// doctor looks for a sandbox's run under the data root, which is in HOME.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	f := &openShellFixture{OpenShell: hostcontroltest.NewOpenShell(t), dp: dp}
 	fakeDockerOf(dp).dockerBinaryFn = func() string { return f.Docker }
