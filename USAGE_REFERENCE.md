@@ -774,7 +774,11 @@ as ONE combined call (`agent/pi/scripts/combined_review.py`) instead of
 two separate sandboxed sessions over the same diff. That review attempt's
 `exit_code` is 40 plus 1 when the conformity review did not succeed and
 plus 2 when the code review did not: 40 is both passed, 43 both failed, and
-any other value fails both gates.
+any other value fails both gates. An answer that lacks one of the two
+reviews is asked for that review alone, and a failed or unparseable call is
+made again: one further call at most, in the same sandbox, told nothing of the
+first. Both evidence files then hold a `retry` line saying what was asked
+again and why.
 
 | Restriction | Why |
 |---|---|

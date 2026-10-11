@@ -20,7 +20,7 @@ and [`USAGE.md`](../../USAGE.md).
 | `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`) | `worker -draft-oracles-script` |
 | `conformity_review.py` | Bounded per-criterion spec-conformity review | — |
 | `code_review.py` | Standalone AI code review (`-code-review-policy off\|advisory\|required`) | — |
-| `combined_review.py` | Runs conformity review and code review in one pass when both are enabled for a run | — |
+| `combined_review.py` | Runs conformity review and code review in one pass when both are enabled for a run. An answer that lacks one review is asked for that review alone, and a failed or unparseable turn is run again: one further turn at most, in its own session folder (`.pi-combined-review-session/retry`), told nothing of the first, inside 40 minutes of model time for the step. Both evidence files then carry a `retry` line saying what was asked again and why, and the prompt is saved as `review-code-retry`, `review-conformity-retry` or `review-combined-retry` | — |
 
 `tests/` holds one `pytest`-compatible suite per script.
 
