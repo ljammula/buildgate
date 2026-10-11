@@ -1,9 +1,13 @@
-// factoryd is the minimal Phase 1-2 slice of the agent factory plan: it
-// supervises exactly one build_app.py invocation against one ticket in one
-// workspace, records durable evidence, and runs the project's own
-// canonical verification command as the only pass/fail signal — never the
-// agent's own report. Its HTTP API observes those records and exposes
-// authenticated start/override commands; no scheduler or UI exists yet.
+// Command factoryd is buildgate's daemon and CLI. It takes a request or a
+// ticket, drives a coding agent through a sandboxed build and verify loop on
+// Temporal, records durable evidence, and judges the result by the project's
+// own verify command and gates, never by the agent's report. Merge and deploy
+// stay human.
+//
+// This package wires: flags, the session config, the subcommands (the
+// dispatch table is subcommands, below), the single-ticket run path and the
+// worker. The work is in internal/*, and a new external dependency goes
+// through the deps boundary (deps.go).
 package main
 
 import (
@@ -471,7 +475,7 @@ func printTopLevelHelp(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Common commands:")
 	fmt.Fprintln(out, `  factoryd quickstart <repo-path> "<task>"   one-command onboarding: configure, build, watch (start here)`)
-	fmt.Fprintln(out, "  factoryd [flags]                            build one ticket directly (-h for its full flag reference)")
+	fmt.Fprintln(out, "  factoryd [flags]                            build one ticket directly (`factoryd -ticket x -h` for every flag)")
 	fmt.Fprintln(out, "  factoryd submit / worker                    queue tickets across repos and build them unattended")
 	fmt.Fprintln(out, "  factoryd serve                              console + API, for watching and approving runs")
 	fmt.Fprintln(out, "  factoryd status <run-id>                    inspect one run's state")

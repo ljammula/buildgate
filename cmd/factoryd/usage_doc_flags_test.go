@@ -204,14 +204,20 @@ func TestUSAGEDocFlagsAreAllReal(t *testing.T) {
 	}
 }
 
-// usageDocFlagsIntentionallyUndocumented lists, per subcommand, flags that
-// are deliberately left out of USAGE.md/USAGE_REFERENCE.md (advanced/
-// internal knobs) -- silences TestUSAGEDocFlagsAreAllReal's informational
-// log line for exactly these. Empty for now: nothing has been reviewed and
-// deliberately excluded yet, so every currently-undocumented flag still
-// logs, which is the conservative starting point for a check that never
-// fails the build.
-var usageDocFlagsIntentionallyUndocumented = map[string][]string{}
+// usageDocFlagsIntentionallyUndocumented lists, per subcommand, the flags
+// deliberately left out of USAGE.md/USAGE_REFERENCE.md, which silences
+// TestUSAGEDocFlagsAreAllReal's informational log line for exactly these.
+// They are the flags the worker or serve sets on the runs they start, and
+// the interpreter a test points at a stand-in script. USAGE_REFERENCE.md's
+// flag table is the 25 used most, so many other flags log here as well:
+// `factoryd <command> -h` is where those are documented.
+var usageDocFlagsIntentionallyUndocumented = map[string][]string{
+	"run":       {"run-id", "request-ticket", "pr-base", "full-suite-source", "resume-worktree-of", "build-app-interpreter"},
+	"daemon":    {"build-app-interpreter"},
+	"supervise": {"build-app-interpreter"},
+	"serve":     {"daemon-build-app-interpreter"},
+	"intake":    {"goal-pilot-interpreter"},
+}
 
 func sortedKeys(m map[string]commandFlagSet) []string {
 	keys := make([]string, 0, len(m))

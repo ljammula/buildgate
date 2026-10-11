@@ -1,12 +1,15 @@
-// Package oraclecanary is the pure, unwired half of the runtime canary for an
+// Package oraclecanary is the checking half of the runtime canary for an
 // operator-approved oracle's RUN_COMMAND.txt. A static check cannot prove a
 // command executes the oracle (`echo .oracle && go test ./...` passes
 // request.ValidateOracleRunCommand), so the structural fix is to run the same
 // command against a known-failing snapshot of the oracle and refuse to trust
 // a pass unless that canary run fails.
 //
-// This package only builds snapshots, judges exit codes, and proposes
-// commands; it runs nothing itself and is not wired into any gate.
+// This package builds snapshots, judges exit codes, proposes commands and
+// checks an oracle's files (CheckDir, CheckGoOracle, CheckPythonOracle); it
+// never runs the oracle's own command. The oracle-drafting job
+// (cmd/factoryd), the approval path of internal/request and
+// internal/workflow call it.
 package oraclecanary
 
 import (

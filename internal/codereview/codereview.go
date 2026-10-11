@@ -14,9 +14,6 @@
 // PR M2-B), so ParseResult re-applies the same per-finding validation
 // code_review.py's own parse_code_review_findings already does in
 // Python, rather than trusting the file's shape.
-//
-// Nothing in this package calls into a run path yet -- that wiring is
-// PR M2-B. This package exists on its own, independently testable.
 package codereview
 
 import (

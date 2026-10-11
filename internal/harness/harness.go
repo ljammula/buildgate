@@ -1,7 +1,8 @@
-// Package harness extracts the embedded Python scripts factoryd shells
-// out to (build_app.py, goal_pilot.py, ticket_runner.py) to a cache
-// directory on disk, so a single installed binary needs no
-// buildgate checkout to find them at run time.
+// Package harness extracts the embedded build scripts of agent/pi that
+// factoryd shells out to into a cache directory on disk, so a single
+// installed binary needs no buildgate checkout to find them at run time
+// (Ensure). It also holds the registry of coding-agent harnesses (pi,
+// pifork, codex, copilot): one Descriptor per harness, in registry.go.
 package harness
 
 import (

@@ -61,14 +61,40 @@ security boundary, not a bug.
 
 | Path | What it is |
 |---|---|
-| `cmd/factoryd/` | The daemon's CLI entry points and subcommands |
+| `cmd/factoryd/` | The daemon's CLI entry points and subcommands (the dispatch table is `subcommands`, `cmd/factoryd/main.go`) |
+| `cmd/factoryd-meter/`, `cmd/registry-proxy/`, `cmd/bg-forward/` | The three other binaries, each built into an image: the spend meter the OpenShell supervisor calls, the per-run package-registry proxy, and the forwarder that gives a worker's `localhost` the run's Compose sidecars |
 | `internal/` | Go orchestration: run state machine, policy gates, sandbox launcher, Temporal workflows, evidence, release/kill-switch, request pipeline |
 | `agent/pi/` | Vendored build-loop scripts (Python) that `factoryd` shells out to, for every harness: each job passes its role's `--harness pi\|pifork\|codex\|copilot`, which selects the adapter in `scripts/harness_adapters.py`. Has its own `README.md` and test suite |
 | `console/` | React + TypeScript operator console (Vite; Node 20+ and npm). Its own `README.md` is the module map and conventions |
 | `internal/operatorskill/buildgate/SKILL.md` | The `buildgate` agent skill operators install with `factoryd install-skill`: an allowlist of `factoryd` commands their Copilot/Claude Code/Codex may run. Embedded in the binary, so it must match the CLI of the same commit |
 | `doc/designs/` | Living design docs for shipped subsystems (e.g. the pifork harness) |
+| `scripts/` | What the `Makefile` targets run: the sharded test runner, install steps, and the live checks (`live-smoke.sh`, `live_round.py`, `proving-ground.sh`, `bar.sh`). Their own tests are `scripts/tests/` (the `*-test` make targets). `scripts/validation/` has its own `README.md` |
+| `testdata/fixtures/` | The small target repositories the live checks and integration tests build in. Not this module's source: the `internal/claims` scans of Go code skip every `testdata` directory. `TestNoPrivateNotesReferences` still reads every tracked file |
+| `embed.go`, `docker-compose.temporal.yml`, `docker-compose.openshell.yml`, `openshell-gateway.toml.tmpl` | The stack files at the repository root, embedded in the binary (`embed.go`) so `factoryd` can start Temporal and the OpenShell gateway from an installed binary |
+| `demo/`, `DEMO.md`, `assets/` | The demo page, recording and script README links to, and the brand images |
 | `data/` | **Runtime state, not source.** Queue entries, run records, workspaces, tickets. Mostly gitignored; don't treat files under here as things to "clean up" as code |
 | `dist/` | Build output, gitignored |
+
+### Finding the code
+
+Every package says what it is in its package comment, so the module prints
+its own index:
+
+```sh
+go list -f '{{.ImportPath}}: {{.Doc}}' ./cmd/... ./internal/...   # one line per package
+go doc ./internal/<package>                                       # the whole package comment
+```
+
+| Looking for | Start at |
+|---|---|
+| What a `factoryd` verb does | `subcommands` in `cmd/factoryd/main.go`, then its `<verb>Main` |
+| A request's states and what moves it | `internal/request` (the record), `internal/requestdriver` (one step), `safety-contract.md`'s state graph |
+| A run's steps | `RunWorkflow` in `internal/workflow/workflow.go`, then `activities_<phase>.go` |
+| Why a run quarantined, halted or waits in `resume_review` | `internal/policy` (gates), `internal/triage` (the sentence), `internal/unresolved` (no-verdict causes) |
+| A sandbox launch | `internal/sandbox` (the request), `internal/openshell` (the gateway), `containment-matrix.md` |
+| A session-config or `.factory.yml` key | `internal/sessionconfig`, `internal/projectconfig`, and the key tables in `USAGE_REFERENCE.md` |
+| A console screen or API route | `console/README.md`'s module layout; the route in `internal/api` |
+| A prompt a model job sends | `agent/pi/scripts/*.prompt.md`, and `agent/pi/README.md` |
 
 Dated, closed-out planning/review docs (gap analyses, proving-ground
 run summaries, superseded plans) do not live in this repo. If you're
@@ -182,7 +208,8 @@ Test gotchas that have broken `main` before:
 | A run input (a value a build needs from a flag or the session config) | Its flag in `newRunFlags` and its resolution in the `ticketRun` stage that owns it (`cmd/factoryd/run_ticket.go`); one field on `runOptions` (`run_options.go`), set in `ticketRun.dispatch` and read in `runOptions.workflowInput()` (`run_temporal.go`) into its `RunWorkflowInput` field (`internal/workflow/workflow_types.go`). If the worker must forward it to a request's ticket build, one argument in `BuildTicketRunArgs` (`internal/requestdriver/config.go`). Add the flag to `runInputGoldenFlags` and regenerate the goldens (`FACTORYD_UPDATE_GOLDEN=1 go test ./cmd/factoryd -run WorkflowInputFromFullFlagSet`): a field that does not reach the workflow leaves the golden unchanged, which is the sign it is mis-wired. `TestWorkerEndToEndRequestReachesAcceptedRun` covers the worker's argv |
 | A workflow activity | The method on `Activities` in the `internal/workflow/activities_<phase>.go` file of its phase (prepare, build, verify, review, oracle commit, evidence, rollback, sandbox), its name constant in `workflow.go`, its input and result types in `workflow_types.go`, and its call in `RunWorkflow`. Version-marker rule: a call added to, removed from or reordered in `RunWorkflow` changes workflow history, so it goes behind `GetVersion` with a new change ID (as `requireIsolatedWorkspaceChange` and `keepWorktreeWhenLostChange` do); never reuse or renumber an ID, and add a replay test (`TestHistoryRecordedBeforeTheIsolationGuardReplaysUnchanged` is the pattern). Moving code between files changes nothing |
 | A new external dependency (a process, binary or service the code calls) | One method on the boundary interface it belongs to in `cmd/factoryd/deps.go` (`host`, `forge`, `temporal`, `docker`), its real body as a method of `realHost`/`realForge`/`realTemporal`/`realDocker` beside the code that uses it, and its field and method on the fake in `deps_test.go`, with a default in `newTestDeps` that cannot leave the test process. Called from `internal/hostcontrol` or `internal/requestdriver`: also one method on that package's `Deps` interface and its one-line wrapper on `*deps` (`deps_hostcontrol.go`, `deps_requestdriver.go`). Pass `dp` down; never add a package-level function variable |
-| An operator-visible behaviour | `USAGE.md` (walkthrough) or `USAGE_REFERENCE.md` (flags, keys); `README.md` if it changes what works or a known limit |
+| An operator-visible behaviour | `USAGE.md` (walkthrough) or `USAGE_REFERENCE.md` (what a command does, keys); `README.md` if it changes what works or a known limit |
+| A CLI flag | Its `-h` text, which is the flag's documentation. `USAGE_REFERENCE.md`'s "The flags used most" table holds at most 25 and lists no flag per command: a new flag goes there only by replacing one, and is named in a section only where that section explains what it changes. A flag only the worker, `serve` or a test sets goes in `usageDocFlagsIntentionallyUndocumented` |
 
 ## Module boundaries
 
@@ -216,6 +243,7 @@ Rules for a new boundary:
 |---|---|---|
 | A Go function has at most 25 decision points | `TestFunctionComplexityStaysWithinLimit` | Split the function. One already over the limit is listed in `internal/claims/testdata/complexity_baseline.txt` and may shrink, never grow |
 | No mock framework | `TestNoMockFrameworkIsImported` | Write a fake struct |
+| A package's non-test files hold exactly one package comment, beginning `Package <name>` (a command: `Command <name>` or its name) | `TestEveryPackageHasOnePackageComment` | Say what the package does, in the present tense, in the comment above one file's `package` clause; put a blank line after any other file's header comment |
 | Only listed packages import `os/exec` | `TestOnlyListedPackagesRunProcesses` | Run the process through an interface the caller declares, then add the package to `processRunningPackages` |
 
 One design rule has no single test, and is checked at review:

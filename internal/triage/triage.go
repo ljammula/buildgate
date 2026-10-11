@@ -1,3 +1,8 @@
+// Package triage writes the one factory-authored sentence that says why a
+// run quarantined or halted (Run), and the finding for each failed gate
+// (FailedGates). It reads only what the factory recorded (gate results,
+// attempts and their logs, changed files, halt codes), never the agent's
+// own report.
 package triage
 
 import (

@@ -11,6 +11,7 @@
 // explicitly does not change"). quickstart adds no new config schema, no
 // new safety bypass, and never approves a spec/plan review on the
 // operator's behalf, -non-interactive included.
+
 package main
 
 import (

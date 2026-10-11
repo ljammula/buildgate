@@ -328,7 +328,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 | Fail closed every release for a project | `factoryd kill-switch -project <p> -state engaged -by <who> -reason <why>` |
 | Clean up after a killed run | `factoryd reconcile -workspace <path> -data-dir <dir>` |
 
-Every command and flag: [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
+Every command, and the flags used most: [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
 Watching, costs, budgets and notifications:
 [USAGE.md § Observe and control](USAGE.md#observe-and-control).
 
@@ -367,12 +367,16 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`demo/console-tour.mp4`](demo/console-tour.mp4) | A captioned recording of the operator console (1 min 55 s): board, triage, spec and plan review, editing, a build, and what a stopped request shows |
 | [`STATUS.md`](STATUS.md) | What works, what is opt-in, every known limit |
 | [`USAGE.md`](USAGE.md) | End-to-end walkthrough: `quickstart`, `submit`/`worker`, oracles, how Temporal runs a request and what happens to a lost step |
-| [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | Per-command flags, gotchas, harness/credential configs, session-config keys, repository-owner runs and daemons |
+| [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | What each command does, the 25 flags used most, gotchas, harness/credential configs, session-config keys, repository-owner runs and daemons |
 | [`console/README.md`](console/README.md) | The operator console |
 | [`agent/pi/README.md`](agent/pi/README.md) | The in-sandbox build, drafting and review scripts and their harness adapters |
 | [`doc/designs/architecture-flows.md`](doc/designs/architecture-flows.md) | Component diagram, request lifecycle, the request workflow and a run's Activity sequence |
 | [`doc/designs/openshell-sandbox-runtime.md`](doc/designs/openshell-sandbox-runtime.md) | The sandbox runtime: gateway, supervisor, meter, one launch step by step, the restart guard |
 | [`doc/designs/progress-contract.md`](doc/designs/progress-contract.md) | The run progress feed: file format, stage vocabulary, stall semantics |
+| [`doc/designs/compose-sidecar-worker-wiring.md`](doc/designs/compose-sidecar-worker-wiring.md) | How a target repository's Compose sidecars are launched and reached from the worker |
+| [`doc/designs/pifork-harness.md`](doc/designs/pifork-harness.md) | The opt-in harness for a fork of Pi, and its image contract |
+| [`doc/designs/validation-plan.md`](doc/designs/validation-plan.md) | The reusable end-to-end validation checklist; [`scripts/validation/`](scripts/validation/README.md) is its executable half |
+| [`AGENTS.md`](AGENTS.md) | Instructions for a coding agent (or a person) changing this repository: layout, checks, where a change goes, module boundaries |
 | [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-020) |
 | [`CLAIMS.md`](CLAIMS.md) | Every normative claim mapped to status + enforcing test |
 | [`containment-matrix.md`](containment-matrix.md) | Sandbox/network/filesystem escape boundaries: enforced vs. open |

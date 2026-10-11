@@ -1,5 +1,9 @@
-// Package workflow provides the first Temporal-backed slice of a factory
-// run. It is separate from factoryd's current single-process supervisor.
+// Package workflow holds the Temporal workflows and activities of a build.
+// RunWorkflow is one ticket's run (prepare, build, verify, gates, review,
+// evidence), RequestWorkflow drives one request step by step from its
+// request.json, and RepositoryOwnerWorkflow serializes the runs submitted
+// for one repository. The activities are the methods of Activities, in the
+// activities_*.go files.
 package workflow
 
 import (

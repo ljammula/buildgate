@@ -1,5 +1,6 @@
 // Route selection for a routes:/models:/roles: session config -- see
 // SelectRoute's own doc comment.
+
 package modelrole
 
 import (
