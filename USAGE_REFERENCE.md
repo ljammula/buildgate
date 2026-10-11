@@ -1108,7 +1108,7 @@ roles:
   | The build that takes the place of an automatic corrective build that never finished (`factoryd resume`, `resume -from scratch`, `retry` after a halt) | `escalation.model` at `escalation.thinking`, as configured when it starts |
   | A rebuild after `factoryd retry` of a ticket whose corrective round finished quarantined | As a first build: the retry is the operator's, not an automatic corrective build |
   | A PR-review round (a reviewer's comments) | As a first build |
-  | Planning and review jobs | Their own role, always |
+  | Planning and review jobs | Their own role. With no `roles.review`, a review runs on its build's model, so an escalated build's review runs on `escalation.model` |
 
   `escalation.model` must be listed in `roles.execution.allowed`; a config
   where it is not is refused, saying to add it. Every check of an allowed

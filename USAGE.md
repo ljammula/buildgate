@@ -827,7 +827,8 @@ ticket's automatic corrective builds.
 |---|---|
 | A ticket's first build | `roles.execution.model`, or the request's `-model execution=...` |
 | An automatic corrective build (after a review or another check) | `escalation.model` at `escalation.thinking`, replacing the request's `-model execution=...` for that build |
-| A PR-review round, planning, review | Unchanged |
+| A PR-review round, planning | Unchanged |
+| Review | `roles.review`, unchanged; with no `roles.review`, the model of the build it reviews |
 
 ```yaml
 roles:
