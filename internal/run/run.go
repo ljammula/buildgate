@@ -252,6 +252,12 @@ type Attempt struct {
 	// release_and_evidence.go/status.go) must mark it an estimate, never
 	// present it as exact, when this is true.
 	RelaySpendPartial bool `json:"relay_spend_partial,omitempty"`
+	// RelayCalls counts this attempt's model requests by how each ended
+	// (answered, refused by the provider with which class of status, never
+	// answered, refused by the meter), read from the meter's ledger and
+	// never from the worker's output. Nil for an attempt that called no
+	// model, and for one recorded before the field existed.
+	RelayCalls *meter.Calls `json:"relay_calls,omitempty"`
 	// ReferenceOracleSHA256 mirrors GateResult.ReferenceOracleSHA256 (see
 	// its own doc comment), recorded on the attempt itself too -- found
 	// via review, PR #152 round 2: the gate's own hash computation runs

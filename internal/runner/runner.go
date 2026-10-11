@@ -6,6 +6,7 @@ package runner
 
 import (
 	"bufio"
+	"buildgate/internal/meter"
 	"context"
 	"errors"
 	"fmt"
@@ -122,6 +123,9 @@ type Result struct {
 	// or failed stream). Callers rendering these fields as evidence must say
 	// so rather than presenting them as metered usage.
 	RelaySpendPartial bool
+	// RelayCalls carries internal/sandbox.RouteLaunchFacts.Calls: the
+	// launch's model requests by how each ended, from the meter's ledger.
+	RelayCalls meter.Calls
 }
 
 // Run executes name/args with dir as its working directory, tees combined

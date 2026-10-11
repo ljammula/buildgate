@@ -405,6 +405,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 			RelayConsumedCostMicroUSD: res.RelayConsumedCostMicroUSD,
 			RelayCeilingExceeded:      res.RelayCeilingExceeded,
 			RelaySpendPartial:         res.RelaySpendPartial,
+			RelayCalls:                run.AttemptCalls(res.RelayCalls),
 			// safety-contract.md SC-012: the oracle content hash is
 			// recorded with the attempt that ran against it, the same as
 			// cmd/factoryd's buildAttempt. Empty unless the in-loop

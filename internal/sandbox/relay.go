@@ -450,7 +450,10 @@ type RouteLaunchFacts struct {
 	// client that dropped a stream). Callers must say so in any rendered
 	// evidence (see cmd/factoryd's release_and_evidence.go).
 	SpendPartial bool
-	StartedAt    time.Time
+	// Calls counts the sandbox's model requests by how each ended, from the
+	// meter's ledger.
+	Calls     meter.Calls
+	StartedAt time.Time
 }
 
 // Spec assembles the launchable configuration for one run's relay from this

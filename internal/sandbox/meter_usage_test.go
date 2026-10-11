@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"buildgate/internal/meter"
@@ -57,8 +58,8 @@ func TestSandboxMeterUsageSumsSettledRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := MeterUsage{InputTokens: 400, OutputTokens: 60, CostMicroUSD: 18, ReasoningEffort: "high"}
-	if usage != want {
+	want := MeterUsage{InputTokens: 400, OutputTokens: 60, CostMicroUSD: 18, ReasoningEffort: "high", Calls: meter.Calls{Answered: 2, Legacy: true}}
+	if !reflect.DeepEqual(usage, want) {
 		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}
 	if usage.Tokens() != 460 {
@@ -82,8 +83,8 @@ func TestSandboxMeterUsageChargesAnUnsettledRequestItsEstimate(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 100 + (6000-1500) input, 20 + 1500 output, 7 + 950 cost.
-	want := MeterUsage{InputTokens: 4600, OutputTokens: 1520, CostMicroUSD: 957, Unsettled: 1}
-	if usage != want {
+	want := MeterUsage{InputTokens: 4600, OutputTokens: 1520, CostMicroUSD: 957, Unsettled: 1, Calls: meter.Calls{Answered: 1, Unanswered: 1, Legacy: true}}
+	if !reflect.DeepEqual(usage, want) {
 		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}
 	// A dropped stream is charged in full but is not a ceiling refusal.
@@ -102,7 +103,7 @@ func TestSandboxMeterUsageReportsACeilingRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := MeterUsage{InputTokens: 100, OutputTokens: 20, CostMicroUSD: 7, ReasoningEffort: "other", ReasoningEffortAnomaly: true, CeilingExceeded: true}
+	want := MeterUsage{InputTokens: 100, OutputTokens: 20, CostMicroUSD: 7, ReasoningEffort: "other", ReasoningEffortAnomaly: true, CeilingExceeded: true, Calls: meter.Calls{DeniedCeiling: 1}}
 	if usage != want {
 		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}

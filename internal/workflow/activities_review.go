@@ -270,7 +270,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 			RelayReasoningEffortAnomaly: res.RelayReasoningEffortAnomaly,
 			RelayConsumedInputTokens:    res.RelayConsumedInputTokens, RelayConsumedOutputTokens: res.RelayConsumedOutputTokens,
 			RelayConsumedCostMicroUSD: res.RelayConsumedCostMicroUSD, RelayCeilingExceeded: res.RelayCeilingExceeded,
-			RelaySpendPartial: res.RelaySpendPartial,
+			RelaySpendPartial: res.RelaySpendPartial, RelayCalls: run.AttemptCalls(res.RelayCalls),
 			// Role/Thinking: roles.review's own resolved values, shared by
 			// both steps (input.ReviewThinking). ExpectedEffort:
 			// relaySpec.WorkerModelExtraJSON is this step's own launched

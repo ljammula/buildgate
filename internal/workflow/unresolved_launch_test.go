@@ -2,7 +2,13 @@ package workflow
 
 import (
 	"errors"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"buildgate/internal/meter"
 
 	"buildgate/internal/sandbox"
 	"buildgate/internal/unresolved"
@@ -77,5 +83,56 @@ func TestANamedGateRelaunchesOnlyASandboxThatNeverStarted(t *testing.T) {
 		if *creates != tc.wantCreates {
 			t.Errorf("%s: launches = %d, want %d", tc.name, *creates, tc.wantCreates)
 		}
+	}
+}
+
+// writeLedgerOnCreate makes the fake runtime leave, for each sandbox it
+// creates, the ledger a meter would have written for it.
+func writeLedgerOnCreate(t *testing.T, rt *inspectRuntime, ledgerRoot, dataDir, runID string, records ...meter.LedgerRecord) {
+	t.Helper()
+	name, err := sandbox.MeterRunName(dataDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.onCreate = func(req sandbox.SandboxRequest) {
+		dir := filepath.Join(ledgerRoot, name)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Error(err)
+			return
+		}
+		ledger, err := meter.OpenLedger(filepath.Join(dir, "id-"+req.Name+".jsonl"), log.New(io.Discard, "", 0))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer ledger.Close()
+		for _, rec := range records {
+			ledger.Append(rec)
+		}
+	}
+}
+
+// What the meter recorded about a review's model requests reaches the
+// review's attempt on the run record: a later reader decides from it, so a
+// dropped copy anywhere between the ledger and the attempt must fail here.
+func TestAReviewAttemptRecordsHowItsModelRequestsEnded(t *testing.T) {
+	f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(string) {})
+	writeLedgerOnCreate(t, f.rt, f.acts.MeterLedgerRoot, f.acts.dataDirFor(f.input.RunWorkflowInput), f.acts.runIDFor(f.input.RunWorkflowInput),
+		meter.LedgerRecord{Kind: meter.LedgerKindAdmit, RequestID: "a"},
+		meter.LedgerRecord{Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledReleased, Status: 429, RetryAfterSeconds: 60},
+		meter.LedgerRecord{Kind: meter.LedgerKindAdmit, RequestID: "b"},
+		meter.LedgerRecord{Kind: meter.LedgerKindBudgetExceeded, RequestID: "c"},
+	)
+	res, err := f.run()
+	attempts := res.Attempts
+	if err != nil {
+		attempts = AttemptsFromError(err)
+	}
+	if len(attempts) == 0 || attempts[0].RelayCalls == nil {
+		t.Fatalf("attempts = %+v (err %v), want the review attempt to carry its model requests", attempts, err)
+	}
+	got := *attempts[0].RelayCalls
+	if got.RateLimited != 1 || got.Unanswered != 1 || got.DeniedBudget != 1 || got.Answered != 0 || got.RetryAt == "" || got.Legacy {
+		t.Errorf("RelayCalls = %+v, want one 429 with its retry time, one unanswered, one budget refusal", got)
 	}
 }

@@ -566,7 +566,7 @@ func attemptResult(res sandbox.Result, in sandboxInputs, skills []sandbox.SkillS
 		RelayReasoningEffort:        res.RelayFacts.ReasoningEffort,
 		RelayReasoningEffortAnomaly: res.RelayFacts.ReasoningEffortAnomaly,
 		RelayConsumedInputTokens:    res.RelayFacts.ConsumedInputTokens, RelayConsumedOutputTokens: res.RelayFacts.ConsumedOutputTokens, RelayConsumedCostMicroUSD: res.RelayFacts.ConsumedCostMicroUSD, RelayCeilingExceeded: res.RelayFacts.CeilingExceeded,
-		RelaySpendPartial: res.RelayFacts.SpendPartial,
+		RelaySpendPartial: res.RelayFacts.SpendPartial, RelayCalls: res.RelayFacts.Calls,
 	}
 }
 

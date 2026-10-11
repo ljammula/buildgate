@@ -3,6 +3,9 @@ package meter
 import (
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	pb "buildgate/internal/meter/middlewarepb"
 
@@ -58,6 +61,9 @@ type responseSession struct {
 	requestID string
 	format    string
 	settled   bool
+	// status and retryAfterSeconds are the response head's, for the ledger.
+	status            int
+	retryAfterSeconds int64
 	// sse reads an event stream's usage; body accumulates any other body.
 	sse      SSEUsageParser
 	body     []byte
@@ -91,6 +97,8 @@ func (s *responseSession) preflight(p *pb.HttpResponsePreflight) *pb.HttpRespons
 	if !ok {
 		return skipPreflight("no reservation for this request")
 	}
+	// Before anything can settle: a head arrived, whatever follows.
+	s.status = int(p.GetStatusCode())
 	policy, err := DecodePolicy(p.GetConfig())
 	if err != nil {
 		s.settle(settlement{mode: settleEstimate})
@@ -98,6 +106,7 @@ func (s *responseSession) preflight(p *pb.HttpResponsePreflight) *pb.HttpRespons
 	}
 	s.format = policy.UsageFormat
 	if code := p.GetStatusCode(); code < http.StatusOK || code >= http.StatusMultipleChoices {
+		s.retryAfterSeconds = retryAfterSeconds(p.GetHeaders(), s.registry.cfg.Now())
 		s.settle(settlement{mode: settleRelease})
 		if credentialRejected(policy, code) {
 			return blockPreflight(CodeCredentialRejected, "the upstream rejected the credential")
@@ -217,5 +226,42 @@ func (s *responseSession) observedSettlement() settlement {
 
 func (s *responseSession) settle(outcome settlement) {
 	s.settled = true
+	outcome.status, outcome.retryAfterSeconds = s.status, s.retryAfterSeconds
 	s.entry.settle(s.requestID, outcome)
+}
+
+// maxRetryAfterSeconds bounds what a response may ask the ledger to record:
+// a week. A larger or negative value is not recorded.
+const maxRetryAfterSeconds = 7 * 24 * 60 * 60
+
+// retryAfterSeconds reads a response's Retry-After header: whole seconds, or
+// an HTTP date taken from now. 0 when there is none, it cannot be read, or
+// it is outside (0, maxRetryAfterSeconds].
+func retryAfterSeconds(headers []*pb.HttpHeader, now time.Time) int64 {
+	for _, header := range headers {
+		if !strings.EqualFold(header.GetName(), "retry-after") {
+			continue
+		}
+		if seconds := retryAfterValue(strings.TrimSpace(header.GetValue()), now); seconds > 0 {
+			return seconds
+		}
+	}
+	return 0
+}
+
+// retryAfterValue is one Retry-After value in seconds, 0 when unreadable or
+// out of bounds.
+func retryAfterValue(value string, now time.Time) int64 {
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		at, dateErr := http.ParseTime(value)
+		if dateErr != nil {
+			return 0
+		}
+		seconds = int64(at.Sub(now).Round(time.Second) / time.Second)
+	}
+	if seconds <= 0 || seconds > maxRetryAfterSeconds {
+		return 0
+	}
+	return seconds
 }

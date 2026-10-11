@@ -132,6 +132,7 @@ func RunWorkerThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, w Ru
 	result.RelayFacts.ReasoningEffort = usage.ReasoningEffort
 	result.RelayFacts.ReasoningEffortAnomaly = usage.ReasoningEffortAnomaly
 	result.RelayFacts.SpendPartial = usage.Unsettled > 0
+	result.RelayFacts.Calls = usage.Calls
 	return result, errors.Join(runErr, usage.CeilingErr())
 }
 

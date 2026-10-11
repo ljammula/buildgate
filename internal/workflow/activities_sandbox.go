@@ -629,7 +629,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			RelayReasoningEffort:        res.RelayFacts.ReasoningEffort,
 			RelayReasoningEffortAnomaly: res.RelayFacts.ReasoningEffortAnomaly,
 			RelayConsumedInputTokens:    res.RelayFacts.ConsumedInputTokens, RelayConsumedOutputTokens: res.RelayFacts.ConsumedOutputTokens, RelayConsumedCostMicroUSD: res.RelayFacts.ConsumedCostMicroUSD, RelayCeilingExceeded: res.RelayFacts.CeilingExceeded,
-			RelaySpendPartial: res.RelayFacts.SpendPartial}
+			RelaySpendPartial: res.RelayFacts.SpendPartial, RelayCalls: res.RelayFacts.Calls}
 		// runner.Result documents ExitCode == -1 whenever err != nil. Sidecar
 		// cleanup above can turn runErr non-nil after a genuinely successful
 		// worker exit was already captured; without this the attempt would

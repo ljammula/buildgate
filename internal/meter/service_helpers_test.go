@@ -121,6 +121,8 @@ type httpResponse struct {
 	noFinal bool
 	// sessionEnd sends a session_end event last.
 	sessionEnd bool
+	// retryAfter, when set, is the response's Retry-After header.
+	retryAfter string
 	onSend     func(*pb.HttpResponseEventResult)
 }
 
@@ -142,6 +144,9 @@ func (r httpResponse) events(config *structpb.Struct) []*pb.HttpResponseEvent {
 	var headers []*pb.HttpHeader
 	if r.contentType != "" {
 		headers = append(headers, &pb.HttpHeader{Name: "content-type", Value: r.contentType})
+	}
+	if r.retryAfter != "" {
+		headers = append(headers, &pb.HttpHeader{Name: "Retry-After", Value: r.retryAfter})
 	}
 	events := []*pb.HttpResponseEvent{{Event: &pb.HttpResponseEvent_Preflight{Preflight: &pb.HttpResponsePreflight{
 		Context:            &pb.RequestContext{RequestId: r.requestID, SandboxId: r.sandboxID, Sandbox: r.sandboxName},
