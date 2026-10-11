@@ -842,6 +842,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
 		return acceptTicketRun(dataDir, r, ticket, runRecord, cfg.OpenPullRequest, now)
 	case run.StateQuarantined:
+		if cause := reviewNoVerdictCause(runRecord); cause != "" {
+			return enterResumeReviewAfterNoVerdict(dataDir, r, runRecord, cause, now)
+		}
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
 		}
@@ -884,11 +887,8 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 // reason.
 func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
 	cause := run.UnresolvedCauseOf(runRecord)
-	if runRecord.KeptForResume {
-		return EnterResumeReview(dataDir, r, runRecord.ID, cause, now)
-	}
-	if cause != "" {
-		return EnterResumeReview(dataDir, r, "", cause, now)
+	if runRecord.KeptForResume || cause != "" {
+		return EnterResumeReview(dataDir, r, lostStepOf(runRecord, cause, runRecord.KeptForResume), now)
 	}
 	return HaltRequest(dataDir, r, reason, now)
 }
@@ -1555,7 +1555,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if launched.unresolved != "" {
 			// No verdict on the round's work, so no quarantine: a human
 			// decides what runs next, and the round used none of the budget.
-			return true, EnterResumeReview(dataDir, r, "", launched.unresolved, now)
+			return true, EnterResumeReview(dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt}, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by

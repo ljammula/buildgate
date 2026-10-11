@@ -6,7 +6,6 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
-	"buildgate/internal/unresolved"
 	"buildgate/internal/workflow"
 	"context"
 	"errors"
@@ -17,12 +16,13 @@ import (
 )
 
 // EnterResumeReview moves r, in the state of the step that ended with no
-// verdict on the work (cause says why), to resume_review and saves it. The
+// verdict on the work (step says which run and why), to resume_review and
+// saves it. The
 // first reminder goes out at once, as for every review wait: the operator is
 // needed from this moment.
-func EnterResumeReview(dataDir string, r *request.Request, lostRunID string, cause unresolved.Cause, now time.Time) error {
+func EnterResumeReview(dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
 	from := r.State
-	if err := r.EnterResumeReview(from, lostRunID, cause, now); err != nil {
+	if err := r.EnterResumeReview(from, step, now); err != nil {
 		return err
 	}
 	log.Printf("request %s: %s -> resume_review (%s)", r.ID, from, r.Error)
