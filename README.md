@@ -217,7 +217,7 @@ Inside `building`, one ticket at a time:
 | Topic | Behaviour |
 |---|---|
 | Execution | One path, live-proven: Temporal, for every command (`worker`, the single-ticket run, `live-smoke`), started with Docker when down. A run whose Temporal is unreachable halts |
-| Lost steps | A lost build keeps its worktree for `factoryd resume`; nothing reruns a lost step on its own |
+| Lost steps | A build that was lost, or whose sandbox could not be started, keeps its worktree for `factoryd resume`; nothing reruns such a step on its own, and its round is not counted |
 | Baseline verify | Before a build spends a model call, every ticket's verify command runs on the commit the ticket starts from. Passed: the build runs, unless the command left files outside the ticket's `Allowed-Files:` that the repository does not ignore (every build would be quarantined by `diff_scope`): then the run halts. Failed for a reason that is the ticket's own work (it names every failing test, or the command needs a path the ticket creates): the build runs and is told. Failed any other way: the run halts with the failing test named. [USAGE.md § Baseline verify](USAGE.md#baseline-verify-the-verify-command-runs-before-the-build) |
 | `code_review` | `-code-review-policy off\|advisory\|required`; CLI default `off`, `quickstart` writes `required` for new configs |
 | The PR | Title from the ticket's `## Goal`; branch `factoryd/<slug>-<shorthash>`; opens as a draft, and `factoryd` marks it ready (`gh pr ready`) once checks pass and no reviewer thread blocks it |

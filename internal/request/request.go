@@ -9,6 +9,7 @@
 package request
 
 import (
+	"buildgate/internal/unresolved"
 	"errors"
 	"fmt"
 	"strings"
@@ -237,6 +238,8 @@ const CorrectiveRoundKind = "corrective"
 // review_corrective_rounds counts Kind ConformityRoundKind and
 // CorrectiveRoundKind rounds together, so a request never burns the
 // PR-review budget on a pre-PR round or the other way round.
+//
+// Counted is the one rule for which rounds use up either budget.
 type Round struct {
 	Index int `json:"index"`
 	// Kind is "" (the zero value, so every round recorded before this
@@ -282,6 +285,12 @@ type Round struct {
 	// failure burning the whole round budget before a single real review
 	// attempt ever ran) this exists to prevent.
 	StartFailure bool `json:"start_failure,omitempty"`
+	// Unresolved is why this halted round's run ended with no verdict on
+	// the work (a lost worker, a failed sandbox launch), "" when the run
+	// was judged or never started. Such a round is not counted (Counted),
+	// and its request waits in resume_review: every re-entry is a human
+	// decision.
+	Unresolved unresolved.Cause `json:"unresolved,omitempty"`
 	// Pushed is true only once this round's own commit has actually been
 	// confirmed pushed to the PR branch (cmd/factoryd's
 	// pushAcceptedRoundAndReply, after gitPushExistingBranch succeeds).
@@ -303,6 +312,15 @@ type Round struct {
 	// already falls back to the ticket's own original RunID when no
 	// round satisfies both Outcome and Pushed (see currentPRHeadRunID).
 	Pushed bool `json:"pushed,omitempty"`
+}
+
+// Counted reports whether the round uses up one of its budget's rounds
+// (max_review_rounds for a PR-review round, review_corrective_rounds for the
+// two pre-PR kinds). A round whose run never started, or ended with no
+// verdict on the work, does not: neither says anything about the work, and
+// counting them let an outage spend the whole budget.
+func (rnd Round) Counted() bool {
+	return !rnd.StartFailure && rnd.Unresolved == ""
 }
 
 // factoryActor names the automated (non-operator) side of Transition.By --

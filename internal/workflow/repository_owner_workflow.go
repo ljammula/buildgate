@@ -671,7 +671,7 @@ func RepositoryOwnerWorkflow(ctx temporalworkflow.Context, input RepositoryOwner
 			// A repeated infrastructure failure is a systemic signal, not a
 			// normal verification/build outcome. Keep this state in the owner
 			// Workflow so it survives worker restarts and Continue-As-New.
-			if applicationErrorType(err) == InfrastructureFailureType {
+			if countsTowardStopLine(err) {
 				result.SystemicFailureStreak++
 				if result.SystemicFailureStreak >= stopLineThreshold {
 					result.StopLineTripped = true
@@ -815,4 +815,14 @@ func compactRepositoryOwnerResultKeepingMax(result RepositoryOwnerResult, max in
 		compacted.Runs[id] = result.Runs[id]
 	}
 	return compacted, drop
+}
+
+// countsTowardStopLine reports a run failure that says the machine, not the
+// work, is failing: an infrastructure failure, or a sandbox that could not
+// be started, which is the same signal under its own type. A history
+// recorded before that type existed cannot hold it, so its streak replays
+// unchanged.
+func countsTowardStopLine(err error) bool {
+	t := applicationErrorType(err)
+	return t == InfrastructureFailureType || t == SandboxLaunchFailureType
 }

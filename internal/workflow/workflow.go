@@ -173,6 +173,14 @@ const (
 	// worktree is kept for a resume decision, like a worker lost with its
 	// Activity.
 	SandboxRerunFailureType = "SandboxRerun"
+	// SandboxLaunchFailureType marks a step whose sandbox never started its
+	// command (sandbox.ErrSandboxNotStarted), with the sandbox confirmed
+	// gone: the step gave no verdict on the work, so the attempt
+	// is not retried by Temporal and the worktree is kept for a resume
+	// decision (unresolved.SandboxLaunch). A history recorded before the
+	// type existed holds InfrastructureFailureType for the same failure and
+	// replays with the rollback it recorded.
+	SandboxLaunchFailureType = "SandboxLaunch"
 	// ComposeServicesRejectedFailureType marks a build whose target repo's
 	// compose file was rejected before any attempt ran (see
 	// sandbox.ErrComposeServicesRejected), kept distinct for the same

@@ -863,13 +863,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		}
 		return quarantineRequestWithCheck(dataDir, r, quarantinedTicketReason(idx, r.TicketCount, reason, check, runRecord), check, now)
 	case run.StateHalted:
-		if runRecord.KeptForResume {
-			// The worker was lost (heartbeat stopped while this process stayed
-			// up, e.g. laptop sleep) and the run's worktree was kept: a human
-			// decides, as for any lost step. Halting would let `retry` delete it.
-			return EnterResumeReview(dataDir, r, runRecord.ID, now)
-		}
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
+		return afterHaltedTicketRun(dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
 	default:
 		// Defensive only: whenever a run record exists (nil runErr, or
 		// non-nil runErr with ticket.RunID set -- see above),
@@ -879,6 +873,24 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// expected to actually reach this branch.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
+}
+
+// afterHaltedTicketRun moves r on after its ticket's run halted. A run whose
+// worktree was kept (a lost worker, a sandbox that never started, a resumed
+// run) waits in resume_review: halting would let `retry` delete the
+// worktree. So does a run that gave no verdict on the work and kept nothing
+// (a build continuing on an earlier attempt's branch keeps no worktree),
+// with only a rebuild left to choose. Any other halt halts the request with
+// reason.
+func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
+	cause := run.UnresolvedCauseOf(runRecord)
+	if runRecord.KeptForResume {
+		return EnterResumeReview(dataDir, r, runRecord.ID, cause, now)
+	}
+	if cause != "" {
+		return EnterResumeReview(dataDir, r, "", cause, now)
+	}
+	return HaltRequest(dataDir, r, reason, now)
 }
 
 // startFailedReason is the halt reason of a ticket build that never started.
@@ -1374,11 +1386,12 @@ func reviewCorrectivePlan(dataDir string, r *request.Request, ticket *request.Ti
 // correctiveRoundsUsed counts the corrective rounds a ticket's build has
 // already had, of either kind: one budget (-review-corrective-rounds)
 // covers them all, so a ticket is not given one round per kind of failure.
-// A round whose run never started does not count.
+// A round whose run never started, or gave no verdict, does not count
+// (request.Round.Counted).
 func correctiveRoundsUsed(ticket *request.Ticket) int {
 	used := 0
 	for _, rnd := range ticket.Rounds {
-		if (rnd.Kind == request.ConformityRoundKind || rnd.Kind == request.CorrectiveRoundKind) && !rnd.StartFailure {
+		if (rnd.Kind == request.ConformityRoundKind || rnd.Kind == request.CorrectiveRoundKind) && rnd.Counted() {
 			used++
 		}
 	}
@@ -1391,9 +1404,7 @@ type correctiveLaunch struct {
 	// for a round that never got that far; loadID is the id its outcome
 	// was read from.
 	startedRunID, loadID string
-	outcome              request.RoundOutcome
-	errText              string
-	startFailure         bool
+	roundOutcome
 }
 
 // launchCorrectiveRound runs one corrective round's build and reads its
@@ -1439,14 +1450,14 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 	if loadID == "" {
 		loadID = roundRunID
 	}
-	outcome, errText, startFailure, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
+	ended, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
 	if loadErr != nil {
 		return correctiveLaunch{}, true, fmt.Errorf("request %s: ticket %d: %s: %w", r.ID, ticket.Index, name, loadErr)
 	}
-	if errText != "" {
-		log.Printf("request %s: ticket %d: %s: %s: %s", r.ID, ticket.Index, name, outcome, errText)
+	if ended.errText != "" {
+		log.Printf("request %s: ticket %d: %s: %s: %s", r.ID, ticket.Index, name, ended.outcome, ended.errText)
 	}
-	return correctiveLaunch{startedRunID: startedRunID, loadID: loadID, outcome: outcome, errText: errText, startFailure: startFailure}, false, nil
+	return correctiveLaunch{startedRunID: startedRunID, loadID: loadID, roundOutcome: ended}, false, nil
 }
 
 func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time, plan correctivePlan) (handled bool, err error) {
@@ -1509,6 +1520,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			RunID:        loadID,
 			Outcome:      outcome,
 			StartFailure: startFailure,
+			Unresolved:   launched.unresolved,
 			At:           now.UTC().Format(time.RFC3339Nano),
 			Error:        errText,
 		})
@@ -1522,7 +1534,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if startedRunID != "" {
 			ticket.RunID = startedRunID
 		}
-		if !startFailure {
+		if ticket.Rounds[len(ticket.Rounds)-1].Counted() {
 			countedRounds++
 		}
 		// Persist each round as soon as it is recorded: a crash or stop
@@ -1539,6 +1551,11 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			}
 			log.Printf("request %s: ticket %d/%d: %s %d/%d accepted, PR %s", r.ID, ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, correctiveRun.PullRequestURL)
 			return true, acceptTicketRun(dataDir, r, ticket, correctiveRun, cfg.OpenPullRequest, now)
+		}
+		if launched.unresolved != "" {
+			// No verdict on the round's work, so no quarantine: a human
+			// decides what runs next, and the round used none of the budget.
+			return true, EnterResumeReview(dataDir, r, "", launched.unresolved, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by

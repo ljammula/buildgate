@@ -11,6 +11,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
+	"buildgate/internal/unresolved"
 	"buildgate/internal/workflow"
 )
 
@@ -75,7 +76,7 @@ func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
 			default:
 				return nil
 			}
-			if err := requestdriver.EnterResumeReview(dataDir, r, keptLostRun(dataDir, lost.ID), time.Now()); err != nil {
+			if err := requestdriver.EnterResumeReview(dataDir, r, keptLostRun(dataDir, lost.ID), unresolved.WorkerLost, time.Now()); err != nil {
 				return err
 			}
 			halted = append(halted, r.ID)

@@ -48,7 +48,7 @@
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
 29 internal/request/retry.go retry
-30 internal/requestdriver/request_driver.go AdvanceBuilding
+29 internal/requestdriver/request_driver.go AdvanceBuilding
 26 internal/requestdriver/request_driver.go AdvancePlanning
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
@@ -60,7 +60,7 @@
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 35 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
-93 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
+89 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
 38 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
 43 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
 56 internal/workflow/repository_owner_workflow.go RepositoryOwnerWorkflow

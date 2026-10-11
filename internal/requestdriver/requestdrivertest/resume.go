@@ -1,6 +1,7 @@
 package requestdrivertest
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"os"
 	"os/exec"
@@ -71,7 +72,7 @@ func SeedLostStep(t *testing.T, dataDir, id string, state request.State, lostRun
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnterResumeReview(state, lostRunID, time.Now()); err != nil {
+	if err := r.EnterResumeReview(state, lostRunID, unresolved.WorkerLost, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Save(dataDir); err != nil {
@@ -128,7 +129,7 @@ func LostBuildFixture(dp requestdriver.Deps, t *testing.T, decision string) (dat
 		t.Fatal(err)
 	}
 	r.Tickets[1].RunID = "lost-run"
-	if err := r.EnterResumeReview(request.StateBuilding, "lost-run", time.Now()); err != nil {
+	if err := r.EnterResumeReview(request.StateBuilding, "lost-run", unresolved.WorkerLost, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if decision != "" {

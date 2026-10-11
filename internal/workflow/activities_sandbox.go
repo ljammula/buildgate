@@ -31,6 +31,63 @@ func forBuildLaunch(ctx context.Context) context.Context {
 	return context.WithValue(ctx, buildLaunchKey{}, true)
 }
 
+type relaunchUnstartedOnlyKey struct{}
+
+// relaunchUnstartedOnly marks ctx as a step whose launch is made again only
+// when its sandbox never started the command (sandbox.ErrSandboxNotStarted):
+// the review, full-suite and named-gate steps. Nothing ran, so the second
+// launch spends nothing twice and finds the worktree as the first did. A
+// command that started and then failed is not launched again on these
+// steps: a review would get a second full spend ceiling and a worktree its
+// first reviewer may have touched. The build and canonical verify, whose
+// attempts predate this rule, relaunch after any launch error.
+func relaunchUnstartedOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, relaunchUnstartedOnlyKey{}, true)
+}
+
+// startedAndNotRelaunched reports a launch error that ends the attempt loop
+// of a relaunchUnstartedOnly step: the command had started.
+func startedAndNotRelaunched(ctx context.Context, runErr error) bool {
+	return ctx.Value(relaunchUnstartedOnlyKey{}) != nil && runErr != nil && !errors.Is(runErr, sandbox.ErrSandboxNotStarted)
+}
+
+// endsAttempts reports whether the attempt that returned runErr is the
+// loop's last whatever the count allows: it succeeded, the Activity's
+// context ended, stops says the worktree must not be launched on again, or
+// the step relaunches only a sandbox that never started and this one had.
+func endsAttempts(ctx context.Context, runErr error, stops func(error) bool) bool {
+	return runErr == nil || ctx.Err() != nil || stops(runErr) || startedAndNotRelaunched(ctx, runErr)
+}
+
+// ranACommand is commandRan after one more attempt: true once any attempt's
+// sandbox released its command, whatever happened to it afterwards.
+func ranACommand(commandRan bool, runErr error) bool {
+	return commandRan || !errors.Is(runErr, sandbox.ErrSandboxNotStarted)
+}
+
+// afterACommandRan returns lastErr for the loop's final error. When an
+// earlier attempt of the same step released its command (commandRan) and
+// the last one's sandbox then never started, the step as a whole ran: the
+// error is returned without sandbox.ErrSandboxNotStarted in its chain, so
+// it is an infrastructure failure and not "the step never ran".
+func afterACommandRan(lastErr error, commandRan bool) error {
+	if commandRan && errors.Is(lastErr, sandbox.ErrSandboxNotStarted) {
+		return fmt.Errorf("%v (an earlier attempt's command had started)", lastErr)
+	}
+	return lastErr
+}
+
+// outOfTime is the error of an attempt the Activity's deadline leaves no
+// room for. It carries the earlier attempt's error, so a launch that failed
+// and could not be made again keeps its type.
+func outOfTime(margin time.Duration, lastErr error) error {
+	err := fmt.Errorf("insufficient time remaining for a sandboxed attempt (less than the %s margin left before this Activity's own deadline)", margin)
+	if lastErr != nil {
+		return fmt.Errorf("%w; the attempt before it: %w", err, lastErr)
+	}
+	return err
+}
+
 // withBuildTimeBudget returns env, plus BuildTimeBudgetEnv set to timeout in
 // whole seconds when ctx is a build's.
 func withBuildTimeBudget(ctx context.Context, env []string, timeout time.Duration) []string {
@@ -287,6 +344,8 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	}
 	last := runner.Result{ExitCode: -1}
 	var lastErr error
+	// commandRan: an attempt of this step released its command.
+	var commandRan bool
 	command := append([]string{interpreter}, translated...)
 	// modelHostLock serializes this whole model-bound Activity invocation
 	// (every attempt below) against every other factoryd run -- any
@@ -417,7 +476,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return last, ctxErr
 			}
-			return last, fmt.Errorf("insufficient time remaining for a sandboxed attempt (less than the %s margin left before this Activity's own deadline)", margin)
+			return last, outOfTime(margin, afterACommandRan(lastErr, commandRan))
 		}
 		if registryProxy != nil {
 			// Ensure runs before the worker timeout below is computed, not
@@ -481,7 +540,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return last, ctxErr
 			}
-			return last, fmt.Errorf("insufficient time remaining for a sandboxed attempt (less than the %s margin left before this Activity's own deadline)", margin)
+			return last, outOfTime(margin, afterACommandRan(lastErr, commandRan))
 		}
 		// runIDFor(input), not the Temporal Workflow ID (found via review):
 		// runViaRepositoryOwner's child executes under
@@ -538,7 +597,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// of that attempt's own evidence rather than surfacing one step
 		// later. A non-terminal attempt leaves the registry proxy alone so
 		// the next retry reuses it.
-		terminalAttempt := attempt == maxAttempts || runErr == nil || ctx.Err() != nil || sandbox.LaunchLeftNothingToRetryOn(runErr)
+		terminalAttempt := attempt == maxAttempts || endsAttempts(ctx, runErr, sandbox.LaunchLeftNothingToRetryOn)
 		if compose != nil && terminalAttempt {
 			// Removes compose services' own dedicated network (its
 			// containers are already gone -- TeardownAttempt above tears
@@ -579,6 +638,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			last.ExitCode = -1
 		}
 		lastErr = runErr
+		commandRan = ranACommand(commandRan, runErr)
 		if afterAttempt != nil {
 			if err := afterAttempt(attempt, last, runErr); err != nil {
 				return last, fmt.Errorf("after attempt %d hook: %w", attempt, err)
@@ -589,11 +649,11 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// errors.Is(runErr, sandbox.ErrSandboxRerun): the runtime started the
 		// command twice and the first was killed mid-work; another attempt
 		// over the same worktree would build on a half-finished edit.
-		if runErr == nil || ctx.Err() != nil || sandbox.RetryStops(runErr) {
+		if endsAttempts(ctx, runErr, sandbox.RetryStops) {
 			return last, runErr
 		}
 	}
-	return last, fmt.Errorf("sandbox attempts exhausted: %w", lastErr)
+	return last, fmt.Errorf("sandbox attempts exhausted: %w", afterACommandRan(lastErr, commandRan))
 }
 
 // unlaunchedAttempt records an attempt that never got far enough to start a

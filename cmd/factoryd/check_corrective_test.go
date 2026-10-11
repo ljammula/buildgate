@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"fmt"
 	"os"
@@ -177,7 +178,7 @@ func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := lost.EnterResumeReview(request.StateBuilding, "", time.Now()); err != nil {
+	if err := lost.EnterResumeReview(request.StateBuilding, "", unresolved.WorkerLost, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := lost.ResumeDecide(request.ResumeScratch, "alice", time.Now()); err != nil {

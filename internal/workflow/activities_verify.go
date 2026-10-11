@@ -333,7 +333,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 				command[0], command[1:]...,
 			)
 		}
-		return a.runSandboxWithRetries(ctx, input, logPath, 1, beforeAttempt, afterAttempt,
+		return a.runSandboxWithRetries(relaunchUnstartedOnly(ctx), input, logPath, a.verifyMaxAttemptsFor(input), beforeAttempt, afterAttempt,
 			// nil, for the same reason canonical verification passes
 			// nil: the full-suite gate never calls a model.
 			nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
@@ -579,7 +579,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 				command[0], command[1:]...,
 			)
 		}
-		return a.runSandboxWithRetries(gateCtx, input.RunWorkflowInput, logPath, 1, beforeAttempt, afterAttempt,
+		return a.runSandboxWithRetries(relaunchUnstartedOnly(gateCtx), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt,
 			// nil, for the same reason canonical verification passes
 			// nil: a named gate never calls a model.
 			nil, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, nil, nil, command[0], command[1:]...)

@@ -234,7 +234,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.timeout = flags.Duration("timeout", 0, "supervisor context timeout; defaults to (timeout-minutes+5)m when zero")
 	f.verifyCommand = flags.String("verify-command", "make verify", "canonical verification command, run in workspace")
 	f.fastCheckCommand = flags.String("fast-check-command", "", "cheap check command (format/lint/compile), run in workspace before -verify-command each round; empty skips this tier")
-	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "total canonical-verification attempts allowed for infrastructure failures")
+	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "total canonical-verification attempts allowed for infrastructure failures, and total launches of a review, full-suite or gate step whose sandbox never started")
 	f.fullSuiteCommand = flags.String("full-suite-command", "", "optional repo-wide full-test-suite command, run in workspace against the same final state -verify-command already ran against. Empty (with no .factory.yml full_suite_command either) is no longer \"unconfigured\" -- the resolved -verify-command is substituted instead and recorded as such; pass the literal value \"none\" to opt out and keep the prior behavior")
 	f.fullSuiteSource = flags.String("full-suite-source", "", "internal: set by worker/the request driver when -full-suite-command above was already resolved upstream (\"verify_command\" for a substitution, \"none\" for an explicit opt-out) so this run's own evidence/release-decision text can say so; not meant to be set by hand")
 	f.fullSuiteCadence = flags.Int("full-suite-cadence", 0, "run -full-suite-command on every Nth valid prior-run chain slice; 0 or 1 preserves running it whenever declared")

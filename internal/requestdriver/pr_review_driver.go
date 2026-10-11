@@ -1,6 +1,7 @@
 package requestdriver
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -960,7 +961,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		// (TryReviewCorrectiveRound, request_driver.go) -- excluded
 		// here so a ticket's PR-review budget is never burned by a round
 		// that ran before any PR even existed.
-		if rnd.Kind == "" && !rnd.StartFailure {
+		if rnd.Kind == "" && rnd.Counted() {
 			countedRounds++
 		}
 	}
@@ -1084,10 +1085,19 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		PriorRunIDs:  priorRunIDs,
 		Outcome:      outcome,
 		StartFailure: attempt.startFailure,
+		Unresolved:   attempt.unresolved,
 		At:           now.UTC().Format(time.RFC3339Nano),
 		Error:        errText,
 	})
 
+	if attempt.unresolved != "" {
+		// No verdict on the round's work: it used no round, and unlike a
+		// start failure the next poll must not start another on its own
+		// (an outage would repeat without end). A human decides; the
+		// reviewer is told nothing, since nothing was judged.
+		log.Printf("request %s: ticket %d: round %d gave no verdict (%s): %s", r.ID, ticket.Index, roundIndex, attempt.unresolved, errText)
+		return EnterResumeReview(dataDir, r, "", attempt.unresolved, now)
+	}
 	if outcome != request.RoundAccepted {
 		// Quarantined or halted: never push, request stays in pr_review,
 		// one notification dispatched -- see this file's own doc comment.
@@ -1114,10 +1124,21 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 // roundAttempt is how one build of a PR-review round ended: the run that
 // holds its record, and correctiveRoundOutcome's reading of it.
 type roundAttempt struct {
-	runID        string
-	outcome      request.RoundOutcome
-	errText      string
+	runID string
+	roundOutcome
+}
+
+// roundOutcome is how a corrective round's run ended, read from its record
+// (correctiveRoundOutcome).
+type roundOutcome struct {
+	outcome request.RoundOutcome
+	// errText is why a round that was not accepted failed, "" when its gate
+	// results already say.
+	errText string
+	// startFailure: the run never started (no record, or no attempt).
 	startFailure bool
+	// unresolved: the run halted with no verdict on the work.
+	unresolved unresolved.Cause
 }
 
 // runRoundAttempt runs one build of a PR-review round on the pull request's
@@ -1187,11 +1208,11 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if loadID == "" {
 		loadID = ticketID
 	}
-	outcome, errText, startFailure, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
+	ended, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
 	if loadErr != nil {
 		return roundAttempt{}, loadErr
 	}
-	return roundAttempt{runID: loadID, outcome: outcome, errText: errText, startFailure: startFailure}, nil
+	return roundAttempt{runID: loadID, roundOutcome: ended}, nil
 }
 
 // roundFixFindings decides whether a PR-review round gets another fix
@@ -1246,31 +1267,29 @@ func roundFixFindings(ctx context.Context, dataDir string, r *request.Request, c
 // accepted or quarantined run can only reach that state after actually
 // attempting work, so it is never a start failure. See RunCorrectiveRound's
 // own doc comment for why this distinction exists (a start failure must
-// not consume a max_review_rounds slot).
-func correctiveRoundOutcome(dataDir, runID string, runErr error) (outcome request.RoundOutcome, errText string, startFailure bool, err error) {
+// not consume a max_review_rounds slot). unresolved is the halted run's
+// recorded cause when it ended with no verdict on the work
+// (run.UnresolvedCauseOf): such a round is not counted either, and its
+// request waits in resume_review.
+func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, error) {
 	loaded, loadErr := run.Load(dataDir, runID)
 	if loadErr != nil {
 		if runErr != nil {
-			return request.RoundHalted, runErr.Error(), true, nil
+			return roundOutcome{outcome: request.RoundHalted, errText: runErr.Error(), startFailure: true}, nil
 		}
-		return "", "", false, fmt.Errorf("load round run %q: %w", runID, loadErr)
+		return roundOutcome{}, fmt.Errorf("load round run %q: %w", runID, loadErr)
 	}
-	switch loaded.State {
-	case run.StateAccepted:
-		return request.RoundAccepted, "", false, nil
-	case run.StateQuarantined:
-		errText = loaded.HaltError
-		if errText == "" && runErr != nil {
-			errText = runErr.Error()
-		}
-		return request.RoundQuarantined, errText, false, nil
-	default:
-		errText = loaded.HaltError
-		if errText == "" && runErr != nil {
-			errText = runErr.Error()
-		}
-		return request.RoundHalted, errText, len(loaded.Attempts) == 0, nil
+	if loaded.State == run.StateAccepted {
+		return roundOutcome{outcome: request.RoundAccepted}, nil
 	}
+	errText := loaded.HaltError
+	if errText == "" && runErr != nil {
+		errText = runErr.Error()
+	}
+	if loaded.State == run.StateQuarantined {
+		return roundOutcome{outcome: request.RoundQuarantined, errText: errText}, nil
+	}
+	return roundOutcome{outcome: request.RoundHalted, errText: errText, startFailure: len(loaded.Attempts) == 0, unresolved: run.UnresolvedCauseOf(loaded)}, nil
 }
 
 // pushAcceptedRoundAndReply pushes an accepted corrective round's branch
@@ -1423,7 +1442,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 func priorRoundGateFindings(dataDir string, r *request.Request, ticket *request.Ticket) ([]run.ReviewVerdict, []run.CodeReviewFinding) {
 	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
 		rnd := ticket.Rounds[i]
-		if rnd.Kind != "" || rnd.StartFailure {
+		if rnd.Kind != "" || !rnd.Counted() {
 			continue
 		}
 		if rnd.Outcome != request.RoundQuarantined {

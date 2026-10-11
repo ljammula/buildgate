@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/unresolved"
 	"os"
 	"strings"
 	"testing"
@@ -134,7 +135,7 @@ func TestResumeRoundWithNoKeptBuildIsRefusedNamingScratch(t *testing.T) {
 	pre := &requestdrivertest.FakeResumePreconditions{T: t, OK: true}
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	r, _ := request.Load(dataDir, id)
-	if err := r.EnterResumeReview(request.StateBuilding, "", time.Now()); err != nil {
+	if err := r.EnterResumeReview(request.StateBuilding, "", unresolved.WorkerLost, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Save(dataDir); err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"strings"
 	"testing"
@@ -103,7 +104,7 @@ func TestHaltLostRequestStepEntersResumeReviewOnlyInTheLostState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := request.ResumePrompt("req-lost", request.StatePlanning); lost.State != request.StateResumeReview || lost.Error != want {
+	if want := request.ResumePrompt("req-lost", request.StatePlanning, unresolved.WorkerLost, false); lost.State != request.StateResumeReview || lost.Error != want {
 		t.Fatalf("lost request = %s %q, want resume_review %q", lost.State, lost.Error, want)
 	}
 	if lost.Resume == nil || lost.Resume.FromState != request.StatePlanning || lost.Resume.Generation != 1 || lost.Resume.LostRunID != "" {

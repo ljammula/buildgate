@@ -290,3 +290,55 @@ func TestAProgressLineFromTheSandboxIsRecordedAsTheWorkersNeverTheFactorys(t *te
 		t.Error("a line from the sandbox ended the run's progress feed")
 	}
 }
+
+// Whether the command was ever released is the one fact that tells a launch
+// that said nothing about the work from a command that ran and failed.
+func TestRunThroughRuntimeSaysWhetherTheCommandEverStarted(t *testing.T) {
+	spec := runtimeSpec(t)
+	_, _, err := RunThroughRuntime(context.Background(), &workerRuntime{createErr: errors.New("image pull failed")}, spec, fastLaunch())
+	if !errors.Is(err, ErrSandboxNotStarted) {
+		t.Errorf("a sandbox that could not be created: err = %v, want ErrSandboxNotStarted", err)
+	}
+
+	// The same launch whose delete cannot be confirmed is both, and the
+	// caller must still see the unconfirmed teardown.
+	spec = runtimeSpec(t)
+	_, _, err = RunThroughRuntime(context.Background(), &workerRuntime{createErr: errors.New("gateway unreachable"), deleteErr: ErrCleanupUnconfirmed}, spec, fastLaunch())
+	if !errors.Is(err, ErrCleanupUnconfirmed) {
+		t.Errorf("an unconfirmed delete after a failed create: err = %v, want ErrCleanupUnconfirmed", err)
+	}
+
+	// A sandbox the runtime created with no worker container never ran it.
+	spec = runtimeSpec(t)
+	_, _, err = RunThroughRuntime(context.Background(), &workerRuntime{}, spec, fastLaunch())
+	if !errors.Is(err, ErrSandboxNotStarted) {
+		t.Errorf("a sandbox with no worker container: err = %v, want ErrSandboxNotStarted", err)
+	}
+
+	// A command that hangs until the sandbox's own timeout ran.
+	spec = runtimeSpec(t)
+	spec.Timeout = 300 * time.Millisecond
+	_, _, err = RunThroughRuntime(context.Background(), &workerRuntime{hang: true, startedAt: "t"}, spec, fastLaunch())
+	if err == nil || errors.Is(err, ErrSandboxNotStarted) {
+		t.Errorf("a command that started and timed out: err = %v, want an error that is not ErrSandboxNotStarted", err)
+	}
+
+	// So did one that exited non-zero: a result, and no error at all.
+	spec = runtimeSpec(t)
+	result, _, err := RunThroughRuntime(context.Background(), &workerRuntime{lines: []string{"FAIL"}, exitCode: 1, startedAt: "t"}, spec, fastLaunch())
+	if err != nil || result.ExitCode != 1 {
+		t.Errorf("a command that exited 1: exit %d, err %v", result.ExitCode, err)
+	}
+}
+
+// A caller that gave up while the sandbox was starting (a stopping worker)
+// is not a sandbox that would not start.
+func TestRunThroughRuntimeACancelledStartIsNotANotStartedSandbox(t *testing.T) {
+	spec := runtimeSpec(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := RunThroughRuntime(ctx, &workerRuntime{createErr: context.Canceled}, spec, fastLaunch())
+	if err == nil || errors.Is(err, ErrSandboxNotStarted) {
+		t.Errorf("err = %v, want the cancellation and not ErrSandboxNotStarted", err)
+	}
+}

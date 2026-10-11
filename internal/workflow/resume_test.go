@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"errors"
 	"os"
@@ -443,5 +444,47 @@ func TestRunBuildActivityWithoutResumeFromIgnoresRoundState(t *testing.T) {
 	args := runBuildArgs(t, repo, fixtureInput())
 	if _, ok := argValue(args, "--resume-from-state"); ok {
 		t.Errorf("an ordinary run passed --resume-from-state: %v", args)
+	}
+}
+
+func TestRunWorkflowKeepsTheWorktreeOfAStepWhoseSandboxFailedToLaunch(t *testing.T) {
+	env, rollbacks, _ := isolatedLostBuildEnv(t, temporal.NewApplicationError("build subprocess infrastructure failure", SandboxLaunchFailureType), true)
+	pinNoActivityRetries(env)
+	env.ExecuteWorkflow(RunWorkflow, isolatedFixtureInput())
+	err := env.GetWorkflowError()
+	if err == nil {
+		t.Fatal("workflow succeeded after a launch failure")
+	}
+	if got := UnresolvedCauseFromError(err); got != unresolved.SandboxLaunch {
+		t.Fatalf("cause on the workflow's error = %q, want %q", got, unresolved.SandboxLaunch)
+	}
+	if *rollbacks != 0 {
+		t.Errorf("rollback ran %d time(s): a launch failure is no verdict on the work, the worktree is kept for a resume decision", *rollbacks)
+	}
+	if wp, br := IsolatedWorkspaceFromError(err); wp == "" || br == "" {
+		t.Errorf("IsolatedWorkspaceFromError = (%q, %q); the caller needs the kept worktree on the error", wp, br)
+	}
+}
+
+// A history recorded before SandboxLaunchFailureType existed holds
+// InfrastructureFailureType for the same launch failure, and its rollback.
+// On replay the failure type comes from the history, never recomputed, so
+// what must hold is that this code still rolls back on that type: this runs
+// the workflow against an Activity failing with the recorded type (the test
+// environment has no recorded-history replayer).
+func TestAnInfrastructureTypedLaunchFailureStillRollsBack(t *testing.T) {
+	recorded := temporal.NewApplicationError("build subprocess infrastructure failure: sandbox attempts exhausted: create sandbox: gateway unreachable", InfrastructureFailureType)
+	env, rollbacks, _ := isolatedLostBuildEnv(t, recorded, true)
+	pinNoActivityRetries(env)
+	env.ExecuteWorkflow(RunWorkflow, isolatedFixtureInput())
+	err := env.GetWorkflowError()
+	if err == nil {
+		t.Fatal("workflow succeeded after a failed build")
+	}
+	if StepLostFromError(err) || HaltReasonCodeFromError(err) != "" {
+		t.Errorf("an infrastructure failure read as unresolved (code %q)", HaltReasonCodeFromError(err))
+	}
+	if *rollbacks != 1 {
+		t.Errorf("rollback ran %d time(s), want the 1 the history recorded", *rollbacks)
 	}
 }

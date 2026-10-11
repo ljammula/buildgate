@@ -19,6 +19,14 @@ import (
 // nothing ran.
 var ErrSandboxRerun = errors.New("the sandbox runtime started the worker command again; the step is lost")
 
+// ErrSandboxNotStarted reports a launch that ended before the worker's
+// command was released: the route credential could not be stored, the
+// sandbox could not be created, or it showed no worker container. Nothing
+// ran, so the worktree is as it was and the step said nothing about the
+// work. An error after the release (a timeout, an output over the limit, a
+// lost wait) never wraps it: the command ran.
+var ErrSandboxNotStarted = errors.New("the sandbox did not start the worker command")
+
 // commandStartWait bounds how long a released command may take to pass the
 // guard and create its output file.
 const commandStartWait = 2 * time.Minute
@@ -102,7 +110,12 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	defer cancel()
 	ref, started, err := startSandbox(runCtx, rt, s, l, req)
 	if err != nil {
-		return result, ref, err
+		if ctx.Err() != nil {
+			// The caller gave up (a stopping worker, a cancelled step):
+			// that is its own outcome, not a sandbox that would not start.
+			return result, ref, err
+		}
+		return result, ref, fmt.Errorf("%w: %w", ErrSandboxNotStarted, err)
 	}
 
 	exit, err := superviseCommand(runCtx, rt, s, launch, l.PollEvery, io.MultiWriter(os.Stdout, logFile))

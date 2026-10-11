@@ -465,6 +465,36 @@ requires a new contract review and an updated machine-checkable test.
   (the whole ledger when that start is unknown; an unreadable ledger
   refuses). A retried build keeps the earlier attempt's worktree but never
   its harness session. Post-build and collect-evidence are never retried.
+  The same holds for any step that ended with no verdict on the work, a
+  closed set of causes each read from a fact the factory observed and never
+  from a worker's or a provider's wording: `worker_lost` (the cases above,
+  and a build whose command the sandbox runtime started twice) and
+  `sandbox_launch` (no launch of the step released its command: the route
+  credential could not be stored, the sandbox could not be created, or it
+  had no worker container; and the sandbox's removal was confirmed). A
+  command that was released and then timed out, printed past the output
+  limit or lost its wait ran, and is not one, also when a later launch of
+  the same step never started; nor is a launch the Activity itself gave up
+  on, or one whose removal could not be confirmed, which keeps nothing. A
+  verify, gate or review command started twice is an infrastructure
+  failure: one sign of it is an exit code the repository's own command
+  could return. A drafting or planning job whose sandbox does not start
+  halts its request; only a run's steps are covered here. The run halts with the cause
+  as its `HaltReasonCode`, a ticket run keeps its worktree (one built on an existing branch
+  keeps none and can only be rebuilt), and the request waits in
+  `resume_review` with the cause; a corrective or PR-review round
+  that ended so is recorded with the cause, and the next round is not
+  started on its own. A sandbox that never started its command is launched
+  again inside the same Activity, up to `-verify-max-attempts` launches in
+  all, for the review, full-suite and named-gate steps: nothing ran, so
+  nothing is spent twice. On those steps a command that started is never
+  launched again. The build (`-build-app-max-attempts`) and canonical
+  verify (`-verify-max-attempts`) launch again after any launch error
+  except an unconfirmed removal, a command started twice or a reached
+  ceiling. Temporal's `MaximumAttempts: 1` stands. A launch failure counts
+  toward a repository's stop line as an infrastructure failure does. An
+  unresolved step accepts nothing: every gate still runs on what a resume
+  produces.
 - **SC-018 — only a build is told about an earlier attempt, and only from
   the factory's record:** a ticket run saved quarantined or halted leaves a
   handoff (`handoff.json` in its run directory, its SHA-256 on the run
@@ -612,7 +642,12 @@ requires a new contract review and an updated machine-checkable test.
   quarantine was recorded and notified (SC-013): every gate runs again on
   its result, it counts against `review_corrective_rounds` (one budget per
   ticket build, shared with the review round) and the launch budget, and
-  it changes nothing about who merges (SC-001).
+  it changes nothing about who merges (SC-001). A round whose run never
+  started, or halted with no verdict on the work (SC-017's causes), counts
+  against neither `review_corrective_rounds` nor `max_review_rounds`: it
+  says nothing about the work. After the second kind no further round
+  starts until a human decides in `resume_review`, and each launch still
+  counts against the launch budget.
 - **SC-019 — a review reads the base commit's instructions:** every model review of a run launches with the repository's instruction files (AGENTS.md-style files, harness folders, project skills, MCP and hook configuration, at any depth of the repository) as the commit the request started from holds them (for a single-ticket run, the run's own base), mounted read-only over the worktree; what the build changed in them reaches the reviewer only as quoted data; an instruction-named path the worktree holds beyond the result commit is removed before the review; a tracked instruction file that no longer matches the result commit, a link from an instruction path to a directory that is not one, a checkout-converted instruction file, or any other shape the mask cannot carry halts the run before the review launches, and a build is never told why. Each review attempt records the snapshot's SHA-256, the masked paths and the removed paths.
 - **SC-020 — memory reaches another ticket only approved or merged, and only inside the fence:** a line derived from one ticket's runs (a build agent's note that passed the fixed text rule, rendered by the host as one list line) reaches a model working on another ticket in two ways only: inside the spec and ticket of a memory request, which stops at spec review until the operator approves it, or as the fenced section of root `AGENTS.md` at the commit that work starts from. A run of a memory request is released only when its result commit holds exactly one root path whose name folds to `AGENTS.md`, spelled `AGENTS.md`, a regular file of mode 100644 that is byte-for-byte the text the factory rendered when the change was proposed, and the run changed no other file; and only when root `AGENTS.md` at the run's diff base is the file the proposal was rendered from (its SHA-256 is the proposal's `base_blob_sha256`, or neither has a file), so a change a person made to the file after the proposal is never overwritten: the release is refused with `AGENTS.md changed after the memory change was proposed; propose it again`, and the worker halts such a request with the same sentence before its build when the checkout's HEAD already differs. Once a repository's root `AGENTS.md` holds a memory section (at the run's diff base, a root file of that name in any letter case holds the text `buildgate:memory`), a run that is not a memory request's may not change that file in any way (its text outside the markers, its mode, its type, a move or a delete) nor add a case variant of its name; before a section exists, such a run may change or create the file but may not leave the marker text in it (written plainly or as HTML character references), a second spelling of its name, or a symlink, submodule or directory in its place. The host reads this from git objects, never the worktree, records it on the run, and refuses the release on any read failure; the operator's override computes it on the host before its decision, and the HTTP override refuses a run that lacks it. With pull requests on, a ticket whose release decision is not allowed halts its request before a later ticket is built on its commit; with pull requests off nothing is pushed or opened, the tickets are built in order and each run's decision is on its record. A memory request changes at most five lines, and when the section is full the proposal is refused: the factory never chooses a line to drop. Candidates are shown only to the operator (`factoryd memory list` and `show`, the project's memory route); nothing collects, proposes or drops one without a person running the command, the factory never runs a command a line names, and a reviewer's comment on a memory request's pull request is answered and starts no build. The section is read only when every line of it is free of control and format characters, and a file with no section is given one only when it does not end inside a code fence: whatever the factory accepts, the file it renders reads back. Memory is off for a repository until the operator lists it under `memory.repositories`, and the project's kill switch or `factoryd memory off` stops every memory action that changes anything. Of the three switches, two stop a memory request already in flight: its run is not released while the kill switch is engaged (as for any run) or while the store holds the off marker `factoryd memory off` wrote (`repository memory is switched off (factoryd memory off)`). Removing a repository from `memory.repositories` stops new proposals and every other changing subcommand, and does not stop the release of a request already in flight.
 
@@ -750,11 +785,13 @@ immutable.
 
 ### Request lifecycle: a lost step waits for a human
 
-A request step (a drafting or planning step, a ticket build, a PR-review
-corrective round) whose worker stopped is never rerun on its own (SC-017).
+A request step (a drafting or planning step, a ticket build, a corrective
+or PR-review round) whose worker stopped, or a ticket build or round that
+ended with no verdict on the work for another of SC-017's causes, is never
+rerun on its own.
 `internal/request.EnterResumeReview` moves the request into `resume_review`,
-a human wait with reminders, recording the lost state, the lost run and a
-`Generation`:
+a human wait with reminders, recording the lost state, the lost run, the
+cause and a `Generation`:
 
 - `spec_drafting -> resume_review`
 - `oracle_drafting -> resume_review`

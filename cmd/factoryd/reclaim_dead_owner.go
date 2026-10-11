@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"errors"
 	"fmt"
@@ -243,6 +244,7 @@ func haltDeadOwnerRun(dataDir, runID string) (bool, error) {
 		fresh.State = run.StateHalted
 		fresh.HaltConfirmed = true
 		fresh.Triage = deadOwnerTriage
+		fresh.HaltReasonCode = string(unresolved.WorkerLost)
 		markKeptForResume(dataDir, fresh)
 		if saveErr := save(fresh, dataDir, errors.New(deadOwnerHaltError)); saveErr != nil {
 			return saveErr

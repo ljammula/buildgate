@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"buildgate/internal/unresolved"
 	"errors"
 	"fmt"
 
@@ -35,15 +36,37 @@ func heartbeatLost(err error) bool {
 
 // stepLost reports whether err means a step ended without a verdict on its
 // work, so the worktree is kept for a resume decision: the Activity's worker
-// went away (heartbeatLost), or the sandbox runtime started the build's
-// command a second time and killed the first. A history recorded before the
-// second case existed cannot hold its failure type, so it replays unchanged.
+// went away (heartbeatLost), the sandbox runtime started the build's
+// command a second time and killed the first, or a sandbox launch failed
+// with no exit code (unresolvedFailureTypes). A history recorded before one
+// of those failure types existed cannot hold it, so it replays unchanged.
 func stepLost(err error) bool {
+	return UnresolvedCauseFromError(err) != ""
+}
+
+// unresolvedFailureTypes maps each ApplicationError type that means "the
+// step ended with no verdict on its work" to its cause. InfrastructureFailureType
+// is deliberately not one: histories recorded with keepWorktreeWhenLostChange
+// hold it for halts that rolled back.
+var unresolvedFailureTypes = map[string]unresolved.Cause{
+	SandboxRerunFailureType:  unresolved.WorkerLost,
+	SandboxLaunchFailureType: unresolved.SandboxLaunch,
+}
+
+// UnresolvedCauseFromError is the cause of a RunWorkflow or Activity failure
+// that is no verdict on the work, "" for any other failure. It reads only
+// the Temporal timeout type and the ApplicationError type, so it survives
+// the Temporal boundary. cmd/factoryd records it on the halted run and keeps
+// the run's worktree.
+func UnresolvedCauseFromError(err error) unresolved.Cause {
 	if heartbeatLost(err) {
-		return true
+		return unresolved.WorkerLost
 	}
 	var appErr *temporal.ApplicationError
-	return errors.As(err, &appErr) && appErr.Type() == SandboxRerunFailureType
+	if errors.As(err, &appErr) {
+		return unresolvedFailureTypes[appErr.Type()]
+	}
+	return ""
 }
 
 // StepLostFromError is stepLost for a RunWorkflow failure that crossed the
@@ -105,6 +128,7 @@ var nonRetryableActivityFailureTypes = []string{
 	IsolationFailureType,
 	RelayCeilingExceededFailureType,
 	SandboxRerunFailureType,
+	SandboxLaunchFailureType,
 	ComposeServicesRejectedFailureType,
 	ReviewInstructionsFailureType,
 	FactoryDirFailureType,

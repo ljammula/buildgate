@@ -2,10 +2,12 @@ package workflow
 
 import (
 	"buildgate/internal/harness"
+	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sandbox/sandboxtest"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -307,5 +309,99 @@ func TestRunSandboxWithRetriesDoesNotRetryACommandTheRuntimeStartedTwice(t *test
 	}
 	if n := len(rt.Requests()); n != 1 {
 		t.Errorf("launches = %d, want 1: the step is lost, not retried", n)
+	}
+}
+
+// A sandbox that could not be created never ran the command. Each attempt
+// the caller allows is made, and what comes back is typed as a launch
+// failure, not as a result. The fake's delete is confirmed: with the gateway
+// itself unreachable the delete cannot be, and that is an unconfirmed
+// teardown instead.
+func TestRunSandboxWithRetriesTypesAFailedCreateAsALaunchFailure(t *testing.T) {
+	rt := &sandboxtest.WorkerRuntime{CreateErr: errors.New("image pull failed")}
+	activities, input, logPath := runtimeActivities(t, rt)
+	var exitCodes []int
+	after := func(_ int, res runner.Result, _ error) error {
+		exitCodes = append(exitCodes, res.ExitCode)
+		return nil
+	}
+	_, err := activities.runSandboxWithRetries(relaunchUnstartedOnly(context.Background()), input, logPath, 2, nil, after, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	if !errors.Is(err, sandbox.ErrSandboxNotStarted) {
+		t.Fatalf("err = %v, want it to wrap ErrSandboxNotStarted", err)
+	}
+	if got := launchErrorType(err); got != SandboxLaunchFailureType {
+		t.Errorf("launchErrorType = %q, want %q (err: %v)", got, SandboxLaunchFailureType, err)
+	}
+	if !slices.Equal(exitCodes, []int{-1, -1}) {
+		t.Errorf("recorded exit codes = %v, want -1 for each of the 2 attempts", exitCodes)
+	}
+}
+
+func TestRunSandboxWithRetriesAFailedCreateWhoseDeleteIsUnconfirmedIsNotALaunchFailure(t *testing.T) {
+	rt := &sandboxtest.WorkerRuntime{CreateErr: errors.New("gateway unreachable"), DeleteErr: fmt.Errorf("gateway unreachable: %w", sandbox.ErrCleanupUnconfirmed)}
+	activities, input, logPath := runtimeActivities(t, rt)
+	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	if got := launchErrorType(err); got != CleanupUnconfirmedFailureType {
+		t.Errorf("launchErrorType = %q, want %q: the sandbox may still exist, so nothing is kept for a resume", got, CleanupUnconfirmedFailureType)
+	}
+	if n := len(rt.Requests()); n > 1 {
+		t.Errorf("launches = %d, want no second launch after an unconfirmed teardown", n)
+	}
+}
+
+// A command that started and then hung ran: the sandbox's own timeout is an
+// infrastructure failure, never a launch failure, and a review, full-suite
+// or gate step does not launch it again (a review would get a second spend
+// ceiling). The build and canonical verify keep their relaunch.
+func TestRunSandboxWithRetriesACommandThatStartedIsNeverALaunchFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mark         func(context.Context) context.Context
+		wantLaunches int
+	}{
+		{"a review, full-suite or gate step", relaunchUnstartedOnly, 1},
+		{"the build and canonical verify", func(ctx context.Context) context.Context { return ctx }, 2},
+	} {
+		rt := &sandboxtest.WorkerRuntime{Lines: []string{"x"}, WaitErr: errors.New("wait: connection reset")}
+		activities, input, logPath := runtimeActivities(t, rt)
+		_, err := activities.runSandboxWithRetries(tc.mark(context.Background()), input, logPath, 2, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+		if err == nil || errors.Is(err, sandbox.ErrSandboxNotStarted) || launchErrorType(err) != InfrastructureFailureType {
+			t.Errorf("%s: err = %v (type %q), want an infrastructure failure that is not a launch failure", tc.name, err, launchErrorType(err))
+		}
+		if n := len(rt.Requests()); n != tc.wantLaunches {
+			t.Errorf("%s: launches = %d, want %d", tc.name, n, tc.wantLaunches)
+		}
+	}
+}
+
+// A command that ran and exited non-zero is a result: the sandbox's exit
+// code reaches the caller with no error, and is never a launch failure.
+func TestRunSandboxWithRetriesANonZeroExitIsAResultNotALaunchFailure(t *testing.T) {
+	rt := &sandboxtest.WorkerRuntime{Lines: []string{"FAIL"}, ExitCode: 1}
+	activities, input, logPath := runtimeActivities(t, rt)
+	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "false")
+	if err != nil || res.ExitCode != 1 {
+		t.Fatalf("exit code %d, err %v; want exit 1 and no error", res.ExitCode, err)
+	}
+	if n := len(rt.Requests()); n != 1 {
+		t.Errorf("launches = %d, want 1: a failed command is not launched again", n)
+	}
+}
+
+// The build and canonical verify launch again after any launch error. When
+// the first attempt's command ran and the second sandbox then would not
+// start, the step ran: it is not "never started", whatever came last.
+func TestRunSandboxWithRetriesAFailedStartAfterACommandRanIsNotALaunchFailure(t *testing.T) {
+	rt := &sandboxtest.WorkerRuntime{Lines: []string{"x"}, WaitErr: errors.New("wait: connection reset")}
+	activities, input, logPath := runtimeActivities(t, rt)
+	after := func(attempt int, _ runner.Result, _ error) error {
+		if attempt == 1 {
+			rt.CreateErr = errors.New("no space left on device")
+		}
+		return nil
+	}
+	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, after, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	if err == nil || errors.Is(err, sandbox.ErrSandboxNotStarted) || launchErrorType(err) != InfrastructureFailureType {
+		t.Errorf("err = %v (type %q), want an infrastructure failure: the first attempt's command ran", err, launchErrorType(err))
 	}
 }

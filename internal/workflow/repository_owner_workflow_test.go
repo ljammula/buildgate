@@ -1336,3 +1336,51 @@ func TestRepositoryOwnerWorkflowPropagatesCancellation(t *testing.T) {
 		t.Error("verify Activity ran; build should have been canceled before completing")
 	}
 }
+
+// A sandbox that cannot be started is as systemic as any infrastructure
+// failure: under its own type it must still count toward the stop line, or a
+// gateway that refuses every launch would let the owner start run after run.
+func TestRepositoryOwnerWorkflowCountsLaunchFailuresTowardTheStopLine(t *testing.T) {
+	buildCalls := 0
+	env := newWorkflowEnvironment(t,
+		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
+			buildCalls++
+			return BuildActivityResult{Attempts: []run.Attempt{{Kind: "build", ExitCode: -1}}}, temporal.NewApplicationError("build subprocess infrastructure failure", SandboxLaunchFailureType)
+		},
+		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
+			t.Fatal("verify must not run after a launch failure")
+			return VerifyActivityResult{}, nil
+		},
+		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
+			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
+		},
+	)
+	repository := "fixture/stop-line-launch"
+	env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: RepositoryOwnerWorkflowID(repository)})
+	env.RegisterWorkflow(RunWorkflow)
+	pinNoActivityRetries(env)
+	env.RegisterDelayedCallback(func() {
+		for i := 1; i <= 4; i++ {
+			id := fmt.Sprintf("run-%d", i)
+			env.SignalWorkflow(SubmitRunSignalName, SubmitRunSignal{RequestID: id, Input: fixtureInputForTicket(id)})
+		}
+	}, 0)
+	var tripped RepositoryOwnerResult
+	env.RegisterDelayedCallback(func() {
+		queryResult, err := env.QueryWorkflow(RepositoryOwnerQueryName)
+		if err != nil {
+			t.Fatalf("query repository owner: %v", err)
+		}
+		if err := queryResult.Get(&tripped); err != nil {
+			t.Fatalf("decode query result: %v", err)
+		}
+		env.SignalWorkflow(ResetStopLineSignalName, ResetStopLineSignal{By: "test", Reason: "let the workflow complete", Generation: tripped.StopLineGeneration})
+	}, 500*time.Millisecond)
+	env.ExecuteWorkflow(RepositoryOwnerWorkflow, RepositoryOwnerWorkflowInput{Repository: repository, IdleTimeout: time.Second, StopLineFailureThreshold: 2})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow error: %v", err)
+	}
+	if !tripped.StopLineTripped || tripped.SystemicFailureStreak < 2 {
+		t.Errorf("stop line tripped = %v, streak = %d after %d launch failures; want it tripped at 2", tripped.StopLineTripped, tripped.SystemicFailureStreak, buildCalls)
+	}
+}

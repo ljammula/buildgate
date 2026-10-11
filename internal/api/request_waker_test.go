@@ -1,6 +1,7 @@
 package api
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"errors"
 	"net/http"
@@ -55,7 +56,7 @@ func TestRequestWakerOnWriteRoutes(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := loaded.EnterResumeReview(request.StatePlanning, "", time.Now()); err != nil {
+					if err := loaded.EnterResumeReview(request.StatePlanning, "", unresolved.WorkerLost, time.Now()); err != nil {
 						t.Fatal(err)
 					}
 					if err := loaded.Save(dataDir); err != nil {
