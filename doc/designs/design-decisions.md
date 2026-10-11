@@ -9,6 +9,8 @@ entry names the invariant and does not restate it.
 
 | Group | Decision |
 |---|---|
+| What it is built for | [The execution role must work on a small local model](#the-execution-role-must-work-on-a-small-local-model) |
+| | [A request is planned first, then split into tickets](#a-request-is-planned-first-then-split-into-tickets) |
 | Layering | [Go on the host decides, Python in the sandbox drives one model job](#go-on-the-host-decides-python-in-the-sandbox-drives-one-model-job) |
 | | [The build loop runs outside the coding agent](#the-build-loop-runs-outside-the-coding-agent) |
 | | [One loop for every harness, one adapter per harness](#one-loop-for-every-harness-one-adapter-per-harness) |
@@ -33,6 +35,26 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
             └─ model
 ```
 
+## What it is built for
+
+### The execution role must work on a small local model
+
+| | |
+|---|---|
+| Decision | The build loop is designed so the execution role can be a locally hosted open-weights model with its context window capped at about 128k tokens, on the minimal `pi` harness (the default). A frontier model is used only where a role is configured with one |
+| Because | Cost. A build is many turns, and a full-featured harness on a hosted frontier model pays that harness's own prompt and tool overhead on every one of them. A small harness on a local model makes those turns cheap |
+| Rules out | A step that works only with a large context window or a frontier model in the execution role. A step that depends on a feature only one vendor's harness has |
+| Revisit when | A local model at this context size can no longer pass the live fixture set |
+
+### A request is planned first, then split into tickets
+
+| | |
+|---|---|
+| Decision | A request becomes a spec, then a plan of tickets, and a person reviews each before any build. Planning and execution are separate roles with their own model, so the plan can come from a stronger model than the one that builds. Each ticket is built, verified, reviewed and delivered as its own pull request |
+| Because | A ticket the size of one pull request fits a small model's context for the build, the verify output and the review, and is a size a person can review. A smaller model builds reliably from a precise ticket; designing the change is the part that needs the stronger one |
+| Rules out | One build for a whole feature. A build that starts from a goal with no reviewed ticket |
+| Revisit when | Never for the split. Ticket size follows the execution model's context window |
+
 ## Layering
 
 ### Go on the host decides, Python in the sandbox drives one model job
@@ -40,7 +62,7 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
 | | |
 |---|---|
 | Decision | `factoryd` (Go) owns the run state machine, the gates, the sandbox launch and the release decision. The scripts under `agent/pi/scripts/` (Python) run inside the sandbox and drive one model job each: a build, a draft, a review |
-| Because | The line between them is the trust boundary: everything in the sandbox runs beside agent-written code and is untrusted, so the side that decides must be outside it. The scripts are vendored in this repository because their output contract (`BUILD_EVIDENCE.json`) must change in the same commit as the Go code that reads it |
+| Because | The line between them is the trust boundary: everything in the sandbox runs beside agent-written code and is untrusted, so the side that decides must be outside it. The scripts are vendored in this repository because their output contract (`BUILD_EVIDENCE.json`) must change in the same commit as the Go code that reads it. The scripts are a goal runner complete in themselves (draft, plan, build rounds, checks); `factoryd` is what runs them unattended, in a sandbox, with gates around them |
 | Rules out | A gate that takes a script's report as its verdict. A script that reaches the host |
 | Revisit when | Never for the boundary. The language is not part of the decision: the scripts could be Go with no change to the design |
 
@@ -48,8 +70,8 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
 
 | | |
 |---|---|
-| Decision | `build_app.py` starts the harness, runs the repository's setup, verify and oracle commands itself after each turn, writes the next round's prompt from the real failure output, and stops at the round cap and the time budget |
-| Because | A harness ends its turn when the model decides it is done. An unattended build needs "done" to be a command's exit status, and its bounds (rounds, minutes, saved prompts) to be code, not model behaviour |
+| Decision | `build_app.py` starts the harness, runs the repository's setup, verify and oracle commands itself after each turn, writes the next round's prompt from the real failure output, and stops at the round cap and the time budget. The first prompt ends with a fixed definition of done (verify command, file scope, tests, criteria evidence) |
+| Because | The default harness is minimal by choice and has no goal runner: it runs a turn and stops. A harness ends its turn when the model decides it is done. An unattended build needs "done" to be a command's exit status, and its bounds (rounds, minutes, saved prompts) to be code, not model behaviour |
 | Rules out | The round loop as a harness hook or a skill: a skill is advice the model may skip, and hook configuration sits in files the agent can edit |
 | Revisit when | Never while builds are unattended |
 
