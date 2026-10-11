@@ -1290,7 +1290,7 @@ func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, 
 		errText = runErr.Error()
 	}
 	cause := unresolvedCauseOf(loaded)
-	step := lostStepOf(loaded, cause, false)
+	step := lostStepOf(dataDir, loaded, cause, false)
 	if loaded.State == run.StateQuarantined {
 		return roundOutcome{outcome: request.RoundQuarantined, errText: errText, unresolved: cause, retryAt: step.RetryAt}, nil
 	}

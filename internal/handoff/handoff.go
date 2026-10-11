@@ -216,8 +216,8 @@ func Build(r *run.Run, dataDir string) Document {
 // binFor is BinOf with what only the run record shows:
 //
 //   - a review check that failed without a verdict to act on (the reviewer
-//     was unavailable) is BinNever, the bin of the request's
-//     review_unavailable check, which is what such a run becomes;
+//     did not answer) is BinNever: there is nothing to tell a build. When
+//     no other check failed, the run's request waits in resume_review;
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the

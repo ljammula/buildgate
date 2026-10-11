@@ -623,7 +623,9 @@ requires a new contract review and an updated machine-checkable test.
   repository's own gates, `diff_scope`, `required_files_changed`,
   `required_content_present`, and the two reviews when they gave a verdict.
   `reference_oracle` counts only where the build is already shown the oracle
-  (a request's ticket). `tests_added`, a review that gave no verdict, a
+  (a request's ticket). `tests_added`, a review that gave no verdict (when
+  only the reviews failed, the request waits in `resume_review` and the run
+  is no quarantine of it), a
   repository gate that never ran, a build that a repository setup command
   stopped before its first agent turn (by the meter's count of zero and an
   unchanged commit, never by the sandbox's exit status or log), a named or
@@ -643,9 +645,10 @@ requires a new contract review and an updated machine-checkable test.
   its result, it counts against `review_corrective_rounds` (one budget per
   ticket build, shared with the review round) and the launch budget, and
   it changes nothing about who merges (SC-001). A round whose run never
-  started, or halted with no verdict on the work (SC-017's causes), counts
+  started, halted with no verdict on the work (SC-017's causes), or was
+  quarantined only by reviews that gave no verdict, counts
   against neither `review_corrective_rounds` nor `max_review_rounds`: it
-  says nothing about the work. After the second kind no further round
+  says nothing about the work. After the second and third kinds no further round
   starts until a human decides in `resume_review`, and each launch still
   counts against the launch budget.
 - **SC-019 — a review reads the base commit's instructions:** every model review of a run launches with the repository's instruction files (AGENTS.md-style files, harness folders, project skills, MCP and hook configuration, at any depth of the repository) as the commit the request started from holds them (for a single-ticket run, the run's own base), mounted read-only over the worktree; what the build changed in them reaches the reviewer only as quoted data; an instruction-named path the worktree holds beyond the result commit is removed before the review; a tracked instruction file that no longer matches the result commit, a link from an instruction path to a directory that is not one, a checkout-converted instruction file, or any other shape the mask cannot carry halts the run before the review launches, and a build is never told why. Each review attempt records the snapshot's SHA-256, the masked paths and the removed paths.
@@ -787,7 +790,8 @@ immutable.
 
 A request step (a drafting or planning step, a ticket build, a corrective
 or PR-review round) whose worker stopped, or a ticket build or round that
-ended with no verdict on the work for another of SC-017's causes, is never
+ended with no verdict on the work for another of SC-017's causes, or whose
+only failed gates are reviews that gave no verdict, is never
 rerun on its own.
 `internal/request.EnterResumeReview` moves the request into `resume_review`,
 a human wait with reminders, recording the lost state, the lost run, the

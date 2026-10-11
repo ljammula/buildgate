@@ -10,7 +10,6 @@
   "review_verdicts": [],
   "succeeded": true,
   "stopped_reason": "canonical verification passed; advisory review (unavailable: no-review-verdict)",
-  "model_stop": null,
   "notes_turn": {
     "ran": false,
     "skipped_reason": "not reached",

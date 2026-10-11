@@ -29,6 +29,7 @@
   "resume": {
     "from_state": "building",
     "lost_run_id": "every-field lost_run_id",
+    "retry_at": "2026-09-10T09:00:00Z",
     "generation": 3,
     "at": "2026-09-10T09:00:00Z",
     "refused": [

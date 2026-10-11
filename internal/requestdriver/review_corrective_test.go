@@ -16,6 +16,7 @@ import (
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/ticketspec"
+	"buildgate/internal/unresolved"
 )
 
 // TestReviewOnlyFlaggedGuards covers reviewOnlyFlagged's own eligibility
@@ -1110,12 +1111,12 @@ func TestReviewCorrectiveRoundBothGatesFailedOneRoundBothSections(t *testing.T) 
 	}
 }
 
-// TestReviewCorrectiveRoundCodeReviewUnavailableNoRoundQuarantinesAsReviewUnavailable
+// TestReviewCorrectiveRoundCodeReviewUnavailableNoRoundWaitsInResumeReview
 // covers "code_review failed but no high finding (reviewer unavailable) ->
-// no round, quarantine named review_unavailable": the code_review check's
-// own advice ("the reviewer reported blocking defects") is wrong for a
-// reviewer that reported nothing.
-func TestReviewCorrectiveRoundCodeReviewUnavailableNoRoundQuarantinesAsReviewUnavailable(t *testing.T) {
+// no round and no quarantine": nothing was judged, so the request waits in
+// resume_review with the cause, here a review that launched no model request
+// and gave no verdict.
+func TestReviewCorrectiveRoundCodeReviewUnavailableNoRoundWaitsInResumeReview(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	branch := "factoryd/" + id + "-001"
@@ -1135,14 +1136,17 @@ func TestReviewCorrectiveRoundCodeReviewUnavailableNoRoundQuarantinesAsReviewUna
 		t.Fatalf("reviewCorrectiveRunner calls = %d, want 0 (reviewer unavailable, nothing actionable)", *calls)
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
-	if loaded.State != request.StateQuarantined {
-		t.Fatalf("State = %q, want %q", loaded.State, request.StateQuarantined)
+	if loaded.State != request.StateResumeReview || loaded.Resume == nil || loaded.Resume.Cause != unresolved.NoVerdict || loaded.Resume.FromState != request.StateBuilding {
+		t.Fatalf("state %s resume %+v (%s), want resume_review from building with cause %s", loaded.State, loaded.Resume, loaded.Error, unresolved.NoVerdict)
 	}
-	if loaded.QuarantineCheck != request.QuarantineCheckReviewUnavailable {
-		t.Errorf("QuarantineCheck = %q, want %q", loaded.QuarantineCheck, request.QuarantineCheckReviewUnavailable)
+	if loaded.QuarantineCheck != "" {
+		t.Errorf("QuarantineCheck = %q: no check judged anything", loaded.QuarantineCheck)
 	}
-	if !strings.Contains(loaded.Error, "the review gave no verdict") {
-		t.Errorf("Error = %q, want it to say the review gave no verdict", loaded.Error)
+	if want := unresolved.NoVerdict.What("building"); !strings.Contains(loaded.Error, want) {
+		t.Errorf("Error = %q, want %q", loaded.Error, want)
+	}
+	if len(loaded.Tickets[0].Rounds) != 0 {
+		t.Errorf("Rounds = %+v, want none: no corrective round ran", loaded.Tickets[0].Rounds)
 	}
 }
 

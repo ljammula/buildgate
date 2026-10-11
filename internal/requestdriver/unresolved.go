@@ -1,11 +1,14 @@
 package requestdriver
 
 import (
+	"buildgate/internal/codereview"
+	"buildgate/internal/evidence"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/unresolved"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 )
 
@@ -41,15 +44,46 @@ func reviewNoVerdictCause(runRecord *run.Run) unresolved.Cause {
 // lostStepOf describes runRecord, a run that gave no verdict for cause, for
 // request.EnterResumeReview: the run a resume continues (kept is false when
 // its worktree was not kept), and the time the provider said to try again.
-func lostStepOf(runRecord *run.Run, cause unresolved.Cause, kept bool) request.LostStep {
+// That time is the meter's (run.ProviderRetryAt); when the meter recorded
+// none, it is the time of day the provider's message gave in the run's
+// retained review evidence (providerResetTimeInEvidence), which names no
+// cause and decides nothing.
+func lostStepOf(dataDir string, runRecord *run.Run, cause unresolved.Cause, kept bool) request.LostStep {
 	step := request.LostStep{Cause: cause}
 	if kept {
 		step.RunID = runRecord.ID
 	}
 	if cause == unresolved.ProviderQuota {
 		step.RetryAt = run.ProviderRetryAt(runRecord)
+		if step.RetryAt == "" {
+			step.RetryAt = providerResetTimeInEvidence(dataDir, runRecord.ID)
+		}
 	}
 	return step
+}
+
+// reviewEvidenceFiles are the two reviews' evidence files as retained in a
+// run's directory, the code review's first.
+var reviewEvidenceFiles = []string{codereview.EvidenceFile, "CONFORMITY_EVIDENCE.json"}
+
+// maxReviewEvidenceBytes bounds the read of a retained review evidence file,
+// which a worker wrote.
+const maxReviewEvidenceBytes = 10 << 20
+
+// providerResetTimeInEvidence is codereview.ProviderResetTime over the
+// review evidence retained for run id, said with the clock it is on; "" when
+// neither file holds one.
+func providerResetTimeInEvidence(dataDir, id string) string {
+	for _, name := range reviewEvidenceFiles {
+		data, err := evidence.ReadHostileFile(filepath.Join(run.Dir(dataDir, id), name), maxReviewEvidenceBytes)
+		if err != nil {
+			continue
+		}
+		if at := codereview.ProviderResetTime(data); at != "" {
+			return at + " by the worker container's clock"
+		}
+	}
+	return ""
 }
 
 // keepForResume flags a quarantined run whose review gave no verdict as
@@ -92,5 +126,5 @@ func afterUnjudgedTicketRun(dataDir string, r *request.Request, runRecord *run.R
 	if cause == "" {
 		return false, nil
 	}
-	return true, EnterResumeReview(dataDir, r, lostStepOf(runRecord, cause, keepForResume(dataDir, runRecord)), now)
+	return true, EnterResumeReview(dataDir, r, lostStepOf(dataDir, runRecord, cause, keepForResume(dataDir, runRecord)), now)
 }

@@ -260,55 +260,6 @@ def compose_services_sentence(environ: dict[str, str]) -> str | None:
 	)
 
 
-# The fixed start of the codex CLI's message for a model request the provider
-# refused because the account's usage limit was reached. It is the one signal
-# of that the scripts get; internal/codereview's providerLimitPhrase is the
-# same text, and tests/fixtures/review_stop_causes.json holds both to it.
-PROVIDER_LIMIT_PHRASE = "You've hit your usage limit"
-
-
-# The closed code for it, in BUILD_EVIDENCE.json's model_stop and
-# combined_review.stop_cause; the Go side's codereview.CodeProviderUsageLimit.
-PROVIDER_USAGE_LIMIT = "provider_usage_limit"
-
-# The time of day that message says to try again at: on the phrase's own
-# line, a twelve-hour clock, then the full stop that ends the message. As
-# internal/codereview's providerLimitResets.
-_PROVIDER_LIMIT_RESETS = re.compile(
-	re.escape(PROVIDER_LIMIT_PHRASE) + r"[^\n]{0,400}?try again at ((?:1[0-2]|[1-9]):[0-5][0-9] [AP]M)\.\s*\Z"
-)
-
-
-def provider_usage_limit(errors) -> bool:
-	"""Whether a model error (a string, or each of a list of them) is the
-	provider's usage-limit message. A further call would be refused as well,
-	until the provider resets the allowance."""
-	if isinstance(errors, str):
-		errors = [errors]
-	return any(PROVIDER_LIMIT_PHRASE in e for e in errors)
-
-
-def provider_limit_resets_at(error: str) -> str:
-	"""The time of day the provider's usage-limit message says to try again
-	at ("3:11 AM"), "" when error is not that message or its time is of any
-	other shape."""
-	found = _PROVIDER_LIMIT_RESETS.search(error)
-	return found.group(1) if found else ""
-
-
-def model_stop(route_errors: list[str]) -> dict | None:
-	"""BUILD_EVIDENCE.json's model_stop: why the model calls of a build that
-	stopped on an all-errored round were refused, as a closed code, or None.
-	route_errors are the harness's own error events of the turn
-	(AgentOutput.route_errors), whole: never the model's text, which no
-	adapter puts there, and read before any cut for display. Only the code
-	and a time of one fixed shape are recorded, none of the message."""
-	for error in route_errors:
-		if PROVIDER_LIMIT_PHRASE in error:
-			return {"code": PROVIDER_USAGE_LIMIT, "resets_at": provider_limit_resets_at(error)}
-	return None
-
-
 def redact(output: str, limit: int = 3000) -> str:
 	import re
 
@@ -599,9 +550,6 @@ class BuildResult:
 	# What the notes turn did, for BUILD_EVIDENCE.json: never its reply.
 	notes_turn: dict = field(default_factory=lambda: {"ran": False, "skipped_reason": "not reached", "duration_s": 0.0})
 	stopped_reason: str = ""
-	# Set only where the build stops on a round whose every model call
-	# errored (model_stop); None otherwise.
-	model_stop: dict | None = None
 	# The repository setup command that failed before the first agent turn,
 	# None otherwise. main then exits SETUP_FAILED_EXIT_CODE.
 	setup_failed_at_start: str | None = None
@@ -3219,11 +3167,6 @@ def _run_build(
 			# pass that can only repeat the same outage (found via Codex
 			# review of PR #5).
 			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
-			result.model_stop = model_stop(parsed.route_errors)
-			if result.model_stop:
-				# Named for whoever reads the build log; the host reads
-				# the code in the evidence (internal/triage).
-				result.stopped_reason += ": the model provider's usage limit was reached"
 			persist(round_index, state_prompt, fingerprint_after)
 			break
 		# Deliberately no special early-break for verify_command is None
@@ -3613,9 +3556,6 @@ def write_evidence_json(result: BuildResult) -> Path:
 		"review_verdicts": result.review_verdicts,
 		"succeeded": result.succeeded,
 		"stopped_reason": result.stopped_reason,
-		# Additive: the closed code for model calls the provider refused
-		# (model_stop), null otherwise. Never the provider's message.
-		"model_stop": result.model_stop,
 		# Additive: whether the one notes turn ran, and its usage. Never the
 		# notes themselves (SC-018).
 		"notes_turn": result.notes_turn,

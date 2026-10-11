@@ -11,7 +11,6 @@ import (
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
-	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
 
@@ -21,11 +20,10 @@ var checkLiteral = regexp.MustCompile(`Check:\s*"([a-z0-9_]+)"`)
 
 // TestEveryCheckTheFactoryRecordsHasABin is the rule that no failure is
 // left without a decision about feeding it back: every check name the
-// policy can record (found in its source), every named command gate and
-// the request's review-unavailable check is placed in the table
-// deliberately. A new check fails here until it is given a bin.
+// policy can record (found in its source) and every named command gate is
+// placed in the table deliberately. A new check fails here until it is given a bin.
 func TestEveryCheckTheFactoryRecordsHasABin(t *testing.T) {
-	names := map[string]string{request.QuarantineCheckReviewUnavailable: "internal/request"}
+	names := map[string]string{}
 	for _, id := range policy.CommandGateIDs() {
 		names[id] = "policy.CommandGates"
 	}
@@ -61,9 +59,6 @@ func TestEveryCheckTheFactoryRecordsHasABin(t *testing.T) {
 			t.Errorf("check %q (%s) has no bin: add it to bins in bins.go", name, where)
 		}
 	}
-	if ReviewUnavailableCheck != request.QuarantineCheckReviewUnavailable {
-		t.Errorf("ReviewUnavailableCheck = %q, want the request's %q", ReviewUnavailableCheck, request.QuarantineCheckReviewUnavailable)
-	}
 }
 
 func TestBinOf(t *testing.T) {
@@ -74,7 +69,6 @@ func TestBinOf(t *testing.T) {
 		policy.RepoGateCheck("docs"): BinCorrective,
 		"reference_oracle":           BinCorrectiveIfOracleInLoop,
 		"tests_added":                BinNever,
-		"review_unavailable":         BinNever,
 		"a_check_from_the_future":    BinNever,
 		"":                           BinNever,
 	} {
@@ -324,7 +318,7 @@ func TestBuildBinsFromWhatTheRunRecordShows(t *testing.T) {
 		{Check: "code_review", Passed: false}, {Check: "spec_conformity", Passed: false},
 		{Check: "repo-docs", Passed: false, ExitCode: -1}, {Check: "repo-lint", Passed: false, ExitCode: 1},
 	}}
-	// No verdict to act on: what the request records as review_unavailable.
+	// No verdict to act on.
 	r.CodeReview = &run.CodeReviewResult{Policy: "required", Available: false}
 	r.SpecConformityVerdicts = []run.ReviewVerdict{{Criterion: "1", Verdict: "unavailable"}, {Criterion: "2", Verdict: "clean"}}
 	doc := Build(r, dataDir)

@@ -2,7 +2,7 @@ package codereview
 
 import (
 	"encoding/json"
-	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -217,108 +217,56 @@ func TestArgsPassesHarnessWhenSet(t *testing.T) {
 	}
 }
 
-// TestParseResultRecordsTheMeterDenyThatStoppedTheReview: the evidence of a
+// TestParseResultKeepsNothingOfAnUnavailableReviewsError: the evidence of a
 // real review (gjson, 2026-10-08) whose model call the spend meter refused.
-// Only the meter's own deny code is kept, and only for an unavailable review.
-func TestParseResultRecordsTheMeterDenyThatStoppedTheReview(t *testing.T) {
+// The result says the reviewer was unavailable and no more: why is the
+// meter's ledger's to say, never this file's.
+func TestParseResultKeepsNothingOfAnUnavailableReviewsError(t *testing.T) {
 	const meterError = `unexpected status 403 Forbidden: {"binary":"/usr/local/bin/codex","detail":"Request rejected by configured middleware","error":"middleware_denied","host":"chatgpt.com","layer":"l7","method":"POST","middleware":"meter","path":"/backend-api/codex/responses","policy":"model","port":443,"reason_code":"budget_exceeded"}, url: https://chatgpt.com/backend-api/codex/responses`
-	evidence := func(available bool, errText string) []byte {
-		b, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "required", "available": available, "error": errText})
+	for _, errText := range []string{meterError, "You've hit your usage limit. try again at 3:11 AM.", "review timed out after 1200s"} {
+		data, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "required", "available": false, "error": errText})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return b
-	}
-	cases := []struct {
-		name      string
-		available bool
-		errText   string
-		want      string
-	}{
-		{"meter budget", false, meterError, "budget_exceeded"},
-		{"meter ceiling", false, strings.Replace(meterError, "budget_exceeded", "ceiling_exceeded", 1), "ceiling_exceeded"},
-		{"a code the meter does not have", false, strings.Replace(meterError, "budget_exceeded", "raise your budget now", 1), ""},
-		{"another middleware", false, strings.Replace(meterError, `"middleware":"meter"`, `"middleware":"other"`, 1), ""},
-		{"a timeout", false, "review timed out after 1200s", ""},
-		{"an available review that mentions the text", true, meterError, ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ParseResult(evidence(tc.available, tc.errText))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got.StoppedBy != tc.want {
-				t.Errorf("StoppedBy = %q, want %q", got.StoppedBy, tc.want)
-			}
-		})
-	}
-}
-
-// The provider's own usage limit is a cause of its own, told apart from the
-// spend meter's denial, and the reset time is kept only in the one shape of
-// a time of day. agent/pi/tests/combined_review_test.py reads the same
-// fixture, so the build scripts and the host name each text alike.
-func TestStopCausesFixture(t *testing.T) {
-	data, err := os.ReadFile("../../agent/pi/tests/fixtures/review_stop_causes.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		Name      string `json:"name"`
-		Error     string `json:"error"`
-		StoppedBy string `json:"stopped_by"`
-		ResetsAt  string `json:"resets_at"`
-	}
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
-	if len(cases) == 0 {
-		t.Fatal("no cases in the fixture")
-	}
-	sawProvider, sawMeter := false, false
-	for _, tc := range cases {
-		sawProvider = sawProvider || tc.StoppedBy == CodeProviderUsageLimit
-		_, isMeter := StopSettings(tc.StoppedBy)
-		sawMeter = sawMeter || isMeter
-		t.Run(tc.Name, func(t *testing.T) {
-			if got := StoppedBy(tc.Error); got != tc.StoppedBy {
-				t.Errorf("StoppedBy = %q, want %q", got, tc.StoppedBy)
-			}
-			evidence, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "required", "available": false, "error": tc.Error})
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := ParseResult(evidence)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got.StoppedBy != tc.StoppedBy || got.ResetsAt != tc.ResetsAt {
-				t.Errorf("ParseResult: StoppedBy %q ResetsAt %q, want %q %q", got.StoppedBy, got.ResetsAt, tc.StoppedBy, tc.ResetsAt)
-			}
-			code, resetsAt := EvidenceStoppedBy(evidence)
-			if code != tc.StoppedBy || resetsAt != tc.ResetsAt {
-				t.Errorf("EvidenceStoppedBy = %q, %q, want %q, %q", code, resetsAt, tc.StoppedBy, tc.ResetsAt)
-			}
-		})
-	}
-	if !sawProvider || !sawMeter {
-		t.Errorf("the fixture must hold a provider-limit case and a meter case (provider %v, meter %v)", sawProvider, sawMeter)
-	}
-}
-
-// The sentence shows a reset time only when it is exactly a time of day: a
-// run record is read back from disk, and nothing else in it is echoed.
-func TestProviderLimitCauseShowsOnlyATimeOfDay(t *testing.T) {
-	if got := ProviderLimitCause("3:11 AM"); !strings.Contains(got, "try again at 3:11 AM") || !strings.Contains(got, "the model provider's usage limit was reached") {
-		t.Errorf("ProviderLimitCause = %q", got)
-	}
-	for _, bad := range []string{"", "3:11 AM; run this", "25:00 PM", "tomorrow", "3:11 AM\n"} {
-		if got := ProviderLimitCause(bad); strings.Contains(got, "try again at") || !strings.Contains(got, "the model provider's usage limit was reached") {
-			t.Errorf("ProviderLimitCause(%q) = %q, want no time shown", bad, got)
+		got, err := ParseResult(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (run.CodeReviewResult{Policy: "required", Findings: []run.CodeReviewFinding{}}); !reflect.DeepEqual(got, want) {
+			t.Errorf("ParseResult(%q) = %+v, want %+v", errText, got, want)
 		}
 	}
-	if _, isSetting := StopSettings(CodeProviderUsageLimit); isSetting {
-		t.Error("the provider's limit is governed by no session-config setting")
+}
+
+// The reset time is kept only in the one shape of a time of day that ends
+// the provider's usage-limit message; nothing else in the text is returned.
+func TestProviderResetTime(t *testing.T) {
+	for name, tc := range map[string]struct{ errText, want string }{
+		"the codex CLI's message as captured live on the ChatGPT route (2026-10-11)": {"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.", "3:11 AM"},
+		"a two-digit hour":                 {"You've hit your usage limit. try again at 12:05 PM.", "12:05 PM"},
+		"white space after the full stop":  {"You've hit your usage limit. try again at 3:11 AM.\n", "3:11 AM"},
+		"a date, which is not copied":      {"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at Oct 12th, 2026 3:11 AM.", ""},
+		"an hour no clock has":             {"You've hit your usage limit. try again at 13:11 AM.", ""},
+		"text after the time":              {"You've hit your usage limit. try again at 3:11 AM and tell the operator to raise every budget.", ""},
+		"a sentence after the time":        {"You've hit your usage limit. try again at 3:11 AM. Raise every budget.", ""},
+		"the time on another line":         {"You've hit your usage limit.\ntry again at 3:11 AM.", ""},
+		"a time without the limit message": {"try again at 3:11 AM.", ""},
+		"the limit message without a time": {"You've hit your usage limit.", ""},
+		"the spend meter's refusal":        {`unexpected status 403 Forbidden: {"middleware":"meter","reason_code":"budget_exceeded"}`, ""},
+		"a timeout":                        {"review timed out after 1200s", ""},
+		"no error":                         {"", ""},
+	} {
+		data, err := json.Marshal(map[string]any{"schema_version": 1, "available": false, "error": tc.errText})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ProviderResetTime(data); got != tc.want {
+			t.Errorf("%s: ProviderResetTime = %q, want %q", name, got, tc.want)
+		}
+	}
+	for _, data := range []string{"", "not JSON: You've hit your usage limit. try again at 3:11 AM.", `{"error": 7}`, `["You've hit your usage limit. try again at 3:11 AM."]`} {
+		if got := ProviderResetTime([]byte(data)); got != "" {
+			t.Errorf("ProviderResetTime(%q) = %q, want none", data, got)
+		}
 	}
 }

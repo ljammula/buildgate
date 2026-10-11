@@ -38,8 +38,11 @@ type ResumeInfo struct {
 	// record written before causes existed, which reads as a lost worker
 	// (unresolved.Cause.What).
 	Cause unresolved.Cause `json:"cause,omitempty"`
-	// RetryAt is when the model provider said to try again (RFC 3339 UTC),
-	// for a step it refused with its own limit; "" when it gave no time.
+	// RetryAt is when the model provider said to try again, for a step it
+	// refused with its own limit; "" when it gave no time. It is the meter's
+	// record (RFC 3339 UTC), or, when the provider sent the meter none, the
+	// time of day its message gave, said with the clock it is on. Shown as
+	// text only.
 	RetryAt string `json:"retry_at,omitempty"`
 	// Generation counts the times the request has entered resume_review. A
 	// decision applies only to the Generation it was made for.

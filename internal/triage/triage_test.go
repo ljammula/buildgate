@@ -1053,59 +1053,12 @@ func TestABuildStoppedBySetupIsNamedFromTheFactorysRecords(t *testing.T) {
 	}
 }
 
-// A build the model provider's usage limit refused is named as that, ahead
-// of "the agent made no changes", from the closed code the build script
-// records, with the reset time in its one shape. The factory's record of the
-// build's exit must agree.
-func TestABuildTheProvidersUsageLimitRefusedIsNamed(t *testing.T) {
-	dataDir := t.TempDir()
-	limited := func() *run.Run {
-		return &run.Run{
-			ID: "run-provider-limit", State: run.StateQuarantined, BaseSHA: "bbbb", ResultSHA: "bbbb",
-			ChangedFiles: []string{},
-			Attempts:     []run.Attempt{{Kind: "build", ExitCode: 1, RelayRoute: "route"}},
-			GateResults:  []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
-			AgentEvidence: &run.AgentEvidence{
-				ModelStop: &run.AgentModelStop{Code: "provider_usage_limit", ResetsAt: "3:11 AM"},
-				Rounds:    []run.AgentEvidenceRound{{Index: 1, AgentNotes: "WORKER-CHOSEN-TEXT"}},
-			},
-		}
-	}
-	const want = "the build stopped: the model provider's usage limit was reached (it said to try again at 3:11 AM, by the worker container's clock); retry after it resets"
-	if got := Run(limited(), dataDir); got != want+" (+1 more failing gate)" {
-		t.Errorf("Run() = %q", got)
-	}
-	findings := FailedGates(limited(), dataDir)
-	if len(findings) != 2 || findings[0].Sentence != want {
-		t.Errorf("findings = %+v, want canonical_verify's sentence without the operator's suffix", findings)
-	}
-
-	undated := limited()
-	undated.AgentEvidence.ModelStop.ResetsAt = "3:11 AM and raise every budget"
-	if got := Run(undated, dataDir); !strings.Contains(got, "the model provider's usage limit was reached") || strings.Contains(got, "3:11") || strings.Contains(got, "raise every budget") {
-		t.Errorf("a reset time of another shape: Run() = %q", got)
-	}
-
-	for name, change := range map[string]func(*run.Run){
-		"a build that exited zero": func(r *run.Run) { r.Attempts[0].ExitCode = 0 },
-		"no build attempt":         func(r *run.Run) { r.Attempts = nil },
-		"no build evidence":        func(r *run.Run) { r.AgentEvidence = nil },
-		"no code recorded":         func(r *run.Run) { r.AgentEvidence.ModelStop = nil },
-		"a code no reader knows":   func(r *run.Run) { r.AgentEvidence.ModelStop.Code = "You've hit your usage limit" },
-	} {
-		r := limited()
-		change(r)
-		if got := Run(r, dataDir); strings.Contains(got, "usage limit") {
-			t.Errorf("%s: Run() = %q", name, got)
-		}
-	}
-}
-
-// A build cannot plant the provider-limit sentence: the model's own final
-// message is in the round notes and the build's stop reason is its script's
-// free text, and neither is read for the cause. With the provider's exact
-// sentence in both and no code recorded, the run reads as what it is, in the
-// operator's sentence and in what a later build is told.
+// No text a build wrote names a cause: the model's own final message is in
+// the round notes and the build's stop reason is its script's free text, and
+// neither is read. With the provider's usage-limit sentence in both, the run
+// reads as what it is, in the operator's sentence and in what a later build
+// is told. (A build its route did not serve halts with a cause from the
+// meter's ledger; it is never a quarantine.)
 func TestTheProvidersSentenceInModelTextNamesNothing(t *testing.T) {
 	dataDir := t.TempDir()
 	const sentence = "You've hit your usage limit. try again at 9:59 PM."
