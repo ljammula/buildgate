@@ -153,6 +153,11 @@ type Attempt struct {
 	// worktree, which this attempt started from. Empty for a build that
 	// was not resumed.
 	ResumedFromCheckpoint string `json:"resumed_from_checkpoint,omitempty"`
+	// KeptFromRun, on a build attempt, is the run whose finished build this
+	// run kept instead of building again: it adopted that run's worktree,
+	// found it clean at that run's result commit, and launched nothing.
+	// Empty for a build that ran.
+	KeptFromRun string `json:"kept_from_run,omitempty"`
 	// ImageDigest is the sandbox worker image's pinned sha256 digest when
 	// this attempt ran inside Docker, and empty for a host-runner attempt —
 	// durable evidence of exactly which immutable worker image identity

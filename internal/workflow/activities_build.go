@@ -144,9 +144,19 @@ func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string,
 	return args
 }
 
-// RunBuildActivity invokes build_app.py through runner.RunWithRetries. A
-// completed invocation is returned from its durable checkpoint on redispatch.
-func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInput) (progressResult BuildActivityResult, err error) {
+// RunBuildActivity is the build step: the finished build of the run this one
+// resumed, when its worktree still stands at it (keptFinishedBuild), else a
+// build_app.py invocation.
+func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInput) (BuildActivityResult, error) {
+	if kept, ok := a.keptFinishedBuild(ctx, input); ok {
+		return kept, nil
+	}
+	return a.runBuild(ctx, input)
+}
+
+// runBuild invokes build_app.py through runner.RunWithRetries. A completed
+// invocation is returned from its durable checkpoint on redispatch.
+func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (progressResult BuildActivityResult, err error) {
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.
