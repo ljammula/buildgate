@@ -23,7 +23,7 @@ func TestWorkerImageCarriesEveryHarnessAtAnExactVersion(t *testing.T) {
 	text := string(data)
 
 	for _, want := range []string{
-		"npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4",
+		"npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0",
 		"npm install -g --ignore-scripts @openai/codex@0.154.0",
 		"ARG COPILOT_VERSION=1.0.88",
 		"npm install -g --ignore-scripts @github/copilot@${COPILOT_VERSION}",

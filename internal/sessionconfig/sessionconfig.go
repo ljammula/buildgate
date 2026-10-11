@@ -347,7 +347,7 @@ type RoleConfig struct {
 	// Thinking is a Pi reasoning-effort level: "off", "minimal", "low",
 	// "medium", "high", "xhigh", or "max". Empty means don't pass a level
 	// at all. See ValidateRouting for the silent-clamp guard this feeds
-	// into: Pi (0.84.4) sends "xhigh"/"max" only when the model's
+	// into: Pi (1.1.0) sends "xhigh"/"max" only when the model's
 	// extra_json declares them in thinking_level_map, and sends any
 	// effort at all only when the model's reasoning: true -- otherwise it
 	// silently clamps to "high" or sends nothing.
@@ -427,7 +427,7 @@ type Roles struct {
 }
 
 // validThinkingLevels is the closed set RoleConfig.Thinking may name --
-// Pi's own reasoning-effort vocabulary (0.84.4).
+// Pi's own reasoning-effort vocabulary (1.1.0).
 var validThinkingLevels = map[string]bool{
 	"off": true, "minimal": true, "low": true, "medium": true,
 	"high": true, "xhigh": true, "max": true,

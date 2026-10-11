@@ -222,7 +222,7 @@ SPECIFIC = [
 	(".pi/SYSTEM.md", md, "text"), (".pi/APPEND_SYSTEM.md", md, "text"),
 	(".pi/settings.json", pi_settings, "text"), (".pi/settings-skills/probe/SKILL.md", skill, "text"),
 	(".pi/settings-ext.mjs", pi_extension, "exec"), (".pi/extensions/probe.ts", pi_extension, "exec"),
-	(".pi/prompts/probe.md", command_md, "text"),
+	(".pi/prompts/probe.md", command_md, "text"), (".pi/mcp.json", mcp_json, "exec"),
 	(".codex/config.toml", codex_config, "exec"), (".codex/hooks.json", codex_hooks, "exec"),
 	(".codex/agents/probe.toml", codex_agent, "text"), (".codex/AGENTS.md", md, "text"),
 	(".codex/prompts/probe.md", command_md, "text"),
@@ -363,6 +363,8 @@ def fixture_from_result(result, table, old):
 		e = result["harnesses"].get(name)
 		if not e or not e.get("turns") or not e["turns"].get("review"):
 			fixture[name] = old[name]
+			if old[name].get("source") == "probed":
+				observed_anywhere.update(old[name].get("paths", []))
 			continue
 		real = {t: v["outcomes"] for t, v in e["turns"].items() if t in REAL_TURNS}
 		seen = table_observation(candidates, real)
@@ -630,14 +632,10 @@ def docker(*args, timeout=60):
 	return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout)
 
 
-def image_versions(image):
-	"""{harness: version string the image reports}."""
-	cmds = {"pi": "pi --version", "codex": "codex --version", "copilot": "copilot --version", "pifork": "pifork --version"}
-	out = {}
-	for h, cmd in cmds.items():
-		r = docker("run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c", cmd + " 2>&1 | head -1", timeout=120)
-		out[h] = r.stdout.strip() if r.returncode == 0 else None
-	return out
+def image_version(image, harness):
+	"""The version string the image reports for a harness."""
+	r = docker("run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c", f"{harness} --version 2>&1 | head -1", timeout=120)
+	return r.stdout.strip() if r.returncode == 0 else None
 
 
 def has_launcher(image, name):
@@ -753,11 +751,10 @@ def main():
 		raise SystemExit("scratch must be under ~/buildgate")
 	SCRATCH.mkdir(parents=True, exist_ok=True)
 	image = args.image or default_image()
-	versions = image_versions(image)
 	result = {"image": image, "candidates": [{k: c[k] for k in ("slug", "path", "kind", "table_path")} for c in candidates], "harnesses": {}}
 	for harness in args.harness or HARNESSES:
 		h_image = args.pifork_image if harness == "pifork" else image
-		entry = {"version": versions.get(harness), "turns": {}}
+		entry = {"version": image_version(h_image, harness) if h_image else None, "turns": {}}
 		result["harnesses"][harness] = entry
 		if h_image is None or not has_launcher(h_image, harness):
 			entry["skipped"] = "no image carrying the `pifork` launcher" if harness == "pifork" else f"no {harness} launcher in the image"

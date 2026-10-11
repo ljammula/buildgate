@@ -38,16 +38,20 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/bg-forward ./cmd/bg-forward
 # install-time state out of it. Exact version pinned, never "latest": a
 # pinned base digest would otherwise still yield a different image on a
 # later rebuild. Bump this alongside a deliberate, reviewed change, same as
-# a digest bump.
+# a digest bump. The pin covers pi itself only: the package ships no
+# npm-shrinkwrap.json (removed upstream in 1.0.1), so npm resolves its
+# dependencies, the caret-ranged @earendil-works/* ones included, at build
+# time.
 #
 # --ignore-scripts is safe here: `npm view @earendil-works/pi-coding-agent
 # scripts` has no preinstall/postinstall/install script (checked
-# 2026-09-03) -- if that ever changes, a broken `pi` at this file's own
-# build-time smoke test below is exactly the failure that's meant to catch.
+# 2026-10-10 for 1.1.0) -- if that ever changes, a broken `pi` at this
+# file's own build-time smoke test below is exactly the failure that's
+# meant to catch.
 FROM node AS pi
 RUN --mount=type=secret,id=build-ca,required=false \
     if [ -f /run/secrets/build-ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build-ca; fi \
-    && npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4
+    && npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0
 
 # Codex CLI and Copilot CLI (the other per-role harnesses, see
 # internal/harness): each in its own Node stage, exact version, no install
