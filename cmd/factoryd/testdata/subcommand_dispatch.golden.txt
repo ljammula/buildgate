@@ -43,15 +43,11 @@ stdout: factoryd version <version>
 
 $ factoryd no-such-command
 exit 1
-stderr: data dir: "data" (source: default)
-stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
-stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+stderr: factoryd: unknown command "no-such-command": `factoryd help` lists the commands
 
 $ factoryd no-such-command -zz-not-a-flag
 exit 1
-stderr: data dir: "data" (source: default)
-stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
-stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+stderr: factoryd: unknown command "no-such-command": `factoryd help` lists the commands
 
 $ factoryd -zz-not-a-flag
 exit 1
@@ -61,9 +57,7 @@ stderr:   Build one ticket directly, with no request (its help: factoryd help ru
 
 $ factoryd STATUS -zz-not-a-flag
 exit 1
-stderr: data dir: "data" (source: default)
-stderr: warning: there is no session config, so the data dir is <workdir>/data: it follows the directory a command runs in. `factoryd setup` writes a config
-stderr: factoryd: roles.execution: modelrole: roles.execution.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md "Model routes")
+stderr: factoryd: unknown command "STATUS": `factoryd help` lists the commands
 
 $ factoryd -ticket t status
 exit 1
