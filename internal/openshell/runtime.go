@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -383,14 +384,17 @@ const maxLabelValueLength = 63
 var labelValueDisallowed = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
 // labelValue fits s to what the gateway accepts as a label value: letters,
-// digits, '-', '_' and '.', at most maxLabelValueLength long. Labels are for
-// a person listing sandboxes; the run's own record is what the factory reads.
+// digits, '-', '_' and '.', at most maxLabelValueLength long, beginning and
+// ending with a letter or a digit. The ends are trimmed after the cut: a run
+// id cut at the limit can end on a '-', and the gateway then refuses the
+// sandbox. Labels are for a person listing sandboxes; the run's own record
+// is what the factory reads.
 func labelValue(s string) string {
 	s = labelValueDisallowed.ReplaceAllString(s, "-")
 	if len(s) > maxLabelValueLength {
 		s = s[:maxLabelValueLength]
 	}
-	return s
+	return strings.Trim(s, "-_.")
 }
 
 func diagnostics(list []v1.ProfileDiagnostic) string {
