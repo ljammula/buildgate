@@ -51,6 +51,8 @@ func stepLost(err error) bool {
 var unresolvedFailureTypes = map[string]unresolved.Cause{
 	SandboxRerunFailureType:  unresolved.WorkerLost,
 	SandboxLaunchFailureType: unresolved.SandboxLaunch,
+	// A command that ran and failed, twice, with a registry unreachable.
+	DependencyFetchFailureType: unresolved.DependencyFetch,
 }
 
 // UnresolvedCauseFromError is the cause of a RunWorkflow or Activity failure
@@ -129,6 +131,7 @@ var nonRetryableActivityFailureTypes = []string{
 	RelayCeilingExceededFailureType,
 	SandboxRerunFailureType,
 	SandboxLaunchFailureType,
+	DependencyFetchFailureType,
 	ComposeServicesRejectedFailureType,
 	ReviewInstructionsFailureType,
 	FactoryDirFailureType,

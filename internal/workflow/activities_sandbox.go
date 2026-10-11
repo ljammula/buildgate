@@ -77,11 +77,14 @@ func afterACommandRan(lastErr error, commandRan bool) error {
 	return lastErr
 }
 
+// errOutOfTime is in the chain of every outOfTime error.
+var errOutOfTime = errors.New("insufficient time remaining for a sandboxed attempt")
+
 // outOfTime is the error of an attempt the Activity's deadline leaves no
 // room for. It carries the earlier attempt's error, so a launch that failed
 // and could not be made again keeps its type.
 func outOfTime(margin time.Duration, lastErr error) error {
-	err := fmt.Errorf("insufficient time remaining for a sandboxed attempt (less than the %s margin left before this Activity's own deadline)", margin)
+	err := fmt.Errorf("%w (less than the %s margin left before this Activity's own deadline)", errOutOfTime, margin)
 	if lastErr != nil {
 		return fmt.Errorf("%w; the attempt before it: %w", err, lastErr)
 	}
@@ -575,9 +578,13 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// compose_services_worker_env. Handles a nil compose the same as a
 		// non-nil Disabled one, so this call is unconditional.
 		s = compose.ApplyToWorkerLaunch(s)
+		// The proxy's count of failed upstream requests is read on both sides
+		// of the launch, for a step that asked (withRegistryFetches).
+		fetches := watchRegistryFetches(ctx, registryProxy)
 		res, runErr := sandbox.LaunchWorker(ctx, a.Sandboxes, a.sandboxDockerFor(input), s, sandbox.RuntimeWorker{
 			Relay: relaySpec, ModelBinaries: harness.ModelBinaries(), MeterLedgerRoot: a.MeterLedgerRoot,
 		})
+		fetches.done(ctx)
 		// The snapshot lives for one launch; the next takes its own.
 		runErr = joinCleanup(runErr, factoryDir.Remove())
 		if compose != nil {

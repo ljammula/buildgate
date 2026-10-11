@@ -478,7 +478,32 @@ requires a new contract review and an updated machine-checkable test.
   on, or one whose removal could not be confirmed, which keeps nothing. A
   verify, gate or review command started twice is an infrastructure
   failure: one sign of it is an exit code the repository's own command
-  could return. A drafting or planning job whose sandbox does not start
+  could return.
+  `dependency_fetch` is the third cause: a canonical verify, baseline
+  verify, full-suite or named-gate command exited non-zero in a launch
+  during which the run's registry proxy counted at least one request its
+  upstream failed, was run once more in the same Activity on the worktree
+  as that run left it, with no model call, and exited non-zero again with
+  at least one more such request counted. A second run that passes is the
+  step's result, and one that fails with none counted is an ordinary
+  failure. The proxy counts a request whose registry could not be reached,
+  did not answer within the upstream timeout, broke off its response, or
+  answered 5xx; it counts no 4xx, no request it refused (method, path, a
+  redirect outside the route's allowlist, its own concurrency limit), none
+  its client abandoned, and none served from its cache or a local
+  directory. The count is read from the proxy container's log before and
+  after each launch: with no registry proxy, or when either read fails,
+  the step is judged as if nothing had been counted. The second run is not
+  made when less than twice the first run's duration is left of the
+  Activity's time, and one the deadline leaves no room to start changes
+  nothing. Limits: the count shows that a registry request failed during
+  the launch, not that the command failed because of it; a package manager
+  that gives up on a request before the proxy's upstream timeout is not
+  counted; the oracle canary, a gate's rerun on the base commit and the
+  verify after an oracle commit are judged without it. A baseline that
+  ends so halts with this cause, never `baseline_verify_failed`, and the
+  step does not count toward a repository's stop line.
+  A drafting or planning job whose sandbox does not start
   halts its request; only a run's steps are covered here. The run halts with the cause
   as its `HaltReasonCode`, a ticket run keeps its worktree (one built on an existing branch
   keeps none and can only be rebuilt), and the request waits in
@@ -488,7 +513,8 @@ requires a new contract review and an updated machine-checkable test.
   again inside the same Activity, up to `-verify-max-attempts` launches in
   all, for the review, full-suite and named-gate steps: nothing ran, so
   nothing is spent twice. On those steps a command that started is never
-  launched again. The build (`-build-app-max-attempts`) and canonical
+  launched again, but for the one `dependency_fetch` rerun of a full-suite
+  or named-gate command. The build (`-build-app-max-attempts`) and canonical
   verify (`-verify-max-attempts`) launch again after any launch error
   except an unconfirmed removal, a command started twice or a reached
   ceiling. Temporal's `MaximumAttempts: 1` stands. A launch failure counts

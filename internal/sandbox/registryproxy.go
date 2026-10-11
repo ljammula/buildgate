@@ -660,6 +660,60 @@ func ensureRegistryProxyEgressNetwork(ctx context.Context, dockerBinary string) 
 // shell-free readiness signal.
 const registryProxyListeningLogLine = "serving registry proxy on"
 
+// registryProxyUpstreamFailuresLogPrefix is internal/registryproxy's
+// UpstreamFailureLogPrefix: the proxy logs one line for each request its
+// upstream failed, this prefix and then its total so far.
+const registryProxyUpstreamFailuresLogPrefix = "upstream_failures="
+
+// registryProxyUpstreamFailures reads the proxy container's log, the same
+// channel its readiness is read from (the container publishes no port and
+// shares no writable mount with the host), for the proxy's count of requests
+// its upstream failed. known is false when the log cannot be read.
+func registryProxyUpstreamFailures(ctx context.Context, dockerBinary, containerName string) (count int, known bool) {
+	if containerName == "" {
+		return 0, false
+	}
+	if dockerBinary == "" {
+		dockerBinary = "docker"
+	}
+	boundedCtx, cancel := context.WithTimeout(ctx, relayDockerCommandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(boundedCtx, dockerBinary, "logs", containerName).CombinedOutput()
+	if err != nil {
+		return 0, false
+	}
+	return parseRegistryProxyUpstreamFailures(string(out))
+}
+
+// parseRegistryProxyUpstreamFailures returns the highest total among the
+// proxy's failure lines in log, 0 when it has none. A failure line is the
+// logger's date and time and then one word, the prefix and a number, with
+// nothing else on the line: a request line has more words, and the proxy
+// quotes the method and path a worker chose, so a worker cannot write one.
+// known is false for a log without the proxy's listening line (it is not this
+// proxy's whole log) or with a failure line whose total is not a number.
+func parseRegistryProxyUpstreamFailures(log string) (count int, known bool) {
+	if !strings.Contains(log, registryProxyListeningLogLine) {
+		return 0, false
+	}
+	for _, line := range strings.Split(log, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		total, found := strings.CutPrefix(fields[2], registryProxyUpstreamFailuresLogPrefix)
+		if !found {
+			continue
+		}
+		n, err := strconv.Atoi(total)
+		if err != nil || n < 0 {
+			return 0, false
+		}
+		count = max(count, n)
+	}
+	return count, true
+}
+
 // goModuleVolumeArgs mounts spec's Go module directory, when it has one,
 // read-only into the proxy container.
 func goModuleVolumeArgs(spec RegistryProxySpec) []string {

@@ -155,12 +155,14 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 				command[0], command[1:]...,
 			)
 		}
-		return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), beforeAttempt, afterAttempt,
-			// nil: canonical verification never calls a model, so it
-			// never gets the relay's network -- it launches with
-			// Network "none" even on a relay-contained run (unless a
-			// registry proxy gives it that proxy's network instead).
-			nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+		return rerunAfterFetchFailure(ctx, logPath, beforeAttempt, afterAttempt, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+			return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), before, after,
+				// nil: canonical verification never calls a model, so it
+				// never gets the relay's network -- it launches with
+				// Network "none" even on a relay-contained run (unless a
+				// registry proxy gives it that proxy's network instead).
+				nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+		})
 	})
 	verifyResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
 	if runErr == nil {
@@ -333,10 +335,12 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 				command[0], command[1:]...,
 			)
 		}
-		return a.runSandboxWithRetries(relaunchUnstartedOnly(ctx), input, logPath, a.verifyMaxAttemptsFor(input), beforeAttempt, afterAttempt,
-			// nil, for the same reason canonical verification passes
-			// nil: the full-suite gate never calls a model.
-			nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+		return rerunAfterFetchFailure(relaunchUnstartedOnly(ctx), logPath, beforeAttempt, afterAttempt, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+			return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), before, after,
+				// nil, for the same reason canonical verification passes
+				// nil: the full-suite gate never calls a model.
+				nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+		})
 	})
 	fullSuiteResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
 	if runErr == nil {
@@ -579,10 +583,12 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 				command[0], command[1:]...,
 			)
 		}
-		return a.runSandboxWithRetries(relaunchUnstartedOnly(gateCtx), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt,
-			// nil, for the same reason canonical verification passes
-			// nil: a named gate never calls a model.
-			nil, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, nil, nil, command[0], command[1:]...)
+		return rerunAfterFetchFailure(relaunchUnstartedOnly(gateCtx), logPath, beforeAttempt, afterAttempt, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+			return a.runSandboxWithRetries(ctx, input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after,
+				// nil, for the same reason canonical verification passes
+				// nil: a named gate never calls a model.
+				nil, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, nil, nil, command[0], command[1:]...)
+		})
 	})
 
 	// Runtime canary: a passing oracle command is only believed when the SAME
