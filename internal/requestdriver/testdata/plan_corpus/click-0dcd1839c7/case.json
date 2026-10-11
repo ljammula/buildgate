@@ -1,0 +1,5 @@
+{
+ "verify_command": "python -m pip install -q -e . pytest && python -m pytest -q tests -k \"not pager\"",
+ "project": "click",
+ "tickets": 1
+}

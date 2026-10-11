@@ -1,0 +1,5 @@
+{
+ "verify_command": "python -m pip install -q -e . pytest freezegun && python -m pytest -q tests",
+ "project": "humanize",
+ "tickets": 1
+}

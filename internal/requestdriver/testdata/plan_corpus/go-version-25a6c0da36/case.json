@@ -1,0 +1,5 @@
+{
+ "verify_command": "go test ./...",
+ "project": "go-version",
+ "tickets": 1
+}
