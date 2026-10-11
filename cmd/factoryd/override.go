@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -188,7 +190,8 @@ func overrideRateMain(args []string) error {
 		}
 		r, err := run.Load(*dataDir, entry.Name())
 		if err != nil {
-			if os.IsNotExist(err) {
+			// errors.Is, not os.IsNotExist: run.Load wraps the read error.
+			if errors.Is(err, fs.ErrNotExist) {
 				continue // a run directory that never got a durable run.json
 			}
 			return fmt.Errorf("load run %q: %w", entry.Name(), err)

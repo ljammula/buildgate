@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -491,6 +492,11 @@ func dispatch(dp *deps, args []string) error {
 	}
 	if handler, ok := subcommands()[args[0]]; ok {
 		return handler(dp, args[1:])
+	}
+	// A single-ticket run is typed as flags only, so a first word that is no
+	// flag is a command name that does not exist.
+	if !strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("unknown command %q: `factoryd help` lists the commands", args[0])
 	}
 	return runMain(dp, args)
 }
