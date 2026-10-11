@@ -3584,6 +3584,97 @@ class VerifyRerunTests(unittest.TestCase):
 					})
 					self.assertIs(rnd.verify_passed, False)
 
+	def _real_verify_build(self, command_for, *, budget=None, clock=None):
+		"""One round with the real run_verification over command_for(outside)
+		in a real repository. Returns the result, how often the command ran
+		(it appends to outside/runs), round 1's saved logs, the progress
+		events and the report."""
+		events = []
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec = Path(outside) / "spec.md"
+			spec.write_text("Fix the cache")
+			turn = subprocess.CompletedProcess([], 0, pi_output("clean"), "")
+			environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+			if budget is not None:
+				environ[build_app.BUILD_TIME_BUDGET_ENV] = str(budget)
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([turn], [lambda: (root / "cache.go").write_text("x\n")])),
+				mock.patch.object(build_app, "print_progress", side_effect=events.append),
+				mock.patch.object(build_app, "_monotonic", side_effect=clock) if clock else contextlib.nullcontext(),
+				mock.patch.dict(os.environ, environ, clear=True),
+			):
+				result = build_app.run_build(
+					root, spec, max_rounds=1, timeout_minutes=1, verify_command_override=command_for(Path(outside)),
+					started_monotonic=0.0 if clock else None,
+				)
+				report = build_app.write_report(result).read_text()
+			runs = (Path(outside) / "runs").read_text().count("run\n") if (Path(outside) / "runs").exists() else 0
+			logs = {path.name: path.read_text() for path in (root / ".pi-build-session" / "feedback" / "round-1").glob("*.log")}
+		return result, runs, logs, events, report
+
+	def test_a_verify_whose_first_run_changed_the_tree_is_not_passed_by_a_second(self):
+		# The first run writes the file it then finds: a second run would pass
+		# on a tree the first one made, not on the one the round is judged on.
+		generating = lambda outside: f"echo run >> {outside}/runs; test -f golden.txt || {{ echo generated > golden.txt; echo '--- FAIL: TestGolden (0.00s)'; exit 1; }}"
+		result, runs, logs, events, report = self._real_verify_build(generating)
+		rnd = result.rounds[0]
+		self.assertEqual(runs, 1)
+		self.assertFalse(result.succeeded)
+		self.assertIs(rnd.verify_passed, False)
+		self.assertEqual(rnd.blockers, ["canonical verification failed"])
+		self.assertIn("TestGolden", rnd.verify_output_tail)
+		reason = "the round's checks changed files in the workspace"
+		self.assertEqual(rnd.verify_rerun, {"ran": False, "passed": None, "skipped_reason": reason, "first_failing": ["TestGolden"]})
+		self.assertEqual(rnd.failure_log, ".pi-build-session/feedback/round-1/verify.log")
+		self.assertEqual(sorted(logs), ["verify.log"])
+		self.assertIn(f"- verify rerun: not run ({reason})", report)
+		self.assertFalse(any("unchanged tree" in e.get("detail", "") for e in events))
+		# The same failure with nothing written in the workspace is run again, and passes.
+		flaky = lambda outside: f"echo run >> {outside}/runs; test -f {outside}/seen || {{ touch {outside}/seen; echo '--- FAIL: TestGolden (0.00s)'; exit 1; }}"
+		result, runs, logs, _, _ = self._real_verify_build(flaky)
+		self.assertEqual(runs, 2)
+		self.assertTrue(result.succeeded)
+		self.assertEqual(result.rounds[0].verify_rerun, {"ran": True, "passed": True, "skipped_reason": "", "first_failing": ["TestGolden"]})
+		self.assertEqual(sorted(logs), ["verify-first-run.log"])
+		# A tree that cannot be compared is not shown to be unchanged.
+		with tempfile.TemporaryDirectory() as not_a_repository:
+			self.assertIn("could not be compared", build_app.verify_rerun_tree_reason(Path(not_a_repository), ("head", "", "", ())))
+
+	def test_the_second_run_gets_no_more_time_than_the_budget_has_left(self):
+		allowance = lambda left, first: build_app.verify_rerun_allowance(returncode=1, first_run_s=first, elapsed=1000.0 - left)
+		with mock.patch.dict(os.environ, {build_app.BUILD_TIME_BUDGET_ENV: "1000"}):
+			# 60 s are kept back; under 30 s of timeout, or under 1.5 times the first run, nothing runs.
+			self.assertEqual(allowance(70, 0), ("under 90 s of the build time budget left", 0))
+			self.assertEqual(allowance(89, 0), ("under 90 s of the build time budget left", 0))
+			self.assertEqual(allowance(90, 0), ("", 30))
+			self.assertEqual(allowance(209, 100), ("under 210 s of the build time budget left", 0))
+			self.assertEqual(allowance(700, 100), ("", 640))
+			self.assertEqual(allowance(5000, 100), ("", 20 * 60))
+		environ = {k: v for k, v in os.environ.items() if k != build_app.BUILD_TIME_BUDGET_ENV}
+		with mock.patch.dict(os.environ, environ, clear=True):
+			self.assertEqual(allowance(0, 100), ("", 20 * 60))
+		# The timeout reaches the command: with 92 s left the second run is started with 32 s.
+		timeouts = []
+		real_sh = build_app.sh
+
+		def recording_sh(args, **kwargs):
+			if args[:1] == ["bash"]:
+				timeouts.append(kwargs.get("timeout"))
+			return real_sh(args, **kwargs)
+
+		failing = lambda outside: "echo '--- FAIL: TestSlow (0.00s)'; exit 1"
+		with mock.patch.object(build_app, "sh", side_effect=recording_sh):
+			result, _, _, _, _ = self._real_verify_build(failing, budget=1000, clock=lambda: 908.0)
+		self.assertEqual(timeouts, [20 * 60, 32])
+		self.assertEqual(result.rounds[0].verify_rerun["ran"], True)
+		with tempfile.TemporaryDirectory() as directory:
+			_, passed, timed_out, tail, _, _ = build_app.run_verification(Path(directory), verify_command_override="sleep 5", verify_timeout_s=1)
+		self.assertEqual((passed, timed_out), (False, True))
+		self.assertTrue(tail.startswith("verification command timed out after 1 s: sleep 5"), tail)
+
 	def test_run_verification_reports_the_commands_exit_status(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)

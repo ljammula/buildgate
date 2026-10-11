@@ -98,19 +98,28 @@ in the opening prompt. Only the build script takes it; no review script does.
   `internal/sanitize`. Anything reaching an operator surface (`factoryd
   status`, notifications, the console) goes through them.
 - **A failed verify is run once more.** When a round's verify command
-  fails after a turn that finished, `build_app.py` runs it a second time on
-  the unchanged tree before asking the model (`rerun_failed_verify`): a
-  timing-sensitive test of the target repository that fails under load
-  otherwise costs a model round that changes nothing. A pass makes the
-  round's verify a pass; a second failure is the round's, with that run's
-  output. No second run for a verify that timed out or could not start
-  (exit 126 or 127), or when the build's time budget has less left than 60 s
-  plus half as long again as the round's checks took. The round's
-  `verify_rerun` in `BUILD_EVIDENCE.json` (`ran`, `passed`, `skipped_reason`,
-  `first_failing`), a `verify rerun` line in `BUILD_REPORT.md` and a round
-  note in the progress feed say what happened; the first run's output stays
-  in the round's feedback folder as `verify-first-run.log`. Only this in-loop
-  check: the factory's gates after the build run once each, as before.
+  fails after a turn that finished, `build_app.py` runs it a second time
+  before asking the model (`rerun_failed_verify`): a timing-sensitive test of
+  the target repository that fails under load otherwise costs a model round
+  that changes nothing. A pass makes the round's verify a pass; a second
+  failure is the round's, with that run's output. No second run, and the
+  first failure stands, when:
+
+  | Case | `skipped_reason` in the round's `verify_rerun` |
+  |---|---|
+  | Verify timed out, was not reached, or the turn failed | no record |
+  | The command could not start (exit 126 or 127) | `the command could not start (exit N)` |
+  | The round's checks changed the workspace (its fingerprint outside the session folder differs from the one before them): a second run would judge a tree the first one made | `the round's checks changed files in the workspace` |
+  | The fingerprint could not be taken | `the workspace could not be compared ...` |
+  | The time budget, less 60 s, has under 30 s or under 1.5 times the first run left | `under N s of the build time budget left` |
+
+  The second run's timeout is what the budget has left less 60 s, at most the
+  verify command's 20 minutes. The round's `verify_rerun` in
+  `BUILD_EVIDENCE.json` (`ran`, `passed`, `skipped_reason`, `first_failing`),
+  a `verify rerun` line in `BUILD_REPORT.md` and a round note in the progress
+  feed say what happened; the first run's output stays in the round's
+  feedback folder as `verify-first-run.log`. Only this in-loop check: the
+  factory's gates after the build run once each, as before.
 - **gofmt.** After a round's verify passes, `build_app.py` runs `gofmt -w`
   on changed `.go` files only (`gofmt_changed_files`), inside the
   sandbox. No-op when `gofmt` is absent or no `.go` file changed.

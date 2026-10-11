@@ -1531,7 +1531,7 @@ oldest first, empty ones kept, at most 26 (the newest).
 | Field | Definition | Against `scripts/baseline.py` |
 |---|---|---|
 | `tickets` | Series counted | Same |
-| `one_shot`, `one_shot_rate` | Series with one run only, accepted, no override or rescue, at most one recorded round | baseline counts a first run accepted with no override or rescue, whatever followed or however many rounds it took |
+| `one_shot`, `one_shot_rate` | Series with one run only, accepted, no override or rescue, at most one recorded round. A round whose verify command failed and passed when the build ran it a second time on the unchanged workspace is a passed round, here and in `rounds_to_green` and a project's observations; the round's `verify_rerun` in the run's `BUILD_EVIDENCE.json` records it | baseline counts a first run accepted with no override or rescue, whatever followed or however many rounds it took |
 | `accepted`, `accepted_rate` | Series whose last run is accepted | Not in baseline |
 | `rounds_to_green` | Over accepted series that recorded a round: rounds summed across all its runs; `median` (mean of the two middle values for an even count) and nearest-rank `p90` | baseline takes the rounds of each accepted run |
 | `failed_round_pairs` | Consecutive failed rounds within one run | Same |
