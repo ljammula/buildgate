@@ -1,8 +1,9 @@
-// Package evidence provides small, factory-owned helpers for producing
-// tamper-evident evidence — currently just content hashing. Keeping this
-// separate from internal/run (the record shape) and internal/runner (the
-// subprocess/git wrapper) matches the plan's internal/evidence/ layout for
-// "logs, reports, hashes, artifacts".
+// Package evidence provides the factory-owned helpers that produce a run's
+// evidence: content hashes of files and trees, retained copies of what a
+// build left (round logs, saved prompts, the agent's notes, its build
+// evidence file), and the dependency changes read from a lockfile diff. It
+// is separate from internal/run (the record shape) and internal/runner (the
+// subprocess and git wrapper).
 package evidence
 
 import (

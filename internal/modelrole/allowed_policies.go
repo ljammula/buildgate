@@ -1,6 +1,7 @@
 // ValidateAllowedPolicies -- config-time proof that every model a role
 // could actually resolve to would produce a launchable relay policy. See
 // its own doc comment below for the live case this exists for.
+
 package modelrole
 
 import (

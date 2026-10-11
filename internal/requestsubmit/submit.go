@@ -1,14 +1,8 @@
-// Package requestsubmit holds the workspace-validation and
-// request-creation core that used to live only inside `factoryd submit`
-// (cmd/factoryd/submit.go). It was factored out here so the
-// new POST /requests console route (internal/api) and the `factoryd
-// submit` CLI call the exact same validation and
-// internal/request.Request construction -- neither one is allowed to
-// grow a second, hand-synced copy of "what makes a workspace/verify-
-// command combination legal to submit," the same anti-duplication
-// reasoning cmd/factoryd/validate.go's own dataDirInsideWorkspace doc
-// comment already gives for run_ticket.go and doctor.go sharing one
-// guard instead of two.
+// Package requestsubmit validates a workspace and creates the request record
+// for it. `factoryd submit` (cmd/factoryd/submit.go) and the POST /requests
+// route (internal/api) both call it, so the CLI and the console share one
+// answer to "what makes a workspace and verify command legal to submit" and
+// one construction of internal/request.Request.
 package requestsubmit
 
 import (

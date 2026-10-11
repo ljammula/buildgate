@@ -2,6 +2,7 @@
 // LaunchAgent that keeps `factoryd worker` running in the background,
 // so an operator no longer needs a dedicated terminal for it (see
 // USAGE.md §11). `factoryd doctor` reports the service's state.
+
 package main
 
 import (

@@ -1,3 +1,10 @@
+// Package meter is the spend meter the OpenShell supervisor calls for every
+// model request of a sandbox (cmd/factoryd-meter serves it): ceilings,
+// sliding-window budgets, pricing, the usage parsers of each API format,
+// reasoning-effort ranking and each sandbox's usage ledger (Account,
+// Ledger). It also holds the route host pins and the host-side Copilot
+// model listing and token exchange. It imports no other buildgate package
+// but its own generated middlewarepb.
 package meter
 
 import (

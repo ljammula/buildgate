@@ -1,5 +1,5 @@
-// Package runner shells out to the existing pi-harness-hardening Python
-// scripts. The agent invoked underneath is an untrusted worker: this
+// Package runner runs the build scripts of agent/pi and git as
+// subprocesses. The agent invoked underneath is an untrusted worker: this
 // package only captures what actually happened (exit code, duration, full
 // log) — it never parses the agent's own prose as a pass/fail signal.
 package runner

@@ -28,7 +28,7 @@ The shortest path from a fresh install to a reviewable pull request:
 | [`STATUS.md`](STATUS.md) | What works, what is opt-in, every known limit |
 | [`DEMO.md`](DEMO.md) | A scripted walkthrough for showing it to someone |
 | `USAGE.md` (this file) | Commands, request lifecycle, config, troubleshooting |
-| [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | Per-command flags, session-config keys, model routes, `.factory.yml`, oracle/request-driver internals |
+| [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | What each command does, the flags used most, session-config keys, model routes, `.factory.yml`, oracle/request-driver internals |
 | [`console/README.md`](console/README.md) | The operator console |
 
 `factoryd quickstart <repo-path> "<task>"` is the whole path for an
@@ -55,16 +55,21 @@ act in "you" rows.
 | `done` | - | Every ticket's PR merged |
 | `quarantined` / `halted` | **you** | Read the reason in `factoryd status`/console, fix the cause, `factoryd retry <id>` (a rebuilt ticket continues from the failed attempt's commit when a build may be told what failed; `-from scratch` rebuilds from the base: [reference](USAGE_REFERENCE.md#request-lifecycle); console: Retry request, with **Retry from scratch** ticked for `-from scratch`) -- or, before any ticket is accepted, send it back to redraft the plan or the spec: `factoryd reject -to plan\|spec -reason "..." <id>` (`plan`/`planning` and `spec`/`spec_drafting`) -- or, to drop the request instead, `factoryd cancel <id>`. A retry after the factory's own checks refused a drafted spec or plan gives the next draft their reason; a failed or timed-out draft job does not ([reference](USAGE_REFERENCE.md#a-retried-draft)) |
 
-A `resume_review` reason for a build or a review whose model was not served is
-read from the spend meter's record of the step's model requests, never from
-what the worker printed:
+The reason names one of eight causes (`resume.cause` in the request's
+`request.json`). The four that say a model was not served, or a review
+gave no verdict, are read from the spend meter's record of the step's model
+requests, never from what the worker printed:
 
 | Reason says | Cause | Before `factoryd resume <id>` |
 |---|---|---|
+| "the factoryd worker stopped while the ... step ran" | `worker_lost` | Nothing to fix first |
+| "the sandbox of the ... step could not be started, so the step never ran" | `sandbox_launch` | Fix what the run's halt reason names (`factoryd doctor -fix`): [Troubleshooting](#troubleshooting) |
+| "a package registry could not be reached while the ... step ran" | `dependency_fetch` | Wait until the registry, or your mirror, answers again: [Troubleshooting](#troubleshooting) |
+| "the job of the ... step ended before it produced a draft" | `drafting_job` | Read what the job reported at the end of the reason line and in its log: [Troubleshooting](#troubleshooting) |
 | "the model provider refused the requests ... with its own rate or usage limit" | `provider_quota` | Wait until the time the reason gives ("it said to try again after ..."), when the provider gave one. No session-config budget governs this limit |
 | "the spend meter refused the model requests ..." | `meter_denied` | Raise the ceiling, window budget or request rate in the session config (or wait out a budget's window; `factoryd cost` shows the spend), then `factoryd restart` |
 | "the model route served none of the last requests ..." | `model_unavailable` | Check the route (`factoryd doctor`). A review whose model served nothing was already launched once more by the factory |
-| "the review ... answered and gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
+| "the review of the ... step gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
 
 `cancelled` is also terminal (`factoryd cancel <id>`). Full mechanics
 (reminders, ticket sequencing, PR review loop): [USAGE_REFERENCE.md § Request lifecycle](USAGE_REFERENCE.md#request-lifecycle).
@@ -570,8 +575,8 @@ handed to `build_app.py` as build instructions and the only file
 pi-harness structure preflight. Passing the unchanging `spec/spec.md` as
 `-spec` on every ticket is refused rather than silently starving the
 build (`-allow-spec-ticket-scope-mismatch` is the explicit opt-out). A
-bare `factoryd -h` prints only the 5 flags that matter; the rest is in
-[USAGE_REFERENCE.md](USAGE_REFERENCE.md).
+bare `factoryd -h` lists the commands; `factoryd -ticket x -h` prints the 5
+flags that matter, then every flag of a single-ticket run.
 
 This creates an isolated worktree at `data/workspaces/<run-id>/` on its own
 branch, `factoryd/<slug>-<shorthash>` (`<slug>` from the ticket's Goal), runs
@@ -895,7 +900,7 @@ every request verb takes `-config`):
 | Local model host serialization | Automatic (`internal/modelhost`, keyed by the selected route's own `upstream` host) — no manual "one job at a time" discipline needed. Waiting shows as a `model_host_lock` event / `waiting` chip |
 | Compose sidecar serialization | Automatic: at most `compose_services_concurrency` (default 1) runs on this machine have compose sidecars, across every data dir and factoryd process. A run takes its slot before its first phase and holds it to the end, so the wait never counts against its timeout; the wait itself is bounded by one run's timeout, after which the run halts naming the holder. The daemon's recovery of a crashed submission takes the slot too, deferring to its next scan while it is busy. Waiting shows as a `compose_services_lock` event / `waiting` chip |
 
-Every command and flag:
+Every command, and the flags used most:
 [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
 
 ### Mission Control
@@ -1385,6 +1390,6 @@ What changes for a build:
 | A run stops at start with `sandbox image: build the image with this repository's toolchains: ...` | The image for the repository's declared Go or Python could not be built: the toolchain image did not pull, the local registry is not running, or buildgate's build scripts do not work on that Python | The message ends with the reason. A pull or registry failure: fix it (`make install` starts the registry) and `factoryd retry <id>`. A Python the scripts fail on cannot run a build |
 | A build is refused: `compose_services_worker_env ... names the service ... as a host` | The worker joins no network and resolves no service name | Read `BG_SERVICE_<NAME>` (an address) in the target repo instead |
 
-Per-command flags, session-config keys, model-route setup, `.factory.yml`
-reference, and oracle/request-driver internals:
+What each command does, the flags used most, session-config keys,
+model-route setup, the `.factory.yml` reference, and oracle/request-driver internals:
 [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md).
