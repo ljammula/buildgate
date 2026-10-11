@@ -103,7 +103,7 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	registryProxy = flags.Bool("registry-proxy", true, "Check the image named by -registry-proxy-image; with none, nothing is checked. Unset uses the session config's registry_proxy when it is set.")
 	registryProxyImage = flags.String("registry-proxy-image", "", "Registry proxy image to check is present locally. Empty skips the check, and so does -registry-proxy=false unless this flag is passed.")
 	composeServices = flags.Bool("compose-services", true, "Check that the docker compose v2 CLI (2.20 or newer) is available. Unset uses the session config's compose_services when it is set.")
-	fix = flags.Bool("fix", false, "Fix what doctor can: build an absent sandbox or registry-proxy image from source and print its digest-pinned reference, start missing services, and offer the first-run fixes (see -yes).")
+	fix = flags.Bool("fix", false, "Fix what doctor can: build an absent image from source, start missing services, reclaim a sandbox whose build is gone, and offer the first-run fixes (see -yes).")
 	repoRoot = flags.String("repo-root", "", "The buildgate checkout whose Makefile -fix builds images from. Empty uses $FACTORYD_REPO_ROOT, then the session config's image_source_root, then the checkout holding the running binary.")
 	workspace = flags.String("workspace", "", "A repository checkout to check: that Docker can see it, that -data-dir lies outside it, its .factory.yml, and its GitHub login. Empty skips these checks.")
 	dataDir = flags.String("data-dir", "data", "Directory of durable run records and logs, checked, with -workspace, for Docker visibility and for lying outside it. Unset uses the session config's data_dir.")

@@ -20,6 +20,7 @@ import (
 // failing doctor. Without meter_image the stack cannot be started, and the
 // one row says so. With fix, a gateway or meter that does not answer is
 // started first (the meter, then the gateway) and the outcome printed to w;
+// a sandbox whose build is gone is reclaimed (doctorSandboxOwnersCheck);
 // a stack that answers but must be restarted (stackRestartReasons) is stopped
 // before that, unless a build is using it.
 func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix bool, w io.Writer) []doctorCheck {
@@ -31,6 +32,9 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 			Advisory: true,
 		}}
 	}
+	// A sandbox whose build is gone is reclaimed before the restart below,
+	// which refuses while any sandbox exists.
+	sandboxes, sandboxesListed := doctorSandboxOwnersCheck(dp, ctx, in, fix, w)
 	if fix {
 		if reasons := stackRestartReasons(in.meterImage); len(reasons) > 0 {
 			stopStackForRestart(dp, w, reasons)
@@ -41,6 +45,9 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 		doctorCheckOpenShellImages(ctx, in.sandboxDocker),
 		doctorCheckOpenShellGateway(dp, ctx),
 		doctorCheckOpenShellGatewayConfig(),
+	}
+	if sandboxesListed {
+		checks = append(checks, sandboxes)
 	}
 	if check, ok := doctorCheckSupervisorTrustsInterceptingCA(); ok {
 		checks = append(checks, check)

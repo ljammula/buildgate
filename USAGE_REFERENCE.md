@@ -73,7 +73,7 @@ it explains what the flag changes. Flags come before positional arguments.
 | `-list` | `logs` | Lists every log of the id, oldest first, saved prompts included |
 | `-all` | `stop` | Every profile's `worker` and `serve`, then the OpenShell stack, Temporal and (when nothing else runs) colima |
 | `-force` | `stop`, `uninstall`, `install-service` | Proceeds past the refusal: `stop` despite a building request, whose build then waits in `resume_review` |
-| `-fix` | `doctor` | Repairs what it can: starts Temporal, the gateway and the meter, and writes missing config values |
+| `-fix` | `doctor` | Repairs what it can: starts Temporal, the gateway and the meter, writes missing config values, and reclaims a sandbox whose build is gone |
 | `-target-repo <checkout>` | `doctor` | Checks a repository as a run and a `submit` would: verify command, root `AGENTS.md`, preflight, compose file, declared toolchains |
 | `-purge` | `uninstall` | Also deletes `~/.config/factoryd`, `~/buildgate`, the Temporal volumes and the gateway's state; asks you to type `purge` |
 

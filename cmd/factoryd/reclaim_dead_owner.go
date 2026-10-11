@@ -155,6 +155,15 @@ func reclaimDeadOwnerRuns(dp *deps, ctx context.Context, dataDir, dockerBinary, 
 	if len(reclaimed) == 0 || dockerBinary == "" {
 		return reclaimed
 	}
+	removeFinishedRunContainers(ctx, dockerBinary, dataDir)
+	return reclaimed
+}
+
+// removeFinishedRunContainers runs dataDir's container reconcilers, the ones
+// every build start runs on its own data dir: they remove the worker, relay
+// and compose-sidecar containers of runs that are confirmed terminal, and
+// the scratch dirs no run in flight uses.
+func removeFinishedRunContainers(ctx context.Context, dockerBinary, dataDir string) {
 	if removed, reconcileErr := sandbox.ReconcileOrphans(ctx, dockerBinary, dataDir); reconcileErr != nil {
 		log.Printf("sandbox: orphaned container reconciliation for %s: %v", dataDir, reconcileErr)
 	} else if len(removed) > 0 {
@@ -171,7 +180,18 @@ func reclaimDeadOwnerRuns(dp *deps, ctx context.Context, dataDir, dockerBinary, 
 		log.Printf("sandbox: removed %d orphaned compose services resource(s) from a prior run: %v", len(removed), removed)
 	}
 	removeScratchDirs(dataDir)
-	return reclaimed
+}
+
+// reclaimLostWork halts what a factoryd process that is gone left in dataDir:
+// every run whose owner is dead (reclaimDeadOwnerRuns), the requests those
+// runs were building, which wait in resume_review, and the containers of a
+// dead drafting or planning job. The caller holds dataDir's worker lock. It
+// returns the runs it halted and the ids of the requests it halted.
+func reclaimLostWork(dp *deps, ctx context.Context, dataDir, dockerBinary, temporalAddress string) (runs []*run.Run, requestIDs []string) {
+	runs = reclaimDeadOwnerRuns(dp, ctx, dataDir, dockerBinary, temporalAddress)
+	requestIDs = haltRequestsOfLostRuns(dataDir, runs)
+	reclaimDeadRequestJobs(ctx, dataDir, dockerBinary)
+	return runs, requestIDs
 }
 
 // reclaimDeadRequestJobs removes the worker and relay containers that a
