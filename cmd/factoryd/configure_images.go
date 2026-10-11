@@ -29,13 +29,13 @@ type configureImagesFlags struct {
 
 func newConfigureImagesFlags() (flags *flag.FlagSet, f configureImagesFlags) {
 	flags = flag.NewFlagSet("configure-images", flag.ContinueOnError)
-	f.configPath = flags.String("config", sessionconfig.DefaultPaths()[0], "session config file to update (created if it doesn't exist yet); see `factoryd worker`'s own -config")
+	f.configPath = flags.String("config", sessionconfig.DefaultPaths()[0], "session config file or profile name to update; created if it does not exist")
 	f.allProfiles = flags.Bool("all-profiles", false, "apply the image refs to every profile under the config directory (see `factoryd use`) instead of one -config; with no profile yet, creates the default config")
 	f.sandboxImage = flags.String("sandbox-image", "", "digest-pinned image to set as this machine's sandbox_image default; left empty, the existing value (if any) is untouched")
 	f.meterImage = flags.String("meter-image", "", "digest-pinned image to set as this machine's meter_image default; left empty, the existing value (if any) is untouched")
 	f.registryProxyImage = flags.String("registry-proxy-image", "", "digest-pinned image to set as this machine's registry_proxy_image default; left empty, the existing value (if any) is untouched")
-	f.imageSourceRoot = flags.String("image-source-root", "", "buildgate checkout these images were built from, for a later staleness check (internal/imageinputs); defaults to the current working directory when at least one image flag above is set")
-	plainFlagUsage(flags)
+	f.imageSourceRoot = flags.String("image-source-root", "", "buildgate checkout the images were built from, recorded so out-of-date images can be detected later; empty means the current directory")
+	finishFlags(flags)
 	return flags, f
 }
 

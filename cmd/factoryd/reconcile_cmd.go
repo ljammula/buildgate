@@ -44,11 +44,11 @@ import (
 // executing the command.
 func newReconcileFlags() (flags *flag.FlagSet, workspace, dataDir, temporalAddress, sandboxDocker *string) {
 	flags = flag.NewFlagSet("reconcile", flag.ContinueOnError)
-	workspace = flags.String("workspace", "", "path to the repository to reconcile stranded isolation markers/worktrees for (required) -- same meaning as factoryd <run>'s -workspace")
+	workspace = flags.String("workspace", "", "path to the repository whose stranded isolation markers and worktrees to reconcile (required)")
 	dataDir = flags.String("data-dir", "data", "directory holding durable run records and isolation markers (must match the value the original runs used)")
-	temporalAddress = flags.String("temporal-address", "", "Temporal server address; when set, a Temporal-mode marker whose workflow this server still reports running is preserved rather than reaped. Omitted: Temporal-mode markers are preserved unconditionally as inconclusive, the same fail-safe default reconcileIsolationMarkers itself uses for a nil client")
-	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable used to reconcile orphaned sandbox containers and check whether a sandboxed run's container is still present before reaping its worktree; a check that fails for any reason (including this executable not being resolvable) is treated as inconclusive and preserves the marker rather than assuming no container exists. Pass -sandbox-docker=\"\" explicitly to skip Docker entirely if this fleet never uses sandboxing and reconciliation should never wait on it")
-	plainFlagUsage(flags)
+	temporalAddress = flags.String("temporal-address", "", "Temporal server address. When set, a marker whose workflow still runs there is kept; when empty, every marker of a Temporal run is kept as inconclusive.")
+	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable for removing orphaned sandbox containers and checking a run's container is gone before its worktree is reaped; a failed check keeps the marker. Pass \"\" to skip Docker.")
+	finishFlags(flags)
 	return
 }
 

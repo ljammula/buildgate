@@ -21,7 +21,7 @@ import (
 // signature change there, which another concurrent change to that
 // file's run-start preflight checks would otherwise conflict with.
 func doctorRegisterNotifyTestFlag(flags *flag.FlagSet) *bool {
-	return flags.Bool("notify-test", false, "send one real desktop test notification, report which mechanism delivered it (terminal-notifier or osascript) and the known silent-failure caveat, then exit -- does not run the rest of doctor's checks. Not part of a default `factoryd doctor` run since it pops real UI")
+	return flags.Bool("notify-test", false, "Send one real desktop test notification, report how it was delivered (terminal-notifier or osascript), then exit without running the other checks.")
 }
 
 // notifyTestClickTarget is the directory the test notification's click

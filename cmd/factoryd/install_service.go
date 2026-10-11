@@ -220,12 +220,12 @@ func resolveServiceDataDir(explicit, configPath string) (string, error) {
 // executing the command.
 func newInstallServiceFlags() (flags *flag.FlagSet, configPath, dataDir *string, force, print, noServe *bool) {
 	flags = flag.NewFlagSet("install-service", flag.ContinueOnError)
-	configPath = flags.String("config", "", "session config the worker should read; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists")
+	configPath = flags.String("config", "", "session config path or profile name the worker reads; default: the active session config")
 	dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the resolved session config's data dir (its data_dir, or ~/buildgate/data when it sets none)")
 	force = flags.Bool("force", false, "overwrite an already-installed plist")
-	print = flags.Bool("print", false, "write the generated worker plist to stdout instead of installing anything (the serve LaunchAgent below is also skipped in this mode)")
+	print = flags.Bool("print", false, "print the generated worker plist to stdout and install nothing")
 	noServe = flags.Bool("no-serve", false, "install only the worker LaunchAgent; skip installing dev.factoryd.serve alongside it")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 
@@ -356,7 +356,9 @@ func installServeService(dp *deps, binaryPath, configPath, dataDir, home string,
 // drift test (TestUSAGEDocFlagsExistOnSubcommand) can enumerate it without
 // executing the command.
 func newUninstallServiceFlags() *flag.FlagSet {
-	return flag.NewFlagSet("uninstall-service", flag.ContinueOnError)
+	flags := flag.NewFlagSet("uninstall-service", flag.ContinueOnError)
+	finishFlags(flags)
+	return flags
 }
 
 func uninstallServiceMain(dp *deps, args []string) error {

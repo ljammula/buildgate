@@ -56,7 +56,7 @@ type inboxEntry struct {
 func newInboxFlags() (flags *flag.FlagSet, jsonOutput *bool) {
 	flags = flag.NewFlagSet("inbox", flag.ContinueOnError)
 	jsonOutput = flags.Bool("json", false, "print the entries as a JSON array instead of text")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return flags, jsonOutput
 }
 

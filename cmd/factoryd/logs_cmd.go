@@ -61,12 +61,12 @@ type logsTarget struct {
 func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, follow *bool, lines *int) {
 	flags = flag.NewFlagSet("logs", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable request and run records")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	list = flags.Bool("list", false, "list every log for the id (oldest first) instead of showing the newest")
 	follow = flags.Bool("f", false, "follow: print appended bytes and switch to newer log files until the request or run finishes (Ctrl-C to stop)")
 	lines = flags.Int("n", 40, "number of trailing lines to show")
 	flags.String("prompt", "", "print one prompt as the build saved it, in full: <name> or <attempt>/<name> as -list shows them (operator-only; may quote repository content)")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

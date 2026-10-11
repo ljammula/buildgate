@@ -41,7 +41,7 @@ func TestBuildgateSkillCommandsAndFlagsAreReal(t *testing.T) {
 	}
 	for _, m := range skillFactoryCommandPattern.FindAllStringSubmatch(string(content), -1) {
 		cmd, rest := m[1], m[2]
-		newFlags, ok := docTrackedCommands[cmd]
+		newFlags, ok := docTrackedCommands()[cmd]
 		if !ok {
 			t.Errorf("SKILL.md: span `factoryd %s%s` names subcommand %q, which docTrackedCommands does not know about", cmd, rest, cmd)
 			continue

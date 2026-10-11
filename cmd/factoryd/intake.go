@@ -206,14 +206,14 @@ func withIntakeLock(pilotDir string, fn func() error) error {
 // executing the command.
 func newIntakeFlags() (flags *flag.FlagSet, specInput, pilotDir, goalPilotInterpreter, goalPilotScript *string, timeout *time.Duration, checkpoint, verifyCommand *string) {
 	flags = flag.NewFlagSet("intake", flag.ContinueOnError)
-	specInput = flags.String("spec-input", "", "path to a rough-input file, or literal rough-input text (required) -- passed straight through to goal_pilot.py's own --spec-input")
+	specInput = flags.String("spec-input", "", "path to a file of rough input, or the rough input text itself (required)")
 	pilotDir = flags.String("pilot-dir", "", "pilot directory to scaffold spec/tickets into; a later `factoryd <run> -workspace` should be this same directory once the spec is approved (required)")
-	goalPilotInterpreter = flags.String("goal-pilot-interpreter", "python3", "interpreter used to invoke -goal-pilot-script")
+	goalPilotInterpreter = flags.String("goal-pilot-interpreter", "python3", "internal: the interpreter that runs -goal-pilot-script; tests point it at a stand-in")
 	goalPilotScript = flags.String("goal-pilot-script", "", "path to goal_pilot.py (default: this version's embedded harness copy)")
-	timeout = flags.Duration("timeout", 50*time.Minute, "timeout for the drafting step; goal_pilot.py's own /spec-plan step is bounded at 45m internally, this adds process-overhead margin")
-	checkpoint = flags.String("checkpoint", "review", "passed through to goal_pilot.py's own --checkpoint (review|skip). Defaults to review, NOT goal_pilot.py's own DEFAULT_CHECKPOINT=skip: skip mode does not halt at goal_pilot.py's step 5 in --non-interactive mode at all, so a resumed invocation (spec.md already FROZEN) would proceed unattended straight into ticket_runner.py building ticket 001 -- exactly the kind of checkpoint-skipping this command exists to never do on its own. Pass -checkpoint skip only if you want that build to happen; intakeMain's own success detection below does not recognize its later halt")
-	verifyCommand = flags.String("verify-command", "", "passed through to goal_pilot.py's own --verify-command, overriding its hardcoded \"make verify && make verify-full\" default when it injects a drafted ticket's Verify-Command: key. That default assumes the target repo's own Makefile defines both targets -- true only for a repo this pipeline scaffolds from scratch. An existing repo being onboarded (factoryd onboard / -preflight-profile brownfield) has no reason to define verify-full at all, so pass its real verify command here (typically the same one that ends up in its .factory.yml) or every drafted ticket after 001 declares a Verify-Command that can never pass, permanently quarantining an otherwise-correct run")
-	plainFlagUsage(flags)
+	timeout = flags.Duration("timeout", 50*time.Minute, "time limit for the drafting step")
+	checkpoint = flags.String("checkpoint", "review", "review or skip. review stops at the acceptance-suite checkpoint for a human; skip passes it and builds ticket 001 unattended, and intake then reports an error at the checkpoint after that build")
+	verifyCommand = flags.String("verify-command", "", "verify command written into each drafted ticket; empty means the verify_command in -pilot-dir's .factory.yml, else \"make verify && make verify-full\"")
+	finishFlags(flags)
 	return
 }
 

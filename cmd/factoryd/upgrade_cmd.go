@@ -73,7 +73,7 @@ func newUpgradeFlags() (*flag.FlagSet, upgradeFlags) {
 	f.source = flags.String("source", "", "buildgate checkout to build from; empty means the active profile's image_source_root")
 	f.yes = flags.Bool("yes", false, "do not ask for confirmation (required when stdin is not a terminal)")
 	f.wait = flags.Bool("wait", false, "when a request is building, wait until every profile's worker is between requests instead of refusing")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return flags, f
 }
 

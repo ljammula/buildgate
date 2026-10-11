@@ -100,56 +100,56 @@ type workerFlags struct {
 // executing the command.
 func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	flags = flag.NewFlagSet("worker", flag.ContinueOnError)
-	f.configPath = flags.String("config", "", "session config file supplying any flag below not given on the command line (keys mirror the flag names with underscores; see `factoryd init-config`). Default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists")
-	f.skipDoctor = flags.Bool("skip-doctor", false, "bypass the factoryd doctor preflight (Docker reachable, every configured image present locally, relay upstream well-formed and listing the worker model from inside the sandbox, contextWindow set) that otherwise runs first and refuses to drain on any failure")
+	f.configPath = flags.String("config", "", "config path or profile name, for flags not given; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	f.skipDoctor = flags.Bool("skip-doctor", false, "skip the doctor preflight, which otherwise runs first and refuses to start the worker on any failed check")
 	f.dataDir = flags.String("data-dir", "data", "directory holding queue and run records; must match what `factoryd submit` used")
-	f.openPullRequest = flags.Bool("open-pull-request", true, "pass -open-pull-request through to each entry's runMainWithReady invocation, so an accepted run pushes its branch and opens a draft PR. Defaults to true here, unlike the bare CLI's own off-by-default -- worker's whole purpose is the automated intake-to-PR flow, so an operator running it has already opted into that outward-facing side effect. Pass -open-pull-request=false to opt back out")
+	f.openPullRequest = flags.Bool("open-pull-request", true, "push each accepted run's branch and open a draft pull request; pass -open-pull-request=false to keep accepted runs local")
 
 	// Everything below is copied verbatim (name, default, help text) from
 	// run_ticket.go's own flag set -- see workerConfig's own doc comment
 	// for why. `factoryd worker -help` and `factoryd -help` should read
 	// identically for each of these.
-	f.buildAppScript = flags.String("build-app-script", "", "path to build_app.py (default: this version's embedded harness copy)")
-	f.draftSpecScript = flags.String("draft-spec-script", "", "path to draft_spec.py, used by the request driver's spec-drafting step (default: this version's embedded harness copy)")
-	f.specDraftTimeoutMinutes = flags.Int("spec-draft-timeout-minutes", defaultSpecDraftTimeoutMinutes, "wall-clock budget for the request driver's single spec-drafting pi invocation")
-	f.planTicketsScript = flags.String("plan-tickets-script", "", "path to plan_tickets.py, used by the request driver's plan-drafting step (default: this version's embedded harness copy)")
-	f.planTicketsTimeoutMinutes = flags.Int("plan-tickets-timeout-minutes", defaultPlanTicketsTimeoutMinutes, "wall-clock budget for the request driver's single plan-drafting pi invocation")
-	f.oracleDraftScript = flags.String("draft-oracles-script", "", "path to draft_acceptance_oracles.py, used by the request driver's oracle-drafting step for requests submitted with -draft-oracles (default: this version's embedded harness copy)")
-	f.oracleDraftTimeoutMinutes = flags.Int("draft-oracles-timeout-minutes", defaultOracleDraftTimeoutMinutes, "wall-clock budget for the request driver's single oracle-drafting pi invocation")
-	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "total build_app.py attempts allowed for infrastructure failures; see factoryd <run>'s own flag of the same name")
-	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "total canonical-verification attempts allowed for infrastructure failures, and total launches of a review, full-suite or gate step whose sandbox never started; see factoryd <run>'s own flag of the same name")
-	f.sandboxImage = flags.String("sandbox-image", "", "run build and verify inside this Docker image. Must be digest-pinned (name@sha256:...) -- a mutable tag is rejected. No built-in default -- run `make install` from the buildgate checkout (builds images from source and records them via `factoryd configure-images`) or pass this explicitly. The image bakes only this repo's own dependencies and a sandboxed build has no package-registry network; a target project needing another dependency needs its own image instead (`make project-sandbox-image PROJECT_DIR=<path>`, see internal/sandbox/Dockerfile.project). worker always runs sandboxed and does not accept a host-execution opt-out")
-	f.registryProxy = flags.Bool("registry-proxy", false, "opt-in: launch a per-run read-only caching package-registry proxy alongside build_app.py's sandboxed worker, fronting an allowlist of npm/PyPI/Go module proxy upstreams (session-config only; see the registry_proxy_*_upstream keys). Requires -sandbox-image.")
-	f.registryProxyImage = flags.String("registry-proxy-image", "", "digest-pinned Docker image for the registry proxy, used when -registry-proxy is set; only used with -registry-proxy. No built-in default -- run `make install` or `make registry-proxy-image`, or pass this explicitly; validated the same way as -relay-image (must be pinned by a sha256 digest)")
-	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file on this host (e.g. a corporate TLS-interception proxy's CA, such as Zscaler) bind-mounted read-only into the registry-proxy container and trusted by it, in addition to their own system CA roots; only used with -relay-image and/or -registry-proxy. The sandboxed worker itself has no network and needs nothing")
-	f.composeServices = flags.Bool("compose-services", true, "launch this run's own docker-compose-declared dependency services alongside the sandboxed worker on every phase (build, verify, full suite); see factoryd <run>'s own flag of the same name. Tuning is session-config only (the compose_services_* keys). Default-on: a target repo with no compose file at its base commit is simply a no-op. Pass -compose-services=false to opt out explicitly")
+	f.buildAppScript = flags.String("build-app-script", "", "path to a build_app.py to run in place of the built-in one")
+	f.draftSpecScript = flags.String("draft-spec-script", "", "path to a draft_spec.py to run for spec drafting in place of the built-in one")
+	f.specDraftTimeoutMinutes = flags.Int("spec-draft-timeout-minutes", defaultSpecDraftTimeoutMinutes, "minutes allowed for drafting a request's spec")
+	f.planTicketsScript = flags.String("plan-tickets-script", "", "path to a plan_tickets.py to run for plan drafting in place of the built-in one")
+	f.planTicketsTimeoutMinutes = flags.Int("plan-tickets-timeout-minutes", defaultPlanTicketsTimeoutMinutes, "minutes allowed for drafting a request's plan")
+	f.oracleDraftScript = flags.String("draft-oracles-script", "", "path to a draft_acceptance_oracles.py to run for oracle drafting in place of the built-in one")
+	f.oracleDraftTimeoutMinutes = flags.Int("draft-oracles-timeout-minutes", defaultOracleDraftTimeoutMinutes, "minutes allowed for drafting a request's acceptance oracles")
+	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "total build attempts allowed when a build fails for an infrastructure reason")
+	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "total canonical-verification attempts allowed on an infrastructure failure, and total launches of a review, full-suite or gate step whose sandbox never started")
+	f.sandboxImage = flags.String("sandbox-image", "", "Docker image that builds and verification run in; must be digest-pinned (name@sha256:...). Empty uses the session config's sandbox_image, which 'make install' records.")
+	f.registryProxy = flags.Bool("registry-proxy", false, "give each build a read-only caching proxy to the npm, PyPI and Go registries. Unset uses the config's registry_proxy, else on unless -build-app-script is given. True needs -sandbox-image.")
+	f.registryProxyImage = flags.String("registry-proxy-image", "", "digest-pinned Docker image of the registry proxy, used only with -registry-proxy. Empty uses the session config's registry_proxy_image, which 'make install' records.")
+	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-intercepting proxy's, trusted by the registry proxy and host-side model calls. Empty uses the session config's egress_ca_bundle, else the saved build-ca.pem.")
+	f.composeServices = flags.Bool("compose-services", true, "start the services the target repository's compose file declares beside each build, verify and full-suite phase; a repository with no compose file is unaffected")
 
 	// prPollInterval/prIgnoreAuthors wire the config only -- the
 	// poll loop that actually reads each open PR's review state on this
 	// interval is the PR-review driver. See
 	// internal/forge.GHPullRequestOpener's own
 	// ReadReviewState/DefaultIgnoreAuthors for what these values will feed.
-	f.prPollInterval = flags.Duration("pr-poll-interval", 5*time.Minute, "how often the PR-review poll loop will re-read each open PR's review state; must be at least 1m")
-	f.prIgnoreAuthors = flags.String("pr-ignore-authors", "", "comma-separated GitHub logins whose review-thread comments the PR-review poll loop always ignores, in addition to internal/forge.DefaultIgnoreAuthors and the factory's own gh account; wins over -pr-trusted-authors when a login appears in both")
-	f.prTrustedAuthors = flags.String("pr-trusted-authors", "", "comma-separated GitHub logins whose review-thread comments trigger a corrective build round; the factory's own gh account is always excluded regardless of this list, and empty means no reviewer comment ever triggers a round")
-	f.maxReviewRounds = flags.Int("max-review-rounds", defaultMaxReviewRounds, "most corrective build rounds a ticket's PR may go through, in response to reviewer comments, before its request is halted with \"review rounds exhausted\"; must be at least 1")
+	f.prPollInterval = flags.Duration("pr-poll-interval", 5*time.Minute, "how often each open pull request's review state is read again; at least 1m")
+	f.prIgnoreAuthors = flags.String("pr-ignore-authors", "", "comma-separated GitHub logins whose review comments are always ignored; a login also in -pr-trusted-authors stays ignored")
+	f.prTrustedAuthors = flags.String("pr-trusted-authors", "", "comma-separated GitHub logins whose review comments start a corrective build round; empty means no comment does. The factory's own GitHub account never counts.")
+	f.maxReviewRounds = flags.Int("max-review-rounds", defaultMaxReviewRounds, "most corrective build rounds a ticket's pull request gets for reviewer comments before its request halts with \"review rounds exhausted\"; at least 1")
 
 	// reviewCorrectiveRounds: counted
 	// separately from maxReviewRounds above -- see request.Round.Kind's
 	// own doc comment for why the two budgets never share one counter.
-	f.reviewCorrectiveRounds = flags.Int("review-corrective-rounds", defaultReviewCorrectiveRounds, "most automatic corrective builds a ticket gets when its run quarantines with its failed gates a subset of {spec_conformity, code_review} (every other recorded gate passed) and at least one of those two carries actionable content (a flagged spec-conformity criterion, or a \"high\"-severity code-review finding), before the request quarantines as it does today; each round writes an addendum spec (the ticket spec plus the flagged criteria and/or blocking code-review findings) and rebuilds on the quarantined run's own branch, going through every gate again including a fresh, independent review. A PR-review corrective round the review gate quarantines the same way gets the same number of fix attempts before it ends. 0 disables both; must not be negative")
+	f.reviewCorrectiveRounds = flags.Int("review-corrective-rounds", defaultReviewCorrectiveRounds, "most automatic fix builds a ticket gets when only the spec-conformity or code-review gate failed and named something to fix; 0 disables them, and a negative value is refused")
 
 	// hitlReminderInterval: the request driver's own reminder ticker. A
 	// request that enters spec_review or plan_review is reminded
 	// immediately (the request driver's own remindRequest call, request_driver.go) and
 	// then again every time this much has elapsed since its last
 	// reminder (the worker's RemindIfDue call).
-	f.hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "how often a request waiting in spec_review, oracle_review, plan_review or resume_review is re-reminded; must be at least 1m")
+	f.hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "how often a request waiting for a human at a review gate is reminded again; at least 1m")
 
 	// advanceOn: the request driver's own ticket-sequencing policy. See
 	// startNextTicketOrFinish's own doc comment (request_driver.go) for
 	// what each value means.
-	f.advanceOn = flags.String("advance-on", requestdriver.AdvanceOnAccepted, `when a request's ticket build advances to the next ticket (or, on the last ticket, to pr_review): "accepted" (default) as soon as the ticket's run is accepted, or "pr_approved" only once its PR is approved`)
+	f.advanceOn = flags.String("advance-on", requestdriver.AdvanceOnAccepted, `when a request moves on to its next ticket: "accepted" as soon as the ticket's run is accepted, or "pr_approved" only once its pull request is approved`)
 
 	// conformityPolicy mirrors factoryd <run>'s own -conformity-policy
 	// flag (previously missing on this command entirely -- every
@@ -163,7 +163,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// should behave like the direct CLI by default" reasoning
 	// -open-pull-request's own doc comment gives for its one deliberate
 	// divergence.
-	f.conformityPolicy = flags.String("conformity-policy", conformityPolicyRequired, "build_app.py --conformity-policy (required|advisory): governs the per-criterion spec-conformity review -spec-acceptance-criteria enables; see factoryd <run>'s own flag of the same name. advisory is the documented escape valve when a slow/local model's own conformity-review round-trip times out or returns unparseable JSON, which otherwise quarantines objectively-correct work under an all-\"unavailable\" verdict (issue #164)")
+	f.conformityPolicy = flags.String("conformity-policy", conformityPolicyRequired, "what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
 
 	// codeReviewPolicy mirrors factoryd <run>'s own -code-review-policy
 	// flag exactly, defaulting to "off" like the bare CLI -- unlike
@@ -171,10 +171,10 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// there is no equivalent operator complaint yet for a gate that is
 	// off by default, so this stays off until an operator opts a
 	// drained entry into it.
-	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "standalone AI code-review pass (agent/pi/scripts/code_review.py): off (default), advisory, or required; see factoryd <run>'s own flag of the same name")
+	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after every other gate passes: off never runs it, advisory records findings without blocking, required quarantines the run on a high-severity finding")
 
-	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Default (empty): Temporal at localhost:7233, started with Docker if down; with FACTORYD_AUTOSTART=0 the address is required (a running Temporal is not auto-selected)")
-	plainFlagUsage(flags)
+	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts Temporal with Docker if it is down; with FACTORYD_AUTOSTART=0 an address is required.")
+	finishFlags(flags)
 	return flags, f
 }
 

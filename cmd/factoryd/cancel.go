@@ -25,9 +25,9 @@ import (
 func newCancelFlags() (flags *flag.FlagSet, dataDir, reason, configPath *string) {
 	flags = flag.NewFlagSet("cancel", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
-	reason = flags.String("reason", "", "why the request is being cancelled (optional) -- recorded on the request's history. Must precede <request-id> on the command line (flag.Parse stops at the first positional argument)")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	reason = flags.String("reason", "", "why the request is being cancelled (optional); recorded on the request's history")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

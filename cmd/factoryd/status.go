@@ -548,12 +548,12 @@ func statusProfileLine(name, path, dataDir string) string {
 func newStatusFlags() (flags *flag.FlagSet, dataDir, project, state, configPath *string, n *int, jsonOutput *bool) {
 	flags = flag.NewFlagSet("status", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
-	project = flags.String("project", "", "only show runs whose project id matches (see GET /projects or internal/release.ProjectFromWorkspace)")
+	project = flags.String("project", "", "only show runs and requests of this project id, which is the name of the repository's root directory")
 	state = flags.String("state", "", "only show runs in this state (e.g. ready, slice_running, verifying, accepted, halted, quarantined)")
 	n = flags.Int("n", 20, "maximum number of runs to show")
 	jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of a table")
-	configPath = flags.String("config", "", "session config path (for the roles: summary below); empty searches the default paths")
-	plainFlagUsage(flags)
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir and the roles summary; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

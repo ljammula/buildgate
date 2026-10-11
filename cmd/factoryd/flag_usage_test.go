@@ -2,32 +2,44 @@ package main
 
 import (
 	"flag"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-// TestNoFlagUsageContainsBackticks is the regression test for the
-// flag.UnquoteUsage misrendering fixed by plainFlagUsage (flag_usage.go):
-// once plainFlagUsage has run, no flag's Usage string may still contain a
-// backtick, since flag.UnquoteUsage treats the first backquoted span in a
-// Usage string as that flag's argument placeholder name (see its own doc
-// comment) -- almost every backtick in this package's flag descriptions
-// quotes a shell command, not an intended placeholder.
-//
-// Reuses usage_doc_flags_test.go's own docTrackedCommands registry, which
-// already builds every documented subcommand's real FlagSet via its
-// new<Cmd>Flags constructor without running the command -- exactly the
-// enumeration this test needs, and the same one TestUSAGEDocFlagsExistOnSubcommand
-// relies on staying complete. doctorMain's three separately registered
-// flags (-yes, -list-models, -notify-test) are not reachable this way; its
-// own plainFlagUsage call covers them.
+// Once finishFlags has run, no flag's usage string holds a backtick:
+// flag.UnquoteUsage would print the first backquoted span as the name of the
+// flag's value, and the usage strings here quote commands.
 func TestNoFlagUsageContainsBackticks(t *testing.T) {
 	t.Parallel()
-	for _, cmd := range sortedKeys(docTrackedCommands) {
-		fs := docTrackedCommands[cmd]()
-		fs.VisitAll(func(f *flag.Flag) {
+	for _, c := range commandCatalog() {
+		c.flags().VisitAll(func(f *flag.Flag) {
 			if strings.Contains(f.Usage, "`") {
-				t.Errorf("factoryd %s -%s: Usage still contains a backtick after plainFlagUsage: %q", cmd, f.Name, f.Usage)
+				t.Errorf("factoryd %s -%s: Usage still contains a backtick after finishFlags: %q", c.name, f.Name, f.Usage)
+			}
+		})
+	}
+}
+
+// flagUsageLimit is how long a flag's usage string may be. The usage string
+// is the flag's documentation, printed by -h and `factoryd help -json`.
+const flagUsageLimit = 200
+
+// sourceNameInUsage matches what a usage string must not lean on: a Go file,
+// a package path of this module, or a pointer at another flag's help.
+var sourceNameInUsage = regexp.MustCompile(`\w\.go\b|internal/|own flag|runMain| -- `)
+
+// A usage string is short and says what the flag does, without naming the
+// source: an operator and a coding agent both read it in -h.
+func TestFlagUsageIsShort(t *testing.T) {
+	t.Parallel()
+	for _, c := range commandCatalog() {
+		c.flags().VisitAll(func(f *flag.Flag) {
+			if n := len(f.Usage); n > flagUsageLimit {
+				t.Errorf("factoryd %s -%s: the usage string is %d characters, over %d: say what the flag does in one or two sentences", c.name, f.Name, n, flagUsageLimit)
+			}
+			if m := sourceNameInUsage.FindString(f.Usage); m != "" {
+				t.Errorf("factoryd %s -%s: the usage string contains %q: say what the flag does, without naming the source or another flag's help", c.name, f.Name, m)
 			}
 		})
 	}

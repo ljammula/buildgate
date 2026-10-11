@@ -38,8 +38,8 @@ func newStatsFlags() statsFlags {
 	f.bucket = flags.Int("bucket", stats.DefaultBucketDays, "days in one row of the trend table")
 	f.all = flags.Bool("all", false, "also count the live-smoke tickets, which are built to prove the pipeline and some to fail")
 	f.jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of tables")
-	f.configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	f.configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return f
 }
 

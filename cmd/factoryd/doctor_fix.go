@@ -19,7 +19,7 @@ import (
 // avoids adding yet another entry to newDoctorFlags' already very long
 // named-return tuple for a flag only doctorApplyFixes reads.
 func doctorRegisterYesFlag(flags *flag.FlagSet) *bool {
-	return flags.Bool("yes", false, "with -fix, apply the first-run-blocker fixes (missing .factory.yml, missing session-config release_* defaults, a -data-dir outside $HOME failing mount visibility) without an interactive y/N prompt -- required on a non-TTY invocation, since none of them are ever applied silently otherwise")
+	return flags.Bool("yes", false, "With -fix, apply the offered fixes without asking. Without a terminal this is required: a fix is otherwise only described, never applied.")
 }
 
 // doctorCheckFactoryYML is an advisory (doctorCheck.Advisory) check for

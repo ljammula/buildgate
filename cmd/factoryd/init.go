@@ -34,11 +34,11 @@ func newInitFlags() (flags *flag.FlagSet, project, root *string, skipDoctor *boo
 	flags = flag.NewFlagSet("init", flag.ContinueOnError)
 	project = flags.String("project", "", "project identifier, used only to title the scaffolded artifacts (required)")
 	root = flags.String("root", "", "project root directory to scaffold into; a later factoryd <run> -workspace should be a subdirectory of this same root (required)")
-	skipDoctor = flags.Bool("skip-doctor", false, "bypass the factoryd doctor environment preflight (Docker reachable, sandbox image present, -root mount-visible) that otherwise runs first and refuses to scaffold on any failure; for CI or an operator who already knows")
-	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable the doctor preflight checks with; see factoryd <run>'s own -sandbox-docker")
-	sandboxImage = flags.String("sandbox-image", "", "sandbox image the doctor preflight confirms is present locally; no built-in default -- an empty value fails the preflight (build one with `make sandbox-image` and pass its digest-pinned ref)")
-	writeFactoryYML = flags.Bool("write-factory-yml", false, "also write .factory.yml at -root: verify_command detected from go.mod/Makefile/package.json/pyproject.toml or requirements.txt, plus preflight_profile: brownfield since the freshly scaffolded spec docs are placeholders, not FROZEN. Refuses to overwrite an existing .factory.yml")
-	plainFlagUsage(flags)
+	skipDoctor = flags.Bool("skip-doctor", false, "skip the environment check that runs first (Docker reachable, sandbox image present, -root visible to Docker) and refuses to scaffold when it fails")
+	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable the environment check runs")
+	sandboxImage = flags.String("sandbox-image", "", "sandbox image the environment check looks for locally; empty means the session config's sandbox_image, and the check fails when neither names one")
+	writeFactoryYML = flags.Bool("write-factory-yml", false, "also write .factory.yml at -root with a detected verify_command and preflight_profile: brownfield; refuses when a .factory.yml already exists")
+	finishFlags(flags)
 	return
 }
 

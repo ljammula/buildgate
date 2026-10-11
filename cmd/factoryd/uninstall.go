@@ -49,9 +49,9 @@ func newUninstallFlags() (flags *flag.FlagSet, yes, dryRun, purge, force *bool) 
 	flags = flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	yes = flags.Bool("yes", false, "do not ask for confirmation (required when stdin is not a terminal)")
 	dryRun = flags.Bool("dry-run", false, "print what would be removed and change nothing")
-	purge = flags.Bool("purge", false, "also delete your session config (~/.config/factoryd), the default data directory (~/buildgate: requests, runs, evidence, logs) the Temporal volumes and the OpenShell gateway's state on the Docker VM. Irreversible")
+	purge = flags.Bool("purge", false, "also delete the session config (~/.config/factoryd), the data directory (~/buildgate), the Temporal volumes and the OpenShell gateway's state on the Docker VM. Irreversible")
 	force = flags.Bool("force", false, "stop daemons even when a request is building (its build is cancelled)")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

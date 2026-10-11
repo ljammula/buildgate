@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -64,18 +63,18 @@ func newDaemonFlags() (flags *flag.FlagSet, temporalAddress, repository, dataDir
 	// path -- the same class of bug an earlier fix addressed on `serve`
 	// itself, where -config previously had no effect on -data-dir
 	// resolution.
-	configPath = flags.String("config", "", "session config path; empty searches the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists (the same search `factoryd worker`/`quickstart` use)")
+	configPath = flags.String("config", "", "session config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	temporalAddress = flags.String("temporal-address", "", "Temporal server address (required)")
 	repository = flags.String("repository", "", "repository identity whose shared task queue this daemon services (required)")
 	dataDir = flags.String("data-dir", "data", "directory for durable run records, logs, and checkpoints")
-	buildAppInterpreter = flags.String("build-app-interpreter", "python3", "interpreter used to invoke -build-app-script")
-	buildAppScript = flags.String("build-app-script", "", "path to build_app.py (default: this version's embedded harness copy)")
-	conformityPolicy = flags.String("conformity-policy", "required", "build_app.py --conformity-policy (required|advisory) -- see run_ticket.go's own -conformity-policy flag help")
-	maxRounds = flags.Int("max-rounds", 3, "build_app.py --max-rounds")
-	timeoutMinutes = flags.Int("timeout-minutes", 45, "build_app.py --timeout-minutes")
-	verifyCommand = flags.String("verify-command", "make verify", "canonical verification command, run in workspace")
-	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file on this host bind-mounted read-only into any relay/registry-proxy this daemon launches, trusted by both in addition to their own system CA roots; see factoryd <run>'s own flag of the same name")
-	plainFlagUsage(flags)
+	buildAppInterpreter = flags.String("build-app-interpreter", "python3", "internal: the interpreter that runs -build-app-script; tests point it at a stand-in")
+	buildAppScript = flags.String("build-app-script", "", "path to a build_app.py to run in place of the built-in one")
+	conformityPolicy = flags.String("conformity-policy", "required", "what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
+	maxRounds = flags.Int("max-rounds", 3, "most rounds the build loop may take on one ticket")
+	timeoutMinutes = flags.Int("timeout-minutes", 45, "minutes the coding agent may run in one build round")
+	verifyCommand = flags.String("verify-command", "make verify", "canonical verification command, run in the workspace")
+	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-intercepting proxy's, trusted by the registry proxy and host-side model calls. Empty uses the one 'factoryd doctor -fix' saved, if any.")
+	finishFlags(flags)
 	return
 }
 

@@ -31,6 +31,10 @@ The shortest path from a fresh install to a reviewable pull request:
 | [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | What each command does, the flags used most, session-config keys, model routes, `.factory.yml`, oracle/request-driver internals |
 | [`console/README.md`](console/README.md) | The operator console |
 
+`factoryd help` lists every command with one line each, `factoryd <command>
+-h` shows a command's arguments and flags, and `factoryd help -json
+[<command>]` prints the same as JSON for a script or a coding agent.
+
 `factoryd quickstart <repo-path> "<task>"` is the whole path for an
 existing repo checkout — see "Quick start" below. For a brand-new app
 with no code yet, see "New app from scratch" further down.
@@ -575,7 +579,7 @@ handed to `build_app.py` as build instructions and the only file
 pi-harness structure preflight. Passing the unchanging `spec/spec.md` as
 `-spec` on every ticket is refused rather than silently starving the
 build (`-allow-spec-ticket-scope-mismatch` is the explicit opt-out). A
-bare `factoryd -h` lists the commands; `factoryd -ticket x -h` prints the 5
+bare `factoryd -h` lists the commands; `factoryd help run` prints the 5
 flags that matter, then every flag of a single-ticket run.
 
 This creates an isolated worktree at `data/workspaces/<run-id>/` on its own

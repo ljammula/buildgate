@@ -9,7 +9,6 @@ import (
 
 	"buildgate/internal/consolelink"
 	"buildgate/internal/hostcontrol"
-	"buildgate/internal/sessionconfig"
 )
 
 // newConsoleFlags builds `factoryd console`'s FlagSet in isolation from
@@ -25,13 +24,13 @@ func newConsoleFlags() (flags *flag.FlagSet, open *bool, configPath, dataDir *st
 	// SAME effective config path `serve`/`install-service`/`quickstart`
 	// themselves used, or this command would read a different (likely
 	// nonexistent) token file than the one actually in use.
-	configPath = flags.String("config", "", "session config path used to locate the stable start-token file; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists")
+	configPath = flags.String("config", "", "the running serve's config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	// The data dir whose serve recorded its console address
 	// (<data-dir>/console-address): the token is attached only to that
 	// serve. Must match serve's own -data-dir when that differs from the
 	// config's data_dir (install-service -data-dir, say).
-	dataDir = flags.String("data-dir", "", "data directory the running `factoryd serve` uses, to find the console address it recorded; default: the session config's data dir; with no session config, ./data")
-	plainFlagUsage(flags)
+	dataDir = flags.String("data-dir", "", "data directory of the running 'factoryd serve', to find its console address; empty uses the session config's data dir, else ./data")
+	finishFlags(flags)
 	return
 }
 

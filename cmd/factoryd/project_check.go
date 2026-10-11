@@ -672,15 +672,15 @@ func newCheckProjectFlags() (flags *flag.FlagSet, specPath, contractPath, archit
 	flags = flag.NewFlagSet("check-project", flag.ContinueOnError)
 	specPath = flags.String("spec", "", "path to the project's spec.md; checked for a frozen STATUS line if set")
 	contractPath = flags.String("contract", "", "path to the contract/program-design artifact; checked for required sections (Conventions, at least one Endpoint) if set")
-	architecturePath = flags.String("architecture", "", "path to the ARCHITECTURE.md-shaped artifact; checked for required sections (Repo layout, Verification, Known deviations, or -architecture-required-sections's own names) if set")
-	architectureRequiredSections = flags.String("architecture-required-sections", "", "comma-separated section headings to require in -architecture, in order, instead of the default Repo layout/Verification/Known deviations -- see the same flag on factoryd's run command for why")
-	ticketPath = flags.String("ticket", "", "path to a whole-app-build ticket file in the pi-harness-native format (## Goal/## Required changes/## Verification/## Commit headings, e.g. spec/tickets/NNN-*.md) -- NOT a factoryd -spec ticket in internal/ticketspec's own Verify-Command:/Allowed-Files: format (e.g. data/tickets/*.spec.md), which this check does not validate. Checked for required headings/content if set.")
-	ticketNumber = flags.Int("ticket-number", 0, "the ticket's own sequence number, required whenever -ticket is set -- only ticket 1 is exempt from the 'This is an existing repo.' context-line requirement TicketStructure checks for every later ticket, so an omitted number must never silently default to 1")
-	makefilePath = flags.String("makefile", "", "path to the project's Makefile (or other file declaring its canonical verify command); if set, every spec/acceptance/<NNN> slice found next to it (i.e. under filepath.Dir(-makefile)/spec/acceptance) must be referenced somewhere in its content -- a drafted acceptance slice that was never staged into verify catches nothing (see policy.AcceptanceSuiteWired)")
+	architecturePath = flags.String("architecture", "", "path to the architecture document; checked for the sections Repo layout, Verification and Known deviations, or those named by -architecture-required-sections")
+	architectureRequiredSections = flags.String("architecture-required-sections", "", "comma-separated section headings to require in -architecture, in order, instead of Repo layout, Verification, Known deviations")
+	ticketPath = flags.String("ticket", "", "path to a build ticket with ## Goal, ## Required changes, ## Verification and ## Commit headings (spec/tickets/NNN-*.md); not a *.spec.md ticket with Verify-Command and Allowed-Files lines")
+	ticketNumber = flags.Int("ticket-number", 0, "the ticket's sequence number; required and positive when -ticket is set. Every ticket after 1 must carry the line 'This is an existing repo.'")
+	makefilePath = flags.String("makefile", "", "path to the Makefile or other file that declares the verify command; every spec/acceptance/<NNN> directory beside it must be named in its content")
 	dataDir = flags.String("data-dir", "data", "directory for durable project-check records")
 	project = flags.String("project", "", "project identifier for the durable record filename (required)")
-	preflightProfile = flags.String("preflight-profile", "", "\"\" (strict, the default) or \"brownfield\": mirrors factoryd <run>'s own -preflight-profile -- under brownfield, -spec/-contract are skipped entirely (not run, not read, not reported) and -architecture's own result is reported but marked advisory, never failing the overall check on its own, and so is a ticket_structure check whose auto-discovered spec/tickets/<ticket>.md does not exist (the shape of every `factoryd submit` entry)")
-	plainFlagUsage(flags)
+	preflightProfile = flags.String("preflight-profile", "", "empty (strict) or \"brownfield\": brownfield skips the -spec and -contract checks and reports an -architecture failure as advisory, so it does not fail the check")
+	finishFlags(flags)
 	return
 }
 

@@ -27,8 +27,8 @@ func newCostFlags() (flags *flag.FlagSet, dataDir, requestID, since, configPath 
 	requestID = flags.String("request", "", "only show this one request's cost rollup")
 	since = flags.String("since", "", "only include requests submitted on/after this date (YYYY-MM-DD); empty includes every request")
 	jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of a table")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

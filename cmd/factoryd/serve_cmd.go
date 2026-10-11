@@ -227,17 +227,17 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// sandbox_image, failed its own allowlist check, and crashed with no
 	// console started -- worse when it doesn't crash: an API-started run
 	// would silently use the other config's route/model/images.
-	f.configPath = flags.String("config", "", "session config path; empty searches the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists (the same search `factoryd worker`/`quickstart` use). Resolves -data-dir, baseSettings (relay/sandbox/release-policy defaults for every API-started run and the override endpoint) and the stable start-token file location")
+	f.configPath = flags.String("config", "", "session config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	f.dataDir = flags.String("data-dir", "data", "directory containing durable run records")
-	f.addr = flags.String("addr", defaultServeAddr, "HTTP listen address. Loopback-only by default: this Server's read routes (GET /runs, GET /runs/{id}, GET /runs/{id}/events, GET /runs/{id}/diff, GET /projects) carry no auth boundary unless FACTORYD_API_READ_TOKEN is set, and getRunDiff in particular serves every run's complete unified source diff plus absolute host paths and provider/model identity -- binding a wider address (e.g. \":8090\") without also setting that token exposes all of it to any caller that can reach the port (found via the 2026-09-05 Opus review, S3)")
-	f.corsAllowOrigin = flags.String("cors-allow-origin", "", "exact browser origin (scheme://host[:port], e.g. http://localhost:8091) to allow reading this Server's responses cross-origin -- needed for the console (USAGE.md §9) when it is served by its own Vite dev server on its own port. Empty (default) keeps CORS off, matching every prior release. Never accepts \"*\": this only changes what a browser page may read from a port it can already reach -- it grants no new network reachability, and the read/start/override token gates above still run first")
-	f.daemonTemporalAddress = flags.String("daemon-temporal-address", "", "Temporal server address for serve-managed daemon supervisors; empty disables daemon lifecycle routes")
-	f.daemonBuildAppInterpreter = flags.String("daemon-build-app-interpreter", "python3", "daemon supervisor's build_app.py interpreter")
-	f.daemonBuildAppScript = flags.String("daemon-build-app-script", "", "daemon supervisor's build_app.py path (default: this version's embedded harness copy)")
-	f.daemonConformityPolicy = flags.String("daemon-conformity-policy", "required", "daemon supervisor's build_app.py conformity policy")
-	f.daemonMaxRounds = flags.Int("daemon-max-rounds", 3, "daemon supervisor's build_app.py max rounds")
-	f.daemonTimeoutMinutes = flags.Int("daemon-timeout-minutes", 45, "daemon supervisor's build_app.py timeout in minutes")
-	f.daemonVerifyCommand = flags.String("daemon-verify-command", "make verify", "daemon supervisor's canonical verification command")
+	f.addr = flags.String("addr", defaultServeAddr, "HTTP listen address. Beyond loopback, set FACTORYD_API_READ_TOKEN: without it anyone who can reach the port reads every run's source diff, host paths and model identity.")
+	f.corsAllowOrigin = flags.String("cors-allow-origin", "", "exact browser origin (scheme://host[:port]) allowed to read responses cross-origin, for a console served from another port; \"*\" is refused. Empty keeps CORS off.")
+	f.daemonTemporalAddress = flags.String("daemon-temporal-address", "", "Temporal server address for the daemons this server manages; empty turns the /daemons routes off")
+	f.daemonBuildAppInterpreter = flags.String("daemon-build-app-interpreter", "python3", "internal: the interpreter a managed daemon runs its build script with; tests point it at a stand-in")
+	f.daemonBuildAppScript = flags.String("daemon-build-app-script", "", "for managed daemons: path to a build_app.py to run in place of the built-in one")
+	f.daemonConformityPolicy = flags.String("daemon-conformity-policy", "required", "for managed daemons: what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
+	f.daemonMaxRounds = flags.Int("daemon-max-rounds", 3, "for managed daemons: most rounds the build loop may take on one ticket")
+	f.daemonTimeoutMinutes = flags.Int("daemon-timeout-minutes", 45, "for managed daemons: minutes the coding agent may run in one build round")
+	f.daemonVerifyCommand = flags.String("daemon-verify-command", "make verify", "for managed daemons: the canonical verification command, run in the workspace")
 	// -daemon-build-app-max-attempts/-daemon-verify-max-attempts and the
 	// whole -daemon-sandbox-* resource surface are gone as of
 	// flags-consolidate (2026-09-10): `factoryd daemon` -- the child this
@@ -264,31 +264,31 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// diverged from a daemon-recovered run's -- e.g. an operator
 	// configuring a 1g ceiling would still see ordinary API runs consume
 	// up to 4g.
-	f.sandboxMemory = flags.String("sandbox-memory", "4g", "memory limit (Docker --memory syntax) for an API-started run's sandboxed worker container; also caps swap")
-	f.sandboxCPUs = flags.String("sandbox-cpus", "2", "CPU limit (Docker --cpus syntax) for an API-started run's sandboxed worker container")
-	f.sandboxTmpfsSize = flags.String("sandbox-tmpfs-size", "1g", "size of each of an API-started run's sandboxed worker's writable tmpfs mounts (/tmp and /home/worker) -- see the CLI's own -sandbox-tmpfs-size flag help for why 1g, not 256m")
+	f.sandboxMemory = flags.String("sandbox-memory", "4g", "memory limit, in Docker --memory syntax, for the sandbox of a run started through the API; also caps swap")
+	f.sandboxCPUs = flags.String("sandbox-cpus", "2", "CPU limit, in Docker --cpus syntax, for the sandbox of a run started through the API")
+	f.sandboxTmpfsSize = flags.String("sandbox-tmpfs-size", "1g", "size of each writable tmpfs mount (/tmp and /home/worker) in the sandbox of a run started through the API")
 	// sandboxWorkerUID mirrors the -sandbox-memory/-cpus/-tmpfs-size
 	// flags just above and closes the same class of gap their own comment
 	// documents: found via code review, this flag was missing entirely, so an
 	// API-started run's sandboxed worker silently used sandbox.
 	// DefaultWorkerUID regardless of what an operator configured for
 	// -sandbox-worker-uid on this same daemon.
-	f.sandboxWorkerUID = flags.Int("sandbox-worker-uid", sandbox.DefaultWorkerUID, "dedicated, non-root, non-factoryd UID an API-started run's sandboxed worker container runs as by default -- see runMain's own flag of the same name")
-	f.releaseProtectedPaths = flags.String("release-protected-paths", "", "internal/release.MergePolicy.ProtectedPaths for this Server's own override endpoint, comma-separated -- see runMain's own flag of the same name")
-	f.releaseMaxFilesChanged = flags.Int("release-max-files-changed", 0, "internal/release.MergePolicy.MaxFilesChanged for this Server's own override endpoint -- see runMain's own flag of the same name")
-	f.releaseMaxInsertions = flags.Int("release-max-insertions", 0, "internal/release.MergePolicy.MaxInsertions for this Server's own override endpoint -- see runMain's own flag of the same name")
-	f.releaseRollbackPlan = flags.String("release-rollback-plan", "", "internal/release.MergePolicy.RollbackPlan for this Server's own override endpoint -- see runMain's own flag of the same name")
-	f.releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "internal/release.MergePolicy.AllowOverrides for this Server's own override endpoint -- see runMain's own flag of the same name")
-	f.releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "internal/release.MergePolicy.AllowDependencyLockfileChanges for this Server's own override endpoint -- see runMain's own flag of the same name")
-	f.releaseAllowUnsandboxed = flags.Bool("release-allow-unsandboxed", false, "internal/release.MergePolicy.AllowUnsandboxed for this Server's own override endpoint -- see runMain's own flag of the same name")
-	f.releaseAllowSkippedProjectCheck = flags.Bool("release-allow-skipped-project-check", false, "internal/release.MergePolicy.AllowSkippedProjectCheck for this Server's own override endpoint -- see runMain's own flag of the same name")
+	f.sandboxWorkerUID = flags.Int("sandbox-worker-uid", sandbox.DefaultWorkerUID, "user ID the sandboxed worker of a run started through the API runs as; must be positive and differ from this process's own")
+	f.releaseProtectedPaths = flags.String("release-protected-paths", "", "comma-separated paths a run may not change and still pass the release decision. Unset uses the session config's release_protected_paths.")
+	f.releaseMaxFilesChanged = flags.Int("release-max-files-changed", 0, "most files a run may change and still pass the release decision; 0 denies every release. Unset uses the session config's release_max_files_changed.")
+	f.releaseMaxInsertions = flags.Int("release-max-insertions", 0, "most inserted lines a run may have and still pass the release decision; 0 denies every release. Unset uses the session config's release_max_insertions.")
+	f.releaseRollbackPlan = flags.String("release-rollback-plan", "", "rollback plan named in the release evidence, such as \"git revert the merge commit on main\"; empty denies every release. Unset uses the session config's release_rollback_plan.")
+	f.releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "let a run with a human override in its history pass the release decision. Unset uses the session config's release_allow_overrides.")
+	f.releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "let a run that changed a dependency lockfile pass the release decision. Unset uses the session config's release_allow_dependency_lockfile_changes.")
+	f.releaseAllowUnsandboxed = flags.Bool("release-allow-unsandboxed", false, "let a run whose build recorded no sandbox image digest pass the release decision. Unset uses the session config's release_allow_unsandboxed.")
+	f.releaseAllowSkippedProjectCheck = flags.Bool("release-allow-skipped-project-check", false, "let a run started with -skip-project-check pass the release decision. Unset uses the session config's release_allow_skipped_project_check.")
 	// apiAllowedSandboxImages narrows the API surface:
 	// an authenticated POST /runs caller is untrusted the same way
 	// -sandbox-docker's caller already is (see apiStartStarter's own
 	// sandbox_docker rejection just above it in this file), so this
 	// request field -- previously validated no more strictly than
 	// digest-pinning -- gets the same treatment here.
-	f.apiAllowedSandboxImages = flags.String("api-allowed-sandbox-images", "", "comma-separated digest-pinned images (name@sha256:...) POST /runs may set as sandbox_image, mirroring -release-protected-paths' comma-separated convention. Empty (default) accepts only this daemon's own configured sandbox image (-api-default-sandbox-image, or failing that the session config's sandbox_image) -- not every digest-pinned image, which was the prior, unrestricted behavior -- because an image is a capability to run arbitrary code inside the sandbox boundary, not merely a filter that's absent until configured (found via a containment review). If this daemon itself has no sandbox image configured, an empty allowlist accepts nothing. The CLI's own -sandbox-image, a fully trusted context, is unaffected and keeps arbitrary digest-pinned values")
+	f.apiAllowedSandboxImages = flags.String("api-allowed-sandbox-images", "", "comma-separated digest-pinned images a POST /runs request may name as sandbox_image. Empty allows only this server's own sandbox image, or none when it has none.")
 	// apiDefaultSandboxImage closes the gap the allowlist above leaves
 	// open by itself: an allowlist only says which images a request is
 	// *permitted* to name, it does not give a caller with no UI for the
@@ -296,8 +296,8 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// exactly that caller -- see startRun in console/src/api/runs.ts.
 	// The default must itself be a member of the allowlist, checked once at
 	// startup, not merely at request time.
-	f.apiDefaultSandboxImage = flags.String("api-default-sandbox-image", "", "sandbox_image POST /runs uses when the request itself leaves that field empty. Unset (default) falls back to this daemon's own session-config sandbox_image, if any -- an empty request sandbox_image resolves to whichever of the two apiSandboxPolicy.imageAllowed's own implicit default names, or is rejected outright if neither is configured. Must itself be allowlisted by -api-allowed-sandbox-images (or, like an unconfigured allowlist, be the value that implicit default names) -- checked at daemon startup so a bad configuration is never discovered one rejected request at a time. An explicit request sandbox_image always wins over this default")
-	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file on this host, forwarded as -egress-ca-bundle to every API-started run's own spawned runMainWithReady; see factoryd <run>'s own flag of the same name")
+	f.apiDefaultSandboxImage = flags.String("api-default-sandbox-image", "", "sandbox image for a POST /runs request that names none; must be one -api-allowed-sandbox-images allows. Empty uses the session config's sandbox_image.")
+	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-intercepting proxy's, trusted by the registry proxy and host-side model calls. Empty uses the one 'factoryd doctor -fix' saved, if any.")
 	// temporalUIURL is deliberately CLI-flag-only, not a session config
 	// key: unlike data_dir/sandbox_*/release_*, internal/sessionconfig.Settings
 	// carries no `serve`-specific settings at all today (no addr, no
@@ -305,7 +305,7 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// resolveDataDirFromSessionConfig's separate, top-level data_dir key,
 	// not a Settings field), so adding one here would be the first of its
 	// kind rather than following an existing convention.
-	f.temporalUIURL = flags.String("temporal-ui-url", "", "base URL of a Temporal Web UI reachable from the operator's browser (e.g. http://localhost:8233), used to build GET /console-config.json's own temporal_ui_url -- the console joins it with a run's own temporal_workflow_id for an \"Open in Temporal UI\" link. Empty (default) omits the field: the console shows no such link")
+	f.temporalUIURL = flags.String("temporal-ui-url", "", "base URL of a Temporal Web UI the operator's browser can reach, such as http://localhost:8233, so the console links each run to it; empty shows no link")
 	// allowedHosts (an adversarial review, 2026-09-24) closes a
 	// regression ServeHTTP's own Host check (DNS-rebinding defense, added
 	// with -addr's loopback default above) otherwise introduces: bound to
@@ -319,8 +319,8 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// every write, exactly like a non-loopback bind, unlike this server's
 	// own true loopback address.
 	f.allowedHosts = &stringListFlag{}
-	flags.Var(f.allowedHosts, "allowed-host", "extra Host header value(s) (host[:port], e.g. localhost:9000 for an ssh -L tunnel, or a Tailscale MagicDNS name) ServeHTTP's loopback Host check accepts in addition to this server's own true loopback address -- comma-separated, and the flag may be repeated (both accumulate). A host accepted this way is for reads only: it never qualifies for the no-override-token write relaxation loopback itself gets -- see api.WithAllowedHosts' own doc comment")
-	plainFlagUsage(flags)
+	flags.Var(f.allowedHosts, "allowed-host", "extra Host header values (host[:port]) accepted besides the loopback address, such as an ssh tunnel's; comma-separated, repeatable. A write through one still needs a token.")
+	finishFlags(flags)
 	return flags, f
 }
 

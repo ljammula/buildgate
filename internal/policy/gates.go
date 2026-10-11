@@ -55,7 +55,7 @@ var CommandGates = []CommandGate{
 		ID:                     "lint",
 		Flag:                   "lint-command",
 		ProjectKey:             "lint_command",
-		Help:                   `optional lint command, run in the sandbox after canonical verification passes; becomes its own "lint" gate in the release decision (default: lint_command from the workspace's .factory.yml). Unset means the gate is recorded as not configured and never blocks`,
+		Help:                   `lint command, run in the sandbox after verification passes as the "lint" gate. Empty uses lint_command from .factory.yml; with neither, the gate is not configured and never blocks`,
 		RerunAfterOracleCommit: true,
 	},
 	{
@@ -83,7 +83,7 @@ var CommandGates = []CommandGate{
 		ID:                     ReferenceOracleGateID,
 		Flag:                   "reference-oracle-command",
 		ProjectKey:             "reference_oracle_command",
-		Help:                   `optional reference-oracle command, same gating as -lint-command; becomes the "reference_oracle" gate (default: reference_oracle_command from .factory.yml). Unlike the other named gates, this command should NOT be agent-authored -- point it at a script checked into the repo outside the ticket's Allowed-Files that diffs the candidate's output against an independent oracle (published test vectors, an existing reference implementation), so its result can't be shaped by the same agent it's checking. Keeping it outside Allowed-Files alone is a convention diff_scope enforces only on the final committed diff, not a guarantee during the build itself -- pair with -reference-oracle-dir for real, structural protection`,
+		Help:                   `command for the "reference_oracle" gate, gated as -lint-command is. Empty uses reference_oracle_command from .factory.yml. Use a check the build cannot edit, with -reference-oracle-dir`,
 		RerunAfterOracleCommit: false,
 	},
 }

@@ -25,8 +25,8 @@ import (
 func newApproveFlags() (flags *flag.FlagSet, dataDir, configPath *string) {
 	flags = flag.NewFlagSet("approve", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 
@@ -91,10 +91,10 @@ func approveMain(dp *deps, args []string) error {
 func newRejectFlags() (flags *flag.FlagSet, dataDir, reason, to, configPath *string) {
 	flags = flag.NewFlagSet("reject", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
-	reason = flags.String("reason", "", "why the request is being rejected (required) -- appended to request.md so the next drafting pass sees it. Must precede <request-id> on the command line (flag.Parse stops at the first positional argument)")
-	to = flags.String("to", "", "for a quarantined or halted request only: send it back to \"plan\" (default) or \"spec\" instead of the prior drafting state -- refused if the request is in a review state instead")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	reason = flags.String("reason", "", "why the request is being rejected (required); the next redraft is given it")
+	to = flags.String("to", "", "Send a quarantined or halted request back to \"plan\" or \"spec\" to be redrafted. Refused in a review state and once any ticket is accepted. Empty rejects the document at the current review gate.")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

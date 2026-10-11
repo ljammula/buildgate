@@ -54,13 +54,13 @@ import (
 func newOnboardFlags() (flags *flag.FlagSet, project, root, workspace *string, skipDoctor *bool, sandboxDocker, sandboxImage *string, writeFactoryYML *bool) {
 	flags = flag.NewFlagSet("onboard", flag.ContinueOnError)
 	project = flags.String("project", "", "project identifier, used only to title the scaffolded artifacts (required)")
-	root = flags.String("root", "", "existing repository root directory to scaffold into directly, mirroring factoryd init's own -root; unlike init, this directory must already exist -- onboard is for a repo that already has real code in it (required unless -workspace is given)")
-	workspace = flags.String("workspace", "", "deprecated -- prefer -root instead, no placeholder subdirectory needed. an empty placeholder subdirectory of the existing repo to onboard, matching factoryd <run>'s own -workspace convention; spec/spec.md, spec/contract.md, and ARCHITECTURE.md are scaffolded at its own parent directory, where the repo's real code actually lives (required unless -root is given; created automatically if it doesn't exist yet)")
-	skipDoctor = flags.Bool("skip-doctor", false, "bypass the factoryd doctor environment preflight (Docker reachable, sandbox image present, -root/-workspace mount-visible) that otherwise runs first and refuses to scaffold on any failure; for CI or an operator who already knows")
-	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable the doctor preflight checks with; see factoryd <run>'s own -sandbox-docker")
-	sandboxImage = flags.String("sandbox-image", "", "sandbox image the doctor preflight confirms is present locally; no built-in default -- an empty value fails the preflight (build one with `make sandbox-image` and pass its digest-pinned ref)")
-	writeFactoryYML = flags.Bool("write-factory-yml", false, "also write .factory.yml at the repository root: verify_command detected from that root's own Makefile/go.mod/package.json (see detectVerifyCommand), plus preflight_profile: brownfield -- always the right default here, since onboard's own target is an existing repo whose scaffolded spec docs stay placeholders, not FROZEN. Refuses to overwrite an existing .factory.yml")
-	plainFlagUsage(flags)
+	root = flags.String("root", "", "existing repository root to scaffold into; it must already exist (required unless -workspace is given)")
+	workspace = flags.String("workspace", "", "deprecated, use -root: an empty placeholder subdirectory of the repository, created if missing; the files are scaffolded in its parent directory (required unless -root is given)")
+	skipDoctor = flags.Bool("skip-doctor", false, "skip the environment check that runs first (Docker reachable, sandbox image present, -root or -workspace visible to Docker) and refuses to scaffold when it fails")
+	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable the environment check runs")
+	sandboxImage = flags.String("sandbox-image", "", "sandbox image the environment check looks for locally; empty means the session config's sandbox_image, and the check fails when neither names one")
+	writeFactoryYML = flags.Bool("write-factory-yml", false, "also write .factory.yml at the repository root with a detected verify_command and preflight_profile: brownfield; refuses when a .factory.yml already exists")
+	finishFlags(flags)
 	return
 }
 

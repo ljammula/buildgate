@@ -98,25 +98,25 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	// `factoryd quickstart -config X` had no way to make `factoryd doctor`
 	// check that same file; it could only ever check the default-path
 	// search's own config, the same class of bug `serve` had.
-	configPath = flags.String("config", "", "session config path; empty searches the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists (the same search `factoryd worker`/`quickstart` use)")
-	sandboxImage = flags.String("sandbox-image", "", "sandbox image to confirm is present locally; empty uses the session config's sandbox_image (if any) -- there is no built-in default")
-	registryProxy = flags.Bool("registry-proxy", true, "check the registry proxy image too; on by default, mirroring -registry-proxy's own default-on resolution for the default, model-backed build_app.py on a real run (found live, P2: doctor still defaulting this off let a bare `factoryd doctor` pass while a bare run would necessarily pull and start an unchecked registry-proxy image) -- pass -registry-proxy=false to skip this check the same way an explicit -registry-proxy=false does on a real run")
-	registryProxyImage = flags.String("registry-proxy-image", "", "registry proxy image to confirm is present locally; only checked with -registry-proxy or when named explicitly. Empty uses the session config's registry_proxy_image (if any) -- there is no built-in default; still empty skips this check")
-	composeServices = flags.Bool("compose-services", true, "check the docker compose v2 CLI (>= 2.20) is available too; on by default, mirroring -registry-proxy's own default-on resolution -- pass -compose-services=false to skip this check the same way an explicit -compose-services=false does on a real run")
-	fix = flags.Bool("fix", false, "build an absent sandbox/registry-proxy image locally via its Makefile target (make sandbox-image/registry-proxy-image) and print the digest-pinned reference to configure; also prints the rm/mv for a stale factoryd shadowing this one on $PATH, applying the rename only with FACTORYD_DOCTOR_APPLY_PATH_FIX=1")
-	repoRoot = flags.String("repo-root", "", "this repository's checkout, whose Makefile -fix runs; defaults to $FACTORYD_REPO_ROOT, then the running binary's parent directory when that holds the Makefile")
-	workspace = flags.String("workspace", "", "a real directory to probe for the colima/Docker-backend mount-visibility trap (internal/sandbox.verifyWorkDirMountVisibility's own check, run standalone here); empty skips this check")
-	dataDir = flags.String("data-dir", "data", "directory for durable run records and logs, checked against -workspace for factoryd <run>'s own -data-dir/-workspace containment guard; see that flag's own doc comment")
+	configPath = flags.String("config", "", "session config file or profile name; empty uses the active profile, then the default paths")
+	sandboxImage = flags.String("sandbox-image", "", "Sandbox image to check is present locally. Empty uses the session config's sandbox_image.")
+	registryProxy = flags.Bool("registry-proxy", true, "Check the image named by -registry-proxy-image; with none, nothing is checked. Unset uses the session config's registry_proxy when it is set.")
+	registryProxyImage = flags.String("registry-proxy-image", "", "Registry proxy image to check is present locally. Empty skips the check, and so does -registry-proxy=false unless this flag is passed.")
+	composeServices = flags.Bool("compose-services", true, "Check that the docker compose v2 CLI (2.20 or newer) is available. Unset uses the session config's compose_services when it is set.")
+	fix = flags.Bool("fix", false, "Fix what doctor can: build an absent sandbox or registry-proxy image from source and print its digest-pinned reference, start missing services, and offer the first-run fixes (see -yes).")
+	repoRoot = flags.String("repo-root", "", "The buildgate checkout whose Makefile -fix builds images from. Empty uses $FACTORYD_REPO_ROOT, then the session config's image_source_root, then the checkout holding the running binary.")
+	workspace = flags.String("workspace", "", "A repository checkout to check: that Docker can see it, that -data-dir lies outside it, its .factory.yml, and its GitHub login. Empty skips these checks.")
+	dataDir = flags.String("data-dir", "data", "Directory of durable run records and logs, checked, with -workspace, for Docker visibility and for lying outside it. Unset uses the session config's data_dir.")
 	temporalAddress = flags.String("temporal-address", "", "Temporal server address to confirm is reachable; empty skips this check")
-	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file on this host to confirm exists and parses, and to mount and trust inside the route-upstream reachability probe below; see factoryd <run>'s own flag of the same name")
-	lintCommand = flags.String("lint-command", "", "lint gate command (see factoryd <run>'s own -lint-command) to confirm its leading executable exists in the sandbox image; empty skips this check")
-	securityCommand = flags.String("security-command", "", "security-audit gate command (see factoryd <run>'s own -security-command) to confirm its leading executable exists in the sandbox image; empty skips this check")
-	unitTestCommand = flags.String("unit-test-command", "", "unit-test gate command (see factoryd <run>'s own -unit-test-command) to confirm its leading executable exists in the sandbox image; empty skips this check")
-	integrationTestCommand = flags.String("integration-test-command", "", "integration-test gate command (see factoryd <run>'s own -integration-test-command) to confirm its leading executable exists in the sandbox image; empty skips this check")
-	referenceOracleCommand = flags.String("reference-oracle-command", "", "reference-oracle gate command (see factoryd <run>'s own -reference-oracle-command) to confirm its leading executable exists in the sandbox image; empty skips this check")
-	referenceOracleDir = flags.String("reference-oracle-dir", "", "see factoryd <run>'s own -reference-oracle-dir; confirms this host directory is actually reachable inside a container by the configured Docker backend, the same mount-visibility probe -workspace itself gets -- found live (2026-09-15): a host path outside colima's default $HOME-only shared mount silently produces an EMPTY mount inside the container rather than an error, so the reference_oracle gate would then find no oracle content to check against at all")
-	hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "how often `factoryd worker` re-reminds a request waiting in spec_review, oracle_review, plan_review or resume_review; see that command's own flag of the same name. Printed as informational only -- nothing here is actually checked against it")
-	plainFlagUsage(flags)
+	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of extra CA certificates to check parses and to trust in the model-route reachability probe. Empty uses the bundle built for a network that re-signs TLS, when one exists.")
+	lintCommand = flags.String("lint-command", "", "Lint gate command whose first executable must exist in the sandbox image. Empty skips this check.")
+	securityCommand = flags.String("security-command", "", "Security-audit gate command whose first executable must exist in the sandbox image. Empty skips this check.")
+	unitTestCommand = flags.String("unit-test-command", "", "Unit-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
+	integrationTestCommand = flags.String("integration-test-command", "", "Integration-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
+	referenceOracleCommand = flags.String("reference-oracle-command", "", "Reference-oracle gate command whose first executable must exist in the sandbox image. Empty skips this check.")
+	referenceOracleDir = flags.String("reference-oracle-dir", "", "Host directory of reference-oracle content to check Docker can see inside a container: an unshared path mounts empty with no error. Empty skips this check.")
+	hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "How often the worker re-reminds a request waiting at a review gate. Doctor prints it and checks nothing against it. Unset uses the session config's hitl_reminder_interval.")
+	finishFlags(flags)
 	return
 }
 
@@ -138,7 +138,7 @@ func doctorMain(dp *deps, args []string) error {
 	yes := doctorRegisterYesFlag(flags)
 	listModels := doctorRegisterListModelsFlag(flags)
 	targetRepo := doctorRegisterTargetRepoFlag(flags)
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

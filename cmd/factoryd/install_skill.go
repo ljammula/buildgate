@@ -26,8 +26,8 @@ const defaultSkillsDirSuffix = ".agents/skills"
 // without executing the command -- same pattern as newConsoleFlags.
 func newInstallSkillFlags() (flags *flag.FlagSet, dir *string) {
 	flags = flag.NewFlagSet("install-skill", flag.ContinueOnError)
-	dir = flags.String("dir", "", "skills directory to install into; default: ~/.agents/skills, which Codex and GitHub Copilot both read. Claude Code reads ~/.claude/skills -- pass -dir ~/.claude/skills for it")
-	plainFlagUsage(flags)
+	dir = flags.String("dir", "", "skills directory to install into; empty means ~/.agents/skills, which Codex and GitHub Copilot read. For Claude Code pass ~/.claude/skills")
+	finishFlags(flags)
 	return
 }
 

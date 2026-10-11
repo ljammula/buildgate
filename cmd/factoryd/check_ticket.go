@@ -29,7 +29,9 @@ import (
 // doc-vs-flag drift test (TestUSAGEDocFlagsExistOnSubcommand) can enumerate
 // it without executing the command.
 func newCheckTicketFlags() *flag.FlagSet {
-	return flag.NewFlagSet("check-ticket", flag.ContinueOnError)
+	flags := flag.NewFlagSet("check-ticket", flag.ContinueOnError)
+	finishFlags(flags)
+	return flags
 }
 
 func checkTicketMain(args []string) error {
@@ -203,8 +205,8 @@ func printTicketHeaderReport(w io.Writer, specPath string, reports []ticketHeade
 // the command.
 func newTicketTemplateFlags() (flags *flag.FlagSet, out *string) {
 	flags = flag.NewFlagSet("ticket-template", flag.ContinueOnError)
-	out = flags.String("o", "", "path to write the skeleton ticket to; empty (the default) prints it to stdout instead")
-	plainFlagUsage(flags)
+	out = flags.String("o", "", "path to write the skeleton ticket to; empty prints it to stdout")
+	finishFlags(flags)
 	return flags, out
 }
 
