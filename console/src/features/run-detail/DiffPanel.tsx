@@ -30,15 +30,17 @@ export function DiffPanel({ runId }: { runId: string }) {
         {files.length > 0 ? (
           <ul aria-label="Changed files" className="flex flex-wrap gap-2">
             {files.map((file) => (
-              <li key={file.line}>
+              <li key={file.line} className="max-w-full">
                 <Button
                   size="sm"
-                  className="font-mono text-xs"
+                  className="max-w-full font-mono text-xs"
+                  title={file.name}
                   onClick={() => {
                     jumpTo(file.line);
                   }}
                 >
-                  {file.name}
+                  {/* A long path is cut at the end, never wider than the screen. */}
+                  <span className="truncate">{file.name}</span>
                 </Button>
               </li>
             ))}

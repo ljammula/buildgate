@@ -16,7 +16,11 @@ export interface TableProps extends TableHTMLAttributes<HTMLTableElement> {
 export function TableFrame({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("overflow-x-auto rounded-lg border border-border bg-surface", className)}
+      // `relative`: text kept for a screen reader is positioned, and scrolls with the table only inside a positioned box.
+      className={cn(
+        "relative overflow-x-auto rounded-lg border border-border bg-surface",
+        className,
+      )}
       {...props}
     />
   );
