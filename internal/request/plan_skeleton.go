@@ -287,16 +287,9 @@ func findAcceptanceCriteriaSection(lines []string) (start, end int, ok bool) {
 
 // foldAcceptanceCriteriaLines folds a "## Acceptance criteria" section's
 // raw lines (as returned by findAcceptanceCriteriaSection) into one
-// verbatim string per numbered criterion, in order -- a thin wrapper
-// over splitAcceptanceCriteriaBlocks' own folded field. Deliberately NOT
-// a second, independent implementation of "where does one criterion end
-// and the next begin": an earlier version duplicated that classification
-// logic between this function and splitAcceptanceCriteriaBlocks, which
-// is exactly the "fixed one copy, not the other" class of bug this
-// codebase has hit before (found via adversarial review, 2026-09-17) --
-// SpecAcceptanceCriteria (via this function) and StripCommitMessageCriteria
-// (via splitAcceptanceCriteriaBlocks directly) could silently disagree on
-// criterion boundaries if the two copies ever drifted.
+// verbatim string per numbered criterion, in order: the folded field of
+// splitAcceptanceCriteriaBlocks, which alone decides where one criterion
+// ends and the next begins.
 func foldAcceptanceCriteriaLines(sectionLines []string) []string {
 	blocks := splitAcceptanceCriteriaBlocks(sectionLines)
 	folded := make([]string, len(blocks))
@@ -324,9 +317,9 @@ func SpecAcceptanceCriteria(specContent string) ([]string, error) {
 }
 
 // commitMessageCriterionREs are the phrasings that make an acceptance
-// criterion one about a git commit's message (StripCommitMessageCriteria
-// has why those are removed). "Commit" has to be the noun the message,
-// subject or title belongs to:
+// criterion read as a rule for a git commit's message, which
+// SpecReviewNotes then notes for the human. "Commit" has to be the noun
+// the message, subject or title belongs to:
 //
 //   - "the commit message", "each commit's log message", "commit subjects
 //     follow ...": the noun phrase, after an article or a quantifier or at
@@ -336,19 +329,14 @@ func SpecAcceptanceCriteria(specContent string) ([]string, error) {
 //   - "all commits include messages ...";
 //   - "Conventional Commits".
 //
-// They are read with the criterion's code spans blanked. A criterion in
-// which "commit" is a verb or names something else ("the consumer commits
-// the offset and logs the message id", "the commit endpoint returns a
-// success message", "the broker's commit log is compacted", "producers
-// commit messages in batches") matches none: removing a real criterion
-// costs the request a requirement, keeping one about a commit message
-// costs a review finding. Not told apart: a criterion of a product whose
-// own subject is git commit messages ("the linter rejects an empty commit
-// message"), which the removal note in the document lets a human restore.
+// They are read with the criterion's code spans blanked. The reading is
+// wrong for a product whose own subject is commits ("`ParseCommit` returns
+// the commit message without its trailers", "the consumer logs the message
+// of each commit failure"), so it only makes a note.
 var commitMessageCriterionREs = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(?:^|[.;:]\s+|\b(?:the|an?|each|every|any|all|its|their|this|that|git|squash|merge|of|in|with|valid|conventional)\s+)commit(?:'s)?\s+(?:log\s+)?(?:message|subject|title)s?\b`),
-	regexp.MustCompile(`(?i)\b(?:message|subject(?:\s+line)?|title)s?\s+of\s+(?:the|each|every|any|an?|all|its)\s+(?:\w+\s+)?commits?\b`),
-	regexp.MustCompile(`(?i)\bcommits?\s+for\s+(?:this|the)\s+(?:work|change|ticket|feature|fix|request)\b`),
+	regexp.MustCompile(`(?i)\b(?:message|subject(?:\s+line)?|title)s?\s+of\s+(?:the|each|every|any|an?|all|its)\s+(?:\w+\s+)?commits?(?:\s*(?:$|[.,;:)])|\s+(?:is|are|must|should|starts?|begins?|follows?|names?|references?|mentions?|has|have|says?)\b)`),
+	regexp.MustCompile(`(?i)\bcommits?\s+for\s+(?:this|the)\s+(?:work|change|ticket|feature|fix)\b`),
 	regexp.MustCompile(`(?i)\b(?:all|every|each)\s+commits?\s+(?:must\s+|should\s+)?(?:includes?|ha(?:s|ve)|carr(?:y|ies)|uses?)\s+(?:an?\s+|the\s+)?(?:\w+\s+)?(?:messages?|subjects?|titles?)\b`),
 	regexp.MustCompile(`(?i)\bconventional\s+commits?\b`),
 }
@@ -368,33 +356,10 @@ func isCommitMessageCriterion(folded string) bool {
 	return false
 }
 
-// leadingCriterionNumberRE strips a folded criterion's own "N. "/"N) "
-// prefix so StripCommitMessageCriteria can renumber the survivors.
+// leadingCriterionNumberRE matches a folded criterion's own "N. "/"N) "
+// prefix.
 var leadingCriterionNumberRE = regexp.MustCompile(`^\d+[.)]\s*`)
 
-// StripCommitMessageCriteria removes any acceptance criterion asking a
-// reviewer to check the commit message/subject line itself, renumbering
-// the remaining criteria sequentially -- rewriting the document here,
-// rather than filtering it out later in some other layer, keeps
-// SpecAcceptanceCriteriaCount, the ticket-planning prompt (which reads
-// spec.md verbatim), and the eventual conformity review all agreeing on
-// the same single numbering, instead of risking the "one layer silently
-// disagrees with another" class of bug this codebase has hit before.
-//
-// factoryd, not the ticket, owns commit authorship (see run_ticket.go's
-// own safety-net commit): a criterion checking the commit subject either
-// tests factoryd's own fixed message (never the ticket's own business) or,
-// worse, an arbitrary per-ticket prefix a factoryd-authored safety-net
-// commit can never match (found live, 2026-09-17). A squash-merge also
-// rewrites the subject on acceptance regardless, so the criterion checks
-// something discarded before anyone reads it.
-// draft_spec.py's own prompt already asks the model not to draft one of
-// these; this is the mechanical backstop for when it does anyway.
-//
-// Returns the (possibly unchanged) spec text and how many criteria were
-// removed, for logging. No-ops (returns specContent, 0) when the spec has
-// no "## Acceptance criteria" section at all -- ValidateSpecSkeleton is
-// the thing that rejects that, not this function.
 // acceptanceCriterionBlock is one top-level numbered criterion's raw
 // source lines (its own first line plus every continuation line that
 // belongs to it, verbatim, in original formatting) alongside its folded
@@ -409,13 +374,8 @@ type acceptanceCriterionBlock struct {
 // is a thin wrapper over this function's own folded field, not a second
 // independent implementation (see that function's own doc comment for
 // why that matters). Keeps each criterion's original raw lines intact,
-// grouped, alongside a folded single-line version -- so a caller that
-// needs to REMOVE some criteria and rewrite the document
-// (StripCommitMessageCriteria) can preserve every surviving criterion's
-// original multi-line formatting exactly, rather than re-flattening
-// content nobody asked to have touched, while a caller that just wants
-// the folded text (foldAcceptanceCriteriaLines/SpecAcceptanceCriteria)
-// still gets exactly that.
+// grouped, alongside a folded single-line version, which is what
+// foldAcceptanceCriteriaLines/SpecAcceptanceCriteria return.
 //
 // A genuinely new top-level criterion starts at column 0 (no leading
 // whitespace on the RAW, untrimmed line) -- a nested sub-item under a
@@ -468,83 +428,4 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 	}
 	flush()
 	return blocks
-}
-
-// StripCommitMessageCriteria removes any acceptance criterion asking a
-// reviewer to check a git commit's message, subject or title -- see
-// commitMessageCriterionREs for what counts as one. Renumbers the
-// remaining criteria sequentially, preserving each surviving criterion's
-// own original source lines
-// verbatim (a multi-line criterion's wrapped text or lettered/numbered
-// sub-list is untouched, only its own leading number changes) -- found
-// via adversarial review, 2026-09-17: an earlier version rebuilt every
-// criterion from its own folded (always-one-line) text, which silently
-// flattened a surviving multi-line criterion's own formatting even
-// though nothing about that criterion needed to change.
-//
-// commitMessageCriterionREs match the phrasings of such a criterion and
-// no other use of "commit", but cannot tell a product whose own subject is
-// commit messages. So every removed criterion's original text is recorded
-// in a visible note appended to the PERSISTED document itself (not just a
-// server log): the human reviewing it sees exactly what was taken out and
-// can restore it by editing the document.
-//
-// Returns the (possibly unchanged) spec text and how many criteria were
-// removed. No-ops (returns specContent, 0) when the spec has no "##
-// Acceptance criteria" section at all -- ValidateSpecSkeleton is the
-// thing that rejects that, not this function.
-func StripCommitMessageCriteria(specContent string) (string, int) {
-	lines := strings.Split(specContent, "\n")
-	start, end, ok := findAcceptanceCriteriaSection(lines)
-	if !ok {
-		return specContent, 0
-	}
-	blocks := splitAcceptanceCriteriaBlocks(lines[start:end])
-	var kept []acceptanceCriterionBlock
-	var removedText []string
-	for _, b := range blocks {
-		if isCommitMessageCriterion(b.folded) {
-			removedText = append(removedText, leadingCriterionNumberRE.ReplaceAllString(b.folded, ""))
-			continue
-		}
-		kept = append(kept, b)
-	}
-	if len(removedText) == 0 {
-		return specContent, 0
-	}
-	rebuilt := append([]string{}, lines[:start]...)
-	rebuilt = append(rebuilt, "")
-	for i, b := range kept {
-		renumbered := append([]string{}, b.rawLines...)
-		renumbered[0] = fmt.Sprintf("%d. %s", i+1, leadingCriterionNumberRE.ReplaceAllString(strings.TrimSpace(renumbered[0]), ""))
-		rebuilt = append(rebuilt, renumbered...)
-	}
-	rebuilt = append(rebuilt, "")
-	rebuilt = append(rebuilt, lines[end:]...)
-	// The removal note is appended as a new "## " section at the very
-	// END of the document -- after "## Open questions", the last
-	// required heading -- not between "## Acceptance criteria" and
-	// whatever required heading originally followed it. Two reasons,
-	// both found via adversarial review, 2026-09-17: (1)
-	// findAcceptanceCriteriaSection (this function's own parsing twin)
-	// stops at the first "## " line after the criteria heading, so a
-	// note placed right after the criteria list would be swept up as a
-	// continuation of the last surviving criterion the next time
-	// anything re-parses this document -- silently corrupting that
-	// criterion's own text. (2) ValidateSpecSkeleton's own "acceptance
-	// criteria has content" check scans to the next REQUIRED heading by
-	// name (e.g. "## Risks"), not the next "## " line literally -- a
-	// note inserted between them would count as that section's own
-	// "content" even when the real criteria list is empty, defeating
-	// advanceSpecDrafting's own re-validation after stripping. Appending
-	// at the very end sits outside every required section's own content
-	// range, so neither problem applies there.
-	rebuilt = append(rebuilt, "", "## Criteria removed by factoryd", "", fmt.Sprintf(
-		"factoryd removed %d acceptance criterion/criteria about the commit message or subject before this draft reached review -- factoryd, not the ticket, owns commit authorship, and a squash-merge rewrites the subject anyway. If this removed a real requirement you actually meant, edit this document before approving.",
-		len(removedText),
-	))
-	for _, t := range removedText {
-		rebuilt = append(rebuilt, "- "+t)
-	}
-	return strings.Join(rebuilt, "\n"), len(removedText)
 }

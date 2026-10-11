@@ -200,15 +200,12 @@ func TestAdvanceSpecDraftingMalformedSkeletonHaltsNamingHeading(t *testing.T) {
 	}
 }
 
-// TestAdvanceSpecDraftingStripsCommitMessageCriterionBeforePersisting is a
-// regression for the 2026-09-17 multi-repo validation finding: a drafted
-// spec asking the reviewer to check the commit message/subject line
-// itself is unfulfillable by factoryd's own safety-net commit (see
-// internal/request.StripCommitMessageCriteria's own doc comment), so the
-// mechanical backstop must run before spec.md is ever persisted -- never
-// leaving a criterion on disk that a human approves but no later layer
-// actually checks.
-func TestAdvanceSpecDraftingStripsCommitMessageCriterionBeforePersisting(t *testing.T) {
+// TestAdvanceSpecDraftingKeepsACommitMessageCriterionAndNotesIt: a drafted
+// criterion that reads as a rule for the commit message is never removed or
+// renumbered (that reading of prose once deleted a real criterion). The
+// spec is persisted as drafted, reaches spec_review, and the request
+// carries a note naming the criterion for the human to decide.
+func TestAdvanceSpecDraftingKeepsACommitMessageCriterionAndNotesIt(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir := t.TempDir()
 	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
@@ -219,126 +216,32 @@ func TestAdvanceSpecDraftingStripsCommitMessageCriterionBeforePersisting(t *test
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-
-	draft := `# Spec
-
-## Problem
-
-Refunds can be double-processed on retry.
-
-## Scope
-
-The /refunds endpoint only.
-
-## Non-goals
-
-Not touching /charges.
-
-## Affected services and packages
-
-internal/payments
-
-## Acceptance criteria
-
-1. A retried POST /refunds with the same idempotency key returns the original result.
-2. The commit subject line begins with ` + "`ticket(refunds):`" + `.
-
-## Risks
-
-None known.
-
-## Open questions
-
-None.
-`
+	draft := "# Spec\n\n## Problem\n\nRefunds can be double-processed on retry.\n\n## Scope\n\nThe /refunds endpoint only.\n\n## Non-goals\n\nNot touching /charges.\n\n" +
+		"## Affected services and packages\n\ninternal/payments\n\n## Acceptance criteria\n\n" +
+		"1. The commit subject line begins with `ticket(refunds):`.\n" +
+		"2. The consumer commits the offset and logs the message id.\n\n" +
+		"## Risks\n\nNone known.\n\n## Open questions\n\nNone.\n"
 	runner, _ := stubSpecDraftRunner(draft, &request.SpecEvidence{}, nil)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
-
 	persisted, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, "req-1"))
 	if err != nil {
 		t.Fatalf("read persisted spec.md: %v", err)
 	}
-	criteria, err := request.SpecAcceptanceCriteria(string(persisted))
-	if err != nil {
-		t.Fatalf("SpecAcceptanceCriteria(persisted): %v", err)
+	if string(persisted) != draft {
+		t.Errorf("the drafted spec was rewritten:\n%s", persisted)
 	}
-	if len(criteria) != 1 {
-		t.Fatalf("persisted spec.md has %d criteria, want 1 (commit-message criterion should have been stripped): %v", len(criteria), criteria)
-	}
-	if strings.Contains(strings.ToLower(criteria[0]), "commit") {
-		t.Errorf("surviving criterion still mentions commit: %q", criteria[0])
-	}
-}
-
-// TestAdvanceSpecDraftingHaltsWhenStrippingLeavesNoCriteria is a
-// regression for an adversarial-review finding on this same branch:
-// ValidateSpecSkeleton only requires the "## Acceptance criteria" section
-// to have at least one non-blank line, not a valid numbered item, so a
-// draft whose ONLY criterion is commit-message-related would pass that
-// first check, then StripCommitMessageCriteria removes it, leaving zero
-// criteria -- which must halt the request with a clear reason here, not
-// persist an invalid spec.md that only fails confusingly later.
-func TestAdvanceSpecDraftingHaltsWhenStrippingLeavesNoCriteria(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir := t.TempDir()
-	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
-		t.Fatal(err)
-	}
-	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
-	r.State = request.StateSpecDrafting
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-
-	draft := `# Spec
-
-## Problem
-
-Refunds can be double-processed on retry.
-
-## Scope
-
-The /refunds endpoint only.
-
-## Non-goals
-
-Not touching /charges.
-
-## Affected services and packages
-
-internal/payments
-
-## Acceptance criteria
-
-1. The commit subject line begins with ` + "`ticket(refunds):`" + `.
-
-## Risks
-
-None known.
-
-## Open questions
-
-None.
-`
-	runner, _ := stubSpecDraftRunner(draft, &request.SpecEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatalf("driveRequests: %v", err)
-	}
-
 	loaded, err := request.Load(dataDir, "req-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StateHalted {
-		t.Fatalf("State = %q, want %q", loaded.State, request.StateHalted)
+	if loaded.State != request.StateSpecReview {
+		t.Fatalf("State = %q, want %q", loaded.State, request.StateSpecReview)
 	}
-	if !strings.Contains(loaded.Error, "no acceptance criteria left") {
-		t.Errorf("Error = %q, want it to explain that stripping left no criteria", loaded.Error)
-	}
-	if _, err := os.Stat(requestdriver.RequestSpecPath(dataDir, "req-1")); !os.IsNotExist(err) {
-		t.Errorf("spec.md should not be persisted when stripping leaves it invalid (stat err = %v)", err)
+	want := "criterion 1 reads as a rule for the commit message, which the factory writes; keep, edit or remove it"
+	if len(loaded.ReviewNotes) != 1 || loaded.ReviewNotes[0] != want {
+		t.Errorf("ReviewNotes = %q, want [%q]", loaded.ReviewNotes, want)
 	}
 }
 
@@ -1675,28 +1578,6 @@ func TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches(t *testin
 	}
 }
 
-// TestCriterionFilesFeasibleAcceptsModuleRelativePath: a criterion naming
-// `cmd/server/main.go` is covered by a ticket allowed to change
-// backend/cmd/server/main.go (live, Flutter + Go app, 2026-09-28: the literal
-// comparison halted a correct plan). A path no covering ticket owns under
-// any prefix is still flagged.
-func TestCriterionFilesFeasibleAcceptsModuleRelativePath(t *testing.T) {
-	criteria := []string{
-		"The route is registered in `cmd/server/main.go`.",
-		"The tool is registered in `internal/mcptools/habit_tools.go`.",
-	}
-	allowed := []string{"backend/cmd/server/main.go", "backend/internal/handler/habit.go"}
-	tickets := []string{habitTicket("make verify", allowed, allowed, 1, 2)}
-
-	reasons := requestdriver.CriterionFilesFeasible(criteria, tickets, [][]string{allowed}, "")
-	if len(reasons) != 1 {
-		t.Fatalf("reasons = %q, want exactly one (criterion 2's habit_tools.go)", reasons)
-	}
-	if !strings.Contains(reasons[0], "criterion 2 names internal/mcptools/habit_tools.go") {
-		t.Errorf("reasons[0] = %q, want it to name criterion 2's uncovered file", reasons[0])
-	}
-}
-
 // habitInsightsCriterionSpec mirrors the live shape (Flutter + Go app
 // habit-insights request, 2026-09-28,
 // data/requests/feature-habit-insights-endpoint-and-mcp-20260928-121607):
@@ -1756,213 +1637,95 @@ Nothing else.
 `, verifyCommand, strings.Join(allowed, ", "), strings.Join(required, ", "), required[0], allowed[len(allowed)-1], criteriaLines)
 }
 
-// TestAdvancePlanningCriterionFilesInfeasibleAutoReplanSucceeds covers the
-// live bug this closes (see habitInsightsCriterionSpec's own doc
-// comment): criterion 1 names three tickets' own files, but the first
-// drafted plan lists it as covered only by the ticket owning
-// mcptools/habit_tools.go. That must not reach plan_review -- it
-// triggers exactly one automatic re-plan naming criterion 1 and the two
-// uncovered paths (never the backticked verify command, which is not a
-// path), and a second, feasible plan (all three tickets listing
-// criterion 1) reaches plan_review normally.
-func TestAdvancePlanningCriterionFilesInfeasibleAutoReplanSucceeds(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
-	insightsTicket := habitTicket("make verify",
-		[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
-		[]string{"backend/internal/habit/insights.go"}, 2)
-	handlerTicket := habitTicket("make verify",
-		[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
-		[]string{"backend/internal/handler/habit.go"}, 2)
-	mcpTicketCoveringAlone := habitTicket("make verify",
-		[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
-		[]string{"backend/internal/mcptools/habit_tools.go"}, 1)
-	infeasible := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: insightsTicket},
-		{Filename: "002.spec.md", Content: handlerTicket},
-		{Filename: "003.spec.md", Content: mcpTicketCoveringAlone},
-	}
-	mcpTicketCoveringWithOthers := habitTicket("make verify",
-		[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
-		[]string{"backend/internal/mcptools/habit_tools.go"}, 1, 2)
-	feasible := []requestdriver.DraftedTicket{
+// habitPlan returns the three tickets of habitInsightsCriterionSpec's plan,
+// each listing the criteria given for it as covered. insights is the
+// insights ticket's Allowed-Files entry for its package.
+func habitPlan(insights string, insightsCriteria, handlerCriteria, mcpCriteria []int) []requestdriver.DraftedTicket {
+	return []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: habitTicket("make verify",
-			[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
-			[]string{"backend/internal/habit/insights.go"}, 1, 2)},
+			[]string{insights, "backend/internal/habit/insights_test.go"},
+			[]string{"backend/internal/habit/insights.go"}, insightsCriteria...)},
 		{Filename: "002.spec.md", Content: habitTicket("make verify",
 			[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
-			[]string{"backend/internal/handler/habit.go"}, 1, 2)},
-		{Filename: "003.spec.md", Content: mcpTicketCoveringWithOthers},
-	}
-	runner, callCount, feedbackByCall := sequencedPlanTicketsRunner(t, dataDir,
-		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
-			return infeasible, &request.PlanEvidence{}, nil
-		},
-		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
-			return feasible, &request.PlanEvidence{}, nil
-		},
-	)
-
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatalf("driveRequests: %v", err)
-	}
-
-	if *callCount != 2 {
-		t.Fatalf("planning launches = %d, want exactly 2", *callCount)
-	}
-	second := (*feedbackByCall)[1]
-	if !strings.Contains(second, "criterion 1 names") {
-		t.Errorf("second launch's plan-feedback.md = %q, want it to name criterion 1", second)
-	}
-	if !strings.Contains(second, "backend/internal/habit/insights.go") || !strings.Contains(second, "backend/internal/handler/habit.go") {
-		t.Errorf("second launch's plan-feedback.md = %q, want it to name both uncovered paths", second)
-	}
-	if strings.Contains(second, "cd backend") {
-		t.Errorf("second launch's plan-feedback.md = %q, must not treat the backticked verify command as a named path", second)
-	}
-
-	loaded, err := request.Load(dataDir, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.State != request.StatePlanReview {
-		t.Fatalf("State = %q, want %q (the second, feasible plan)", loaded.State, request.StatePlanReview)
-	}
-	if loaded.TicketCount != 3 {
-		t.Fatalf("TicketCount = %d, want 3", loaded.TicketCount)
-	}
-}
-
-// TestAdvancePlanningCriterionFilesFeasibleWhenAllOwningTicketsCoverIt
-// covers the feasible counterpart directly (no re-plan involved): the
-// exact same three-ticket plan as the feasible half above, drafted on
-// the first attempt, reaches plan_review with no factory-authored
-// rejection at all.
-func TestAdvancePlanningCriterionFilesFeasibleWhenAllOwningTicketsCoverIt(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
-	tickets := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: habitTicket("make verify",
-			[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
-			[]string{"backend/internal/habit/insights.go"}, 1, 2)},
-		{Filename: "002.spec.md", Content: habitTicket("make verify",
-			[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
-			[]string{"backend/internal/handler/habit.go"}, 1, 2)},
+			[]string{"backend/internal/handler/habit.go"}, handlerCriteria...)},
 		{Filename: "003.spec.md", Content: habitTicket("make verify",
 			[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
-			[]string{"backend/internal/mcptools/habit_tools.go"}, 1, 2)},
-	}
-	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatalf("driveRequests: %v", err)
-	}
-
-	loaded, err := request.Load(dataDir, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.State != request.StatePlanReview {
-		t.Fatalf("State = %q, want %q", loaded.State, request.StatePlanReview)
-	}
-	if len(loaded.Rejections) != 0 {
-		t.Fatalf("Rejections = %+v, want none (feasible on the first attempt)", loaded.Rejections)
+			[]string{"backend/internal/mcptools/habit_tools.go"}, mcpCriteria...)},
 	}
 }
 
-// TestAdvancePlanningCriterionFilesFeasibleWithDirectoryAllowedFiles
-// covers matchesAllowed's directory-prefix form (via
-// policy.PathCoveredByAllowed): a ticket declaring
-// "backend/internal/habit/" (trailing slash) as Allowed-Files still
-// covers criterion 1's own "backend/internal/habit/insights.go" without
-// naming the file exactly.
-func TestAdvancePlanningCriterionFilesFeasibleWithDirectoryAllowedFiles(t *testing.T) {
+// TestAdvancePlanningNotesACriterionListedUnderOneOfItsTickets is the
+// incident the note exists for (see habitInsightsCriterionSpec): criterion 1
+// names three tickets' own files and the plan lists it under the ticket
+// that owns one of them. The plan is not refused and not re-planned (the
+// automatic re-plan once widened Allowed-Files to a file the spec left
+// alone): it reaches plan_review on the first launch, and the request
+// carries one note for each file the covering ticket may not change, naming
+// the ticket that may -- never the backticked verify command.
+func TestAdvancePlanningNotesACriterionListedUnderOneOfItsTickets(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
-	tickets := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: habitTicket("make verify",
-			[]string{"backend/internal/habit/", "backend/internal/habit/insights_test.go"},
-			[]string{"backend/internal/habit/insights.go"}, 1, 2)},
-		{Filename: "002.spec.md", Content: habitTicket("make verify",
-			[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
-			[]string{"backend/internal/handler/habit.go"}, 1, 2)},
-		{Filename: "003.spec.md", Content: habitTicket("make verify",
-			[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
-			[]string{"backend/internal/mcptools/habit_tools.go"}, 1, 2)},
-	}
-	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-
+	plan := habitPlan("backend/internal/habit/insights.go", []int{2}, []int{2}, []int{1})
+	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir, func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+		return plan, &request.PlanEvidence{}, nil
+	})
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
-
 	loaded, err := request.Load(dataDir, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StatePlanReview {
-		t.Fatalf("State = %q, want %q (directory Allowed-Files entry covers the named file)", loaded.State, request.StatePlanReview)
+	if loaded.State != request.StatePlanReview || *callCount != 1 || len(loaded.Rejections) != 0 {
+		t.Fatalf("State = %q after %d planning launch(es) with rejections %+v, want plan_review after one launch and none", loaded.State, *callCount, loaded.Rejections)
 	}
-}
-
-// TestAdvancePlanningCriterionFilesTwiceHaltsAfterTwoLaunches covers the
-// bound on advancePlanning's automatic re-plan for the criterion-paths
-// check specifically (the tests_added-infeasibility bound is pinned
-// separately by TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches):
-// a second criterion-files-infeasible plan halts after exactly two
-// launches, never a third.
-func TestAdvancePlanningCriterionFilesTwiceHaltsAfterTwoLaunches(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
-	insightsTicket := habitTicket("make verify",
-		[]string{"backend/internal/habit/insights.go", "backend/internal/habit/insights_test.go"},
-		[]string{"backend/internal/habit/insights.go"}, 2)
-	handlerTicket := habitTicket("make verify",
-		[]string{"backend/internal/handler/habit.go", "backend/internal/handler/habit_test.go"},
-		[]string{"backend/internal/handler/habit.go"}, 2)
-	mcpTicketCoveringAlone := habitTicket("make verify",
-		[]string{"backend/internal/mcptools/habit_tools.go", "backend/internal/mcptools/habit_insights_tools_test.go"},
-		[]string{"backend/internal/mcptools/habit_tools.go"}, 1)
-	infeasible := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: insightsTicket},
-		{Filename: "002.spec.md", Content: handlerTicket},
-		{Filename: "003.spec.md", Content: mcpTicketCoveringAlone},
+	want := []string{
+		"criterion 1 names `backend/internal/habit/insights.go`, which ticket 001.spec.md may change, but the tickets covering criterion 1 may not",
+		"criterion 1 names `backend/internal/handler/habit.go`, which ticket 002.spec.md may change, but the tickets covering criterion 1 may not",
 	}
-	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir,
-		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
-			return infeasible, &request.PlanEvidence{}, nil
-		},
-		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
-			return infeasible, &request.PlanEvidence{}, nil
-		},
-	)
-
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatalf("driveRequests: %v", err)
+	if strings.Join(loaded.ReviewNotes, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ReviewNotes = %q, want %q", loaded.ReviewNotes, want)
 	}
-
-	if *callCount != 2 {
-		t.Fatalf("planning launches = %d, want exactly 2 (bounded, no unbounded loop)", *callCount)
+	if !strings.Contains(loaded.LastAsk, "Plan ready") {
+		t.Errorf("LastAsk = %q, want the plan review's reminder", loaded.LastAsk)
 	}
-
-	loaded, err := request.Load(dataDir, id)
-	if err != nil {
+	// Approving drops the notes: they describe the gate that was passed.
+	if err := loaded.ApprovePlan("alice", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StateHalted {
-		t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
-	}
-	if !strings.Contains(loaded.Error, "criterion 1 names") {
-		t.Errorf("Error = %q, want it to name criterion 1", loaded.Error)
+	if loaded.ReviewNotes != nil {
+		t.Errorf("after approval: ReviewNotes = %q", loaded.ReviewNotes)
 	}
 }
 
-// TestAdvancePlanningCombinesTestsAddedAndCriterionFilesReasons covers
-// #351's own combined-message requirement: a plan that is simultaneously
-// tests_added-infeasible (one ticket) and criterion-files-infeasible (a
-// different criterion, a different ticket) gets exactly one re-plan
-// message naming BOTH infeasibilities, not just the first one found.
-func TestAdvancePlanningCombinesTestsAddedAndCriterionFilesReasons(t *testing.T) {
+// TestAdvancePlanningLeavesNoNoteWhenEveryOwningTicketListsTheCriterion: the
+// same plan with criterion 1 listed under all three tickets, with the
+// insights ticket naming its file or the directory that holds it
+// (policy.PathCoveredByAllowed's directory form), has nothing to note.
+func TestAdvancePlanningLeavesNoNoteWhenEveryOwningTicketListsTheCriterion(t *testing.T) {
+	for _, insights := range []string{"backend/internal/habit/insights.go", "backend/internal/habit/"} {
+		dp := newFakeDeps(t)
+		dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
+		runner, _ := requestdrivertest.StubPlanTicketsRunner(habitPlan(insights, []int{1, 2}, []int{1, 2}, []int{1, 2}), &request.PlanEvidence{}, nil)
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+		loaded, err := request.Load(dataDir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.State != request.StatePlanReview || len(loaded.Rejections) != 0 || len(loaded.ReviewNotes) != 0 {
+			t.Errorf("%s: State = %q, rejections %+v, notes %q, want plan_review with neither", insights, loaded.State, loaded.Rejections, loaded.ReviewNotes)
+		}
+	}
+}
+
+// TestAdvancePlanningRefusesForTheTestsRuleAndNotForACriterionsFile: a plan
+// with a ticket whose Allowed-Files can never pass tests_added (a check of
+// header lines) and a criterion naming a file no covering ticket may change
+// (a reading of prose) is refused, and re-planned once, for the first only:
+// the refusal's reason does not mention the criterion.
+func TestAdvancePlanningRefusesForTheTestsRuleAndNotForACriterionsFile(t *testing.T) {
 	dp := newFakeDeps(t)
 	const combinedSpec = "# Spec\n\n" +
 		"## Problem\n\nRefunds can be double-processed on retry.\n\n" +
@@ -1974,22 +1737,17 @@ func TestAdvancePlanningCombinesTestsAddedAndCriterionFilesReasons(t *testing.T)
 		"2. Unit tests cover `internal/payments/refunds.go`.\n\n" +
 		"## Risks\n\nNone known.\n\n" +
 		"## Open questions\n\nNone.\n"
-	wiringOnlyTicket := infeasibleTestsAddedTicket("make verify", 1)
-	mismatchedTicket := habitTicket("make verify",
-		[]string{"internal/payments/other.go", "internal/payments/other_test.go"},
-		[]string{"internal/payments/other.go"}, 2)
-
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, combinedSpec, "make verify")
 	tickets := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: wiringOnlyTicket},
-		{Filename: "002.spec.md", Content: mismatchedTicket},
+		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1)},
+		{Filename: "002.spec.md", Content: habitTicket("make verify",
+			[]string{"internal/payments/other.go", "internal/payments/other_test.go"},
+			[]string{"internal/payments/other.go"}, 2)},
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
-
 	loaded, err := request.Load(dataDir, id)
 	if err != nil {
 		t.Fatal(err)
@@ -1998,11 +1756,8 @@ func TestAdvancePlanningCombinesTestsAddedAndCriterionFilesReasons(t *testing.T)
 		t.Fatalf("Rejections = %+v, want exactly one factory-authored rejection", loaded.Rejections)
 	}
 	reason := loaded.Rejections[0].Reason
-	if !strings.Contains(reason, "tests_added") {
-		t.Errorf("Rejections[0].Reason = %q, want it to name the tests_added infeasibility", reason)
-	}
-	if !strings.Contains(reason, "criterion 2 names") || !strings.Contains(reason, "internal/payments/refunds.go") {
-		t.Errorf("Rejections[0].Reason = %q, want it to name the criterion 2 infeasibility", reason)
+	if !strings.Contains(reason, "tests_added") || strings.Contains(reason, "criterion 2") || strings.Contains(reason, "refunds.go") {
+		t.Errorf("Rejections[0].Reason = %q, want the tests_added infeasibility and nothing of criterion 2", reason)
 	}
 }
 

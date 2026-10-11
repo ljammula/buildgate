@@ -516,6 +516,11 @@ type Request struct {
 	// plan_review rejection, or when the factory finds the plan infeasible,
 	// the planning job revises the current tickets with that feedback.
 	PlanImported bool `json:"plan_imported,omitempty"`
+	// ReviewNotes are the factory's notes for the human on what the current
+	// review gate shows (see RefreshReviewNotes): set in spec_review and
+	// plan_review, dropped by every transition. Advice only: nothing reads
+	// them to decide anything.
+	ReviewNotes []string `json:"review_notes,omitempty"`
 	// DraftHalt is the factory's reason for refusing the latest spec or plan
 	// draft whose CONTENT its own checks rejected; the next draft of that
 	// stage is told it (the driver renders it after the operator feedback,
@@ -967,6 +972,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	// so every transition clears it and Quarantine's own caller re-sets it
 	// fresh when the new quarantine warrants one (Follow-up B).
 	r.QuarantineCheck = ""
+	r.ReviewNotes = nil
 	r.UpdatedAt = ts
 	r.EnteredAt = ts
 	r.prevState = to

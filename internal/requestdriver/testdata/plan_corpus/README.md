@@ -25,7 +25,7 @@ workspaces/<project>.files   the project's file names
 |---|---|
 | `TestRealApprovedPlansPassEveryPlanTimeCheck` (`internal/requestdriver`) | `AdvancePlanning` with a planner that returns the case's tickets; the request must reach `plan_review` on the first attempt with the case's ticket count |
 | `TestRealApprovedPlansPassTheHandoverChecks` (`internal/requestsubmit`) | What `factoryd submit -spec-file -plan-dir` checks before recording a request |
-| The mutation tests of `plan_corpus_mutation_test.go` (`internal/requestdriver`) | Each criterion, with a clause written into it that names a token that is not a file to change, a file only referred to or left alone, a file that changes, or a commit: the criterion-files check and the commit-message stripping must read the clause as they read it alone |
+| The mutation tests of `plan_corpus_mutation_test.go` (`internal/requestdriver`) | Each criterion, with a clause written into it that names a token that is not a file, a file cited, left alone or said to change, or a commit: every mutated plan must still reach `plan_review`, and the review notes (`request.PlanReviewNotes`, `request.SpecReviewNotes`) must read the clause as they read it alone |
 
 ## Workspace: file names only
 

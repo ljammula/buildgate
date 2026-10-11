@@ -131,7 +131,11 @@ func RecordEdit(dataDir string, r *Request, by, relPath, after string, now time.
 		Diff:          diff,
 		DiffTruncated: truncated,
 	})
+	// The notes are those of the text under review: read them again.
+	notes := r.ReviewNotes
+	r.RefreshReviewNotes(dataDir)
 	if err := r.Save(dataDir); err != nil {
+		r.ReviewNotes = notes
 		// The record could not be saved: put the replaced text back, so a
 		// save the caller is told failed has not changed the file, and a
 		// retry meets the text and the hash it started from.

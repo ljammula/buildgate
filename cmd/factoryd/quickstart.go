@@ -3124,6 +3124,7 @@ func quickstartReportRequestState(dataDir string, r *request.Request, w io.Write
 	switch r.State {
 	case request.StateSpecReview:
 		fmt.Fprintf(w, "Spec drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, request.SpecPath(dataDir, r.ID), arg, r.ID)
+		printReviewNotes(w, r)
 		return nil
 	case request.StateOracleReview:
 		fmt.Fprintf(w, "Oracle stage for request %s is waiting on you: %s/%s\nReview or hand-write it (absent or empty skips), then run: factoryd approve%s %s\n", r.ID, request.Dir(dataDir, r.ID), request.RequestOracleDirName, arg, r.ID)
@@ -3133,6 +3134,7 @@ func quickstartReportRequestState(dataDir string, r *request.Request, w io.Write
 		return nil
 	case request.StatePlanReview:
 		fmt.Fprintf(w, "Plan drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, filepath.Join(request.Dir(dataDir, r.ID), "tickets"), arg, r.ID)
+		printReviewNotes(w, r)
 		return nil
 	case request.StateResumeReview:
 		fmt.Fprintf(w, "Request %s is waiting on you: %s\n", r.ID, strings.Join(strings.Fields(r.NextAction()), " "))

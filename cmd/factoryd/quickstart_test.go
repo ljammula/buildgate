@@ -1076,6 +1076,22 @@ func TestQuickstartReportRequestStatePlanReview(t *testing.T) {
 	}
 }
 
+// TestQuickstartReportRequestStatePrintsTheReviewNotes: at a spec or plan
+// review the factory's notes are printed under the approve command, one a
+// line, as advice.
+func TestQuickstartReportRequestStatePrintsTheReviewNotes(t *testing.T) {
+	for _, state := range []request.State{request.StateSpecReview, request.StatePlanReview} {
+		r := &request.Request{ID: "req-2", State: state, ReviewNotes: []string{"criterion 2 names `a.go`, which ticket 001.spec.md may change", "and 3 more"}}
+		var out bytes.Buffer
+		if err := quickstartReportRequestState(t.TempDir(), r, &out); err != nil {
+			t.Fatalf("quickstartReportRequestState: %v", err)
+		}
+		if got := out.String(); !strings.Contains(got, "\nnote: criterion 2 names `a.go`, which ticket 001.spec.md may change\nnote: and 3 more\n") {
+			t.Errorf("%s: output = %q, want each note on its own line", state, got)
+		}
+	}
+}
+
 func TestQuickstartReportRequestStateHalted(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-3", State: request.StateHalted, Error: "relay upstream unreachable"}

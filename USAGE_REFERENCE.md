@@ -400,7 +400,7 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 | Edited in the console | At `spec_review` and `plan_review` the console's Edit saves the file in place. Each save is recorded on the request: who, when, the changed lines, and the replaced text as a revision (the request page's Audit lists them). If you then reject that stage, the changed lines go to the planning model with your feedback, marked to be kept; an edit you approve reaches no model, since nothing redrafts the file |
 | Not in the skeleton | Hand the document over as the request (`-request-file`) and review the spec Buildgate drafts from it |
 | Ticket format | Header lines `Verify-Command:` (the request's verify command, exactly), `Allowed-Files:`, `Required-Changed-Files:` (with at least one test file, or a `Tests-Required: no -- <reason>` line), then `## Goal`, `## Plan` with `### Files to touch`, `### Steps`, `### Tests to add`, `### Acceptance criteria covered` (criterion numbers, one per list item), `## Out of scope` A file the ticket moves or renames is a change to both paths: list the old path and the new one in `Allowed-Files:` (the changed-file list names both, for `diff_scope`, required files and protected paths alike) |
-| Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (verify command, allowed files, the tests rule, criterion feasibility). A handed-over plan that fails one halts the request with the reason, or, when the factory judges it infeasible, is revised by the planning model with that reason as feedback |
+| Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (ticket format, verify command, allowed files, criteria coverage, the tests rule). A handed-over plan that fails one halts the request with the reason, or, when it fails the tests rule, is revised by the planning model with that reason as feedback. What the factory reads from a criterion's prose is a note at `plan_review`, never a refusal |
 | `-plan-dir` alone | Refused: tickets name the criteria of the spec they plan |
 | A halted hand-over | `factoryd retry` takes the same document again and halts the same way. Send it back with a reason instead (`factoryd reject -to plan -reason "..." <id>`, or `-to spec`): the model then revises your document to fix it. Or `cancel`, correct the file and submit again |
 | Spec changed after hand-over | If you reject the spec and the revision changes its criteria, your tickets are still taken on the first planning pass and must still cover them. Sending a request back to spec after a plan exists discards the plan's revisions and its feedback: the tickets as you handed them over are taken again |
@@ -729,32 +729,44 @@ gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
 `tests_added` and it declares no `Tests-Required` opt-out.
 
-A second plan-time check runs alongside it: a plan is rejected when an
-approved-spec acceptance criterion names, in backticks, a file its work
-changes and that file is in the `Allowed-Files` of no ticket that lists
-the criterion as covered. A wrong refusal costs the whole request, so a
-backticked name counts only when every row below says it does:
+What refuses a drafted plan reads its structure only, never the meaning
+of its prose:
 
-| Question | Counts as a file to change | Does not |
+| Refusal | Reads |
+|---|---|
+| A ticket off the format | The ticket's headings, in order (`## Goal` ... `## Out of scope`), and its header lines |
+| Another verify command | The ticket's `Verify-Command:` line against the request's verify command, as text |
+| No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
+| An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's numbered criteria |
+| The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
+
+A plan the planning model drafted that fails one is re-planned once, with
+the check's message as the feedback; a second refused plan halts the
+request. A handed-over plan is re-planned only for the tests rule; any
+other failure halts it at once.
+
+What the factory reads from prose is a **review note**: one line on the
+request (`review_notes` in `request.json` and `GET /requests/{id}`), shown
+in the console's Review panel and by `factoryd watch`, counted in the
+review reminder. A note never refuses, re-plans or rewrites anything, and
+approval does not look at it. To act on one, request changes with it as
+the feedback. Notes are read again after each edit made at the gate, and
+at most ten are shown.
+
+| Gate | Note | When |
 |---|---|---|
-| Is it a file of this repository? | A file that exists; `tests/x.py::test_y` and `a.go:42` name that file. A new path with a directory and an extension, when its first directory exists at the repository's root or holds a file some ticket may change | A command, a glob, a URL or URL path, `key=value`, a version (`HTTP/1.1`), a media type, a route template (`users/{id}.json`), a path outside the repository (`~/...`, `$HOME/...`, `../...`), an import path (`github.com/acme/x/y.pb.go`), a call, a Go identifier qualified by its package (`internal/domain.Calculate`): each only if a file of that name exists |
-| Does its clause leave it alone? | No such wording, a limit on it, or a change said beside it: "`a.go` is otherwise unchanged", "unchanged except for ...", "`a.go` returns 404 and existing responses are unchanged" | `untouched`, `unchanged`, `not modified`, `must not change`, `no changes to`, `do not modify the existing`, `must remain as it is`, `stays the same`, `leave ... alone`, `without any change to`, said of the file |
-| Does its clause only refer to it? | Any other wording | The wording that leads to the name is that of a reference: `already`, `pattern`, `convention`, `like`, `as in`, `same ... as`, `similar to`, `mirrors`, `consistent with`, `modelled on`, `follows`, `based on`, `reuses`, `what`, `including`, `such as`, `see` |
-| The file exists and no ticket of the plan may change it: does its clause say something changes? | `adds`, `gains`, `new`, `updated`, `returns`, `removed`, ... | A clause with no such wording: the criterion reads, runs or cites the file |
+| `plan_review` | `criterion N names <file>, which ticket T may change, but the tickets covering criterion N may not` | The criterion names, in backticks, a file that is in the `Allowed-Files` of a ticket that does not list the criterion as covered, and in those of no ticket that does. Only names and ticket headers are read: any wording earns it |
+| `plan_review` | `criterion N says <file> changes, but no ticket may change it` | The file exists, no ticket may change it, and the words around its name say it changes (`adds`, `gains`, `new`, `updated`, `removed` ...) without denying it (`no`, `not`, `unchanged`) or only referring to it (`already`, `pattern`, `like`, `from`) |
+| `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review is told to pass such a criterion, since it sees only the diff |
 
-A parenthetical is a clause of its own. Not caught: an existing file the
-plan leaves out of every ticket when its clause states behaviour without a
-word of change, and a new file under a top-level directory that neither
-the repository has nor any ticket writes into. A criterion covered by
-no ticket at all is left to the "unclaimed criterion" check. On either
-rejection the request driver re-plans once, feeding every infeasibility
-found back to the planner as feedback before the request reaches a human;
-if the redrafted plan is still infeasible, the request halts. A plan the
-planning model drafted that fails any other check (a ticket off the
-format, a missing header, another verify command, an unclaimed criterion)
-is re-planned once the same way, with the check's message as the feedback;
-a second refused plan halts the request. A handed-over plan that fails
-such a check halts at once.
+A backticked name is a file when a file of exactly that name exists
+(`tests/x.py::test_y` and `a.go:42` name that file; letter case counts
+on every file system), or when it is a new path that some ticket's
+`Allowed-Files` cover. A command, a glob, a URL or URL path, `key=value`,
+a version (`HTTP/1.1`), a media type, a route template
+(`users/{id}.json`), a path outside the repository, an import path and a
+Go identifier qualified by its package (`internal/domain.Calculate`) are
+not files.
 
 Real correctness coverage is `-conformity-policy`'s
 per-criterion review (default `required`, no `.factory.yml` key) plus the

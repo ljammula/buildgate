@@ -489,6 +489,11 @@ export interface RequestSummary {
    * after a draft that was not a deliberate none_eligible.
    */
   readonly oracleSkipWarning: string;
+  /**
+   * The factory's notes on what the review gate shows (spec_review,
+   * plan_review). Advice from its reading of the text: nothing depends on them.
+   */
+  readonly reviewNotes: readonly string[];
   /** The drafting job running right now, or null. See requestRunningJob. */
   readonly activeJob: ActiveJob | null;
   readonly submittedAt: string;
@@ -660,6 +665,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     oracleDraftStatus: oracleDraftField(oracleDraft, "status"),
     oracleDraftDetail: oracleDraftField(oracleDraft, "detail"),
     oracleSkipWarning: typeof skipWarning === "string" ? skipWarning : "",
+    reviewNotes: stringList(o, "review_notes", at),
     activeJob: isObject(activeJob) ? decodeActiveJob(activeJob, `${at}.active_job`) : null,
     oracleDraftCriteria: oracleDraftCriteria(oracleDraft, `${at}.oracle_draft.criteria`),
     nextAction: optString(o, "next_action", at),

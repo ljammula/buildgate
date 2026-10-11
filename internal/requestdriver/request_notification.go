@@ -113,6 +113,9 @@ func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requ
 	if note := request.OracleReviewNotice(dataDir, r); note != "" {
 		notice.Detail += " -- NOTE: " + note
 	}
+	if n := len(r.ReviewNotes); n > 0 && (r.State == request.StateSpecReview || r.State == request.StatePlanReview) {
+		notice.Detail += fmt.Sprintf(" The factory left %d note(s) on it.", n)
+	}
 	if waited >= time.Minute {
 		notice.Detail = fmt.Sprintf("Waiting for you for %s. %s", waited.Round(time.Minute), notice.Detail)
 	}

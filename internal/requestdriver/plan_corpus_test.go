@@ -124,9 +124,6 @@ func planCorpusRefusal(t *testing.T, c planCorpusCase) string {
 	if err := request.ValidateSpecSkeleton(c.spec); err != nil {
 		return "spec skeleton: " + err.Error()
 	}
-	if _, removed := request.StripCommitMessageCriteria(c.spec); removed != 0 {
-		return "spec drafting would remove an approved acceptance criterion as a commit-message criterion"
-	}
 	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, c.spec, c.verifyCommand)
 	fixture, err := request.Load(dataDir, id)
 	if err != nil {

@@ -189,32 +189,6 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
-	// Mechanical backstop for draft_spec.py's own prompt instruction not
-	// to draft a commit-message/subject criterion in the first place --
-	// see StripCommitMessageCriteria's own doc comment for why. Applied
-	// here, before the spec is ever persisted or shown to the operator at
-	// spec_review, so every later reader (the human approving it, the
-	// ticket-planning prompt, SpecAcceptanceCriteriaCount) sees the same
-	// already-renumbered document -- never a criterion a human approved
-	// that some other layer silently never checks.
-	if stripped, removed := request.StripCommitMessageCriteria(specMD); removed > 0 {
-		log.Printf("request %s: stripped %d commit-message acceptance criterion(criteria) from the drafted spec", r.ID, removed)
-		specMD = stripped
-		// Re-validate after stripping, before persisting anything: found
-		// via adversarial review, 2026-09-17 -- ValidateSpecSkeleton only
-		// requires the "## Acceptance criteria" section to have at least
-		// one non-blank line, not a valid numbered item, so a draft whose
-		// ONLY criterion was commit-message-related passed the check
-		// above but would leave zero numbered criteria after stripping.
-		// Without this, that invalid spec.md would still be written to
-		// disk and reach spec_review, only to fail confusingly much later
-		// (SpecAcceptanceCriteria erroring during ticket planning or
-		// build) instead of HaltRequest reporting the real reason here,
-		// where the actual cause is known.
-		if err := request.ValidateSpecSkeleton(specMD); err != nil {
-			return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md has no acceptance criteria left after removing %d commit-message criterion(criteria): %v", removed, err), now)
-		}
-	}
 	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
 		return fmt.Errorf("write spec: %w", err)
 	}
@@ -232,6 +206,9 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	if err := r.CompleteSpecDrafting(now); err != nil {
 		return err
 	}
+	// What the factory's reading of the spec found is advice for the review
+	// (request.SpecReviewNotes): it changes nothing in the document.
+	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: spec_drafting -> spec_review (spec drafted)", r.ID)
 	// State first, then the reminder, then save again: a crash between
 	// the two saves costs at most one duplicate reminder (the ticker
@@ -373,13 +350,12 @@ const maxPlanningAttempts = 2
 // factory-authored Rejection (By: "factoryd") so the request's history
 // shows why a second launch happened, feeds the same reason back to
 // plan_tickets.py as plan_review-rejection feedback (request.PlanFeedback),
-// and re-launches once. A second class of infeasibility joined the first
-// live (Flutter + Go app habit-insights request, 2026-09-28): a spec criterion naming files
-// owned by several tickets, but listed as covered by only one of them --
-// see CriterionFilesFeasible's own doc comment for that incident.
-// writeAndValidateDraftedTickets reports every infeasibility of either
-// class it finds in one message, so a single re-plan gets fed all of
-// them at once. Every other content failure of a drafted plan (a ticket off
+// and re-launches once. writeAndValidateDraftedTickets reports every such
+// ticket it finds in one message, so a single re-plan gets fed all of them
+// at once. Only checks over a plan's structure refuse it or re-plan it: a
+// criterion that names a file its covering tickets may not change is read
+// from the spec's prose, so it is a note at plan_review
+// (request.PlanReviewNotes). Every other content failure of a drafted plan (a ticket off
 // the format, missing Allowed-Files, an unclaimed acceptance criterion, a
 // Verify-Command drift, ...) gets the same single re-plan, told the check's
 // own message; a handed-over plan and an I/O error halt on the first
@@ -424,16 +400,10 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	if err != nil {
 		return fmt.Errorf("read approved spec: %w", err)
 	}
-	// criteriaTexts (rather than a second call to
-	// SpecAcceptanceCriteriaCount, which itself just counts this same
-	// parse's own result) also feeds CriterionFilesFeasible below, which
-	// needs each criterion's verbatim text to find the repo paths it
-	// names.
-	criteriaTexts, err := request.SpecAcceptanceCriteria(string(specBytes))
+	criteriaCount, err := request.SpecAcceptanceCriteriaCount(string(specBytes))
 	if err != nil {
 		return HaltRequest(dataDir, r, fmt.Sprintf("approved spec.md: %v", err), now)
 	}
-	criteriaCount := len(criteriaTexts)
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 
 	runner = withPlanImport(runner)
@@ -490,7 +460,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
 			return fmt.Errorf("create tickets dir: %w", err)
 		}
-		requestTickets, validateErr = writeAndValidateDraftedTickets(ticketsDir, tickets, criteriaCount, verifyCommand, testPatterns, criteriaTexts, r.Workspace)
+		requestTickets, validateErr = writeAndValidateDraftedTickets(ticketsDir, tickets, criteriaCount, verifyCommand, testPatterns)
 		if validateErr == nil {
 			break
 		}
@@ -525,6 +495,10 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	if err := r.CompletePlanning(now); err != nil {
 		return err
 	}
+	// A criterion that names a file its covering tickets may not change is
+	// a note for the review (request.PlanReviewNotes), never a refusal or a
+	// re-plan: that reading of the spec's prose can be wrong.
+	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: planning -> plan_review (plan drafted: %d ticket(s))", r.ID, r.TicketCount)
 	if err := r.Save(dataDir); err != nil {
 		return err
@@ -1898,13 +1872,11 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 
 // errPlanInfeasible sentinels a writeAndValidateDraftedTickets failure
 // that gets a single automatic re-plan rather than an immediate halt --
-// see AdvancePlanning's own doc comment and maxPlanningAttempts. Two
-// checks wrap their failures with it: a ticket whose Allowed-Files could
-// never satisfy the tests_added gate (policy.TicketTestsAddedFeasible),
-// and a spec criterion naming a file no ticket covering it may change
-// (CriterionFilesFeasible) -- generalised from the single
-// tests_added-only sentinel #340/#343 first added, so both share
-// AdvancePlanning's one retry loop instead of duplicating it. Every other
+// see AdvancePlanning's own doc comment and maxPlanningAttempts. One check
+// wraps its failures with it: a ticket whose Allowed-Files could never
+// satisfy the tests_added gate (policy.TicketTestsAddedFeasible), which
+// reads the ticket's header lines and the project's test patterns and no
+// prose. Every other
 // validation failure this function can return (a bad heading, a missing
 // Allowed-Files/Required-Changed-Files, a Verify-Command drift, an
 // unclaimed acceptance criterion) is not wrapped with it; planRedraftable
@@ -1920,25 +1892,24 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // a different command than the one planning resolved. Once every ticket
 // individually validates that way, it checks that every criterion from 1
 // to criteriaCount is claimed by at least one ticket
-// (request.ValidatePlanCoverage), then runs the two infeasibility checks
-// (errPlanInfeasible): a ticket whose own declared Allowed-Files could
+// (request.ValidatePlanCoverage), then reports the infeasible tickets
+// (errPlanInfeasible): one whose own declared Allowed-Files could
 // never pass the tests_added gate (policy.TicketTestsAddedFeasible) --
 // found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
 // approved, and burned a full build round before quarantining on a
 // tests_added failure its own Allowed-Files made structurally
-// unavoidable -- and a spec criterion naming a file no ticket covering it
-// may change (CriterionFilesFeasible; see its own doc comment for the
-// live incident that motivated it). Both classes are collected across
-// every ticket/criterion rather than returned on the first hit, so a
-// single re-plan is fed every infeasibility found, not just the first.
+// unavoidable. They are collected across every ticket rather than returned
+// on the first hit, so a single re-plan is fed every one found. Every check
+// here reads a ticket's structure (headings, header lines, criterion
+// numbers), never the meaning of its prose: what the factory reads from
+// prose is a note at the review (request.PlanReviewNotes).
 // Every other validation failure returns immediately, naming the failing
 // ticket's filename; the caller (AdvancePlanning) removes ticketsDir on
 // any failure path so a halted request's directory doesn't keep
 // half-valid ticket files around.
-func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string, criteriaTexts []string, workspace string) ([]request.Ticket, error) {
+func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string) ([]request.Ticket, error) {
 	requestTickets := make([]request.Ticket, 0, len(tickets))
 	contents := make([]string, 0, len(tickets))
-	allowedByTicket := make([][]string, 0, len(tickets))
 	var infeasible []string
 	for i, ticket := range tickets {
 		ticketPath := filepath.Join(ticketsDir, ticket.Filename)
@@ -1978,12 +1949,10 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		}
 		requestTickets = append(requestTickets, request.Ticket{Index: i + 1, SpecPath: ticketPath})
 		contents = append(contents, ticket.Content)
-		allowedByTicket = append(allowedByTicket, allowed)
 	}
 	if err := request.ValidatePlanCoverage(criteriaCount, contents); err != nil {
 		return nil, contentErr(err)
 	}
-	infeasible = append(infeasible, CriterionFilesFeasible(criteriaTexts, contents, allowedByTicket, workspace)...)
 	if len(infeasible) > 0 {
 		return nil, contentErr(fmt.Errorf("%s: %w", strings.Join(infeasible, "; "), errPlanInfeasible))
 	}

@@ -1,6 +1,7 @@
 package requestdriver_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -13,6 +14,7 @@ import (
 	"buildgate/internal/policy"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/testfixture"
 	"buildgate/internal/ticketspec"
 )
@@ -20,15 +22,17 @@ import (
 // The mutation corpus: every acceptance criterion of every plan-corpus
 // case, with one clause written into it. A clause names a token in the
 // wording of a row of one of the tables below; a placement says where in
-// the criterion the clause goes. The plan-time text rules must read the
-// mutated criterion as they read the clause alone:
+// the criterion the clause goes. Two things are required of the plan-time
+// reading of a criterion's prose:
 //
-//   - a token that is not a file some ticket must change (notAFileTokens,
-//     and a file under citedClauses or untouchedClauses) refuses no plan;
-//   - a file some ticket must change (changedClauses) that no covering
-//     ticket allows is still named in a reason;
-//   - a criterion that mentions a commit without being about a commit's
-//     message (commitMentions) is not removed from its spec.
+//   - it refuses nothing: every mutated plan reaches plan_review, whatever
+//     the clause says, with its spec as written
+//     (TestRealPlansWithMutatedCriteriaStillReachPlanReview);
+//   - its notes read the mutated criterion as they read the clause alone: a
+//     file another ticket of the plan owns is noted in any wording, an
+//     existing file nobody owns only when the clause says it changes, and a
+//     token that is not a file, a file only referred to or left alone and a
+//     mention of a commit never.
 //
 // A new way of writing a token that is not a file, or of saying a file is
 // only referred to or left alone, is a new row; so is a new placement.
@@ -191,10 +195,11 @@ var commitMentions = []string{
 type mutationPlan struct {
 	name      string
 	workspace string
-	criteria  []string   // each on one line, as request.SpecAcceptanceCriteria folds it
-	contents  []string   // the tickets
-	allowed   [][]string // their Allowed-Files
+	criteria  []string // each on one line, as request.SpecAcceptanceCriteria folds it
+	tickets   []request.PlanTicket
 	covered   map[int]bool
+	// asItStands holds the notes of each criterion read so far, unmutated.
+	asItStands map[int][]string
 	// existing is a file of the project, and created one that is not, under
 	// a directory the project has ("" when it has none); no ticket of the
 	// plan may change either.
@@ -215,7 +220,7 @@ func loadMutationPlans(t *testing.T) []mutationPlan {
 			workspaces[c.project] = t.TempDir()
 			testfixture.WriteEmptyFiles(t, workspaces[c.project], list)
 		}
-		p := mutationPlan{name: c.name, workspace: workspaces[c.project], covered: map[int]bool{}}
+		p := mutationPlan{name: c.name, workspace: workspaces[c.project], covered: map[int]bool{}, asItStands: map[int][]string{}}
 		var err error
 		if p.criteria, err = request.SpecAcceptanceCriteria(c.spec); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -233,7 +238,7 @@ func loadMutationPlans(t *testing.T) []mutationPlan {
 			for _, n := range numbers {
 				p.covered[n] = true
 			}
-			p.contents, p.allowed, union = append(p.contents, ticket.Content), append(p.allowed, allowed), append(union, allowed...)
+			p.tickets, union = append(p.tickets, request.PlanTicket{Name: ticket.Filename, Content: ticket.Content, Allowed: allowed}), append(union, allowed...)
 		}
 		files, err := os.ReadFile(list)
 		if err != nil {
@@ -283,25 +288,27 @@ func coveredUnderAnyRoot(file string, allowed []string) bool {
 	return false
 }
 
-// reasons returns what the criterion check says of the plan with criterion
-// n (from 1) replaced by text. owned, when not "", is a file that one more
-// ticket, covering no criterion, may change.
-func (p mutationPlan) reasons(n int, text, owned string) []string {
+// otherTicket is the file name of the ticket notes adds to a plan.
+const otherTicket = "099.spec.md"
+
+// notes returns the plan's review notes with criterion n (from 1) replaced
+// by text and every other criterion blank. owned, when not "", is a file
+// that one more ticket, otherTicket, which lists no criterion, may change.
+func (p mutationPlan) notes(n int, text, owned string) []string {
 	criteria := make([]string, len(p.criteria))
 	criteria[n-1] = text
-	contents, allowed := p.contents, p.allowed
+	tickets := p.tickets
 	if owned != "" {
-		contents = append(append([]string{}, contents...), "a ticket that covers no criterion")
-		allowed = append(append([][]string{}, allowed...), []string{owned})
+		tickets = append(append([]request.PlanTicket{}, tickets...), request.PlanTicket{Name: otherTicket, Content: "a ticket that covers no criterion", Allowed: []string{owned}})
 	}
-	return requestdriver.CriterionFilesFeasible(criteria, contents, allowed, p.workspace)
+	return request.PlanReviewNotes(criteria, tickets, p.workspace)
 }
 
 // mutationStride thins the mutations: of every mutationStride (clause,
 // placement) pairs, a criterion gets one, a different one from the
 // criterion before it. Every pair is still written into one real criterion
 // in mutationStride, of every project; 1 writes every pair into every
-// criterion, in about half a minute.
+// criterion, in about a minute.
 const mutationStride = 8
 
 // eachMutation calls check for the covered criteria of every plan with each
@@ -344,25 +351,28 @@ func eachMutation(t *testing.T, plans []mutationPlan, clauses func(p mutationPla
 	return count
 }
 
-// TestRealCriteriaAreReadAsTheyStand: before any mutation, no criterion of
-// the corpus produces a reason, and each case has its probes.
-func TestRealCriteriaAreReadAsTheyStand(t *testing.T) {
-	for _, p := range loadMutationPlans(t) {
-		if reasons := requestdriver.CriterionFilesFeasible(p.criteria, p.contents, p.allowed, p.workspace); len(reasons) != 0 {
-			t.Errorf("%s: %q", p.name, reasons)
-		}
-		if len(p.covered) == 0 {
-			t.Errorf("%s: no ticket covers a criterion", p.name)
-		}
+// checkNotes fails the test unless the mutated criterion's notes are those
+// of the criterion as it stands followed by added.
+func checkNotes(t *testing.T, p mutationPlan, n int, where, clause, mutated, owned string, added ...string) {
+	t.Helper()
+	if _, read := p.asItStands[n]; !read {
+		p.asItStands[n] = p.notes(n, p.criteria[n-1], "")
+	}
+	want := append(append([]string{}, p.asItStands[n]...), added...)
+	if got := p.notes(n, mutated, owned); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("%s criterion %d, %s %q (ticket %s owns %q):\n got  %q\n want %q\n%s", p.name, n, where, clause, otherTicket, owned, got, want, mutated)
 	}
 }
 
-// TestATokenThatIsNotAFileRefusesNoRealPlan: a version, a media type, a URL
-// or its path, a key=value, a route template, a path outside the
-// repository, an import path, a command or a call, written into any real
-// criterion at any placement in the wording of a change, produces no
-// reason.
-func TestATokenThatIsNotAFileRefusesNoRealPlan(t *testing.T) {
+func ownedNote(n int, file string) string {
+	return fmt.Sprintf("criterion %d names `%s`, which ticket %s may change, but the tickets covering criterion %d may not", n, file, otherTicket, n)
+}
+
+// TestATokenThatIsNotAFileEarnsNoNoteInAnyRealCriterion: a version, a media
+// type, a URL or its path, a key=value, a route template, a path outside
+// the repository, an import path, a command or a call, written into any
+// real criterion at any placement in the wording of a change, adds no note.
+func TestATokenThatIsNotAFileEarnsNoNoteInAnyRealCriterion(t *testing.T) {
 	plans := loadMutationPlans(t)
 	var clauses []string
 	for _, token := range notAFileTokens {
@@ -371,21 +381,18 @@ func TestATokenThatIsNotAFileRefusesNoRealPlan(t *testing.T) {
 		}
 	}
 	count := eachMutation(t, plans, func(mutationPlan) []string { return clauses }, func(p mutationPlan, n int, where, clause, mutated string) {
-		if reasons := p.reasons(n, mutated, ""); len(reasons) != 0 {
-			t.Errorf("%s criterion %d, %s %q: %q\n%s", p.name, n, where, clause, reasons, mutated)
-		}
+		checkNotes(t, p, n, where, clause, mutated, "")
 	})
 	t.Logf("%d tokens, %d mutated criteria", len(notAFileTokens), count)
 }
 
-// TestAFileOnlyReferredToOrLeftAloneRefusesNoRealPlan: an existing file
-// that a clause cites, runs or compares with, or that a clause says stays
-// as it is, written into any real criterion at any placement, produces no
-// reason -- when no ticket of the plan may change the file, and when
-// another ticket may, which leaves only the clause's wording to pass it.
-// A file that does not exist yet and a clause says is left alone passes
-// too.
-func TestAFileOnlyReferredToOrLeftAloneRefusesNoRealPlan(t *testing.T) {
+// TestAFileOnlyReferredToOrLeftAloneEarnsNoNoteUnlessAnotherTicketOwnsIt: an
+// existing file that a clause cites, runs, compares with or says stays as
+// it is, written into any real criterion at any placement, adds no note
+// while no ticket of the plan may change it. The same clause with the file
+// in another ticket's Allowed-Files adds the note that names that ticket:
+// who owns a file is read from ticket headers, and no wording hides it.
+func TestAFileOnlyReferredToOrLeftAloneEarnsNoNoteUnlessAnotherTicketOwnsIt(t *testing.T) {
 	plans := loadMutationPlans(t)
 	clauses := func(p mutationPlan) []string {
 		var out []string
@@ -396,161 +403,264 @@ func TestAFileOnlyReferredToOrLeftAloneRefusesNoRealPlan(t *testing.T) {
 		}
 		for _, clause := range untouchedClauses {
 			out = append(out, fmt.Sprintf(clause, p.existing))
-			if p.created != "" {
-				out = append(out, fmt.Sprintf(clause, p.created))
-			}
 		}
 		return out
 	}
 	count := eachMutation(t, plans, clauses, func(p mutationPlan, n int, where, clause, mutated string) {
-		for _, owned := range []string{"", p.existing, p.created} {
-			if owned != "" && !strings.Contains(clause, "`"+owned) {
-				continue
-			}
-			if reasons := p.reasons(n, mutated, owned); len(reasons) != 0 {
-				t.Errorf("%s criterion %d, %s %q (another ticket owns %q): %q\n%s", p.name, n, where, clause, owned, reasons, mutated)
-			}
-		}
+		checkNotes(t, p, n, where, clause, mutated, "")
+		checkNotes(t, p, n, where, clause, mutated, p.existing, ownedNote(n, p.existing))
 	})
 	t.Logf("%d citing clauses in %d forms, %d untouched clauses, %d mutated criteria", len(citedClauses), len(citedForms), len(untouchedClauses), count)
 }
 
-// TestAFileATicketMustChangeIsStillCaughtInEveryRealPlan: a file a clause
-// says changes, written into any real criterion at any placement, is named
-// in a reason when no ticket covering the criterion may change it: a new
-// file under a directory the project has, an existing file in the wording
-// of a change, a test or a line of it, and -- the incident the check exists
-// for -- a file another ticket of the plan owns, in any wording.
-func TestAFileATicketMustChangeIsStillCaughtInEveryRealPlan(t *testing.T) {
+// TestAFileAClauseSaysChangesIsNotedInEveryRealCriterion: a file a clause
+// says changes, or states the behaviour of, written into any real criterion
+// at any placement:
+//
+//   - owned by another ticket of the plan (the incident the note exists
+//     for), whether it exists or is new, in any wording: the note that
+//     names that ticket;
+//   - existing and in no ticket's Allowed-Files, in the wording of a
+//     change, as itself, a test of it or a line of it: the weaker note;
+//   - new and in no ticket's Allowed-Files: no note, since nothing but
+//     its spelling says it is a file of this repository.
+func TestAFileAClauseSaysChangesIsNotedInEveryRealCriterion(t *testing.T) {
 	plans := loadMutationPlans(t)
-	type probe struct{ clause, file, owned string }
-	probes := map[string]probe{}
+	type probe struct{ file, owned, note string }
+	probes := map[string][]probe{}
 	clauses := func(p mutationPlan) []string {
 		var out []string
-		add := func(clause, token, file, owned string) {
-			if file == "" {
-				return // a project with no directory has no new file to name
-			}
+		add := func(clause, token string, each ...probe) {
 			text := fmt.Sprintf(clause, token)
-			probes[p.name+"\x00"+text] = probe{text, file, owned}
+			probes[p.name+"\x00"+text] = each
 			out = append(out, text)
 		}
-		for _, clause := range changedByWording {
-			add(clause, p.created, p.created, "")
-			add(clause, p.existing, p.existing, "")
-			add(clause, p.existing+"::test_probe", p.existing, "")
-			add(clause, p.existing+":42", p.existing, "")
+		for _, clause := range append(append([]string{}, changedByWording...), changedByOwner...) {
+			add(clause, p.existing, probe{p.existing, p.existing, "owned"})
+			add(clause, "zz_mutation_new_dir/probe.txt", probe{"zz_mutation_new_dir/probe.txt", "zz_mutation_new_dir/probe.txt", "owned"}, probe{})
 			if p.created != "" {
-				add(clause, p.created+"::test_probe", p.created, "")
+				add(clause, p.created, probe{p.created, p.created, "owned"}, probe{})
 			}
 		}
-		for _, clause := range changedByOwner {
-			add(clause, p.created, p.created, "")
-			add(clause, p.created, p.created, p.created)
-			add(clause, p.existing, p.existing, p.existing)
-			add(clause, "zz_mutation_new_dir/probe.txt", "zz_mutation_new_dir/probe.txt", "zz_mutation_new_dir/probe.txt")
+		for _, clause := range changedByWording {
+			for _, form := range citedForms {
+				add(clause+" today", fmt.Sprintf(form, p.existing), probe{p.existing, "", "unowned"})
+			}
 		}
 		return out
 	}
 	count := eachMutation(t, plans, clauses, func(p mutationPlan, n int, where, clause, mutated string) {
-		pr := probes[p.name+"\x00"+clause]
-		reasons := p.reasons(n, mutated, pr.owned)
-		want := fmt.Sprintf("criterion %d names %s but no ticket covering it may change it", n, pr.file)
-		if len(reasons) != 1 || !strings.HasPrefix(reasons[0], want) {
-			t.Errorf("%s criterion %d, %s %q (another ticket owns %q): reasons = %q, want one starting %q\n%s", p.name, n, where, clause, pr.owned, reasons, want, mutated)
+		for _, pr := range probes[p.name+"\x00"+clause] {
+			switch pr.note {
+			case "owned":
+				checkNotes(t, p, n, where, clause, mutated, pr.owned, ownedNote(n, pr.file))
+			case "unowned":
+				checkNotes(t, p, n, where, clause, mutated, "", fmt.Sprintf("criterion %d says `%s` changes, but no ticket may change it", n, pr.file))
+			default:
+				checkNotes(t, p, n, where, clause, mutated, "")
+			}
 		}
 	})
-	t.Logf("%d clauses of a change, %d mutated criteria", len(changedByWording)*5+len(changedByOwner)*4, count)
+	t.Logf("%d clauses of a change, %d mutated criteria", len(changedByWording)+len(changedByOwner), count)
 }
 
-// TestNoRealCriterionIsRemovedAsACommitMessageCriterion: spec drafting
-// removes a criterion about a git commit's message. No criterion of the
-// corpus is one, alone in a spec or with a mention of a commit that is not
-// about its message written into it; the same criterion with a clause about
-// the commit's message is removed, so the sweep would see a removal.
-func TestNoRealCriterionIsRemovedAsACommitMessageCriterion(t *testing.T) {
+// TestNoRealCriterionReadsAsARuleForTheCommitMessage: no criterion of the
+// corpus earns the spec-review note for a commit-message rule, alone or
+// with a mention of a commit that is not about its message written into
+// it; the same criterion with a clause about the commit's message does, so
+// the sweep would see a note.
+func TestNoRealCriterionReadsAsARuleForTheCommitMessage(t *testing.T) {
 	spec := func(criterion string) string {
 		return "# Spec\n\n## Problem\n\nx\n\n## Scope\n\nx\n\n## Non-goals\n\nx\n\n## Affected services and packages\n\nx\n\n## Acceptance criteria\n\n" +
 			criterion + "\n\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
 	}
-	kept := func(label, criterion string) {
-		t.Helper()
-		if got, removed := request.StripCommitMessageCriteria(spec(criterion)); removed != 0 || got != spec(criterion) {
-			t.Errorf("%s: removed as a commit-message criterion: %s", label, criterion)
-		}
-	}
 	plans := loadMutationPlans(t)
 	for _, p := range plans {
 		for i, criterion := range p.criteria {
-			kept(fmt.Sprintf("%s criterion %d", p.name, i+1), criterion)
+			if notes := request.SpecReviewNotes(spec(criterion)); len(notes) != 0 {
+				t.Errorf("%s criterion %d: %q: %s", p.name, i+1, notes, criterion)
+			}
 		}
 	}
 	count := eachMutation(t, plans, func(mutationPlan) []string { return commitMentions }, func(p mutationPlan, n int, where, clause, mutated string) {
-		kept(fmt.Sprintf("%s criterion %d, %s %q", p.name, n, where, clause), mutated)
-	})
-	removed := eachMutation(t, plans, func(mutationPlan) []string { return []string{"the commit message names the ticket"} }, func(p mutationPlan, n int, where, clause, mutated string) {
-		if _, removed := request.StripCommitMessageCriteria(spec(mutated)); removed != 1 {
-			t.Errorf("%s criterion %d, %s %q: not removed: %s", p.name, n, where, clause, mutated)
+		if notes := request.SpecReviewNotes(spec(mutated)); len(notes) != 0 {
+			t.Errorf("%s criterion %d, %s %q: %q: %s", p.name, n, where, clause, notes, mutated)
 		}
 	})
-	t.Logf("%d mentions kept in %d mutated criteria, %d criteria about a commit message removed", len(commitMentions), count, removed)
+	noted := eachMutation(t, plans, func(mutationPlan) []string { return []string{"the commit message names the ticket"} }, func(p mutationPlan, n int, where, clause, mutated string) {
+		if notes := request.SpecReviewNotes(spec(mutated)); len(notes) != 1 {
+			t.Errorf("%s criterion %d, %s %q: notes = %q, want one: %s", p.name, n, where, clause, notes, mutated)
+		}
+	})
+	t.Logf("%d mentions in %d mutated criteria, %d criteria about a commit message noted", len(commitMentions), count, noted)
+}
+
+// mutatedSpec returns spec with its acceptance criteria replaced by
+// criteria, one a line.
+func mutatedSpec(t *testing.T, spec string, criteria []string) string {
+	t.Helper()
+	lines := strings.Split(spec, "\n")
+	start, end := -1, len(lines)
+	for i, line := range lines {
+		if start < 0 && strings.TrimSpace(line) == "## Acceptance criteria" {
+			start = i + 1
+		} else if start >= 0 && strings.HasPrefix(line, "## ") {
+			end = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatal("no acceptance criteria section")
+	}
+	return strings.Join(lines[:start], "\n") + "\n\n" + strings.Join(criteria, "\n") + "\n\n" + strings.Join(lines[end:], "\n")
 }
 
 // TestRealPlansWithMutatedCriteriaStillReachPlanReview takes the whole
 // path a planner's output takes (as TestRealApprovedPlansPassEveryPlanTimeCheck
 // does) with every criterion of each case's spec mutated: each gets one
-// clause that names no file to change, or mentions a commit, at one
-// placement, the next criterion the next clause and placement. Every case
-// must still reach plan_review with nothing removed from its spec.
+// clause of any table -- a token that is not a file, a file cited, left
+// alone or said to change, a mention of a commit and a rule for its message
+// -- at one placement, the next criterion the next clause, twice over so
+// every clause is written at every placement. No reading of a criterion's
+// prose may refuse a plan or rewrite a spec: every case reaches plan_review
+// on the first attempt with its criteria as written.
 func TestRealPlansWithMutatedCriteriaStillReachPlanReview(t *testing.T) {
 	plans := map[string]mutationPlan{}
 	for _, p := range loadMutationPlans(t) {
 		plans[p.name] = p
 	}
-	turn := 0
-	for _, c := range loadPlanCorpus(t) {
-		p := plans[c.name]
-		var clauses []string
-		for _, token := range notAFileTokens {
-			clauses = append(clauses, fmt.Sprintf(notAFileClauses[len(clauses)%len(notAFileClauses)], token))
-		}
-		for _, clause := range citedClauses {
-			clauses = append(clauses, fmt.Sprintf(clause, fmt.Sprintf(citedForms[len(clauses)%len(citedForms)], p.existing)))
-		}
-		for _, clause := range untouchedClauses {
-			clauses = append(clauses, fmt.Sprintf(clause, p.existing))
-		}
-		clauses = append(clauses, commitMentions...)
-		mutated := make([]string, len(p.criteria))
-		for i, criterion := range p.criteria {
-			number := criterionNumberRE.FindString(criterion)
-			mutated[i] = placements[turn%len(placements)].write(number, criterion[len(number):], clauses[turn%len(clauses)])
-			turn++
-		}
-		lines := strings.Split(c.spec, "\n")
-		start, end := -1, len(lines)
-		for i, line := range lines {
-			switch {
-			case start < 0 && strings.TrimSpace(line) == "## Acceptance criteria":
-				start = i + 1
-			case start >= 0 && i >= start && strings.HasPrefix(line, "## "):
-				end = i
+	turn, written := 0, map[[2]int]bool{}
+	clauseCount := 0
+	for pass := 0; pass < 2; pass++ {
+		for _, c := range loadPlanCorpus(t) {
+			p := plans[c.name]
+			var clauses []string
+			for _, token := range notAFileTokens {
+				for _, clause := range notAFileClauses {
+					clauses = append(clauses, fmt.Sprintf(clause, token))
+				}
 			}
-			if end != len(lines) {
-				break
+			for _, clause := range append(append(append(append([]string{}, citedClauses...), untouchedClauses...), changedByWording...), changedByOwner...) {
+				for _, form := range citedForms {
+					clauses = append(clauses, fmt.Sprintf(clause, fmt.Sprintf(form, p.existing)))
+				}
+				clauses = append(clauses, fmt.Sprintf(clause, path.Dir(p.existing)+"/zz_mutation_probe.txt"))
 			}
-		}
-		if start < 0 {
-			t.Fatalf("%s: no acceptance criteria section", c.name)
-		}
-		c.spec = strings.Join(lines[:start], "\n") + "\n\n" + strings.Join(mutated, "\n") + "\n\n" + strings.Join(lines[end:], "\n")
-		t.Run(c.name, func(t *testing.T) {
-			if refusal := planCorpusRefusal(t, c); refusal != "" {
-				t.Fatalf("a real plan whose criteria name tokens that are not files to change is refused: %s\n%s", refusal, strings.Join(mutated, "\n"))
+			clauses = append(append(clauses, commitMentions...), "the commit message names the ticket")
+			clauseCount = len(clauses)
+			mutated := make([]string, len(p.criteria))
+			for i, criterion := range p.criteria {
+				number := criterionNumberRE.FindString(criterion)
+				k, at := turn%len(clauses), (turn/len(clauses))%len(placements)
+				mutated[i] = placements[at].write(number, criterion[len(number):], clauses[k])
+				written[[2]int{k, at}] = true
+				turn++
 			}
-		})
+			c.spec = mutatedSpec(t, c.spec, mutated)
+			t.Run(fmt.Sprintf("%s/%d", c.name, pass), func(t *testing.T) {
+				if refusal := planCorpusRefusal(t, c); refusal != "" {
+					t.Fatalf("a real plan is refused for what its criteria say: %s\n%s", refusal, strings.Join(mutated, "\n"))
+				}
+			})
+		}
 	}
-	if turn < len(notAFileTokens)+len(citedClauses)+len(untouchedClauses)+len(commitMentions) {
-		t.Errorf("%d criteria in the corpus, fewer than the clauses to write", turn)
+	if len(written) != clauseCount*len(placements) {
+		t.Errorf("%d of %d (clause, placement) pairs were written: the corpus has too few criteria for two passes", len(written), clauseCount*len(placements))
+	}
+}
+
+// reviewedSentences are criteria an adversarial review of the refusing
+// version of the criterion check wrote. The first ten were refused although
+// nothing in them asks a ticket to change the file; the eleventh matched the
+// repository's VERSION file on a file system that ignores case.
+var reviewedSentences = []string{
+	"No new dependencies are added to `go.mod`.",
+	"`go.mod` needs no changes.",
+	"The existing tests in `tests/test_api.py` pass without modification.",
+	"`./scripts/lint.sh` returns exit code 0.",
+	"| `pkg/api.go` | no change |",
+	"The handler calls `Store.Get` from `internal/store/store.go`.",
+	"The handler returns the JSON shape documented in `docs/api.md`.",
+	"The handler follows existing handlers, e.g. `internal/api/users.go`.",
+	"The server creates `logs/app.log` on first start.",
+	"Requests to `api/v2/items.json` return 200.",
+	"The response gains a `version` field.",
+}
+
+// incidentSentences are that review's criteria in the incident's shape:
+// each names files another ticket owns, in wording that cites them.
+var incidentSentences = []string{
+	"Invalid ids are tested in all three layers, including `handler_test.go` and `insights_test.go`.",
+	"The validation pattern is implemented in `handler.go`.",
+	"`handler.go` already validates the id; it now also returns 404.",
+}
+
+// drivePlan plans a request whose spec has criteria and whose workspace has
+// files, with a planner that returns tickets, and returns the request.
+func drivePlan(t *testing.T, criteria, files []string, tickets []requestdriver.DraftedTicket) *request.Request {
+	t.Helper()
+	spec := "# Spec\n\n## Problem\n\nx\n\n## Scope\n\nx\n\n## Non-goals\n\nx\n\n## Affected services and packages\n\nx\n\n## Acceptance criteria\n\n"
+	for i, criterion := range criteria {
+		spec += fmt.Sprintf("%d. %s\n", i+1, criterion)
+	}
+	spec += "\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
+	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, spec, "make verify")
+	fixture, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		full := filepath.Join(fixture.Workspace, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview || len(loaded.Rejections) != 0 || loaded.Error != "" {
+		t.Fatalf("State = %q, rejections %+v, error %q: want plan_review on the first attempt", loaded.State, loaded.Rejections, loaded.Error)
+	}
+	return loaded
+}
+
+// TestTheReviewedSentencesReachPlanReview: the criteria that were refused
+// reach plan_review with no note, and those in the incident's shape reach
+// it with the note that names the ticket owning each file.
+func TestTheReviewedSentencesReachPlanReview(t *testing.T) {
+	files := []string{"go.mod", "VERSION", "tests/test_api.py", "scripts/lint.sh", "pkg/api.go", "internal/store/store.go", "docs/api.md", "internal/api/users.go", "api/v2/items.json",
+		"handler.go", "handler_test.go", "insights_test.go"}
+	covering := []string{"internal/api/items.go", "internal/api/items_test.go"}
+	var all []int
+	for i := range reviewedSentences {
+		all = append(all, i+1)
+	}
+	r := drivePlan(t, reviewedSentences, files, []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: habitTicket("make verify", covering, covering, all...)}})
+	if len(r.ReviewNotes) != 0 {
+		t.Errorf("ReviewNotes = %q, want none", r.ReviewNotes)
+	}
+
+	owning := []string{"handler.go", "handler_test.go", "insights_test.go"}
+	r = drivePlan(t, append([]string{"The handler ticket's own criterion."}, incidentSentences...), files, []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: habitTicket("make verify", owning, owning, 1)},
+		{Filename: "002.spec.md", Content: habitTicket("make verify", covering, covering, 2, 3, 4)},
+	})
+	var want []string
+	for _, named := range []struct {
+		criterion int
+		file      string
+	}{{2, "handler_test.go"}, {2, "insights_test.go"}, {3, "handler.go"}, {4, "handler.go"}} {
+		want = append(want, fmt.Sprintf("criterion %d names `%s`, which ticket 001.spec.md may change, but the tickets covering criterion %d may not", named.criterion, named.file, named.criterion))
+	}
+	if strings.Join(r.ReviewNotes, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ReviewNotes = %q\nwant %q", r.ReviewNotes, want)
 	}
 }

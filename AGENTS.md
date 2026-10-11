@@ -217,6 +217,12 @@ Rules for a new boundary:
 | No mock framework | `TestNoMockFrameworkIsImported` | Write a fake struct |
 | Only listed packages import `os/exec` | `TestOnlyListedPackagesRunProcesses` | Run the process through an interface the caller declares, then add the package to `processRunningPackages` |
 
+One design rule has no single test, and is checked at review:
+
+| Rule | Where it is kept | What follows from it |
+|---|---|---|
+| A check that reads prose advises at a review gate; it never refuses, re-drafts or rewrites. Only a check over structure refuses | `request.PlanReviewNotes`, `request.SpecReviewNotes` (`Request.ReviewNotes`); the mutation tests of `internal/requestdriver/plan_corpus_mutation_test.go` require every mutated real plan to reach `plan_review` | A rule that infers meaning from a spec's or a ticket's free text (a word list, a regexp over a sentence) returns a note: one line built from numbers, file names and ticket names, never the prose. A rule that refuses reads headings, header lines, numbers or file lists, and says which in its doc comment |
+
 After splitting or moving a listed function, regenerate the baseline with
 `CLAIMS_UPDATE_COMPLEXITY_BASELINE=1 go test ./internal/claims -run TestFunctionComplexityStaysWithinLimit`.
 Its diff may only remove lines, lower numbers, or rename a moved function.
