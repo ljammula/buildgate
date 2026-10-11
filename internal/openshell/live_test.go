@@ -383,7 +383,7 @@ func TestLiveModelRouteThroughTheMeter(t *testing.T) {
 		t.Fatalf("PushCredential: %v", err)
 	}
 	if err := rt.PushCredential(ctx, cred); err != nil {
-		t.Fatalf("a second PushCredential (the update path): %v", err)
+		t.Fatalf("a second PushCredential (the same value, left as stored): %v", err)
 	}
 	spec.Environment = access.Environment
 	req, err := spec.SandboxRequest(launch)
@@ -453,6 +453,52 @@ for attempt in range(6):
 // corporate proxy. A worker's call reaches it only when the supervisor the
 // gateway starts trusts that CA; against the pinned supervisor every attempt
 // is a connection error.
+// TestLiveSameCredentialIsNotStoredTwice: the real gateway reports a
+// provider revision, the same credential twice leaves it alone (so no running
+// sandbox reloads and drops its requests), and a changed credential takes the
+// update path and returns the revision the provider then has. The credential
+// is a made-up value; no request is made with it.
+func TestLiveSameCredentialIsNotStoredTwice(t *testing.T) {
+	rt, _ := liveRuntime(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	expires := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	cred := chatGPTCredential(t, "not-a-real-token", expires)
+	cred.Provider = fmt.Sprintf("bg-live-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		if _, err := rt.Client.Providers().Delete(context.Background(), DefaultWorkspace, cred.Provider); err != nil {
+			t.Errorf("cleanup: delete provider %s: %v", cred.Provider, err)
+		}
+	})
+	push := func(c sandbox.RouteCredential) uint64 {
+		t.Helper()
+		if err := rt.PushCredential(ctx, c); err != nil {
+			t.Fatalf("PushCredential: %v", err)
+		}
+		provider, err := rt.Client.Providers().Get(ctx, DefaultWorkspace, c.Provider)
+		if err != nil {
+			t.Fatalf("read provider %s: %v", c.Provider, err)
+		}
+		return provider.ResourceVersion
+	}
+	created := push(cred)
+	if created == 0 {
+		t.Fatal("the gateway reports no provider revision, so an unchanged credential cannot be told from a changed one")
+	}
+	if again := push(cred); again != created {
+		t.Fatalf("pushing the same credential changed the provider: revision %d to %d", created, again)
+	}
+	later := cred
+	later.ExpiresAt = expires.Add(time.Hour)
+	updated := push(later)
+	if updated == created {
+		t.Fatalf("a changed credential was not stored: revision stayed %d", created)
+	}
+	if again := push(later); again != updated {
+		t.Fatalf("the revision the update returned was not the provider's: %d, then %d after the same push", updated, again)
+	}
+}
+
 func TestLiveSupervisorTrustsTheInterceptingCA(t *testing.T) {
 	rt, image := liveRuntime(t)
 	upstream := os.Getenv("OPENSHELL_LIVE_INTERCEPTED_UPSTREAM")

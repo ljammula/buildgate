@@ -82,6 +82,9 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
+	if s.statsNow != nil {
+		now = s.statsNow()
+	}
 	since, err := stats.ParseSince(r.URL.Query().Get("since"), now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

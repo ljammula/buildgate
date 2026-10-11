@@ -500,6 +500,13 @@ func WithProjectStatsProvider(provider ProjectStatsProvider) Option {
 	}
 }
 
+// withStatsClock fixes the clock GET /stats reads, for a test that compares
+// its response with a committed file: the route's buckets are counted back
+// from the current day, so on the real clock that response changes daily.
+func withStatsClock(now func() time.Time) Option {
+	return func(s *Server) { s.statsNow = now }
+}
+
 // WithDaemonController supplies the lifecycle implementation used by
 // GET/POST /daemons. Without one, those routes fail closed as unavailable.
 func WithDaemonController(controller DaemonController) Option {
@@ -582,11 +589,14 @@ type Server struct {
 	mcpHandler http.Handler
 	// mcpSubmits are the times of the submit_request calls that created a
 	// request within mcpSubmitWindow (see mcpSubmitAllowed).
-	mcpSubmitMu           sync.Mutex
-	mcpSubmits            []time.Time
-	runStarter            RunStarter
-	projectChecker        ProjectChecker
-	projectStatsProvider  ProjectStatsProvider
+	mcpSubmitMu          sync.Mutex
+	mcpSubmits           []time.Time
+	runStarter           RunStarter
+	projectChecker       ProjectChecker
+	projectStatsProvider ProjectStatsProvider
+	// statsNow is the clock of GET /stats, whose weekly buckets end at the
+	// current day; nil is time.Now (see withStatsClock).
+	statsNow              func() time.Time
 	projectMemoryProvider ProjectMemoryProvider
 	daemonController      DaemonController
 	// prOpener is request.Retry's own "accepted run, no PR yet" side

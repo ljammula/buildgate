@@ -114,3 +114,47 @@ func TestCriterionFilesFeasibleReadsAQualifiedIdentifierAsCode(t *testing.T) {
 		}
 	}
 }
+
+// TestCriterionFilesFeasibleReadsAURLPathOrAValueAsData: a criterion that
+// quotes a request path a router serves, a variable's value or a URL names
+// no file of the repository, so no ticket has to list it in Allowed-Files.
+// A repo-relative file in the same criterion is still checked, and so is a
+// rooted name when that file exists.
+func TestCriterionFilesFeasibleReadsAURLPathOrAValueAsData(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "static"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "static", "site.css"), []byte("body{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	allowed := []string{"regexp.go", "regexp_test.go"}
+	tickets := []string{habitTicket("go test ./...", allowed, allowed, 1)}
+	cases := []struct {
+		criterion string
+		flagged   []string
+	}{
+		{"`newRouteRegexp` in `regexp.go`: a router with `Path(\"/files/{rest...}\")` serves `/files/a/b/c.txt` with `rest=a/b/c.txt`.", nil},
+		{"`/repos/gorilla/mux/blob/docs/img/logo.png` is served with `path=docs/img/logo.png`.", nil},
+		{"The handler redirects to `https://example.com/docs/index.html`.", nil},
+		{"`/v1/items.json` is served by the handler in `internal/api/items.go`.", []string{"internal/api/items.go"}},
+		{"`/static/site.css` gains the new rule.", []string{"/static/site.css"}},
+	}
+	// A rooted name of an existing file is covered by that file's entry.
+	withCSS := []string{"static/site.css"}
+	if reasons := requestdriver.CriterionFilesFeasible([]string{"GET `/static/site.css` returns the new rule."}, []string{habitTicket("go test ./...", withCSS, withCSS, 1)}, [][]string{withCSS}, workspace); len(reasons) != 0 {
+		t.Errorf("a rooted name of an allowed file was flagged: %q", reasons)
+	}
+	for _, tc := range cases {
+		reasons := requestdriver.CriterionFilesFeasible([]string{tc.criterion}, tickets, [][]string{allowed}, workspace)
+		if len(reasons) != len(tc.flagged) {
+			t.Errorf("criterion %q: reasons = %q, want %d (%v)", tc.criterion, reasons, len(tc.flagged), tc.flagged)
+			continue
+		}
+		for i, path := range tc.flagged {
+			if !strings.Contains(reasons[i], "names "+path+" ") {
+				t.Errorf("criterion %q: reasons[%d] = %q, want it to name %s", tc.criterion, i, reasons[i], path)
+			}
+		}
+	}
+}

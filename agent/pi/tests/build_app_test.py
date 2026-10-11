@@ -3240,6 +3240,10 @@ class GofmtChangedFilesTests(unittest.TestCase):
 		self.assertIn("do NOT re-run `git diff`", prompt)
 		self.assertIn("1 file changed", prompt)
 		self.assertIn("diff --git a/x.go b/x.go", prompt)
+		# A hunk line's trailing text is git's guess at the section, not a
+		# line of the file: a reviewer took "@@ ... @@ Unreleased" for a
+		# heading and flagged a correctly placed changelog entry twice.
+		self.assertIn("git's guess at the enclosing function or heading", prompt)
 		# The old "diff the workspace yourself" instruction must be gone --
 		# otherwise the reviewer has no reason not to re-fetch it anyway.
 		self.assertNotIn("Diff the workspace against", prompt)
