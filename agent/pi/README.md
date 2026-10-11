@@ -126,6 +126,10 @@ in the opening prompt. Only the build script takes it; no review script does.
 
 ## Why this lives here
 
+Why the build loop is a script outside the coding agent, and why one set of
+scripts serves every harness, is in
+[`doc/designs/design-decisions.md`](../../doc/designs/design-decisions.md).
+
 These scripts are vendored here, not imported from
 [`pi-harness-hardening`](https://github.com/ljammula/pi-harness-hardening),
 because their contract with `factoryd` (chiefly `BUILD_EVIDENCE.json`'s

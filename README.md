@@ -371,6 +371,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`console/README.md`](console/README.md) | The operator console |
 | [`agent/pi/README.md`](agent/pi/README.md) | The in-sandbox build, drafting and review scripts and their harness adapters |
 | [`doc/designs/architecture-flows.md`](doc/designs/architecture-flows.md) | Component diagram, request lifecycle, the request workflow and a run's Activity sequence |
+| [`doc/designs/design-decisions.md`](doc/designs/design-decisions.md) | Why it is built this way: each standing decision, its reason, what it rules out and what would reopen it |
 | [`doc/designs/openshell-sandbox-runtime.md`](doc/designs/openshell-sandbox-runtime.md) | The sandbox runtime: gateway, supervisor, meter, one launch step by step, the restart guard |
 | [`doc/designs/progress-contract.md`](doc/designs/progress-contract.md) | The run progress feed: file format, stage vocabulary, stall semantics |
 | [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-020) |
