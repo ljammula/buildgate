@@ -777,8 +777,11 @@ plus 2 when the code review did not: 40 is both passed, 43 both failed, and
 any other value fails both gates. An answer that lacks one of the two
 reviews is asked for that review alone, and a failed or unparseable call is
 made again: one further call at most, in the same sandbox, told nothing of the
-first. Both evidence files then hold a `retry` line saying what was asked
-again and why.
+first and unable to read its transcript. The two calls share the 20 minutes
+one call gets, so the review takes no longer; the second is skipped when under
+5 minutes are left or when the spend meter stopped the first. Both evidence
+files then hold a `retry` line saying what was asked again and why, or why
+nothing was.
 
 | Restriction | Why |
 |---|---|

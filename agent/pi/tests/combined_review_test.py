@@ -206,13 +206,18 @@ class RunCombinedReviewTests(unittest.TestCase):
 				timeouts.append(timeout)
 				raise subprocess.TimeoutExpired(command, timeout)
 
-			with mock.patch.object(build_app, "sh", side_effect=timing_out):
+			ticks = iter([0.0, 20 * 60.0])
+			with (
+				mock.patch.object(build_app, "sh", side_effect=timing_out),
+				mock.patch.object(combined_review, "clock", side_effect=lambda: next(ticks)),
+			):
 				conformity, review = combined_review.run_combined_review(
 					root, criteria_path=criteria_path, spec_path=spec_path,
 					conformity_policy="required", review_policy="required",
 				)
-			# The first turn, then its one retry, each with the combined timeout.
-			self.assertEqual(timeouts, [20 * 60, 20 * 60])
+			# Nothing is left of the review's time, so nothing is asked again.
+			self.assertEqual(timeouts, [20 * 60])
+			self.assertIn("not asked again", review["retry"])
 			self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
 			self.assertIn("timed out after 20 minutes", conformity["stopped_reason"])
 			self.assertFalse(review["available"])
@@ -270,10 +275,17 @@ class CombinedReviewRetryTests(unittest.TestCase):
 				"thinking": command[command.index("--thinking") + 1],
 				"base": env.get("AI_REVIEW_BASE_SHA"),
 				"session_was_empty": not session.exists() or not [p for p in session.iterdir() if p.name != "prompts"],
+				"first_session": sorted(p.name for p in (root / ".pi-combined-review-session").iterdir()) if (root / ".pi-combined-review-session").is_dir() else [],
+				"evidence": {
+					name: json.loads((root / name).read_text())
+					for name in ("CONFORMITY_EVIDENCE.json", "CODE_REVIEW_EVIDENCE.json") if (root / name).exists()
+				},
 			})
 			# What a harness leaves behind: session state the next turn must not find.
 			session.mkdir(parents=True, exist_ok=True)
 			(session / "state.jsonl").write_text("turn %d\n" % len(turns))
+			(session / "codex-home").mkdir(exist_ok=True)
+			(session / "codex-home" / "transcript.jsonl").write_text("the answer of turn %d\n" % len(turns))
 			# A reviewer that edits the workspace must not change the retry's diff.
 			(root / "seed.txt").write_text("seed\nrewritten by reviewer turn %d\n" % len(turns))
 			result = queue.pop(0)
@@ -361,13 +373,15 @@ class CombinedReviewRetryTests(unittest.TestCase):
 			self.assertIn("no verdict for any criterion", evidence["retry"])
 
 	def test_a_failed_turn_runs_the_combined_turn_once_more(self):
+		ticks = iter([0.0, 2 * 60.0])
 		conformity, review, turns, root = self._run([
-			failed_turn('429 "token budget exceeded"'),
+			failed_turn("upstream connection reset"),
 			answer({"criteria": VERDICTS, "findings": []}),
-		])
+		], clock=lambda: next(ticks))
 		self.assertEqual(len(turns), 2)
 		self.assertEqual(turns[1]["prompt"], turns[0]["prompt"], "the same question, word for word")
-		self.assertEqual(turns[1]["timeout"], 20 * 60)
+		# The two turns share the one turn's 20 minutes: 2 used, 18 left.
+		self.assertEqual(turns[1]["timeout"], 18 * 60)
 		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
 		self.assertTrue(review["available"])
 		self.assertTrue(review["succeeded"])
@@ -376,7 +390,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		self.assertEqual(list(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
 		for evidence in (conformity, review):
 			self.assertIn("asked once more for both reviews", evidence["retry"])
-			self.assertIn("429", evidence["retry"])
+			self.assertIn("upstream connection reset", evidence["retry"])
 
 	def test_an_answer_with_no_json_at_all_runs_the_combined_turn_once_more(self):
 		conformity, review, turns, _ = self._run([
@@ -469,24 +483,119 @@ class CombinedReviewRetryTests(unittest.TestCase):
 				self.assertFalse(seen["path"].is_symlink())
 				self.assertEqual((Path(outside) / "keep.txt").exists(), plant == "link")
 
-	def test_a_retry_that_does_not_fit_the_steps_time_is_skipped_and_the_reason_recorded(self):
+	def test_a_retry_that_does_not_fit_the_reviews_time_is_skipped_and_the_reason_recorded(self):
 		# The clock is read at the start and once when the retry is sized:
-		# 36 of the step's 40 minutes are gone by then.
-		ticks = iter([0.0, 36 * 60.0])
-		conformity, review, turns, _ = self._run([failed_turn("boom")], clock=lambda: next(ticks))
+		# 16 of the review's 20 minutes are gone by then.
+		ticks = iter([0.0, 16 * 60.0])
+		conformity, review, turns, root = self._run([failed_turn("boom")], clock=lambda: next(ticks))
 		self.assertEqual(len(turns), 1)
 		self.assertEqual(conformity["error"], "boom")
 		self.assertEqual(review["stopped_reason"], "code review was unavailable: boom")
 		for evidence in (conformity, review):
 			self.assertTrue(evidence["retry"].startswith("not asked again (the first turn failed: boom)"), evidence["retry"])
-			self.assertIn("40 minutes", evidence["retry"])
+			self.assertIn("under 5 of the review's 20 minutes", evidence["retry"])
+		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
 
-	def test_a_retry_gets_no_more_than_the_time_the_step_has_left(self):
-		ticks = iter([0.0, 33 * 60.0 + 30])
-		_, _, turns, _ = self._run(
-			[answer({"criteria": VERDICTS}), answer({"findings": []})], clock=lambda: next(ticks),
-		)
-		self.assertEqual([t["timeout"] for t in turns], [20 * 60, 6 * 60])
+	def test_the_two_turns_together_never_get_more_than_the_one_turns_time(self):
+		for used_minutes, own in ((13.5, "half"), (13.5, "whole"), (0.1, "half"), (0.1, "whole"), (14.9, "whole")):
+			with self.subTest(used_minutes=used_minutes, own=own):
+				ticks = iter([0.0, used_minutes * 60.0])
+				first = answer({"criteria": VERDICTS}) if own == "half" else failed_turn("boom")
+				_, _, turns, _ = self._run([first, answer({"criteria": VERDICTS, "findings": []})], clock=lambda: next(ticks))
+				self.assertEqual(turns[0]["timeout"], 20 * 60)
+				self.assertLessEqual(used_minutes * 60 + turns[1]["timeout"], 20 * 60)
+				self.assertGreaterEqual(turns[1]["timeout"], 5 * 60)
+				self.assertLessEqual(turns[1]["timeout"], (10 if own == "half" else 20) * 60)
+
+	def test_a_turn_the_spend_meter_stopped_is_not_asked_again(self):
+		deny = '403 {"middleware":"meter","reason_code":"%s","detail":"x"}'
+		errors = [deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited", '429 "token budget exceeded"']
+		for error in errors:
+			with self.subTest(error=error):
+				conformity, review, turns, root = self._run([failed_turn(error)])
+				self.assertEqual(len(turns), 1)
+				self.assertFalse(review["available"])
+				self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
+				self.assertEqual(review["error"], conformity["error"])
+				self.assertIn("reason_code" if "meter" in error else "429", review["error"])
+				for evidence in (conformity, review):
+					self.assertIn("not asked again", evidence["retry"])
+					self.assertIn("the spend meter stopped the first turn", evidence["retry"])
+				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+
+	def test_a_denial_code_outside_the_meters_body_is_an_ordinary_failure(self):
+		self.assertEqual(combined_review.meter_stop('{"reason_code":"budget_exceeded"}'), "")
+		self.assertEqual(combined_review.meter_stop('{"middleware":"meter","reason_code":"policy_changed"}'), "")
+		self.assertEqual(combined_review.meter_stop('{"middleware":"meter","reason_code":"rate_limited"}'), "rate_limited")
+		self.assertEqual(combined_review.meter_stop("connection reset"), "")
+
+	def test_the_first_turns_evidence_is_on_disk_before_the_retry_starts(self):
+		# A retry killed from outside leaves what the first turn alone gave.
+		cases = [
+			(answer({"criteria": VERDICTS}), ["clean", "flagged"], False, ""),
+			(answer({"findings": FINDINGS}), ["unavailable", "unavailable"], True, ""),
+			(failed_turn("boom"), ["unavailable", "unavailable"], False, "boom"),
+		]
+		for first, verdicts, available, error in cases:
+			with self.subTest(first=first.stdout[:60]):
+				_, _, turns, _ = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})])
+				self.assertEqual(turns[0]["evidence"], {})
+				on_disk = turns[1]["evidence"]
+				self.assertEqual([v["verdict"] for v in on_disk["CONFORMITY_EVIDENCE.json"]["review_verdicts"]], verdicts)
+				self.assertEqual(on_disk["CODE_REVIEW_EVIDENCE.json"]["available"], available)
+				self.assertEqual(on_disk["CODE_REVIEW_EVIDENCE.json"]["error"], error)
+				for evidence in on_disk.values():
+					self.assertNotIn("retry", evidence)
+
+	def test_the_retry_cannot_read_the_first_turns_transcript(self):
+		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), failed_turn("boom")):
+			with self.subTest(first=first.stdout[:60]):
+				_, _, turns, root = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})])
+				# All the retry finds in the first turn's folder: both saved
+				# prompts and its own empty folder.
+				self.assertEqual(turns[1]["first_session"], ["prompts", "retry"])
+				self.assertEqual(len(self._saved_prompts(root)), 2)
+				left = [p for p in root.rglob("*") if ".git" not in p.parts and p.is_file() and "turn 1" in p.read_text(errors="replace")]
+				self.assertEqual(left, [])
+
+	def test_a_session_folder_that_is_a_link_is_never_followed(self):
+		with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as outside:
+			root = Path(workspace)
+			(Path(outside) / "keep.txt").write_text("not the workspace's\n")
+			(Path(outside) / "retry").mkdir()
+			(Path(outside) / "retry" / "keep.txt").write_text("not the workspace's either\n")
+			(root / ".pi-combined-review-session").symlink_to(outside, target_is_directory=True)
+			retry = combined_review.fresh_retry_session_dir(root)
+			self.assertEqual(retry, root / ".pi-combined-review-session" / "retry")
+			self.assertFalse((root / ".pi-combined-review-session").is_symlink())
+			self.assertEqual(list(retry.iterdir()), [])
+			self.assertEqual(retry.resolve(), (root / ".pi-combined-review-session" / "retry").resolve())
+			self.assertTrue((Path(outside) / "keep.txt").exists())
+			self.assertTrue((Path(outside) / "retry" / "keep.txt").exists())
+
+	def test_links_inside_the_session_folder_are_removed_by_name(self):
+		with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as outside:
+			root = Path(workspace)
+			session = root / ".pi-combined-review-session"
+			(session / "prompts").mkdir(parents=True)
+			(session / "prompts" / "review-combined.md").write_text("the first prompt\n")
+			(Path(outside) / "keep.txt").write_text("not the workspace's\n")
+			(session / "codex-home").symlink_to(outside, target_is_directory=True)
+			(session / "sessions").mkdir()
+			(session / "sessions" / "inner").symlink_to(outside, target_is_directory=True)
+			retry = combined_review.fresh_retry_session_dir(root)
+			self.assertEqual(sorted(p.name for p in session.iterdir()), ["prompts", "retry"])
+			self.assertEqual(list(retry.iterdir()), [])
+			self.assertEqual((session / "prompts" / "review-combined.md").read_text(), "the first prompt\n")
+			self.assertTrue((Path(outside) / "keep.txt").exists())
+
+	def test_a_session_folder_that_cannot_be_emptied_asks_nothing_again(self):
+		with mock.patch.object(combined_review, "fresh_retry_session_dir", return_value=None):
+			conformity, review, turns, _ = self._run([failed_turn("boom")])
+		self.assertEqual(len(turns), 1)
+		self.assertEqual(review["error"], "boom")
+		self.assertIn("could not be emptied", conformity["retry"])
+		self.assertIn("could not be emptied", review["retry"])
 
 
 class WriteCombinedEvidenceTests(unittest.TestCase):
