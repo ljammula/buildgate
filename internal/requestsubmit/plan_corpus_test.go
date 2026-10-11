@@ -1,27 +1,30 @@
 package requestsubmit
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"buildgate/internal/testfixture"
 )
 
 // TestRealApprovedPlansPassTheHandoverChecks puts every case of the plan
 // corpus (internal/requestdriver/testdata/plan_corpus, see its README.md)
 // through what `factoryd submit -spec-file -plan-dir` checks before a
 // request is recorded. The cases are real specs and plans that were approved
-// and built, so a refusal here is a check refusing valid input.
+// and built, so a refusal here is a check refusing valid input. The
+// workspace holds the project's file names as empty files.
 func TestRealApprovedPlansPassTheHandoverChecks(t *testing.T) {
 	corpus := filepath.Join("..", "requestdriver", "testdata", "plan_corpus")
 	entries, err := os.ReadDir(corpus)
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
 	ran := 0
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == "workspaces" {
 			continue
 		}
 		ran++
@@ -31,6 +34,18 @@ func TestRealApprovedPlansPassTheHandoverChecks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			meta, err := os.ReadFile(filepath.Join(dir, "case.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed struct {
+				Project string `json:"project"`
+			}
+			if err := json.Unmarshal(meta, &parsed); err != nil {
+				t.Fatalf("%s/case.json: %v", dir, err)
+			}
+			workspace := t.TempDir()
+			testfixture.WriteEmptyFiles(t, workspace, filepath.Join(corpus, "workspaces", parsed.Project+".files"))
 			names, err := filepath.Glob(filepath.Join(dir, "tickets", "*.spec.md"))
 			if err != nil || len(names) == 0 {
 				t.Fatalf("tickets of %s: %v (%d files)", dir, err, len(names))

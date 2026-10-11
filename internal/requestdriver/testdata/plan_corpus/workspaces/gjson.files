@@ -1,0 +1,10 @@
+.github/images/logo-dark.png
+.github/images/logo-light.png
+AGENTS.md
+LICENSE
+README.md
+SYNTAX.md
+gjson.go
+gjson_test.go
+go.mod
+go.sum

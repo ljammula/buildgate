@@ -16,6 +16,7 @@ Real specs and plans that a plan-time check must accept.
   spec.md               the approved spec
   tickets/NNN.spec.md   the plan, as approved
   case.json             verify_command, project, tickets (the count)
+workspaces/<project>.files   the project's file names
 ```
 
 ## What reads it
@@ -25,22 +26,28 @@ Real specs and plans that a plan-time check must accept.
 | `TestRealApprovedPlansPassEveryPlanTimeCheck` (`internal/requestdriver`) | `AdvancePlanning` with a planner that returns the case's tickets; the request must reach `plan_review` on the first attempt with the case's ticket count |
 | `TestRealApprovedPlansPassTheHandoverChecks` (`internal/requestsubmit`) | What `factoryd submit -spec-file -plan-dir` checks before recording a request |
 
-## Limit: no repository
+## Workspace: file names only
 
-The repositories are not here, so both tests run against an empty
-workspace. A check that looks a name up in the repository runs only in the
-form it takes when the file is absent:
+`workspaces/<project>.files` is `git ls-files` of the commit the project's
+cases were planned against: paths only, one a line, sorted. Each test builds
+the case's workspace from it, every path as an empty file, so a check that
+asks whether a path exists finds what the planner's workspace had.
 
-| Check | Not exercised |
+| Check | Runs as |
 |---|---|
-| A criterion's backticked name read as a repository file (`looksLikeRepoPath`) | A name counted only because that file exists in the workspace |
-| A criterion's test name qualified by its package (`packageQualified`) | A qualifier that is a directory of the workspace |
-| The project's own `test_patterns` and `design_guide` (`.factory.yml`) | Any value but the defaults |
+| A criterion's backticked name read as a repository file (`looksLikeRepoPath`), a name counted only because that file exists included | In full |
+| A criterion's test name qualified by its package (`packageQualified`), a qualifier that is a directory holding Go files included | In full |
+| Anything that reads a file's contents: the project's `.factory.yml` (`test_patterns`, `design_guide`), a design guide | At its defaults only: contents are not reproduced |
+
+The workspace is a plain directory, not a git repository; no plan-time
+check asks for one.
 
 ## Adding a case
 
 Copy an approved request's `spec.md` and `tickets/` from its directory
 under the data dir (`requests/<id>/`) into a new `<project>-<hash>/` here,
 unchanged, and write its `case.json`. Check it names nothing private first.
+A case of a new project also needs `workspaces/<project>.files`
+(`git ls-files | sort` at the commit it was planned against).
 A case a check refuses stays, listed in `planCorpusRefused` with the reason,
 until the check is fixed.
