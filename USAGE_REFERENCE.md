@@ -727,17 +727,25 @@ the release decision). Unset falls back to
 `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust); this
 gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
-`tests_added` and it declares no `Tests-Required` opt-out. A second
-plan-time check runs alongside it: for every approved-spec acceptance
-criterion, it collects the repo-relative file paths the criterion names in
-backticks and rejects the plan if a named path is in the `Allowed-Files`
-of no ticket that lists the criterion as covered. A name such as
-`internal/domain.Calculate` (a Go package's directory, a dot, an
-identifier) is code, not a file, and is not checked unless a file of that
-name exists: it is told by an upper-case letter after the dot, or by the
-part before the dot being a directory that holds Go files. A path named in a
-clause that says it stays as it is (`untouched`, `unchanged`, `not
-modified`, `must not change`, `no changes to`) is not checked. A criterion covered by
+`tests_added` and it declares no `Tests-Required` opt-out.
+
+A second plan-time check runs alongside it: a plan is rejected when an
+approved-spec acceptance criterion names, in backticks, a file its work
+changes and that file is in the `Allowed-Files` of no ticket that lists
+the criterion as covered. A wrong refusal costs the whole request, so a
+backticked name counts only when every row below says it does:
+
+| Question | Counts as a file to change | Does not |
+|---|---|---|
+| Is it a file of this repository? | A file that exists; `tests/x.py::test_y` and `a.go:42` name that file. A new path with a directory and an extension, when its first directory exists at the repository's root or holds a file some ticket may change | A command, a glob, a URL or URL path, `key=value`, a version (`HTTP/1.1`), a media type, a route template (`users/{id}.json`), a path outside the repository (`~/...`, `$HOME/...`, `../...`), an import path (`github.com/acme/x/y.pb.go`), a call, a Go identifier qualified by its package (`internal/domain.Calculate`): each only if a file of that name exists |
+| Does its clause leave it alone? | No such wording, a limit on it, or a change said beside it: "`a.go` is otherwise unchanged", "unchanged except for ...", "`a.go` returns 404 and existing responses are unchanged" | `untouched`, `unchanged`, `not modified`, `must not change`, `no changes to`, `do not modify the existing`, `must remain as it is`, `stays the same`, `leave ... alone`, `without any change to`, said of the file |
+| Does its clause only refer to it? | Any other wording | The wording that leads to the name is that of a reference: `already`, `pattern`, `convention`, `like`, `as in`, `same ... as`, `similar to`, `mirrors`, `consistent with`, `modelled on`, `follows`, `based on`, `reuses`, `what`, `including`, `such as`, `see` |
+| The file exists and no ticket of the plan may change it: does its clause say something changes? | `adds`, `gains`, `new`, `updated`, `returns`, `removed`, ... | A clause with no such wording: the criterion reads, runs or cites the file |
+
+A parenthetical is a clause of its own. Not caught: an existing file the
+plan leaves out of every ticket when its clause states behaviour without a
+word of change, and a new file under a top-level directory that neither
+the repository has nor any ticket writes into. A criterion covered by
 no ticket at all is left to the "unclaimed criterion" check. On either
 rejection the request driver re-plans once, feeding every infeasibility
 found back to the planner as feedback before the request reaches a human;

@@ -122,8 +122,12 @@ func TestCriterionFilesFeasibleReadsAQualifiedIdentifierAsCode(t *testing.T) {
 // rooted name when that file exists.
 func TestCriterionFilesFeasibleReadsAURLPathOrAValueAsData(t *testing.T) {
 	workspace := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(workspace, "static"), 0o755); err != nil {
-		t.Fatal(err)
+	// internal/ exists: a new file is checked under a directory the
+	// repository has.
+	for _, dir := range []string{"static", "internal/api"} {
+		if err := os.MkdirAll(filepath.Join(workspace, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "static", "site.css"), []byte("body{}\n"), 0o644); err != nil {
 		t.Fatal(err)

@@ -323,22 +323,50 @@ func SpecAcceptanceCriteria(specContent string) ([]string, error) {
 	return criteria, nil
 }
 
-// commitMessageCriterionRE heuristically detects an acceptance criterion
-// about the commit message/subject/log itself -- see
-// StripCommitMessageCriteria's own doc comment for why these are refused.
-// Matches "commit"/"commits"/"commit's" followed, within a short span of
-// other words (bounded so it doesn't fire on two unrelated mentions of
-// "commit" and "message" far apart in a longer criterion), by
-// "message(s)", "subject(s)", or "log(s)" -- not just the two directly
-// adjacent, and not just the singular form of either side, found via
-// adversarial review, 2026-09-17: a real phrasing like "the commit log
-// message references the ticket ID" or "each commit's log message
-// follows Conventional Commits" has an intervening word ("log") the
-// original directly-adjacent pattern missed entirely, and a plural
-// phrasing like "all commits include messages referencing the ticket
-// ID" matched neither side of the original singular-only pattern at
-// all.
-var commitMessageCriterionRE = regexp.MustCompile(`(?i)commits?(?:'s)?\b(?:\s+\S+){0,6}\s+(?:messages?|subjects?|logs?)\b`)
+// commitMessageCriterionREs are the phrasings that make an acceptance
+// criterion one about a git commit's message (StripCommitMessageCriteria
+// has why those are removed). "Commit" has to be the noun the message,
+// subject or title belongs to:
+//
+//   - "the commit message", "each commit's log message", "commit subjects
+//     follow ...": the noun phrase, after an article or a quantifier or at
+//     the start of a sentence;
+//   - "the subject line of each commit";
+//   - "the commit for this work has ...";
+//   - "all commits include messages ...";
+//   - "Conventional Commits".
+//
+// They are read with the criterion's code spans blanked. A criterion in
+// which "commit" is a verb or names something else ("the consumer commits
+// the offset and logs the message id", "the commit endpoint returns a
+// success message", "the broker's commit log is compacted", "producers
+// commit messages in batches") matches none: removing a real criterion
+// costs the request a requirement, keeping one about a commit message
+// costs a review finding. Not told apart: a criterion of a product whose
+// own subject is git commit messages ("the linter rejects an empty commit
+// message"), which the removal note in the document lets a human restore.
+var commitMessageCriterionREs = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(?:^|[.;:]\s+|\b(?:the|an?|each|every|any|all|its|their|this|that|git|squash|merge|of|in|with|valid|conventional)\s+)commit(?:'s)?\s+(?:log\s+)?(?:message|subject|title)s?\b`),
+	regexp.MustCompile(`(?i)\b(?:message|subject(?:\s+line)?|title)s?\s+of\s+(?:the|each|every|any|an?|all|its)\s+(?:\w+\s+)?commits?\b`),
+	regexp.MustCompile(`(?i)\bcommits?\s+for\s+(?:this|the)\s+(?:work|change|ticket|feature|fix|request)\b`),
+	regexp.MustCompile(`(?i)\b(?:all|every|each)\s+commits?\s+(?:must\s+|should\s+)?(?:includes?|ha(?:s|ve)|carr(?:y|ies)|uses?)\s+(?:an?\s+|the\s+)?(?:\w+\s+)?(?:messages?|subjects?|titles?)\b`),
+	regexp.MustCompile(`(?i)\bconventional\s+commits?\b`),
+}
+
+// criterionCodeSpanRE matches a Markdown code span of a criterion.
+var criterionCodeSpanRE = regexp.MustCompile("`[^`]*`")
+
+// isCommitMessageCriterion reports whether folded, one acceptance
+// criterion on one line, is about a git commit's message.
+func isCommitMessageCriterion(folded string) bool {
+	prose := criterionCodeSpanRE.ReplaceAllString(leadingCriterionNumberRE.ReplaceAllString(folded, ""), "`code`")
+	for _, re := range commitMessageCriterionREs {
+		if re.MatchString(prose) {
+			return true
+		}
+	}
+	return false
+}
 
 // leadingCriterionNumberRE strips a folded criterion's own "N. "/"N) "
 // prefix so StripCommitMessageCriteria can renumber the survivors.
@@ -443,10 +471,10 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 }
 
 // StripCommitMessageCriteria removes any acceptance criterion asking a
-// reviewer to check the commit message/subject/log itself -- see
-// commitMessageCriterionRE's own doc comment for the exact heuristic and
-// why these are refused. Renumbers the remaining criteria sequentially,
-// preserving each surviving criterion's own original source lines
+// reviewer to check a git commit's message, subject or title -- see
+// commitMessageCriterionREs for what counts as one. Renumbers the
+// remaining criteria sequentially, preserving each surviving criterion's
+// own original source lines
 // verbatim (a multi-line criterion's wrapped text or lettered/numbered
 // sub-list is untouched, only its own leading number changes) -- found
 // via adversarial review, 2026-09-17: an earlier version rebuilt every
@@ -454,17 +482,12 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 // flattened a surviving multi-line criterion's own formatting even
 // though nothing about that criterion needed to change.
 //
-// Because commitMessageCriterionRE is a heuristic, it can occasionally
-// match a real, unrelated criterion that merely happens to mention
-// "commit" near "message"/"subject"/"log" -- found via the same review
-// (e.g. "the commit endpoint returns a success message with the
-// transaction ID"). Silently deleting matched text with no trace would
-// leave a human approving spec_review unaware anything was removed at
-// all. Instead, every removed criterion's original text is recorded in a
-// visible note appended to the end of the "## Acceptance criteria"
-// section of the PERSISTED document itself (not just a server log), so
-// the human reviewing it can see exactly what was taken out and restore
-// it by editing the document if the removal was wrong.
+// commitMessageCriterionREs match the phrasings of such a criterion and
+// no other use of "commit", but cannot tell a product whose own subject is
+// commit messages. So every removed criterion's original text is recorded
+// in a visible note appended to the PERSISTED document itself (not just a
+// server log): the human reviewing it sees exactly what was taken out and
+// can restore it by editing the document.
 //
 // Returns the (possibly unchanged) spec text and how many criteria were
 // removed. No-ops (returns specContent, 0) when the spec has no "##
@@ -480,7 +503,7 @@ func StripCommitMessageCriteria(specContent string) (string, int) {
 	var kept []acceptanceCriterionBlock
 	var removedText []string
 	for _, b := range blocks {
-		if commitMessageCriterionRE.MatchString(b.folded) {
+		if isCommitMessageCriterion(b.folded) {
 			removedText = append(removedText, leadingCriterionNumberRE.ReplaceAllString(b.folded, ""))
 			continue
 		}
@@ -517,7 +540,7 @@ func StripCommitMessageCriteria(specContent string) (string, int) {
 	// at the very end sits outside every required section's own content
 	// range, so neither problem applies there.
 	rebuilt = append(rebuilt, "", "## Criteria removed by factoryd", "", fmt.Sprintf(
-		"factoryd removed %d acceptance criterion/criteria about the commit message/subject/log before this draft reached review -- factoryd, not the ticket, owns commit authorship, and a squash-merge rewrites the subject anyway. If this removed a real requirement you actually meant, edit this document before approving.",
+		"factoryd removed %d acceptance criterion/criteria about the commit message or subject before this draft reached review -- factoryd, not the ticket, owns commit authorship, and a squash-merge rewrites the subject anyway. If this removed a real requirement you actually meant, edit this document before approving.",
 		len(removedText),
 	))
 	for _, t := range removedText {

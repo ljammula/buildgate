@@ -543,8 +543,8 @@ None.
 
 // TestStripCommitMessageCriteriaRecordsRemovedTextVisibly is a
 // regression for an adversarial-review finding on this same branch:
-// commitMessageCriterionRE is a heuristic and can occasionally match a
-// real, unrelated criterion -- silently deleting matched text with no
+// commitMessageCriterionREs cannot tell a product whose own subject is
+// commit messages, so a real criterion can still match -- silently deleting matched text with no
 // trace would leave a human approving spec_review unaware anything was
 // removed. The removed text must survive somewhere in the persisted
 // document, and must not corrupt the criteria section itself when
@@ -620,6 +620,66 @@ func TestStripCommitMessageCriteriaCatchesNonAdjacentPhrasings(t *testing.T) {
 		_, removed := StripCommitMessageCriteria(spec)
 		if removed != 1 {
 			t.Errorf("StripCommitMessageCriteria(%q) removed = %d, want 1", criterion, removed)
+		}
+	}
+}
+
+// commitMessageSpec returns a valid spec whose first criterion is
+// criterion and whose second is another one.
+func commitMessageSpec(criterion string) string {
+	return "# Spec\n\n## Problem\n\nx\n\n## Scope\n\nx\n\n## Non-goals\n\nx\n\n## Affected services and packages\n\ninternal/foo\n\n## Acceptance criteria\n\n" +
+		"1. " + criterion + "\n2. Something else entirely.\n\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
+}
+
+// TestStripCommitMessageCriteriaKeepsACriterionThatIsNotAboutACommitMessage:
+// a criterion in which "commit" is a verb, or names something that is not a
+// git commit's message, is a requirement of the product and stays, with its
+// number. "The consumer commits the offset and logs the message id" was
+// removed and the criteria after it renumbered.
+func TestStripCommitMessageCriteriaKeepsACriterionThatIsNotAboutACommitMessage(t *testing.T) {
+	for _, criterion := range []string{
+		"The consumer commits the offset and logs the message id.",
+		"The commit endpoint returns a success message with the transaction ID.",
+		"The transaction commit log is flushed before the reply is sent.",
+		"The broker's commit log is compacted after each segment roll.",
+		"Producers commit messages in batches of 100.",
+		"The consumer commits messages only after the handler returns.",
+		"`Commit` returns an error whose message names the subject of the failed write.",
+		"On commit the store logs one line with the message count.",
+		"A two-phase commit that fails logs the message and the subject of each participant.",
+		"The handler commits the transaction, then publishes the message with subject `orders.created`.",
+		"`git commit` is never run by the tool; it prints the message `nothing to do`.",
+		"The `commit message` field of the form is required.",
+		"When the offset commits fail, the error message includes the partition.",
+		"The email's subject line is `Committed` and its title is unchanged.",
+	} {
+		spec := commitMessageSpec(criterion)
+		if got, removed := StripCommitMessageCriteria(spec); removed != 0 || got != spec {
+			t.Errorf("StripCommitMessageCriteria removed %d criterion for %q, want the spec unchanged", removed, criterion)
+		}
+	}
+}
+
+// TestStripCommitMessageCriteriaRemovesEachPhrasingOfOne: every phrasing of
+// a criterion about a git commit's message, subject or title is removed.
+func TestStripCommitMessageCriteriaRemovesEachPhrasingOfOne(t *testing.T) {
+	for _, criterion := range []string{
+		"The commit message subject line begins with `ticket(foo):`.",
+		"The commit subject line begins with `ticket(foo):`.",
+		"The commit message references the ticket ID.",
+		"A commit message in the imperative mood describes the change.",
+		"Each commit's message is at most 72 characters wide.",
+		"The change lands as one commit; the commit title names the ticket.",
+		"The subject line of each commit starts with `fix:`.",
+		"The message of the final commit mentions the issue number.",
+		"Every commit has a subject under 50 characters.",
+		"All commits use messages in the imperative mood.",
+		"The work follows Conventional Commits.",
+		"The git commit message says what changed.",
+		"Tests pass. Commit messages name the package they change.",
+	} {
+		if _, removed := StripCommitMessageCriteria(commitMessageSpec(criterion)); removed != 1 {
+			t.Errorf("StripCommitMessageCriteria removed %d criterion for %q, want 1", removed, criterion)
 		}
 	}
 }
