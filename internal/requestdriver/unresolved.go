@@ -1,7 +1,6 @@
 package requestdriver
 
 import (
-	"buildgate/internal/meter"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/unresolved"
@@ -33,21 +32,10 @@ func reviewNoVerdictCause(runRecord *run.Run) unresolved.Cause {
 	if runRecord == nil || runRecord.State != run.StateQuarantined || !reviewShapeOnly(runRecord) || !reviewUnavailable(runRecord) {
 		return ""
 	}
-	if cause := run.ModelRouteCause(lastReviewCalls(runRecord)); cause != "" {
+	if cause := run.ModelRouteCause(run.LastReviewCalls(runRecord)); cause != "" {
 		return cause
 	}
 	return unresolved.NoVerdict
-}
-
-// lastReviewCalls is what the meter recorded of the last review launch of
-// runRecord, nil when it launched none or the launch called no model.
-func lastReviewCalls(runRecord *run.Run) *meter.Calls {
-	for i := len(runRecord.Attempts) - 1; i >= 0; i-- {
-		if runRecord.Attempts[i].Role == run.AttemptRoleReview {
-			return runRecord.Attempts[i].RelayCalls
-		}
-	}
-	return nil
 }
 
 // lostStepOf describes runRecord, a run that gave no verdict for cause, for
@@ -59,21 +47,9 @@ func lostStepOf(runRecord *run.Run, cause unresolved.Cause, kept bool) request.L
 		step.RunID = runRecord.ID
 	}
 	if cause == unresolved.ProviderQuota {
-		step.RetryAt = providerRetryAt(runRecord)
+		step.RetryAt = run.ProviderRetryAt(runRecord)
 	}
 	return step
-}
-
-// providerRetryAt is the latest time the provider asked any launch of
-// runRecord to wait until, from the meter's record of its Retry-After.
-func providerRetryAt(runRecord *run.Run) string {
-	at := ""
-	for _, attempt := range runRecord.Attempts {
-		if attempt.RelayCalls != nil && attempt.RelayCalls.RetryAt > at {
-			at = attempt.RelayCalls.RetryAt
-		}
-	}
-	return at
 }
 
 // keepForResume flags a quarantined run whose review gave no verdict as
@@ -107,9 +83,14 @@ func keepForResume(dataDir string, runRecord *run.Run) bool {
 	return kept
 }
 
-// enterResumeReviewAfterNoVerdict moves r to resume_review after
-// runRecord, a quarantined ticket run whose review gave no verdict: nothing
-// was judged, so there is no quarantine and no corrective build.
-func enterResumeReviewAfterNoVerdict(dataDir string, r *request.Request, runRecord *run.Run, cause unresolved.Cause, now time.Time) error {
-	return EnterResumeReview(dataDir, r, lostStepOf(runRecord, cause, keepForResume(dataDir, runRecord)), now)
+// afterUnjudgedTicketRun moves r to resume_review when runRecord is a
+// quarantined ticket run whose review gave no verdict: nothing was judged,
+// so there is no quarantine and no corrective build. handled is false for
+// any other run.
+func afterUnjudgedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, now time.Time) (handled bool, err error) {
+	cause := reviewNoVerdictCause(runRecord)
+	if cause == "" {
+		return false, nil
+	}
+	return true, EnterResumeReview(dataDir, r, lostStepOf(runRecord, cause, keepForResume(dataDir, runRecord)), now)
 }

@@ -53,3 +53,26 @@ func refusedBy(calls meter.Calls) string {
 	}
 	return ""
 }
+
+// LastReviewCalls is what the meter recorded of r's last review launch, nil
+// when r launched none or that launch called no model.
+func LastReviewCalls(r *Run) *meter.Calls {
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if r.Attempts[i].Role == AttemptRoleReview {
+			return r.Attempts[i].RelayCalls
+		}
+	}
+	return nil
+}
+
+// ProviderRetryAt is the latest time the model provider asked any launch of
+// r to wait until (meter.Calls.RetryAt), "" when it gave none.
+func ProviderRetryAt(r *Run) string {
+	at := ""
+	for _, attempt := range r.Attempts {
+		if attempt.RelayCalls != nil && attempt.RelayCalls.RetryAt > at {
+			at = attempt.RelayCalls.RetryAt
+		}
+	}
+	return at
+}

@@ -187,3 +187,36 @@ func TestABuildWhoseModelRouteDidNotServeItIsUnresolved(t *testing.T) {
 		}
 	}
 }
+
+// A review whose model route served nothing, for no reason a second launch
+// would meet again, is launched once more; the count is the caller's. What
+// comes back when it is still not served is the launch's result, with no
+// error: the review ran, and its gate decides.
+func TestAReviewWhoseModelServedNothingIsLaunchedOnceMore(t *testing.T) {
+	unanswered := []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}}
+	limited := []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}, {Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledReleased, Status: 429}}
+	answered := []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}, {InputTokens: 10, OutputTokens: 5}, {Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledExact, Status: 200}}
+	for _, tc := range []struct {
+		name         string
+		ledger       []meter.LedgerRecord
+		wantLaunches int
+	}{
+		{"no request answered", unanswered, 2},
+		{"refused by the provider's limit: a second launch would be refused too", limited, 1},
+		{"answered", answered, 1},
+	} {
+		f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(string) {})
+		f.acts.VerifyMaxAttempts = 2
+		writeLedgerOnCreate(t, f.rt, f.acts.MeterLedgerRoot, f.acts.dataDirFor(f.input.RunWorkflowInput), f.acts.runIDFor(f.input.RunWorkflowInput), tc.ledger...)
+		write := f.rt.onCreate
+		launches := 0
+		f.rt.onCreate = func(req sandbox.SandboxRequest) { launches++; write(req) }
+		res, err := f.run()
+		if err != nil {
+			t.Errorf("%s: RunReviewStepActivity: %v", tc.name, err)
+		}
+		if launches != tc.wantLaunches || len(res.Attempts) != tc.wantLaunches {
+			t.Errorf("%s: launches = %d, attempts = %d; want %d", tc.name, launches, len(res.Attempts), tc.wantLaunches)
+		}
+	}
+}

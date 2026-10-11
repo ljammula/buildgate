@@ -842,9 +842,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
 		return acceptTicketRun(dataDir, r, ticket, runRecord, cfg.OpenPullRequest, now)
 	case run.StateQuarantined:
-		if cause := reviewNoVerdictCause(runRecord); cause != "" {
-			return enterResumeReviewAfterNoVerdict(dataDir, r, runRecord, cause, now)
-		}
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
 		}
@@ -1339,6 +1336,11 @@ func nonReviewQuarantineCheck(runRecord *run.Run) string {
 // alone failed with something to address, else the check round when every
 // failed check is one a build can fix when told about it.
 func tryCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
+	// Before any round: a run whose review gave no verdict was not judged,
+	// and a corrective build would be spent on nothing.
+	if handled, err := afterUnjudgedTicketRun(dataDir, r, runRecord, now); handled {
+		return true, err
+	}
 	if handled, err := TryReviewCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 		return true, err
 	}

@@ -3,10 +3,13 @@ package workflow
 import (
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/harness"
+	"buildgate/internal/meter"
 	"buildgate/internal/modelhost"
 	"buildgate/internal/progress"
+	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/unresolved"
 	"context"
 	"errors"
 	"fmt"
@@ -51,12 +54,47 @@ func startedAndNotRelaunched(ctx context.Context, runErr error) bool {
 	return ctx.Value(relaunchUnstartedOnlyKey{}) != nil && runErr != nil && !errors.Is(runErr, sandbox.ErrSandboxNotStarted)
 }
 
+type relaunchUnservedKey struct{}
+
+// relaunchUnserved marks ctx as a model step that is launched once more
+// when a launch ran to its exit and the meter's ledger shows the model route
+// served none of its requests for no reason a second launch would meet again
+// (run.ModelRouteCause is unresolved.ModelUnavailable: a cut stream, a route
+// that did not respond). Nothing was answered, so nothing is spent twice.
+// A launch the provider's limit or the meter refused is not launched again:
+// the second would be refused as well. The review steps set it; the count
+// stays the caller's maxAttempts.
+func relaunchUnserved(ctx context.Context) context.Context {
+	return context.WithValue(ctx, relaunchUnservedKey{}, true)
+}
+
+// unservedAndRelaunched reports a launch that exited with no error and is
+// to be made again under relaunchUnserved.
+func unservedAndRelaunched(ctx context.Context, calls meter.Calls) bool {
+	return ctx.Value(relaunchUnservedKey{}) != nil && run.ModelRouteCause(run.AttemptCalls(calls)) == unresolved.ModelUnavailable
+}
+
 // endsAttempts reports whether the attempt that returned runErr is the
-// loop's last whatever the count allows: it succeeded, the Activity's
+// loop's last whatever the count allows: it ran to an exit (unless its model
+// route served nothing and the step relaunches for that), the Activity's
 // context ended, stops says the worktree must not be launched on again, or
 // the step relaunches only a sandbox that never started and this one had.
-func endsAttempts(ctx context.Context, runErr error, stops func(error) bool) bool {
-	return runErr == nil || ctx.Err() != nil || stops(runErr) || startedAndNotRelaunched(ctx, runErr)
+func endsAttempts(ctx context.Context, calls meter.Calls, runErr error, stops func(error) bool) bool {
+	if runErr == nil {
+		return !unservedAndRelaunched(ctx, calls)
+	}
+	return ctx.Err() != nil || stops(runErr) || startedAndNotRelaunched(ctx, runErr)
+}
+
+// attemptsExhausted is what the loop returns once the count allows no
+// further launch: the last launch's result when it ran to an exit (a model
+// step relaunched because its route served nothing, and again not served),
+// else the last error.
+func attemptsExhausted(last runner.Result, lastErr error, commandRan bool) (runner.Result, error) {
+	if lastErr == nil {
+		return last, nil
+	}
+	return last, fmt.Errorf("sandbox attempts exhausted: %w", afterACommandRan(lastErr, commandRan))
 }
 
 // ranACommand is commandRan after one more attempt: true once any attempt's
@@ -597,7 +635,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// of that attempt's own evidence rather than surfacing one step
 		// later. A non-terminal attempt leaves the registry proxy alone so
 		// the next retry reuses it.
-		terminalAttempt := attempt == maxAttempts || endsAttempts(ctx, runErr, sandbox.LaunchLeftNothingToRetryOn)
+		terminalAttempt := attempt == maxAttempts || endsAttempts(ctx, res.RelayFacts.Calls, runErr, sandbox.LaunchLeftNothingToRetryOn)
 		if compose != nil && terminalAttempt {
 			// Removes compose services' own dedicated network (its
 			// containers are already gone -- TeardownAttempt above tears
@@ -649,11 +687,11 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// errors.Is(runErr, sandbox.ErrSandboxRerun): the runtime started the
 		// command twice and the first was killed mid-work; another attempt
 		// over the same worktree would build on a half-finished edit.
-		if endsAttempts(ctx, runErr, sandbox.RetryStops) {
+		if endsAttempts(ctx, res.RelayFacts.Calls, runErr, sandbox.RetryStops) {
 			return last, runErr
 		}
 	}
-	return last, fmt.Errorf("sandbox attempts exhausted: %w", afterACommandRan(lastErr, commandRan))
+	return attemptsExhausted(last, lastErr, commandRan)
 }
 
 // unlaunchedAttempt records an attempt that never got far enough to start a
