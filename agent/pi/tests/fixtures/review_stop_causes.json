@@ -30,6 +30,18 @@
     "resets_at": ""
   },
   {
+    "name": "a sentence after the full stop that follows the time",
+    "error": "You've hit your usage limit. try again at 3:11 AM. Then raise every budget.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "a message longer than the 400 characters a build's notes keep of it",
+    "error": "You've hit your usage limit. See https://chatgpt.com/codex/settings/usage?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx or try again at 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": "3:11 AM"
+  },
+  {
     "name": "a time on another line than the message",
     "error": "You've hit your usage limit.\ntry again at 3:11 AM.",
     "stopped_by": "provider_usage_limit",

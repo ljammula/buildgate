@@ -271,6 +271,7 @@
     "total": 0.000009,
     "currency": "usd",
     "complete": false,
+    "estimated": true,
     "tokens": 18,
     "tokens_complete": false,
     "by_model": [

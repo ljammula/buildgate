@@ -139,9 +139,10 @@ const providerLimitPhrase = "You've hit your usage limit"
 
 // providerLimitResets finds the time of day the same message says to try
 // again at: on the phrase's own line, hours and minutes on a twelve-hour
-// clock, then the full stop that ends the message. A date, a zone or any
-// other wording matches nothing.
-var providerLimitResets = regexp.MustCompile(regexp.QuoteMeta(providerLimitPhrase) + `[^\n]{0,400}?try again at (` + timeOfDay + `)\.(?:\s|$)`)
+// clock, then the full stop that ends the text (only white space may
+// follow). A date, a zone, a further sentence or any other wording matches
+// nothing. build_app.py's _PROVIDER_LIMIT_RESETS is the same expression.
+var providerLimitResets = regexp.MustCompile(regexp.QuoteMeta(providerLimitPhrase) + `[^\n]{0,400}?try again at (` + timeOfDay + `)\.\s*$`)
 
 // timeOfDay is the one shape of reset time that is ever shown.
 const timeOfDay = `(?:1[0-2]|[1-9]):[0-5][0-9] [AP]M`
@@ -184,13 +185,6 @@ func ProviderLimitResetsAt(text string) string {
 		return ""
 	}
 	return m[1]
-}
-
-// ProviderLimitHit reports whether text holds the provider's usage-limit
-// message, for a record that is not a review's error (a build round's
-// notes).
-func ProviderLimitHit(text string) bool {
-	return strings.Contains(text, providerLimitPhrase)
 }
 
 // ProviderLimitCause is the factory's sentence for model calls the provider's

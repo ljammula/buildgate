@@ -673,6 +673,14 @@ type DiffStat struct {
 // someone happened to inspect a real run's own evidence closely).
 const AgentEvidenceSchemaVersion = 2
 
+// AgentModelStop is AgentEvidence.ModelStop: Code is
+// codereview.CodeProviderUsageLimit, ResetsAt the time of day the provider
+// said to try again at or "".
+type AgentModelStop struct {
+	Code     string `json:"code"`
+	ResetsAt string `json:"resets_at"`
+}
+
 // AgentEvidence is best-effort structured evidence emitted by build_app.py.
 // It is recorded only after factoryd's policy gates have decided the run's
 // terminal state, so none of these agent/reviewer details can become a gate.
@@ -688,11 +696,18 @@ type AgentEvidence struct {
 	ReviewPolicy  string `json:"review_policy"`
 	// Provider and Model preserve JSON null when build_app.py inherited its
 	// configured defaults instead of explicitly pinning an identity.
-	Provider      *string              `json:"provider"`
-	Model         *string              `json:"model"`
-	Succeeded     bool                 `json:"succeeded"`
-	StoppedReason string               `json:"stopped_reason"`
-	Rounds        []AgentEvidenceRound `json:"rounds"`
+	Provider      *string `json:"provider"`
+	Model         *string `json:"model"`
+	Succeeded     bool    `json:"succeeded"`
+	StoppedReason string  `json:"stopped_reason"`
+	// ModelStop is the build script's closed code for a build that stopped
+	// because its model calls were refused, nil otherwise. The script sets
+	// it from the harness's own error events, never from the model's text
+	// (build_app.py's model_stop). Like the rest of this file it is the
+	// worker container's record: a reader keeps only a code it knows and a
+	// reset time of the one accepted shape (internal/triage).
+	ModelStop *AgentModelStop      `json:"model_stop,omitempty"`
+	Rounds    []AgentEvidenceRound `json:"rounds"`
 	// AgentsMDUsed and AgentsMDGitBlob record whether a committed
 	// AGENTS.md guided this build and, if so, its git blob id (a
 	// content-addressed identity build_app.py's committed_agents_md_blob

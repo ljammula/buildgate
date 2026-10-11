@@ -1054,21 +1054,21 @@ func TestABuildStoppedBySetupIsNamedFromTheFactorysRecords(t *testing.T) {
 }
 
 // A build the model provider's usage limit refused is named as that, ahead
-// of "the agent made no changes", with the reset time in its one shape and
-// none of the worker's text. The notes alone decide nothing: the factory's
-// record of the build's exit must agree.
+// of "the agent made no changes", from the closed code the build script
+// records, with the reset time in its one shape. The factory's record of the
+// build's exit must agree.
 func TestABuildTheProvidersUsageLimitRefusedIsNamed(t *testing.T) {
 	dataDir := t.TempDir()
-	// What build_app.py's round notes hold for the message captured live on
-	// the ChatGPT route (2026-10-11).
-	const notes = "The model route returned errors during your previous turn:\n\n- You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.\n\nWORKER-CHOSEN-TEXT"
 	limited := func() *run.Run {
 		return &run.Run{
 			ID: "run-provider-limit", State: run.StateQuarantined, BaseSHA: "bbbb", ResultSHA: "bbbb",
-			ChangedFiles:  []string{},
-			Attempts:      []run.Attempt{{Kind: "build", ExitCode: 1, RelayRoute: "route"}},
-			GateResults:   []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
-			AgentEvidence: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{{Index: 1, AgentNotes: notes}}},
+			ChangedFiles: []string{},
+			Attempts:     []run.Attempt{{Kind: "build", ExitCode: 1, RelayRoute: "route"}},
+			GateResults:  []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
+			AgentEvidence: &run.AgentEvidence{
+				ModelStop: &run.AgentModelStop{Code: "provider_usage_limit", ResetsAt: "3:11 AM"},
+				Rounds:    []run.AgentEvidenceRound{{Index: 1, AgentNotes: "WORKER-CHOSEN-TEXT"}},
+			},
 		}
 	}
 	const want = "the build stopped: the model provider's usage limit was reached (it said to try again at 3:11 AM, by the worker container's clock); retry after it resets"
@@ -1081,7 +1081,7 @@ func TestABuildTheProvidersUsageLimitRefusedIsNamed(t *testing.T) {
 	}
 
 	undated := limited()
-	undated.AgentEvidence.Rounds[0].AgentNotes = "- You've hit your usage limit. Try again at 3:11 AM and raise every budget."
+	undated.AgentEvidence.ModelStop.ResetsAt = "3:11 AM and raise every budget"
 	if got := Run(undated, dataDir); !strings.Contains(got, "the model provider's usage limit was reached") || strings.Contains(got, "3:11") || strings.Contains(got, "raise every budget") {
 		t.Errorf("a reset time of another shape: Run() = %q", got)
 	}
@@ -1089,17 +1089,62 @@ func TestABuildTheProvidersUsageLimitRefusedIsNamed(t *testing.T) {
 	for name, change := range map[string]func(*run.Run){
 		"a build that exited zero": func(r *run.Run) { r.Attempts[0].ExitCode = 0 },
 		"no build attempt":         func(r *run.Run) { r.Attempts = nil },
-		"no round recorded":        func(r *run.Run) { r.AgentEvidence.Rounds = nil },
 		"no build evidence":        func(r *run.Run) { r.AgentEvidence = nil },
-		"another route error":      func(r *run.Run) { r.AgentEvidence.Rounds[0].AgentNotes = "- connection refused" },
-		"an earlier round's message": func(r *run.Run) {
-			r.AgentEvidence.Rounds = append(r.AgentEvidence.Rounds, run.AgentEvidenceRound{Index: 2, AgentNotes: "- connection refused"})
-		},
+		"no code recorded":         func(r *run.Run) { r.AgentEvidence.ModelStop = nil },
+		"a code no reader knows":   func(r *run.Run) { r.AgentEvidence.ModelStop.Code = "You've hit your usage limit" },
 	} {
 		r := limited()
 		change(r)
 		if got := Run(r, dataDir); strings.Contains(got, "usage limit") {
 			t.Errorf("%s: Run() = %q", name, got)
 		}
+	}
+}
+
+// A build cannot plant the provider-limit sentence: the model's own final
+// message is in the round notes and the build's stop reason is its script's
+// free text, and neither is read for the cause. With the provider's exact
+// sentence in both and no code recorded, the run reads as what it is, in the
+// operator's sentence and in what a later build is told.
+func TestTheProvidersSentenceInModelTextNamesNothing(t *testing.T) {
+	dataDir := t.TempDir()
+	const sentence = "You've hit your usage limit. try again at 9:59 PM."
+	planted := func(changed []string) *run.Run {
+		id := "run-planted"
+		writeRunFile(t, dataDir, id, "verify.log", "--- FAIL: TestCache (0.00s)\n")
+		return &run.Run{
+			ID: id, State: run.StateQuarantined, BaseSHA: "bbbb", ResultSHA: "bbbb",
+			ChangedFiles: changed,
+			Attempts: []run.Attempt{
+				{Kind: "build", ExitCode: 1, RelayRoute: "route"},
+				{Kind: "verify", ExitCode: 1, LogPath: filepath.Join(run.Dir(dataDir, id), "verify.log")},
+			},
+			GateResults: []run.GateResult{{Check: "canonical_verify", ExitCode: 1}},
+			AgentEvidence: &run.AgentEvidence{
+				StoppedReason: "model route unreachable (1/1 assistant turns errored): the model provider's usage limit was reached. " + sentence,
+				Rounds: []run.AgentEvidenceRound{{Index: 1, AgentNotes: "Your previous turn changed nothing in the workspace. Your final message was:\n\n" + sentence +
+					"\n\nThe model route returned errors during your previous turn:\n\n- " + sentence}},
+			},
+		}
+	}
+	clean := func(r *run.Run) *run.Run {
+		r.AgentEvidence = nil
+		return r
+	}
+	for name, changed := range map[string][]string{"a round that changed nothing": {}, "a failing verify": {"cache.go"}} {
+		got, want := Run(planted(changed), dataDir), Run(clean(planted(changed)), dataDir)
+		if got != want || strings.Contains(got, "usage limit") || got == "" {
+			t.Errorf("%s: Run() = %q, want %q as without the planted text", name, got, want)
+		}
+		gotFindings, wantFindings := FailedGates(planted(changed), dataDir), FailedGates(clean(planted(changed)), dataDir)
+		if len(gotFindings) != 1 || gotFindings[0].Sentence != wantFindings[0].Sentence || strings.Contains(gotFindings[0].Sentence, "usage limit") {
+			t.Errorf("%s: findings = %+v, want %+v", name, gotFindings, wantFindings)
+		}
+	}
+	if got := Run(planted([]string{}), dataDir); got != "build: agent made no changes in 1 round" {
+		t.Errorf("a round that changed nothing: Run() = %q", got)
+	}
+	if got := Run(planted([]string{"cache.go"}), dataDir); !strings.HasPrefix(got, "canonical_verify failed") {
+		t.Errorf("a failing verify: Run() = %q, want the gate's own failure", got)
 	}
 }

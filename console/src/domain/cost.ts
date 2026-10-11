@@ -71,15 +71,34 @@ export function formatTokenCount(n: number): string {
 }
 
 /**
+ * The mark ahead of a token figure that is not exact:
+ *   "≥ "     a lower bound: some spend was not recorded (`complete` false);
+ *   "≤ "     an upper bound: every request is counted, and at least one that
+ *            ended without a usage report is counted at the meter's
+ *            worst-case estimate (`estimated`), so the real figure is no
+ *            higher;
+ *   "about " both at once, so neither bound holds;
+ *   ""       exact.
+ */
+export function tokenBoundPrefix(complete: boolean, estimated: boolean): string {
+  if (!complete) return estimated ? "about " : "≥ ";
+  return estimated ? "≤ " : "";
+}
+
+/**
  * Formats one ModelUsage entry as "gpt-5.6-luna · 478.3k tokens", or
  * "unknown model · 12.3k tokens" when usage.model is empty (the
- * contributing evidence recorded no model id). `complete` false prefixes
- * the token count with "≥ " -- the containing summary's tokens are a
- * lower bound, not an exact figure.
+ * contributing evidence recorded no model id). `complete` and `estimated`
+ * are the containing summary's, and set the mark ahead of the token count
+ * (tokenBoundPrefix).
  */
-export function formatModelUsageLine(usage: ModelUsage, complete = true): string {
+export function formatModelUsageLine(
+  usage: ModelUsage,
+  complete = true,
+  estimated = false,
+): string {
   const model = usage.model === "" ? "unknown model" : usage.model;
-  const prefix = complete ? "" : "≥ ";
+  const prefix = tokenBoundPrefix(complete, estimated);
   return `${model} · ${prefix}${formatTokenCount(usage.tokens)} tokens`;
 }
 
@@ -98,12 +117,12 @@ export function formatUsageSummary(summary: CostSummary): string {
   if (first === undefined) {
     const tokens = summary.tokens;
     if (tokens === null) return "—";
-    const prefix = summary.tokensComplete ? "" : "≥ ";
+    const prefix = tokenBoundPrefix(summary.tokensComplete, summary.estimated);
     return `${prefix}${formatTokenCount(tokens)} tokens`;
   }
-  const firstLine = formatModelUsageLine(first, summary.tokensComplete);
+  const firstLine = formatModelUsageLine(first, summary.tokensComplete, summary.estimated);
   if (summary.byModel.length === 1) return firstLine;
-  const prefix = summary.tokensComplete ? "" : "≥ ";
+  const prefix = tokenBoundPrefix(summary.tokensComplete, summary.estimated);
   const model = first.model === "" ? "unknown model" : first.model;
   const total = summary.tokens ?? summary.byModel.reduce((sum, m) => sum + m.tokens, 0);
   return `${model} +${summary.byModel.length - 1} more · ${prefix}${formatTokenCount(total)} tokens`;
@@ -111,7 +130,7 @@ export function formatUsageSummary(summary: CostSummary): string {
 
 /**
  * One token figure for a whole request: "478.3k tokens", "≥ 500 tokens" when
- * the figure is a lower bound, "—" when nothing is known. Where
+ * the figure is a lower bound ("≤" for an upper one: tokenBoundPrefix), "—" when nothing is known. Where
  * formatUsageSummary names the model, this is only the number; the model
  * breakdown belongs in a tooltip or a disclosure.
  */
@@ -120,7 +139,7 @@ export function formatUsageTokens(summary: CostSummary): string {
     summary.tokens ??
     (summary.byModel.length === 0 ? null : summary.byModel.reduce((sum, m) => sum + m.tokens, 0));
   if (total === null) return "—";
-  return `${summary.tokensComplete ? "" : "≥ "}${formatTokenCount(total)} tokens`;
+  return `${tokenBoundPrefix(summary.tokensComplete, summary.estimated)}${formatTokenCount(total)} tokens`;
 }
 
 /**
@@ -144,8 +163,12 @@ export function formatUsageFigure(summary: CostSummary): string {
  * formatUsageLines (the triage/approve-confirm "Usage so far" lines),
  * never by the run detail screen's own bare-token rendering.
  */
-export function formatModelUsageDetailLine(usage: ModelUsage, complete = true): string {
-  const base = formatModelUsageLine(usage, complete);
+export function formatModelUsageDetailLine(
+  usage: ModelUsage,
+  complete = true,
+  estimated = false,
+): string {
+  const base = formatModelUsageLine(usage, complete, estimated);
   const rolePrefix = usage.role === "" ? "" : `${usage.role} · `;
   const costSuffix = usage.costMicroUsd > 0 ? ` · $${(usage.costMicroUsd / 1e6).toFixed(2)}` : "";
   return `${rolePrefix}${base}${costSuffix}`;
@@ -184,12 +207,12 @@ export function formatUsageLines(summary: CostSummary): string[] {
     if (tokens === null) {
       lines.push("—");
     } else {
-      const prefix = summary.tokensComplete ? "" : "≥ ";
+      const prefix = tokenBoundPrefix(summary.tokensComplete, summary.estimated);
       lines.push(`${prefix}${formatTokenCount(tokens)} tokens`);
     }
   } else {
     for (const usage of summary.byModel) {
-      lines.push(formatModelUsageDetailLine(usage, summary.tokensComplete));
+      lines.push(formatModelUsageDetailLine(usage, summary.tokensComplete, summary.estimated));
     }
   }
   const perTicket = formatCostPerAcceptedTicket(summary);

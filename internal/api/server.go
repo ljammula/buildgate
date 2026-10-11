@@ -1247,11 +1247,16 @@ type runView struct {
 	// renders role + model + tokens + cost the same way a request's
 	// cost_summary does.
 	ByModel []ModelUsage `json:"by_model,omitempty"`
-	// TokensComplete is false when ByModel is a lower bound -- an attempt's
-	// relay spend was only partly recovered after a relay crash, or the
-	// AgentEvidence fallback had a round with no usable token figure (see
-	// addRunModelUsage). Mirrors CostSummary.TokensComplete.
+	// TokensComplete is false when ByModel is a lower bound -- the
+	// AgentEvidence fallback had a round with no usable token figure, or
+	// the run has no token figure at all (see addRunModelUsage). Mirrors
+	// CostSummary.TokensComplete.
 	TokensComplete bool `json:"tokens_complete"`
+	// Estimated is true when ByModel holds the meter's worst-case estimate
+	// for a model request that ended without a usage report
+	// (run.Attempt.RelaySpendPartial): the figures may over-state the real
+	// usage. Mirrors CostSummary.Estimated.
+	Estimated bool `json:"estimated,omitempty"`
 	// ComposePhases is what each phase launched from the target repo's
 	// compose file (its services.<phase>.json), so the run page can show
 	// which sidecars ran -- found missing in the 2026-09-29
@@ -1343,7 +1348,7 @@ func readComposePhases(dataDir, runID string) []composePhaseView {
 func (s *Server) runViewFor(r *run.Run) runView {
 	view := runView{Run: r}
 	acc := newModelUsageAccumulator()
-	view.TokensComplete = addRunModelUsage(r, acc)
+	view.TokensComplete, view.Estimated = addRunModelUsage(r, acc)
 	view.ByModel = acc.finish()
 	if r.TerminalConfirmed() {
 		return view
@@ -2672,6 +2677,13 @@ type CostSummary struct {
 	// an exact figure, and the console must render it as "≥" rather than
 	// "=".
 	Complete bool `json:"complete"`
+	// Estimated is true when Total and Tokens hold the meter's worst-case
+	// estimate for at least one model request that ended without a usage
+	// report (request.JobSpend.SpendPartial, run.Attempt.RelaySpendPartial):
+	// the request's whole body length as input tokens and its full output
+	// cap as output. Such a total may over-state the real spend; it is not
+	// a lower bound, so it leaves Complete and TokensComplete as they are.
+	Estimated bool `json:"estimated,omitempty"`
 	// SubscriptionBilled is true when ANY run contributing to Runs (a
 	// ticket's build, or a corrective PR-review round) was billed to a
 	// ChatGPT/Copilot subscription (run.SubscriptionBilled) rather than a
@@ -2964,7 +2976,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			// ones).
 			cs.Spec = float64(sp.CostMicroUSD) / 1e6
 			if sp.SpendPartial {
-				cs.Complete = false
+				cs.Estimated = true
 			}
 			acc.addJobSpend(sp)
 		} else {
@@ -3001,7 +3013,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			// above.
 			cs.Plan = float64(sp.CostMicroUSD) / 1e6
 			if sp.SpendPartial {
-				cs.Complete = false
+				cs.Estimated = true
 			}
 			acc.addJobSpend(sp)
 		} else {
@@ -3031,7 +3043,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 		sp := req.OracleDraft.Spend
 		cs.Oracle = float64(sp.CostMicroUSD) / 1e6
 		if sp.SpendPartial {
-			cs.Complete = false
+			cs.Estimated = true
 		}
 		acc.addJobSpend(sp)
 	}
@@ -3073,9 +3085,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 		if subscriptionBilled {
 			cs.SubscriptionBilled = true
 		}
-		if !addRunModelUsage(r, acc) {
-			cs.TokensComplete = false
-		}
+		cs.addRunTokens(r, acc)
 	}
 	for _, ticket := range req.Tickets {
 		if ticket.RunID == "" {
@@ -3113,9 +3123,7 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 				if subscriptionBilled {
 					cs.SubscriptionBilled = true
 				}
-				if !addRunModelUsage(loadedRun, acc) {
-					cs.TokensComplete = false
-				}
+				cs.addRunTokens(loadedRun, acc)
 			} else {
 				ticketRun = byID[loadedRun.ID]
 			}
@@ -3150,6 +3158,14 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 	return cs
 }
 
+// addRunTokens folds r's tokens into acc (addRunModelUsage) and what that
+// says of the figure into cs: a lower bound, an estimate, or neither.
+func (cs *CostSummary) addRunTokens(r *run.Run, acc *modelUsageAccumulator) {
+	complete, estimated := addRunModelUsage(r, acc)
+	cs.TokensComplete = cs.TokensComplete && complete
+	cs.Estimated = cs.Estimated || estimated
+}
+
 // addRunModelUsage adds r's own token/model contribution into acc,
 // mirroring runCostFromRun's own relay-first, AgentEvidence-fallback
 // preference (see that function's doc comment) applied to tokens instead
@@ -3158,7 +3174,12 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 // cost. Takes an already-loaded *run.Run (not a runID) so a caller that
 // scanned dataDir/runs once (computeCostSummary) or already has one in
 // hand (runViewFor) never needs a second run.Load for the same run.
-func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) bool {
+//
+// estimated is true when a relay-billed attempt's figures hold the meter's
+// worst-case estimate for a request that ended without a usage report: the
+// tokens are all counted, so complete stays true, and the total may
+// over-state.
+func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) (complete, estimated bool) {
 	var relayTokens int64
 	var relayCostMicroUSD int64
 	var runModel string
@@ -3179,15 +3200,8 @@ func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) bool {
 	// all, silently losing that spend from ByModel entirely even though
 	// runCost's own dollar total already counted it).
 	if relayTokens > 0 || relayCostMicroUSD > 0 {
-		complete := true
 		for _, attempt := range r.Attempts {
-			// A total that holds the meter's estimate for a model request
-			// that ended without a usage report is not an exact figure
-			// (see run.Attempt.RelaySpendPartial), so the rollup is marked
-			// incomplete, which the console shows as "≥".
-			if attempt.RelaySpendPartial {
-				complete = false
-			}
+			estimated = estimated || attempt.RelaySpendPartial
 			tokens := attempt.RelayConsumedInputTokens + attempt.RelayConsumedOutputTokens
 			if tokens == 0 && attempt.RelayConsumedCostMicroUSD == 0 {
 				continue
@@ -3199,12 +3213,12 @@ func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) bool {
 			// "execution") applies here unchanged.
 			acc.add(attempt.Role, attempt.RelayWorkerModelID, tokens, attempt.RelayConsumedCostMicroUSD)
 		}
-		return complete
+		return true, estimated
 	}
 	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) == 0 {
-		return false
+		return false, false
 	}
-	complete := true
+	complete = true
 	for _, round := range r.AgentEvidence.Rounds {
 		total, ok := usageTotalTokens(round.Usage)
 		if !ok {
@@ -3222,7 +3236,7 @@ func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) bool {
 		// still reaches cs.Runs/Total, just not per-model here.
 		acc.add("", runModel, total, 0)
 	}
-	return complete
+	return complete, false
 }
 
 // runCostFromRun returns r's own contribution to a cost rollup: the

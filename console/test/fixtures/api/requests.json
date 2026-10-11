@@ -192,6 +192,7 @@
       "total": 0.012003,
       "currency": "usd",
       "complete": false,
+      "estimated": true,
       "tokens": 1206,
       "tokens_complete": false,
       "by_model": [
@@ -470,6 +471,7 @@
       "total": 0.000009,
       "currency": "usd",
       "complete": false,
+      "estimated": true,
       "tokens": 18,
       "tokens_complete": false,
       "by_model": [

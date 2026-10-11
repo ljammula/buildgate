@@ -119,7 +119,10 @@ describe("fixtures", () => {
     expect(r.requestId).toBe("req-done");
     expect(r.temporalWorkflowId).toBe("every-field temporal_workflow_id");
     expect(r.referenceOracleDir).toBe("every-field reference_oracle_dir");
-    expect(r.tokensComplete).toBe(false);
+    // An attempt whose spend holds the meter's estimate: every token is
+    // counted, and the figure is marked as one that may over-state.
+    expect(r.tokensComplete).toBe(true);
+    expect(r.estimated).toBe(true);
     expect(r.byModel).toEqual([
       {
         role: "every-field role",

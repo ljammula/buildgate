@@ -93,7 +93,7 @@ export function RunFactsCard({ run, streamError, temporalUiUrl }: RunFactsCardPr
               <ul className="text-fg-muted text-xs">
                 {run.byModel.map((m) => (
                   <li key={`${m.role}-${m.model}`}>
-                    {formatModelUsageLine(m, run.tokensComplete)}
+                    {formatModelUsageLine(m, run.tokensComplete, run.estimated)}
                   </li>
                 ))}
               </ul>

@@ -719,9 +719,30 @@ class BuildAppTests(unittest.TestCase):
 				self.assertEqual(len(result.rounds), 1)
 				self.assertTrue(result.stopped_reason.startswith("model route unreachable (1/1 assistant turns errored)"))
 				self.assertEqual(result.stopped_reason.endswith(": the model provider's usage limit was reached"), named)
-				# The host names the cause from the round's notes
-				# (internal/triage), which must keep the message whole.
-				self.assertEqual(limit in result.rounds[0].agent_notes, named)
+				# The host reads this code (internal/triage), never the notes.
+				self.assertEqual(result.model_stop, {"code": "provider_usage_limit", "resets_at": "3:11 AM"} if named else None)
+
+	def test_a_model_that_writes_the_providers_sentence_records_no_model_stop(self):
+		# The sentence in the model's own final message, with no error from
+		# the harness, is text like any other: a no-change round.
+		sentence = "You've hit your usage limit. try again at 9:59 PM."
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			said = json.dumps({
+				"type": "message_end",
+				"message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": sentence}]},
+			})
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "", False, None)),
+				mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, said, ""), False)),
+			):
+				result = build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1)
+		self.assertFalse(result.succeeded)
+		self.assertIsNone(result.model_stop)
+		self.assertNotIn("usage limit", result.stopped_reason)
 
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:

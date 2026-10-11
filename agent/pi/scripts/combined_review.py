@@ -109,9 +109,8 @@ RETRY_SESSION_SUBDIR = "retry"
 METER_DENY_CODES = ("budget_exceeded", "ceiling_exceeded", "rate_limited")
 METER_DENY_WORDINGS = ("budget exceeded", "ceiling exceeded", "rate limited", "rate limit exceeded")
 
-# stop_cause's name for a turn the provider's usage limit refused; the Go
-# side's codereview.CodeProviderUsageLimit.
-PROVIDER_USAGE_LIMIT = "provider_usage_limit"
+# stop_cause's name for a turn the provider's usage limit refused.
+PROVIDER_USAGE_LIMIT = build_app.PROVIDER_USAGE_LIMIT
 
 # What a retry asks for, by the part of the first answer that was missing.
 RETRY_COMBINED, RETRY_CONFORMITY, RETRY_CODE_REVIEW = "combined", "conformity", "code_review"

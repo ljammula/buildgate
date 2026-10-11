@@ -549,6 +549,11 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		for case in cases:
 			with self.subTest(case=case["name"]):
 				self.assertEqual(combined_review.stop_cause(case["error"]), case["stopped_by"])
+				if case["stopped_by"] == "provider_usage_limit":
+					self.assertEqual(build_app.provider_limit_resets_at(case["error"]), case["resets_at"])
+					self.assertEqual(build_app.model_stop(["connection reset", case["error"]]), {"code": "provider_usage_limit", "resets_at": case["resets_at"]})
+				elif not case["stopped_by"]:
+					self.assertIsNone(build_app.model_stop([case["error"]]))
 
 	def test_a_denial_code_outside_the_meters_body_is_an_ordinary_failure(self):
 		self.assertEqual(combined_review.meter_stop('{"reason_code":"budget_exceeded"}'), "")

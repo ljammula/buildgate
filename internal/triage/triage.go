@@ -704,25 +704,21 @@ func buildStoppedBySetupSentence(r *run.Run, forOperator bool) string {
 // buildStoppedByProviderLimitSentence is canonical_verify's sentence for a
 // run whose build ended because the model provider's own usage limit refused
 // its model calls, "" for any other run. Both must hold: the last build
-// attempt exited non-zero (the factory's record), and the last round the
-// build recorded carries the provider's fixed message among the model-route
-// errors of its notes (codereview.ProviderLimitHit). The notes are the
-// worker container's and untrusted, so none of their text is copied: the
-// sentence is the factory's, and the reset time is shown only in the one
-// shape codereview.ProviderLimitResetsAt accepts. A build that forges the
-// message is told to be retried later, and fails the same gate again.
+// attempt exited non-zero (the factory's record), and the build's evidence
+// carries the closed code the build script records from the harness's own
+// error events (run.AgentEvidence.ModelStop). No text the model wrote is
+// read: not the round notes, which hold its final message, and not the stop
+// reason. The evidence file is the worker container's, so only that code
+// and a reset time of the one shape codereview.ProviderLimitCause accepts
+// are used, and the sentence is the factory's.
 func buildStoppedByProviderLimitSentence(r *run.Run, forOperator bool) string {
-	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) == 0 {
+	if r.AgentEvidence == nil || r.AgentEvidence.ModelStop == nil || r.AgentEvidence.ModelStop.Code != codereview.CodeProviderUsageLimit {
 		return ""
 	}
 	if a, found := lastAttempt(r, "build"); !found || a.ExitCode == 0 {
 		return ""
 	}
-	notes := r.AgentEvidence.Rounds[len(r.AgentEvidence.Rounds)-1].AgentNotes
-	if !codereview.ProviderLimitHit(notes) {
-		return ""
-	}
-	s := "the build stopped: " + codereview.ProviderLimitCause(codereview.ProviderLimitResetsAt(notes)) + "; retry after it resets"
+	s := "the build stopped: " + codereview.ProviderLimitCause(r.AgentEvidence.ModelStop.ResetsAt) + "; retry after it resets"
 	if !forOperator {
 		return s
 	}
