@@ -40,12 +40,34 @@ type Calls struct {
 	// wait until (its arrival plus its Retry-After), RFC 3339 UTC; "" when
 	// none carried one.
 	RetryAt string `json:"retry_at,omitempty"`
+	// RefusedAtEnd counts the requests refused since the last answered one
+	// (by the upstream with 429 or a failure status, or by the meter): the
+	// route stopped serving the step and did not start again. Requests that
+	// simply got no answer, or that the upstream rejected as malformed, are
+	// neither counted nor end the count: a client that cancels its last
+	// request on the way out leaves the same trace. RefusedAtEndBy is the
+	// kind of the last of them (RefusedBy*).
+	RefusedAtEnd   int    `json:"refused_at_end,omitempty"`
+	RefusedAtEndBy string `json:"refused_at_end_by,omitempty"`
 	// Legacy is true when the ledger holds a complete record from before
 	// the meter recorded how a request ended. Its counts are then inferred
 	// (SummarizeCalls) and say less: a provider's 429 reads as Failed, an
 	// expired reservation as Answered, and the meter's budget and rate
 	// refusals are absent. A decision must not rest on a Legacy summary.
 	Legacy bool `json:"legacy,omitempty"`
+}
+
+// Who refused a request, for RefusedAtEndBy.
+const (
+	RefusedByProviderLimit = "provider_limit"
+	RefusedByProviderError = "provider_error"
+	RefusedByMeter         = "meter"
+)
+
+// Served reports whether any request got an answer whose usage was read: a
+// success head alone (AnsweredUnread) may have delivered nothing.
+func (c Calls) Served() bool {
+	return c.Answered > 0
 }
 
 // Recorded is every request the ledger holds a record of. A request the
@@ -87,10 +109,13 @@ func SummarizeCalls(records []LedgerRecord) Calls {
 			calls.countComplete(rec, usageSinceEvent)
 		case LedgerKindCeilingExceeded:
 			calls.DeniedCeiling++
+			calls.refusedAtEnd(RefusedByMeter)
 		case LedgerKindBudgetExceeded:
 			calls.DeniedBudget++
+			calls.refusedAtEnd(RefusedByMeter)
 		case LedgerKindRateLimited:
 			calls.DeniedRate++
+			calls.refusedAtEnd(RefusedByMeter)
 		}
 		usageSinceEvent = false
 	}
@@ -114,15 +139,23 @@ func (c *Calls) countComplete(rec LedgerRecord, usageBefore bool) {
 		c.Unanswered++
 	case rec.Status >= 200 && rec.Status < 300 && rec.Settled == SettledExact:
 		c.Answered++
+		c.RefusedAtEnd, c.RefusedAtEndBy = 0, ""
 	case rec.Status >= 200 && rec.Status < 300:
 		c.AnsweredUnread++
 	case rec.Status == 429:
 		c.RateLimited++
+		c.refusedAtEnd(RefusedByProviderLimit)
 	case rec.Status >= 400 && rec.Status < 500:
 		c.Rejected++
 	default:
 		c.Failed++
+		c.refusedAtEnd(RefusedByProviderError)
 	}
+}
+
+func (c *Calls) refusedAtEnd(by string) {
+	c.RefusedAtEnd++
+	c.RefusedAtEndBy = by
 }
 
 // noteRetryAt keeps the latest "wait until" of the refused responses: the

@@ -7,6 +7,7 @@ import (
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/ticketspec"
+	"buildgate/internal/unresolved"
 	wsisolation "buildgate/internal/workspace"
 	"context"
 	"errors"
@@ -440,6 +441,7 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 		return a.runSandboxWithRetries(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
 	})
 	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
+	runErr = withModelRouteFailure(runErr, subResult)
 	result := BuildActivityResult{Result: subResult, Attempts: withInherited(inherited, attempts)}
 	checkpoint.Result = result
 	if runErr != nil {
@@ -475,7 +477,10 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 // run that hit its own budget apart from one whose teardown was merely
 // ambiguous, or one that failed for an unrelated infrastructure reason.
 func buildActivityErrorType(runErr error) string {
+	var route modelRouteFailure
 	switch {
+	case errors.As(runErr, &route):
+		return modelRouteFailureTypes[route.cause]
 	case errors.Is(runErr, sandbox.ErrSandboxRerun):
 		// Before the ceiling: a command killed mid-request leaves its
 		// request unsettled, which is a consequence, not the cause.
@@ -652,4 +657,28 @@ func (a *Activities) runPostBuild(ctx context.Context, checkpointDir string, inp
 		return PostBuildResult{CommittedByWorker: true}, temporal.NewApplicationErrorWithCause("capture result SHA after safety-net commit", InfrastructureFailureType, err)
 	}
 	return result, nil
+}
+
+// modelRouteFailure is the error of a build that ran to an exit status
+// saying it did not succeed while its model route was not serving it.
+type modelRouteFailure struct{ cause unresolved.Cause }
+
+func (f modelRouteFailure) Error() string {
+	return "the build did not succeed and the meter's ledger shows why not: " + f.cause.What("build")
+}
+
+// withModelRouteFailure returns runErr, or, for a build that launched and
+// exited without succeeding, a modelRouteFailure when the ledger of its last
+// launch says the route did not serve it. A build that succeeded, one whose
+// repository setup failed before any agent turn, and one whose route served
+// it to the end are results: nil. The exit status is the sandbox's and only
+// narrows the question; the cause is the meter's.
+func withModelRouteFailure(runErr error, result runner.Result) error {
+	if runErr != nil || result.ExitCode == 0 || result.ExitCode == SetupFailedExitCode {
+		return runErr
+	}
+	if cause := run.ModelRouteCause(run.AttemptCalls(result.RelayCalls)); cause != "" {
+		return modelRouteFailure{cause: cause}
+	}
+	return nil
 }

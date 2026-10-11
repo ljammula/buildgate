@@ -6,13 +6,16 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"buildgate/internal/meter"
+	"buildgate/internal/runner"
 
 	"buildgate/internal/sandbox"
 	"buildgate/internal/unresolved"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 )
 
@@ -134,5 +137,53 @@ func TestAReviewAttemptRecordsHowItsModelRequestsEnded(t *testing.T) {
 	got := *attempts[0].RelayCalls
 	if got.RateLimited != 1 || got.Unanswered != 1 || got.DeniedBudget != 1 || got.Answered != 0 || got.RetryAt == "" || got.Legacy {
 		t.Errorf("RelayCalls = %+v, want one 429 with its retry time, one unanswered, one budget refusal", got)
+	}
+}
+
+// A build that exits "did not succeed" while the meter's ledger shows the
+// route was not serving it is no verdict on the work: the Activity fails
+// with the cause's own type, RunWorkflow keeps the worktree, and no
+// corrective build is spent against the same route.
+func TestABuildWhoseModelRouteDidNotServeItIsUnresolved(t *testing.T) {
+	limit := meter.Calls{Answered: 12, RateLimited: 3, RefusedAtEnd: 3, RefusedAtEndBy: meter.RefusedByProviderLimit}
+	for _, tc := range []struct {
+		name string
+		res  runner.Result
+		err  error
+		want unresolved.Cause
+	}{
+		{"did not succeed, the provider's limit from some point on", runner.Result{ExitCode: 1, RelayCalls: limit}, nil, unresolved.ProviderQuota},
+		{"did not succeed, nothing ever answered", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Unanswered: 4}}, nil, unresolved.ModelUnavailable},
+		{"did not succeed, the meter refused", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 2, DeniedBudget: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByMeter}}, nil, unresolved.MeterDenied},
+		{"did not succeed with every request answered: the gates judge it", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 40}}, nil, ""},
+		{"succeeded although the limit was hit at the end: a result", runner.Result{ExitCode: 0, RelayCalls: limit}, nil, ""},
+		{"the repository's setup failed before any turn", runner.Result{ExitCode: SetupFailedExitCode, RelayCalls: meter.Calls{}}, nil, ""},
+		{"called no model", runner.Result{ExitCode: 1}, nil, ""},
+		{"a ledger that cannot say", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Failed: 3, Legacy: true}}, nil, ""},
+	} {
+		err := withModelRouteFailure(tc.err, tc.res)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: err = %v, want none", tc.name, err)
+			}
+			continue
+		}
+		crossed := temporal.NewApplicationErrorWithCause("build subprocess infrastructure failure", buildActivityErrorType(err), err)
+		if got := UnresolvedCauseFromError(crossed); got != tc.want {
+			t.Errorf("%s: cause across the Temporal boundary = %q (type %q), want %q", tc.name, got, buildActivityErrorType(err), tc.want)
+		}
+		if !StepLostFromError(crossed) || HaltReasonCodeFromError(crossed) != string(tc.want) {
+			t.Errorf("%s: the worktree would be rolled back, or the halt carries code %q", tc.name, HaltReasonCodeFromError(crossed))
+		}
+	}
+	// A launch error is its own finding and is never replaced.
+	launch := errors.New("sandbox attempts exhausted")
+	if got := withModelRouteFailure(launch, runner.Result{ExitCode: -1, RelayCalls: limit}); got != launch {
+		t.Errorf("a launch error became %v", got)
+	}
+	for cause, typ := range modelRouteFailureTypes {
+		if unresolvedFailureTypes[typ] != cause || !slices.Contains(nonRetryableActivityFailureTypes, typ) {
+			t.Errorf("%s: type %q does not map back to it, or Temporal would retry it", cause, typ)
+		}
 	}
 }

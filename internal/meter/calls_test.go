@@ -46,7 +46,7 @@ func TestTheLedgerSaysHowEachRequestEnded(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := SummarizeCalls(records)
-	want := Calls{Answered: 1, RateLimited: 2, Rejected: 1, Failed: 1, Unanswered: 3, DeniedCeiling: 1, RetryAt: f.clock.Now().Add(-2 * time.Minute).Add(10 * time.Minute).UTC().Format(time.RFC3339)}
+	want := Calls{Answered: 1, RateLimited: 2, Rejected: 1, Failed: 1, Unanswered: 3, DeniedCeiling: 1, RefusedAtEnd: 4, RefusedAtEndBy: RefusedByMeter, RetryAt: f.clock.Now().Add(-2 * time.Minute).Add(10 * time.Minute).UTC().Format(time.RFC3339)}
 	if got != want {
 		t.Errorf("SummarizeCalls = %+v\nwant           %+v", got, want)
 	}
@@ -77,8 +77,8 @@ func TestTheWindowBudgetAndTheRequestRateLeaveADenyRecord(t *testing.T) {
 		overrides map[string]any
 		want      Calls
 	}{
-		LedgerKindRateLimited:    {map[string]any{"requests_per_minute": 1}, Calls{Answered: 1, DeniedRate: 1}},
-		LedgerKindBudgetExceeded: {map[string]any{"token_budget": 50, "token_window_seconds": 3600}, Calls{Answered: 1, DeniedBudget: 1}},
+		LedgerKindRateLimited:    {map[string]any{"requests_per_minute": 1}, Calls{Answered: 1, DeniedRate: 1, RefusedAtEnd: 1, RefusedAtEndBy: RefusedByMeter}},
+		LedgerKindBudgetExceeded: {map[string]any{"token_budget": 50, "token_window_seconds": 3600}, Calls{Answered: 1, DeniedBudget: 1, RefusedAtEnd: 1, RefusedAtEndBy: RefusedByMeter}},
 	} {
 		f := newFixture(t)
 		config := policyStruct(t, tc.overrides)
@@ -170,5 +170,37 @@ func TestARequestIDAdmittedAgainIsCountedAgain(t *testing.T) {
 	}
 	if got, want := SummarizeCalls(records), (Calls{Answered: 1, Unanswered: 1}); got != want {
 		t.Errorf("SummarizeCalls = %+v, want %+v", got, want)
+	}
+}
+
+// "Refused at the end" is the route going away and not coming back: an
+// answer resets it, and a request that got no answer or was rejected as
+// malformed neither counts nor resets, since a client leaves those behind
+// on an ordinary exit.
+func TestRefusedAtEndCountsOnlyRefusalsSinceTheLastAnswer(t *testing.T) {
+	complete := func(id string, status int) []LedgerRecord {
+		settled := SettledReleased
+		if status == 200 {
+			settled = SettledExact
+		}
+		return []LedgerRecord{{Kind: LedgerKindAdmit, RequestID: id}, {Kind: LedgerKindComplete, RequestID: id, Settled: settled, Status: status}}
+	}
+	var records []LedgerRecord
+	add := func(recs ...[]LedgerRecord) {
+		for _, r := range recs {
+			records = append(records, r...)
+		}
+	}
+	add(complete("a", 429), complete("b", 200))
+	if got := SummarizeCalls(records); got.RefusedAtEnd != 0 || got.RefusedAtEndBy != "" {
+		t.Errorf("a limit followed by an answer: %+v, want nothing refused at the end", got)
+	}
+	add(complete("c", 502), complete("d", 400), []LedgerRecord{{Kind: LedgerKindAdmit, RequestID: "e"}}, complete("f", 429))
+	if got := SummarizeCalls(records); got.RefusedAtEnd != 2 || got.RefusedAtEndBy != RefusedByProviderLimit {
+		t.Errorf("502, a rejected, an unanswered, 429 after the last answer: %+v, want 2 refused, the last by the provider's limit", got)
+	}
+	add([]LedgerRecord{{Kind: LedgerKindBudgetExceeded, RequestID: "g"}})
+	if got := SummarizeCalls(records); got.RefusedAtEnd != 3 || got.RefusedAtEndBy != RefusedByMeter || !got.Served() {
+		t.Errorf("then a meter refusal: %+v, want 3 refused, the last by the meter", got)
 	}
 }
