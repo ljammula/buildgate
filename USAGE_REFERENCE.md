@@ -514,9 +514,10 @@ the flag; `factoryd doctor -fix` builds it when absent.
 `meter_image` (buildgate's own meter, `make meter-image`) is set the same way
 by `make install` (`-meter-image`). The OpenShell gateway stack reads it:
 every build launches through that gateway. `factoryd doctor` warns when it
-is unset (fix: `make install`) and, once set, warns on any of its four
-OpenShell rows (images, gateway, gateway config, meter) that fails;
-`doctor -fix`, `worker` and a single-ticket run start the stack
+is unset (fix: `make install`) and, once set, warns on any of its five
+OpenShell rows (images, gateway, gateway config, meter, meter image) that
+fails; `doctor -fix`, `worker` and a single-ticket run start the stack, and
+`doctor -fix` alone restarts one whose meter was started from another image
 ([USAGE.md](USAGE.md#the-sandbox-runtime-openshell-gateway-and-meter)).
 
 ### Corporate TLS interception

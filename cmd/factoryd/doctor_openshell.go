@@ -20,8 +20,8 @@ import (
 // failing doctor. Without meter_image the stack cannot be started, and the
 // one row says so. With fix, a gateway or meter that does not answer is
 // started first (the meter, then the gateway) and the outcome printed to w;
-// a stack whose supervisors lack this network's CA is stopped before that,
-// unless a build is using it.
+// a stack that answers but must be restarted (stackRestartReasons) is stopped
+// before that, unless a build is using it.
 func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix bool, w io.Writer) []doctorCheck {
 	if in.meterImage == "" {
 		return []doctorCheck{{
@@ -32,8 +32,8 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 		}}
 	}
 	if fix {
-		if stale, known := supervisorImageStale(); known && stale {
-			stopStackForInterceptingCA(dp, w)
+		if reasons := stackRestartReasons(in.meterImage); len(reasons) > 0 {
+			stopStackForRestart(dp, w, reasons)
 		}
 		startSandboxRuntimeIfDown(dp, ctx, w, in.meterImage)
 	}
@@ -45,7 +45,50 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 	if check, ok := doctorCheckSupervisorTrustsInterceptingCA(); ok {
 		checks = append(checks, check)
 	}
-	return append(checks, doctorCheckMeter(dp, ctx))
+	return append(checks, doctorCheckMeter(dp, ctx), doctorCheckMeterRunsConfiguredImage(in.meterImage))
+}
+
+// stackRestartReason is why a stack that was started has to be stopped and
+// started again: a start that finds the gateway and the meter answering
+// leaves them as they are, and each takes what is named here only when it
+// starts.
+type stackRestartReason int
+
+const (
+	// supervisorLacksCA: the gateway starts supervisors from an image
+	// without this network's intercepting CA.
+	supervisorLacksCA stackRestartReason = iota
+	// meterImageDiffers: the meter was started from an image other than the
+	// configured meter_image.
+	meterImageDiffers
+	// meterImageUnrecorded: the stack was started with no record of its
+	// meter's image, so the meter cannot be shown to be the configured one.
+	meterImageUnrecorded
+)
+
+// goal is what the restart is for, as the line -fix prints ends.
+func (r stackRestartReason) goal() string {
+	switch r {
+	case supervisorLacksCA:
+		return "sandbox supervisors trust this network's CA"
+	case meterImageDiffers:
+		return "the meter runs the configured image"
+	default:
+		return "the meter is known to run the configured image"
+	}
+}
+
+// stackRestartReasons is every reason the stack this machine last started is
+// not the one its configuration calls for; none for a stack never started.
+func stackRestartReasons(meterImage string) []stackRestartReason {
+	var reasons []stackRestartReason
+	if stale, known := supervisorImageStale(); known && stale {
+		reasons = append(reasons, supervisorLacksCA)
+	}
+	if _, reason, stale := meterImageStale(meterImage); stale {
+		reasons = append(reasons, reason)
+	}
+	return reasons
 }
 
 // supervisorImageStale reports whether the stack last started with a
@@ -72,17 +115,36 @@ func supervisorImageStale() (stale, known bool) {
 	return !strings.Contains(string(config), `"`+hostcontrol.SupervisorImageFor(caPEM)+`"`), true
 }
 
-// stopStackForInterceptingCA stops the stack so that the start after it
-// renders the supervisor image this network needs: a gateway reads its
-// configuration once, when it starts. A build in any profile's data dir
-// keeps the stack running, and the row then says what to run.
-func stopStackForInterceptingCA(dp *deps, w io.Writer) {
+// meterImageStale reports whether the stack's meter was last started from an
+// image other than meterImage, with that image (started) and which of the
+// two meter reasons applies. A stack never started is not stale: its first
+// start takes meterImage.
+func meterImageStale(meterImage string) (started string, reason stackRestartReason, stale bool) {
+	started, everStarted := hostcontrol.StartedMeterImage()
+	switch {
+	case !everStarted || started == meterImage:
+		return started, 0, false
+	case started == "":
+		return "", meterImageUnrecorded, true
+	}
+	return started, meterImageDiffers, true
+}
+
+// stopStackForRestart stops the stack so that the start after it takes what
+// reasons name: a gateway reads its configuration, and the meter's container
+// its image, once, at a start. A build in any profile's data dir keeps the
+// stack running, and the rows then say what to run.
+func stopStackForRestart(dp *deps, w io.Writer, reasons []stackRestartReason) {
 	profiles, err := loadProfiles()
 	if err != nil {
 		return
 	}
 	dirs, _ := distinctDataDirs(profiles)
-	fmt.Fprintln(w, "openshell: restarting so that sandbox supervisors trust this network's CA")
+	goals := make([]string, len(reasons))
+	for i, r := range reasons {
+		goals[i] = r.goal()
+	}
+	fmt.Fprintf(w, "openshell: restarting so that %s\n", strings.Join(goals, " and "))
 	stopOpenShellIfStarted(dp, w, dirs)
 }
 
@@ -154,6 +216,36 @@ func doctorCheckMeter(dp *deps, ctx context.Context) doctorCheck {
 		return openShellDownCheck(dp, ctx, name, err, hostcontrol.OpenShellMeterAddr)
 	}
 	return doctorCheck{Name: name}
+}
+
+// doctorCheckMeterRunsConfiguredImage is the row of a meter left running
+// across a `make install` that built another image: it answers, so nothing
+// replaced it, and every build is metered by the superseded one.
+func doctorCheckMeterRunsConfiguredImage(meterImage string) doctorCheck {
+	name := "OpenShell meter runs the configured image"
+	started, reason, stale := meterImageStale(meterImage)
+	if !stale {
+		return doctorCheck{Name: name}
+	}
+	err := fmt.Errorf("the meter was started from %s and meter_image is %s", shortImageRef(started), shortImageRef(meterImage))
+	if reason == meterImageUnrecorded {
+		err = fmt.Errorf("the stack was started with no record of its meter's image, so the meter may not be meter_image %s", shortImageRef(meterImage))
+	}
+	return doctorCheck{
+		Name:     name,
+		Advisory: true,
+		Err:      err,
+		Fix:      "run `factoryd doctor -fix`: it stops the gateway and the meter and starts them from meter_image, but not while a request is building or a sandbox exists; run it again once those builds have finished",
+	}
+}
+
+// shortImageRef is an image reference with its digest cut to 12 hex digits.
+func shortImageRef(ref string) string {
+	const marker = "@sha256:"
+	if i := strings.Index(ref, marker); i >= 0 && len(ref) > i+len(marker)+12 {
+		return ref[:i+len(marker)+12]
+	}
+	return ref
 }
 
 // doctorCheckOpenShellGatewayConfig checks the gateway config the stack runs:

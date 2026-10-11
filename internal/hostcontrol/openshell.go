@@ -36,6 +36,10 @@ const (
 	// OpenShellGatewayConfigFile is the rendered gateway configuration kept in
 	// the stack directory for inspection (the gateway receives it inline).
 	OpenShellGatewayConfigFile = "gateway.toml"
+	// OpenShellMeterImageFile records, in the stack directory, the image the
+	// meter was last started from: a meter that answers is not recreated, so
+	// the configured image alone does not say which one runs.
+	OpenShellMeterImageFile = "meter-image"
 	// openShellMeterEndpoint is where the gateway's supervisors reach the
 	// meter: the VM's loopback, on the port the meter publishes.
 	openShellMeterEndpoint = "http://" + OpenShellMeterAddr
@@ -205,8 +209,9 @@ func (st OpenShellStack) env(gatewayConfig string) []string {
 // StartOpenShell brings the stack up in order: the meter, once it accepts
 // connections, then the gateway, once it completes an mTLS handshake. Nothing
 // calls it unless an operator command does; behind AutostartEnabled it
-// touches neither Docker nor the certificates. The returned error is the
-// one-line reason it could not.
+// touches neither Docker nor the certificates. A start that succeeded records
+// the meter's image (StartedMeterImage). The returned error is the one-line
+// reason it could not.
 func StartOpenShell(dp Deps, ctx context.Context, w io.Writer, st OpenShellStack) error {
 	if !AutostartEnabled() {
 		return fmt.Errorf("OpenShell not started: %s=0", AutostartEnvVar)
@@ -245,7 +250,25 @@ func StartOpenShell(dp Deps, ctx context.Context, w io.Writer, st OpenShellStack
 	withSpinner(w, "starting OpenShell (first start pulls images)", func() {
 		startErr = startMeterThenGateway(dp, ctx, st.Timeouts, composePath, logPath, env)
 	})
-	return startErr
+	if startErr != nil {
+		return startErr
+	}
+	return writeIfChanged(filepath.Join(dir, OpenShellMeterImageFile), []byte(st.MeterImage+"\n"))
+}
+
+// StartedMeterImage is the image the stack's meter was last started from.
+// started is false when the stack was never started (it has no rendered
+// gateway config); image is "" for a stack started with no record of it.
+func StartedMeterImage() (image string, started bool) {
+	dir, err := OpenShellStackPath()
+	if err != nil {
+		return "", false
+	}
+	if _, err := os.Stat(filepath.Join(dir, OpenShellGatewayConfigFile)); err != nil {
+		return "", false
+	}
+	recorded, _ := os.ReadFile(filepath.Join(dir, OpenShellMeterImageFile))
+	return strings.TrimSpace(string(recorded)), true
 }
 
 func startMeterThenGateway(dp Deps, ctx context.Context, t OpenShellTimeouts, composePath, logPath string, env []string) error {

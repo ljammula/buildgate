@@ -86,7 +86,7 @@ names what is missing and stops; a missing `npm` alone only costs the console.
 | `PATH` | Links `~/.local/bin/factoryd` to the installed binary, so shells that never read a profile (an agent, a script, an ssh command) find it wherever `~/.local/bin` is on `PATH`; a `factoryd` already there that is not this link is left alone. When `factoryd` still does not resolve: appends the `export PATH=...` line to `~/.zshrc` (`~/.bash_profile` for bash), once; a new terminal picks it up |
 | GitHub | `gh auth login` when `gh` is not logged in and this is a terminal |
 | Model | `factoryd setup`: asks which model (detected ChatGPT/Codex and Copilot logins first) and, on a route that can run more than one, which coding agent; everything else is defaulted. Asks nothing when the config already names a model, or with no terminal (a single detected login is then used) |
-| Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter. Its failures do not fail the install |
+| Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter, and restarts a gateway and meter started from another meter image unless a build is using them. Its failures do not fail the install |
 | Closing list | Ends with `buildgate is installed.` and a numbered `Left for you:` list of whatever a step could not finish (open a new terminal, `gh auth login`, `factoryd setup`, failed checks), then the `quickstart` command |
 | Tree | Leaves `git status` clean |
 

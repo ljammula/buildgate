@@ -191,6 +191,41 @@ func TestOpenShellStartBringsUpMeterBeforeGateway(t *testing.T) {
 	}
 }
 
+// The record of the meter's image is what tells a later doctor that the meter
+// which answers is not the configured one, so only a start that succeeded
+// writes it.
+func TestOpenShellStartRecordsTheMeterImageOnlyWhenItSucceeded(t *testing.T) {
+	f := newOpenShellFixture(t)
+	if image, started := StartedMeterImage(); image != "" || started {
+		t.Fatalf("before any start: image %q, started %v", image, started)
+	}
+	f.dp.meterHealthyFn = f.HealthyOnceUp("meter")
+	f.dp.gatewayHealthyFn = func(context.Context) error { return errors.New("handshake refused") }
+	if err := StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, f.stack0); err == nil {
+		t.Fatal("StartOpenShell succeeded with a gateway that never answers")
+	}
+	if image, started := StartedMeterImage(); image != "" || !started {
+		t.Fatalf("after a failed start: image %q, started %v; want no record of a started stack", image, started)
+	}
+	f.healthyOnceUp()
+	if err := StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, f.stack0); err != nil {
+		t.Fatalf("StartOpenShell: %v", err)
+	}
+	if image, started := StartedMeterImage(); image != f.stack0.MeterImage || !started {
+		t.Fatalf("after a start: image %q, started %v; want %q", image, started, f.stack0.MeterImage)
+	}
+	// A failed start with another image does not record that image.
+	next := f.stack0
+	next.MeterImage = "localhost:5050/factoryd-meter@sha256:bbbb"
+	f.dp.gatewayHealthyFn = func(context.Context) error { return errors.New("handshake refused") }
+	if err := StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, next); err == nil {
+		t.Fatal("StartOpenShell succeeded with a gateway that never answers")
+	}
+	if image, _ := StartedMeterImage(); image != f.stack0.MeterImage {
+		t.Errorf("after a failed second start the record is %q, want %q", image, f.stack0.MeterImage)
+	}
+}
+
 func TestOpenShellStartAutostartOffDoesNothing(t *testing.T) {
 	f := newOpenShellFixture(t)
 	t.Setenv(AutostartEnvVar, "0")
