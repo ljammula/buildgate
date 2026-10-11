@@ -717,12 +717,16 @@ class BuildAppTests(unittest.TestCase):
 		self.assertEqual(len(agent_invocation_calls(run)), 1)
 		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.stopped_reason)
 
-	def test_a_build_the_providers_usage_limit_refused_says_so(self):
-		limit = next(
-			c["error"] for c in json.loads((Path(__file__).parent / "fixtures" / "review_stop_causes.json").read_text())
-			if c["stopped_by"] == "provider_usage_limit"
+	def test_a_build_the_provider_refused_stops_as_any_unreachable_route_does(self):
+		# The provider's usage-limit message, as the codex CLI gave it live
+		# (2026-10-11), is an errored turn like any other: the round loop
+		# stops, and the script names no cause. Why the route did not serve
+		# the build is the spend meter's record, read by the host.
+		limit = (
+			"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit "
+			"https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM."
 		)
-		for message, named in ((limit, True), ("connection refused", False)):
+		for message in (limit, "connection refused"):
 			with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
 				root = Path(directory)
 				spec = root / "spec.md"
@@ -737,12 +741,10 @@ class BuildAppTests(unittest.TestCase):
 				):
 					result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1)
 				self.assertEqual(len(result.rounds), 1)
-				self.assertTrue(result.stopped_reason.startswith("model route unreachable (1/1 assistant turns errored)"))
-				self.assertEqual(result.stopped_reason.endswith(": the model provider's usage limit was reached"), named)
-				# The host reads this code (internal/triage), never the notes.
-				self.assertEqual(result.model_stop, {"code": "provider_usage_limit", "resets_at": "3:11 AM"} if named else None)
+				self.assertEqual(result.stopped_reason, "model route unreachable (1/1 assistant turns errored)")
+				self.assertFalse(hasattr(result, "model_stop"))
 
-	def test_a_model_that_writes_the_providers_sentence_records_no_model_stop(self):
+	def test_a_model_that_writes_the_providers_sentence_made_a_no_change_round(self):
 		# The sentence in the model's own final message, with no error from
 		# the harness, is text like any other: a no-change round.
 		sentence = "You've hit your usage limit. try again at 9:59 PM."
@@ -761,8 +763,8 @@ class BuildAppTests(unittest.TestCase):
 			):
 				result = build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1)
 		self.assertFalse(result.succeeded)
-		self.assertIsNone(result.model_stop)
 		self.assertNotIn("usage limit", result.stopped_reason)
+		self.assertNotIn("model route unreachable", result.stopped_reason)
 
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:

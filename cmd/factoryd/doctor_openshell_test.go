@@ -96,15 +96,15 @@ func TestDoctorOpenShellGatewayAndMeterHealth(t *testing.T) {
 	}
 }
 
-func TestDoctorOpenShellChecksRunAllFourWithAMeterImage(t *testing.T) {
+func TestDoctorOpenShellChecksRunAllFiveWithAMeterImage(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return errors.New("down") }
 	checks := doctorOpenShellChecks(dp, context.Background(), doctorInputs{
 		meterImage: "localhost:5050/factoryd-meter@sha256:aaaa", sandboxDocker: fakeImageDocker(t, true),
 	}, false, io.Discard)
-	if len(checks) != 4 {
-		t.Fatalf("checks = %d, want 4", len(checks))
+	if len(checks) != 5 {
+		t.Fatalf("checks = %d, want 5", len(checks))
 	}
 	for _, c := range checks {
 		if strings.Contains(c.Name, "not configured") {

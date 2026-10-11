@@ -20,7 +20,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. | `-config`, `-data-dir` |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. | `-reason` (required, before the id), `-to` (`plan`\|`spec`; quarantined/halted only), `-config`, `-data-dir` |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. | `-reason` (requests only), `-from attempt\|scratch` (default `attempt`; `scratch` rebuilds from the base commit; the API body's `"from"`, which the console's Retry dialog sends when **Retry from scratch** is ticked), `-config`, `-data-dir` |
-| `factoryd resume [-from round\|scratch] <request-id>` | The decision for a request in `resume_review` (its step ended with no verdict on the work: the `worker` stopped, or the step's sandbox could not be started): `-from round` (default) continues a lost build in its kept worktree from the last completed round, or reruns a lost drafting or planning step; `-from scratch` rebuilds the ticket from a fresh worktree (a drafting or planning step simply reruns). For a lost build, `round` first checks that no sandbox container of the lost run is alive and the worktree HEAD equals or descends from the HEAD its round state recorded, and refuses otherwise, naming `-from scratch` and `factoryd cancel`; the check is made again when the build launches. A lost drafting or planning step is refused (either verb) while a container its job launched is still alive; `worker` start removes those of a dead process first. Cancel with `factoryd cancel`. `factoryd retry` refuses a request in `resume_review`. Same rules as `POST /requests/{id}/resume` (body `{"from":"round"\|"scratch","by":"<name>"}`; 409 for another state or a refused check). | `-from` (`round`\|`scratch`, before the id), `-config`, `-data-dir` |
+| `factoryd resume [-from round\|scratch] <request-id>` | The decision for a request in `resume_review` (its step ended with no verdict on the work: the `worker` stopped, the step's sandbox could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft): `-from round` (default) continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again, or reruns a lost drafting or planning step; `-from scratch` rebuilds the ticket from a fresh worktree (a drafting or planning step simply reruns). For a lost build, `round` first checks that no sandbox container of the lost run is alive and the worktree HEAD equals or descends from the HEAD its round state recorded, and refuses otherwise, naming `-from scratch` and `factoryd cancel`; the check is made again when the build launches. A lost drafting or planning step is refused (either verb) while a container its job launched is still alive; `worker` start removes those of a dead process first. Cancel with `factoryd cancel`. `factoryd retry` refuses a request in `resume_review`. Same rules as `POST /requests/{id}/resume` (body `{"from":"round"\|"scratch","by":"<name>"}`; 409 for another state or a refused check). | `-from` (`round`\|`scratch`, before the id), `-config`, `-data-dir` |
 | `factoryd amend-scope -reason "<text>" <request-id> <file>...` | A human operator widens ONE `quarantined` ticket's approved `Allowed-Files:` scope by hand, re-pinning that ticket spec's approval hash, so `factoryd retry` can rebuild it -- the recovery for a build `diff_scope` quarantined over a file that is a legitimate part of the ticket but that the plan never listed. Refused unless the ticket has no PR yet, every existing approval hash still verifies, and each file is a new, valid, not-already-allowed workspace-relative path. Only that one `Allowed-Files:` line is rewritten; state stays `quarantined`. | `-reason` (required, before the id), `-config`, `-data-dir` |
 | `factoryd cancel <request-id>` | Moves a non-terminal request, or one already `quarantined`/`halted` (dismisses it instead of retrying), to `cancelled`. Refuses `done`. Same rules as `POST /requests/{id}/cancel`. | `-reason`, `-config`, `-data-dir` |
 | `factoryd install-service` | macOS: installs and bootstraps launchd agents `dev.factoryd.worker` (`factoryd worker -temporal-address <addr>`, the address resolved as `submit` does; refuses with one line when no Temporal is available) and `dev.factoryd.serve` (`KeepAlive`, logs under `<data-dir>/logs/`). Creates or reuses a stable start token at `<config dir>/serve-start-token` (0600); the plist never embeds it. | `-config`, `-data-dir` (default: config `data_dir`; error if neither), `-force` (overwrite existing plists), `-print` (print the worker plist only), `-no-serve` |
@@ -87,7 +87,7 @@ each `daemon` child it runs.
 | `worker` start after a kill -9 | With the drain lock held, it reclaims every nonterminal run whose owner is gone: the pid in the run's `sandbox-owner.pid` no longer exists (a live pid, no marker, or a terminal run is never touched). Each is halted with the triage "the factoryd process running this build stopped mid-run", its Temporal workflow is terminated if still `Running` (unreachable Temporal: the run is left for the next start), and its worker, supervisor, registry-proxy and compose containers are removed; its ticket rebuilds as a new run. One log line per run. |
 | Paths colima does not share | colima should share only `~/buildgate` read-write and your repositories read-only (USAGE.md, "Data directory and colima"), so a data dir or workspace anywhere else — `/tmp`, `~/.cache` — fails inside the sandbox ("does not appear to share ... into its containers"). `doctor -workspace <dir>` probes the workspace and data dir; `worker` and `factoryd <run>` preflights probe the data dir when it already exists. `doctor -fix` can repoint `data_dir` to `~/buildgate/data`. `mkdir -p` the data dir before a first bare `factoryd` run. On macOS `doctor` also warns (`Docker VM does not share all of $HOME`) while the VM still sees all of `$HOME`. |
 | Correct work quarantined as all-"unavailable" | A slow/local model's conformity review can time out or return unparseable output; under `-conformity-policy required` (default) every criterion reads `unavailable` and blocks. If `agent_evidence.stopped_reason` lists every criterion as unmet, retry with `-conformity-policy advisory` (flag or `conformity_policy` key). The verdict is still recorded. |
-| The model provider's usage limit ran out mid-request | A review it refused quarantines the request with check `review_unavailable` and the reason "the model provider's usage limit was reached (it said to try again at 3:11 AM, by the worker container's clock) during the review"; a build it refused fails `canonical_verify` with "the build stopped: the model provider's usage limit was reached (...); retry after it resets". Nothing was judged. Run `factoryd retry <id>` after that time (the worker container's clock is UTC unless the image sets another). The time is shown only when the provider's message gave a plain time of day; no session-config budget governs this limit. Recognised from the codex CLI's message ("You've hit your usage limit"); another harness's wording reads as a review that gave no verdict, or a build whose model route was unreachable. |
+| The model provider's usage limit ran out mid-request | Nothing was judged, so nothing quarantines: the request waits in `resume_review` with cause `provider_quota` and the reason "the model provider refused the requests of the building step with its own rate or usage limit, so the work was not judged (it said to try again after ...)". The cause is read from the spend meter's record of the step's model requests (the provider answered them `429`), never from the worker's output. The time is the provider's `Retry-After` as the meter recorded it; when it sent none, a plain time of day in the codex CLI's usage-limit message is shown instead ("3:11 AM by the worker container's clock", UTC unless the image sets another), and otherwise no time. Run `factoryd resume <id>` after that time: a build it refused continues in its kept worktree, and a build whose review it refused is reviewed again without building. No session-config budget governs this limit. |
 | Configured image is out of date with its own source | `factoryd doctor`/`quickstart` compare each configured image's stamped build-inputs label against the checkout named by `image_source_root` (session config, written by `factoryd configure-images`) and warn (never fail) when it's stale; `quickstart` offers to rebuild, `worker`/`serve` print one warning line at startup. Run `make install` in that checkout to rebuild. No `image_source_root` recorded (or the checkout is unreadable): nothing is checked. |
 
 ## Request lifecycle
@@ -95,8 +95,9 @@ each `daemon` child it runs.
 `submitted` -> `spec_drafting` -> `spec_review` (you) -> [`oracle_drafting`
 -> `oracle_review` (you), only with `-draft-oracles`] -> `planning` ->
 `plan_review` (you) -> `building` (one ticket at a time) -> `pr_review` ->
-`done`. Off-ramps: `quarantined`, `halted`, `cancelled`. A step whose
-`worker` stopped (drafting, planning, a build, a PR-review corrective round)
+`done`. Off-ramps: `quarantined`, `halted`, `cancelled`. A step that ended
+with no verdict on the work (its `worker` stopped, or one of the causes in
+USAGE.md's `resume_review` table)
 waits in `resume_review` (you): `factoryd resume`, `factoryd resume -from
 scratch` or `factoryd cancel`; it returns to the state of the lost step.
 Merge stays human, outside this graph.
@@ -162,9 +163,15 @@ rebuilt via `-on-branch`/`-diff-base` against the quarantined run's own
 branch/base SHA, through every gate again including a fresh, independent
 review. A review that gave no verdict (the reviewer timed out, returned
 nothing parseable, or had its model calls refused by the spend meter or by
-the model provider's own usage limit) is not actionable and gets no round:
-the request quarantines with check `review_unavailable`, saying the build
-was not judged and which of these it was when the run records it; otherwise the quarantine names `code_review` when that gate
+the model provider's own limit) is not actionable, gets no round and is no
+quarantine: the request waits in `resume_review` with the cause, read from
+the spend meter's record of the review's model requests (`provider_quota`,
+`meter_denied`, `model_unavailable`, or `no_verdict` when the model was
+served), and `factoryd resume <id>` reviews the kept build again without
+building it. A corrective round whose own review gave no verdict is not
+counted and leaves the request there too, with only
+`factoryd resume -from scratch <id>` to choose (a round keeps no worktree).
+A quarantine names `code_review` when that gate
 failed, else `spec_conformity`. Accepted opens the PR and advances exactly like an ordinary
 first-build acceptance; quarantined or halted again quarantines the
 request as usual. A budget greater than `1` runs up to that many
@@ -290,7 +297,8 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   Capped at `-max-review-rounds` (default `3`; key `max_review_rounds`),
   then halts naming the ticket. A round whose run never started, or halted
   with no verdict on the work (a lost worker, a sandbox that could not be
-  started), is not counted; after the second kind the request waits in
+  started, a model route that did not serve it), or whose review gave no
+  verdict, is not counted; after any but the first the request waits in
   `resume_review` and no reply is posted.
 - A thread is judged by its latest comment the factory's account did not
   write. The factory's replies never resolve a thread and never clear it:
@@ -514,9 +522,10 @@ the flag; `factoryd doctor -fix` builds it when absent.
 `meter_image` (buildgate's own meter, `make meter-image`) is set the same way
 by `make install` (`-meter-image`). The OpenShell gateway stack reads it:
 every build launches through that gateway. `factoryd doctor` warns when it
-is unset (fix: `make install`) and, once set, warns on any of its four
-OpenShell rows (images, gateway, gateway config, meter) that fails;
-`doctor -fix`, `worker` and a single-ticket run start the stack
+is unset (fix: `make install`) and, once set, warns on any of its five
+OpenShell rows (images, gateway, gateway config, meter, meter image) that
+fails; `doctor -fix`, `worker` and a single-ticket run start the stack, and
+`doctor -fix` alone restarts one whose meter was started from another image
 ([USAGE.md](USAGE.md#the-sandbox-runtime-openshell-gateway-and-meter)).
 
 ### Corporate TLS interception
@@ -807,15 +816,16 @@ two separate sandboxed sessions over the same diff. That review attempt's
 `exit_code` is 40 plus 1 when the conformity review did not succeed and
 plus 2 when the code review did not: 40 is both passed, 43 both failed, and
 any other value fails both gates. An answer that lacks one of the two
-reviews is asked for that review alone, and a failed or unparseable call is
-made again: one further call at most, in the same sandbox, told nothing of the
-first and unable to read its transcript. The two calls share the 20 minutes
+reviews is asked for that review alone, and an answer with neither is asked
+for both again: one further call at most, in the same sandbox, told nothing of
+the first and unable to read its transcript. The two calls share the 20 minutes
 one call gets, so the review takes no longer; the second is skipped when under
-5 minutes are left, when the spend meter stopped the first (its own deny body,
-never wording alone: a provider's `429` rate limit is asked again), or when the
-model provider's usage limit refused it. Both evidence
+5 minutes are left. Both evidence
 files then hold a `retry` line saying what was asked again and why, or why
-nothing was.
+nothing was. A call that failed is not made again in the sandbox: the factory
+launches the review once more when the spend meter's record shows its model
+served nothing, and a review that still gave no verdict leaves the request in
+`resume_review`.
 
 | Restriction | Why |
 |---|---|

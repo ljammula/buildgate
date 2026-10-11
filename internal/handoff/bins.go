@@ -35,12 +35,7 @@ const (
 	BinOperator Bin = "operator"
 )
 
-// ReviewUnavailableCheck is the check a request records when a required
-// review could not produce a verdict (request.QuarantineCheckReviewUnavailable).
-// It is not a run's gate; it has a bin so that no check lacks one.
-const ReviewUnavailableCheck = "review_unavailable"
-
-// bins holds every check a run or a request can record as failed. A check
+// bins holds every check a run can record as failed. A check
 // missing here is BinNever (see BinOf) and fails
 // TestEveryCheckTheFactoryRecordsHasABin: a new check must be placed
 // deliberately.
@@ -61,8 +56,6 @@ var bins = map[string]Bin{
 
 	// Telling a build "add a test" trains a token test.
 	"tests_added": BinNever,
-	// No verdict exists to act on.
-	ReviewUnavailableCheck: BinNever,
 }
 
 // BinOf returns the bin of a failed check. A repository's own gate

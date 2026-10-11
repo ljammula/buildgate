@@ -63,9 +63,11 @@ func (e *runEntry) admit(req admitRequest) admission {
 	}
 	now := e.now()
 	if !e.account.TokenBelowLimit(now) || !e.account.CostBelowLimit(now) {
+		e.ledger.Append(LedgerRecord{TS: e.stamp(), Kind: LedgerKindBudgetExceeded, RequestID: req.requestID})
 		return admission{code: CodeBudgetExceeded}
 	}
 	if e.requestLimiter != nil && !e.requestLimiter.Allow(now, 1) {
+		e.ledger.Append(LedgerRecord{TS: e.stamp(), Kind: LedgerKindRateLimited, RequestID: req.requestID})
 		return admission{code: CodeRateLimited}
 	}
 	est.stream = req.stream
@@ -149,9 +151,20 @@ const (
 )
 
 // settlement is a reservation's outcome; usage is read only for settleExact.
+// status and retryAfterSeconds are what the response head showed, zero when
+// none arrived.
 type settlement struct {
-	mode  settleMode
-	usage usageFigures
+	mode              settleMode
+	usage             usageFigures
+	status            int
+	retryAfterSeconds int64
+}
+
+// settledNames are the ledger's names for the settle modes.
+var settledNames = map[settleMode]string{
+	settleRelease:  SettledReleased,
+	settleExact:    SettledExact,
+	settleEstimate: SettledEstimate,
 }
 
 // usageFigures are Account.AddUsage's parameters.
@@ -196,7 +209,7 @@ func (e *runEntry) settleLocked(requestID string, s settlement) bool {
 		e.account.AddUsage(p.estimateInputTokens, p.estimateInputTokens, 0, 0, p.estimateOutputTokens, p.effort)
 		e.logger.Printf("usage unmeterable; charged conservative estimate (input=%d output=%d): request %s", p.estimateInputTokens, p.estimateOutputTokens, requestID)
 	}
-	e.ledger.Append(LedgerRecord{TS: e.stamp(), Kind: LedgerKindComplete, RequestID: requestID})
+	e.ledger.Append(LedgerRecord{TS: e.stamp(), Kind: LedgerKindComplete, RequestID: requestID, Settled: settledNames[s.mode], Status: s.status, RetryAfterSeconds: s.retryAfterSeconds})
 	return true
 }
 

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"buildgate/internal/run"
+	"buildgate/internal/unresolved"
 	"crypto/sha256"
 	"fmt"
 	"slices"
@@ -817,12 +818,17 @@ func compactRepositoryOwnerResultKeepingMax(result RepositoryOwnerResult, max in
 	return compacted, drop
 }
 
-// countsTowardStopLine reports a run failure that says the machine, not the
-// work, is failing: an infrastructure failure, or a sandbox that could not
-// be started, which is the same signal under its own type. A history
-// recorded before that type existed cannot hold it, so its streak replays
-// unchanged.
+// countsTowardStopLine reports a run failure that says the machine or the
+// model route, not the work, is failing: an infrastructure failure, or one
+// of the unresolved types that are the same signal under their own name (a
+// sandbox that could not be started, a route that did not serve the build).
+// A lost worker is not: the next run has a worker. A history recorded before
+// those types existed cannot hold them, so its streak replays unchanged.
 func countsTowardStopLine(err error) bool {
 	t := applicationErrorType(err)
-	return t == InfrastructureFailureType || t == SandboxLaunchFailureType
+	if t == InfrastructureFailureType {
+		return true
+	}
+	cause := unresolvedFailureTypes[t]
+	return cause != "" && cause != unresolved.WorkerLost
 }

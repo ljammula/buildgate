@@ -26,6 +26,12 @@ func ClearKeptForResume(dataDir, runID string) error {
 		if !r.KeptForResume {
 			return nil
 		}
+		if r.State == run.StateAccepted {
+			// An operator's override accepted the kept run: its worktree
+			// and branch are the accepted result and are never reaped.
+			r.KeptForResume = false
+			return r.Persist(dataDir)
+		}
 		markerPath := wsisolation.IsolationMarkerPath(dataDir, runID)
 		marker, markerErr := wsisolation.LoadIsolationMarker(markerPath)
 		switch {
@@ -58,6 +64,22 @@ func ClearKeptForResume(dataDir, runID string) error {
 		r.KeptForResume = false
 		return r.Persist(dataDir)
 	})
+}
+
+// RollbackOverridden removes the isolated worktree and branch of r, a run
+// an operator overrode to halted, and reports whether it did. It removes
+// nothing when another run's isolation marker claims the worktree: a resume
+// adopted it (a quarantined run whose review gave no verdict is kept and can
+// be resumed), so it is that run's work now, and removing it would destroy a
+// build in flight or an accepted result. r's record is not changed.
+func RollbackOverridden(dataDir string, r *run.Run) (removed bool, err error) {
+	if r.Branch == "" || claimedByAnotherMarker(dataDir, r.ID, r.WorkspacePath) {
+		return false, nil
+	}
+	if err := Rollback(r.ProjectPath, r.WorkspacePath, r.Branch, r.OnBranch != ""); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // claimedByAnotherMarker reports whether an isolation marker other than

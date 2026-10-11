@@ -247,10 +247,11 @@ func readImportedSpec(dataDir, id string) (string, error) {
 // oracle_review with the status the job reported. Unlike spec drafting and
 // planning, a job failure never halts the request: a runner error becomes
 // status "failed" and the operator decides at oracle_review (reject to retry,
-// hand-write oracle/, or approve to skip). Two things do not land in review:
+// hand-write oracle/, or approve to skip). Three things do not land in review:
 // a stale spec approval (halted, exactly like AdvancePlanning -- the drafter's
-// input changed) and a stop request mid-run (r is left as it is, so the next
-// pass re-runs the job).
+// input changed), a stop request mid-run (r is left as it is, so the next
+// pass re-runs the job), and a job that ended before it produced a draft
+// (OracleDraftJobFailure: the request waits in resume_review with the cause).
 func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner OracleDraftRunner, now time.Time) error {
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
@@ -293,7 +294,10 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 		if ctx.Err() != nil {
 			return jobErr
 		}
-		draft = request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting failed: %v", jobErr)}
+		if failure := firstOracleJobFailure(r, jobErr); failure != nil {
+			return unresolvedOracleDrafting(dataDir, r, failure, now)
+		}
+		draft = failedOracleDraft(jobErr)
 	case !draft.Status.Valid():
 		draft = request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting returned an invalid status %q", draft.Status)}
 	}
@@ -850,18 +854,19 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// its own doc comment). QuarantineCheck names which of
 		// spec_conformity/code_review actually failed whenever every
 		// failed gate is one of those two (reviewShapeOnly) -- unlike
-		// ReviewOnlyFlagged, this does NOT require actionable content: an
-		// unavailable code reviewer or an all-"clean" conformity pass
-		// still tells the operator which check to look at, even though
-		// neither gave this function anything to build a corrective
-		// round's addendum from.
+		// ReviewOnlyFlagged, this does NOT require actionable content: a
+		// conformity failure with every criterion answered "clean" still
+		// tells the operator which check to look at, even though it gave
+		// this function nothing to build a corrective round's addendum
+		// from. (A review that gave no verdict is not here: it left for
+		// resume_review in tryCorrectiveRound.)
 		check := ""
 		if reviewShapeOnly(runRecord) {
 			check = quarantineCheckFor(runRecord)
 		} else if failedGate(runRecord, "diff_scope") {
 			check = request.QuarantineCheckDiffScope
 		}
-		return quarantineRequestWithCheck(dataDir, r, quarantinedTicketReason(idx, r.TicketCount, reason, check, runRecord), check, now)
+		return quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
 	case run.StateHalted:
 		return afterHaltedTicketRun(dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
 	default:
@@ -884,11 +889,8 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 // reason.
 func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
 	cause := run.UnresolvedCauseOf(runRecord)
-	if runRecord.KeptForResume {
-		return EnterResumeReview(dataDir, r, runRecord.ID, cause, now)
-	}
-	if cause != "" {
-		return EnterResumeReview(dataDir, r, "", cause, now)
+	if runRecord.KeptForResume || cause != "" {
+		return EnterResumeReview(dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
 	}
 	return HaltRequest(dataDir, r, reason, now)
 }
@@ -1058,8 +1060,9 @@ func conformityUnanswered(runRecord *run.Run) bool {
 // quarantineAfterReviewRound quarantines r after a corrective round whose
 // run was quarantined again without anything a further round could fix.
 // When only review gates failed, the cause is named the same way a first
-// run's is (quarantineCheckFor): in particular a round whose own review
-// gave no verdict is "review unavailable", not an unnamed quarantine.
+// run's is (quarantineCheckFor). A round whose review gave no verdict never
+// reaches here: its request went to resume_review (correctiveRoundOutcome's
+// unresolved cause).
 func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *run.Run, reason string, now time.Time) error {
 	if !reviewShapeOnly(roundRun) {
 		// The same check an uncorrected quarantine names (AdvanceBuilding):
@@ -1067,53 +1070,7 @@ func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *ru
 		// at amend-scope.
 		return quarantineRequestWithCheck(dataDir, r, reason, nonReviewQuarantineCheck(roundRun), now)
 	}
-	check := quarantineCheckFor(roundRun)
-	if check == request.QuarantineCheckReviewUnavailable {
-		reason += " -- " + noVerdictCause(roundRun) + ", so the rebuilt ticket was not judged"
-	}
-	return quarantineRequestWithCheck(dataDir, r, reason, check, now)
-}
-
-// noVerdictCause says why a review gave no verdict, as far as the run
-// records it: the spend meter refusing the reviewer's model calls is named
-// with the settings that govern it, since "no verdict" alone reads as a
-// reviewer fault and sends the operator to the review's thinking level
-// (found live 2026-10-08: a review 1.18M tokens long, cut off by the
-// 1M-token hourly budget, was reported as having timed out or returned
-// nothing).
-//
-// The provider's own usage limit is named too, with the time it said to try
-// again at when the run recorded one: no setting governs it, and the
-// operator's move is to retry after that time (found live 2026-10-11: the
-// ChatGPT route's allowance ran out mid-request and each review was
-// reported as having given no verdict).
-func noVerdictCause(runRecord *run.Run) string {
-	code, resetsAt := "", ""
-	if runRecord != nil {
-		code, resetsAt = runRecord.SpecConformityStoppedBy, runRecord.SpecConformityResetsAt
-		if runRecord.CodeReview != nil && runRecord.CodeReview.StoppedBy != "" {
-			code, resetsAt = runRecord.CodeReview.StoppedBy, runRecord.CodeReview.ResetsAt
-		}
-	}
-	if code == codereview.CodeProviderUsageLimit {
-		return codereview.ProviderLimitCause(resetsAt) + " during the review"
-	}
-	settings, ok := codereview.StopSettings(code)
-	if !ok {
-		return "the review gave no verdict"
-	}
-	return fmt.Sprintf("the spend meter stopped the review's model calls (%s: %s in the session config; `factoryd cost` shows the spend)", code, settings)
-}
-
-// quarantinedTicketReason is the request's quarantine reason for a ticket
-// whose run was quarantined. A review that gave no verdict is named as
-// that, since the run's own reason ("gate failed: spec_conformity") reads
-// like a defect in the build.
-func quarantinedTicketReason(idx, count int, reason, check string, runRecord *run.Run) string {
-	if check == request.QuarantineCheckReviewUnavailable {
-		return fmt.Sprintf("ticket %d/%d quarantined: %s, so the build was not judged (%s)", idx, count, noVerdictCause(runRecord), reason)
-	}
-	return fmt.Sprintf("ticket %d/%d quarantined: %s", idx, count, reason)
+	return quarantineRequestWithCheck(dataDir, r, reason, quarantineCheckFor(roundRun), now)
 }
 
 // blockingCodeReviewFindings returns runRecord.CodeReview's "high"-severity
@@ -1188,17 +1145,14 @@ func reviewShapeOnly(runRecord *run.Run) bool {
 
 // quarantineCheckFor names which gate caused a review-shaped quarantine
 // (or exhausted review-corrective budget) for request.QuarantineCheck: a
-// review that gave no verdict takes QuarantineCheckReviewUnavailable (the
-// remedy is to run it again); otherwise a failed code_review gate -- alone or alongside spec_conformity -- always
+// failed code_review gate -- alone or alongside spec_conformity -- always
 // takes QuarantineCheckCodeReview, since the operator's remedy is the
 // same either way (fix the diff, not redraft the spec); otherwise
 // QuarantineCheckSpecConformity. Only meaningful when reviewShapeOnly (or
 // a round's own re-check of ReviewOnlyFlagged, which implies it) already
-// returned true.
+// returned true. A run whose reviews gave no verdict is never quarantined
+// under a check: reviewNoVerdictCause takes it to resume_review first.
 func quarantineCheckFor(runRecord *run.Run) string {
-	if reviewUnavailable(runRecord) {
-		return request.QuarantineCheckReviewUnavailable
-	}
 	for _, g := range runRecord.GateResults {
 		if g.Check == "code_review" && !g.Passed {
 			return request.QuarantineCheckCodeReview
@@ -1339,6 +1293,11 @@ func nonReviewQuarantineCheck(runRecord *run.Run) string {
 // alone failed with something to address, else the check round when every
 // failed check is one a build can fix when told about it.
 func tryCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
+	// Before any round: a run whose review gave no verdict was not judged,
+	// and a corrective build would be spent on nothing.
+	if handled, err := afterUnjudgedTicketRun(dataDir, r, runRecord, now); handled {
+		return true, err
+	}
 	if handled, err := TryReviewCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 		return true, err
 	}
@@ -1555,7 +1514,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if launched.unresolved != "" {
 			// No verdict on the round's work, so no quarantine: a human
 			// decides what runs next, and the round used none of the budget.
-			return true, EnterResumeReview(dataDir, r, "", launched.unresolved, now)
+			return true, EnterResumeReview(dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt}, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by

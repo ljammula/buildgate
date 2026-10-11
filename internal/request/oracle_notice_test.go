@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"buildgate/internal/unresolved"
 )
 
 func TestOracleReviewNoticeWhenRunCommandMissing(t *testing.T) {
@@ -244,13 +246,14 @@ func TestNextActionCoversReviewStatesHaltsAndQuarantine(t *testing.T) {
 			r.QuarantineCheck = QuarantineCheckCodeReview
 			return r
 		}, []string{"code_review quarantined", "Code review findings", "factoryd retry req-1"}, []string{"fix the cause named above, then"}},
-		{"quarantined, review unavailable", func() *Request {
+		{"resume_review, the review gave no verdict", func() *Request {
 			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
-			r.State = StateQuarantined
-			r.Error = "ticket 2/2 quarantined: the review gave no verdict, so the build was not judged (gate failed: spec_conformity)"
-			r.QuarantineCheck = QuarantineCheckReviewUnavailable
+			r.State = StateBuilding
+			if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-1", Cause: unresolved.ProviderQuota, RetryAt: "2026-10-11T03:11:00Z"}, fixedNow); err != nil {
+				t.Fatal(err)
+			}
 			return r
-		}, []string{"review unavailable", "nothing was judged wrong", "factoryd retry req-1"}, []string{"blocking defects", "spec_conformity quarantined"}},
+		}, []string{"the model provider refused the requests of the building step", "was not judged", "factoryd resume req-1", "kept worktree"}, []string{"quarantined", "factoryd retry"}},
 		{"quarantined, budget_exhausted:request", func() *Request {
 			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
 			r.State = StateQuarantined

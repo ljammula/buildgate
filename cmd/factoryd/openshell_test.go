@@ -4,9 +4,11 @@ import (
 	"buildgate/internal/hostcontrol/hostcontroltest"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -201,5 +203,186 @@ func TestDoctorRestartsAStackWhoseSupervisorsLackTheInterceptingCA(t *testing.T)
 	}
 	if c == nil || c.Err != nil {
 		t.Errorf("after the restart: %+v, want the row ok", c)
+	}
+}
+
+// startedStack writes what a started stack leaves in its directory: the
+// rendered gateway config and, unless meterImage is "", the record of the
+// image its meter started from.
+func (f *openShellFixture) startedStack(t *testing.T, meterImage string) {
+	t.Helper()
+	config, err := hostcontrol.RenderGatewayConfig(hostcontrol.OpenShellSupervisorImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(f.stack, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.stack, hostcontrol.OpenShellGatewayConfigFile), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if meterImage == "" {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(f.stack, hostcontrol.OpenShellMeterImageFile), []byte(meterImage+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// answersUntilStopped makes the gateway and the meter answer, except between
+// a `compose stop meter` and the start after it.
+func (f *openShellFixture) answersUntilStopped() {
+	health := func(context.Context) error {
+		lines := f.LogLines()
+		if stop := hostcontroltest.IndexOfLine(lines, "stop meter"); stop >= 0 && hostcontroltest.IndexOfLine(lines, "start-stack") < stop {
+			return errors.New("stopped")
+		}
+		return nil
+	}
+	fakeSandboxOf(f.dp).gatewayHealthyFn, fakeSandboxOf(f.dp).meterHealthyFn = health, health
+}
+
+func meterImageRow(t *testing.T, checks []doctorCheck) doctorCheck {
+	t.Helper()
+	for _, c := range checks {
+		if c.Name == "OpenShell meter runs the configured image" {
+			return c
+		}
+	}
+	t.Fatalf("no meter image row in %+v", checks)
+	return doctorCheck{}
+}
+
+const (
+	oldMeterImage = "localhost:5050/factoryd-meter@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	newMeterImage = "localhost:5050/factoryd-meter@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+)
+
+// A meter that answers is never recreated by a start, so the image it runs is
+// the one recorded at its last start, not meter_image: the reasons and the
+// row compare the two.
+func TestStackRestartReasonsNameAMeterStartedFromAnotherImage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		started  bool
+		recorded string
+		want     []stackRestartReason
+		wantErr  []string
+	}{
+		{name: "never started"},
+		{name: "the configured image", started: true, recorded: newMeterImage},
+		{name: "another image", started: true, recorded: oldMeterImage, want: []stackRestartReason{meterImageDiffers},
+			wantErr: []string{"started from localhost:5050/factoryd-meter@sha256:0123456789ab and", "meter_image is localhost:5050/factoryd-meter@sha256:fedcba987654"}},
+		{name: "no record", started: true, want: []stackRestartReason{meterImageUnrecorded},
+			wantErr: []string{"no record of its meter's image", "meter_image localhost:5050/factoryd-meter@sha256:fedcba987654"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOpenShellFixture(t)
+			if tc.started {
+				f.startedStack(t, tc.recorded)
+			}
+			if got := stackRestartReasons(newMeterImage); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("reasons = %v, want %v", got, tc.want)
+			}
+			c := doctorCheckMeterRunsConfiguredImage(newMeterImage)
+			if len(tc.want) == 0 {
+				if c.Err != nil {
+					t.Errorf("row = %+v, want ok", c)
+				}
+				return
+			}
+			if c.Err == nil || !c.Advisory {
+				t.Fatalf("row = %+v, want an advisory failure", c)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(c.Err.Error(), want) {
+					t.Errorf("error %q lacks %q", c.Err, want)
+				}
+			}
+			if strings.Contains(c.Err.Error(), "0123456789abc") || strings.Contains(c.Err.Error(), "fedcba9876543") {
+				t.Errorf("error %q carries a whole digest", c.Err)
+			}
+			for _, want := range []string{"`factoryd doctor -fix`", "not while a request is building or a sandbox exists", "run it again"} {
+				if !strings.Contains(c.Fix, want) {
+					t.Errorf("fix %q lacks %q", c.Fix, want)
+				}
+			}
+		})
+	}
+}
+
+// `make install` writes a new meter_image while the old meter answers: doctor
+// names it, and with -fix stops the stack so that the start after it runs the
+// configured image.
+func TestDoctorFixRestartsAStackWhoseMeterRunsAnotherImage(t *testing.T) {
+	for _, tc := range []struct{ name, recorded, wantLine string }{
+		{"another image", oldMeterImage, "openshell: restarting so that the meter runs the configured image\n"},
+		{"no record", "", "openshell: restarting so that the meter is known to run the configured image\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOpenShellFixture(t)
+			f.startedStack(t, tc.recorded)
+			f.answersUntilStopped()
+			var started []string
+			fakeSandboxOf(f.dp).startStackFn = func(_ context.Context, _ io.Writer, meterImage string) error {
+				f.Note("start-stack")
+				started = append(started, meterImage)
+				f.startedStack(t, meterImage)
+				return nil
+			}
+			in := doctorInputs{meterImage: newMeterImage, sandboxDocker: fakeImageDocker(t, true)}
+			if c := meterImageRow(t, doctorOpenShellChecks(f.dp, context.Background(), in, false, io.Discard)); c.Err == nil {
+				t.Fatalf("stale meter without -fix: %+v, want a failing row", c)
+			}
+			if lines := f.LogLines(); hostcontroltest.IndexOfLine(lines, "stop ") >= 0 || len(started) != 0 {
+				t.Fatalf("doctor without -fix touched the stack:\n%s", strings.Join(lines, "\n"))
+			}
+			var out bytes.Buffer
+			c := meterImageRow(t, doctorOpenShellChecks(f.dp, context.Background(), in, true, &out))
+			lines := f.LogLines()
+			gateway, meter, start := hostcontroltest.IndexOfLine(lines, "stop gateway"), hostcontroltest.IndexOfLine(lines, "stop meter"), hostcontroltest.IndexOfLine(lines, "start-stack")
+			if gateway < 0 || meter < gateway || start < meter {
+				t.Fatalf("want the gateway stopped, the meter stopped, then a start; got %d, %d, %d in:\n%s\n%s", gateway, meter, start, strings.Join(lines, "\n"), out.String())
+			}
+			if !reflect.DeepEqual(started, []string{newMeterImage}) {
+				t.Errorf("started with %q, want once with %q", started, newMeterImage)
+			}
+			if !strings.HasPrefix(out.String(), tc.wantLine) {
+				t.Errorf("output %q does not begin with %q", out.String(), tc.wantLine)
+			}
+			if c.Err != nil {
+				t.Errorf("after the restart: %+v, want the row ok", c)
+			}
+			// The stack now runs the configured image: a second -fix leaves it alone.
+			doctorOpenShellChecks(f.dp, context.Background(), in, true, &out)
+			if again := f.LogLines(); len(again) != len(lines) {
+				t.Errorf("a second -fix touched a stack that is not stale:\n%s", strings.Join(again[len(lines):], "\n"))
+			}
+		})
+	}
+}
+
+// Stopping the gateway under a build starts every sandbox's command again, so
+// a stale meter is left running while one is using the stack.
+func TestDoctorFixLeavesAStaleMeterRunningWhileABuildUsesIt(t *testing.T) {
+	f := newOpenShellFixture(t)
+	f.startedStack(t, oldMeterImage)
+	f.answersUntilStopped()
+	fakeSandboxOf(f.dp).sandboxNamesFn = func(context.Context) ([]string, error) { return []string{"sb-1"}, nil }
+	fakeSandboxOf(f.dp).startStackFn = func(context.Context, io.Writer, string) error {
+		f.Note("start-stack")
+		return nil
+	}
+	var out bytes.Buffer
+	in := doctorInputs{meterImage: newMeterImage, sandboxDocker: fakeImageDocker(t, true)}
+	c := meterImageRow(t, doctorOpenShellChecks(f.dp, context.Background(), in, true, &out))
+	if lines := f.LogLines(); hostcontroltest.IndexOfLine(lines, "stop ") >= 0 || hostcontroltest.IndexOfLine(lines, "start-stack") >= 0 {
+		t.Fatalf("the stack was stopped or started under a build:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(out.String(), "openshell: not stopped, in use by sandbox sb-1") {
+		t.Errorf("output lacks the refusal:\n%s", out.String())
+	}
+	if c.Err == nil || !c.Advisory || !strings.Contains(c.Fix, "factoryd doctor -fix") {
+		t.Errorf("row = %+v, want it still failing with the fix", c)
 	}
 }

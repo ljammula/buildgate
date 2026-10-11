@@ -150,7 +150,6 @@ func loadSpecConformityVerdicts(r *run.Run, dataDir, id string) {
 	// evidence this time never keeps verdicts from an earlier attempt and
 	// renders them as if they were current (found via review).
 	r.SpecConformityVerdicts = nil
-	r.SpecConformityStoppedBy, r.SpecConformityResetsAt = "", ""
 	if !r.SpecConformityConfigured {
 		return
 	}
@@ -162,7 +161,6 @@ func loadSpecConformityVerdicts(r *run.Run, dataDir, id string) {
 		}
 		return
 	}
-	r.SpecConformityStoppedBy, r.SpecConformityResetsAt = codereview.EvidenceStoppedBy(data)
 	verdicts, err := conformity.ParseVerdicts(data)
 	if err != nil {
 		fmt.Printf("run %s: warning: %v\n", id, err)

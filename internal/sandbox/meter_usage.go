@@ -26,6 +26,8 @@ type MeterUsage struct {
 	// Unsettled counts requests admitted and never completed. Their
 	// worst-case estimates are in the totals above.
 	Unsettled int
+	// Calls counts the sandbox's requests by how each ended.
+	Calls meter.Calls
 }
 
 // Tokens is input plus output, the figure a token ceiling limits.
@@ -112,6 +114,7 @@ func readMeterLedger(path string) (MeterUsage, error) {
 	}
 	var usage MeterUsage
 	usage.InputTokens, usage.OutputTokens, usage.CostMicroUSD = meter.ReplayLedger(records)
+	usage.Calls = meter.SummarizeCalls(records)
 	completed := map[string]bool{}
 	for _, rec := range records {
 		if rec.Kind == meter.LedgerKindComplete {

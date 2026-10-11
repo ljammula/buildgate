@@ -49,8 +49,21 @@ func stepLost(err error) bool {
 // is deliberately not one: histories recorded with keepWorktreeWhenLostChange
 // hold it for halts that rolled back.
 var unresolvedFailureTypes = map[string]unresolved.Cause{
-	SandboxRerunFailureType:  unresolved.WorkerLost,
-	SandboxLaunchFailureType: unresolved.SandboxLaunch,
+	SandboxRerunFailureType:     unresolved.WorkerLost,
+	SandboxLaunchFailureType:    unresolved.SandboxLaunch,
+	ModelUnavailableFailureType: unresolved.ModelUnavailable,
+	ProviderQuotaFailureType:    unresolved.ProviderQuota,
+	MeterDeniedFailureType:      unresolved.MeterDenied,
+	// A command that ran and failed, twice, with a registry unreachable.
+	DependencyFetchFailureType: unresolved.DependencyFetch,
+}
+
+// modelRouteFailureTypes is the failure type of each cause
+// run.ModelRouteCause can return.
+var modelRouteFailureTypes = map[unresolved.Cause]string{
+	unresolved.ModelUnavailable: ModelUnavailableFailureType,
+	unresolved.ProviderQuota:    ProviderQuotaFailureType,
+	unresolved.MeterDenied:      MeterDeniedFailureType,
 }
 
 // UnresolvedCauseFromError is the cause of a RunWorkflow or Activity failure
@@ -129,6 +142,10 @@ var nonRetryableActivityFailureTypes = []string{
 	RelayCeilingExceededFailureType,
 	SandboxRerunFailureType,
 	SandboxLaunchFailureType,
+	ModelUnavailableFailureType,
+	ProviderQuotaFailureType,
+	MeterDeniedFailureType,
+	DependencyFetchFailureType,
 	ComposeServicesRejectedFailureType,
 	ReviewInstructionsFailureType,
 	FactoryDirFailureType,

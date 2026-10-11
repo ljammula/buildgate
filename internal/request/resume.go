@@ -38,6 +38,12 @@ type ResumeInfo struct {
 	// record written before causes existed, which reads as a lost worker
 	// (unresolved.Cause.What).
 	Cause unresolved.Cause `json:"cause,omitempty"`
+	// RetryAt is when the model provider said to try again, for a step it
+	// refused with its own limit; "" when it gave no time. It is the meter's
+	// record (RFC 3339 UTC), or, when the provider sent the meter none, the
+	// time of day its message gave, said with the clock it is on. Shown as
+	// text only.
+	RetryAt string `json:"retry_at,omitempty"`
 	// Generation counts the times the request has entered resume_review. A
 	// decision applies only to the Generation it was made for.
 	Generation int `json:"generation"`
@@ -65,33 +71,50 @@ type ResumeDecision struct {
 // the History reason and Error of the move into resume_review, and the base
 // of the reminder.
 //
-// kept is false for a build step that left no worktree to continue in (a
-// build on an existing branch keeps none): only a rebuild is then offered.
-func ResumePrompt(id string, from State, cause unresolved.Cause, kept bool) string {
-	what := cause.What(string(from))
-	if from == StateBuilding && !kept {
+// A build step that left no worktree to continue in (step.RunID is "": a
+// build on an existing branch keeps none) is offered only a rebuild. A time
+// the provider gave is said, so the operator does not resume into the same
+// refusal.
+func ResumePrompt(id string, from State, step LostStep) string {
+	what := step.Cause.What(string(from))
+	if step.RetryAt != "" {
+		what += " (it said to try again after " + step.RetryAt + ")"
+	}
+	if from == StateBuilding && step.RunID == "" {
 		return fmt.Sprintf("%s; nothing of it was kept: `factoryd resume -from scratch %s` rebuilds the ticket (or `factoryd cancel %s`)", what, id, id)
 	}
 	return fmt.Sprintf("%s; `factoryd resume %s` continues it (or `-from scratch` / `factoryd cancel %s`)", what, id, id)
 }
 
+// LostStep is what is known about a step that ended with no verdict on the
+// work, for EnterResumeReview.
+type LostStep struct {
+	// RunID is the run whose kept worktree a resume continues, "" when the
+	// step had no run or kept nothing.
+	RunID string
+	// Cause is why the step gave no verdict.
+	Cause unresolved.Cause
+	// RetryAt is ResumeInfo.RetryAt.
+	RetryAt string
+}
+
 // EnterResumeReview moves a request whose step ended with no verdict on the
 // work out of from into resume_review, which waits on a human: nothing reruns
 // on its own. from must be the state of that step and the request's current
-// state; lostRunID is the run it was running, or ""; cause is why it gave no
-// verdict. It starts the next Generation and resets the reminder bookkeeping.
-func (r *Request) EnterResumeReview(from State, lostRunID string, cause unresolved.Cause, now time.Time) error {
+// state. It starts the next Generation and resets the reminder bookkeeping.
+func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) error {
 	if !stateIn(from, resumableStates) {
 		return fmt.Errorf("request %s: a lost %q step cannot enter %s (allowed from: %v) %w", r.ID, from, StateResumeReview, resumableStates, ErrIllegalTransition)
 	}
-	prompt := ResumePrompt(r.ID, from, cause, lostRunID != "")
+	prompt := ResumePrompt(r.ID, from, step)
 	if err := advance(r, []State{from}, StateResumeReview, factoryActor, prompt, now); err != nil {
 		return err
 	}
 	r.Resume = &ResumeInfo{
 		FromState:  from,
-		LostRunID:  lostRunID,
-		Cause:      cause,
+		LostRunID:  step.RunID,
+		Cause:      step.Cause,
+		RetryAt:    step.RetryAt,
 		Generation: r.nextResumeGeneration(),
 		At:         r.UpdatedAt,
 	}
@@ -188,7 +211,7 @@ func (r *Request) resumeNextAction() string {
 		return fmt.Sprintf("%s: `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID)
 	}
 	if from == StateBuilding {
-		return fmt.Sprintf("%s: `factoryd resume %s` continues it in its kept worktree from the last completed round, `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
+		return fmt.Sprintf("%s: `factoryd resume %s` continues it in its kept worktree (a build from its last completed round; a build that had finished is kept and only the steps after it run again), `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
 	}
 	return fmt.Sprintf("%s: `factoryd resume %s` runs it again, or `factoryd cancel %s`", what, r.ID, r.ID)
 }

@@ -270,7 +270,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 			RelayReasoningEffortAnomaly: res.RelayReasoningEffortAnomaly,
 			RelayConsumedInputTokens:    res.RelayConsumedInputTokens, RelayConsumedOutputTokens: res.RelayConsumedOutputTokens,
 			RelayConsumedCostMicroUSD: res.RelayConsumedCostMicroUSD, RelayCeilingExceeded: res.RelayCeilingExceeded,
-			RelaySpendPartial: res.RelaySpendPartial,
+			RelaySpendPartial: res.RelaySpendPartial, RelayCalls: run.AttemptCalls(res.RelayCalls),
 			// Role/Thinking: roles.review's own resolved values, shared by
 			// both steps (input.ReviewThinking). ExpectedEffort:
 			// relaySpec.WorkerModelExtraJSON is this step's own launched
@@ -301,7 +301,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(relaunchUnstartedOnly(prep.launchContext(ctx)), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(relaunchUnserved(relaunchUnstartedOnly(prep.launchContext(ctx))), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
 	})
 	// Immediately after the launch, before the clean check below: the stubs
 	// a mask over an absent path needed, and the snapshot's scratch.

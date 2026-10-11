@@ -104,7 +104,7 @@ func TestHaltLostRequestStepEntersResumeReviewOnlyInTheLostState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := request.ResumePrompt("req-lost", request.StatePlanning, unresolved.WorkerLost, false); lost.State != request.StateResumeReview || lost.Error != want {
+	if want := request.ResumePrompt("req-lost", request.StatePlanning, request.LostStep{Cause: unresolved.WorkerLost}); lost.State != request.StateResumeReview || lost.Error != want {
 		t.Fatalf("lost request = %s %q, want resume_review %q", lost.State, lost.Error, want)
 	}
 	if lost.Resume == nil || lost.Resume.FromState != request.StatePlanning || lost.Resume.Generation != 1 || lost.Resume.LostRunID != "" {

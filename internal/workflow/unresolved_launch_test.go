@@ -2,11 +2,22 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
+	"time"
+
+	"buildgate/internal/meter"
+	"buildgate/internal/runner"
 
 	"buildgate/internal/sandbox"
 	"buildgate/internal/unresolved"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 )
 
@@ -77,5 +88,159 @@ func TestANamedGateRelaunchesOnlyASandboxThatNeverStarted(t *testing.T) {
 		if *creates != tc.wantCreates {
 			t.Errorf("%s: launches = %d, want %d", tc.name, *creates, tc.wantCreates)
 		}
+	}
+}
+
+// writeLedgerOnCreate makes the fake runtime leave, for each sandbox it
+// creates, the ledger a meter would have written for it.
+func writeLedgerOnCreate(t *testing.T, rt *inspectRuntime, ledgerRoot, dataDir, runID string, records ...meter.LedgerRecord) {
+	t.Helper()
+	name, err := sandbox.MeterRunName(dataDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.onCreate = func(req sandbox.SandboxRequest) {
+		dir := filepath.Join(ledgerRoot, name)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Error(err)
+			return
+		}
+		ledger, err := meter.OpenLedger(filepath.Join(dir, "id-"+req.Name+".jsonl"), log.New(io.Discard, "", 0))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer ledger.Close()
+		for _, rec := range records {
+			ledger.Append(rec)
+		}
+	}
+}
+
+// What the meter recorded about a review's model requests reaches the
+// review's attempt on the run record: a later reader decides from it, so a
+// dropped copy anywhere between the ledger and the attempt must fail here.
+func TestAReviewAttemptRecordsHowItsModelRequestsEnded(t *testing.T) {
+	f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(string) {})
+	writeLedgerOnCreate(t, f.rt, f.acts.MeterLedgerRoot, f.acts.dataDirFor(f.input.RunWorkflowInput), f.acts.runIDFor(f.input.RunWorkflowInput),
+		meter.LedgerRecord{Kind: meter.LedgerKindAdmit, RequestID: "a"},
+		meter.LedgerRecord{Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledReleased, Status: 429, RetryAfterSeconds: 60},
+		meter.LedgerRecord{Kind: meter.LedgerKindAdmit, RequestID: "b"},
+		meter.LedgerRecord{Kind: meter.LedgerKindBudgetExceeded, RequestID: "c"},
+	)
+	res, err := f.run()
+	attempts := res.Attempts
+	if err != nil {
+		attempts = AttemptsFromError(err)
+	}
+	if len(attempts) == 0 || attempts[0].RelayCalls == nil {
+		t.Fatalf("attempts = %+v (err %v), want the review attempt to carry its model requests", attempts, err)
+	}
+	got := *attempts[0].RelayCalls
+	if got.RateLimited != 1 || got.Unanswered != 1 || got.DeniedBudget != 1 || got.Answered != 0 || got.RetryAt == "" || got.Legacy {
+		t.Errorf("RelayCalls = %+v, want one 429 with its retry time, one unanswered, one budget refusal", got)
+	}
+}
+
+// A build that exits "did not succeed" while the meter's ledger shows the
+// route was not serving it is no verdict on the work: the Activity fails
+// with the cause's own type, RunWorkflow keeps the worktree, and no
+// corrective build is spent against the same route.
+func TestABuildWhoseModelRouteDidNotServeItIsUnresolved(t *testing.T) {
+	limit := meter.Calls{Answered: 12, RateLimited: 3, RefusedAtEnd: 3, RefusedAtEndBy: meter.RefusedByProviderLimit}
+	for _, tc := range []struct {
+		name string
+		res  runner.Result
+		err  error
+		want unresolved.Cause
+	}{
+		{"did not succeed, the provider's limit from some point on", runner.Result{ExitCode: 1, RelayCalls: limit}, nil, unresolved.ProviderQuota},
+		{"did not succeed, nothing ever answered", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Unanswered: 4}}, nil, unresolved.ModelUnavailable},
+		{"did not succeed, the meter refused", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 2, DeniedBudget: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByMeter}}, nil, unresolved.MeterDenied},
+		{"did not succeed with every request answered: the gates judge it", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 40}}, nil, ""},
+		{"succeeded although the limit was hit at the end: a result", runner.Result{ExitCode: 0, RelayCalls: limit}, nil, ""},
+		{"the repository's setup failed before any turn", runner.Result{ExitCode: SetupFailedExitCode, RelayCalls: meter.Calls{}}, nil, ""},
+		{"called no model", runner.Result{ExitCode: 1}, nil, ""},
+		{"a ledger that cannot say", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Failed: 3, Legacy: true}}, nil, ""},
+	} {
+		err := withModelRouteFailure(tc.err, tc.res)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: err = %v, want none", tc.name, err)
+			}
+			continue
+		}
+		crossed := temporal.NewApplicationErrorWithCause("build subprocess infrastructure failure", buildActivityErrorType(err), err)
+		if got := UnresolvedCauseFromError(crossed); got != tc.want {
+			t.Errorf("%s: cause across the Temporal boundary = %q (type %q), want %q", tc.name, got, buildActivityErrorType(err), tc.want)
+		}
+		if !StepLostFromError(crossed) || HaltReasonCodeFromError(crossed) != string(tc.want) {
+			t.Errorf("%s: the worktree would be rolled back, or the halt carries code %q", tc.name, HaltReasonCodeFromError(crossed))
+		}
+	}
+	// A launch error is its own finding and is never replaced.
+	launch := errors.New("sandbox attempts exhausted")
+	if got := withModelRouteFailure(launch, runner.Result{ExitCode: -1, RelayCalls: limit}); got != launch {
+		t.Errorf("a launch error became %v", got)
+	}
+	for cause, typ := range modelRouteFailureTypes {
+		if unresolvedFailureTypes[typ] != cause || !slices.Contains(nonRetryableActivityFailureTypes, typ) {
+			t.Errorf("%s: type %q does not map back to it, or Temporal would retry it", cause, typ)
+		}
+	}
+}
+
+// A review whose model route served nothing, for no reason a second launch
+// would meet again, is launched once more; the count is the caller's. What
+// comes back when it is still not served is the launch's result, with no
+// error: the review ran, and its gate decides.
+func TestAReviewWhoseModelServedNothingIsLaunchedOnceMore(t *testing.T) {
+	unanswered := []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}}
+	limited := []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}, {Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledReleased, Status: 429}}
+	answered := []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}, {InputTokens: 10, OutputTokens: 5}, {Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledExact, Status: 200}}
+	for _, tc := range []struct {
+		name         string
+		ledger       []meter.LedgerRecord
+		wantLaunches int
+	}{
+		{"no request answered", unanswered, 2},
+		{"every request refused with 429: a rate limit may have passed", limited, 2},
+		{"refused by the meter: the same settings would refuse again", []meter.LedgerRecord{{Kind: meter.LedgerKindBudgetExceeded, RequestID: "a"}}, 1},
+		{"answered", answered, 1},
+		// A verdict may exist: it is never thrown away for a second try,
+		// whatever the route did after its answers.
+		{"answered, then a provider error", append(append([]meter.LedgerRecord{}, answered...), meter.LedgerRecord{Kind: meter.LedgerKindAdmit, RequestID: "b"}, meter.LedgerRecord{Kind: meter.LedgerKindComplete, RequestID: "b", Settled: meter.SettledReleased, Status: 503}), 1},
+		{"every request rejected as malformed: a second try meets it again", []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}, {Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledReleased, Status: 400}}, 1},
+	} {
+		f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(string) {})
+		f.acts.VerifyMaxAttempts = 2
+		writeLedgerOnCreate(t, f.rt, f.acts.MeterLedgerRoot, f.acts.dataDirFor(f.input.RunWorkflowInput), f.acts.runIDFor(f.input.RunWorkflowInput), tc.ledger...)
+		write := f.rt.onCreate
+		launches := 0
+		f.rt.onCreate = func(req sandbox.SandboxRequest) { launches++; write(req) }
+		res, err := f.run()
+		if err != nil {
+			t.Errorf("%s: RunReviewStepActivity: %v", tc.name, err)
+		}
+		if launches != tc.wantLaunches || len(res.Attempts) != tc.wantLaunches {
+			t.Errorf("%s: launches = %d, attempts = %d; want %d", tc.name, launches, len(res.Attempts), tc.wantLaunches)
+		}
+	}
+}
+
+// A relaunch the Activity's deadline leaves no room for must not cost the
+// launch that already ran to its exit: its result stands. Only a step that
+// never produced one fails for want of time.
+func TestNoRoomForASecondLaunchKeepsTheFirstLaunchsResult(t *testing.T) {
+	ran := runner.Result{ExitCode: 1}
+	if res, err := noRoomForAttempt(ran, time.Minute, nil, true); err != nil || res.ExitCode != 1 {
+		t.Errorf("after a launch that exited: result %+v, err %v; want that result and no error", res, err)
+	}
+	if _, err := noRoomForAttempt(runner.Result{}, time.Minute, nil, false); !errors.Is(err, errOutOfTime) {
+		t.Errorf("before any launch: err = %v, want out of time", err)
+	}
+	notStarted := fmt.Errorf("%w: create", sandbox.ErrSandboxNotStarted)
+	if _, err := noRoomForAttempt(runner.Result{ExitCode: -1}, time.Minute, notStarted, false); launchErrorType(err) != SandboxLaunchFailureType {
+		t.Errorf("after a sandbox that never started: type %q, want it kept as a launch failure", launchErrorType(err))
 	}
 }

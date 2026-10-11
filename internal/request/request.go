@@ -1245,15 +1245,6 @@ const QuarantineCheckSpecConformity = "spec_conformity"
 // cmd/factoryd's reviewOnlyFlagged/tryReviewCorrectiveRound.
 const QuarantineCheckCodeReview = "code_review"
 
-// QuarantineCheckReviewUnavailable is set when the only gates that failed
-// are spec_conformity and/or code_review and the reviewer gave no verdict
-// at all (it timed out, returned nothing parseable, or its model calls were
-// refused by the spend meter or by the provider's own usage limit).
-// Nothing was judged wrong with the build, so the remedy is to run the
-// ticket again, not to redraft the spec or fix a finding. The request is
-// still quarantined: an unreviewed build never passes.
-const QuarantineCheckReviewUnavailable = "review_unavailable"
-
 // QuarantineCheckDiffScope is set instead of QuarantineCheckSpecConformity/
 // QuarantineCheckCodeReview when a build quarantined because it changed a
 // file outside the ticket's own Allowed-Files: scope (internal/policy's
@@ -1558,9 +1549,6 @@ func (r *Request) quarantinedNextAction() string {
 	}
 	if r.QuarantineCheck == QuarantineCheckCodeReview {
 		return fmt.Sprintf("code_review quarantined -- the reviewer reported blocking defects the corrective round did not fix (see the run's Code review findings); `factoryd retry %s` rebuilds the ticket%s", r.ID, r.sendBackHint())
-	}
-	if r.QuarantineCheck == QuarantineCheckReviewUnavailable {
-		return fmt.Sprintf("review unavailable -- the reviewer gave no verdict (it timed out, returned nothing, or its model calls were stopped: the reason above says which), so nothing was judged wrong with the build; `factoryd retry %s` rebuilds the ticket and reviews it again: after `factoryd restart` if you changed a budget, or after the reset time if the model provider's usage limit was reached. If it keeps happening for another reason, lower `roles.review.thinking` or split the ticket%s", r.ID, r.sendBackHint())
 	}
 	if r.QuarantineCheck == QuarantineCheckDiffScope {
 		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files (named above). If a file is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())

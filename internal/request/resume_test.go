@@ -20,7 +20,7 @@ func TestEnterResumeReviewFromEveryLostStepState(t *testing.T) {
 		t.Run(string(from), func(t *testing.T) {
 			r := requestIn(from)
 			r.WaitingSince, r.NotifyCount = "earlier", 3
-			if err := r.EnterResumeReview(from, "run-lost", unresolved.WorkerLost, fixedNow); err != nil {
+			if err := r.EnterResumeReview(from, LostStep{RunID: "run-lost", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 				t.Fatalf("EnterResumeReview: %v", err)
 			}
 			if r.State != StateResumeReview {
@@ -30,7 +30,7 @@ func TestEnterResumeReviewFromEveryLostStepState(t *testing.T) {
 			if r.Resume == nil || r.Resume.FromState != from || r.Resume.LostRunID != "run-lost" || r.Resume.Generation != 1 {
 				t.Errorf("Resume = %+v, want %+v", r.Resume, want)
 			}
-			if r.Error != ResumePrompt("req-1", from, unresolved.WorkerLost, true) {
+			if r.Error != ResumePrompt("req-1", from, LostStep{RunID: "run-lost", Cause: unresolved.WorkerLost}) {
 				t.Errorf("Error = %q, want the resume prompt", r.Error)
 			}
 			last := r.History[len(r.History)-1]
@@ -57,7 +57,7 @@ func wantResume(from State) *ResumeInfo {
 func TestEnterResumeReviewRefusesEveryOtherState(t *testing.T) {
 	for _, from := range []State{StateSubmitted, StateSpecReview, StateOracleReview, StatePlanReview, StateDone, StateQuarantined, StateHalted, StateCancelled, StateResumeReview} {
 		r := requestIn(from)
-		err := r.EnterResumeReview(from, "", unresolved.WorkerLost, fixedNow)
+		err := r.EnterResumeReview(from, LostStep{RunID: "", Cause: unresolved.WorkerLost}, fixedNow)
 		if !errors.Is(err, ErrIllegalTransition) {
 			t.Errorf("from %s: err = %v, want ErrIllegalTransition", from, err)
 		}
@@ -67,7 +67,7 @@ func TestEnterResumeReviewRefusesEveryOtherState(t *testing.T) {
 	}
 	// The named state must be the request's own.
 	r := requestIn(StateBuilding)
-	if err := r.EnterResumeReview(StatePlanning, "", unresolved.WorkerLost, fixedNow); !errors.Is(err, ErrIllegalTransition) {
+	if err := r.EnterResumeReview(StatePlanning, LostStep{RunID: "", Cause: unresolved.WorkerLost}, fixedNow); !errors.Is(err, ErrIllegalTransition) {
 		t.Errorf("mismatched from: err = %v, want ErrIllegalTransition", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestResumeDecideReturnsToTheLostState(t *testing.T) {
 		for _, verb := range []string{ResumeRound, ResumeScratch} {
 			t.Run(string(from)+"/"+verb, func(t *testing.T) {
 				r := requestIn(from)
-				if err := r.EnterResumeReview(from, "run-lost", unresolved.WorkerLost, fixedNow); err != nil {
+				if err := r.EnterResumeReview(from, LostStep{RunID: "run-lost", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 					t.Fatal(err)
 				}
 				to, err := r.ResumeDecide(verb, "alice", fixedNow.Add(time.Minute))
@@ -121,7 +121,7 @@ func TestResumeDecideRefusals(t *testing.T) {
 		}
 	}
 	r = requestIn(StateBuilding)
-	if err := r.EnterResumeReview(StateBuilding, "run-lost", unresolved.WorkerLost, fixedNow); err != nil {
+	if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-lost", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.ResumeDecide("cancel", "alice", fixedNow); err == nil || errors.Is(err, ErrIllegalTransition) {
@@ -135,7 +135,7 @@ func TestResumeDecideRefusals(t *testing.T) {
 func TestResumeReviewLeavesToCancelledHaltedAndQuarantined(t *testing.T) {
 	enter := func() *Request {
 		r := requestIn(StateBuilding)
-		if err := r.EnterResumeReview(StateBuilding, "run-lost", unresolved.WorkerLost, fixedNow); err != nil {
+		if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-lost", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 			t.Fatal(err)
 		}
 		return r
@@ -153,7 +153,7 @@ func TestResumeReviewLeavesToCancelledHaltedAndQuarantined(t *testing.T) {
 
 func TestResumeGenerationGrowsAndStaleDecisionIsIgnored(t *testing.T) {
 	r := requestIn(StateBuilding)
-	if err := r.EnterResumeReview(StateBuilding, "run-1", unresolved.WorkerLost, fixedNow); err != nil {
+	if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-1", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.ResumeDecide(ResumeRound, "alice", fixedNow); err != nil {
@@ -163,7 +163,7 @@ func TestResumeGenerationGrowsAndStaleDecisionIsIgnored(t *testing.T) {
 		t.Fatalf("a decision for the current generation must apply, got %q", r.PendingResumeVerb())
 	}
 	// The resumed build is lost in turn: a second entry is a new Generation.
-	if err := r.EnterResumeReview(StateBuilding, "run-2", unresolved.WorkerLost, fixedNow.Add(time.Hour)); err != nil {
+	if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-2", Cause: unresolved.WorkerLost}, fixedNow.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if r.Resume.Generation != 2 || r.Resume.LostRunID != "run-2" {
@@ -186,7 +186,7 @@ func TestResumeGenerationGrowsAndStaleDecisionIsIgnored(t *testing.T) {
 
 func TestEveryOtherTransitionDropsTheResumeDecision(t *testing.T) {
 	r := requestIn(StateBuilding)
-	if err := r.EnterResumeReview(StateBuilding, "run-1", unresolved.WorkerLost, fixedNow); err != nil {
+	if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-1", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.ResumeDecide(ResumeRound, "alice", fixedNow); err != nil {
@@ -202,7 +202,7 @@ func TestEveryOtherTransitionDropsTheResumeDecision(t *testing.T) {
 
 func TestRefuseResumeReturnsToResumeReviewWithReasons(t *testing.T) {
 	r := requestIn(StateBuilding)
-	if err := r.EnterResumeReview(StateBuilding, "run-1", unresolved.WorkerLost, fixedNow); err != nil {
+	if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-1", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.ResumeDecide(ResumeRound, "alice", fixedNow); err != nil {
@@ -240,7 +240,7 @@ func TestRefuseResumeReturnsToResumeReviewWithReasons(t *testing.T) {
 func TestRetryRefusesInResumeReviewWithAHint(t *testing.T) {
 	dataDir := t.TempDir()
 	r := requestIn(StatePlanning)
-	if err := r.EnterResumeReview(StatePlanning, "", unresolved.WorkerLost, fixedNow); err != nil {
+	if err := r.EnterResumeReview(StatePlanning, LostStep{RunID: "", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Save(dataDir); err != nil {
@@ -262,7 +262,7 @@ func TestRetryRefusesInResumeReviewWithAHint(t *testing.T) {
 func TestResumeRequestPreflightAndSave(t *testing.T) {
 	dataDir := t.TempDir()
 	r := requestIn(StateBuilding)
-	if err := r.EnterResumeReview(StateBuilding, "run-lost", unresolved.WorkerLost, fixedNow); err != nil {
+	if err := r.EnterResumeReview(StateBuilding, LostStep{RunID: "run-lost", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Save(dataDir); err != nil {
@@ -293,7 +293,7 @@ func TestResumeRequestChecksDraftingStepsForEveryVerb(t *testing.T) {
 	for _, verb := range []string{ResumeRound, ResumeScratch} {
 		dataDir := t.TempDir()
 		r := requestIn(StateSpecDrafting)
-		if err := r.EnterResumeReview(StateSpecDrafting, "", unresolved.WorkerLost, fixedNow); err != nil {
+		if err := r.EnterResumeReview(StateSpecDrafting, LostStep{RunID: "", Cause: unresolved.WorkerLost}, fixedNow); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.Save(dataDir); err != nil {

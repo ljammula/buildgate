@@ -28,9 +28,10 @@ only "criteria", parse_code_review_findings only "findings"), so the
 combined {"criteria": [...], "findings": [...]} answer parses with each
 unchanged.
 
-An answer that lacks one of the two parts, or a turn that fails, gets one
-further turn (see run_combined_review): the missing review alone, or the
-combined turn again.
+An answer that lacks one of the two parts gets one further turn (see
+run_combined_review): the missing review alone, or the combined turn again
+when the answer had neither. A turn that fails gets none: the host decides
+from the spend meter's record whether to launch the review again.
 
 Writes BOTH CONFORMITY_EVIDENCE.json and CODE_REVIEW_EVIDENCE.json, each
 in exactly conformity_review.py's/code_review.py's own existing schema --
@@ -101,22 +102,6 @@ RETRY_MIN_MINUTES = 5
 SESSION_DIR = ".pi-combined-review-session"
 RETRY_SESSION_SUBDIR = "retry"
 
-# How the spend meter's denial reads in a turn's error: the OpenShell
-# supervisor's deny body, naming the meter as the middleware and one of the
-# meter's own deny codes. Exactly codereview.StoppedBy's match on the Go side
-# (meterDenyCodes), and tests/fixtures/review_stop_causes.json holds both to
-# it. A turn the meter stopped is not retried: the second call would be denied
-# as well. Nor is a turn the model provider's own usage limit refused
-# (build_app.provider_usage_limit). Wording alone is never the meter's: a
-# provider's own 429 ("rate limit exceeded") is a failed turn like any other
-# and is asked again once, and a harness that reports the denial without its
-# body (a bare status line) is asked again too, and denied again.
-METER_DENY_MIDDLEWARE = '"middleware":"meter"'
-METER_DENY_CODES = ("budget_exceeded", "ceiling_exceeded", "rate_limited")
-
-# stop_cause's name for a turn the provider's usage limit refused.
-PROVIDER_USAGE_LIMIT = build_app.PROVIDER_USAGE_LIMIT
-
 # What a retry asks for, by the part of the first answer that was missing.
 RETRY_COMBINED, RETRY_CONFORMITY, RETRY_CODE_REVIEW = "combined", "conformity", "code_review"
 RETRY_PROMPT_NAMES = {
@@ -184,36 +169,21 @@ def conformity_unavailable(verdicts: list[dict]) -> bool:
 
 def missing_part(verdicts: list[dict], available: bool, error: str) -> tuple[str, str]:
 	"""Returns (which retry the first answer calls for, why), ("", "") when
-	both halves are usable."""
+	both halves are usable, and when the turn failed: an error and neither
+	half. A failed turn is not asked again here. Whether its model was served
+	is the spend meter's record, which this script cannot read, and the host
+	decides from it what happens next (it launches the review once more when
+	the model served nothing)."""
 	no_conformity = conformity_unavailable(verdicts)
 	if no_conformity and not available:
 		if error:
-			return RETRY_COMBINED, f"the first turn failed: {error}"
+			return "", ""
 		return RETRY_COMBINED, "the first answer had neither a verdict for any criterion nor a findings list"
 	if no_conformity:
 		return RETRY_CONFORMITY, "the combined answer had no verdict for any criterion"
 	if not available:
 		return RETRY_CODE_REVIEW, "the combined answer had no parseable findings list"
 	return "", ""
-
-
-def meter_stop(error: str) -> str:
-	"""The meter's deny code in error when error holds the meter's own deny
-	body, or ""."""
-	if METER_DENY_MIDDLEWARE not in error:
-		return ""
-	for code in METER_DENY_CODES:
-		if f'"reason_code":"{code}"' in error:
-			return code
-	return ""
-
-
-def stop_cause(error: str) -> str:
-	"""What in error says a second call would be refused as the first was:
-	meter_stop's answer, PROVIDER_USAGE_LIMIT for the provider's own usage
-	limit, or "". The meter's denial is looked for first, as
-	codereview.StoppedBy does on the Go side."""
-	return meter_stop(error) or (PROVIDER_USAGE_LIMIT if build_app.provider_usage_limit(error) else "")
 
 
 def retry_timeout_minutes(part: str, started: float) -> int:
@@ -289,12 +259,13 @@ def run_combined_review(
 	code_review_evidence) -- both JSON-serializable evidence dicts in
 	exactly conformity_review.py's/code_review.py's own existing shapes.
 
-	When the answer lacks a part, that part is asked for once more, in one
-	further turn at most (missing_part): the missing review alone, with the
-	standalone reviewer's own prompt (code_review.code_review_prompt,
-	build_app.spec_conformity_prompt), the other review's result kept as
-	parsed; or the combined prompt again when the turn failed or neither part
-	parsed. Found live (2026-10-10): an answer with no parseable JSON left
+	When the turn answered and the answer lacks a part, that part is asked
+	for once more, in one further turn at most (missing_part): the missing
+	review alone, with the standalone reviewer's own prompt
+	(code_review.code_review_prompt, build_app.spec_conformity_prompt), the
+	other review's result kept as parsed; or the combined prompt again when
+	neither part parsed. A turn that failed (an error and neither part) is
+	not asked again: both reviews are unavailable with its error. Found live (2026-10-10): an answer with no parseable JSON left
 	both reviews unavailable, which quarantines a run with no corrective
 	build, over a formatting slip. The retry is the same question over the
 	same inputs: the diff and the instruction-file block fetched for the
@@ -303,10 +274,9 @@ def run_combined_review(
 	folder of its own (fresh_retry_session_dir) and not a word about the
 	first turn, whose transcript is removed before it starts. The two turns
 	together get the COMBINED_REVIEW_TIMEOUT_MINUTES the one turn had
-	(retry_timeout_minutes), a turn the spend meter stopped or the provider's
-	usage limit refused is not retried (stop_cause), and the first turn's evidence is written to the workspace
-	before the retry starts, so a retry killed from outside leaves what the
-	first turn alone would have.
+	(retry_timeout_minutes), and the first turn's evidence is written to the
+	workspace before the retry starts, so a retry killed from outside leaves
+	what the first turn alone would have.
 
 	A part still missing after the retry is unavailable exactly as a
 	standalone review's unavailable turn is, recording the retry's own
@@ -314,8 +284,8 @@ def run_combined_review(
 	"unavailable" and parse_code_review_findings returns available=False
 	when it finds no "criteria"/"findings" list at all. Both evidences then
 	carry one more key, "retry": one line saying what was asked again and
-	why (the first turn's error included), or why it was not. The key is
-	absent when the first answer was whole; no Go reader decodes it."""
+	why, or why it was not. The key is absent when the first answer was whole
+	and when the first turn failed; no Go reader decodes it."""
 	started = clock()
 	criteria = build_app.read_acceptance_criteria(criteria_path)
 	spec_text = spec_path.read_text()
@@ -344,14 +314,9 @@ def run_combined_review(
 	if not part:
 		return conformity, review
 
-	stopped = stop_cause(error)
 	timeout_minutes = retry_timeout_minutes(part, started)
 	retry_session = None
-	if stopped == PROVIDER_USAGE_LIMIT:
-		skipped = "the model provider's usage limit was reached and it would refuse a second call as well"
-	elif stopped:
-		skipped = f"the spend meter stopped the first turn ({stopped}) and would stop a second"
-	elif not timeout_minutes:
+	if not timeout_minutes:
 		skipped = (
 			f"under {RETRY_MIN_MINUTES} of the review's {COMBINED_REVIEW_TIMEOUT_MINUTES} minutes were left"
 		)

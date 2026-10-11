@@ -447,10 +447,6 @@
       "model": "every-field model",
       "succeeded": true,
       "stopped_reason": "every-field stopped_reason",
-      "model_stop": {
-        "code": "every-field code",
-        "resets_at": "2026-09-10T09:00:00Z"
-      },
       "rounds": [
         {
           "index": 3,
@@ -505,6 +501,7 @@
         "factory_dir_commit": "every-field factory_dir_commit",
         "factory_dir_error": "every-field factory_dir_error",
         "resumed_from_checkpoint": "every-field resumed_from_checkpoint",
+        "kept_from_run": "every-field kept_from_run",
         "image_digest": "every-field image_digest",
         "relay_image_digest": "every-field relay_image_digest",
         "relay_network": "every-field relay_network",
@@ -527,6 +524,21 @@
         "relay_consumed_cost_micro_usd": 3,
         "relay_ceiling_exceeded": true,
         "relay_spend_partial": true,
+        "relay_calls": {
+          "answered": 3,
+          "answered_unread": 3,
+          "rate_limited": 3,
+          "rejected": 3,
+          "failed": 3,
+          "unanswered": 3,
+          "denied_ceiling": 3,
+          "denied_budget": 3,
+          "denied_rate": 3,
+          "retry_at": "2026-09-10T09:00:00Z",
+          "refused_at_end": 3,
+          "refused_at_end_by": "every-field refused_at_end_by",
+          "legacy": true
+        },
         "reference_oracle_sha256": "every-field reference_oracle_sha256",
         "role": "every-field role",
         "harness": "every-field harness",
@@ -629,8 +641,6 @@
         "detail": "every-field detail"
       }
     ],
-    "spec_conformity_stopped_by": "every-field spec_conformity_stopped_by",
-    "spec_conformity_resets_at": "2026-09-10T09:00:00Z",
     "code_review": {
       "policy": "every-field policy",
       "available": true,
@@ -642,9 +652,7 @@
           "summary": "every-field summary",
           "failure_scenario": "every-field failure_scenario"
         }
-      ],
-      "stopped_by": "every-field stopped_by",
-      "resets_at": "2026-09-10T09:00:00Z"
+      ]
     },
     "reference_oracle_dir": "every-field reference_oracle_dir",
     "oracles_not_committed_by_request": true,

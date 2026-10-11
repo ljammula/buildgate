@@ -49,11 +49,22 @@ act in "you" rows.
 | `oracle_review` | **you** | Read every oracle file, then `approve` (to `planning`) or `reject -reason` (back to `oracle_drafting`) |
 | `planning` | factory | Drafts one or more tickets from the approved spec; with `submit -plan-dir`, your own tickets are taken with no model call and get the same checks |
 | `plan_review` | **you** | `approve` (to `building`) or `reject -reason` (back to `planning`) |
-| `building` | factory | One ticket at a time in the Docker sandbox, verified, gated, PR opened when release policy allows. A quarantine whose failed gates are only `spec_conformity` and/or `code_review` first gets up to `-review-corrective-rounds` (default `1`) automatic corrective builds on the same branch before quarantining. So does a quarantine by other checks a build can fix when told what failed (a failed verification, a command or repository gate, a diff outside Allowed-Files, a missing required file or content): that build is given the factory's record of the failed attempt, and the same budget covers both kinds. A failed `tests_added`, an unknown check or a halt gets none. A review that gave no verdict (it timed out or returned nothing; the combined review has 20 minutes) gets no corrective build: the request quarantines as "the review gave no verdict", and `factoryd retry <id>` builds and reviews the ticket again. When the spend meter refused the review's model calls the reason says "the spend meter stopped the review's model calls" with the meter's code and the session-config keys behind it (`budget_exceeded`: `meter_token_budget`, `meter_cost_budget_micro_usd` and their windows; `ceiling_exceeded`: `meter_token_ceiling`, `meter_cost_ceiling_micro_usd`; `rate_limited`: `meter_requests_per_minute`): raise the limit (or, for a budget, wait out its window), `factoryd restart`, then retry |
+| `building` | factory | One ticket at a time in the Docker sandbox, verified, gated, PR opened when release policy allows. A quarantine whose failed gates are only `spec_conformity` and/or `code_review` first gets up to `-review-corrective-rounds` (default `1`) automatic corrective builds on the same branch before quarantining. So does a quarantine by other checks a build can fix when told what failed (a failed verification, a command or repository gate, a diff outside Allowed-Files, a missing required file or content): that build is given the factory's record of the failed attempt, and the same budget covers both kinds. A failed `tests_added`, an unknown check or a halt gets none. A review that gave no verdict (it timed out or returned nothing; the combined review has 20 minutes) is no quarantine and gets no corrective build: nothing was judged, so the request waits in `resume_review` with the cause, and the build is kept |
 | `pr_review` | **you** (on GitHub) | Trusted reviewer comments trigger corrective rounds; PR auto-marked ready once checks pass and no thread blocks it; merging is yours. Next ticket starts once this one is accepted (or, under `-advance-on pr_approved`, once reviewer-approved) |
-| `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), or the sandbox of a build or round step could not be started. The reason line says which, and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
+| `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft. The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
 | `done` | - | Every ticket's PR merged |
 | `quarantined` / `halted` | **you** | Read the reason in `factoryd status`/console, fix the cause, `factoryd retry <id>` (a rebuilt ticket continues from the failed attempt's commit when a build may be told what failed; `-from scratch` rebuilds from the base: [reference](USAGE_REFERENCE.md#request-lifecycle); console: Retry request, with **Retry from scratch** ticked for `-from scratch`) -- or, before any ticket is accepted, send it back to redraft the plan or the spec: `factoryd reject -to plan\|spec -reason "..." <id>` (`plan`/`planning` and `spec`/`spec_drafting`) -- or, to drop the request instead, `factoryd cancel <id>`. A retry after the factory's own checks refused a drafted spec or plan gives the next draft their reason; a failed or timed-out draft job does not ([reference](USAGE_REFERENCE.md#a-retried-draft)) |
+
+A `resume_review` reason for a build or a review whose model was not served is
+read from the spend meter's record of the step's model requests, never from
+what the worker printed:
+
+| Reason says | Cause | Before `factoryd resume <id>` |
+|---|---|---|
+| "the model provider refused the requests ... with its own rate or usage limit" | `provider_quota` | Wait until the time the reason gives ("it said to try again after ..."), when the provider gave one. No session-config budget governs this limit |
+| "the spend meter refused the model requests ..." | `meter_denied` | Raise the ceiling, window budget or request rate in the session config (or wait out a budget's window; `factoryd cost` shows the spend), then `factoryd restart` |
+| "the model route served none of the last requests ..." | `model_unavailable` | Check the route (`factoryd doctor`). A review whose model served nothing was already launched once more by the factory |
+| "the review ... answered and gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
 
 `cancelled` is also terminal (`factoryd cancel <id>`). Full mechanics
 (reminders, ticket sequencing, PR review loop): [USAGE_REFERENCE.md § Request lifecycle](USAGE_REFERENCE.md#request-lifecycle).
@@ -728,6 +739,16 @@ canary and syntax checks are guards, not proof of correctness.
 `-draft-oracles` stays opt-in until measurement supports a default-on
 change.
 
+**A failed draft and a failed job are different outcomes.**
+
+| What happened | Where the request waits | What you do |
+|---|---|---|
+| The drafting script ran to its own result and nothing usable came of it, or the factory's checks refused what it wrote (`failed` in `oracle_review`) | `oracle_review` | `reject -reason` to draft again, hand-write `oracle/`, or `approve` to skip the stage |
+| The job ended before the script reached a result: its sandbox never started, the launch was lost or cut off, the script exited non-zero with no evidence file, or the meter's ledger shows none of its model requests was answered | `resume_review`, with the cause in the reason line | Fix the cause, then `factoryd resume <id>` drafts again (or `factoryd cancel <id>`). `<data-dir>/requests/<id>/logs/oracle_draft.log` and `logs/oracle_draft_failed/SUMMARY.txt` have the job's output |
+
+An error from before the launch (the drafting worktree, the job's input
+files, an unresolvable review role) is a `failed` draft in `oracle_review`.
+
 Step-by-step mechanics, the drafter's self-checks, limits, and the
 quarantine-triage oracle hint: [USAGE_REFERENCE.md § Oracle drafting internals](USAGE_REFERENCE.md#oracle-drafting-internals).
 `-no-commit-oracles` keeps an accepted oracle out of the repo (it still
@@ -945,7 +966,7 @@ carries a token.
 | reaches `spec_review` | Spec ready for your review | On entry, then every `hitl_reminder_interval` while it waits |
 | reaches `oracle_review` | Acceptance tests ready for your review | Same |
 | reaches `plan_review` | Plan ready for your review | Same |
-| reaches `resume_review` | A step was lost: choose how to continue | Same |
+| reaches `resume_review` | A step gave no verdict on the work: choose how to continue | Same |
 | is halted | Halted: needs you | Once, with the reason |
 | is quarantined | Quarantined: needs you | Once, with the reason. A quarantined build the factory follows with a corrective round of its own sends nothing |
 | has a pull request ready to merge | Pull request ready to merge | Once per pull request head |
@@ -1217,15 +1238,17 @@ or `max_review_rounds`. A request run by
 `-hitl-reminder-interval`) for one of three decisions:
 
 ```text
-step lost (heartbeat stops)
+step gives no verdict (worker lost, sandbox not started, route not serving)
         |
         v
-run halted, lost build's worktree kept      request -> resume_review
+run halted or left quarantined, worktree kept   request -> resume_review
         |
         +-- factoryd resume <id>               continue the build from the last
         |                                      completed round (fresh agent session +
-        |                                      short handoff), or rerun a lost
-        |                                      drafting / planning step
+        |                                      short handoff); keep a build that had
+        |                                      finished and run only the gates and the
+        |                                      review again; or rerun a lost drafting /
+        |                                      planning step
         +-- factoryd resume -from scratch <id> rebuild the ticket, reaping the kept worktree
         +-- factoryd cancel <id>               withdraw it, reaping the kept worktree
 ```
@@ -1274,9 +1297,10 @@ pinned by digest), not by `docker run`.
 | Task | Command |
 |---|---|
 | Start both | `factoryd doctor -fix` (needs `meter_image`, which `make install` writes); `worker` and a single-ticket run start them when they do not answer, unless `FACTORYD_AUTOSTART=0` |
-| Check | `factoryd doctor`: images present, gateway healthy, gateway config has TLS and mTLS on, meter healthy; on a network that re-signs TLS, also that the supervisor trusts its CA |
+| Check | `factoryd doctor`: images present, gateway healthy, gateway config has TLS and mTLS on, meter healthy, meter runs the configured image (the one recorded in `~/.config/factoryd/openshell/meter-image` at its last start is `meter_image`); on a network that re-signs TLS, also that the supervisor trusts its CA |
 | Stop | `factoryd stop -all`; refused while a request or sandbox is active, because a gateway restart starts every sandbox's command again |
 | Pull the pinned OpenShell images | `make openshell-images` (part of `make install`) |
+| Apply a new `meter_image` (`make install` built another meter) | `factoryd doctor -fix`: it stops the gateway and the meter and starts them from `meter_image`, unless a request is building or a sandbox exists; `make install` ends with it |
 | Apply changed stack files after an upgrade | `factoryd stop -all`, then `factoryd doctor -fix`: a gateway that already answers is not recreated |
 
 The gateway container sees your home directory read-only, because it
@@ -1327,6 +1351,8 @@ What changes for a build:
 | Halt says the factoryd process running this build stopped mid-run | A `worker`'s `factoryd` process was stopped or lost | A request waits in `resume_review`: `factoryd resume <id>`; a single-ticket run is started again |
 | Request is in `resume_review`: "the factoryd worker stopped while the ... step ran" | The `worker` running that step stopped (stop, crash, reboot, sleep); no step is ever retried automatically | `factoryd resume <id>` continues it (a build from its last completed round), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it |
 | Request is in `resume_review`: "the sandbox of the ... step could not be started, so the step never ran" | The sandbox runtime could not create the step's sandbox or it came up with no worker container, on every launch the step is allowed (`-verify-max-attempts`; a build: `-build-app-max-attempts`). Nothing ran and the work was not judged | The run's halt reason has the runtime's error; fix it (`factoryd doctor -fix`), then `factoryd resume <id>`. A ticket build continues in its kept worktree and a PR-review round is started again. A corrective round before the pull request keeps no worktree: `factoryd resume -from scratch <id>` |
+| Request is in `resume_review`: "a package registry could not be reached while the ... step ran, so its command's failure says nothing about the work" | The step's command (verify, the baseline verify, the full suite or a named gate) failed, was run a second time and failed again, and both times the registry proxy had requests its registry did not serve (unreachable, timed out or a 5xx). No model was called for the second run and the work was not judged | The step's logs in the run directory show what could not be fetched (the second run's ends in `.attempt<n>.log`). Once the registry (or your mirror, the `registry_proxy_*_upstream` session-config keys) answers again: `factoryd resume <id>`, or `factoryd resume -from scratch <id>` to rebuild the ticket |
+| Request is in `resume_review`: "the job of the oracle_drafting step ended before it produced a draft, so there is nothing to review" (or the sandbox, model route, provider limit or spend meter clause for `oracle_drafting`) | The oracle-drafting job gave no draft to review: its sandbox never started, its launch was lost or cut off, the script exited non-zero with no evidence file, or none of its model requests was answered. Nothing is drafted again on its own | The reason line ends with what the job reported; `<data-dir>/requests/<id>/logs/oracle_draft.log` has the rest. Fix it (`factoryd doctor -fix`, the route, the session config's budget), then `factoryd resume <id>`. Refused while a container of the job is alive |
 | Run or request halted: `halted before the build: baseline verify failed: <test> ...; the ticket names none of them` | The verify command fails on the untouched repository: the command is wrong for this repo or image (a test needs a program the image lacks, a plugin is not installed), or the repo's default branch is red. No model call was made | Run the command in the worker image yourself, fix it, and build again: [Baseline verify](#baseline-verify-the-verify-command-runs-before-the-build). If the ticket is meant to make those tests pass, name them in the ticket |
 | Run or request halted: `halted before the build: baseline verify passed, but the command leaves <path> and N more outside the ticket's Allowed-Files` | The verify command (or a `setup:` command) writes files the repository does not ignore, and the factory commits what it leaves, so every build would be quarantined by `diff_scope`. No model call was made | Add those paths to the repository's `.gitignore`, or make the command remove them: [Baseline verify](#baseline-verify-the-verify-command-runs-before-the-build) |
 | Run or request halted: `halted (operator finding): .factory/ cannot be mounted read-only: ...` | Every sandbox that runs a repository command mounts `.factory/` read-only as the commit `.factory.yml` was read from holds it. The directory at that commit, or the worktree's entry of that name, has a shape the mount cannot carry: the worktree lacks the directory, it is a file or a symlink, another spelling (`.Factory`) exists, or the committed directory holds a symlink or a submodule | Fix what the sentence names (USAGE_REFERENCE, "The `.factory/` directory"), commit, then `factoryd retry <id>` |
@@ -1346,6 +1372,7 @@ What changes for a build:
 | `gh auth status` fails with "no oauth token found" in an ssh session on a Mac | An ssh session cannot read the login keychain that holds the GitHub login; a process started from that session gets the same answer | Check `gh auth status` in the session that starts `worker`. If it fails, start `worker` and `serve` in the desktop login session: a terminal there, or launchd agents (`factoryd install-service`) |
 | A build fails: "sandbox runtime: ... run `factoryd doctor -fix`" | The OpenShell gateway or the meter is not running (a reboot, a colima restart, `stop -all`) | `factoryd doctor -fix` starts both; `worker` and a single-ticket run start them too unless `FACTORYD_AUTOSTART=0` |
 | `doctor`, `doctor -fix`, `worker` or a run reports `port N is published by container ...` | Another container in the Docker VM publishes one of the stack's ports (`17670`, `17671`, `17672`); the gateway shares the VM's network, so it cannot bind | Stop that container or publish it on another host port, then `factoryd doctor -fix` |
+| `doctor` warns `OpenShell meter runs the configured image` | `make install` built a new meter image and wrote it to `meter_image` while the gateway and the meter were answering, and a stack that answers is not recreated; or the stack was started with no record of its meter's image | `factoryd doctor -fix` stops the gateway and the meter and starts them from `meter_image`. It leaves them running while a request is building or a sandbox exists: run it again when those builds have finished |
 | A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |

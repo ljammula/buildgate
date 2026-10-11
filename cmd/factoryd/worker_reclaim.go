@@ -76,7 +76,7 @@ func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
 			default:
 				return nil
 			}
-			if err := requestdriver.EnterResumeReview(dataDir, r, keptLostRun(dataDir, lost.ID), unresolved.WorkerLost, time.Now()); err != nil {
+			if err := requestdriver.EnterResumeReview(dataDir, r, request.LostStep{RunID: keptLostRun(dataDir, lost.ID), Cause: unresolved.WorkerLost}, time.Now()); err != nil {
 				return err
 			}
 			halted = append(halted, r.ID)

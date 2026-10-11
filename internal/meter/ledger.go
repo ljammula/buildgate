@@ -38,7 +38,28 @@ type LedgerRecord struct {
 	EstimateTokens       int64 `json:"estimate_tokens,omitempty"`
 	EstimateOutputTokens int64 `json:"estimate_output_tokens,omitempty"`
 	EstimateCostMicroUSD int64 `json:"estimate_cost_micro_usd,omitempty"`
+	// Settled, on a complete record, is how the request ended: one of the
+	// Settled* values. Empty on a record written before the field existed.
+	Settled string `json:"settled,omitempty"`
+	// Status, on a complete record, is the upstream's HTTP status, 0 when
+	// no response head reached the meter (the request was never answered).
+	Status int `json:"status,omitempty"`
+	// RetryAfterSeconds, on a complete record of a response that was not a
+	// success, is its Retry-After header as seconds from when it arrived, 0
+	// when it sent none or one the meter could not read.
+	RetryAfterSeconds int64 `json:"retry_after_seconds,omitempty"`
 }
+
+// How a complete record's request ended.
+const (
+	// SettledExact: the response's own usage was read and charged.
+	SettledExact = "exact"
+	// SettledEstimate: the reserved estimate was charged (usage could not
+	// be read, or no response ever arrived and the reservation expired).
+	SettledEstimate = "estimate"
+	// SettledReleased: nothing was charged (the response was not a success).
+	SettledReleased = "released"
+)
 
 // Ledger event kinds written by the meter service next to usage records.
 const (
@@ -49,6 +70,10 @@ const (
 	LedgerKindComplete = "complete"
 	// LedgerKindCeilingExceeded: a request was refused at a ceiling.
 	LedgerKindCeilingExceeded = "ceiling_exceeded"
+	// LedgerKindBudgetExceeded: a request was refused at a window budget.
+	LedgerKindBudgetExceeded = "budget_exceeded"
+	// LedgerKindRateLimited: a request was refused at the request rate.
+	LedgerKindRateLimited = "rate_limited"
 )
 
 // Ledger is the usage ledger file, opened for append.
@@ -151,6 +176,15 @@ func eventLine(ts string, rec LedgerRecord) string {
 	if rec.EstimateCostMicroUSD > 0 {
 		fmt.Fprintf(&b, ",\"estimate_cost_micro_usd\":%d", rec.EstimateCostMicroUSD)
 	}
+	if rec.Settled != "" {
+		fmt.Fprintf(&b, ",\"settled\":%q", rec.Settled)
+	}
+	if rec.Status > 0 {
+		fmt.Fprintf(&b, ",\"status\":%d", rec.Status)
+	}
+	if rec.RetryAfterSeconds > 0 {
+		fmt.Fprintf(&b, ",\"retry_after_seconds\":%d", rec.RetryAfterSeconds)
+	}
 	b.WriteString("}\n")
 	return b.String()
 }
@@ -167,7 +201,7 @@ func (l *Ledger) appendLine(line string) {
 }
 
 // ReadLedgerAll returns every well-formed ledger line of path, in order:
-// usage records and event records (admit, complete, ceiling_exceeded), every
+// usage records and event records (admit, complete, and the three deny kinds), every
 // field filled, which is what the meter service replays after a restart. A
 // blank line, and a truncated or corrupt one -- the shape a crash mid-write
 // leaves -- is skipped, never an error and never a stop: every other line was

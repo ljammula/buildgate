@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os/exec"
 	"strconv"
@@ -659,6 +661,112 @@ func ensureRegistryProxyEgressNetwork(ctx context.Context, dockerBinary string) 
 // doc comment for why polling the container's own log is a reliable,
 // shell-free readiness signal.
 const registryProxyListeningLogLine = "serving registry proxy on"
+
+// registryProxyUpstreamFailuresLogPrefix is internal/registryproxy's
+// UpstreamFailureLogPrefix: the proxy logs one line for each request its
+// upstream failed, this prefix and then its total so far.
+const registryProxyUpstreamFailuresLogPrefix = "upstream_failures="
+
+// registryProxyUpstreamFailures reads the proxy container's log, the same
+// channel its readiness is read from (the container publishes no port and
+// shares no writable mount with the host), for the proxy's count of requests
+// its upstream failed. known is false when the log cannot be read.
+func registryProxyUpstreamFailures(ctx context.Context, dockerBinary, containerName string) (count int, known bool) {
+	if containerName == "" {
+		return 0, false
+	}
+	if dockerBinary == "" {
+		dockerBinary = "docker"
+	}
+	boundedCtx, cancel := context.WithTimeout(ctx, relayDockerCommandTimeout)
+	defer cancel()
+	// Scanned as it arrives, never held whole: the proxy logs a line for
+	// every request, so a worker decides how long its log is.
+	cmd := exec.CommandContext(boundedCtx, dockerBinary, "logs", containerName)
+	reader, writer := io.Pipe()
+	cmd.Stdout, cmd.Stderr = writer, writer
+	if err := cmd.Start(); err != nil {
+		return 0, false
+	}
+	go func() { writer.CloseWithError(cmd.Wait()) }()
+	count, known, err := scanRegistryProxyUpstreamFailures(reader)
+	// Drain what the scan left, so the writer side can finish.
+	_, _ = io.Copy(io.Discard, reader)
+	if err != nil {
+		return 0, false
+	}
+	return count, known
+}
+
+// maxRegistryProxyLogLine bounds one line held while scanning the proxy's
+// log. A longer line is not a failure line (those are a date, a time and one
+// short word) and is skipped.
+const maxRegistryProxyLogLine = 4096
+
+// parseRegistryProxyUpstreamFailures is scanRegistryProxyUpstreamFailures
+// over a log already in hand.
+func parseRegistryProxyUpstreamFailures(log string) (count int, known bool) {
+	count, known, _ = scanRegistryProxyUpstreamFailures(strings.NewReader(log))
+	return count, known
+}
+
+// scanRegistryProxyUpstreamFailures returns the highest total among the
+// proxy's failure lines in log, 0 when it has none. A failure line is the
+// logger's date and time and then one word, the prefix and a number, with
+// nothing else on the line: a request line has more words, and the proxy
+// quotes the method and path a worker chose, so a worker cannot write one.
+// known is false for a log without the proxy's listening line (it is not this
+// proxy's whole log) or with a failure line whose total is not a number. err
+// is the reader's own error: the log could not be read to its end.
+func scanRegistryProxyUpstreamFailures(log io.Reader) (count int, known bool, err error) {
+	reader := bufio.NewReaderSize(log, maxRegistryProxyLogLine)
+	listening, valid := false, true
+	for {
+		line, tooLong, readErr := reader.ReadLine()
+		if readErr != nil {
+			if readErr != io.EOF {
+				return 0, false, readErr
+			}
+			if !listening || !valid {
+				return 0, false, nil
+			}
+			return count, true, nil
+		}
+		if tooLong {
+			// Skip the rest of an overlong line.
+			for tooLong && readErr == nil {
+				_, tooLong, readErr = reader.ReadLine()
+			}
+			continue
+		}
+		text := string(line)
+		listening = listening || strings.Contains(text, registryProxyListeningLogLine)
+		n, isFailureLine, ok := upstreamFailureTotal(text)
+		if !isFailureLine {
+			continue
+		}
+		valid = valid && ok
+		count = max(count, n)
+	}
+}
+
+// upstreamFailureTotal reads one log line: isFailureLine when it has the
+// failure line's shape, ok when its total is a number.
+func upstreamFailureTotal(line string) (total int, isFailureLine, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) != 3 {
+		return 0, false, false
+	}
+	text, found := strings.CutPrefix(fields[2], registryProxyUpstreamFailuresLogPrefix)
+	if !found {
+		return 0, false, false
+	}
+	n, err := strconv.Atoi(text)
+	if err != nil || n < 0 {
+		return 0, true, false
+	}
+	return n, true, true
+}
 
 // goModuleVolumeArgs mounts spec's Go module directory, when it has one,
 // read-only into the proxy container.

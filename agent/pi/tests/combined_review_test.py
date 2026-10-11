@@ -220,9 +220,10 @@ class RunCombinedReviewTests(unittest.TestCase):
 					root, criteria_path=criteria_path, spec_path=spec_path,
 					conformity_policy="required", review_policy="required",
 				)
-			# Nothing is left of the review's time, so nothing is asked again.
+			# A turn that failed is not asked again.
 			self.assertEqual(timeouts, [20 * 60])
-			self.assertIn("not asked again", review["retry"])
+			self.assertNotIn("retry", review)
+			self.assertNotIn("retry", conformity)
 			self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
 			self.assertIn("timed out after 20 minutes", conformity["stopped_reason"])
 			self.assertFalse(review["available"])
@@ -249,7 +250,8 @@ FINDINGS = [{"severity": "high", "file": "a.go", "line": 12, "summary": "nil der
 
 class CombinedReviewRetryTests(unittest.TestCase):
 	"""An answer that lacks a part is asked for once more: the missing review
-	alone, or the combined turn again when nothing was usable."""
+	alone, or the combined turn again when the answer had neither. A turn
+	that failed is not asked again."""
 
 	def _run(self, answers, *, thinking="high", clock=None, base=True):
 		"""Runs the review with the model turns answered in order by answers
@@ -377,25 +379,30 @@ class CombinedReviewRetryTests(unittest.TestCase):
 			self.assertIn("asked once more for the spec conformity review alone", evidence["retry"])
 			self.assertIn("no verdict for any criterion", evidence["retry"])
 
-	def test_a_failed_turn_runs_the_combined_turn_once_more(self):
-		ticks = iter([0.0, 2 * 60.0])
-		conformity, review, turns, root = self._run([
-			failed_turn("upstream connection reset"),
-			answer({"criteria": VERDICTS, "findings": []}),
-		], clock=lambda: next(ticks))
-		self.assertEqual(len(turns), 2)
-		self.assertEqual(turns[1]["prompt"], turns[0]["prompt"], "the same question, word for word")
-		# The two turns share the one turn's 20 minutes: 2 used, 18 left.
-		self.assertEqual(turns[1]["timeout"], 18 * 60)
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
-		self.assertTrue(review["available"])
-		self.assertTrue(review["succeeded"])
-		self.assertEqual(conformity["error"], "")
-		self.assertEqual(review["error"], "")
-		self.assertEqual(list(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
-		for evidence in (conformity, review):
-			self.assertIn("asked once more for both reviews", evidence["retry"])
-			self.assertIn("upstream connection reset", evidence["retry"])
+	def test_a_failed_turn_is_not_asked_again(self):
+		# Whether the model was served is the spend meter's record, which the
+		# host reads: it launches the review again, or hands the step to a
+		# human. Each of these is one model call, whatever the error says.
+		deny = '403 {"middleware":"meter","reason_code":"%s","detail":"x"}'
+		errors = [
+			"upstream connection reset",
+			'429 "rate limit exceeded"',
+			deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited",
+			"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at 3:11 AM.",
+		]
+		for error in errors:
+			with self.subTest(error=error):
+				conformity, review, turns, root = self._run([failed_turn(error)])
+				self.assertEqual(len(turns), 1)
+				self.assertFalse(review["available"])
+				self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
+				self.assertEqual(review["error"], error)
+				self.assertEqual(conformity["error"], error)
+				self.assertEqual(review["stopped_reason"], "code review was unavailable: " + error)
+				for evidence in (conformity, review):
+					self.assertNotIn("retry", evidence)
+				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+				self.assertFalse((root / ".pi-combined-review-session" / "retry").exists())
 
 	def test_an_answer_with_no_json_at_all_runs_the_combined_turn_once_more(self):
 		conformity, review, turns, _ = self._run([
@@ -403,13 +410,27 @@ class CombinedReviewRetryTests(unittest.TestCase):
 			answer({"criteria": VERDICTS, "findings": FINDINGS}),
 		])
 		self.assertEqual(len(turns), 2)
-		self.assertEqual(turns[1]["prompt"], turns[0]["prompt"])
+		self.assertEqual(turns[1]["prompt"], turns[0]["prompt"], "the same question, word for word")
 		self.assertTrue(review["available"])
+		self.assertIn("asked once more for both reviews", review["retry"])
 		self.assertIn("neither a verdict for any criterion nor a findings list", review["retry"])
 
-	def test_a_second_failure_stays_unavailable_with_the_retrys_error_and_no_third_call(self):
+	def test_a_combined_retry_shares_the_one_turns_time(self):
+		ticks = iter([0.0, 2 * 60.0])
+		conformity, review, turns, root = self._run([
+			answer("Everything looks fine to me."),
+			answer({"criteria": VERDICTS, "findings": []}),
+		], clock=lambda: next(ticks))
+		self.assertEqual(len(turns), 2)
+		# The two turns share the one turn's 20 minutes: 2 used, 18 left.
+		self.assertEqual(turns[1]["timeout"], 18 * 60)
+		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
+		self.assertTrue(review["succeeded"])
+		self.assertEqual(list(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
+
+	def test_a_retry_that_fails_stays_unavailable_with_the_retrys_error_and_no_third_call(self):
 		conformity, review, turns, _ = self._run([
-			failed_turn("first failure"),
+			answer("Everything looks fine to me."),
 			failed_turn("second failure"),
 		])
 		self.assertEqual(len(turns), 2)
@@ -422,7 +443,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		self.assertEqual(review["error"], "second failure")
 		self.assertEqual(review["stopped_reason"], "code review was unavailable: second failure")
 		for evidence in (conformity, review):
-			self.assertIn("first failure", evidence["retry"])
+			self.assertIn("asked once more for both reviews", evidence["retry"])
 
 	def test_a_half_retry_that_fails_leaves_that_half_unavailable_and_the_other_as_it_was(self):
 		conformity, review, turns, _ = self._run([
@@ -437,7 +458,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 
 	def test_a_combined_retry_that_answers_half_is_not_retried_again(self):
 		conformity, review, turns, _ = self._run([
-			failed_turn("first failure"),
+			answer("Everything looks fine to me."),
 			answer({"criteria": VERDICTS}),
 		])
 		self.assertEqual(len(turns), 2)
@@ -446,7 +467,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		self.assertIn("no parseable response", review["stopped_reason"])
 
 	def test_the_retry_has_its_own_empty_session_folder_and_the_first_turns_settings(self):
-		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), failed_turn("boom")):
+		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), answer("Everything looks fine to me.")):
 			with self.subTest(first=first.stdout[:60]):
 				_, _, turns, root = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})], thinking="max")
 				first_turn, retry = turns
@@ -483,7 +504,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 					return seen["path"]
 
 				with mock.patch.object(combined_review, "fresh_retry_session_dir", side_effect=planting):
-					_, _, turns, _ = self._run([failed_turn("boom"), answer({"criteria": VERDICTS, "findings": []})])
+					_, _, turns, _ = self._run([answer("Everything looks fine to me."), answer({"criteria": VERDICTS, "findings": []})])
 				self.assertTrue(turns[1]["session_was_empty"])
 				self.assertFalse(seen["path"].is_symlink())
 				self.assertEqual((Path(outside) / "keep.txt").exists(), plant == "link")
@@ -492,12 +513,12 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		# The clock is read at the start and once when the retry is sized:
 		# 16 of the review's 20 minutes are gone by then.
 		ticks = iter([0.0, 16 * 60.0])
-		conformity, review, turns, root = self._run([failed_turn("boom")], clock=lambda: next(ticks))
+		conformity, review, turns, root = self._run([answer({"criteria": VERDICTS})], clock=lambda: next(ticks))
 		self.assertEqual(len(turns), 1)
-		self.assertEqual(conformity["error"], "boom")
-		self.assertEqual(review["stopped_reason"], "code review was unavailable: boom")
+		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
+		self.assertFalse(review["available"])
 		for evidence in (conformity, review):
-			self.assertTrue(evidence["retry"].startswith("not asked again (the first turn failed: boom)"), evidence["retry"])
+			self.assertTrue(evidence["retry"].startswith("not asked again (the combined answer had no parseable findings list)"), evidence["retry"])
 			self.assertIn("under 5 of the review's 20 minutes", evidence["retry"])
 		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
 
@@ -505,92 +526,19 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		for used_minutes, own in ((13.5, "half"), (13.5, "whole"), (0.1, "half"), (0.1, "whole"), (14.9, "whole")):
 			with self.subTest(used_minutes=used_minutes, own=own):
 				ticks = iter([0.0, used_minutes * 60.0])
-				first = answer({"criteria": VERDICTS}) if own == "half" else failed_turn("boom")
+				first = answer({"criteria": VERDICTS}) if own == "half" else answer("Everything looks fine to me.")
 				_, _, turns, _ = self._run([first, answer({"criteria": VERDICTS, "findings": []})], clock=lambda: next(ticks))
 				self.assertEqual(turns[0]["timeout"], 20 * 60)
 				self.assertLessEqual(used_minutes * 60 + turns[1]["timeout"], 20 * 60)
 				self.assertGreaterEqual(turns[1]["timeout"], 5 * 60)
 				self.assertLessEqual(turns[1]["timeout"], (10 if own == "half" else 20) * 60)
 
-	def test_a_turn_the_spend_meter_stopped_is_not_asked_again(self):
-		deny = '403 {"middleware":"meter","reason_code":"%s","detail":"x"}'
-		errors = [deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited"]
-		for error in errors:
-			with self.subTest(error=error):
-				conformity, review, turns, root = self._run([failed_turn(error)])
-				self.assertEqual(len(turns), 1)
-				self.assertFalse(review["available"])
-				self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
-				self.assertEqual(review["error"], conformity["error"])
-				self.assertIn("reason_code", review["error"])
-				for evidence in (conformity, review):
-					self.assertIn("not asked again", evidence["retry"])
-					self.assertIn("the spend meter stopped the first turn", evidence["retry"])
-				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
-
-	def test_a_providers_own_rate_limit_is_asked_again_once(self):
-		# A provider's 429 is not the spend meter's denial: the turn gets the
-		# one retry any failed turn gets, in what is left of the same budget.
-		errors = [c["error"] for c in self._stop_causes() if "provider's own" in c["name"]]
-		self.assertGreaterEqual(len(errors), 5)
-		for error in errors:
-			with self.subTest(error=error):
-				ticks = iter([0.0, 60.0])
-				conformity, review, turns, root = self._run(
-					[failed_turn(error), answer({"criteria": VERDICTS, "findings": []})], clock=lambda: next(ticks),
-				)
-				self.assertEqual(len(turns), 2)
-				self.assertTrue(review["available"])
-				self.assertLessEqual(60 + turns[1]["timeout"], 20 * 60)
-				for evidence in (conformity, review):
-					self.assertNotIn("not asked again", evidence["retry"])
-					self.assertNotIn("spend meter", evidence["retry"])
-				self.assertEqual(sorted(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
-
-	def test_a_turn_the_providers_usage_limit_refused_is_not_asked_again(self):
-		# The codex CLI's message as captured live (2026-10-11), when the
-		# turn was asked again and refused again.
-		error = next(c["error"] for c in self._stop_causes() if c["stopped_by"] == "provider_usage_limit")
-		conformity, review, turns, root = self._run([failed_turn(error)])
-		self.assertEqual(len(turns), 1)
-		self.assertFalse(review["available"])
-		self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
-		self.assertEqual(review["error"], error)
-		for evidence in (conformity, review):
-			self.assertIn("not asked again", evidence["retry"])
-			self.assertIn("the model provider's usage limit was reached", evidence["retry"])
-			self.assertNotIn("spend meter", evidence["retry"])
-		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
-
-	@staticmethod
-	def _stop_causes() -> list[dict]:
-		return json.loads((Path(__file__).parent / "fixtures" / "review_stop_causes.json").read_text())
-
-	def test_stop_causes_are_named_as_the_host_names_them(self):
-		# internal/codereview's TestStopCausesFixture reads the same file.
-		cases = self._stop_causes()
-		self.assertTrue(cases)
-		for case in cases:
-			with self.subTest(case=case["name"]):
-				self.assertEqual(combined_review.stop_cause(case["error"]), case["stopped_by"])
-				if case["stopped_by"] == "provider_usage_limit":
-					self.assertEqual(build_app.provider_limit_resets_at(case["error"]), case["resets_at"])
-					self.assertEqual(build_app.model_stop(["connection reset", case["error"]]), {"code": "provider_usage_limit", "resets_at": case["resets_at"]})
-				elif not case["stopped_by"]:
-					self.assertIsNone(build_app.model_stop([case["error"]]))
-
-	def test_a_denial_code_outside_the_meters_body_is_an_ordinary_failure(self):
-		self.assertEqual(combined_review.meter_stop('{"reason_code":"budget_exceeded"}'), "")
-		self.assertEqual(combined_review.meter_stop('{"middleware":"meter","reason_code":"policy_changed"}'), "")
-		self.assertEqual(combined_review.meter_stop('{"middleware":"meter","reason_code":"rate_limited"}'), "rate_limited")
-		self.assertEqual(combined_review.meter_stop("connection reset"), "")
-
 	def test_the_first_turns_evidence_is_on_disk_before_the_retry_starts(self):
 		# A retry killed from outside leaves what the first turn alone gave.
 		cases = [
 			(answer({"criteria": VERDICTS}), ["clean", "flagged"], False, ""),
 			(answer({"findings": FINDINGS}), ["unavailable", "unavailable"], True, ""),
-			(failed_turn("boom"), ["unavailable", "unavailable"], False, "boom"),
+			(answer("Everything looks fine to me."), ["unavailable", "unavailable"], False, ""),
 		]
 		for first, verdicts, available, error in cases:
 			with self.subTest(first=first.stdout[:60]):
@@ -604,7 +552,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 					self.assertNotIn("retry", evidence)
 
 	def test_the_retry_cannot_read_the_first_turns_transcript(self):
-		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), failed_turn("boom")):
+		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), answer("Everything looks fine to me.")):
 			with self.subTest(first=first.stdout[:60]):
 				_, _, turns, root = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})])
 				# All the retry finds in the first turn's folder: both saved
@@ -647,9 +595,9 @@ class CombinedReviewRetryTests(unittest.TestCase):
 
 	def test_a_session_folder_that_cannot_be_emptied_asks_nothing_again(self):
 		with mock.patch.object(combined_review, "fresh_retry_session_dir", return_value=None):
-			conformity, review, turns, _ = self._run([failed_turn("boom")])
+			conformity, review, turns, _ = self._run([answer("Everything looks fine to me.")])
 		self.assertEqual(len(turns), 1)
-		self.assertEqual(review["error"], "boom")
+		self.assertFalse(review["available"])
 		self.assertIn("could not be emptied", conformity["retry"])
 		self.assertIn("could not be emptied", review["retry"])
 
