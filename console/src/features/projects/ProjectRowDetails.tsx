@@ -15,7 +15,10 @@ export function ProjectRowDetails({ project, tab, onTabChange, columns }: Projec
   return (
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={columns} className="bg-surface-sunken p-4">
-        <ProjectDetails project={project} tab={tab} onTabChange={onTabChange} />
+        {/* On a phone the table scrolls sideways: the details stay one screen wide beside it. */}
+        <div className="max-md:sticky max-md:left-4 max-md:w-[calc(100vw-4rem-2px)]">
+          <ProjectDetails project={project} tab={tab} onTabChange={onTabChange} />
+        </div>
       </TableCell>
     </TableRow>
   );

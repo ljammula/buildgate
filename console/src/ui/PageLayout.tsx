@@ -25,25 +25,29 @@ export function PageHeader({
     <header
       data-sticky={sticky || undefined}
       className={cn(
-        "flex flex-col gap-2 border-b border-border px-6 py-4",
+        "flex flex-col gap-2 border-b border-border px-6 py-4 max-md:px-4",
         sticky && "sticky top-0 z-20 bg-bg",
         className,
       )}
     >
       {breadcrumbs ? <div className="text-xs text-fg-muted">{breadcrumbs}</div> : null}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-x-4 gap-y-2 max-md:flex-wrap">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-fg">{title}</h1>
           {description ? <p className="mt-1 text-sm text-fg-muted">{description}</p> : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex shrink-0 items-center gap-2 max-md:shrink max-md:flex-wrap">
+            {actions}
+          </div>
+        ) : null}
       </div>
     </header>
   );
 }
 
 export function PageBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-6 px-6 py-5", className)} {...props} />;
+  return <div className={cn("flex flex-col gap-6 px-6 py-5 max-md:px-4", className)} {...props} />;
 }
 
 export interface SectionProps {

@@ -116,5 +116,12 @@ until curl -sf -o /dev/null "http://127.0.0.1:$port/healthz"; do
 done
 token="$(grep -o '#t=[A-Za-z0-9_-]*' "$walk_dir/serve.log" | head -1 | cut -c4-)"
 
+# What the seed lacks, for links.mjs: the every-field run names evidence that
+# is not on disk, and no request was submitted for the seeded project.
+export LINKS_ALLOW="${LINKS_ALLOW-^(409|500) GET /runs/run-every-field/
+^alert: Request failed \(500\) ?read diff
+^404 GET /projects/app/memory\$
+^alert: Not found.*no request was submitted for this project}"
+
 cd "$root/console"
 node "test/walk/${WALK_SCRIPT:-walk.mjs}" "http://127.0.0.1:$port" "$token" "$walk_dir" "$@"

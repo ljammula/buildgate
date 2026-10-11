@@ -21,10 +21,10 @@ export function NotificationToggle({ support, on, onTurnOn, onTurnOff }: Notific
   if (support === "denied") {
     return (
       <span
-        className="flex items-center gap-1.5 px-1.5 text-xs text-fg-subtle"
+        className="flex min-w-0 items-center gap-1.5 px-1.5 text-xs text-fg-subtle max-md:block max-md:truncate"
         title="Allow notifications for this site in the browser's site settings, then reload."
       >
-        <BellOff aria-hidden className="size-4" />
+        <BellOff aria-hidden className="size-4 shrink-0 max-md:mr-1.5 max-md:inline" />
         Notifications blocked in this browser
       </span>
     );
