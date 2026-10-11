@@ -87,6 +87,7 @@ each `daemon` child it runs.
 | `worker` start after a kill -9 | With the drain lock held, it reclaims every nonterminal run whose owner is gone: the pid in the run's `sandbox-owner.pid` no longer exists (a live pid, no marker, or a terminal run is never touched). Each is halted with the triage "the factoryd process running this build stopped mid-run", its Temporal workflow is terminated if still `Running` (unreachable Temporal: the run is left for the next start), and its worker, supervisor, registry-proxy and compose containers are removed; its ticket rebuilds as a new run. One log line per run. |
 | Paths colima does not share | colima should share only `~/buildgate` read-write and your repositories read-only (USAGE.md, "Data directory and colima"), so a data dir or workspace anywhere else — `/tmp`, `~/.cache` — fails inside the sandbox ("does not appear to share ... into its containers"). `doctor -workspace <dir>` probes the workspace and data dir; `worker` and `factoryd <run>` preflights probe the data dir when it already exists. `doctor -fix` can repoint `data_dir` to `~/buildgate/data`. `mkdir -p` the data dir before a first bare `factoryd` run. On macOS `doctor` also warns (`Docker VM does not share all of $HOME`) while the VM still sees all of `$HOME`. |
 | Correct work quarantined as all-"unavailable" | A slow/local model's conformity review can time out or return unparseable output; under `-conformity-policy required` (default) every criterion reads `unavailable` and blocks. If `agent_evidence.stopped_reason` lists every criterion as unmet, retry with `-conformity-policy advisory` (flag or `conformity_policy` key). The verdict is still recorded. |
+| The model provider's usage limit ran out mid-request | A review it refused quarantines the request with check `review_unavailable` and the reason "the model provider's usage limit was reached (it said to try again at 3:11 AM, by the worker container's clock) during the review"; a build it refused fails `canonical_verify` with "the build stopped: the model provider's usage limit was reached (...); retry after it resets". Nothing was judged. Run `factoryd retry <id>` after that time (the worker container's clock is UTC unless the image sets another). The time is shown only when the provider's message gave a plain time of day; no session-config budget governs this limit. Recognised from the codex CLI's message ("You've hit your usage limit"); another harness's wording reads as a review that gave no verdict, or a build whose model route was unreachable. |
 | Configured image is out of date with its own source | `factoryd doctor`/`quickstart` compare each configured image's stamped build-inputs label against the checkout named by `image_source_root` (session config, written by `factoryd configure-images`) and warn (never fail) when it's stale; `quickstart` offers to rebuild, `worker`/`serve` print one warning line at startup. Run `make install` in that checkout to rebuild. No `image_source_root` recorded (or the checkout is unreadable): nothing is checked. |
 
 ## Request lifecycle
@@ -159,10 +160,11 @@ review findings to address" section (each blocking finding's file:line,
 severity, summary and failure scenario) when code_review was flagged,
 rebuilt via `-on-branch`/`-diff-base` against the quarantined run's own
 branch/base SHA, through every gate again including a fresh, independent
-review. A review that gave no verdict (the reviewer timed out or returned
-nothing parseable) is not actionable and gets no round: the request
-quarantines with check `review_unavailable`, saying the build was not
-judged; otherwise the quarantine names `code_review` when that gate
+review. A review that gave no verdict (the reviewer timed out, returned
+nothing parseable, or had its model calls refused by the spend meter or by
+the model provider's own usage limit) is not actionable and gets no round:
+the request quarantines with check `review_unavailable`, saying the build
+was not judged and which of these it was when the run records it; otherwise the quarantine names `code_review` when that gate
 failed, else `spec_conformity`. Accepted opens the PR and advances exactly like an ordinary
 first-build acceptance; quarantined or halted again quarantines the
 request as usual. A budget greater than `1` runs up to that many
@@ -779,7 +781,8 @@ reviews is asked for that review alone, and a failed or unparseable call is
 made again: one further call at most, in the same sandbox, told nothing of the
 first and unable to read its transcript. The two calls share the 20 minutes
 one call gets, so the review takes no longer; the second is skipped when under
-5 minutes are left or when the spend meter stopped the first. Both evidence
+5 minutes are left, when the spend meter stopped the first, or when the model
+provider's usage limit refused it. Both evidence
 files then hold a `retry` line saying what was asked again and why, or why
 nothing was.
 

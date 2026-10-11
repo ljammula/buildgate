@@ -104,9 +104,14 @@ RETRY_SESSION_SUBDIR = "retry"
 # How the spend meter's denial reads in a turn's error: the OpenShell
 # supervisor's deny body, matched as codereview.StoppedBy matches it on the Go
 # side, and the wording of a harness that rewords it. A turn the meter stopped
-# is not retried: the second call would be denied as well.
+# is not retried: the second call would be denied as well. Nor is a turn the
+# model provider's own usage limit refused (build_app.provider_usage_limit).
 METER_DENY_CODES = ("budget_exceeded", "ceiling_exceeded", "rate_limited")
 METER_DENY_WORDINGS = ("budget exceeded", "ceiling exceeded", "rate limited", "rate limit exceeded")
+
+# stop_cause's name for a turn the provider's usage limit refused; the Go
+# side's codereview.CodeProviderUsageLimit.
+PROVIDER_USAGE_LIMIT = "provider_usage_limit"
 
 # What a retry asks for, by the part of the first answer that was missing.
 RETRY_COMBINED, RETRY_CONFORMITY, RETRY_CODE_REVIEW = "combined", "conformity", "code_review"
@@ -201,6 +206,14 @@ def meter_stop(error: str) -> str:
 	return ""
 
 
+def stop_cause(error: str) -> str:
+	"""What in error says a second call would be refused as the first was:
+	meter_stop's answer, PROVIDER_USAGE_LIMIT for the provider's own usage
+	limit, or "". The meter's denial is looked for first, as
+	codereview.StoppedBy does on the Go side."""
+	return meter_stop(error) or (PROVIDER_USAGE_LIMIT if build_app.provider_usage_limit(error) else "")
+
+
 def retry_timeout_minutes(part: str, started: float) -> int:
 	"""The retry's timeout: its turn's own, cut to the whole minutes the first
 	turn left of COMBINED_REVIEW_TIMEOUT_MINUTES; 0 when under
@@ -288,8 +301,8 @@ def run_combined_review(
 	folder of its own (fresh_retry_session_dir) and not a word about the
 	first turn, whose transcript is removed before it starts. The two turns
 	together get the COMBINED_REVIEW_TIMEOUT_MINUTES the one turn had
-	(retry_timeout_minutes), a turn the spend meter stopped is not retried
-	(meter_stop), and the first turn's evidence is written to the workspace
+	(retry_timeout_minutes), a turn the spend meter stopped or the provider's
+	usage limit refused is not retried (stop_cause), and the first turn's evidence is written to the workspace
 	before the retry starts, so a retry killed from outside leaves what the
 	first turn alone would have.
 
@@ -329,11 +342,13 @@ def run_combined_review(
 	if not part:
 		return conformity, review
 
-	denied = meter_stop(error)
+	stopped = stop_cause(error)
 	timeout_minutes = retry_timeout_minutes(part, started)
 	retry_session = None
-	if denied:
-		skipped = f"the spend meter stopped the first turn ({denied}) and would stop a second"
+	if stopped == PROVIDER_USAGE_LIMIT:
+		skipped = "the model provider's usage limit was reached and it would refuse a second call as well"
+	elif stopped:
+		skipped = f"the spend meter stopped the first turn ({stopped}) and would stop a second"
 	elif not timeout_minutes:
 		skipped = (
 			f"under {RETRY_MIN_MINUTES} of the review's {COMBINED_REVIEW_TIMEOUT_MINUTES} minutes were left"

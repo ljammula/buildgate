@@ -29,15 +29,13 @@ import (
 
 // relaySpendSummary sums the actual relay spend recorded across every
 // attempt (Attempt.RelayConsumedCostMicroUSD/RelayConsumedInputTokens/
-// RelayConsumedOutputTokens) and reports whether any attempt's total is a
-// partial recovery, not a confirmed final spend -- Attempt.
-// RelaySpendPartial's own doc comment explains why that can happen (the
-// relay exited abnormally and its usage ledger, not its container logs,
-// is what got read at cleanup). Callers rendering totalCostMicroUSD/
-// totalTokens as evidence must say so whenever partial is true, per
-// CLAIMS.md's "crash-orphaned relay" residual: an invented-looking
-// complete number is worse than an honest partial one when it can feed a
-// budget-ceiling decision.
+// RelayConsumedOutputTokens) and reports whether any attempt's total holds
+// an estimate, not only metered usage -- Attempt.RelaySpendPartial's own
+// doc comment explains when (a model request ended without a usage report
+// and the meter charged its estimate for it). Callers rendering
+// totalCostMicroUSD/totalTokens as evidence must say so whenever partial is
+// true: a number that reads as exact is worse than one marked an estimate
+// when it can feed a budget-ceiling decision.
 func relaySpendSummary(attempts []run.Attempt) (totalCostMicroUSD, totalTokens int64, partial bool) {
 	for _, a := range attempts {
 		totalCostMicroUSD += a.RelayConsumedCostMicroUSD
@@ -49,14 +47,20 @@ func relaySpendSummary(attempts []run.Attempt) (totalCostMicroUSD, totalTokens i
 	return totalCostMicroUSD, totalTokens, partial
 }
 
+// spendEstimateNote is what a spend total says when it is not all metered
+// usage (Attempt.RelaySpendPartial): the meter charged its own estimate for
+// the request. Short, since `factoryd status` puts it in a table cell.
+const spendEstimateNote = "an estimate: a model request ended without a usage report"
+
 // relaySpendLine renders a relaySpendSummary result as the text every
 // cost/evidence line below shares: "not recorded" when nothing was ever
-// spent, the partial marking (never a bare number presented as final) when
-// any attempt's spend is an incomplete recovery, or the plain total
-// otherwise.
+// spent, the total marked an estimate (never a bare number presented as
+// exact) when any attempt's spend holds one, or the plain total otherwise.
+// Only whether a request went unreported is recorded on an attempt, not how
+// many did, so the line gives no count.
 func relaySpendLine(totalCostMicroUSD, totalTokens int64, partial, subscriptionBilled bool) string {
 	if partial {
-		s := fmt.Sprintf("partial (relay exited abnormally after $%.4f recorded, %d tokens)", float64(totalCostMicroUSD)/1_000_000, totalTokens)
+		s := fmt.Sprintf("$%.4f, %d tokens (%s)", float64(totalCostMicroUSD)/1_000_000, totalTokens, spendEstimateNote)
 		if subscriptionBilled {
 			s += subscriptionCostSuffix
 		}

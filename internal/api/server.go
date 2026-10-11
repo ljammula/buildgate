@@ -3181,9 +3181,10 @@ func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) bool {
 	if relayTokens > 0 || relayCostMicroUSD > 0 {
 		complete := true
 		for _, attempt := range r.Attempts {
-			// A crashed relay's spend recovered from its usage ledger is
-			// an honest lower bound, not the confirmed total (see
-			// run.Attempt.RelaySpendPartial), so the rollup must read "≥".
+			// A total that holds the meter's estimate for a model request
+			// that ended without a usage report is not an exact figure
+			// (see run.Attempt.RelaySpendPartial), so the rollup is marked
+			// incomplete, which the console shows as "≥".
 			if attempt.RelaySpendPartial {
 				complete = false
 			}

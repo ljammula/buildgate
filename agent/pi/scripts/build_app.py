@@ -260,6 +260,22 @@ def compose_services_sentence(environ: dict[str, str]) -> str | None:
 	)
 
 
+# The fixed start of the codex CLI's message for a model request the provider
+# refused because the account's usage limit was reached. It is the one signal
+# of that the scripts get; internal/codereview's providerLimitPhrase is the
+# same text, and tests/fixtures/review_stop_causes.json holds both to it.
+PROVIDER_LIMIT_PHRASE = "You've hit your usage limit"
+
+
+def provider_usage_limit(errors) -> bool:
+	"""Whether a model error (a string, or each of a list of them) is the
+	provider's usage-limit message. A further call would be refused as well,
+	until the provider resets the allowance."""
+	if isinstance(errors, str):
+		errors = [errors]
+	return any(PROVIDER_LIMIT_PHRASE in e for e in errors)
+
+
 def redact(output: str, limit: int = 3000) -> str:
 	import re
 
@@ -2992,6 +3008,10 @@ def _run_build(
 			# pass that can only repeat the same outage (found via Codex
 			# review of PR #5).
 			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
+			if provider_usage_limit(parsed.route_errors):
+				# Named for whoever reads the build log; the host names it
+				# from the round's notes (internal/triage).
+				result.stopped_reason += ": the model provider's usage limit was reached"
 			persist(round_index, state_prompt, fingerprint_after)
 			break
 		# Deliberately no special early-break for verify_command is None

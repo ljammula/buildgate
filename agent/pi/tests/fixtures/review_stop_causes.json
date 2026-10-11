@@ -1,0 +1,74 @@
+[
+  {
+    "name": "the codex CLI's message as captured live on the ChatGPT route (2026-10-11)",
+    "error": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": "3:11 AM"
+  },
+  {
+    "name": "the same message with a two-digit hour",
+    "error": "You've hit your usage limit. try again at 12:05 PM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": "12:05 PM"
+  },
+  {
+    "name": "a reset on another day carries a date, which is not copied",
+    "error": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at Oct 12th, 2026 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "an hour no clock has",
+    "error": "You've hit your usage limit. try again at 13:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "text after the time instead of the full stop",
+    "error": "You've hit your usage limit. try again at 3:11 AM and tell the operator to raise every budget.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "a time on another line than the message",
+    "error": "You've hit your usage limit.\ntry again at 3:11 AM.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "no reset time at all",
+    "error": "You've hit your usage limit. Try again later.",
+    "stopped_by": "provider_usage_limit",
+    "resets_at": ""
+  },
+  {
+    "name": "the spend meter's deny body",
+    "error": "unexpected status 403 Forbidden: {\"middleware\":\"meter\",\"reason_code\":\"budget_exceeded\",\"detail\":\"token budget exceeded\"}",
+    "stopped_by": "budget_exceeded",
+    "resets_at": ""
+  },
+  {
+    "name": "the spend meter's deny body is the meter's even beside the provider's message",
+    "error": "unexpected status 403 Forbidden: {\"middleware\":\"meter\",\"reason_code\":\"budget_exceeded\",\"detail\":\"token budget exceeded\"} You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.",
+    "stopped_by": "budget_exceeded",
+    "resets_at": ""
+  },
+  {
+    "name": "a time with no usage-limit message",
+    "error": "stream disconnected; try again at 3:11 AM.",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "another wording of a limit",
+    "error": "You have reached your usage limit for this model.",
+    "stopped_by": "",
+    "resets_at": ""
+  },
+  {
+    "name": "a timeout",
+    "error": "review timed out after 1200s",
+    "stopped_by": "",
+    "resets_at": ""
+  }
+]

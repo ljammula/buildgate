@@ -1097,13 +1097,22 @@ func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *ru
 // (found live 2026-10-08: a review 1.18M tokens long, cut off by the
 // 1M-token hourly budget, was reported as having timed out or returned
 // nothing).
+//
+// The provider's own usage limit is named too, with the time it said to try
+// again at when the run recorded one: no setting governs it, and the
+// operator's move is to retry after that time (found live 2026-10-11: the
+// ChatGPT route's allowance ran out mid-request and each review was
+// reported as having given no verdict).
 func noVerdictCause(runRecord *run.Run) string {
-	code := ""
+	code, resetsAt := "", ""
 	if runRecord != nil {
-		code = runRecord.SpecConformityStoppedBy
+		code, resetsAt = runRecord.SpecConformityStoppedBy, runRecord.SpecConformityResetsAt
 		if runRecord.CodeReview != nil && runRecord.CodeReview.StoppedBy != "" {
-			code = runRecord.CodeReview.StoppedBy
+			code, resetsAt = runRecord.CodeReview.StoppedBy, runRecord.CodeReview.ResetsAt
 		}
+	}
+	if code == codereview.CodeProviderUsageLimit {
+		return codereview.ProviderLimitCause(resetsAt) + " during the review"
 	}
 	settings, ok := codereview.StopSettings(code)
 	if !ok {

@@ -245,8 +245,9 @@ def cause_bucket(run_json: Dict[str, Any], category: str) -> str:
 def relay_usage(run_json: Dict[str, Any]) -> Dict[str, int]:
     """Best-effort sum of an attempt's own recorded relay spend across every
     attempt -- the same fields internal/run.Attempt records per attempt
-    (see that struct's own doc comment); partial/absent for an attempt with
-    no relay or one whose relay was never cleaned up (RelaySpendPartial)."""
+    (see that struct's own doc comment); absent for an attempt that made no
+    metered model request, and an estimate for one with a request that ended
+    without a usage report (RelaySpendPartial)."""
     tokens_in = tokens_out = cost_micro_usd = 0
     for a in run_json.get("attempts") or []:
         tokens_in += int(a.get("relay_consumed_input_tokens") or 0)

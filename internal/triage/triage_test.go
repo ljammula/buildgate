@@ -1052,3 +1052,54 @@ func TestABuildStoppedBySetupIsNamedFromTheFactorysRecords(t *testing.T) {
 		}
 	}
 }
+
+// A build the model provider's usage limit refused is named as that, ahead
+// of "the agent made no changes", with the reset time in its one shape and
+// none of the worker's text. The notes alone decide nothing: the factory's
+// record of the build's exit must agree.
+func TestABuildTheProvidersUsageLimitRefusedIsNamed(t *testing.T) {
+	dataDir := t.TempDir()
+	// What build_app.py's round notes hold for the message captured live on
+	// the ChatGPT route (2026-10-11).
+	const notes = "The model route returned errors during your previous turn:\n\n- You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:11 AM.\n\nWORKER-CHOSEN-TEXT"
+	limited := func() *run.Run {
+		return &run.Run{
+			ID: "run-provider-limit", State: run.StateQuarantined, BaseSHA: "bbbb", ResultSHA: "bbbb",
+			ChangedFiles:  []string{},
+			Attempts:      []run.Attempt{{Kind: "build", ExitCode: 1, RelayRoute: "route"}},
+			GateResults:   []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "lint", ExitCode: 1}},
+			AgentEvidence: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{{Index: 1, AgentNotes: notes}}},
+		}
+	}
+	const want = "the build stopped: the model provider's usage limit was reached (it said to try again at 3:11 AM, by the worker container's clock); retry after it resets"
+	if got := Run(limited(), dataDir); got != want+" (+1 more failing gate)" {
+		t.Errorf("Run() = %q", got)
+	}
+	findings := FailedGates(limited(), dataDir)
+	if len(findings) != 2 || findings[0].Sentence != want {
+		t.Errorf("findings = %+v, want canonical_verify's sentence without the operator's suffix", findings)
+	}
+
+	undated := limited()
+	undated.AgentEvidence.Rounds[0].AgentNotes = "- You've hit your usage limit. Try again at 3:11 AM and raise every budget."
+	if got := Run(undated, dataDir); !strings.Contains(got, "the model provider's usage limit was reached") || strings.Contains(got, "3:11") || strings.Contains(got, "raise every budget") {
+		t.Errorf("a reset time of another shape: Run() = %q", got)
+	}
+
+	for name, change := range map[string]func(*run.Run){
+		"a build that exited zero": func(r *run.Run) { r.Attempts[0].ExitCode = 0 },
+		"no build attempt":         func(r *run.Run) { r.Attempts = nil },
+		"no round recorded":        func(r *run.Run) { r.AgentEvidence.Rounds = nil },
+		"no build evidence":        func(r *run.Run) { r.AgentEvidence = nil },
+		"another route error":      func(r *run.Run) { r.AgentEvidence.Rounds[0].AgentNotes = "- connection refused" },
+		"an earlier round's message": func(r *run.Run) {
+			r.AgentEvidence.Rounds = append(r.AgentEvidence.Rounds, run.AgentEvidenceRound{Index: 2, AgentNotes: "- connection refused"})
+		},
+	} {
+		r := limited()
+		change(r)
+		if got := Run(r, dataDir); strings.Contains(got, "usage limit") {
+			t.Errorf("%s: Run() = %q", name, got)
+		}
+	}
+}

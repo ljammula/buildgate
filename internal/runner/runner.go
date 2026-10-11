@@ -117,11 +117,10 @@ type Result struct {
 	RelayConsumedCostMicroUSD int64
 	RelayCeilingExceeded      bool
 	// RelaySpendPartial carries internal/sandbox.RouteLaunchFacts.
-	// SpendPartial: true when the four fields above are a best-effort
-	// recovery from this run's usage ledger, not a confirmed final total,
-	// because the relay exited abnormally before `docker logs` could be
-	// read at cleanup. Callers rendering these fields as evidence must say
-	// so rather than presenting them as the complete spend.
+	// SpendPartial: true when the consumed totals above include the meter's
+	// estimate for a model request that ended without a usage report (a cut
+	// or failed stream). Callers rendering these fields as evidence must say
+	// so rather than presenting them as metered usage.
 	RelaySpendPartial bool
 }
 

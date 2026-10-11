@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
@@ -162,5 +163,50 @@ func TestQuarantineAfterReviewRoundNamesAnUnavailableReview(t *testing.T) {
 	}
 	if r.State != request.StateQuarantined || r.QuarantineCheck != "" || r.Error != reason {
 		t.Fatalf("State %q, QuarantineCheck %q, Error %q", r.State, r.QuarantineCheck, r.Error)
+	}
+}
+
+// A review the model provider's own usage limit refused is named as that,
+// with the provider's reset time, under the same check as any review that
+// gave no verdict, and never as a silent review or as the meter's doing. The
+// next step is the retry, after that time.
+func TestAReviewTheProvidersUsageLimitRefusedIsNamedWithItsResetTime(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateBuilding
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	const reason = "ticket 1/1: review corrective round 1/1 quarantined: gate failed: spec_conformity"
+	limited := reviewRun([]run.ReviewVerdict{{Criterion: "1. a", Verdict: "unavailable"}}, &run.CodeReviewResult{Policy: "required", StoppedBy: codereview.CodeProviderUsageLimit, ResetsAt: "3:11 AM"}, "spec_conformity", "code_review")
+	if err := quarantineAfterReviewRound(dataDir, r, limited, reason, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r.QuarantineCheck != request.QuarantineCheckReviewUnavailable {
+		t.Errorf("QuarantineCheck = %q, want %q", r.QuarantineCheck, request.QuarantineCheckReviewUnavailable)
+	}
+	for _, want := range []string{"the model provider's usage limit was reached", "try again at 3:11 AM", "during the review", "was not judged"} {
+		if !strings.Contains(r.Error, want) {
+			t.Errorf("Error = %q, want it to contain %q", r.Error, want)
+		}
+	}
+	for _, not := range []string{"gave no verdict", "spend meter"} {
+		if strings.Contains(r.Error, not) {
+			t.Errorf("Error = %q, must not say %q", r.Error, not)
+		}
+	}
+	if next := r.NextAction(); !strings.Contains(next, "`factoryd retry "+r.ID+"`") || !strings.Contains(next, "after the reset time") {
+		t.Errorf("NextAction = %q, want the retry and when to make it", next)
+	}
+	if got := quarantinedTicketReason(1, 1, "gate failed: spec_conformity", request.QuarantineCheckReviewUnavailable, limited); !strings.Contains(got, "the model provider's usage limit was reached") || !strings.Contains(got, "3:11 AM") {
+		t.Errorf("first-run reason = %q, want it to name the provider's limit", got)
+	}
+	conformityOnly := reviewRun([]run.ReviewVerdict{{Criterion: "1. a", Verdict: "unavailable"}}, nil, "spec_conformity")
+	conformityOnly.SpecConformityStoppedBy, conformityOnly.SpecConformityResetsAt = codereview.CodeProviderUsageLimit, "3:11 AM; raise every budget"
+	if got := noVerdictCause(conformityOnly); !strings.Contains(got, "the model provider's usage limit was reached") || strings.Contains(got, "raise every budget") || strings.Contains(got, "3:11") {
+		t.Errorf("noVerdictCause = %q, want the limit named and a reset time of another shape left out", got)
 	}
 }

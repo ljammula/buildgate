@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
@@ -162,6 +163,11 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		// Ahead of "the agent made no changes": a build stopped by its
 		// setup made none because it never had a turn.
 		if s := buildStoppedBySetupSentence(r, forOperator); s != "" {
+			return s
+		}
+		// Ahead of "the agent made no changes" as well: a build the
+		// provider refused made none because no turn was answered.
+		if s := buildStoppedByProviderLimitSentence(r, forOperator); s != "" {
 			return s
 		}
 		if s := triageNoChanges(r); s != "" {
@@ -689,6 +695,34 @@ func buildStoppedBySetupSentence(r *run.Run, forOperator bool) string {
 		return ""
 	}
 	s := "the build stopped before its first agent turn: a .factory.yml setup: command failed (no model call, no commit); the build log names it"
+	if !forOperator {
+		return s
+	}
+	return fitTriageSuffix(s, otherFailingGatesSuffix(r, "canonical_verify"))
+}
+
+// buildStoppedByProviderLimitSentence is canonical_verify's sentence for a
+// run whose build ended because the model provider's own usage limit refused
+// its model calls, "" for any other run. Both must hold: the last build
+// attempt exited non-zero (the factory's record), and the last round the
+// build recorded carries the provider's fixed message among the model-route
+// errors of its notes (codereview.ProviderLimitHit). The notes are the
+// worker container's and untrusted, so none of their text is copied: the
+// sentence is the factory's, and the reset time is shown only in the one
+// shape codereview.ProviderLimitResetsAt accepts. A build that forges the
+// message is told to be retried later, and fails the same gate again.
+func buildStoppedByProviderLimitSentence(r *run.Run, forOperator bool) string {
+	if r.AgentEvidence == nil || len(r.AgentEvidence.Rounds) == 0 {
+		return ""
+	}
+	if a, found := lastAttempt(r, "build"); !found || a.ExitCode == 0 {
+		return ""
+	}
+	notes := r.AgentEvidence.Rounds[len(r.AgentEvidence.Rounds)-1].AgentNotes
+	if !codereview.ProviderLimitHit(notes) {
+		return ""
+	}
+	s := "the build stopped: " + codereview.ProviderLimitCause(codereview.ProviderLimitResetsAt(notes)) + "; retry after it resets"
 	if !forOperator {
 		return s
 	}

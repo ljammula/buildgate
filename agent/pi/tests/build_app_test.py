@@ -697,6 +697,32 @@ class BuildAppTests(unittest.TestCase):
 		self.assertEqual(len(agent_invocation_calls(run)), 1)
 		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.stopped_reason)
 
+	def test_a_build_the_providers_usage_limit_refused_says_so(self):
+		limit = next(
+			c["error"] for c in json.loads((Path(__file__).parent / "fixtures" / "review_stop_causes.json").read_text())
+			if c["stopped_by"] == "provider_usage_limit"
+		)
+		for message, named in ((limit, True), ("connection refused", False)):
+			with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
+				root = Path(directory)
+				spec = root / "spec.md"
+				spec.write_text("Fix the cache")
+				errored_output = json.dumps({
+					"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": message},
+				})
+				with (
+					mock.patch.object(build_app, "ensure_git_repo"),
+					mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "", False, None)),
+					mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, errored_output, ""), False)),
+				):
+					result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1)
+				self.assertEqual(len(result.rounds), 1)
+				self.assertTrue(result.stopped_reason.startswith("model route unreachable (1/1 assistant turns errored)"))
+				self.assertEqual(result.stopped_reason.endswith(": the model provider's usage limit was reached"), named)
+				# The host names the cause from the round's notes
+				# (internal/triage), which must keep the message whole.
+				self.assertEqual(limit in result.rounds[0].agent_notes, named)
+
 	def test_flagged_review_drives_a_corrective_round(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)

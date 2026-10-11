@@ -246,10 +246,10 @@ func TestComputeCostSummaryByModelDistinctOrdered(t *testing.T) {
 	}
 }
 
-// TestAddRunModelUsagePartialRelaySpendIsLowerBound covers a run whose relay
-// crashed and whose spend was recovered from its usage ledger
-// (run.Attempt.RelaySpendPartial): the tokens still count, but the rollup
-// must report them as a lower bound, never a confirmed total.
+// TestAddRunModelUsagePartialRelaySpendIsLowerBound covers a run with a
+// model request that ended without a usage report, charged the meter's
+// estimate (run.Attempt.RelaySpendPartial): the tokens still count, but the
+// rollup must mark them incomplete, never an exact total.
 func TestAddRunModelUsagePartialRelaySpendIsLowerBound(t *testing.T) {
 	r := &run.Run{Attempts: []run.Attempt{
 		{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayConsumedInputTokens: 800, RelayConsumedOutputTokens: 200, RelaySpendPartial: true},

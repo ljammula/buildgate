@@ -523,6 +523,33 @@ class CombinedReviewRetryTests(unittest.TestCase):
 					self.assertIn("the spend meter stopped the first turn", evidence["retry"])
 				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
 
+	def test_a_turn_the_providers_usage_limit_refused_is_not_asked_again(self):
+		# The codex CLI's message as captured live (2026-10-11), when the
+		# turn was asked again and refused again.
+		error = next(c["error"] for c in self._stop_causes() if c["stopped_by"] == "provider_usage_limit")
+		conformity, review, turns, root = self._run([failed_turn(error)])
+		self.assertEqual(len(turns), 1)
+		self.assertFalse(review["available"])
+		self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
+		self.assertEqual(review["error"], error)
+		for evidence in (conformity, review):
+			self.assertIn("not asked again", evidence["retry"])
+			self.assertIn("the model provider's usage limit was reached", evidence["retry"])
+			self.assertNotIn("spend meter", evidence["retry"])
+		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+
+	@staticmethod
+	def _stop_causes() -> list[dict]:
+		return json.loads((Path(__file__).parent / "fixtures" / "review_stop_causes.json").read_text())
+
+	def test_stop_causes_are_named_as_the_host_names_them(self):
+		# internal/codereview's TestStopCausesFixture reads the same file.
+		cases = self._stop_causes()
+		self.assertTrue(cases)
+		for case in cases:
+			with self.subTest(case=case["name"]):
+				self.assertEqual(combined_review.stop_cause(case["error"]), case["stopped_by"])
+
 	def test_a_denial_code_outside_the_meters_body_is_an_ordinary_failure(self):
 		self.assertEqual(combined_review.meter_stop('{"reason_code":"budget_exceeded"}'), "")
 		self.assertEqual(combined_review.meter_stop('{"middleware":"meter","reason_code":"policy_changed"}'), "")
