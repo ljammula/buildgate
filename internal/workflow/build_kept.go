@@ -16,9 +16,10 @@ import (
 const buildKindName = "build"
 
 // keptFinishedBuild returns the result of the build step for a run that
-// adopted the worktree of a run whose build had already finished (a step
-// after it ended with no verdict: a review that got no answer, a verify lost
-// with its worker), without launching anything. ok is false, and the build
+// adopted the worktree of a run whose build had already finished and that
+// recorded the commit it left, without launching anything. That is a run
+// quarantined by a review that gave no verdict: a run halted by a failed
+// Activity records no result commit, so a resume of one builds as before. ok is false, and the build
 // runs as for any resume, unless every one of these holds, each read by the
 // host and none from the worker:
 //
@@ -47,14 +48,40 @@ func (a *Activities) keptFinishedBuild(ctx context.Context, input RunWorkflowInp
 	progressMark(ctx, logDir, buildKindName, "start", "", "")
 	progressMark(ctx, logDir, buildKindName, "note", "", detail)
 	progressMark(ctx, logDir, buildKindName, "end", "pass", "")
+	activity.GetLogger(ctx).Info(detail)
 	now := time.Now().UTC()
-	result := runner.Result{Command: []string{detail}, ExitCode: 0, StartedAt: now, FinishedAt: now}
-	attempt := run.Attempt{
-		Kind: buildKindName, Command: result.Command, ExitCode: 0,
-		StartedAt: now.Format(time.RFC3339), FinishedAt: now.Format(time.RFC3339),
-		KeptFromRun: earlier.ID,
-	}
+	attempt := keptBuildAttempt(earlier, now)
+	result := runner.Result{Command: attempt.Command, ExitCode: 0, StartedAt: now, FinishedAt: now, ImageDigest: attempt.ImageDigest}
 	return BuildActivityResult{Result: result, Attempts: []run.Attempt{attempt}}, true
+}
+
+// keptBuildAttempt is the build attempt a run records for a build it kept
+// from earlier: that run's last build attempt, with everything that says
+// how the build was made (the sandbox image, the harness, the route, the
+// skills), since this run's release decision asks of its build attempt
+// whether it ran in the sandbox. What that attempt spent is left out: it is
+// the earlier run's spend, already carried to this one as a total, and
+// counting it here would count it twice. KeptFromRun says where it came
+// from; the times are when it was kept.
+func keptBuildAttempt(earlier *run.Run, now time.Time) run.Attempt {
+	attempt := lastBuildAttempt(earlier)
+	attempt.KeptFromRun = earlier.ID
+	attempt.StartedAt, attempt.FinishedAt = now.Format(time.RFC3339), now.Format(time.RFC3339)
+	attempt.LogPath = ""
+	attempt.RelayConsumedInputTokens, attempt.RelayConsumedOutputTokens, attempt.RelayConsumedCostMicroUSD = 0, 0, 0
+	attempt.RelayCeilingExceeded, attempt.RelaySpendPartial, attempt.RelayCalls = false, false, nil
+	return attempt
+}
+
+// lastBuildAttempt is r's last build attempt; buildFinished says it exists
+// and exited 0.
+func lastBuildAttempt(r *run.Run) run.Attempt {
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if r.Attempts[i].Kind == buildKindName {
+			return r.Attempts[i]
+		}
+	}
+	return run.Attempt{Kind: buildKindName}
 }
 
 // finishedBuildToKeep is the run whose finished build input's run keeps:

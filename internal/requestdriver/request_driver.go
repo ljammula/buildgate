@@ -294,11 +294,10 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 		if ctx.Err() != nil {
 			return jobErr
 		}
-		var failure *OracleDraftJobFailure
-		if errors.As(jobErr, &failure) {
+		if failure := firstOracleJobFailure(r, jobErr); failure != nil {
 			return unresolvedOracleDrafting(dataDir, r, failure, now)
 		}
-		draft = request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting failed: %v", jobErr)}
+		draft = failedOracleDraft(jobErr)
 	case !draft.Status.Valid():
 		draft = request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting returned an invalid status %q", draft.Status)}
 	}

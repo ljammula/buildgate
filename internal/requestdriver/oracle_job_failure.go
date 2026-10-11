@@ -4,6 +4,8 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/unresolved"
+	"errors"
+	"fmt"
 	"log"
 	"time"
 	"unicode/utf8"
@@ -31,6 +33,34 @@ type OracleDraftJobFailure struct {
 func (e *OracleDraftJobFailure) Error() string { return e.Err.Error() }
 func (e *OracleDraftJobFailure) Unwrap() error { return e.Err }
 
+// firstOracleJobFailure is jobErr's OracleDraftJobFailure when the pass that
+// returned it was not itself started by a resume decision, nil otherwise.
+// The first job failure waits in resume_review, where a resume drafts again.
+// When the resumed pass fails as a job too, the request goes on to
+// oracle_review with a failed draft, as any drafting error does: there the
+// operator can also hand-write the oracles or approve without them, which
+// resume_review does not offer, so a failure that repeats on every pass (a
+// request the provider rejects, a script that crashes) never leaves cancel
+// as the only way out.
+func firstOracleJobFailure(r *request.Request, jobErr error) *OracleDraftJobFailure {
+	var failure *OracleDraftJobFailure
+	if !errors.As(jobErr, &failure) || r.PendingResumeVerb() != "" {
+		return nil
+	}
+	return failure
+}
+
+// failedOracleDraft is the failed draft a drafting error leaves for
+// oracle_review, with what the pass spent when the error says.
+func failedOracleDraft(jobErr error) request.OracleDraft {
+	draft := request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting failed: %v", jobErr)}
+	var failure *OracleDraftJobFailure
+	if errors.As(jobErr, &failure) {
+		draft.Spend = failure.Spend
+	}
+	return draft
+}
+
 // maxJobFailureDetailBytes caps the job's own words in the reason line.
 const maxJobFailureDetailBytes = 300
 
@@ -51,7 +81,7 @@ func unresolvedOracleDrafting(dataDir string, r *request.Request, failure *Oracl
 		}
 		r.OracleDraft.Spend = r.OracleDraft.Spend.Add(failure.Spend)
 	}
-	if err := EnterResumeReview(dataDir, r, "", cause, now); err != nil {
+	if err := EnterResumeReview(dataDir, r, request.LostStep{Cause: cause}, now); err != nil {
 		return err
 	}
 	if detail := jobFailureDetail(failure.Err); detail != "" {

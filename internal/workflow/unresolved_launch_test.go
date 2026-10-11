@@ -2,12 +2,14 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"buildgate/internal/meter"
 	"buildgate/internal/runner"
@@ -202,8 +204,13 @@ func TestAReviewWhoseModelServedNothingIsLaunchedOnceMore(t *testing.T) {
 		wantLaunches int
 	}{
 		{"no request answered", unanswered, 2},
-		{"refused by the provider's limit: a second launch would be refused too", limited, 1},
+		{"every request refused with 429: a rate limit may have passed", limited, 2},
+		{"refused by the meter: the same settings would refuse again", []meter.LedgerRecord{{Kind: meter.LedgerKindBudgetExceeded, RequestID: "a"}}, 1},
 		{"answered", answered, 1},
+		// A verdict may exist: it is never thrown away for a second try,
+		// whatever the route did after its answers.
+		{"answered, then a provider error", append(append([]meter.LedgerRecord{}, answered...), meter.LedgerRecord{Kind: meter.LedgerKindAdmit, RequestID: "b"}, meter.LedgerRecord{Kind: meter.LedgerKindComplete, RequestID: "b", Settled: meter.SettledReleased, Status: 503}), 1},
+		{"every request rejected as malformed: a second try meets it again", []meter.LedgerRecord{{Kind: meter.LedgerKindAdmit, RequestID: "a"}, {Kind: meter.LedgerKindComplete, RequestID: "a", Settled: meter.SettledReleased, Status: 400}}, 1},
 	} {
 		f := newReviewFixture(t, map[string]string{"main.go": "package main\n"}, func(string) {})
 		f.acts.VerifyMaxAttempts = 2
@@ -218,5 +225,22 @@ func TestAReviewWhoseModelServedNothingIsLaunchedOnceMore(t *testing.T) {
 		if launches != tc.wantLaunches || len(res.Attempts) != tc.wantLaunches {
 			t.Errorf("%s: launches = %d, attempts = %d; want %d", tc.name, launches, len(res.Attempts), tc.wantLaunches)
 		}
+	}
+}
+
+// A relaunch the Activity's deadline leaves no room for must not cost the
+// launch that already ran to its exit: its result stands. Only a step that
+// never produced one fails for want of time.
+func TestNoRoomForASecondLaunchKeepsTheFirstLaunchsResult(t *testing.T) {
+	ran := runner.Result{ExitCode: 1}
+	if res, err := noRoomForAttempt(ran, time.Minute, nil, true); err != nil || res.ExitCode != 1 {
+		t.Errorf("after a launch that exited: result %+v, err %v; want that result and no error", res, err)
+	}
+	if _, err := noRoomForAttempt(runner.Result{}, time.Minute, nil, false); !errors.Is(err, errOutOfTime) {
+		t.Errorf("before any launch: err = %v, want out of time", err)
+	}
+	notStarted := fmt.Errorf("%w: create", sandbox.ErrSandboxNotStarted)
+	if _, err := noRoomForAttempt(runner.Result{ExitCode: -1}, time.Minute, notStarted, false); launchErrorType(err) != SandboxLaunchFailureType {
+		t.Errorf("after a sandbox that never started: type %q, want it kept as a launch failure", launchErrorType(err))
 	}
 }

@@ -24,6 +24,7 @@ func TestModelRouteCauseReadsOnlyTheMetersCounts(t *testing.T) {
 		{"nothing ever answered: no response at all", &meter.Calls{Unanswered: 3}, unresolved.ModelUnavailable},
 		{"nothing ever answered: only stream heads that were cut", &meter.Calls{AnsweredUnread: 2}, unresolved.ModelUnavailable},
 		{"nothing ever answered: the meter refused, then silence", &meter.Calls{DeniedCeiling: 1, Unanswered: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByMeter}, unresolved.MeterDenied},
+		{"every request rejected as malformed: the client's doing", &meter.Calls{Rejected: 3}, ""},
 		{"a ledger that cannot say how requests ended", &meter.Calls{Failed: 3, Legacy: true}, ""},
 	} {
 		if got := ModelRouteCause(tc.calls); got != tc.want {

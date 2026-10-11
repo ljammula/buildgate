@@ -2415,19 +2415,7 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 			// report already sitting in its isolated worktree. Best-effort
 			// and non-fatal: a run whose build never got far enough to
 			// write one simply has nothing here to retain.
-			s.retainBuildArtifacts(id, loaded.WorkspacePath)
-			if err := release.Rollback(loaded.ProjectPath, loaded.WorkspacePath, loaded.Branch, loaded.OnBranch != ""); err != nil {
-				log.Printf("run %s: rollback of isolated workspace after override failed: %v", id, err)
-			} else {
-				// The override is the human decision that ends a kept
-				// worktree's wait; the worktree is gone, so the flag is too.
-				if loaded.KeptForResume {
-					loaded.KeptForResume = false
-					if err := loaded.Persist(s.dataDir); err != nil {
-						log.Printf("run %s: clear kept-for-resume after override rollback: %v", id, err)
-					}
-				}
-			}
+			s.rollbackOverriddenRun(id, loaded)
 		}
 		// This runs inside run.WithLock's own callback, so calling a
 		// blocking dispatch here directly would hold this run's
@@ -4842,4 +4830,26 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// rollbackOverriddenRun removes the isolated worktree and branch of loaded,
+// a run just overridden to halted, keeping its build artifacts first, and
+// clears its kept-for-resume flag once they are gone. Nothing is removed
+// when a resumed run adopted the worktree (release.RollbackOverridden).
+func (s *Server) rollbackOverriddenRun(id string, loaded *run.Run) {
+	s.retainBuildArtifacts(id, loaded.WorkspacePath)
+	removed, err := release.RollbackOverridden(s.dataDir, loaded)
+	if err != nil {
+		log.Printf("run %s: rollback of isolated workspace after override failed: %v", id, err)
+		return
+	}
+	if !removed || !loaded.KeptForResume {
+		return
+	}
+	// The override is the human decision that ends a kept worktree's wait;
+	// the worktree is gone, so the flag is too.
+	loaded.KeptForResume = false
+	if err := loaded.Persist(s.dataDir); err != nil {
+		log.Printf("run %s: clear kept-for-resume after override rollback: %v", id, err)
+	}
 }

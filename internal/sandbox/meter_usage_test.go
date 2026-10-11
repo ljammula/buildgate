@@ -103,7 +103,7 @@ func TestSandboxMeterUsageReportsACeilingRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := MeterUsage{InputTokens: 100, OutputTokens: 20, CostMicroUSD: 7, ReasoningEffort: "other", ReasoningEffortAnomaly: true, CeilingExceeded: true, Calls: meter.Calls{DeniedCeiling: 1}}
+	want := MeterUsage{InputTokens: 100, OutputTokens: 20, CostMicroUSD: 7, ReasoningEffort: "other", ReasoningEffortAnomaly: true, CeilingExceeded: true, Calls: meter.Calls{DeniedCeiling: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByMeter}}
 	if usage != want {
 		t.Fatalf("usage = %+v, want %+v", usage, want)
 	}

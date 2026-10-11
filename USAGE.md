@@ -51,7 +51,7 @@ act in "you" rows.
 | `plan_review` | **you** | `approve` (to `building`) or `reject -reason` (back to `planning`) |
 | `building` | factory | One ticket at a time in the Docker sandbox, verified, gated, PR opened when release policy allows. A quarantine whose failed gates are only `spec_conformity` and/or `code_review` first gets up to `-review-corrective-rounds` (default `1`) automatic corrective builds on the same branch before quarantining. So does a quarantine by other checks a build can fix when told what failed (a failed verification, a command or repository gate, a diff outside Allowed-Files, a missing required file or content): that build is given the factory's record of the failed attempt, and the same budget covers both kinds. A failed `tests_added`, an unknown check or a halt gets none. A review that gave no verdict (it timed out or returned nothing; the combined review has 20 minutes) is no quarantine and gets no corrective build: nothing was judged, so the request waits in `resume_review` with the cause, and the build is kept |
 | `pr_review` | **you** (on GitHub) | Trusted reviewer comments trigger corrective rounds; PR auto-marked ready once checks pass and no thread blocks it; merging is yours. Next ticket starts once this one is accepted (or, under `-advance-on pr_approved`, once reviewer-approved) |
-| `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, or a review gave no verdict. The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
+| `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft. The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
 | `done` | - | Every ticket's PR merged |
 | `quarantined` / `halted` | **you** | Read the reason in `factoryd status`/console, fix the cause, `factoryd retry <id>` (a rebuilt ticket continues from the failed attempt's commit when a build may be told what failed; `-from scratch` rebuilds from the base: [reference](USAGE_REFERENCE.md#request-lifecycle); console: Retry request, with **Retry from scratch** ticked for `-from scratch`) -- or, before any ticket is accepted, send it back to redraft the plan or the spec: `factoryd reject -to plan\|spec -reason "..." <id>` (`plan`/`planning` and `spec`/`spec_drafting`) -- or, to drop the request instead, `factoryd cancel <id>`. A retry after the factory's own checks refused a drafted spec or plan gives the next draft their reason; a failed or timed-out draft job does not ([reference](USAGE_REFERENCE.md#a-retried-draft)) |
 
@@ -966,7 +966,7 @@ carries a token.
 | reaches `spec_review` | Spec ready for your review | On entry, then every `hitl_reminder_interval` while it waits |
 | reaches `oracle_review` | Acceptance tests ready for your review | Same |
 | reaches `plan_review` | Plan ready for your review | Same |
-| reaches `resume_review` | A step was lost: choose how to continue | Same |
+| reaches `resume_review` | A step gave no verdict on the work: choose how to continue | Same |
 | is halted | Halted: needs you | Once, with the reason |
 | is quarantined | Quarantined: needs you | Once, with the reason. A quarantined build the factory follows with a corrective round of its own sends nothing |
 | has a pull request ready to merge | Pull request ready to merge | Once per pull request head |
@@ -1238,15 +1238,17 @@ or `max_review_rounds`. A request run by
 `-hitl-reminder-interval`) for one of three decisions:
 
 ```text
-step lost (heartbeat stops)
+step gives no verdict (worker lost, sandbox not started, route not serving)
         |
         v
-run halted, lost build's worktree kept      request -> resume_review
+run halted or left quarantined, worktree kept   request -> resume_review
         |
         +-- factoryd resume <id>               continue the build from the last
         |                                      completed round (fresh agent session +
-        |                                      short handoff), or rerun a lost
-        |                                      drafting / planning step
+        |                                      short handoff); keep a build that had
+        |                                      finished and run only the gates and the
+        |                                      review again; or rerun a lost drafting /
+        |                                      planning step
         +-- factoryd resume -from scratch <id> rebuild the ticket, reaping the kept worktree
         +-- factoryd cancel <id>               withdraw it, reaping the kept worktree
 ```

@@ -21,7 +21,10 @@ import (
 // can provoke each of these. So this is only ever a reason to hand a step
 // that did not pass to a human; it accepts nothing and rejects nothing.
 func ModelRouteCause(calls *meter.Calls) unresolved.Cause {
-	if calls == nil || calls.Legacy || calls.Recorded() == 0 {
+	if calls == nil || calls.Legacy || calls.Recorded() == calls.Rejected {
+		// No record, a ledger that cannot say, or nothing but requests
+		// the upstream rejected as malformed (a 4xx other than 429): that
+		// last is the client's doing, and a second try would meet it again.
 		return ""
 	}
 	if calls.Served() && calls.RefusedAtEnd == 0 {
@@ -65,14 +68,14 @@ func LastReviewCalls(r *Run) *meter.Calls {
 	return nil
 }
 
-// ProviderRetryAt is the latest time the model provider asked any launch of
-// r to wait until (meter.Calls.RetryAt), "" when it gave none.
+// ProviderRetryAt is the time the model provider asked r's most recent
+// launch that recorded one to wait until (meter.Calls.RetryAt), "" when no
+// launch did. An earlier launch's time is not shown for a later refusal.
 func ProviderRetryAt(r *Run) string {
-	at := ""
-	for _, attempt := range r.Attempts {
-		if attempt.RelayCalls != nil && attempt.RelayCalls.RetryAt > at {
-			at = attempt.RelayCalls.RetryAt
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if calls := r.Attempts[i].RelayCalls; calls != nil && calls.RetryAt != "" {
+			return calls.RetryAt
 		}
 	}
-	return at
+	return ""
 }

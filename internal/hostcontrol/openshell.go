@@ -253,7 +253,13 @@ func StartOpenShell(dp Deps, ctx context.Context, w io.Writer, st OpenShellStack
 	if startErr != nil {
 		return startErr
 	}
-	return writeIfChanged(filepath.Join(dir, OpenShellMeterImageFile), []byte(st.MeterImage+"\n"))
+	// The stack is up. Without the record the next `doctor -fix` restarts
+	// it once more to be sure of its meter image, which is the safe reading;
+	// failing here would report a started stack as not started.
+	if err := writeIfChanged(filepath.Join(dir, OpenShellMeterImageFile), []byte(st.MeterImage+"\n")); err != nil {
+		fmt.Fprintf(w, "openshell: started, but the meter image it runs could not be recorded: %v\n", err)
+	}
+	return nil
 }
 
 // StartedMeterImage is the image the stack's meter was last started from.

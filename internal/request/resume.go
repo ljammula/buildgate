@@ -211,7 +211,7 @@ func (r *Request) resumeNextAction() string {
 		return fmt.Sprintf("%s: `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID)
 	}
 	if from == StateBuilding {
-		return fmt.Sprintf("%s: `factoryd resume %s` continues it in its kept worktree from the last completed round, `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
+		return fmt.Sprintf("%s: `factoryd resume %s` continues it in its kept worktree (a build from its last completed round; a build that had finished is kept and only the steps after it run again), `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
 	}
 	return fmt.Sprintf("%s: `factoryd resume %s` runs it again, or `factoryd cancel %s`", what, r.ID, r.ID)
 }

@@ -74,16 +74,23 @@ func TestAnOracleDraftScriptExitIsAJobFailureOnlyWithoutAnAnswerOrEvidence(t *te
 		evidence bool
 		want     unresolved.Cause // "" for a failed draft
 	}{
-		"crashed before its evidence":          {1, meter.Calls{Answered: 4}, false, unresolved.DraftingJob},
-		"crashed, no model route":              {1, meter.Calls{}, false, unresolved.DraftingJob},
-		"its own failed verdict":               {2, meter.Calls{Answered: 2, Failed: 6}, true, ""},
-		"its own failed verdict, no ledger":    {2, meter.Calls{}, true, ""},
-		"an answer whose usage was unread":     {2, meter.Calls{AnsweredUnread: 1, Failed: 2}, true, ""},
-		"no request answered":                  {2, meter.Calls{Failed: 2, Unanswered: 1}, true, unresolved.ModelUnavailable},
-		"every request rejected upstream":      {2, meter.Calls{Rejected: 3}, true, unresolved.ModelUnavailable},
-		"none answered, one a 429":             {2, meter.Calls{RateLimited: 1, Failed: 2}, true, unresolved.ProviderQuota},
-		"every request refused by the meter":   {2, meter.Calls{DeniedBudget: 2, DeniedRate: 1}, true, unresolved.MeterDenied},
-		"meter refusals after a 429":           {2, meter.Calls{RateLimited: 1, DeniedCeiling: 2}, true, unresolved.ProviderQuota},
+		"crashed before its evidence":         {1, meter.Calls{Answered: 4}, false, unresolved.DraftingJob},
+		"crashed, no model route":             {1, meter.Calls{}, false, unresolved.DraftingJob},
+		"its own failed verdict":              {2, meter.Calls{Answered: 2, Failed: 6, RefusedAtEnd: 6, RefusedAtEndBy: meter.RefusedByProviderError}, true, ""},
+		"answered, then the provider's limit": {2, meter.Calls{Answered: 12, RateLimited: 3, RefusedAtEnd: 3, RefusedAtEndBy: meter.RefusedByProviderLimit}, true, ""},
+		"its own failed verdict, no ledger":   {2, meter.Calls{}, true, ""},
+		// A success head with unread usage may have delivered nothing: by
+		// the rule every model step shares (run.ModelRouteCause) the route
+		// did not serve the job.
+		"an answer whose usage was unread": {2, meter.Calls{AnsweredUnread: 1, Failed: 2}, true, unresolved.ModelUnavailable},
+		"no request answered":              {2, meter.Calls{Failed: 2, Unanswered: 1}, true, unresolved.ModelUnavailable},
+		// Rejected as malformed is the job's own doing: its evidence stands.
+		"every request rejected upstream":    {2, meter.Calls{Rejected: 3}, true, ""},
+		"none answered, one a 429":           {2, meter.Calls{RateLimited: 1, Failed: 2}, true, unresolved.ProviderQuota},
+		"every request refused by the meter": {2, meter.Calls{DeniedBudget: 2, DeniedRate: 1}, true, unresolved.MeterDenied},
+		// Who refused last names the cause; with nothing served and no
+		// order known, the meter's own refusals do.
+		"meter refusals after a 429":           {2, meter.Calls{RateLimited: 1, DeniedCeiling: 2}, true, unresolved.MeterDenied},
 		"none answered, records without facts": {2, meter.Calls{Failed: 3, Legacy: true}, true, ""},
 	}
 	for name, tc := range cases {

@@ -337,3 +337,71 @@ func TestWorktreeExistsOnlyForAnExistingDirectory(t *testing.T) {
 		t.Error("worktreeExists must be true only for an existing directory")
 	}
 }
+
+// A quarantined run whose review gave no verdict is kept and can be resumed;
+// the run that adopts its worktree owns it from then on. An operator who then
+// overrides the original run to halted must not remove what the resumed run
+// is building in: the worktree is another run's marker's now.
+func TestOverridingARunWhoseWorktreeAnotherRunAdoptedRemovesNothing(t *testing.T) {
+	dataDir, repoDir, marker, _ := requestdrivertest.KeptRun(t, "kept-run")
+	original, err := run.Load(dataDir, "kept-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := release.RollbackOverridden(dataDir, original)
+	if err != nil || !removed {
+		t.Fatalf("a run that still owns its worktree: removed = %v, err = %v; want it removed", removed, err)
+	}
+	if _, statErr := os.Stat(marker.WorktreePath); !os.IsNotExist(statErr) {
+		t.Fatalf("worktree still there after the override's rollback (stat err = %v)", statErr)
+	}
+
+	dataDir, repoDir, marker, _ = requestdrivertest.KeptRun(t, "kept-run")
+	adopted := marker
+	adopted.RunID = "resumed-run"
+	if err := wsisolation.WriteIsolationMarker(wsisolation.IsolationMarkerPath(dataDir, "resumed-run"), adopted); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(wsisolation.IsolationMarkerPath(dataDir, "kept-run")); err != nil {
+		t.Fatal(err)
+	}
+	if original, err = run.Load(dataDir, "kept-run"); err != nil {
+		t.Fatal(err)
+	}
+	removed, err = release.RollbackOverridden(dataDir, original)
+	if err != nil || removed {
+		t.Fatalf("a worktree the resumed run adopted: removed = %v, err = %v; want nothing removed", removed, err)
+	}
+	if _, statErr := os.Stat(marker.WorktreePath); statErr != nil {
+		t.Errorf("the resumed run's worktree was removed: %v", statErr)
+	}
+	if out := requestdrivertest.WorktreeGitOut(t, repoDir, "branch", "--list", marker.Branch); out == "" {
+		t.Errorf("the resumed run's branch %s was deleted", marker.Branch)
+	}
+}
+
+// A kept run an operator's override accepted is a result: a later cancel or
+// rebuild of its request clears the flag and reaps nothing.
+func TestClearKeptForResumeNeverReapsAnAcceptedRun(t *testing.T) {
+	dataDir, repoDir, marker, _ := requestdrivertest.KeptRun(t, "kept-run")
+	r, err := run.Load(dataDir, "kept-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.State = run.StateAccepted
+	if err := r.Persist(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := release.ClearKeptForResume(dataDir, "kept-run"); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(marker.WorktreePath); statErr != nil {
+		t.Errorf("an accepted run's worktree was reaped: %v", statErr)
+	}
+	if out := requestdrivertest.WorktreeGitOut(t, repoDir, "branch", "--list", marker.Branch); out == "" {
+		t.Errorf("an accepted run's branch %s was deleted", marker.Branch)
+	}
+	if got, _ := run.Load(dataDir, "kept-run"); got.KeptForResume {
+		t.Error("flag still set")
+	}
+}

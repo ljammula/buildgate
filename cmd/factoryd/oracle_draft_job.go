@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/run"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -406,22 +407,16 @@ func scriptExitJobFailure(res runner.Result, evidencePath string, timedOut bool)
 	return "", "", false
 }
 
-// unservedCause reads a launch's ledger summary for the one case that is no
-// verdict on a draft: requests were recorded and none was answered. It names
-// the meter when every request was refused by the meter itself, the provider
-// when one was answered 429, and otherwise the route. A summary inferred
-// from records without settlement facts (Legacy) decides nothing.
+// unservedCause is why a launch none of whose model requests was served got
+// none (run.ModelRouteCause, the rule the build and review steps share). ok
+// is false when any request was answered: a script that was served and then
+// refused has its own evidence to be judged by.
 func unservedCause(calls meter.Calls) (unresolved.Cause, bool) {
-	if calls.Legacy || calls.Recorded() == 0 || calls.Answered+calls.AnsweredUnread > 0 {
+	if calls.Served() {
 		return "", false
 	}
-	switch {
-	case calls.Denied() == calls.Recorded():
-		return unresolved.MeterDenied, true
-	case calls.RateLimited > 0:
-		return unresolved.ProviderQuota, true
-	}
-	return unresolved.ModelUnavailable, true
+	cause := run.ModelRouteCause(run.AttemptCalls(calls))
+	return cause, cause != ""
 }
 
 // autoRedrafts is how many times a draft that fails the host's compile

@@ -84,11 +84,12 @@ func TestAnOracleDraftingJobFailureWaitsInResumeReviewWithItsCause(t *testing.T)
 	}
 }
 
-// `factoryd resume` returns the request to oracle_drafting and the step
-// drafts again: a second job failure waits in resume_review under a new
-// Generation, and a draft that succeeds reaches oracle_review carrying what
-// the failed passes spent.
-func TestAResumedOracleDraftingStepDraftsAgainAndASecondFailureIsANewGeneration(t *testing.T) {
+// A resume drafts again. When the resumed pass fails as a job too, the
+// request does not wait in resume_review a second time, where cancel would
+// be the only way out of a failure that repeats: it reaches oracle_review
+// with a failed draft, where the operator can also hand-write the oracles or
+// approve without them. The spend of every pass is kept.
+func TestAResumedOracleDraftingPassThatFailsAgainReachesOracleReview(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
 	spend := func(cost int64) *request.JobSpend {
@@ -125,14 +126,30 @@ func TestAResumedOracleDraftingStepDraftsAgainAndASecondFailureIsANewGeneration(
 		t.Fatal(err)
 	}
 	second := requestdrivertest.LoadRequest(t, dataDir, id)
-	if second.State != request.StateResumeReview || second.Resume == nil || second.Resume.Generation != 2 {
-		t.Fatalf("second failure: State = %q, Resume = %+v; want resume_review, Generation 2", second.State, second.Resume)
+	if second.State != request.StateOracleReview || second.OracleDraft == nil || second.OracleDraft.Status != request.OracleDraftFailed {
+		t.Fatalf("the resumed pass failed again: State = %q, OracleDraft = %+v; want a failed draft in oracle_review", second.State, second.OracleDraft)
 	}
-	if second.NotifyCount != 1 {
-		t.Errorf("NotifyCount = %d, want the new entry's own first reminder", second.NotifyCount)
+	if !strings.Contains(second.OracleDraft.Detail, "exited 1") {
+		t.Errorf("Detail = %q, want what the job reported", second.OracleDraft.Detail)
 	}
+	if second.OracleDraft.Spend == nil || second.OracleDraft.Spend.CostMicroUSD != 15 {
+		t.Errorf("Spend = %+v, want both failed passes: 15", second.OracleDraft.Spend)
+	}
+}
 
-	if _, err := resumeOracleDrafting(dataDir, id, gate); err != nil {
+// A resumed pass that succeeds is an ordinary draft, with the failed pass's
+// spend added to its own.
+func TestAResumedOracleDraftingPassThatDraftsReachesOracleReview(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
+	spend := func(cost int64) *request.JobSpend {
+		return &request.JobSpend{Role: "review", Model: "model-a", CostMicroUSD: cost, At: time.Now()}
+	}
+	failed, _ := requestdrivertest.StubOracleDraftRunner(request.OracleDraft{}, &requestdriver.OracleDraftJobFailure{Cause: unresolved.ModelUnavailable, Err: errors.New("no request answered"), Spend: spend(10)})
+	if err := driveOracleDrafting(t, dp, context.Background(), dataDir, failed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resumeOracleDrafting(dataDir, id, requestdriver.ResumeGate{Containers: &requestdrivertest.FakeJobContainers{}}); err != nil {
 		t.Fatal(err)
 	}
 	drafted, calls := requestdrivertest.StubOracleDraftRunner(request.OracleDraft{Status: request.OracleDrafted, Files: []string{"oracle_001_test.go"}, Spend: spend(100)}, nil)
@@ -146,8 +163,8 @@ func TestAResumedOracleDraftingStepDraftsAgainAndASecondFailureIsANewGeneration(
 	if len(*calls) != 1 {
 		t.Errorf("redraft calls = %d, want 1", len(*calls))
 	}
-	if got.OracleDraft.Spend == nil || got.OracleDraft.Spend.CostMicroUSD != 115 {
-		t.Errorf("Spend = %+v, want the two failed passes and the draft: 115", got.OracleDraft.Spend)
+	if got.OracleDraft.Spend == nil || got.OracleDraft.Spend.CostMicroUSD != 110 {
+		t.Errorf("Spend = %+v, want the failed pass and the draft: 110", got.OracleDraft.Spend)
 	}
 }
 

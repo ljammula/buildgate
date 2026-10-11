@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,5 +107,23 @@ func TestRegistryProxyLifecycleUpstreamFailures(t *testing.T) {
 	}
 	if _, known := lifecycle.UpstreamFailures(context.Background()); known {
 		t.Error("after cleanup: the count read as known")
+	}
+}
+
+// The proxy logs a line for every request, so a worker decides how long the
+// log is and how long a line is: the scan holds one bounded line at a time,
+// skips a line longer than that, and still finds the totals around it.
+func TestScanRegistryProxyUpstreamFailuresIsBoundedByLineNotByLog(t *testing.T) {
+	var log strings.Builder
+	log.WriteString("2026/10/11 10:00:00 " + registryProxyListeningLogLine + "\n")
+	log.WriteString("2026/10/11 10:00:01 " + registryProxyUpstreamFailuresLogPrefix + "1\n")
+	log.WriteString("2026/10/11 10:00:02 GET \"/" + strings.Repeat("a", 3*maxRegistryProxyLogLine) + " " + registryProxyUpstreamFailuresLogPrefix + "99\" status=404\n")
+	for i := 0; i < 20000; i++ {
+		log.WriteString("2026/10/11 10:00:03 GET \"/simple/pkg/\" status=404 bytes=0\n")
+	}
+	log.WriteString("2026/10/11 10:00:04 " + registryProxyUpstreamFailuresLogPrefix + "3\n")
+	count, known, err := scanRegistryProxyUpstreamFailures(strings.NewReader(log.String()))
+	if err != nil || !known || count != 3 {
+		t.Errorf("count = %d, known = %v, err = %v; want 3 from a log of %d bytes", count, known, err, log.Len())
 	}
 }

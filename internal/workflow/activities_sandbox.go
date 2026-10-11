@@ -57,13 +57,15 @@ func startedAndNotRelaunched(ctx context.Context, runErr error) bool {
 type relaunchUnservedKey struct{}
 
 // relaunchUnserved marks ctx as a model step that is launched once more
-// when a launch ran to its exit and the meter's ledger shows the model route
-// served none of its requests for no reason a second launch would meet again
-// (run.ModelRouteCause is unresolved.ModelUnavailable: a cut stream, a route
-// that did not respond). Nothing was answered, so nothing is spent twice.
-// A launch the provider's limit or the meter refused is not launched again:
-// the second would be refused as well. The review steps set it; the count
-// stays the caller's maxAttempts.
+// when a launch ran to its exit and the meter's ledger shows that not one of
+// its requests was served, by the route's or the provider's doing
+// (run.ModelRouteCause is unresolved.ModelUnavailable or ProviderQuota: a
+// cut stream, a route that did not respond, a rate limit that may have
+// passed). Nothing was answered, so there is no verdict to lose and nothing
+// is spent twice. A launch that was served at all is never launched again,
+// whatever came after its answers; nor is one the meter itself refused,
+// which the same settings would refuse again. The review steps set it; the
+// count stays the caller's maxAttempts.
 func relaunchUnserved(ctx context.Context) context.Context {
 	return context.WithValue(ctx, relaunchUnservedKey{}, true)
 }
@@ -71,7 +73,11 @@ func relaunchUnserved(ctx context.Context) context.Context {
 // unservedAndRelaunched reports a launch that exited with no error and is
 // to be made again under relaunchUnserved.
 func unservedAndRelaunched(ctx context.Context, calls meter.Calls) bool {
-	return ctx.Value(relaunchUnservedKey{}) != nil && run.ModelRouteCause(run.AttemptCalls(calls)) == unresolved.ModelUnavailable
+	if ctx.Value(relaunchUnservedKey{}) == nil || calls.Served() {
+		return false
+	}
+	cause := run.ModelRouteCause(run.AttemptCalls(calls))
+	return cause == unresolved.ModelUnavailable || cause == unresolved.ProviderQuota
 }
 
 // endsAttempts reports whether the attempt that returned runErr is the
@@ -117,6 +123,19 @@ func afterACommandRan(lastErr error, commandRan bool) error {
 
 // errOutOfTime is in the chain of every outOfTime error.
 var errOutOfTime = errors.New("insufficient time remaining for a sandboxed attempt")
+
+// noRoomForAttempt is what the loop returns when the Activity's deadline
+// leaves no room to start an attempt. When the launch before it ran to an
+// exit (a model step being launched again because its route served
+// nothing), that launch's result stands, with no error: running out of time
+// for the second try must not turn a result into an infrastructure failure
+// that rolls the worktree back. Otherwise it is outOfTime.
+func noRoomForAttempt(last runner.Result, margin time.Duration, lastErr error, commandRan bool) (runner.Result, error) {
+	if lastErr == nil && commandRan {
+		return last, nil
+	}
+	return last, outOfTime(margin, afterACommandRan(lastErr, commandRan))
+}
 
 // outOfTime is the error of an attempt the Activity's deadline leaves no
 // room for. It carries the earlier attempt's error, so a launch that failed
@@ -517,7 +536,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return last, ctxErr
 			}
-			return last, outOfTime(margin, afterACommandRan(lastErr, commandRan))
+			return noRoomForAttempt(last, margin, lastErr, commandRan)
 		}
 		if registryProxy != nil {
 			// Ensure runs before the worker timeout below is computed, not
@@ -581,7 +600,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return last, ctxErr
 			}
-			return last, outOfTime(margin, afterACommandRan(lastErr, commandRan))
+			return noRoomForAttempt(last, margin, lastErr, commandRan)
 		}
 		// runIDFor(input), not the Temporal Workflow ID (found via review):
 		// runViaRepositoryOwner's child executes under

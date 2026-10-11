@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"buildgate/internal/evidence"
+	"buildgate/internal/meter"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sandbox/sandboxtest"
@@ -69,7 +70,11 @@ func (f *keptBuildFixture) build() (BuildActivityResult, error) {
 // nothing. Every gate still runs afterwards, on that commit.
 func TestAResumedRunKeepsAFinishedBuildInsteadOfBuildingAgain(t *testing.T) {
 	f := newKeptBuildFixture(t)
-	f.saveEarlier(&run.Run{State: run.StateQuarantined, ResultSHA: f.head, Attempts: []run.Attempt{{Kind: "build", ExitCode: 0}, {Kind: "verify", ExitCode: 0}, {Kind: "review", ExitCode: 1}}})
+	f.saveEarlier(&run.Run{State: run.StateQuarantined, ResultSHA: f.head, Attempts: []run.Attempt{
+		{Kind: "build", ExitCode: 0, ImageDigest: "sha256:worker", Harness: "codex", Role: run.AttemptRoleExecution, RelayRoute: "codex", RelayConsumedInputTokens: 900, RelayConsumedCostMicroUSD: 70, LogPath: "/earlier/build.log", RelayCalls: &meter.Calls{Answered: 9}},
+		{Kind: "verify", ExitCode: 0, ImageDigest: "sha256:worker"},
+		{Kind: "review", ExitCode: 1, ImageDigest: "sha256:worker"},
+	}})
 	earlierEvidence := filepath.Join(run.Dir(f.acts.dataDirFor(f.input), "earlier"), evidence.BuildEvidenceFileName)
 	writeFile(t, earlierEvidence, `{"rounds":[{"round":1}]}`)
 	res, err := f.build()
@@ -80,7 +85,22 @@ func TestAResumedRunKeepsAFinishedBuildInsteadOfBuildingAgain(t *testing.T) {
 		t.Errorf("sandboxes created = %d, want none: the build was finished", f.creates)
 	}
 	if res.Result.ExitCode != 0 || len(res.Attempts) != 1 || res.Attempts[0].KeptFromRun != "earlier" || res.Attempts[0].Kind != "build" {
-		t.Errorf("result = %+v, want one passed build attempt kept from the earlier run", res)
+		t.Fatalf("result = %+v, want one passed build attempt kept from the earlier run", res)
+	}
+	// The resumed run's release decision asks of its build attempt whether
+	// it ran in the sandbox: the kept attempt must say how the build was
+	// made, or an accepted run could never open its pull request.
+	kept := res.Attempts[0]
+	if kept.ImageDigest != "sha256:worker" || kept.Harness != "codex" || kept.RelayRoute != "codex" {
+		t.Errorf("kept attempt = %+v, want the earlier build's image, harness and route", kept)
+	}
+	resumed := &run.Run{Attempts: []run.Attempt{kept, {Kind: "verify", ExitCode: 0, ImageDigest: "sha256:worker"}}}
+	if !resumed.Sandboxed() {
+		t.Error("a run whose kept build ran in the sandbox does not read as sandboxed")
+	}
+	// What the earlier build spent is that run's, carried as a total.
+	if kept.RelayConsumedInputTokens != 0 || kept.RelayConsumedCostMicroUSD != 0 || kept.RelayCalls != nil || kept.LogPath != "" {
+		t.Errorf("kept attempt carries the earlier run's spend or log: %+v", kept)
 	}
 	if got, err := os.ReadFile(filepath.Join(f.acts.logDirFor(f.input), evidence.BuildEvidenceFileName)); err != nil || string(got) != `{"rounds":[{"round":1}]}` {
 		t.Errorf("the kept build's evidence in the resumed run's directory = %q, %v", got, err)

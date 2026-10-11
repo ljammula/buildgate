@@ -192,7 +192,7 @@ Inside `building`, one ticket at a time:
        +-- fails, and the failure is not the ticket's own work --> halted
        |
        v
-  agent builds in the sandbox ----- worker lost (sleep, crash, stop) ----+
+  agent builds in the sandbox -- no verdict (worker lost, route down) ---+
        |                                                                 |
        v                                                                 v
   gates, all factory-owned:                              run halts, worktree is kept,

@@ -491,7 +491,9 @@ requires a new contract review and an updated machine-checkable test.
   answered 5xx; it counts no 4xx, no request it refused (method, path, a
   redirect outside the route's allowlist, its own concurrency limit), none
   its client abandoned, and none served from its cache or a local
-  directory. The count is read from the proxy container's log before and
+  directory. A worker can provoke a counted failure (a client that reads a
+  response more slowly than the upstream timeout), so this cause too only
+  hands a failed step to a human. The count is read from the proxy container's log before and
   after each launch: with no registry proxy, or when either read fails,
   the step is judged as if nothing had been counted. The second run is not
   made when less than twice the first run's duration is left of the
@@ -501,10 +503,58 @@ requires a new contract review and an updated machine-checkable test.
   that gives up on a request before the proxy's upstream timeout is not
   counted; the oracle canary, a gate's rerun on the base commit and the
   verify after an oracle commit are judged without it. A baseline that
-  ends so halts with this cause, never `baseline_verify_failed`, and the
-  step does not count toward a repository's stop line.
+  ends so halts with this cause, never `baseline_verify_failed`.
+  `model_unavailable`, `provider_quota` and `meter_denied` are read from
+  the spend meter's ledger of the step's last launch, which the meter
+  writes outside the sandbox from each response's head: the model route
+  did not serve the step when no request got an answer whose usage was
+  read, or when the requests since the last such answer were refused by
+  the provider (HTTP 429: `provider_quota`; another failure status:
+  `model_unavailable`) or by the meter itself at a ceiling, a window budget
+  or the request rate (`meter_denied`). A request that simply got no
+  response, or that the upstream rejected as malformed, neither counts as
+  a refusal nor ends the count, and a step all of whose requests were
+  rejected as malformed has no cause: that is the client's doing. So a
+  route that stops accepting connections after it answered is not seen. A
+  ledger written before the meter recorded how requests ended names no
+  cause. They apply to three steps: a build that exited without succeeding
+  (its Activity then fails with the cause's type, the run halts and keeps
+  its worktree, and no corrective build is spent), a review all of whose
+  failed gates gave no verdict (below), and an oracle-drafting job none of
+  whose requests was served.
+  A worker chooses its requests and can provoke each of these, so they
+  only ever hand a step that did not pass to a human; they accept nothing
+  and reject nothing. `no_verdict` is such a review for which the ledger
+  names no route failure. A review gave no verdict when nothing was
+  flagged or blocking and every review gate that failed did so for want of
+  an answer: a criterion went unanswered for spec conformity, the reviewer
+  returned no findings list for code review. Its run stays quarantined and
+  is kept for a resume, with no quarantine check on the request and no
+  corrective build. A review launch that exited with not one request
+  served, by the route's or the provider's doing (`model_unavailable`,
+  `provider_quota`), is launched once more inside the same Activity,
+  within `-verify-max-attempts`; one that was served at all, and one the
+  meter refused, are not, and a second launch the Activity's deadline
+  leaves no room for leaves the first launch's result standing. The review
+  script asks again only for an answer that arrived incomplete, never
+  after a turn that failed. A resumed run whose adopted worktree is clean
+  at the result commit the adopted run recorded, that run's last build
+  attempt having exited 0, launches no build: the build step returns that
+  build, recorded with the image and harness it was made with, and every
+  gate and the review run on that commit. Only a run that ended (a
+  quarantine) records a result commit; a resume of a run an Activity
+  failure halted builds as before. An operator's override of a run to
+  halted removes its worktree only while no other run's isolation marker
+  claims it.
+  An oracle-drafting job that ended before its script reached a result
+  (its sandbox never started, none of its model requests was served, or it
+  exited with no evidence file: `drafting_job` when nothing more specific
+  is known) moves its request from `oracle_drafting` to `resume_review`.
+  When the pass a resume started fails so again, the request goes on to
+  `oracle_review` with a failed draft, where the operator can also write
+  the oracles by hand or approve without them.
   A spec-drafting or planning job whose sandbox does not start
-  halts its request; only a run's steps are covered here. The run halts with the cause
+  halts its request. The run halts with the cause
   as its `HaltReasonCode`, a ticket run keeps its worktree (one built on an existing branch
   keeps none and can only be rebuilt), and the request waits in
   `resume_review` with the cause; a corrective or PR-review round
@@ -517,8 +567,9 @@ requires a new contract review and an updated machine-checkable test.
   or named-gate command. The build (`-build-app-max-attempts`) and canonical
   verify (`-verify-max-attempts`) launch again after any launch error
   except an unconfirmed removal, a command started twice or a reached
-  ceiling. Temporal's `MaximumAttempts: 1` stands. A launch failure counts
-  toward a repository's stop line as an infrastructure failure does. An
+  ceiling. Temporal's `MaximumAttempts: 1` stands. A run that halts for any
+  of these causes but `worker_lost` counts toward a repository's stop line
+  as an infrastructure failure does. An
   unresolved step accepts nothing: every gate still runs on what a resume
   produces.
 - **SC-018 — only a build is told about an earlier attempt, and only from
@@ -846,13 +897,16 @@ wording of an error or of the script's output: the launch returned no exit
 code (cause `sandbox_launch` when the sandbox never released the script and
 its removal was confirmed, otherwise `drafting_job`); the script exited
 non-zero and the meter's ledger holds requests of the launch, none answered
-and none read from records without settlement facts (`meter_denied` when the
-meter refused every one, `provider_quota` when one was answered 429,
-otherwise `model_unavailable`); or the script exited non-zero short of its
+with read usage, not all rejected as malformed, and none read from records
+without settlement facts (the cause is the one SC-017 gives a model route
+that did not serve a step: who refused last, else the meter when it
+refused any, else the provider's limit when it answered 429, else
+`model_unavailable`); or the script exited non-zero short of its
 budget and left no evidence file (`drafting_job`). The evidence file is on a
 mount the worker can write, so a worker can move a pass between `failed` in
 `oracle_review` and this wait; neither accepts anything and both wait for a
-human. Every other end of the step is unchanged: a result the script
+human. A pass that a resume started and that fails as a job again is a
+failed draft in `oracle_review`. Every other end of the step is unchanged: a result the script
 reported, a draft the host's checks refused, and an error from before the
 launch are a `failed` draft in `oracle_review`. A resume is refused while a
 container of the job is alive, and reruns the step.
