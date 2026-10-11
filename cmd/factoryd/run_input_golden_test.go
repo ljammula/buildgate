@@ -33,7 +33,7 @@ func runInputGoldenConfig(t *testing.T) string {
 		"  builder:\n    id: builder-model-id\n    api: openai-completions\n    routes: [golden-route]\n    reasoning: true\n" +
 		"  reviewer:\n    id: reviewer-model-id\n    api: openai-responses\n    routes: [review-route]\n    reasoning: true\n" +
 		"roles:\n" +
-		"  execution: { model: builder, thinking: medium }\n" +
+		"  execution: { model: builder, thinking: medium, escalation: { model: builder, thinking: low } }\n" +
 		"  review: { model: reviewer, thinking: high }\n" +
 		"registry_proxy_image: registry-proxy@sha256:" + strings.Repeat("c", 64) + "\n" +
 		"compose_services_memory: 3g\n" +
@@ -87,6 +87,8 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-build-app-interpreter", "/bin/sh",
 		"-build-app-script", filepath.Join(testdataDir(t), "fake_build_app.sh"),
 		"-build-app-max-attempts", "3",
+		"-execution-model", "builder",
+		"-execution-thinking", "low",
 		"-conformity-policy", "advisory",
 		"-code-review-policy", "advisory",
 		"-spec-acceptance-criteria", write("criteria.md", "1. content.txt has one more line.\n"),

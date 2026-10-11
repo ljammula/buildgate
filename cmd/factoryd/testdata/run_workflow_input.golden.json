@@ -152,7 +152,7 @@
   "spec_acceptance_criteria": "<INPUTS>/criteria.md",
   "spec_path": "<DATA_DIR>/runs/<RUN_ID>/spec.snapshot.md",
   "tests_required_opt_out": "integration fixture doesn't exercise tests_added",
-  "thinking": "medium",
+  "thinking": "low",
   "ticket": "001-golden",
   "ticket_path": "<INPUTS>/spec.md",
   "timeout_minutes": 11,

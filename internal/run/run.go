@@ -1524,6 +1524,12 @@ type Run struct {
 	// record again only by loading that run's handoff afresh, under the
 	// same checks as the first time (SC-018).
 	EarlierAttemptOf string `json:"earlier_attempt_of,omitempty"`
+	// Escalated records that the request driver started this run's build on
+	// roles.execution.escalation: a ticket's automatic corrective build, or
+	// the build that takes the place of one that never finished. Set at the
+	// point the run starts, like RequestID, so the build that follows a lost
+	// one runs on the escalation too.
+	Escalated bool `json:"escalated,omitempty"`
 	// TestsRequiredOptOut is the ticket's declared reason (ticketspec's
 	// "Tests-Required: no -- <reason>") for skipping the tests_added
 	// gate on this run, or "" when the gate ran normally (no opt-out

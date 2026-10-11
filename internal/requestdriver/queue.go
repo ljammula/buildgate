@@ -116,6 +116,11 @@ type QueueEntry struct {
 	// roles.execution.model in effect, exactly as before this field
 	// existed.
 	ExecutionModel string `json:"execution_model,omitempty"`
+	// ExecutionThinking is the reasoning-effort level this one entry's
+	// build runs at instead of roles.execution.thinking
+	// (-execution-thinking): the level of roles.execution.escalation, set
+	// with ExecutionModel by escalate. Empty leaves the role's own.
+	ExecutionThinking string `json:"execution_thinking,omitempty"`
 	// SpecAcceptanceCriteria is the absolute path to a file holding this
 	// ticket's approved-spec acceptance criteria, passed through
 	// to runMainWithReady's own -spec-acceptance-criteria verbatim; empty

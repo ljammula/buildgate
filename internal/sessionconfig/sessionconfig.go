@@ -372,6 +372,44 @@ type RoleConfig struct {
 	// folder NAMES only, never paths, resolved through Config.SkillDirs
 	// (ResolveRoleSkills). A path-shaped entry is refused by ValidateSkills.
 	Skills []string `yaml:"skills,omitempty"`
+	// Escalation names the model an automatic corrective build of a ticket
+	// runs on instead of Model. Only roles.execution may set it
+	// (ValidateRouting); nil means a corrective build runs as the first
+	// build did.
+	Escalation *Escalation `yaml:"escalation,omitempty"`
+}
+
+// Escalation is roles.execution.escalation: the model, and optionally the
+// reasoning-effort level, of a ticket's automatic corrective builds. Like
+// RoleConfig it names a models: key and a level, never an upstream or path.
+type Escalation struct {
+	// Model is a models: key and a member of the role's Allowed
+	// (ValidateRouting), so every check an allowed model gets covers it.
+	Model string `yaml:"model"`
+	// Thinking is the level a corrective build runs at; empty means the
+	// role's own Thinking.
+	Thinking string `yaml:"thinking,omitempty"`
+}
+
+// EscalationModel is the models: key of the role's escalation, "" when the
+// role has none.
+func (rc *RoleConfig) EscalationModel() string {
+	if rc == nil || rc.Escalation == nil {
+		return ""
+	}
+	return rc.Escalation.Model
+}
+
+// EscalationThinking is the level a build on the role's escalation runs at:
+// the escalation's own, else the role's. "" when the role has no escalation.
+func (rc *RoleConfig) EscalationThinking() string {
+	if rc == nil || rc.Escalation == nil {
+		return ""
+	}
+	if rc.Escalation.Thinking != "" {
+		return rc.Escalation.Thinking
+	}
+	return rc.Thinking
 }
 
 // Roles is the roles: session-config block: a model alias and thinking
@@ -881,6 +919,9 @@ roles:
   # buildgate-tdd, buildgate-diagnosing, go-service, typescript-service,
   # flutter-app, kafka-processing, postgres-change, temporal-go.
   # execution: { model: local-model, skills: [buildgate-tdd, buildgate-diagnosing, go-service] }
+  # Optional: run a ticket's automatic corrective builds on another models:
+  # entry, listed in allowed (thinking defaults to the role's own).
+  # execution: { model: local-model, allowed: [local-model, stronger-model], escalation: { model: stronger-model, thinking: high } }
   # allow_shared_model waives the rule that review must not resolve to the
   # same backend as execution -- this example has only one model to pick.
   review: { model: local-model, allow_shared_model: true }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -451,4 +452,29 @@ func writeDockerAlwaysMissingImages(t *testing.T) string {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return fakeDocker
+}
+
+// TestDoctorRoleSelectionsIncludeTheEscalationModel: doctor resolves a route
+// for roles.execution.escalation's model as it does for each role's own,
+// since a corrective build runs on it with no one having picked it; with no
+// escalation the selections are the three roles'.
+func TestDoctorRoleSelectionsIncludeTheEscalationModel(t *testing.T) {
+	settings := sessionconfig.Settings{Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "luna"}}}
+	labels := func() []string {
+		var got []string
+		for _, sel := range doctorRoleSelections(settings) {
+			got = append(got, sel.label+"="+sel.model)
+		}
+		return got
+	}
+	if got, want := labels(), []string{"planning=", "execution=", "review="}; !slices.Equal(got, want) {
+		t.Errorf("no escalation: selections %v, want %v", got, want)
+	}
+	settings.Roles.Execution.Escalation = &sessionconfig.Escalation{Model: "sol"}
+	if got, want := labels(), []string{"planning=", "execution=", "execution.escalation=sol", "review="}; !slices.Equal(got, want) {
+		t.Errorf("with an escalation: selections %v, want %v", got, want)
+	}
+	if got := doctorRoleSelections(sessionconfig.Settings{}); len(got) != 3 {
+		t.Errorf("no roles: %d selections, want the three roles'", len(got))
+	}
 }

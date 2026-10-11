@@ -280,6 +280,9 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.ExecutionModel != "" {
 		args = append(args, "-execution-model", entry.ExecutionModel)
 	}
+	if entry.ExecutionThinking != "" {
+		args = append(args, "-execution-thinking", entry.ExecutionThinking)
+	}
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}

@@ -110,7 +110,7 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 		subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
 		subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
 
-	def _check(self, run, session_name, saved_name):
+	def _check(self, run, session_name, saved_name, retry_name=None):
 		import code_review, combined_review, conformity_review  # noqa: F401
 		with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as inputs:
 			root = Path(d)
@@ -123,7 +123,12 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 			with self._spy() as spy, mock.patch.object(build_app, "sh", return_value=completed):
 				run(root, spec, criteria)
 			sent = spy.call_args.kwargs["prompt"]
-			self.assertEqual(read_saved(root / session_name), {saved_name + ".md": sent})
+			want = {saved_name + ".md": sent}
+			if retry_name:
+				# The empty answer is asked for once more: the same prompt, saved under its own name.
+				self.assertEqual([call.kwargs["prompt"] for call in spy.call_args_list], [sent, sent])
+				want[retry_name + ".md"] = sent
+			self.assertEqual(read_saved(root / session_name), want)
 
 	def test_code_review(self):
 		import code_review
@@ -137,7 +142,7 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 		import combined_review
 		self._check(
 			lambda root, spec, criteria: combined_review.run_combined_review(root, criteria_path=criteria, spec_path=spec, conformity_policy="required", review_policy="required"),
-			".pi-combined-review-session", "review-combined",
+			".pi-combined-review-session", "review-combined", retry_name="review-combined-retry",
 		)
 
 

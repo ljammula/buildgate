@@ -28,6 +28,10 @@ only "criteria", parse_code_review_findings only "findings"), so the
 combined {"criteria": [...], "findings": [...]} answer parses with each
 unchanged.
 
+An answer that lacks one of the two parts, or a turn that fails, gets one
+further turn (see run_combined_review): the missing review alone, or the
+combined turn again.
+
 Writes BOTH CONFORMITY_EVIDENCE.json and CODE_REVIEW_EVIDENCE.json, each
 in exactly conformity_review.py's/code_review.py's own existing schema --
 so every Go reader, golden test, and evidence loader on both the direct
@@ -49,7 +53,10 @@ under --review-policy. 0 means both succeeded; 3 means both failed.
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -72,6 +79,51 @@ COMBINED_EXIT_BASE = 40
 # was still reading files at 10 minutes, twice, and the ticket was
 # quarantined with no verdict at all.
 COMBINED_REVIEW_TIMEOUT_MINUTES = 20
+
+# A standalone review turn's time (build_app.run_review_turn's default): what
+# a retry that asks for one review alone gets.
+STANDALONE_REVIEW_TIMEOUT_MINUTES = 10
+
+# A retry never lengthens the review: the first turn and the retry together
+# get the COMBINED_REVIEW_TIMEOUT_MINUTES the one turn always had, so a run's
+# own deadline (the build's -timeout-minutes plus five) is reached no sooner
+# than before. A retry gets what the first turn left of it, never more than
+# its own turn's timeout, and is skipped when under RETRY_MIN_MINUTES are
+# left: less than that has not been enough for a review of any real diff.
+RETRY_MIN_MINUTES = 5
+
+# The first turn's session folder; the host empties its prompts folder before
+# the launch and copies that folder alone afterwards
+# (workflow.reviewPromptSession, evidence.RetainPrompts). Before a retry,
+# everything else in it (pi's sessions, a codex or copilot home: the first
+# turn's transcript and answer) is removed, and the retry runs in a new folder
+# below it, saving its prompt beside the first one under its own name.
+SESSION_DIR = ".pi-combined-review-session"
+RETRY_SESSION_SUBDIR = "retry"
+
+# How the spend meter's denial reads in a turn's error: the OpenShell
+# supervisor's deny body, matched as codereview.StoppedBy matches it on the Go
+# side, and the wording of a harness that rewords it. A turn the meter stopped
+# is not retried: the second call would be denied as well.
+METER_DENY_CODES = ("budget_exceeded", "ceiling_exceeded", "rate_limited")
+METER_DENY_WORDINGS = ("budget exceeded", "ceiling exceeded", "rate limited", "rate limit exceeded")
+
+# What a retry asks for, by the part of the first answer that was missing.
+RETRY_COMBINED, RETRY_CONFORMITY, RETRY_CODE_REVIEW = "combined", "conformity", "code_review"
+RETRY_PROMPT_NAMES = {
+	RETRY_COMBINED: "review-combined-retry",
+	RETRY_CONFORMITY: "review-conformity-retry",
+	RETRY_CODE_REVIEW: "review-code-retry",
+}
+RETRY_ASKS = {
+	RETRY_COMBINED: "both reviews",
+	RETRY_CONFORMITY: "the spec conformity review alone",
+	RETRY_CODE_REVIEW: "the code review alone",
+}
+
+# The clock the step's budget is measured on; a name of its own so a test can
+# replace it without touching time.monotonic for everything else.
+clock = time.monotonic
 
 DIFF_SELF = prompt_templates.load("combined_review.diff_self", ("base",))
 DIFF_INLINE = prompt_templates.load("combined_review.diff_inline", ("diff",))
@@ -114,6 +166,104 @@ def combined_review_prompt(
 	).removesuffix("\n")
 
 
+def conformity_unavailable(verdicts: list[dict]) -> bool:
+	"""True when the answer held a verdict for no criterion at all (what
+	conformity_evidence reports as an unavailable review). One real verdict
+	makes the half usable, the rest staying unavailable as before."""
+	return bool(verdicts) and all(v["verdict"] == "unavailable" for v in verdicts)
+
+
+def missing_part(verdicts: list[dict], available: bool, error: str) -> tuple[str, str]:
+	"""Returns (which retry the first answer calls for, why), ("", "") when
+	both halves are usable."""
+	no_conformity = conformity_unavailable(verdicts)
+	if no_conformity and not available:
+		if error:
+			return RETRY_COMBINED, f"the first turn failed: {error}"
+		return RETRY_COMBINED, "the first answer had neither a verdict for any criterion nor a findings list"
+	if no_conformity:
+		return RETRY_CONFORMITY, "the combined answer had no verdict for any criterion"
+	if not available:
+		return RETRY_CODE_REVIEW, "the combined answer had no parseable findings list"
+	return "", ""
+
+
+def meter_stop(error: str) -> str:
+	"""What in error says the spend meter stopped the turn, or ""."""
+	if '"middleware":"meter"' in error:
+		for code in METER_DENY_CODES:
+			if f'"reason_code":"{code}"' in error:
+				return code
+	lowered = error.lower()
+	for wording in METER_DENY_WORDINGS:
+		if wording in lowered:
+			return wording
+	return ""
+
+
+def retry_timeout_minutes(part: str, started: float) -> int:
+	"""The retry's timeout: its turn's own, cut to the whole minutes the first
+	turn left of COMBINED_REVIEW_TIMEOUT_MINUTES; 0 when under
+	RETRY_MIN_MINUTES are left."""
+	own = COMBINED_REVIEW_TIMEOUT_MINUTES if part == RETRY_COMBINED else STANDALONE_REVIEW_TIMEOUT_MINUTES
+	left = int((COMBINED_REVIEW_TIMEOUT_MINUTES * 60 - (clock() - started)) // 60)
+	return min(own, left) if left >= RETRY_MIN_MINUTES else 0
+
+
+def _remove(path: str, is_real_dir: bool) -> None:
+	"""Removes path without following a link: a real directory with its
+	contents, anything else by its name."""
+	if is_real_dir:
+		shutil.rmtree(path, ignore_errors=True)
+		return
+	try:
+		os.unlink(path)
+	except OSError:
+		pass
+
+
+def fresh_retry_session_dir(workspace: Path) -> Path | None:
+	"""Returns the retry's session folder, new and empty, after removing what
+	the first turn (or an earlier launch, or the build) left in the review's
+	session folder: everything in it but the saved prompts, so the retry can
+	read neither the first turn's transcript nor its answer. No link is
+	followed: a session folder that is a link (or not a directory) is removed
+	by name and made again, and so is each entry in it. None when something
+	other than the prompts is still there afterwards; the caller then asks
+	nothing."""
+	session = workspace / SESSION_DIR
+	try:
+		if session.is_symlink() or (session.exists() and not session.is_dir()):
+			session.unlink()
+		session.mkdir(exist_ok=True)
+		with os.scandir(session) as entries:
+			for entry in entries:
+				if entry.name != build_app.saved_prompts.PROMPTS_DIR:
+					_remove(entry.path, entry.is_dir(follow_symlinks=False))
+		left = [name for name in os.listdir(session) if name != build_app.saved_prompts.PROMPTS_DIR]
+		if left or session.is_symlink():
+			return None
+		retry = session / RETRY_SESSION_SUBDIR
+		retry.mkdir()
+		return retry
+	except OSError:
+		return None
+
+
+def _evidences(
+	verdicts: list[dict], conformity_error: str, available: bool, findings: list[dict], review_error: str, *,
+	conformity_policy: str, review_policy: str, thinking: str | None, diff_fetch_failed: bool,
+) -> tuple[dict, dict]:
+	conformity = conformity_review.conformity_evidence(
+		verdicts, conformity_error, conformity_policy=conformity_policy, thinking=thinking,
+	)
+	review = code_review.code_review_evidence(
+		available, findings, review_error, review_policy=review_policy, thinking=thinking,
+		diff_fetch_failed=diff_fetch_failed,
+	)
+	return conformity, review
+
+
 def run_combined_review(
 	workspace: Path, *, criteria_path: Path, spec_path: Path,
 	conformity_policy: str = "required", review_policy: str = "required",
@@ -123,21 +273,45 @@ def run_combined_review(
 	"""Runs the one combined turn and returns (conformity_evidence,
 	code_review_evidence) -- both JSON-serializable evidence dicts in
 	exactly conformity_review.py's/code_review.py's own existing shapes.
-	An unavailable turn (a subprocess/relay error, or no parseable JSON
-	answer at all) yields both evidences unavailable, each recording the
-	turn's own error -- parse_conformity_verdicts defaults every criterion
-	to "unavailable" and parse_code_review_findings returns available=False
-	when it finds no "criteria"/"findings" list at all, exactly as either
-	standalone script already behaves for its own unavailable turn."""
+
+	When the answer lacks a part, that part is asked for once more, in one
+	further turn at most (missing_part): the missing review alone, with the
+	standalone reviewer's own prompt (code_review.code_review_prompt,
+	build_app.spec_conformity_prompt), the other review's result kept as
+	parsed; or the combined prompt again when the turn failed or neither part
+	parsed. Found live (2026-10-10): an answer with no parseable JSON left
+	both reviews unavailable, which quarantines a run with no corrective
+	build, over a formatting slip. The retry is the same question over the
+	same inputs: the diff and the instruction-file block fetched for the
+	first turn (never fetched again, so a file the first reviewer touched
+	cannot change it), the same base, thinking level and adapter, a session
+	folder of its own (fresh_retry_session_dir) and not a word about the
+	first turn, whose transcript is removed before it starts. The two turns
+	together get the COMBINED_REVIEW_TIMEOUT_MINUTES the one turn had
+	(retry_timeout_minutes), a turn the spend meter stopped is not retried
+	(meter_stop), and the first turn's evidence is written to the workspace
+	before the retry starts, so a retry killed from outside leaves what the
+	first turn alone would have.
+
+	A part still missing after the retry is unavailable exactly as a
+	standalone review's unavailable turn is, recording the retry's own
+	error -- parse_conformity_verdicts defaults every criterion to
+	"unavailable" and parse_code_review_findings returns available=False
+	when it finds no "criteria"/"findings" list at all. Both evidences then
+	carry one more key, "retry": one line saying what was asked again and
+	why (the first turn's error included), or why it was not. The key is
+	absent when the first answer was whole; no Go reader decodes it."""
+	started = clock()
 	criteria = build_app.read_acceptance_criteria(criteria_path)
 	spec_text = spec_path.read_text()
 	diff = build_app.workspace_diff(workspace, review_base_sha) if review_base_sha else None
 	diff_fetch_failed = review_base_sha is not None and diff is None
+	instructions_block = build_app.instructions_diff_block(instructions_diff)
 	prompt = combined_review_prompt(
-		criteria, spec_text, review_base_sha, diff=diff, instructions_block=build_app.instructions_diff_block(instructions_diff),
+		criteria, spec_text, review_base_sha, diff=diff, instructions_block=instructions_block,
 	)
 	turn = build_app.run_review_turn(
-		workspace, prompt=prompt, session_dir=workspace / ".pi-combined-review-session",
+		workspace, prompt=prompt, session_dir=workspace / SESSION_DIR,
 		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
 		timeout_minutes=COMBINED_REVIEW_TIMEOUT_MINUTES, prompt_name="review-combined",
 	)
@@ -146,13 +320,63 @@ def run_combined_review(
 	conformity_verdicts = build_app.parse_conformity_verdicts(turn.text, criteria)
 	available, findings = code_review.parse_code_review_findings(turn.text)
 
-	conformity = conformity_review.conformity_evidence(
-		conformity_verdicts, error, conformity_policy=conformity_policy, thinking=thinking,
-	)
-	review = code_review.code_review_evidence(
-		available, findings, error, review_policy=review_policy, thinking=thinking,
+	policies = dict(
+		conformity_policy=conformity_policy, review_policy=review_policy, thinking=thinking,
 		diff_fetch_failed=diff_fetch_failed,
 	)
+	conformity, review = _evidences(conformity_verdicts, error, available, findings, error, **policies)
+	part, why = missing_part(conformity_verdicts, available, error)
+	if not part:
+		return conformity, review
+
+	denied = meter_stop(error)
+	timeout_minutes = retry_timeout_minutes(part, started)
+	retry_session = None
+	if denied:
+		skipped = f"the spend meter stopped the first turn ({denied}) and would stop a second"
+	elif not timeout_minutes:
+		skipped = (
+			f"under {RETRY_MIN_MINUTES} of the review's {COMBINED_REVIEW_TIMEOUT_MINUTES} minutes were left"
+		)
+	else:
+		# What the first turn alone amounts to is on disk before the retry
+		# starts: a retry killed from outside leaves that, not nothing.
+		write_combined_evidence(workspace, conformity, review)
+		retry_session = fresh_retry_session_dir(workspace)
+		skipped = "" if retry_session else "the first turn's session folder could not be emptied"
+	if skipped:
+		conformity["retry"] = review["retry"] = f"not asked again ({why}): {skipped}"[:400]
+		return conformity, review
+
+	if part == RETRY_CONFORMITY:
+		retry_prompt = build_app.spec_conformity_prompt(
+			criteria, review_base_sha, diff=diff, instructions_block=instructions_block,
+		)
+	elif part == RETRY_CODE_REVIEW:
+		retry_prompt = code_review.code_review_prompt(
+			spec_text, review_base_sha, diff=diff, instructions_block=instructions_block,
+		)
+	else:
+		retry_prompt = prompt
+	# Saved beside the first turn's prompt, in the one folder the host copies
+	# for this step, not in the retry's own session folder.
+	build_app.saved_prompts.save_prompt(workspace / SESSION_DIR, RETRY_PROMPT_NAMES[part], retry_prompt)
+	build_app.print_progress({"stage": "agent", "event": "note", "detail": f"review: asking once more for {RETRY_ASKS[part]}"})
+	second = build_app.run_review_turn(
+		workspace, prompt=retry_prompt, session_dir=retry_session,
+		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
+		timeout_minutes=timeout_minutes,
+	)
+	second_error = build_app.single_line(build_app.redact(second.error, 100_000)) if second.error else ""
+	conformity_error = review_error = error
+	if part != RETRY_CODE_REVIEW:
+		conformity_verdicts = build_app.parse_conformity_verdicts(second.text, criteria)
+		conformity_error = second_error
+	if part != RETRY_CONFORMITY:
+		available, findings = code_review.parse_code_review_findings(second.text)
+		review_error = second_error
+	conformity, review = _evidences(conformity_verdicts, conformity_error, available, findings, review_error, **policies)
+	conformity["retry"] = review["retry"] = f"asked once more for {RETRY_ASKS[part]}, in a new session: {why}"[:400]
 	return conformity, review
 
 
@@ -196,6 +420,8 @@ def main() -> int:
 		thinking=args.thinking, adapter=adapter, instructions_diff=args.instructions_diff,
 	)
 	conformity_path, review_path = write_combined_evidence(args.workspace.resolve(), conformity, review)
+	if conformity.get("retry"):
+		print(f"Retry: {conformity['retry']}")
 	print(f"Conformity evidence written to {conformity_path}")
 	print(f"Outcome: {'SUCCEEDED' if conformity['succeeded'] else 'DID NOT SUCCEED'} -- {conformity['stopped_reason']}")
 	print(f"Code review evidence written to {review_path}")
