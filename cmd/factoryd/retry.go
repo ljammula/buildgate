@@ -22,16 +22,16 @@ import (
 // executing the command.
 func newRetryFlags() (flags *flag.FlagSet, dataDir, reason, from, configPath *string) {
 	flags = flag.NewFlagSet("retry", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory holding the request; must match `factoryd submit`'s. Must precede <id> on the command line (flag.Parse stops at the first positional argument)")
+	dataDir = flags.String("data-dir", "data", "directory holding the request; must be the data directory it was submitted to")
 	// reason (an adversarial review, 2026-09-24) mirrors the
 	// console's own required retry-reason field (POST /requests/{id}/retry's
 	// body -- see retryRequestHandler) and reject's own -reason flag
 	// (newRejectFlags): recorded on the request's appended History entry
 	// via request.Retry, not dropped.
 	reason = flags.String("reason", "", "why this request is being retried, recorded on its history")
-	from = flags.String("from", retryFromAttempt, "where a rebuilt ticket starts: \"attempt\" continues from the quarantined attempt's commit when a build may be told what it failed on and it committed something (otherwise from the base commit); \"scratch\" always starts from the base commit. No effect on a retry that rebuilds no ticket")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	from = flags.String("from", retryFromAttempt, "Where a rebuilt ticket starts. \"attempt\" continues from the failed attempt's commit when it made one and the build may be told what failed. \"scratch\" drops that work and starts from the base commit.")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

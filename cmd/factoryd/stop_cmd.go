@@ -27,7 +27,7 @@ func newStopFlags() (flags *flag.FlagSet, f stopFlags) {
 	f.dataDir = flags.String("data-dir", "data", "data directory whose worker and serve to stop")
 	f.all = flags.Bool("all", false, "stop worker and serve for every profile's data dir, then the OpenShell gateway and meter if this machine started them, then Temporal; exclusive with -config and -data-dir")
 	f.force = flags.Bool("force", false, "stop even when a request is building (its build is cancelled) and, with -all, stop Temporal even when a worker is still live")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return flags, f
 }
 

@@ -4,94 +4,24 @@ import (
 	"flag"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
 	"buildgate/internal/requestsubmit"
 )
 
-// commandFlagSet returns the real *flag.FlagSet for a `factoryd <cmd>`
-// subcommand, built via that subcommand's own new<Cmd>Flags helper (see
-// e.g. newWorkerFlags in worker_config.go) rather than by running the
-// command -- these helpers exist specifically so this file can enumerate
-// real flags without any side effects.
-type commandFlagSet func() *flag.FlagSet
-
-// docTrackedCommands maps every `factoryd <cmd>` name this repo's own docs
-// (USAGE.md, USAGE_REFERENCE.md) can reference to that subcommand's real
-// FlagSet. Keys are exactly the token following "factoryd " in a doc's own
-// command reference (e.g. the USAGE.md "Command reference" table under
-// "## 11. Five repos, zero terminals: `submit` + `worker`").
-//
-// This is also the full registry TestUSAGEDocFlagsAreAllReal (direction 2,
-// informational) walks to report any real flag no doc mentions anywhere --
-// so it includes every subcommand, not only the ones the table names.
-var docTrackedCommands = map[string]commandFlagSet{
-	"amend-scope":     func() *flag.FlagSet { fs, _, _, _ := newAmendScopeFlags(); return fs },
-	"approve":         func() *flag.FlagSet { fs, _, _ := newApproveFlags(); return fs },
-	"reject":          func() *flag.FlagSet { fs, _, _, _, _ := newRejectFlags(); return fs },
-	"cancel":          func() *flag.FlagSet { fs, _, _, _ := newCancelFlags(); return fs },
-	"check-ticket":    newCheckTicketFlags,
-	"ticket-template": func() *flag.FlagSet { fs, _ := newTicketTemplateFlags(); return fs },
-	"daemon": func() *flag.FlagSet {
-		fs, _, _, _, _, _, _, _, _, _, _, _ := newDaemonFlags()
-		return fs
-	},
-	"doctor": func() *flag.FlagSet {
-		fs, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ := newDoctorFlags()
-		// doctorMain registers these four directly on the set, then
-		// strips backticks from every usage string.
-		doctorRegisterNotifyTestFlag(fs)
-		doctorRegisterYesFlag(fs)
-		doctorRegisterListModelsFlag(fs)
-		doctorRegisterTargetRepoFlag(fs)
-		plainFlagUsage(fs)
-		return fs
-	},
-	"init":              func() *flag.FlagSet { fs, _, _, _, _, _, _ := newInitFlags(); return fs },
-	"init-config":       func() *flag.FlagSet { fs, _ := newInitConfigFlags(); return fs },
-	"install-service":   func() *flag.FlagSet { fs, _, _, _, _, _ := newInstallServiceFlags(); return fs },
-	"uninstall-service": newUninstallServiceFlags,
-	"console":           func() *flag.FlagSet { fs, _, _, _ := newConsoleFlags(); return fs },
-	"install-skill":     func() *flag.FlagSet { fs, _ := newInstallSkillFlags(); return fs },
-	"mcp":               func() *flag.FlagSet { fs, _ := newMCPFlags(); return fs },
-	"gate-token":        func() *flag.FlagSet { fs, _ := newGateTokenFlags(); return fs },
-	"remote-console":    func() *flag.FlagSet { fs, _ := newRemoteConsoleFlags(); return fs },
-	"intake":            func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newIntakeFlags(); return fs },
-	"reset-stop-line":   func() *flag.FlagSet { fs, _, _, _, _ := newResetStopLineFlags(); return fs },
-	"kill-switch":       func() *flag.FlagSet { fs, _, _, _, _, _ := newKillSwitchFlags(); return fs },
-	"onboard":           func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newOnboardFlags(); return fs },
-	"override":          func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _, _, _, _ := newOverrideFlags(); return fs },
-	"override-rate":     func() *flag.FlagSet { fs, _ := newOverrideRateFlags(); return fs },
-	"check-project":     func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _ := newCheckProjectFlags(); return fs },
-	"configure-images":  func() *flag.FlagSet { fs, _ := newConfigureImagesFlags(); return fs },
-	"cost":              func() *flag.FlagSet { fs, _, _, _, _, _ := newCostFlags(); return fs },
-	"stats":             func() *flag.FlagSet { return newStatsFlags().set },
-	"logs":              func() *flag.FlagSet { fs, _, _, _, _, _ := newLogsFlags(); return fs },
-	"worker":            func() *flag.FlagSet { fs, _ := newWorkerFlags(); return fs },
-	"quickstart":        func() *flag.FlagSet { fs, _ := newQuickstartFlags(); return fs },
-	"setup":             func() *flag.FlagSet { fs, _ := newSetupFlags(); return fs },
-	"reconcile":         func() *flag.FlagSet { fs, _, _, _, _ := newReconcileFlags(); return fs },
-	"resume":            func() *flag.FlagSet { fs, _, _, _ := newResumeFlags(); return fs },
-	"retry":             func() *flag.FlagSet { fs, _, _, _, _ := newRetryFlags(); return fs },
-	"run":               func() *flag.FlagSet { fs, _ := newRunFlags(); return fs }, // documented as `factoryd <run>`, no fixed subcommand keyword
-	"serve":             func() *flag.FlagSet { fs, _ := newServeFlags(); return fs },
-	"status":            func() *flag.FlagSet { fs, _, _, _, _, _, _ := newStatusFlags(); return fs },
-	"submit":            func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newSubmitFlags(); return fs },
-	"supervise":         func() *flag.FlagSet { fs, _, _ := newSuperviseFlags(); return fs },
-	"inbox":             func() *flag.FlagSet { fs, _ := newInboxFlags(); return fs },
-	"memory":            func() *flag.FlagSet { return newMemoryFlags().set },
-	"stop":              func() *flag.FlagSet { fs, _ := newStopFlags(); return fs },
-	"restart":           newRestartFlags,
-	"uninstall":         func() *flag.FlagSet { fs, _, _, _, _ := newUninstallFlags(); return fs },
-	"upgrade":           func() *flag.FlagSet { fs, _ := newUpgradeFlags(); return fs },
-	"use":               newUseFlags,
-	"watch":             func() *flag.FlagSet { fs, _, _, _ := newWatchFlags(); return fs },
+// docTrackedCommands maps every `factoryd <cmd>` name the docs can reference
+// to that command's real FlagSet: the catalog the help prints from.
+func docTrackedCommands() map[string]func() *flag.FlagSet {
+	commands := map[string]func() *flag.FlagSet{}
+	for _, c := range commandCatalog() {
+		commands[c.name] = c.flags
+	}
+	return commands
 }
 
 // usageDocPaths are the docs TestUSAGEDocFlagsExistOnSubcommand and
-// TestUSAGEDocFlagsAreAllReal scan, relative to this package directory.
+// TestUsageDocsNameNoInternalFlag scan, relative to this package directory.
 // USAGE_REFERENCE.md holds USAGE.md's own detailed command-reference table
 // (split out 2026-09-17 to keep USAGE.md itself short) and must stay in
 // this list for the same drift check to keep covering it.
@@ -145,9 +75,9 @@ func TestUSAGEDocFlagsExistOnSubcommand(t *testing.T) {
 				continue
 			}
 			cmd := m[1]
-			newFlags, ok := docTrackedCommands[cmd]
+			newFlags, ok := docTrackedCommands()[cmd]
 			if !ok {
-				t.Errorf("%s: table row documents `factoryd %s`, which usage_doc_flags_test.go's docTrackedCommands does not know about -- add it so this test can check its flags", path, cmd)
+				t.Errorf("%s: table row documents `factoryd %s`, which is not in commandCatalog (help_catalog.go) -- add it so this test can check its flags", path, cmd)
 				continue
 			}
 			fs := newFlags()
@@ -161,71 +91,78 @@ func TestUSAGEDocFlagsExistOnSubcommand(t *testing.T) {
 	}
 }
 
-// TestUSAGEDocFlagsAreAllReal is direction 2 (informational only, never
-// fails) of the same drift check: it reports every real flag, across every
-// `factoryd` subcommand, that neither USAGE.md nor USAGE_REFERENCE.md
-// mentions anywhere -- not scoped to the command-reference table alone,
-// since most subcommands' flags are documented in worked-example prose
-// instead. A hard failure here would become the kind of check people
-// `t.Skip` (per the plan item's own reasoning), so an undocumented flag is
-// logged via t.Logf, not t.Errorf -- add it to
-// usageDocFlagsIntentionallyUndocumented to silence the log line once
-// you've confirmed it's deliberately internal/advanced, or better, document
-// it and let the log line go away on its own.
-func TestUSAGEDocFlagsAreAllReal(t *testing.T) {
+// usageFlagTableLimit is how many flags USAGE_REFERENCE.md's "The flags used
+// most" table may hold. Every other flag is documented by its own -h text.
+const usageFlagTableLimit = 25
+
+// USAGE_REFERENCE.md's flag table stays a short list of real flags.
+func TestUsageReferenceFlagTableIsShortAndReal(t *testing.T) {
 	t.Parallel()
-	var corpus []byte
+	content, err := os.ReadFile("../../USAGE_REFERENCE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, found := strings.Cut(string(content), "### The flags used most")
+	if !found {
+		t.Fatal(`USAGE_REFERENCE.md has no "### The flags used most" section`)
+	}
+	real := map[string]bool{}
+	for _, newFlags := range docTrackedCommands() {
+		operatorFlags(newFlags()).VisitAll(func(f *flag.Flag) { real[f.Name] = true })
+	}
+	rows := 0
+	for _, line := range strings.Split(table, "\n") {
+		if strings.HasPrefix(line, "#") {
+			break
+		}
+		if !strings.HasPrefix(line, "| `-") {
+			continue
+		}
+		rows++
+		cell, _, _ := strings.Cut(strings.TrimPrefix(line, "| "), " | ")
+		for _, fm := range usageFlagTokenPattern.FindAllStringSubmatch(cell, -1) {
+			if !real[fm[1]] {
+				t.Errorf("the flag table names -%s, which no command has as an operator's flag", fm[1])
+			}
+		}
+	}
+	if rows == 0 || rows > usageFlagTableLimit {
+		t.Errorf("the flag table has %d rows, want 1 to %d: a new flag goes in by replacing one", rows, usageFlagTableLimit)
+	}
+}
+
+// anyFlagTokenPattern matches a flag wherever a doc writes one: after a
+// backtick or after a space, as in `factoryd -run-id x`.
+var anyFlagTokenPattern = regexp.MustCompile("[`\\s]-([a-zA-Z][a-zA-Z0-9-]*)")
+
+// The usage docs name no internal flag: -h leaves those out, and so do they.
+func TestUsageDocsNameNoInternalFlag(t *testing.T) {
+	t.Parallel()
+	internal, operator := map[string]bool{}, map[string]bool{}
+	for _, newFlags := range docTrackedCommands() {
+		newFlags().VisitAll(func(f *flag.Flag) {
+			if isInternalFlag(f) {
+				internal[f.Name] = true
+			} else {
+				operator[f.Name] = true
+			}
+		})
+	}
+	if len(internal) == 0 {
+		t.Fatal("no flag is marked internal; the scan below proves nothing")
+	}
 	for _, path := range usageDocPaths {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		corpus = append(corpus, content...)
-		corpus = append(corpus, '\n')
-	}
-	documented := map[string]bool{}
-	for _, fm := range usageFlagTokenPattern.FindAllStringSubmatch(string(corpus), -1) {
-		documented[fm[1]] = true
-	}
-
-	for _, cmd := range sortedKeys(docTrackedCommands) {
-		allow := usageDocFlagsIntentionallyUndocumented[cmd]
-		allowed := make(map[string]bool, len(allow))
-		for _, name := range allow {
-			allowed[name] = true
-		}
-		fs := docTrackedCommands[cmd]()
-		fs.VisitAll(func(f *flag.Flag) {
-			if documented[f.Name] || allowed[f.Name] {
-				return
+		for _, fm := range anyFlagTokenPattern.FindAllStringSubmatch(string(content), -1) {
+			// A name that is an operator's flag on another command is that flag.
+			if name := fm[1]; internal[name] && !operator[name] {
+				t.Errorf("%s names -%s, an internal flag (its usage string begins %q): the docs name only flags an operator passes", path, name, internalFlagPrefix)
 			}
-			t.Logf("informational: `factoryd %s` -%s is not mentioned anywhere in USAGE.md/USAGE_REFERENCE.md", cmd, f.Name)
-		})
+		}
 	}
-}
-
-// usageDocFlagsIntentionallyUndocumented lists, per subcommand, the flags
-// deliberately left out of USAGE.md/USAGE_REFERENCE.md, which silences
-// TestUSAGEDocFlagsAreAllReal's informational log line for exactly these.
-// They are the flags the worker or serve sets on the runs they start, and
-// the interpreter a test points at a stand-in script. USAGE_REFERENCE.md's
-// flag table is the 25 used most, so many other flags log here as well:
-// `factoryd <command> -h` is where those are documented.
-var usageDocFlagsIntentionallyUndocumented = map[string][]string{
-	"run":       {"run-id", "request-ticket", "pr-base", "full-suite-source", "resume-worktree-of", "build-app-interpreter"},
-	"daemon":    {"build-app-interpreter"},
-	"supervise": {"build-app-interpreter"},
-	"serve":     {"daemon-build-app-interpreter"},
-	"intake":    {"goal-pilot-interpreter"},
-}
-
-func sortedKeys(m map[string]commandFlagSet) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // USAGE.md shows the prompt an AGENTS.md refusal prints, so an operator can

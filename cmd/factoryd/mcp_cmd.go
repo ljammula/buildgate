@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"buildgate/internal/consolelink"
-	"buildgate/internal/sessionconfig"
 )
 
 // mcpTokenFileSuffix names the file holding the bearer token of `factoryd
@@ -50,11 +49,11 @@ type mcpFlags struct {
 // enumerate its flags.
 func newMCPFlags() (flags *flag.FlagSet, f mcpFlags) {
 	flags = flag.NewFlagSet("mcp", flag.ContinueOnError)
-	f.configPath = flags.String("config", "", "session config path, which locates the token file beside it; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists. Must be the config the running 'factoryd serve' uses")
-	f.dataDir = flags.String("data-dir", "", "data directory the running 'factoryd serve' uses, to find the address it listens on; default: the session config's data dir; with no session config, ./data")
+	f.configPath = flags.String("config", "", "the running serve's config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	f.dataDir = flags.String("data-dir", "", "data directory of the running 'factoryd serve', to find its address; empty uses the session config's data dir, else ./data")
 	f.rotate = flags.Bool("rotate", false, "replace the token; the old one stops working at once")
 	f.disable = flags.Bool("disable", false, "remove the token file, which turns the endpoint off")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

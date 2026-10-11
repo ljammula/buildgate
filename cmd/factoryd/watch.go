@@ -537,9 +537,9 @@ func printRunRecapBaseline(w io.Writer, r *run.Run) {
 func newWatchFlags() (flags *flag.FlagSet, dataDir, configPath *string, noFollow *bool) {
 	flags = flag.NewFlagSet("watch", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable run/request records")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	noFollow = flags.Bool("no-follow", false, "print what exists now and exit, instead of following until the run/request finishes")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

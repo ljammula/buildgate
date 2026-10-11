@@ -25,7 +25,7 @@ func restartMain(dp *deps, args []string) error {
 // newRestartFlags is restart's flag set: it takes no flag and no argument.
 func newRestartFlags() *flag.FlagSet {
 	flags := flag.NewFlagSet("restart", flag.ContinueOnError)
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return flags
 }
 

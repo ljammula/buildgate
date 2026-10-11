@@ -29,7 +29,7 @@ var listGitHubCopilotModelsFn = meter.ListGitHubCopilotModels
 // doctorMain's FlagSet rather than threaded through newDoctorFlags' own
 // already-long return tuple.
 func doctorRegisterListModelsFlag(flags *flag.FlagSet) *bool {
-	return flags.Bool("list-models", false, "list the models roles.execution's resolved route actually serves (host-side, reusing the same credential/token-exchange this check suite already performs), then exit without running the rest of doctor's checks")
+	return flags.Bool("list-models", false, "List the models the execution role's route serves, then exit without running the other checks.")
 }
 
 // anthropicDefaultUpstream is the Anthropic route's own hardcoded upstream

@@ -25,10 +25,10 @@ import (
 // executing the command.
 func newAmendScopeFlags() (flags *flag.FlagSet, dataDir, reason, configPath *string) {
 	flags = flag.NewFlagSet("amend-scope", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory holding the queue the entry was submitted to; must match `factoryd submit`'s. Must precede <id> on the command line (flag.Parse stops at the first positional argument)")
-	reason = flags.String("reason", "", "why this ticket's scope is being widened (required) -- recorded on the request's history. Must precede <request-id> on the command line (flag.Parse stops at the first positional argument)")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution); empty searches the default paths")
-	plainFlagUsage(flags)
+	dataDir = flags.String("data-dir", "data", "directory holding the request; must be the data directory it was submitted to")
+	reason = flags.String("reason", "", "why this ticket's scope is being widened (required); recorded on the request's history")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

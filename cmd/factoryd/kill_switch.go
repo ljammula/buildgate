@@ -36,7 +36,7 @@ func newResetStopLineFlags() (flags *flag.FlagSet, temporalAddress, repository, 
 	repository = flags.String("repository", "", "repository identity whose stop line to reset (required)")
 	by = flags.String("by", "", "name of the human resetting the stop line (required)")
 	reason = flags.String("reason", "", "justification for resetting the stop line (required, e.g. confirmation the shared workspace was restored)")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 
@@ -156,11 +156,11 @@ func anyRunRecordedUnderProject(dataDir, project string) (bool, error) {
 func newKillSwitchFlags() (flags *flag.FlagSet, dataDir, project, state, by, reason *string) {
 	flags = flag.NewFlagSet("kill-switch", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable project records")
-	project = flags.String("project", "", "project whose kill switch to read or change (required) -- the same single path component release decisions are recorded under")
+	project = flags.String("project", "", "project whose kill switch to read or change (required); the name its release decisions are recorded under")
 	state = flags.String("state", "", "new state: engaged or disengaged. Omit to report the current state and history without changing anything")
 	by = flags.String("by", "", "name of the human changing the switch (required with -state)")
 	reason = flags.String("reason", "", "justification for the change (required with -state)")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

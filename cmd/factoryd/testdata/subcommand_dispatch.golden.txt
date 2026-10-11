@@ -1,38 +1,37 @@
 $ factoryd
 exit 0
-stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: factoryd builds and verifies a change in a sandbox and opens a pull request. Merging stays yours.
 stdout: 
-stdout: Common commands:
+stdout: Usage: factoryd <command> [flags] [arguments]   (flags come before arguments)
 
 $ factoryd -h
 exit 0
-stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: factoryd builds and verifies a change in a sandbox and opens a pull request. Merging stays yours.
 stdout: 
-stdout: Common commands:
+stdout: Usage: factoryd <command> [flags] [arguments]   (flags come before arguments)
 
 $ factoryd -help
 exit 0
-stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: factoryd builds and verifies a change in a sandbox and opens a pull request. Merging stays yours.
 stdout: 
-stdout: Common commands:
+stdout: Usage: factoryd <command> [flags] [arguments]   (flags come before arguments)
 
 $ factoryd --help
 exit 0
-stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: factoryd builds and verifies a change in a sandbox and opens a pull request. Merging stays yours.
 stdout: 
-stdout: Common commands:
+stdout: Usage: factoryd <command> [flags] [arguments]   (flags come before arguments)
 
 $ factoryd help
 exit 0
-stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
+stdout: factoryd builds and verifies a change in a sandbox and opens a pull request. Merging stays yours.
 stdout: 
-stdout: Common commands:
+stdout: Usage: factoryd <command> [flags] [arguments]   (flags come before arguments)
 
 $ factoryd help status
 exit 0
-stdout: factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)
-stdout: 
-stdout: Common commands:
+stdout: Usage: factoryd status [flags]
+stdout:   List requests and runs with their state
 
 $ factoryd version
 exit 0
@@ -57,7 +56,8 @@ stderr: factoryd: roles.execution: modelrole: roles.execution.model is not confi
 $ factoryd -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd [flags]  (build one ticket; see `factoryd quickstart` for full onboarding)
+stderr: Usage: factoryd -ticket <id> -workspace <dir> -spec <file> [flags]
+stderr:   Build one ticket directly, with no request (its help: factoryd help run)
 
 $ factoryd STATUS -zz-not-a-flag
 exit 1
@@ -82,237 +82,237 @@ stderr: factoryd: usage: factoryd stage-agent-tests <dest>
 $ factoryd override -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of override:
-stderr:   -by string
+stderr: Usage: factoryd override [flags]
+stderr:   Set a run's terminal state by hand, with the reason
 
 $ factoryd serve -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of serve:
-stderr:   -addr string
+stderr: Usage: factoryd serve [flags]
+stderr:   Serve the console and the API
 
 $ factoryd daemon -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of daemon:
-stderr:   -build-app-interpreter string
+stderr: Usage: factoryd daemon [flags]
+stderr:   Service one repository's task queue
 
 $ factoryd supervise -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of supervise:
-stderr:   -build-app-interpreter string
+stderr: Usage: factoryd supervise [flags]
+stderr:   Run one daemon per repository and restart it
 
 $ factoryd reset-stop-line -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of reset-stop-line:
-stderr:   -by string
+stderr: Usage: factoryd reset-stop-line [flags]
+stderr:   Clear a repository's stop line
 
 $ factoryd override-rate -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of override-rate:
-stderr:   -data-dir string
+stderr: Usage: factoryd override-rate [flags]
+stderr:   Report how many accepted runs needed an override
 
 $ factoryd check-project -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of check-project:
-stderr:   -architecture string
+stderr: Usage: factoryd check-project [flags]
+stderr:   Run the project-bootstrap checks on the files you name
 
 $ factoryd check-ticket -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of check-ticket:
-stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd check-ticket [flags] <ticket-file>
+stderr:   Validate a ticket's header lines
 
 $ factoryd ticket-template -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of ticket-template:
-stderr:   -o string
+stderr: Usage: factoryd ticket-template [flags]
+stderr:   Print a skeleton ticket
 
 $ factoryd init -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of init:
-stderr:   -project string
+stderr: Usage: factoryd init [flags]
+stderr:   Scaffold a new project
 
 $ factoryd onboard -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of onboard:
-stderr:   -project string
+stderr: Usage: factoryd onboard [flags]
+stderr:   Scaffold the onboarding docs of an existing repository
 
 $ factoryd doctor -zz-not-a-flag
 exit 1
 stdout: factoryd doctor: running <binary> (<version>)
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of doctor:
-stderr:   -compose-services
+stderr: Usage: factoryd doctor [flags]
+stderr:   Check this machine's setup; -fix repairs what it can
 
 $ factoryd intake -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of intake:
-stderr:   -checkpoint string
+stderr: Usage: factoryd intake [flags]
+stderr:   Draft a spec and tickets into a pilot directory
 
 $ factoryd kill-switch -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of kill-switch:
-stderr:   -by string
+stderr: Usage: factoryd kill-switch [flags]
+stderr:   Show, engage or disengage a project's release kill switch
 
 $ factoryd reconcile -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of reconcile:
-stderr:   -data-dir string
+stderr: Usage: factoryd reconcile [flags]
+stderr:   Remove the worktree, branch or marker a killed run left
 
 $ factoryd status -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of status:
-stderr:   -config string
+stderr: Usage: factoryd status [flags]
+stderr:   List requests and runs with their state
 
 $ factoryd inbox -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of inbox:
-stderr:   -json
+stderr: Usage: factoryd inbox [flags]
+stderr:   List every request waiting on you, across profiles
 
 $ factoryd stop -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of stop:
-stderr:   -all
+stderr: Usage: factoryd stop [flags]
+stderr:   Stop the worker and the console of a data dir
 
 $ factoryd uninstall -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of uninstall:
-stderr:   -dry-run
+stderr: Usage: factoryd uninstall [flags]
+stderr:   Remove what make install put on this machine
 
 $ factoryd upgrade -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of upgrade:
-stderr:   -source string
+stderr: Usage: factoryd upgrade [flags]
+stderr:   Upgrade this machine to a release
 
 $ factoryd use -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of use:
-stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd use [flags] [<profile>]
+stderr:   List the profiles, or make one active
 
 $ factoryd watch -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of watch:
-stderr:   -config string
+stderr: Usage: factoryd watch [flags] <run-or-request-id>
+stderr:   Follow a run's or a request's progress
 
 $ factoryd logs -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of logs:
-stderr:   -config string
+stderr: Usage: factoryd logs [flags] <request-id | run-id | queue-run | serve>
+stderr:   Print the newest log for an id
 
 $ factoryd cost -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of cost:
-stderr:   -config string
+stderr: Usage: factoryd cost [flags]
+stderr:   Show model spend per accepted ticket
 
 $ factoryd submit -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of submit:
-stderr:   -config string
+stderr: Usage: factoryd submit [flags] <workspace> [text]
+stderr:   Record a request for a repository; the worker drafts, plans and builds it
 
 $ factoryd approve -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of approve:
-stderr:   -config string
+stderr: Usage: factoryd approve [flags] <request-id>
+stderr:   Release a request from its spec, oracle or plan review
 
 $ factoryd reject -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of reject:
-stderr:   -config string
+stderr: Usage: factoryd reject [flags] <request-id>
+stderr:   Send a review back for a redraft, with the reason
 
 $ factoryd cancel -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of cancel:
-stderr:   -config string
+stderr: Usage: factoryd cancel [flags] <request-id>
+stderr:   Cancel a request
 
 $ factoryd worker -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of worker:
-stderr:   -advance-on string
+stderr: Usage: factoryd worker [flags]
+stderr:   Drive every request of the data dir (submit and quickstart start it)
 
 $ factoryd retry -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of retry:
-stderr:   -config string
+stderr: Usage: factoryd retry [flags] <request-id>
+stderr:   Rebuild the ticket of a quarantined or halted request
 
 $ factoryd resume -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of resume:
-stderr:   -config string
+stderr: Usage: factoryd resume [flags] <request-id>
+stderr:   Continue a request whose step ended with no verdict (resume_review)
 
 $ factoryd amend-scope -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of amend-scope:
-stderr:   -config string
+stderr: Usage: factoryd amend-scope [flags] <request-id> <file>...
+stderr:   Add files to a quarantined ticket's allowed scope
 
 $ factoryd init-config -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of init-config:
-stderr:   -path string
+stderr: Usage: factoryd init-config [flags]
+stderr:   Write the example session config
 
 $ factoryd install-service -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of install-service:
-stderr:   -config string
+stderr: Usage: factoryd install-service [flags]
+stderr:   Keep the worker and the console running under launchd (macOS)
 
 $ factoryd uninstall-service -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of uninstall-service:
-stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd uninstall-service [flags]
+stderr:   Remove the launchd services
 
 $ factoryd quickstart -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of quickstart:
-stderr:   -build-images
+stderr: Usage: factoryd quickstart [flags] [<repo-path>] ["<task>"]
+stderr:   Set up, submit one request and follow it to its first review gate
 
 $ factoryd console -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of console:
-stderr:   -config string
+stderr: Usage: factoryd console [flags]
+stderr:   Print the link to the web console, starting it if needed
 
 $ factoryd install-skill -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of install-skill:
-stderr:   -dir string
+stderr: Usage: factoryd install-skill [flags]
+stderr:   Install the buildgate skill for your coding agent
 
 $ factoryd configure-images -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of configure-images:
-stderr:   -all-profiles
+stderr: Usage: factoryd configure-images [flags]
+stderr:   Record the image refs in a session config (make install runs it)
 
 $ factoryd image-inputs-hash -zz-not-a-flag
 exit 1
@@ -323,8 +323,8 @@ stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 $ factoryd restart -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of restart:
-stderr: factoryd: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd restart [flags]
+stderr:   Restart every profile's worker and console with this binary
 
 $ factoryd project-image-args -zz-not-a-flag
 exit 1
@@ -341,14 +341,14 @@ stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 $ factoryd setup -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of setup:
-stderr:   -config string
+stderr: Usage: factoryd setup [flags]
+stderr:   Choose the model and coding agent every run uses
 
 $ factoryd mcp -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of mcp:
-stderr:   -config string
+stderr: Usage: factoryd mcp [flags]
+stderr:   Turn the console's MCP endpoint on, and print its token
 
 $ factoryd memory -zz-not-a-flag
 exit 1
@@ -359,8 +359,8 @@ stderr:   list                             the switch, the budget, the lines in 
 $ factoryd stats -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of stats:
-stderr:   -all
+stderr: Usage: factoryd stats [flags]
+stderr:   Show whether builds are getting better, per project
 
 $ factoryd build-ca-bundle -zz-not-a-flag
 exit 1
@@ -371,12 +371,19 @@ stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 $ factoryd gate-token -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of gate-token:
-stderr:   -config string
+stderr: Usage: factoryd gate-token [flags]
+stderr:   Write the token a console on another machine needs
 
 $ factoryd remote-console -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage of remote-console:
-stderr:   -config string
+stderr: Usage: factoryd remote-console [flags]
+stderr:   Open this profile's console to another machine on the tailnet
+
+$ factoryd help -zz-not-a-flag
+exit 1
+stdout: flag provided but not defined: -zz-not-a-flag
+stdout: Usage: factoryd help [flags] [<command>]
+stdout:   List every command, or show one command's arguments and flags
+stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 

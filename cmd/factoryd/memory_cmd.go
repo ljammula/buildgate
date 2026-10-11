@@ -67,27 +67,30 @@ type memoryFlags struct {
 func newMemoryFlags() memoryFlags {
 	f := memoryFlags{set: flag.NewFlagSet("memory", flag.ContinueOnError), remove: &exactListFlag{}}
 	f.workspace = f.set.String("workspace", "", "the repository whose memory to read or change: its root, or any directory inside it (required)")
-	f.config = f.set.String("config", "", "session config file or profile name (default: the same search path `factoryd worker -config` uses); its memory.repositories list is the per-repository switch")
+	f.config = f.set.String("config", "", "session config file or profile name; empty uses the active profile, then the default paths. Its memory.repositories list turns memory on per repository")
 	f.dataDir = f.set.String("data-dir", "data", "directory for durable records; must match what `factoryd worker` uses")
 	f.jsonOut = f.set.Bool("json", false, "list and show: print JSON instead of text")
 	f.reason = f.set.String("reason", "", "drop and off: why, recorded with the change")
 	f.set.Var(f.remove, "remove", "propose: an exact line of the section to remove, as `memory list` prints it. Repeatable")
-	plainFlagUsage(f.set)
+	finishFlags(f.set)
+	shared := f.set.Usage
+	f.set.Usage = func() {
+		shared()
+		fmt.Fprintf(f.set.Output(), "\nSubcommands:\n%s\n", memorySubcommands)
+	}
 	return f
 }
 
-const memoryUsage = `usage: factoryd memory <subcommand> -workspace <repository> [flags] [arguments]
-
-  list                             the switch, the budget, the lines in force and the candidates
+const memorySubcommands = `  list                             the switch, the budget, the lines in force and the candidates
   show <id>                        one candidate: its line, the runs that said it, its history
   add "<text>"                     add your own candidate line
   drop [-reason <why>] <id>        drop a candidate
   propose [-remove "<line>"]... [<id>...]
                                    open one request that adds the named candidates
                                    (none named: the most seen) and removes the -remove lines
-  on | off [-reason <why>]         resume or stop memory for this repository's project
+  on | off [-reason <why>]         resume or stop memory for this repository's project`
 
-Flags come before the arguments.`
+const memoryUsage = "usage: factoryd memory <subcommand> -workspace <repository> [flags] [arguments]\n\n" + memorySubcommands + "\n\nFlags come before the arguments."
 
 // memoryCmd is one invocation, resolved: which repository, which data
 // directory, which session config.

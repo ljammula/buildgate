@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"buildgate/internal/api"
-	"buildgate/internal/sessionconfig"
 )
 
 // gateTokenFileSuffix names the file holding the gate token of `factoryd
@@ -132,12 +131,12 @@ type gateTokenFlags struct {
 // parsing, so the doc-vs-flag drift test can enumerate its flags.
 func newGateTokenFlags() (flags *flag.FlagSet, f gateTokenFlags) {
 	flags = flag.NewFlagSet("gate-token", flag.ContinueOnError)
-	f.configPath = flags.String("config", "", "session config path, which locates the token file beside it; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists. Must be the config the running 'factoryd serve' uses")
+	f.configPath = flags.String("config", "", "the running serve's config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	f.ttl = flags.Duration("ttl", gateDefaultTTL, fmt.Sprintf("how long a token this command writes works, from %s to %s", gateMinTTL, gateMaxTTL))
 	f.rotate = flags.Bool("rotate", false, "replace the token; the old one stops working at once")
 	f.disable = flags.Bool("disable", false, "keep the gate on with no token: no gate token opens a console that is not on this machine until -rotate")
 	f.remove = flags.Bool("remove", false, "remove the token file, which turns the gate off: a console under an -allowed-host name reads with no token and cannot write")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

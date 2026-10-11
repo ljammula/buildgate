@@ -34,7 +34,7 @@ func newSetupFlags() (flags *flag.FlagSet, f setupFlags) {
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file trusted for the outbound TLS calls setup makes and written to the config")
 	f.harnessName = flags.String("harness", harness.Pi, "coding agent every role runs: \"pi\", \"codex\" (needs -route chatgpt-codex) or \"pifork\" (needs -sandbox-image); skips the coding-agent question")
 	f.sandboxImage = flags.String("sandbox-image", "", "digest-pinned pifork worker image; required with -harness pifork, refused otherwise")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return flags, f
 }
 

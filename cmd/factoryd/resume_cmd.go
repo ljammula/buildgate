@@ -17,10 +17,10 @@ import (
 // executing the command.
 func newResumeFlags() (flags *flag.FlagSet, dataDir, from, configPath *string) {
 	flags = flag.NewFlagSet("resume", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records. Must precede <request-id> on the command line (flag.Parse stops at the first positional argument)")
-	from = flags.String("from", request.ResumeRound, "how to continue the lost step: \"round\" continues a lost build in its kept worktree from the last completed round (a lost drafting or planning step simply runs again); \"scratch\" starts the lost build over from a fresh worktree")
-	configPath = flags.String("config", "", "session config path (for -data-dir resolution and the sandbox docker binary); empty searches the default paths")
-	plainFlagUsage(flags)
+	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	from = flags.String("from", request.ResumeRound, "How a lost build continues. \"round\" continues in its kept worktree from the last completed round. \"scratch\" discards that worktree and rebuilds the ticket. Any other lost step simply runs again.")
+	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	finishFlags(flags)
 	return
 }
 

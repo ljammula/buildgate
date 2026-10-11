@@ -76,7 +76,7 @@ func distinctDataDirs(profiles []profileInfo) (dirs []string, owners map[string]
 
 func newUseFlags() *flag.FlagSet {
 	flags := flag.NewFlagSet("use", flag.ContinueOnError)
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return flags
 }
 

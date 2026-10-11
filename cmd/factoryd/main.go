@@ -13,9 +13,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -447,7 +447,7 @@ func buildVersion(stamped string, settings []debug.BuildSetting) string {
 // topLevelHelpTokens are the ways an operator asks for top-level help
 // rather than naming a real subcommand or starting a bare run --
 // isTopLevelHelpRequest below is the only place these are checked.
-var topLevelHelpTokens = map[string]bool{"-h": true, "-help": true, "--help": true, "help": true}
+var topLevelHelpTokens = map[string]bool{"-h": true, "-help": true, "--help": true}
 
 // isTopLevelHelpRequest reports whether args (os.Args[1:]) asks for
 // top-level help: no subcommand at all (bare `factoryd`), or the first
@@ -466,25 +466,6 @@ func isTopLevelHelpRequest(args []string) bool {
 	return len(args) == 0 || topLevelHelpTokens[args[0]]
 }
 
-// printTopLevelHelp is what a bare `factoryd` or `factoryd -h`/`-help`/
-// `--help`/`help` prints: the handful of commands an operator actually
-// reaches for, not every subcommand this binary has (`factoryd <cmd> -h`
-// -- or USAGE.md/USAGE_REFERENCE.md -- covers the rest).
-func printTopLevelHelp(out io.Writer) {
-	fmt.Fprintln(out, "factoryd -- an unattended build/verify agent factory (merge and deploy stay human-gated)")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Common commands:")
-	fmt.Fprintln(out, `  factoryd quickstart <repo-path> "<task>"   one-command onboarding: configure, build, watch (start here)`)
-	fmt.Fprintln(out, "  factoryd [flags]                            build one ticket directly (`factoryd -ticket x -h` for every flag)")
-	fmt.Fprintln(out, "  factoryd submit / worker                    queue tickets across repos and build them unattended")
-	fmt.Fprintln(out, "  factoryd serve                              console + API, for watching and approving runs")
-	fmt.Fprintln(out, "  factoryd status <run-id>                    inspect one run's state")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Also: doctor (check setup), approve / reject / retry / cancel (act on a request), stop (stop what quickstart started), logs, inbox, stats (is it getting better).")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "See USAGE.md for the full walkthrough, or `factoryd <command> -h` for that command's own flags.")
-}
-
 func realMain(dp *deps) error {
 	// Set once, here, before any subcommand can persist a run record --
 	// run.Persist (internal/run/run.go) stamps this package-level value
@@ -499,11 +480,28 @@ func realMain(dp *deps) error {
 		printTopLevelHelp(os.Stdout)
 		return nil
 	}
-	if handler, ok := subcommands()[os.Args[1]]; ok {
-		return handler(dp, os.Args[2:])
-	}
+	return helpIsNotAFailure(dispatch(dp, os.Args[1:]))
+}
 
-	return runMain(dp, os.Args[1:])
+// dispatch runs the command args names. `factoryd <command> -h` is that
+// command's help, on stdout as `factoryd help <command>` prints it.
+func dispatch(dp *deps, args []string) error {
+	if _, listed := lookupCommand(args[0]); listed && len(args) == 2 && topLevelHelpTokens[args[1]] {
+		return helpMain(os.Stdout, args[:1])
+	}
+	if handler, ok := subcommands()[args[0]]; ok {
+		return handler(dp, args[1:])
+	}
+	return runMain(dp, args)
+}
+
+// helpIsNotAFailure turns the error a command returns for -h into success:
+// the command printed its usage, which is what was asked for.
+func helpIsNotAFailure(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
 }
 
 // runMain is the existing bounded supervisor entry point, factored so the
@@ -597,7 +595,10 @@ func subcommands() map[string]subcommand {
 			return gateTokenMain(dp, os.Stdout, args)
 		},
 		"memory": memoryMain,
-		"stats":  withoutDeps(statsMain),
+		"help": func(_ *deps, args []string) error {
+			return helpMain(os.Stdout, args)
+		},
+		"stats": withoutDeps(statsMain),
 		"version": func(*deps, []string) error {
 			return versionMain()
 		},

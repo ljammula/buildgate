@@ -17,6 +17,9 @@ You run exactly these forms. Every command follows the active profile (see
 `-config <profile>` right after the command name only when the operator names
 another profile:
 
+- `factoryd help [<command>]` and `factoryd help -json <command>`: the list of
+  commands, or one command's arguments and flags (read-only; it takes no
+  `-config`). Check here before giving the operator a command you are unsure of
 - `factoryd doctor [-target-repo <repo-path>]`
 - `factoryd status [-n N] [-json]`
 - `factoryd watch [-no-follow] <id>`

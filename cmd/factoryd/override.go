@@ -23,15 +23,15 @@ func newOverrideFlags() (flags *flag.FlagSet, runID, dataDir, by, reason, state,
 	by = flags.String("by", "", "name of the human applying the override (required)")
 	reason = flags.String("reason", "", "justification for the override (required)")
 	state = flags.String("state", "", "new terminal state: accepted or halted (required)")
-	releaseProtectedPaths = flags.String("release-protected-paths", "", "internal/release.MergePolicy.ProtectedPaths, comma-separated -- see runMain's own flag of the same name")
-	releaseMaxFilesChanged = flags.Int("release-max-files-changed", 0, "internal/release.MergePolicy.MaxFilesChanged -- see runMain's own flag of the same name")
-	releaseMaxInsertions = flags.Int("release-max-insertions", 0, "internal/release.MergePolicy.MaxInsertions -- see runMain's own flag of the same name")
-	releaseRollbackPlan = flags.String("release-rollback-plan", "", "internal/release.MergePolicy.RollbackPlan -- see runMain's own flag of the same name")
-	releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "internal/release.MergePolicy.AllowOverrides -- see runMain's own flag of the same name")
-	releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "internal/release.MergePolicy.AllowDependencyLockfileChanges -- see runMain's own flag of the same name")
-	releaseAllowUnsandboxed = flags.Bool("release-allow-unsandboxed", false, "internal/release.MergePolicy.AllowUnsandboxed -- see runMain's own flag of the same name")
-	releaseAllowSkippedProjectCheck = flags.Bool("release-allow-skipped-project-check", false, "internal/release.MergePolicy.AllowSkippedProjectCheck -- see runMain's own flag of the same name")
-	plainFlagUsage(flags)
+	releaseProtectedPaths = flags.String("release-protected-paths", "", "comma-separated paths a run may not change and still pass the release decision, for the decision recorded after the override")
+	releaseMaxFilesChanged = flags.Int("release-max-files-changed", 0, "most files a run may change and still pass the release decision; 0 denies every release, for the decision recorded after the override")
+	releaseMaxInsertions = flags.Int("release-max-insertions", 0, "most inserted lines a run may have and still pass the release decision; 0 denies every release, for the decision recorded after the override")
+	releaseRollbackPlan = flags.String("release-rollback-plan", "", "rollback plan named in the release evidence, such as \"git revert the merge commit on main\"; empty denies every release, for the decision recorded after the override")
+	releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "let a run with a human override in its history pass the release decision, for the decision recorded after the override")
+	releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "let a run that changed a dependency lockfile pass the release decision, for the decision recorded after the override")
+	releaseAllowUnsandboxed = flags.Bool("release-allow-unsandboxed", false, "let a run whose build recorded no sandbox image digest pass the release decision, for the decision recorded after the override")
+	releaseAllowSkippedProjectCheck = flags.Bool("release-allow-skipped-project-check", false, "let a run started with -skip-project-check pass the release decision, for the decision recorded after the override")
+	finishFlags(flags)
 	return
 }
 
@@ -159,7 +159,7 @@ func overrideObjectsDir(r *run.Run) string {
 func newOverrideRateFlags() (flags *flag.FlagSet, dataDir *string) {
 	flags = flag.NewFlagSet("override-rate", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

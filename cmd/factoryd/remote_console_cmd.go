@@ -18,7 +18,6 @@ import (
 
 	"buildgate/internal/consolelink"
 	"buildgate/internal/hostcontrol"
-	"buildgate/internal/sessionconfig"
 )
 
 // remoteConsoleFileSuffix names the file that records how this profile's
@@ -339,12 +338,12 @@ type remoteConsoleFlags struct {
 // isolation from parsing, so the doc-vs-flag drift test can enumerate it.
 func newRemoteConsoleFlags() (flags *flag.FlagSet, f remoteConsoleFlags) {
 	flags = flag.NewFlagSet("remote-console", flag.ContinueOnError)
-	f.configPath = flags.String("config", "", "session config path, which locates the files beside it; default: the first of "+strings.Join(sessionconfig.DefaultPaths(), ", ")+" that exists")
+	f.configPath = flags.String("config", "", "config path or profile name of the console to open; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	f.dataDir = flags.String("data-dir", "", "data directory of the console to open; default: the session config's data dir")
 	f.httpsPort = flags.Int("https-port", 0, "HTTPS port of the Tailscale listener; default: the one already forwarding to this console, else the first free of 443, 8443, 8444 and up")
 	f.ttl = flags.Duration("ttl", gateDefaultTTL, fmt.Sprintf("how long a gate token this command writes works, from %s to %s; a usable token is kept as it is", gateMinTTL, gateMaxTTL))
 	f.off = flags.Bool("off", false, "close the console to other machines: remove the allowed host, the listener this command added, and the gate token if this command wrote it")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 

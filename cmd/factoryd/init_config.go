@@ -20,7 +20,7 @@ import (
 func newInitConfigFlags() (flags *flag.FlagSet, path *string) {
 	flags = flag.NewFlagSet("init-config", flag.ContinueOnError)
 	path = flags.String("path", sessionconfig.DefaultPaths()[0], "where to write the example config")
-	plainFlagUsage(flags)
+	finishFlags(flags)
 	return
 }
 
