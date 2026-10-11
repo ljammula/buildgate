@@ -24,6 +24,9 @@ type WorkerRuntime struct {
 	StartedAt string
 	CreateErr error
 	DeleteErr error
+	// WaitErr, when set, is what Wait returns once the command has exited:
+	// the wait for a command that ran was lost.
+	WaitErr error
 	// Live is what ListByRun returns.
 	Live []string
 
@@ -116,6 +119,9 @@ func (w *WorkerRuntime) Wait(ctx context.Context, _ string) (sandbox.SandboxExit
 	case <-exited:
 		w.mu.Lock()
 		defer w.mu.Unlock()
+		if w.WaitErr != nil {
+			return sandbox.SandboxExit{}, w.WaitErr
+		}
 		return w.exit, nil
 	case <-ctx.Done():
 		return sandbox.SandboxExit{}, ctx.Err()

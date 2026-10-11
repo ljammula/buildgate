@@ -18,6 +18,7 @@ import (
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/unresolved"
 	"buildgate/internal/workflow"
 )
 
@@ -251,5 +252,5 @@ func (a *requestActivities) HaltLostRequestStep(_ context.Context, in workflow.H
 	if string(r.State) != in.State {
 		return nil
 	}
-	return requestdriver.EnterResumeReview(a.dataDir, r, lostRunOf(a.dataDir, r), time.Now())
+	return requestdriver.EnterResumeReview(a.dataDir, r, lostRunOf(a.dataDir, r), unresolved.WorkerLost, time.Now())
 }

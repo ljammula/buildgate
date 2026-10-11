@@ -54,13 +54,18 @@ func RelayCeilingExceededFromError(err error) bool {
 
 // HaltReasonCodeFromError maps err to run.Run.HaltReasonCode's value,
 // through Temporal's ApplicationError wrappers like
-// RelayCeilingExceededFromError, or "" for a halt cause with no code.
+// RelayCeilingExceededFromError, or "" for a halt cause with no code. A
+// failure that is no verdict on the work has its unresolved.Cause as its
+// code (UnresolvedCauseFromError).
 func HaltReasonCodeFromError(err error) string {
 	switch {
 	case RelayCeilingExceededFromError(err):
 		return run.HaltReasonRelayCeilingExceeded
 	case errors.Is(err, sandbox.ErrComposeServicesRejected):
 		return run.HaltReasonComposeServicesRejected
+	}
+	if cause := UnresolvedCauseFromError(err); cause != "" {
+		return string(cause)
 	}
 	var appErr *temporal.ApplicationError
 	if !errors.As(err, &appErr) {

@@ -1,0 +1,53 @@
+// Package unresolved names the ways a step can end with the factory holding
+// no verdict on the work.
+package unresolved
+
+import "fmt"
+
+// Cause names why a step ended with the factory holding no verdict
+// on the work: something outside the work failed. It is a closed set, each
+// member decided from a fact the factory itself observed (a Temporal timeout,
+// a sandbox whose command was never released), never from a worker's or a provider's
+// wording. An unresolved step accepts nothing and judges nothing: its request
+// waits in resume_review for a human, and its round is not counted.
+//
+// A halted run records its cause as run.Run.HaltReasonCode; a request records
+// it as request.ResumeInfo.Cause. Adding a cause is one constant and one
+// entry in causes.
+type Cause string
+
+const (
+	// WorkerLost: the worker running the step went away (a
+	// heartbeat or start-to-close timeout, a dead owner process, or a
+	// command the sandbox runtime started twice).
+	WorkerLost Cause = "worker_lost"
+	// SandboxLaunch: the step's sandbox never started its command (it
+	// could not be created, or had no worker container), and is confirmed
+	// gone. A command that started and then hung, was cut off or printed
+	// too much is not one: it ran.
+	SandboxLaunch Cause = "sandbox_launch"
+)
+
+// causes holds, for each cause, the operator's clause about what
+// happened; %s is the step.
+var causes = map[Cause]string{
+	WorkerLost:    "the factoryd worker stopped while the %s step ran",
+	SandboxLaunch: "the sandbox of the %s step could not be started, so the step never ran",
+}
+
+// Known reports whether c is a member of the closed set.
+func (c Cause) Known() bool {
+	_, ok := causes[c]
+	return ok
+}
+
+// What is the operator's clause about what happened to step. A cause outside
+// the set reads as a lost worker: a record written before causes existed
+// could only have been one.
+func (c Cause) What(step string) string {
+	clause, ok := causes[c]
+	if !ok {
+		clause = causes[WorkerLost]
+	}
+	return fmt.Sprintf(clause, step)
+}

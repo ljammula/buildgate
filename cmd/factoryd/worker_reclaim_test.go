@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"slices"
 	"testing"
@@ -43,7 +44,7 @@ func TestHaltRequestsOfLostRunsEntersResumeReviewOnlyForTheBuildingTicketsReques
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != request.StateResumeReview || got.Error != request.ResumePrompt(reqID, request.StateBuilding) {
+	if got.State != request.StateResumeReview || got.Error != request.ResumePrompt(reqID, request.StateBuilding, unresolved.WorkerLost, got.Resume != nil && got.Resume.LostRunID != "") {
 		t.Fatalf("request = %s %q, want resume_review with the resume prompt", got.State, got.Error)
 	}
 	if got.Resume == nil || got.Resume.LostRunID != "run-lost" || got.Resume.Generation != 1 {

@@ -353,6 +353,7 @@ func TestPackageBoundaryRules(t *testing.T) {
 			"buildgate/internal/sanitize":      true,
 			"buildgate/internal/sessionconfig": true,
 			"buildgate/internal/ticketspec":    true,
+			"buildgate/internal/unresolved":    true,
 			"buildgate/internal/workflow":      true,
 			"buildgate/internal/workspace":     true,
 		}
@@ -467,6 +468,7 @@ func TestRequestdrivertestIsATestsOnlyPackage(t *testing.T) {
 		"buildgate/internal/requestdriver": true,
 		"buildgate/internal/run":           true,
 		"buildgate/internal/testfixture":   true,
+		"buildgate/internal/unresolved":    true,
 		"buildgate/internal/workspace":     true,
 	}
 	for imp := range buildgateImports(g, testPkg) {
@@ -528,5 +530,19 @@ func TestImportersOfFindsAShippedImporter(t *testing.T) {
 	delete(g, "buildgate/internal/workflow")
 	if got := importersOf(g, testPkg); len(got) != 0 {
 		t.Errorf("importersOf = %v, want none", got)
+	}
+}
+
+// TestUnresolvedIsALeafPackage: internal/unresolved is the closed set of
+// causes that run, request, workflow and requestdriver all read. It imports
+// no buildgate package, so naming a cause never pulls one of them into
+// another.
+func TestUnresolvedIsALeafPackage(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const pkg = "buildgate/internal/unresolved"
+	requirePackage(t, g, pkg)
+	if imports := buildgateImports(g, pkg); len(imports) > 0 {
+		t.Errorf("unresolved imports no buildgate package: imports %v", sortedKeys(imports))
 	}
 }

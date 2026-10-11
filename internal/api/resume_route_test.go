@@ -1,6 +1,7 @@
 package api
 
 import (
+	"buildgate/internal/unresolved"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,7 +24,7 @@ func seedLostBuild(t *testing.T, dataDir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnterResumeReview(request.StateBuilding, "run-lost", time.Now()); err != nil {
+	if err := r.EnterResumeReview(request.StateBuilding, "run-lost", unresolved.WorkerLost, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Save(dataDir); err != nil {
@@ -164,7 +165,7 @@ func TestResumeRouteReapsKeptWorktreesWhenNoKeptBuildIsContinued(t *testing.T) {
 		dataDir := t.TempDir()
 		seedApprovableRequest(t, dataDir, "req-1", from, false)
 		r, _ := request.Load(dataDir, "req-1")
-		if err := r.EnterResumeReview(from, "", time.Now()); err != nil {
+		if err := r.EnterResumeReview(from, "", unresolved.WorkerLost, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.Save(dataDir); err != nil {

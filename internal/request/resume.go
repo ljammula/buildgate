@@ -1,6 +1,7 @@
 package request
 
 import (
+	"buildgate/internal/unresolved"
 	"fmt"
 	"strings"
 	"time"
@@ -33,6 +34,10 @@ type ResumeInfo struct {
 	// LostRunID is the run the lost step was running: the build whose kept
 	// worktree ResumeRound continues. Empty when the step had no run.
 	LostRunID string `json:"lost_run_id,omitempty"`
+	// Cause is why the step ended with no verdict on the work. Empty on a
+	// record written before causes existed, which reads as a lost worker
+	// (unresolved.Cause.What).
+	Cause unresolved.Cause `json:"cause,omitempty"`
 	// Generation counts the times the request has entered resume_review. A
 	// decision applies only to the Generation it was made for.
 	Generation int `json:"generation"`
@@ -55,29 +60,38 @@ type ResumeDecision struct {
 	At         string `json:"at"`
 }
 
-// ResumePrompt is the one sentence that tells the operator a step was lost
-// and what to do about it. Recorded as the History reason and Error of the
-// move into resume_review, and the base of the reminder.
-func ResumePrompt(id string, from State) string {
-	return fmt.Sprintf("the factoryd worker stopped while the %s step ran; `factoryd resume %s` continues it (or `-from scratch` / `factoryd cancel %s`)", from, id, id)
+// ResumePrompt is the one sentence that tells the operator a step ended with
+// no verdict on the work, why (cause), and what to do about it. Recorded as
+// the History reason and Error of the move into resume_review, and the base
+// of the reminder.
+//
+// kept is false for a build step that left no worktree to continue in (a
+// build on an existing branch keeps none): only a rebuild is then offered.
+func ResumePrompt(id string, from State, cause unresolved.Cause, kept bool) string {
+	what := cause.What(string(from))
+	if from == StateBuilding && !kept {
+		return fmt.Sprintf("%s; nothing of it was kept: `factoryd resume -from scratch %s` rebuilds the ticket (or `factoryd cancel %s`)", what, id, id)
+	}
+	return fmt.Sprintf("%s; `factoryd resume %s` continues it (or `-from scratch` / `factoryd cancel %s`)", what, id, id)
 }
 
-// EnterResumeReview moves a request whose step was lost out of from into
-// resume_review, which waits on a human: nothing reruns on its own. from must
-// be the state of the lost step and the request's current state; lostRunID is
-// the run it was running, or "". It starts the next Generation and resets the
-// reminder bookkeeping.
-func (r *Request) EnterResumeReview(from State, lostRunID string, now time.Time) error {
+// EnterResumeReview moves a request whose step ended with no verdict on the
+// work out of from into resume_review, which waits on a human: nothing reruns
+// on its own. from must be the state of that step and the request's current
+// state; lostRunID is the run it was running, or ""; cause is why it gave no
+// verdict. It starts the next Generation and resets the reminder bookkeeping.
+func (r *Request) EnterResumeReview(from State, lostRunID string, cause unresolved.Cause, now time.Time) error {
 	if !stateIn(from, resumableStates) {
 		return fmt.Errorf("request %s: a lost %q step cannot enter %s (allowed from: %v) %w", r.ID, from, StateResumeReview, resumableStates, ErrIllegalTransition)
 	}
-	prompt := ResumePrompt(r.ID, from)
+	prompt := ResumePrompt(r.ID, from, cause, lostRunID != "")
 	if err := advance(r, []State{from}, StateResumeReview, factoryActor, prompt, now); err != nil {
 		return err
 	}
 	r.Resume = &ResumeInfo{
 		FromState:  from,
 		LostRunID:  lostRunID,
+		Cause:      cause,
 		Generation: r.nextResumeGeneration(),
 		At:         r.UpdatedAt,
 	}
@@ -164,13 +178,19 @@ func (r *Request) resumeNextAction() string {
 		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd resume %s`, `factoryd resume -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
 	}
 	from := r.Resume.FromState
+	what := r.Resume.Cause.What(string(from))
 	if len(r.Resume.Refused) > 0 {
 		return fmt.Sprintf("the lost %s step cannot be resumed (%s); `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", from, strings.Join(r.Resume.Refused, "; "), r.ID, r.ID)
 	}
-	if from == StateBuilding {
-		return fmt.Sprintf("the factoryd worker stopped while the build ran: `factoryd resume %s` continues it in its kept worktree from the last completed round, `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", r.ID, r.ID, r.ID)
+	if from == StateBuilding && r.Resume.LostRunID == "" {
+		// Nothing of the step was kept (a corrective round builds on the
+		// ticket's branch and keeps no worktree), so only a rebuild is left.
+		return fmt.Sprintf("%s: `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID)
 	}
-	return fmt.Sprintf("the factoryd worker stopped while the %s step ran: `factoryd resume %s` runs it again, or `factoryd cancel %s`", from, r.ID, r.ID)
+	if from == StateBuilding {
+		return fmt.Sprintf("%s: `factoryd resume %s` continues it in its kept worktree from the last completed round, `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
+	}
+	return fmt.Sprintf("%s: `factoryd resume %s` runs it again, or `factoryd cancel %s`", what, r.ID, r.ID)
 }
 
 func stateIn(s State, set []State) bool {

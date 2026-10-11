@@ -301,7 +301,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(prep.launchContext(ctx), input.RunWorkflowInput, logPath, 1, beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(relaunchUnstartedOnly(prep.launchContext(ctx)), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
 	})
 	// Immediately after the launch, before the clean check below: the stubs
 	// a mask over an absent path needed, and the snapshot's scratch.
@@ -426,16 +426,10 @@ func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInp
 			}
 		}
 	}
-	errType := InfrastructureFailureType
-	if errors.Is(runErr, sandbox.ErrCleanupUnconfirmed) {
-		errType = CleanupUnconfirmedFailureType
-	}
+	errType := launchErrorType(runErr)
 	if runErr != nil {
 		checkpoint.Error = fmt.Sprintf("%s subprocess infrastructure failure: %v", step.Label, runErr)
-		checkpoint.ErrorType = ""
-		if errType == CleanupUnconfirmedFailureType {
-			checkpoint.ErrorType = errType
-		}
+		checkpoint.ErrorType = checkpointErrorType(runErr)
 	} else if err != nil {
 		checkpoint.Error = fmt.Sprintf("%s evidence infrastructure failure: %v", step.Label, err)
 	}

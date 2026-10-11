@@ -196,7 +196,7 @@ request sits in a queue nobody drains.
 | `oracle_review` | List the oracle files and any `ACTION NEEDED` line `watch` printed |
 | `plan_review` | Summarize the ticket list; approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |
-| `resume_review` | A step was lost because the worker stopped; nothing reruns on its own. Quote `reason:` and `next:` from `watch`, then name the choices: `factoryd resume <id>` (continue the build from its last completed round, or rerun a lost drafting or planning step), `factoryd resume -from scratch <id>` (rebuild the ticket), `factoryd cancel <id>`. The operator chooses; if `resume` is refused, only `-from scratch` or `cancel` remain |
+| `resume_review` | A step ended with no verdict on the work (the worker stopped, or its sandbox could not be started; `reason:` says which); nothing reruns on its own. Quote `reason:` and `next:` from `watch`, then name the choices: `factoryd resume <id>` (continue the build from its last completed round, or rerun a lost drafting or planning step), `factoryd resume -from scratch <id>` (rebuild the ticket), `factoryd cancel <id>`. The operator chooses; if `resume` is refused, only `-from scratch` or `cancel` remain |
 | `halted`, `quarantined` | Quote `reason:` and `next:` from `watch`, then explain them |
 | `done`, `cancelled` | Final state and PR URL(s) |
 
