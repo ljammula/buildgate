@@ -43,6 +43,12 @@ const (
 	// DependencyFetch: a repository command failed in an attempt during
 	// which the registry proxy could not reach a package registry.
 	DependencyFetch Cause = "dependency_fetch"
+	// DraftingJob: a drafting step's job ended before its script reached a
+	// result of its own (the launch returned no exit code, or the script
+	// exited non-zero leaving no evidence file), and nothing more specific
+	// is known. A draft the script or the factory's checks refused is not
+	// one: that is a result.
+	DraftingJob Cause = "drafting_job"
 )
 
 // causes holds, for each cause, the operator's clause about what
@@ -55,6 +61,7 @@ var causes = map[Cause]string{
 	MeterDenied:      "the spend meter refused the model requests of the %s step (a ceiling, a window budget or the request rate in the session config; `factoryd cost` shows the spend), so the work was not judged",
 	NoVerdict:        "the review of the %s step answered and gave no verdict the factory could read",
 	DependencyFetch:  "a package registry could not be reached while the %s step ran, so its command's failure says nothing about the work",
+	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
 }
 
 // Known reports whether c is a member of the closed set.

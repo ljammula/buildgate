@@ -478,7 +478,7 @@ requires a new contract review and an updated machine-checkable test.
   on, or one whose removal could not be confirmed, which keeps nothing. A
   verify, gate or review command started twice is an infrastructure
   failure: one sign of it is an exit code the repository's own command
-  could return. A drafting or planning job whose sandbox does not start
+  could return. A spec-drafting or planning job whose sandbox does not start
   halts its request; only a run's steps are covered here. The run halts with the cause
   as its `HaltReasonCode`, a ticket run keeps its worktree (one built on an existing branch
   keeps none and can only be rebuilt), and the request waits in
@@ -808,6 +808,24 @@ records the decision and returns the request to the state of the lost step:
 - `resume_review -> building`
 - `resume_review -> pr_review`
 - `resume_review -> cancelled`
+
+An oracle-drafting job that ended before its script reached a result is
+the same wait, entered by the step itself from `oracle_drafting`: it is no
+draft, so the request does not reach `oracle_review`. The job decides that from what it observed, never from the
+wording of an error or of the script's output: the launch returned no exit
+code (cause `sandbox_launch` when the sandbox never released the script and
+its removal was confirmed, otherwise `drafting_job`); the script exited
+non-zero and the meter's ledger holds requests of the launch, none answered
+and none read from records without settlement facts (`meter_denied` when the
+meter refused every one, `provider_quota` when one was answered 429,
+otherwise `model_unavailable`); or the script exited non-zero short of its
+budget and left no evidence file (`drafting_job`). The evidence file is on a
+mount the worker can write, so a worker can move a pass between `failed` in
+`oracle_review` and this wait; neither accepts anything and both wait for a
+human. Every other end of the step is unchanged: a result the script
+reported, a draft the host's checks refused, and an error from before the
+launch are a `failed` draft in `oracle_review`. A resume is refused while a
+container of the job is alive, and reruns the step.
 
 `cancelled` is `Cancel`, as above. A build resumed with `round` is checked
 again before it launches; a failed check returns the request to

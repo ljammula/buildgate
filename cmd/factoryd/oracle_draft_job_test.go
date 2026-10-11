@@ -372,14 +372,15 @@ func TestOracleDraftJobStatusMapping(t *testing.T) {
 	}
 }
 
-// A launch error or timeout is recorded as status failed (the request still
-// goes to oracle_review); it touches nothing.
+// A launch error or timeout is a job failure, not a draft; it touches
+// nothing.
 func TestOracleDraftJobLaunchErrorTouchesNothing(t *testing.T) {
 	f := newDraftFixture(t)
 	mustWrite(t, filepath.Join(f.oracleDir, "RUN_COMMAND.txt"), "go test ./.oracle/...\n")
 	stubLaunch(t, fakeScript{Err: context.DeadlineExceeded}, nil)
-	if got, err := f.run(t); err != nil || got.Status != request.OracleDraftFailed {
-		t.Fatalf("launch error = %+v, %v; want status failed", got, err)
+	var failure *requestdriver.OracleDraftJobFailure
+	if got, err := f.run(t); !errors.As(err, &failure) {
+		t.Fatalf("launch error = %+v, %v; want an OracleDraftJobFailure", got, err)
 	}
 	if got := f.oracleFiles(t); len(got) != 1 || got["RUN_COMMAND.txt"] != "go test ./.oracle/...\n" {
 		t.Errorf("oracle/ changed on a failed launch: %v", got)
@@ -1064,20 +1065,6 @@ func TestOracleDraftRejectRedraftPassesFeedbackOnly(t *testing.T) {
 	}
 }
 
-// A job error (and any panic-free failure) still reaches oracle_review.
-func TestOracleDraftJobErrorStillLandsInReview(t *testing.T) {
-	dp := newTestDeps(t)
-	f := newDraftFixture(t)
-	stubLaunch(t, fakeScript{Err: errors.New("relay down")}, nil)
-	if err := driveRequests(dp, context.Background(), f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runOracleDraftJob, requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatal(err)
-	}
-	got := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
-	if got.State != request.StateOracleReview || got.OracleDraft.Status != request.OracleDraftFailed || !strings.Contains(got.OracleDraft.Detail, "relay down") {
-		t.Fatalf("state=%s draft=%+v", got.State, got.OracleDraft)
-	}
-}
-
 // overTotalCap is five valid 15 KiB Go oracles: each under the per-file cap,
 // together over the 64 KiB total.
 func overTotalCap() fakeScript {
@@ -1385,7 +1372,7 @@ func TestOracleDraftFailedRedraftQuarantinesRejectedDraft(t *testing.T) {
 	feedback := request.OracleFeedbackPath(f.dataDir, f.id)
 	mustWrite(t, feedback, "## Oracle rejected\n\nno\n")
 
-	stubLaunch(t, fakeScript{Err: errors.New("relay down")}, nil)
+	stubLaunch(t, fakeScript{Status: "failed", Exit: 2}, nil)
 	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	r.OracleDraft = f.last
 	got, err := runOracleDraftJob(context.Background(), requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: r, Cfg: f.cfg, OracleDir: f.oracleDir, FeedbackPath: feedback})
@@ -1411,7 +1398,7 @@ func TestOracleDraftFailureWithoutRejectKeepsExistingDraft(t *testing.T) {
 	if _, err := f.run(t); err != nil {
 		t.Fatal(err)
 	}
-	stubLaunch(t, fakeScript{Err: errors.New("relay down")}, nil)
+	stubLaunch(t, fakeScript{Status: "failed", Exit: 2}, nil)
 	got, err := f.run(t)
 	if err != nil || got.Status != request.OracleDraftFailed {
 		t.Fatalf("got %+v, %v", got, err)
@@ -1774,16 +1761,14 @@ func TestOracleDraftFailureKeepsExitCodeOutputTailAndScratchEvidence(t *testing.
 func TestOracleDraftFailureWithAnEmptyLogSaysSoAndStillRetains(t *testing.T) {
 	f := newDraftFixture(t)
 	stubLaunch(t, fakeScript{Err: errors.New("container start refused")}, nil)
-	got, err := f.run(t)
-	if err != nil {
-		t.Fatal(err)
+	_, err := f.run(t)
+	var failure *requestdriver.OracleDraftJobFailure
+	if !errors.As(err, &failure) || !strings.Contains(err.Error(), "container start refused") {
+		t.Fatalf("err = %v, want an OracleDraftJobFailure naming the launch error", err)
 	}
-	if got.Status != request.OracleDraftFailed || !strings.Contains(got.Detail, "container start refused") || !strings.Contains(got.Detail, "printed no output") {
-		t.Errorf("draft = %+v", got)
-	}
-	summary := filepath.Join(request.Dir(f.dataDir, f.id), "logs", oracleFailureDirName, "SUMMARY.txt")
-	if _, err := os.Stat(summary); err != nil {
-		t.Errorf("no retained summary: %v", err)
+	summary, err := os.ReadFile(filepath.Join(request.Dir(f.dataDir, f.id), "logs", oracleFailureDirName, "SUMMARY.txt"))
+	if err != nil || !strings.Contains(string(summary), "container start refused") {
+		t.Errorf("retained summary = %q, %v", summary, err)
 	}
 }
 
@@ -2027,8 +2012,8 @@ func TestOracleDraftClearsStaleRetainedFailureBeforeAnyLaunchOrOnLaunchError(t *
 	f := newDraftFixture(t)
 	old := staleFile(f)
 	stubLaunch(t, fakeScript{Err: errors.New("docker: cannot start")}, nil)
-	if _, err := f.run(t); err != nil {
-		t.Fatal(err)
+	if _, err := f.run(t); err == nil {
+		t.Fatal("a launch error returned no error")
 	}
 	if _, err := os.Stat(old); err == nil {
 		t.Error("a previous failure's file survived a launch error")

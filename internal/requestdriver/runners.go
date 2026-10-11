@@ -25,7 +25,8 @@ type OracleDraftInput struct {
 // OracleDraftRunner is the injectable oracle-drafting job, the same
 // injection style as SpecDraftRunner/PlanTicketsRunner. A returned error (or
 // a job that overran its own timeout) becomes status "failed" and never halts
-// the request -- see AdvanceOracleDrafting.
+// the request; an *OracleDraftJobFailure sends it to resume_review instead --
+// see AdvanceOracleDrafting.
 type OracleDraftRunner func(ctx context.Context, in OracleDraftInput) (request.OracleDraft, error)
 
 // DraftedTicket is one ticket runPlanTicketsJob read back from

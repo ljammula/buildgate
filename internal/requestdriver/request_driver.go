@@ -247,10 +247,11 @@ func readImportedSpec(dataDir, id string) (string, error) {
 // oracle_review with the status the job reported. Unlike spec drafting and
 // planning, a job failure never halts the request: a runner error becomes
 // status "failed" and the operator decides at oracle_review (reject to retry,
-// hand-write oracle/, or approve to skip). Two things do not land in review:
+// hand-write oracle/, or approve to skip). Three things do not land in review:
 // a stale spec approval (halted, exactly like AdvancePlanning -- the drafter's
-// input changed) and a stop request mid-run (r is left as it is, so the next
-// pass re-runs the job).
+// input changed), a stop request mid-run (r is left as it is, so the next
+// pass re-runs the job), and a job that ended before it produced a draft
+// (OracleDraftJobFailure: the request waits in resume_review with the cause).
 func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner OracleDraftRunner, now time.Time) error {
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
@@ -292,6 +293,10 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 	case jobErr != nil:
 		if ctx.Err() != nil {
 			return jobErr
+		}
+		var failure *OracleDraftJobFailure
+		if errors.As(jobErr, &failure) {
+			return unresolvedOracleDrafting(dataDir, r, failure, now)
 		}
 		draft = request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting failed: %v", jobErr)}
 	case !draft.Status.Valid():

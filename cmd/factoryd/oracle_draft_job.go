@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/meter"
 	"buildgate/internal/modelrole"
 	"buildgate/internal/oraclecanary"
 	"buildgate/internal/oraclecommit"
@@ -26,6 +27,7 @@ import (
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
+	"buildgate/internal/unresolved"
 )
 
 const (
@@ -156,6 +158,14 @@ func runOracleDraftJob(ctx context.Context, in requestdriver.OracleDraftInput) (
 			// A stopped daemon leaves the request as it is; the next pass re-runs.
 			return request.OracleDraft{}, err
 		}
+		// A launch that ended before its script reached a result is no
+		// draft to call failed: the request waits in resume_review. An error
+		// from before the launch (the worktree, the job's inputs, its role)
+		// is the host's own refusal and stays a failed draft.
+		var failure *requestdriver.OracleDraftJobFailure
+		if errors.As(err, &failure) {
+			return request.OracleDraft{}, failure
+		}
 		draft = failedOracleDraft(err.Error())
 	}
 	// A failed re-draft that follows a reject must not leave the rejected
@@ -230,22 +240,7 @@ func runOracleDraftJobIn(ctx context.Context, in requestdriver.OracleDraftInput,
 	}
 	launch.Ecosystem = eco
 	if skipEco != "" {
-		detail := fmt.Sprintf("the target repository looks like %s and only Go and Python oracles are drafted automatically (the default sandbox image has no other test runner), so no model pass was spent: hand-write oracle/ test files with a project image that has the runner, or approve to skip", skipEco)
-		// This path returns before launchOracleDraft ever runs, so oracle_draft.log
-		// would otherwise never be written at all -- live symptom: an
-		// operator finding it 0 bytes with no explanation why. Write the
-		// same reason there, and give every criterion its own verdict
-		// (ineligible, same reason) instead of only the aggregate Detail
-		// above -- neither the model nor draft_acceptance_oracles.py ran,
-		// so there is no richer per-criterion rationale to report.
-		if err := os.WriteFile(launch.LogPath(1), []byte(detail+"\n"), 0o600); err != nil {
-			log.Printf("request %s: write oracle-draft log for the ecosystem skip: %v", job.ID, err)
-		}
-		verdicts := make([]request.OracleCriterionVerdict, len(criteria))
-		for i := range criteria {
-			verdicts[i] = request.OracleCriterionVerdict{Number: i + 1, Eligible: false, Reason: detail}
-		}
-		return noneEligibleDraft(in.OracleDir, prev, detail, verdicts)
+		return ecosystemSkipDraft(job.ID, skipEco, launch.LogPath(1), in.OracleDir, prev, len(criteria))
 	}
 	// Resolved only once a model pass will actually run: a repo the skip
 	// branch above declines never needs the review role, so a bad roles.review
@@ -283,6 +278,13 @@ func runOracleDraftJobIn(ctx context.Context, in requestdriver.OracleDraftInput,
 		draft.Spend = jobSpendFromResult(res, launch.RoleOverride.Role, time.Now())
 		return draft
 	}
+	// jobFailed is fail for a pass that is no verdict on a draft: the same
+	// retained diagnostics and spend, returned as the error that sends the
+	// request to resume_review.
+	jobFailed := func(cause unresolved.Cause, why string) error {
+		kept := fail(failedOracleDraft(why))
+		return &requestdriver.OracleDraftJobFailure{Cause: cause, Err: errors.New(sanitizeLogText(why)), Spend: kept.Spend}
+	}
 	launchStart := oracleDraftClock()
 	res, err = launchOracleDraft(ctx, cfg, job, launch)
 	launchElapsed := oracleDraftClock().Sub(launchStart)
@@ -291,11 +293,15 @@ func runOracleDraftJobIn(ctx context.Context, in requestdriver.OracleDraftInput,
 		if ctx.Err() != nil {
 			return request.OracleDraft{}, fmt.Errorf("draft_acceptance_oracles.py did not run to completion: %w", err)
 		}
-		return fail(failedOracleDraft(fmt.Sprintf("draft_acceptance_oracles.py did not run to completion: %v", err))), nil
+		return request.OracleDraft{}, jobFailed(launchFailureCause(err), fmt.Sprintf("draft_acceptance_oracles.py did not run to completion: %v", err))
 	}
 	if res.ExitCode != 0 {
+		timedOut := looksLikeScriptTimeout(res.ExitCode, launchElapsed, oracleScriptBudgetMinutes(launch.CriterionTimeoutMinutes, launch.NCriteria))
+		if cause, why, ok := scriptExitJobFailure(res, launch.EvidencePath, timedOut); ok {
+			return request.OracleDraft{}, jobFailed(cause, fmt.Sprintf("%s (log: %s)", why, logPath))
+		}
 		var salvageErr error
-		if looksLikeScriptTimeout(res.ExitCode, launchElapsed, oracleScriptBudgetMinutes(launch.CriterionTimeoutMinutes, launch.NCriteria)) {
+		if timedOut {
 			draftDir := filepath.Join(scriptScratch, "ORACLES_DRAFT")
 			if entries, readErr := os.ReadDir(draftDir); (readErr != nil && os.IsNotExist(readErr)) || (readErr == nil && len(entries) == 0) {
 				return fail(failedOracleDraft(fmt.Sprintf("draft_acceptance_oracles.py exited %d; timed out; model wrote no files (log: %s)", res.ExitCode, logPath))), nil
@@ -335,6 +341,87 @@ func runOracleDraftJobIn(ctx context.Context, in requestdriver.OracleDraftInput,
 		return autoRedraft(ctx, in, job, launch, criteria, specText, draft, cleanScratch)
 	}
 	return draft, nil
+}
+
+// ecosystemSkipDraft is the none_eligible draft of a workspace whose
+// language (skipEco) is not drafted automatically: no model pass is spent.
+func ecosystemSkipDraft(requestID, skipEco, logPath, oracleDir string, prev []string, nCriteria int) (request.OracleDraft, error) {
+	detail := fmt.Sprintf("the target repository looks like %s and only Go and Python oracles are drafted automatically (the default sandbox image has no other test runner), so no model pass was spent: hand-write oracle/ test files with a project image that has the runner, or approve to skip", skipEco)
+	// This path returns before launchOracleDraft ever runs, so oracle_draft.log
+	// would otherwise never be written at all -- live symptom: an
+	// operator finding it 0 bytes with no explanation why. Write the
+	// same reason there, and give every criterion its own verdict
+	// (ineligible, same reason) instead of only the aggregate Detail
+	// above -- neither the model nor draft_acceptance_oracles.py ran,
+	// so there is no richer per-criterion rationale to report.
+	if err := os.WriteFile(logPath, []byte(detail+"\n"), 0o600); err != nil {
+		log.Printf("request %s: write oracle-draft log for the ecosystem skip: %v", requestID, err)
+	}
+	verdicts := make([]request.OracleCriterionVerdict, nCriteria)
+	for i := range verdicts {
+		verdicts[i] = request.OracleCriterionVerdict{Number: i + 1, Eligible: false, Reason: detail}
+	}
+	return noneEligibleDraft(oracleDir, prev, detail, verdicts)
+}
+
+// launchFailureCause is why a launch that returned no exit code gave no
+// verdict: unresolved.SandboxLaunch when the sandbox never released the
+// script (sandbox.ErrSandboxNotStarted in the error's chain) and its removal
+// was confirmed, as a run step's launch is read (workflow's launchErrorType);
+// otherwise unresolved.DraftingJob (the launch could not be prepared, the
+// script started and its wait was lost or cut off, or the sandbox may still
+// exist).
+func launchFailureCause(err error) unresolved.Cause {
+	if errors.Is(err, sandbox.ErrSandboxNotStarted) && !errors.Is(err, sandbox.ErrCleanupUnconfirmed) {
+		return unresolved.SandboxLaunch
+	}
+	return unresolved.DraftingJob
+}
+
+// scriptExitJobFailure says whether a script that exited non-zero gave no
+// verdict on a draft, and why. Two facts decide it, neither of them the
+// script's output:
+//
+//   - the meter's ledger holds requests of this launch and none was answered
+//     (unservedCause): the model never produced anything to judge;
+//   - the script left no evidence file and did not use its whole budget: it
+//     stopped before its own result (it writes the file on every path that
+//     reaches one, "failed" included).
+//
+// Everything else is a result and stays a "failed" draft: the script's own
+// "failed" evidence, and a run that used its whole budget (timedOut), whose
+// partial draft the caller salvages. The evidence file is on a mount the
+// worker can write, so a worker can move a pass between the two outcomes;
+// neither accepts anything, and both wait for a human.
+func scriptExitJobFailure(res runner.Result, evidencePath string, timedOut bool) (unresolved.Cause, string, bool) {
+	if cause, ok := unservedCause(res.RelayCalls); ok {
+		return cause, fmt.Sprintf("draft_acceptance_oracles.py exited %d and none of its %d model request(s) was answered", res.ExitCode, res.RelayCalls.Recorded()), true
+	}
+	if timedOut {
+		return "", "", false
+	}
+	if _, err := os.Lstat(evidencePath); errors.Is(err, fs.ErrNotExist) {
+		return unresolved.DraftingJob, fmt.Sprintf("draft_acceptance_oracles.py exited %d before writing its evidence file", res.ExitCode), true
+	}
+	return "", "", false
+}
+
+// unservedCause reads a launch's ledger summary for the one case that is no
+// verdict on a draft: requests were recorded and none was answered. It names
+// the meter when every request was refused by the meter itself, the provider
+// when one was answered 429, and otherwise the route. A summary inferred
+// from records without settlement facts (Legacy) decides nothing.
+func unservedCause(calls meter.Calls) (unresolved.Cause, bool) {
+	if calls.Legacy || calls.Recorded() == 0 || calls.Answered+calls.AnsweredUnread > 0 {
+		return "", false
+	}
+	switch {
+	case calls.Denied() == calls.Recorded():
+		return unresolved.MeterDenied, true
+	case calls.RateLimited > 0:
+		return unresolved.ProviderQuota, true
+	}
+	return unresolved.ModelUnavailable, true
 }
 
 // autoRedrafts is how many times a draft that fails the host's compile
