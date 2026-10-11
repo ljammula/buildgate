@@ -21,6 +21,10 @@ type RegistryProxyHooks struct {
 	// Address returns the proxy container's address on its internal
 	// network, for a worker that reaches it by address; nil asks Docker.
 	Address func(ctx context.Context, dockerBinary, container, network string) (string, error)
+	// UpstreamFailures returns how many requests the proxy container has
+	// failed because its upstream failed, and whether that is known; nil
+	// reads the container's log.
+	UpstreamFailures func(ctx context.Context, dockerBinary, container string) (count int, known bool)
 }
 
 // RegistryProxyCleanupTimeout bounds Cleanup's own teardown call.
@@ -114,6 +118,23 @@ func (l *RegistryProxyLifecycle) resolveAddress(ctx context.Context) error {
 	}
 	l.address = ip
 	return nil
+}
+
+// UpstreamFailures is how many requests this run's registry proxy has failed
+// since it started because a package registry could not be reached, did not
+// answer in time or answered 5xx (internal/registryproxy counts them), and
+// whether that is known. It is not known without a started proxy or when the
+// proxy's log cannot be read: a caller must then decide nothing from it. A
+// caller that wants the failures of one launch reads it before and after.
+func (l *RegistryProxyLifecycle) UpstreamFailures(ctx context.Context) (count int, known bool) {
+	if l == nil || l.handle == nil {
+		return 0, false
+	}
+	read := l.hooks.UpstreamFailures
+	if read == nil {
+		read = registryProxyUpstreamFailures
+	}
+	return read(ctx, l.dockerBinary, l.facts.ContainerName)
 }
 
 // PrepareWorker points workerSpec at this run's already-started registry

@@ -54,6 +54,8 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	ModelUnavailableFailureType: unresolved.ModelUnavailable,
 	ProviderQuotaFailureType:    unresolved.ProviderQuota,
 	MeterDeniedFailureType:      unresolved.MeterDenied,
+	// A command that ran and failed, twice, with a registry unreachable.
+	DependencyFetchFailureType: unresolved.DependencyFetch,
 }
 
 // modelRouteFailureTypes is the failure type of each cause
@@ -143,6 +145,7 @@ var nonRetryableActivityFailureTypes = []string{
 	ModelUnavailableFailureType,
 	ProviderQuotaFailureType,
 	MeterDeniedFailureType,
+	DependencyFetchFailureType,
 	ComposeServicesRejectedFailureType,
 	ReviewInstructionsFailureType,
 	FactoryDirFailureType,

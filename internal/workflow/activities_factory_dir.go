@@ -111,7 +111,9 @@ func refusedFactoryDirAttempt(afterAttempt func(int, runner.Result, error) error
 // a refused `.factory/` mount keep their own types; a sandbox that never
 // started its command (sandbox.ErrSandboxNotStarted) is
 // SandboxLaunchFailureType; anything else, a command that started and then
-// timed out or was lost included, is an infrastructure failure. A command
+// timed out or was lost included, is an infrastructure failure. A repository
+// command that failed twice while the registry proxy could not reach a
+// registry (errDependencyFetch) is DependencyFetchFailureType. A command
 // the runtime started twice is a lost step for the build only
 // (buildActivityErrorType): one of its signs is an exit code, which a
 // repository's own verify or gate command could return.
@@ -123,6 +125,8 @@ func launchErrorType(runErr error) string {
 		return FactoryDirFailureType
 	case errors.Is(runErr, sandbox.ErrSandboxNotStarted):
 		return SandboxLaunchFailureType
+	case errors.Is(runErr, errDependencyFetch):
+		return DependencyFetchFailureType
 	}
 	return InfrastructureFailureType
 }

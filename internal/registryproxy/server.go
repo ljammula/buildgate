@@ -69,6 +69,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -166,6 +167,52 @@ type Server struct {
 	cacheMu    sync.Mutex
 	cacheTotal int64
 	cacheEntry map[string]cacheStat
+
+	// upstreamFailures counts the requests this server could not serve
+	// because the upstream failed (see noteUpstreamFailure).
+	upstreamFailures atomic.Int64
+}
+
+// UpstreamFailureLogPrefix starts the one log line a Server writes for each
+// request it could not serve because the upstream failed; the server's total
+// so far follows it. internal/sandbox reads the container's log for these
+// lines (registryProxyUpstreamFailuresLogPrefix), the only way out of a
+// container that publishes no port and shares no writable mount.
+const UpstreamFailureLogPrefix = "upstream_failures="
+
+// errRedirectRefused marks an upstream request this server ended itself, by
+// its redirect policy. It is a refusal, not a failure of the upstream.
+var errRedirectRefused = errors.New("registry proxy: redirect refused")
+
+// noteUpstreamFailure counts one request the upstream failed: it could not be
+// reached or did not answer in time (a dial, TLS, timeout or reset error,
+// before or during the response body), or it answered 5xx. Nothing a client
+// can cause on its own is counted: a 4xx (a package that does not exist), a
+// request this server refused (method, path, redirect policy, its own
+// concurrency limit), a request the client abandoned, and anything served
+// from the cache or a local directory.
+func (s *Server) noteUpstreamFailure() {
+	s.logger.Printf("%s%d", UpstreamFailureLogPrefix, s.upstreamFailures.Add(1))
+}
+
+// UpstreamFailures is how many requests the upstream has failed since the
+// server started.
+func (s *Server) UpstreamFailures() int64 {
+	return s.upstreamFailures.Load()
+}
+
+// notedBody is an upstream response body that remembers a failed read.
+type notedBody struct {
+	io.ReadCloser
+	readErr error
+}
+
+func (b *notedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.readErr = err
+	}
+	return n, err
 }
 
 type cacheStat struct {
@@ -421,11 +468,11 @@ func (s *Server) matchRoute(requestPath string) (Route, string, bool) {
 // since without it there is nothing to check the target host against.
 func (s *Server) checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 5 {
-		return errors.New("registry proxy: too many redirects")
+		return fmt.Errorf("%w: too many redirects", errRedirectRefused)
 	}
 	allowed, ok := req.Context().Value(redirectAllowedHostsKey{}).(map[string]bool)
 	if !ok || !allowed[strings.ToLower(req.URL.Host)] {
-		return fmt.Errorf("registry proxy: redirect to non-allowlisted host %q refused", req.URL.Host)
+		return fmt.Errorf("%w: non-allowlisted host %q", errRedirectRefused, req.URL.Host)
 	}
 	return nil
 }
@@ -466,14 +513,18 @@ func (s *Server) fetchAndServe(w http.ResponseWriter, r *http.Request, route Rou
 
 	response, err := s.client.Do(outbound)
 	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			writeError(w, http.StatusGatewayTimeout, "upstream request timed out")
-			return http.StatusGatewayTimeout
-		}
-		writeError(w, http.StatusBadGateway, "upstream request failed or was redirected to a non-allowlisted host")
-		return http.StatusBadGateway
+		return s.serveUpstreamError(w, r, ctx, err)
 	}
 	defer response.Body.Close()
+	body := &notedBody{ReadCloser: response.Body}
+	response.Body = body
+	// Once per request, whatever the path below: a 5xx, or a body that
+	// stopped arriving while the client was still there to read it.
+	defer func() {
+		if response.StatusCode >= http.StatusInternalServerError || (body.readErr != nil && r.Context().Err() == nil) {
+			s.noteUpstreamFailure()
+		}
+	}()
 
 	if r.Method == http.MethodHead {
 		copyResponseHeaders(w.Header(), response.Header, true)
@@ -496,6 +547,28 @@ func (s *Server) fetchAndServe(w http.ResponseWriter, r *http.Request, route Rou
 	w.WriteHeader(response.StatusCode)
 	s.copyAndCache(w, response.Body, key, contentType)
 	return response.StatusCode
+}
+
+// serveUpstreamError answers a request whose upstream request returned err
+// and no response, and returns the status it wrote. A redirect this server
+// refused and a request its client abandoned are not failures of the
+// upstream; a timeout and any other transport error are.
+func (s *Server) serveUpstreamError(w http.ResponseWriter, r *http.Request, upstreamCtx context.Context, err error) int {
+	switch {
+	case errors.Is(err, errRedirectRefused):
+		writeError(w, http.StatusBadGateway, "upstream redirected to a non-allowlisted host")
+		return http.StatusBadGateway
+	case r.Context().Err() != nil:
+		writeError(w, http.StatusBadGateway, "request canceled before the upstream answered")
+		return http.StatusBadGateway
+	case errors.Is(upstreamCtx.Err(), context.DeadlineExceeded):
+		s.noteUpstreamFailure()
+		writeError(w, http.StatusGatewayTimeout, "upstream request timed out")
+		return http.StatusGatewayTimeout
+	}
+	s.noteUpstreamFailure()
+	writeError(w, http.StatusBadGateway, "upstream request failed")
+	return http.StatusBadGateway
 }
 
 // maxRewritableBodyBytes bounds how large a simple-index response
