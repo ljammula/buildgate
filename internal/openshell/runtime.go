@@ -2,10 +2,15 @@ package openshell
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"sync"
 	"time"
 
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
@@ -43,6 +48,17 @@ type Runtime struct {
 	// Sleep waits out the supervisor's first settings poll
 	// (waitFirstSettingsPoll); nil is a timer.
 	Sleep func(ctx context.Context, d time.Duration) error
+
+	// pushed is what PushCredential last stored in each provider.
+	pushedMu sync.Mutex
+	pushed   map[string]pushedCredential
+}
+
+// pushedCredential is one stored credential as this process knows it: its
+// digest, and the revision the gateway gave the provider when it took it.
+type pushedCredential struct {
+	digest   string
+	revision uint64
 }
 
 var _ sandbox.Runtime = (*Runtime)(nil)
@@ -223,8 +239,41 @@ func (r *Runtime) ListByRun(ctx context.Context, dataDir, runID string) ([]strin
 	return names, nil
 }
 
+// credentialDigest is the SHA-256 of a credential as stored: its profile,
+// every name and value, and its expiry.
+func credentialDigest(profileID string, secrets map[string]string, expiresAt time.Time) string {
+	names := make([]string, 0, len(secrets))
+	for name := range secrets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	writeField := func(field string) {
+		_ = binary.Write(h, binary.BigEndian, uint64(len(field)))
+		h.Write([]byte(field))
+	}
+	writeField(profileID)
+	for _, name := range names {
+		writeField(name)
+		writeField(secrets[name])
+	}
+	if !expiresAt.IsZero() {
+		writeField(expiresAt.UTC().Format(time.RFC3339Nano))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // PushCredential stores the credential in the route's provider, creating the
-// profile and the provider on first use.
+// profile and the provider on first use. A provider this process already
+// gave this credential, and that nothing has changed since (its revision is
+// the one that push returned), is left as it is: every update gives the
+// provider a new revision, and each running sandbox's supervisor drops its
+// model streams in flight to load it, so a push per launch cut the long
+// requests of every other job on the route (found live, 2026-10-10: three
+// reviews of large diffs lost all six tries of a stream to the launches of
+// other jobs). The gateway returns no stored value and keeps no metadata an
+// update sets, so what was stored is remembered here: a new process stores
+// the credential once, and a provider anything else changed is stored again.
 func (r *Runtime) PushCredential(ctx context.Context, cred sandbox.RouteCredential) error {
 	secrets := cred.Secrets()
 	if cred.Provider == "" || len(secrets) == 0 {
@@ -260,20 +309,54 @@ func (r *Runtime) PushCredential(ctx context.Context, cred sandbox.RouteCredenti
 			spec.CredentialExpiresAt[name] = cred.ExpiresAt
 		}
 	}
+	digest := credentialDigest(profile.ID, secrets, cred.ExpiresAt)
 	providers := r.Client.Providers()
 	existing, err := providers.Get(ctx, r.workspace(), cred.Provider)
+	var stored *v1.Provider
 	switch {
 	case v1.IsNotFound(err):
-		_, err = providers.Create(ctx, r.workspace(), &v1.Provider{Name: cred.Provider, Type: profile.ID, Spec: spec})
+		stored, err = providers.Create(ctx, r.workspace(), &v1.Provider{Name: cred.Provider, Type: profile.ID, Spec: spec})
 	case err == nil:
+		if r.holds(cred.Provider, pushedCredential{digest: digest, revision: existing.ResourceVersion}) {
+			return nil
+		}
 		existing.Type, existing.Spec = profile.ID, spec
-		_, err = providers.Update(ctx, r.workspace(), existing)
+		stored, err = providers.Update(ctx, r.workspace(), existing)
 	}
 	if err != nil {
 		// The SDK's errors carry gateway messages, never the request body.
 		return fmt.Errorf("openshell: store credential in provider %s: %w", cred.Provider, err)
 	}
+	var revision uint64
+	if stored != nil {
+		revision = stored.ResourceVersion
+	}
+	r.remember(cred.Provider, pushedCredential{digest: digest, revision: revision})
 	return nil
+}
+
+// holds reports whether the provider was last stored by this process with
+// exactly this credential at exactly this revision.
+func (r *Runtime) holds(provider string, want pushedCredential) bool {
+	r.pushedMu.Lock()
+	defer r.pushedMu.Unlock()
+	got, ok := r.pushed[provider]
+	return ok && got == want
+}
+
+// remember records a stored credential. A revision of zero (a gateway that
+// reports none) is never matched, so such a provider is stored every time.
+func (r *Runtime) remember(provider string, stored pushedCredential) {
+	r.pushedMu.Lock()
+	defer r.pushedMu.Unlock()
+	if stored.revision == 0 {
+		delete(r.pushed, provider)
+		return
+	}
+	if r.pushed == nil {
+		r.pushed = map[string]pushedCredential{}
+	}
+	r.pushed[provider] = stored
 }
 
 // Connect opens a gateway client authenticated with the client bundle in

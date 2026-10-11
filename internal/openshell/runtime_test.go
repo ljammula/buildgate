@@ -461,6 +461,87 @@ func TestPushCredentialCreatesThenReplacesTheProvidersValues(t *testing.T) {
 	}
 }
 
+// TestPushCredentialLeavesAProviderThatHoldsTheCredentialAlone: an update
+// gives the provider a new revision, and every running sandbox on the route
+// drops its model streams to load it. A push of the value this process last
+// stored, to a provider nothing has changed since, therefore changes
+// nothing. A new token, a new expiry, a provider something else updated and
+// a process that has stored nothing yet all store the credential.
+func TestPushCredentialLeavesAProviderThatHoldsTheCredentialAlone(t *testing.T) {
+	rt, client, _ := newTestRuntime()
+	ctx := context.Background()
+	expires := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	revision := func() uint64 {
+		t.Helper()
+		provider, err := client.Providers().Get(ctx, DefaultWorkspace, "bg-12345678-chatgpt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return provider.ResourceVersion
+	}
+	push := func(rt *Runtime, token string, expiresAt time.Time) uint64 {
+		t.Helper()
+		if err := rt.PushCredential(ctx, chatGPTCredential(t, token, expiresAt)); err != nil {
+			t.Fatal(err)
+		}
+		return revision()
+	}
+	first := push(rt, "tok-1", expires)
+	if first == 0 {
+		t.Fatal("the fake gateway reports no revision, so this test proves nothing")
+	}
+	if again := push(rt, "tok-1", expires); again != first {
+		t.Errorf("pushing the same credential updated the provider: revision %d, then %d", first, again)
+	}
+	newToken := push(rt, "tok-2", expires)
+	if newToken == first {
+		t.Error("a new token was not stored")
+	}
+	newExpiry := push(rt, "tok-2", expires.Add(time.Hour))
+	if newExpiry == newToken {
+		t.Error("a new expiry was not stored")
+	}
+
+	// Something else changed the provider: what it holds is unknown.
+	provider, err := client.Providers().Get(ctx, DefaultWorkspace, "bg-12345678-chatgpt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.Spec.Credentials = map[string]string{"BG_CHATGPT_TOKEN": "someone-elses"}
+	if _, err := client.Providers().Update(ctx, DefaultWorkspace, provider); err != nil {
+		t.Fatal(err)
+	}
+	changed := revision()
+	if changed == newExpiry {
+		t.Fatal("the out-of-band update did not change the revision")
+	}
+	restored := push(rt, "tok-2", expires.Add(time.Hour))
+	if restored == changed {
+		t.Error("a provider something else changed was left as it was")
+	}
+	provider, err = client.Providers().Get(ctx, DefaultWorkspace, "bg-12345678-chatgpt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Spec.Credentials["BG_CHATGPT_TOKEN"] != "tok-2" {
+		t.Error("the credential was not put back")
+	}
+	if again := push(rt, "tok-2", expires.Add(time.Hour)); again != restored {
+		t.Error("the restored credential was stored a second time")
+	}
+
+	// A process that has stored nothing does not know what the provider
+	// holds, and stores the credential once.
+	fresh := &Runtime{Client: client}
+	started := push(fresh, "tok-2", expires.Add(time.Hour))
+	if started == restored {
+		t.Error("a new process trusted a provider it had not stored")
+	}
+	if again := push(fresh, "tok-2", expires.Add(time.Hour)); again != started {
+		t.Error("the new process stored the credential a second time")
+	}
+}
+
 func TestPushCredentialRefusesAnEmptyCredential(t *testing.T) {
 	rt, _, _ := newTestRuntime()
 	if err := rt.PushCredential(context.Background(), sandbox.RouteCredential{Provider: "p"}); err == nil {

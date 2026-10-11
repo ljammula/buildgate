@@ -274,6 +274,7 @@ class CodeReviewPromptTest(unittest.TestCase):
 		)
 		self.assertIn("do NOT re-run `git diff`", prompt)
 		self.assertIn("1 file changed", prompt)
+		self.assertIn("git's guess at the enclosing function or heading", prompt)
 		self.assertIn("diff --git a/x.go b/x.go", prompt)
 		# The old "diff the workspace yourself" instruction must be gone --
 		# otherwise the reviewer has no reason not to re-fetch it anyway.

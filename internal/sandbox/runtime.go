@@ -41,8 +41,9 @@ type Runtime interface {
 	// each recorded name the gateway reports or a container still carries.
 	ListByRun(ctx context.Context, dataDir, runID string) ([]string, error)
 	// PushCredential stores a route's current credential in the gateway's
-	// provider store. A sandbox reads it at start only, so it is pushed
-	// before each Create.
+	// provider store, and is called before each Create. A value the store
+	// already holds is not stored again: a stored value reaches every
+	// running sandbox on the route, which drops its requests in flight.
 	PushCredential(ctx context.Context, cred RouteCredential) error
 }
 

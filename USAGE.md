@@ -1268,7 +1268,8 @@ What changes for a build:
   the worker's `localhost` forwards every published port. Reached at its
   `BG_SERVICE_<NAME>` address instead, the first connection succeeds and
   the one to the advertised name fails (`connect: permission denied`).
-- The route's credential is pushed to the gateway before each launch; the
+- The route's credential is checked against the gateway's copy before each
+  launch and pushed when it has changed; the
   worker holds a placeholder. A token that expires before the step's time
   budget ends refuses the launch.
 - A `credential_mode: github-copilot` route sends the stored GitHub login

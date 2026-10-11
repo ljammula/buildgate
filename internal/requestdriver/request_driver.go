@@ -2037,8 +2037,10 @@ func CriterionFilesFeasible(criteriaTexts []string, ticketContents []string, all
 // `cmd/server/main.go` for the file every ticket lists as
 // backend/cmd/server/main.go, and the literal comparison rejected a correct
 // plan twice and halted the request (2026-09-28). An Allowed-Files entry
-// ending in "/"+p is that same file.
+// ending in "/"+p is that same file. A rooted name (`/static/site.css`,
+// counted because that file exists) is the file without its leading slash.
 func criterionPathCovered(p string, allowed []string) bool {
+	p = strings.TrimPrefix(p, "/")
 	if policy.PathCoveredByAllowed(p, allowed) {
 		return true
 	}
@@ -2149,7 +2151,10 @@ func criterionPathUntouched(prose []byte, from, to int) bool {
 // counts as a path when it contains "/" and ends in a file extension
 // (packageQualified tells "internal/domain.Calculate" from one), or when it
 // names a file that actually exists under workspace (workspace == "" skips
-// that fallback check entirely).
+// that fallback check entirely). A token that starts with "/" is a URL path
+// or an absolute path ("/files/a/b/c.txt", a request a router serves), one
+// with "=" a value ("path=docs/img/logo.png") and one with "://" a URL:
+// none is repo-relative, so each counts only when such a file exists.
 func looksLikeRepoPath(token, workspace string) bool {
 	if strings.ContainsAny(token, " \t") {
 		return false
@@ -2157,7 +2162,7 @@ func looksLikeRepoPath(token, workspace string) bool {
 	if strings.ContainsAny(token, "*?") || strings.Contains(token, "...") {
 		return false
 	}
-	if strings.Contains(token, "/") {
+	if strings.Contains(token, "/") && !strings.HasPrefix(token, "/") && !strings.Contains(token, "=") && !strings.Contains(token, "://") {
 		if ext := path.Ext(token); ext != "" && ext != "." && !packageQualified(token, ext, workspace) {
 			return true
 		}

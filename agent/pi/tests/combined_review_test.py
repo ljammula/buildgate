@@ -46,6 +46,7 @@ class CombinedReviewPromptTests(unittest.TestCase):
 		diff_index = prompt.index("diff text")
 		spec_index = prompt.index("Add a widget to the app.")
 		self.assertLess(diff_index, spec_index, "diff block must precede the ticket spec")
+		self.assertIn("git's guess at the enclosing function or heading", prompt)
 
 		# Task A: every existing conformity rule.
 		self.assertIn("1. Widget exists", prompt)

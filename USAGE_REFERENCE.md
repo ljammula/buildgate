@@ -887,7 +887,8 @@ roles:
   login is saved as `routes.copilot.github_token_file` (a path); an
   explicit token stays in the daemon env.
 - A build sends the GitHub login token itself as the bearer token: it is
-  pushed to the OpenShell gateway before each launch, the worker holds a
+  checked against the OpenShell gateway's copy before each launch and pushed
+  when it has changed, the worker holds a
   placeholder, and it does not expire during a step. The meter overwrites
   the client headers the Copilot API requires (`User-Agent`,
   `Editor-Version`, `Editor-Plugin-Version`, `Copilot-Integration-Id`,
