@@ -102,12 +102,17 @@ SESSION_DIR = ".pi-combined-review-session"
 RETRY_SESSION_SUBDIR = "retry"
 
 # How the spend meter's denial reads in a turn's error: the OpenShell
-# supervisor's deny body, matched as codereview.StoppedBy matches it on the Go
-# side, and the wording of a harness that rewords it. A turn the meter stopped
-# is not retried: the second call would be denied as well. Nor is a turn the
-# model provider's own usage limit refused (build_app.provider_usage_limit).
+# supervisor's deny body, naming the meter as the middleware and one of the
+# meter's own deny codes. Exactly codereview.StoppedBy's match on the Go side
+# (meterDenyCodes), and tests/fixtures/review_stop_causes.json holds both to
+# it. A turn the meter stopped is not retried: the second call would be denied
+# as well. Nor is a turn the model provider's own usage limit refused
+# (build_app.provider_usage_limit). Wording alone is never the meter's: a
+# provider's own 429 ("rate limit exceeded") is a failed turn like any other
+# and is asked again once, and a harness that reports the denial without its
+# body (a bare status line) is asked again too, and denied again.
+METER_DENY_MIDDLEWARE = '"middleware":"meter"'
 METER_DENY_CODES = ("budget_exceeded", "ceiling_exceeded", "rate_limited")
-METER_DENY_WORDINGS = ("budget exceeded", "ceiling exceeded", "rate limited", "rate limit exceeded")
 
 # stop_cause's name for a turn the provider's usage limit refused.
 PROVIDER_USAGE_LIMIT = build_app.PROVIDER_USAGE_LIMIT
@@ -193,15 +198,13 @@ def missing_part(verdicts: list[dict], available: bool, error: str) -> tuple[str
 
 
 def meter_stop(error: str) -> str:
-	"""What in error says the spend meter stopped the turn, or ""."""
-	if '"middleware":"meter"' in error:
-		for code in METER_DENY_CODES:
-			if f'"reason_code":"{code}"' in error:
-				return code
-	lowered = error.lower()
-	for wording in METER_DENY_WORDINGS:
-		if wording in lowered:
-			return wording
+	"""The meter's deny code in error when error holds the meter's own deny
+	body, or ""."""
+	if METER_DENY_MIDDLEWARE not in error:
+		return ""
+	for code in METER_DENY_CODES:
+		if f'"reason_code":"{code}"' in error:
+			return code
 	return ""
 
 

@@ -781,8 +781,9 @@ reviews is asked for that review alone, and a failed or unparseable call is
 made again: one further call at most, in the same sandbox, told nothing of the
 first and unable to read its transcript. The two calls share the 20 minutes
 one call gets, so the review takes no longer; the second is skipped when under
-5 minutes are left, when the spend meter stopped the first, or when the model
-provider's usage limit refused it. Both evidence
+5 minutes are left, when the spend meter stopped the first (its own deny body,
+never wording alone: a provider's `429` rate limit is asked again), or when the
+model provider's usage limit refused it. Both evidence
 files then hold a `retry` line saying what was asked again and why, or why
 nothing was.
 

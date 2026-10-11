@@ -509,7 +509,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 
 	def test_a_turn_the_spend_meter_stopped_is_not_asked_again(self):
 		deny = '403 {"middleware":"meter","reason_code":"%s","detail":"x"}'
-		errors = [deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited", '429 "token budget exceeded"']
+		errors = [deny % "budget_exceeded", deny % "ceiling_exceeded", deny % "rate_limited"]
 		for error in errors:
 			with self.subTest(error=error):
 				conformity, review, turns, root = self._run([failed_turn(error)])
@@ -517,11 +517,30 @@ class CombinedReviewRetryTests(unittest.TestCase):
 				self.assertFalse(review["available"])
 				self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
 				self.assertEqual(review["error"], conformity["error"])
-				self.assertIn("reason_code" if "meter" in error else "429", review["error"])
+				self.assertIn("reason_code", review["error"])
 				for evidence in (conformity, review):
 					self.assertIn("not asked again", evidence["retry"])
 					self.assertIn("the spend meter stopped the first turn", evidence["retry"])
 				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+
+	def test_a_providers_own_rate_limit_is_asked_again_once(self):
+		# A provider's 429 is not the spend meter's denial: the turn gets the
+		# one retry any failed turn gets, in what is left of the same budget.
+		errors = [c["error"] for c in self._stop_causes() if "provider's own" in c["name"]]
+		self.assertGreaterEqual(len(errors), 5)
+		for error in errors:
+			with self.subTest(error=error):
+				ticks = iter([0.0, 60.0])
+				conformity, review, turns, root = self._run(
+					[failed_turn(error), answer({"criteria": VERDICTS, "findings": []})], clock=lambda: next(ticks),
+				)
+				self.assertEqual(len(turns), 2)
+				self.assertTrue(review["available"])
+				self.assertLessEqual(60 + turns[1]["timeout"], 20 * 60)
+				for evidence in (conformity, review):
+					self.assertNotIn("not asked again", evidence["retry"])
+					self.assertNotIn("spend meter", evidence["retry"])
+				self.assertEqual(sorted(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
 
 	def test_a_turn_the_providers_usage_limit_refused_is_not_asked_again(self):
 		# The codex CLI's message as captured live (2026-10-11), when the
