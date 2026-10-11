@@ -256,7 +256,7 @@ func runTests(m *testing.M) int {
 			panic("create " + subprocessCoverDirEnv + ": " + err.Error())
 		}
 		os.Setenv("GOCOVERDIR", coverDir)
-		buildArgs = []string{"build", "-cover", "-coverpkg=buildgate/...", "-o", binPath, "."}
+		buildArgs = []string{"build", "-tags", "factorydtest", "-cover", "-coverpkg=buildgate/...", "-o", binPath, "."}
 	}
 	build := exec.Command("go", buildArgs...)
 	// GOCACHE/GOMODCACHE explicitly, scoped to this one command rather than

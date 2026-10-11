@@ -11,6 +11,8 @@ data/events.db-shm
 data/daemon-heartbeat-*.json
 data/temporal-checkpoints/
 /dist/
+# `make coverage` writes its profiles here.
+/.coverage/
 data/projects/
 data/queue/
 data/requests/
