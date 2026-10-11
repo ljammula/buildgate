@@ -127,6 +127,8 @@ func TestConsoleContractFixtures(t *testing.T) {
 	server := httptest.NewServer(NewServer(dataDir,
 		WithWorkspaces([]string{workspace}),
 		WithTemporalUIURL("http://localhost:8233"),
+		// GET /stats counts its weekly buckets back from today.
+		withStatsClock(func() time.Time { return time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC) }),
 		WithDaemonController(&daemonControllerStub{statuses: []DaemonStatus{{
 			Repository: "acme/app", State: "running", PID: 4242,
 			StartedAt: contractFixtureTime, HeartbeatUpdatedAt: contractFixtureTime,
