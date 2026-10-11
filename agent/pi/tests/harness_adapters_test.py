@@ -306,6 +306,8 @@ class PiforkThroughSharedOrchestrationTests(unittest.TestCase):
 				mock.patch.object(build_app, "workspace_fingerprint", side_effect=[("before-1",), ("after-1",), ("before-2",), ("after-2",)]),
 				mock.patch.object(build_app, "run_verification", side_effect=[
 					("make verify", False, False, "first failure", False, None),
+					# A failed verify is run once more before the next round.
+					("make verify", False, False, "first failure", False, None),
 					("make verify", True, False, "", False, None),
 				]),
 			):

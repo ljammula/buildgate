@@ -354,6 +354,84 @@
       "max_rounds": 3,
       "state": "{\"version\":1,\"last_completed_round\":3,\"next_prompt\":\"p\",\"passed\":false,\"rounds\":[{\"index\":1,\"blockers\":[\"canonical verification failed\"]},{\"index\":2,\"blockers\":[\"canonical verification failed\"]},{\"index\":3,\"blockers\":[\"canonical verification failed\"]}]}",
       "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: a rerun that passed",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"ran\":true,\"passed\":true,\"skipped_reason\":\"\",\"first_failing\":[\"TestWaitFor\"]}}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "verify_rerun: null",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":null}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "verify_rerun: an object with no fields",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{}}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "verify_rerun: a skipped rerun, passed null",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"ran\":false,\"passed\":null,\"skipped_reason\":\"under 210 s of the build time budget left\",\"first_failing\":[]}}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "verify_rerun: an unknown field is ignored",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"ran\":true,\"extra\":7}}]}",
+      "script_accepts": true
+    },
+    {
+      "name": "verify_rerun: a string",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":\"yes\"}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: a list",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":[]}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: ran is a string",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"ran\":\"yes\"}}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: ran is null",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"ran\":null}}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: passed is an integer",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"ran\":true,\"passed\":1}}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: skipped_reason is an integer",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"skipped_reason\":3}}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: first_failing holds an integer",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"first_failing\":[\"a\",7]}}]}",
+      "script_accepts": false
+    },
+    {
+      "name": "verify_rerun: first_failing is a string",
+      "max_rounds": 1,
+      "state": "{\"version\":1,\"last_completed_round\":1,\"next_prompt\":\"p\",\"passed\":true,\"notes_turn_started\":true,\"rounds\":[{\"index\":1,\"blockers\":[],\"verify_rerun\":{\"first_failing\":\"a\"}}]}",
+      "script_accepts": false
     }
   ]
 }

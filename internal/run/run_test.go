@@ -276,6 +276,29 @@ func TestCleanRoundFeedbackBoundsAndCleansAgentText(t *testing.T) {
 	none.CleanRoundFeedback()
 }
 
+// A round of BUILD_EVIDENCE.json whose failed verify passed when build_app.py
+// ran it once more carries a verify_rerun object no field here reads. It must
+// decode, and the round is the pass its verify_passed says it is.
+func TestAgentEvidenceRoundWithAVerifyRerunDecodesAsThePassItRecords(t *testing.T) {
+	var ev AgentEvidence
+	raw := []byte(`{
+		"schema_version": 2,
+		"succeeded": true,
+		"rounds": [
+			{"index": 1, "agent": "pi", "agent_returncode": 0, "agent_timed_out": false,
+			 "usage": null, "reviewer_outcome": "clean", "reviewer_detail": "",
+			 "verify_passed": true, "verify_timed_out": false, "duration_s": 1.0, "blockers": [],
+			 "verify_rerun": {"ran": true, "passed": true, "skipped_reason": "", "first_failing": ["TestWaitFor"]}}
+		]
+	}`)
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		t.Fatalf("unmarshal a round with verify_rerun: %v", err)
+	}
+	if got := ev.Rounds[0].Outcome(); got != "pass" || !ev.Rounds[0].Passed() {
+		t.Errorf("Outcome = %q, Passed = %v, want the pass the round recorded", got, ev.Rounds[0].Passed())
+	}
+}
+
 // TestAgentEvidenceRoundDecodesFastCheckFields locks json.Unmarshal's
 // handling of the fast_check_ran/fast_check_passed fields build_app.py's
 // write_evidence_json writes per round:

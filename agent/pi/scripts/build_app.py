@@ -618,6 +618,10 @@ class Round:
 	# run_autofix's record of this round's autofix commands (None when the
 	# repository lists none); written as `autofix` in BUILD_EVIDENCE.json.
 	autofix: dict | None = None
+	# rerun_failed_verify's record for a round whose verify failed and was a
+	# candidate for one more run (None for every other round); written as
+	# `verify_rerun` in BUILD_EVIDENCE.json.
+	verify_rerun: dict | None = None
 
 
 @dataclass
@@ -1292,8 +1296,12 @@ def autofix_prompt_note(record: dict | None) -> str:
 
 def run_verification(
 	workspace: Path, *, verify_command_override: str | None = None, fast_check_command: str | None = None,
-	log_dir: Path | None = None,
+	log_dir: Path | None = None, outcome: dict | None = None,
 ) -> tuple[str | None, bool | None, bool, str, bool, bool | None]:
+	# outcome, when given, receives the verify command's exit status as
+	# `returncode` once that command has run to its end (never for a fast
+	# check, a timeout or a command that was not resolved).
+	#
 	# verify_command_override, when set, is a factoryd-resolved ticket's own
 	# declared Verify-Command: -- see --verify-command's own doc comment in
 	# main() for why resolve_verify_command()'s root-only auto-detection is
@@ -1341,12 +1349,114 @@ def run_verification(
 		return None, None, False, "", bool(fast_check_command), fast_check_passed
 	try:
 		completed = sh(["bash", "-o", "pipefail", "-lc", command], cwd=workspace, timeout=20 * 60)
+		if outcome is not None:
+			outcome["returncode"] = completed.returncode
 		combined = f"{completed.stdout}\n{completed.stderr}"
 		output = redact(combined) if completed.returncode == 0 else failure_output(combined, _feedback_log(log_dir, VERIFY_LOG))
 		return command, completed.returncode == 0, False, output, bool(fast_check_command), fast_check_passed
 	except subprocess.TimeoutExpired as exc:
 		header = f"verification command timed out after 20 minutes: {command}"
 		return command, False, True, timeout_output(header, exc, _feedback_log(log_dir, VERIFY_LOG)), bool(fast_check_command), fast_check_passed
+
+
+# The exit statuses bash gives for a command it could not run: found but not
+# executable, and not found.
+VERIFY_NOT_STARTED_EXIT_CODES = (126, 127)
+# What a second verify run must leave of the launch's time budget, beyond half
+# as long again as the round's checks took the first time.
+VERIFY_RERUN_RESERVE_S = 60
+# Where the first run's saved output goes when verify is run again, so that
+# verify.log is only ever the output of the run the round is judged by.
+VERIFY_FIRST_RUN_LOG = "verify-first-run.log"
+VERIFY_RERUN_NAME_CHARS = 200
+VERIFY_RERUN_REASON_CHARS = 200
+
+
+def verify_rerun_skip_reason(*, returncode: int | None, first_run_s: float, elapsed: float) -> str:
+	"""Why a failed verify is not run a second time, or "" when it is: the
+	command could not start (the same would happen again), or the launch's
+	time budget, when the host set one, has less left than a second run is
+	allowed (VERIFY_RERUN_RESERVE_S and half as long again as the first)."""
+	if returncode in VERIFY_NOT_STARTED_EXIT_CODES:
+		return f"the command could not start (exit {returncode})"
+	try:
+		budget = int(os.environ.get(BUILD_TIME_BUDGET_ENV, ""))
+	except ValueError:
+		return ""
+	needed = VERIFY_RERUN_RESERVE_S + math.ceil(1.5 * first_run_s)
+	if budget - elapsed < needed:
+		return f"under {needed} s of the build time budget left"
+	return ""
+
+
+def rerun_failed_verify(
+	workspace: Path, *, round_index: int, max_rounds: int, verify_command: str, verify_tail: str,
+	returncode: int | None, first_run_s: float, elapsed: float, log_dir: Path | None,
+) -> tuple[dict, tuple[bool | None, bool, str] | None]:
+	"""Runs a round's verify command once more on the unchanged tree after it
+	failed, before a model round is spent on the failure. Seen live
+	(2026-10-10, four builds on one repository): timing-sensitive tests of
+	the target repository failed under machine load, the model was asked to
+	fix them, and the next round passed without changing a file.
+
+	Returns the round's `verify_rerun` record and, when the command ran
+	again, that run's (passed, timed_out, output), which the caller takes in
+	place of the first run's: a pass makes the round's verify a pass and the
+	model is told nothing of the first failure; a failure or a timeout is the
+	round's, with this run's output and log. The record says which happened,
+	or why the command was not run again (verify_rerun_skip_reason), and
+	names the tests the first run failed. The second run is the same command
+	under run_verification's own timeout; the fast check is not repeated.
+
+	This is the build script's own in-loop check and nothing else. The
+	factory's gates after the build (canonical_verify, full_suite_verify,
+	the baseline verify) each run once in their own container and judge the
+	run as before: a test that fails there fails the gate, whatever a rerun
+	here showed."""
+	names = [single_line(redact(name))[:VERIFY_RERUN_NAME_CHARS] for name in round_feedback.failing_names(verify_tail)]
+	record = {"ran": False, "passed": None, "skipped_reason": "", "first_failing": names}
+	note = {"stage": "round", "event": "note", "round": round_index, "max_rounds": max_rounds}
+	skip = verify_rerun_skip_reason(returncode=returncode, first_run_s=first_run_s, elapsed=elapsed)
+	if skip:
+		record["skipped_reason"] = skip
+		print_progress({**note, "detail": f"verify failed and was not run again: {skip}"})
+		return record, None
+	print_progress({**note, "detail": "verify failed; running it once more on the unchanged tree before asking the model"})
+	first_log = _feedback_log(log_dir, VERIFY_LOG)
+	if first_log is not None:
+		try:
+			os.replace(first_log, log_dir / VERIFY_FIRST_RUN_LOG)
+		except OSError:
+			first_log.unlink(missing_ok=True)
+	_, passed, timed_out, tail, _, _ = run_verification(workspace, verify_command_override=verify_command, log_dir=log_dir)
+	record.update(ran=True, passed=passed is True)
+	if passed is True:
+		print_progress({**note, "detail": f"verify passed when run again on the unchanged tree; the first run failed {len(names)} named test(s) and no model round is spent on it"})
+	return record, (passed, timed_out, tail)
+
+
+def _verify_rerun_from_state(value) -> dict | None:
+	"""A round record's `verify_rerun` rebuilt from its known fields, each
+	type-checked and cut; anything else refuses the whole file, as _typed
+	does."""
+	if value is None:
+		return None
+	return {
+		"ran": _typed(value, "ran", (bool,), False),
+		"passed": _typed(value, "passed", (bool, type(None)), None),
+		"skipped_reason": _typed(value, "skipped_reason", (str,), "", cap=VERIFY_RERUN_REASON_CHARS),
+		"first_failing": _typed_strings(value, "first_failing", max_items=round_feedback.MAX_FAILING_NAMES, cap=VERIFY_RERUN_NAME_CHARS),
+	}
+
+
+def verify_rerun_report_line(record: dict) -> str:
+	"""BUILD_REPORT.md's line for a round's `verify_rerun` record."""
+	if not record["ran"]:
+		return f"- verify rerun: not run ({record['skipped_reason']})"
+	if not record["passed"]:
+		return "- verify rerun: failed again on the unchanged tree"
+	failing = ", ".join(record["first_failing"]) or "no test named"
+	return f"- verify rerun: the first run failed ({failing}) and a second run on the unchanged tree passed; the round's verify counts as passed"
 
 
 def changed_go_files(workspace: Path, base_sha: str | None) -> list[str]:
@@ -2238,6 +2348,7 @@ def round_from_state(item: dict, position: int) -> Round:
 		failure_log=_typed(item, "failure_log", (str,), "", cap=400),
 		agent_notes=_typed(item, "agent_notes", (str,), "", cap=text),
 		autofix=_typed(item, "autofix", (dict, type(None)), None),
+		verify_rerun=_verify_rerun_from_state(_typed(item, "verify_rerun", (dict, type(None)), None)),
 	)
 
 
@@ -2953,10 +3064,25 @@ def _run_build(
 		note_autofix(round_index, autofix_record)
 
 		checks_started = _monotonic()
+		first_verify: dict = {}
 		setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
 			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
-			fast_check_command=fast_check_command, log_dir=feedback_dir,
+			fast_check_command=fast_check_command, log_dir=feedback_dir, outcome=first_verify,
 		)
+		# A verify that ran and failed after a turn that finished is run once
+		# more before the failure costs a model round (rerun_failed_verify):
+		# never one that timed out or was not reached, and only this in-loop
+		# check, never a gate the factory runs after the build.
+		verify_rerun = None
+		turn_finished = not timed_out and completed is not None and completed.returncode == 0
+		if turn_finished and setup_failed is None and verify_command and verify_passed is False and not verify_timed_out:
+			verify_rerun, again = rerun_failed_verify(
+				workspace, round_index=round_index, max_rounds=max_rounds, verify_command=verify_command, verify_tail=verify_tail,
+				returncode=first_verify.get("returncode"), first_run_s=_monotonic() - checks_started,
+				elapsed=_monotonic() - started_monotonic, log_dir=feedback_dir,
+			)
+			if again is not None:
+				verify_passed, verify_timed_out, verify_tail = again
 		if verify_passed is True:
 			reformatted = gofmt_changed_files(workspace, review_base_sha)
 			if reformatted:
@@ -3064,6 +3190,7 @@ def _run_build(
 			),
 			failure_log=round_failure_log(feedback_dir, workspace, setup_failed is not None) if blockers else "",
 			autofix=autofix_record,
+			verify_rerun=verify_rerun,
 			agent_notes=round_feedback.agent_notes(
 				no_changes=no_changes, timed_out=timed_out, timeout_minutes=timeout_minutes,
 				returncode=agent_returncode, stderr_tail=redact(parsed.last_turn_error, 1500),
@@ -3378,6 +3505,8 @@ def write_report(result: BuildResult) -> Path:
 			lines.append(f"- verify command: `{rnd.verify_command or '(none resolved)'}`")
 		verify_status = "timed out" if rnd.verify_timed_out else str(rnd.verify_passed)
 		lines.append(f"- verify passed: {verify_status}")
+		if rnd.verify_rerun is not None:
+			lines.append(verify_rerun_report_line(rnd.verify_rerun))
 		lines.append(f"- duration: {rnd.duration_s:.1f}s")
 		trace_summary = [f"{t.get('extension')}:{t.get('event')}={t.get('outcome')}" for t in rnd.traces]
 		if trace_summary:
@@ -3526,6 +3655,12 @@ def write_evidence_json(result: BuildResult) -> Path:
 				"agent_notes": rnd.agent_notes,
 				# Additive, present only for a round that ran autofix commands.
 				**({"autofix": rnd.autofix} if rnd.autofix is not None else {}),
+				# Additive, present only for a round whose verify failed and
+				# was a candidate for one more run (rerun_failed_verify):
+				# whether it ran again, whether that run passed, why it did
+				# not run, and the tests the first run failed. verify_passed
+				# above is the run the round was judged by.
+				**({"verify_rerun": rnd.verify_rerun} if rnd.verify_rerun is not None else {}),
 			}
 			for rnd in result.rounds
 		],

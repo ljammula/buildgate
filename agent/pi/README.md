@@ -103,6 +103,20 @@ in the opening prompt. Only the build script takes it; no review script does.
   is no assignment, an empty quoted value is shown, and so is a value under
   6 characters whose name holds `token` or `api key` but no `secret`,
   `password` or `passwd` (`token = "abc", want "xyz"`, `max_tokens: 4096`).
+- **A failed verify is run once more.** When a round's verify command
+  fails after a turn that finished, `build_app.py` runs it a second time on
+  the unchanged tree before asking the model (`rerun_failed_verify`): a
+  timing-sensitive test of the target repository that fails under load
+  otherwise costs a model round that changes nothing. A pass makes the
+  round's verify a pass; a second failure is the round's, with that run's
+  output. No second run for a verify that timed out or could not start
+  (exit 126 or 127), or when the build's time budget has less left than 60 s
+  plus half as long again as the round's checks took. The round's
+  `verify_rerun` in `BUILD_EVIDENCE.json` (`ran`, `passed`, `skipped_reason`,
+  `first_failing`), a `verify rerun` line in `BUILD_REPORT.md` and a round
+  note in the progress feed say what happened; the first run's output stays
+  in the round's feedback folder as `verify-first-run.log`. Only this in-loop
+  check: the factory's gates after the build run once each, as before.
 - **gofmt.** After a round's verify passes, `build_app.py` runs `gofmt -w`
   on changed `.go` files only (`gofmt_changed_files`), inside the
   sandbox. No-op when `gofmt` is absent or no `.go` file changed.
