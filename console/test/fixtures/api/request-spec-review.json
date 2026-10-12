@@ -67,5 +67,14 @@
     ]
   },
   "approve_next_state": "planning",
-  "next_action": "review the drafted spec: `factoryd approve req-spec-review`, or `factoryd reject -reason ... req-spec-review` to redraft"
+  "next_action": "review the drafted spec: `factoryd approve req-spec-review`, or `factoryd reject -reason ... req-spec-review` to redraft",
+  "inspect": {
+    "commands": [
+      {
+        "label": "The spec",
+        "command": "less /data/requests/req-spec-review/spec.md"
+      }
+    ],
+    "note": "Nothing is built yet: these are the files the gate approves. Change them in the console's editor, or reject with a reason to have them redrafted."
+  }
 }

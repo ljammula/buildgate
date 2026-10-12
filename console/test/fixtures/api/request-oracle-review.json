@@ -90,5 +90,18 @@
     ]
   },
   "approve_next_state": "planning",
-  "next_action": "review the drafted oracle (or leave it absent/empty to skip): `factoryd approve req-oracle-review`, or `factoryd reject -reason ... req-oracle-review` to redraft"
+  "next_action": "review the drafted oracle (or leave it absent/empty to skip): `factoryd approve req-oracle-review`, or `factoryd reject -reason ... req-oracle-review` to redraft",
+  "inspect": {
+    "commands": [
+      {
+        "label": "The spec",
+        "command": "less /data/requests/req-oracle-review/spec.md"
+      },
+      {
+        "label": "The drafted oracle files",
+        "command": "ls -R /data/requests/req-oracle-review/oracle"
+      }
+    ],
+    "note": "Nothing is built yet: these are the files the gate approves. Change them in the console's editor, or reject with a reason to have them redrafted."
+  }
 }

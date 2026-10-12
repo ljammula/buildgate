@@ -287,5 +287,35 @@
       }
     ]
   },
-  "next_action": "the lost building step cannot be resumed (every-field refused); `factoryd resume -from scratch req-every-field` rebuilds the ticket, or `factoryd cancel req-every-field`"
+  "next_action": "the lost building step cannot be resumed (every-field refused); `factoryd resume -from scratch req-every-field` rebuilds the ticket, or `factoryd cancel req-every-field`",
+  "inspect": {
+    "tickets": [
+      {
+        "ticket": 1,
+        "run_id": "run-quarantined",
+        "worktree": "/repos/app",
+        "base": "1111111111111111111111111111111111111111",
+        "result": "HEAD",
+        "commands": [
+          {
+            "label": "The worktree's commits now (no result was recorded: not what the gates checked)",
+            "command": "git -C /repos/app log --oneline 1111111111111111111111111111111111111111..HEAD --"
+          },
+          {
+            "label": "The worktree's change now (not checked)",
+            "command": "git -C /repos/app diff 1111111111111111111111111111111111111111..HEAD --"
+          },
+          {
+            "label": "The newest log",
+            "command": "factoryd logs -data-dir /data run-quarantined"
+          },
+          {
+            "label": "Every log and saved prompt",
+            "command": "factoryd logs -data-dir /data -list run-quarantined"
+          }
+        ]
+      }
+    ],
+    "note": "Only the \"Your own copy\" line writes: it makes a folder of your own from the commit the gates checked. Try or change the work there, or with `gh pr checkout` when there is a pull request, never in the factory's worktree: a commit there is not released (the push is pinned to the checked commit, and a branch that moved is refused), a retry, resume or reconcile may reuse or remove the folder, and a review does not start on a worktree that is not clean. Running the build's tests on this machine runs code a model wrote, outside the sandbox. To send a change back, comment on the pull request from a reviewer the factory trusts (not the account it pushes as): the comment starts a corrective round. To continue: `factoryd resume`, or `factoryd resume -from scratch` to rebuild the ticket."
+  }
 }

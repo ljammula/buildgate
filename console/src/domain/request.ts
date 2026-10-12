@@ -600,6 +600,55 @@ export interface RequestSummary {
   readonly lastNotifiedAt: string;
   /** One short headline saying what is asked of the operator; empty when none. */
   readonly lastAsk: string;
+  /**
+   * The commands that show the work before a decision (Go's
+   * request.Inspection, the same `factoryd inspect` prints). Only GET
+   * /requests/{id} sends it, and only when there is something to show.
+   */
+  readonly inspect: Inspection | null;
+}
+
+/** One command an operator can copy, with what it shows. */
+export interface InspectCommand {
+  readonly label: string;
+  readonly command: string;
+}
+
+/** The commands of one built ticket's run. */
+export interface InspectTicket {
+  readonly ticket: number;
+  readonly runId: string;
+  /** Home-relative; empty once the worktree is gone. */
+  readonly worktree: string;
+  readonly commands: readonly InspectCommand[];
+}
+
+export interface Inspection {
+  /** The drafted files of a review gate. */
+  readonly commands: readonly InspectCommand[];
+  readonly tickets: readonly InspectTicket[];
+  readonly note: string;
+}
+
+function decodeInspectCommand(o: JsonObject, at: string): InspectCommand {
+  return { label: reqString(o, "label", at), command: reqString(o, "command", at) };
+}
+
+function decodeInspectTicket(o: JsonObject, at: string): InspectTicket {
+  return {
+    ticket: numberOr(o, "ticket", at, 0),
+    runId: reqString(o, "run_id", at),
+    worktree: optString(o, "worktree", at),
+    commands: objectList(o, "commands", at, decodeInspectCommand),
+  };
+}
+
+function decodeInspection(o: JsonObject, at: string): Inspection {
+  return {
+    commands: objectList(o, "commands", at, decodeInspectCommand),
+    tickets: objectList(o, "tickets", at, decodeInspectTicket),
+    note: optString(o, "note", at),
+  };
 }
 
 /**
@@ -679,6 +728,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     build: optObject(o, "build", at, decodeRequestBuild),
     lastNotifiedAt: optString(o, "last_notified_at", at),
     lastAsk: optString(o, "last_ask", at),
+    inspect: optObject(o, "inspect", at, decodeInspection),
   };
 }
 

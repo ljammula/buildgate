@@ -558,6 +558,7 @@ func subcommands() map[string]subcommand {
 		"reconcile":         withoutDeps(reconcileMain),
 		"status":            withoutDeps(statusMain),
 		"inbox":             withoutDeps(inboxMain),
+		"inspect":           withoutDeps(inspectMain),
 		"stop":              stopMain,
 		"uninstall":         uninstallMain,
 		"upgrade":           upgradeMain,

@@ -29,6 +29,12 @@ another profile:
   getting better, per repository and per week (read-only; counts, no model call)
 - `factoryd inbox [-json]`: everything waiting on the operator across every
   profile, oldest first (it ignores the active profile and needs no `-config`)
+- `factoryd inspect [-json] <request-id | run-id>`: the commands that show the
+  work before a decision (the command itself only reads). Relay its lines to
+  the operator; you may run its `git log` and `git diff` lines and read the files
+  its `less` lines name, never its
+  `git worktree add` line (it writes), a test or build command, or an edit in
+  the factory's worktree
 - `factoryd memory list -workspace <repo-path> [-json]` and
   `factoryd memory show -workspace <repo-path> <id>`: the repository's memory
   lines in force and its candidate lines (read-only for you: with memory on,

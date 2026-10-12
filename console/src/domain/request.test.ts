@@ -695,3 +695,23 @@ test("a request's in-place edits decode, and an edit is handed over by the next 
   expect(editHandoff(r.edits[1]!, r.rejections)).toBeNull();
   expect(request().edits).toEqual([]);
 });
+
+test("a built request's inspect commands decode from the fixture", () => {
+  const r = detail("request-quarantined");
+  expect(r.inspect).not.toBeNull();
+  const ticket = r.inspect?.tickets[0];
+  expect(ticket?.ticket).toBe(1);
+  // The fixture's run recorded no result commit: its worktree's HEAD, labelled as not checked.
+  expect(ticket?.commands[0]?.label).toContain("not what the gates checked");
+  expect(ticket?.commands[0]?.command).toMatch(/^git -C \S+ log --oneline [0-9a-f]+\.\.HEAD --$/);
+  expect(r.inspect?.note).toContain("Try or change the work there");
+});
+
+test("a draft gate's inspect commands open its files and carry no ticket", () => {
+  const r = detail("request-spec-review");
+  expect(r.inspect?.tickets).toEqual([]);
+  expect(r.inspect?.commands[0]).toEqual({
+    label: "The spec",
+    command: "less /data/requests/req-spec-review/spec.md",
+  });
+});

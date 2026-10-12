@@ -87,5 +87,43 @@
     "accepted_tickets": 1,
     "cost_per_accepted_ticket_micro_usd": 1512000
   },
-  "next_action": "`factoryd retry req-halted` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `factory/req-halted-1` by hand"
+  "next_action": "`factoryd retry req-halted` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `factory/req-halted-1` by hand",
+  "inspect": {
+    "tickets": [
+      {
+        "ticket": 1,
+        "run_id": "run-accepted",
+        "worktree": "/repos/app",
+        "base": "1111111111111111111111111111111111111111",
+        "result": "2222222222222222222222222222222222222222",
+        "commands": [
+          {
+            "label": "The commits",
+            "command": "git -C /repos/app log --oneline 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 --"
+          },
+          {
+            "label": "The files changed",
+            "command": "git -C /repos/app diff --stat 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 --"
+          },
+          {
+            "label": "The whole change",
+            "command": "git -C /repos/app diff 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 --"
+          },
+          {
+            "label": "Your own copy, to try or change",
+            "command": "git -C /repos/app worktree add ~/review/run-accepted 2222222222222222222222222222222222222222"
+          },
+          {
+            "label": "The newest log",
+            "command": "factoryd logs -data-dir /data run-accepted"
+          },
+          {
+            "label": "Every log and saved prompt",
+            "command": "factoryd logs -data-dir /data -list run-accepted"
+          }
+        ]
+      }
+    ],
+    "note": "Only the \"Your own copy\" line writes: it makes a folder of your own from the commit the gates checked. Try or change the work there, or with `gh pr checkout` when there is a pull request, never in the factory's worktree: a commit there is not released (the push is pinned to the checked commit, and a branch that moved is refused), a retry, resume or reconcile may reuse or remove the folder, and a review does not start on a worktree that is not clean. Running the build's tests on this machine runs code a model wrote, outside the sandbox. To continue, follow the next step printed for the request (`factoryd retry` when the cause is fixed)."
+  }
 }
