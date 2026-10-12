@@ -63,10 +63,14 @@ type Lesson struct {
 	RequestID  string       `json:"request_id,omitempty"`
 	// Seen is how many distinct runs said the line; Runs lists them, newest
 	// last, at most MaxLessonRuns.
-	Seen        int      `json:"seen,omitempty"`
-	Runs        []string `json:"runs,omitempty"`
-	FirstSeenAt string   `json:"first_seen_at,omitempty"`
-	LastSeenAt  string   `json:"last_seen_at,omitempty"`
+	Seen int      `json:"seen,omitempty"`
+	Runs []string `json:"runs,omitempty"`
+	// EvidenceRuns are run IDs an operator cited in support of this line.
+	// They are separate from Runs: a cited run did not necessarily produce
+	// the candidate in its build-agent notes.
+	EvidenceRuns []string `json:"evidence_runs,omitempty"`
+	FirstSeenAt  string   `json:"first_seen_at,omitempty"`
+	LastSeenAt   string   `json:"last_seen_at,omitempty"`
 }
 
 const (

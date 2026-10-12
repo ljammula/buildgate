@@ -1128,8 +1128,8 @@ pull request                you merge it; the line is in force from then on
 |---|---|---|
 | Switch it on | Add the repository under `memory.repositories` in the session config (`- path: ~/code/app`, optional `budget_lines`, `budget_chars`) | Off for every repository not listed. Default budget: 40 lines, 3000 characters |
 | See what there is | `factoryd memory list -workspace ~/code/app` | The lines in force and the candidates, each with how many runs said it |
-| Look at one | `factoryd memory show -workspace ~/code/app <id>` | The line, the runs that said it, its history |
-| Write your own | `factoryd memory add -workspace ~/code/app "The integration tests need the database up"` | A candidate from you, under the same text rule (USAGE_REFERENCE has the rule); a command goes inside backticks, quoted for your shell |
+| Look at one | `factoryd memory show -workspace ~/code/app <id>` | The line, runs whose agent notes said it, operator-cited evidence runs, and its history |
+| Write your own | `factoryd memory add -workspace ~/code/app -run <run-id> "The integration tests need the database up"` | A candidate from you, under the same text rule (USAGE_REFERENCE has the rule); repeat `-run` to cite finished runs from this repository. These are kept separate from runs whose agent notes said the line |
 | Discard one | `factoryd memory drop -workspace ~/code/app -reason "wrong" <id>` | It is never proposed; runs that repeat it are still counted |
 | Propose | `factoryd memory propose -workspace ~/code/app <id> <id>` (no id: the most seen that fit) | One request, at most five changes, waiting at `spec_review`. Its spec ends with the whole `AGENTS.md` it will produce. Refused, like any request, when the repo has no `AGENTS.md` at `HEAD`: a memory request adds to that file and does not create it |
 | Approve | `factoryd approve <request-id>`, twice (spec, then plan) | The ticket is built in the sandbox like any other |

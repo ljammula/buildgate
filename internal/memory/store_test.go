@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,7 @@ func mkLesson(t *testing.T, n int, state State, at string) Lesson {
 func TestStoreMissingAndRoundTrip(t *testing.T) {
 	s := openTest(t)
 	st, err := s.Load()
-	if err != nil || st.SchemaVersion != 1 || len(st.Lessons) != 0 {
+	if err != nil || st.SchemaVersion != StoreSchemaVersion || len(st.Lessons) != 0 {
 		t.Fatalf("missing: %+v %v", st, err)
 	}
 	l := mkLesson(t, 1, StateCandidate, "")
@@ -68,7 +69,7 @@ func TestStoreMissingAndRoundTrip(t *testing.T) {
 func TestStoreRefusesBadFiles(t *testing.T) {
 	for name, content := range map[string]string{
 		"unknown field": `{"schema_version":1,"lessons":[],"extra":1}`,
-		"wrong schema":  `{"schema_version":2,"lessons":[]}`,
+		"wrong schema":  `{"schema_version":3,"lessons":[]}`,
 		"oversize":      `{"schema_version":1,"pad":"` + strings.Repeat("x", MaxStateBytes) + `"}`,
 	} {
 		s := openTest(t)
@@ -81,6 +82,32 @@ func TestStoreRefusesBadFiles(t *testing.T) {
 		if err := s.Update(func(*StoreState) error { return nil }); !errors.Is(err, ErrStore) {
 			t.Errorf("%s: Update = %v", name, err)
 		}
+	}
+}
+
+func TestStoreMigratesSchemaOneWithoutChangingLessonProvenance(t *testing.T) {
+	s := openTest(t)
+	old := `{"schema_version":1,"lessons":[{"id":"old-id","reason":"Keep the existing rule","line":"- Keep the existing rule.","line_sha256":"old-hash","source":"operator","state":"candidate","seen":1,"runs":["agent-run"]}]}`
+	if err := os.WriteFile(filepath.Join(s.dir, "state.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.SchemaVersion != StoreSchemaVersion || len(st.Lessons) != 1 || st.Lessons[0].Runs[0] != "agent-run" || len(st.Lessons[0].EvidenceRuns) != 0 {
+		t.Fatalf("migrated state = %+v", st)
+	}
+	if err := s.Update(func(state *StoreState) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.dir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved StoreState
+	if err := json.Unmarshal(data, &saved); err != nil || saved.SchemaVersion != StoreSchemaVersion || saved.Lessons[0].Runs[0] != "agent-run" {
+		t.Fatalf("saved migrated state = %+v, err %v", saved, err)
 	}
 }
 
@@ -139,6 +166,17 @@ func TestStoreBounds(t *testing.T) {
 	})
 	if !errors.Is(err, ErrStore) {
 		t.Fatalf("too many runs on a lesson: %v", err)
+	}
+	err = s2.Update(func(st *StoreState) error {
+		l := mkLesson(t, 2, StateCandidate, "")
+		for i := 0; i < MaxLessonRuns+1; i++ {
+			l.EvidenceRuns = append(l.EvidenceRuns, fmt.Sprintf("evidence-%d", i))
+		}
+		st.Lessons = append(st.Lessons, l)
+		return nil
+	})
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("too many evidence runs on a lesson: %v", err)
 	}
 }
 

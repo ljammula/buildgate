@@ -502,6 +502,125 @@ func TestMemoryShowListsTheRunsThatSaidTheLine(t *testing.T) {
 	}
 }
 
+func TestMemoryAddCitesFinishedRunsSeparatelyFromAgentNotes(t *testing.T) {
+	f := newMemFix(t, nil)
+	f.acceptedRunWithNotes("operator-correction-a", worthKnowing("A different agent note"))
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(config, []byte("memory:\n  repositories:\n    - path: "+f.root+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"add", "-config", config, "-workspace", f.root, "-data-dir", f.data, "-run", "operator-correction-a", "Go commands run from the backend directory"}
+	if _, err := memoryRun(f.dp, newMemoryFlags(), args, f.out); err != nil {
+		t.Fatal(err)
+	}
+	lesson := f.lessonByLine("- Go commands run from the backend directory.")
+	if lesson.Seen != 0 || len(lesson.Runs) != 0 || !containsMemoryRun(lesson.EvidenceRuns, "operator-correction-a") {
+		t.Fatalf("operator evidence was treated as an agent note or lost: %+v", lesson)
+	}
+
+	c := f.cmd()
+	if err := c.show([]string{lesson.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"runs that said it (newest last):\n  (none)", "runs cited by the operator (newest last):\n  operator-correction-a"} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Errorf("show lacks %q:\n%s", want, f.out.String())
+		}
+	}
+	f.out.Reset()
+	c.jsonOut = true
+	if err := c.show([]string{lesson.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var shown struct {
+		memory.Lesson
+		RunsSeen  []memoryRunSeen  `json:"runs_seen"`
+		RunsCited []memoryRunCited `json:"runs_cited"`
+	}
+	if err := json.Unmarshal(f.out.Bytes(), &shown); err != nil {
+		t.Fatalf("show -json: %v\n%s", err, f.out.String())
+	}
+	if len(shown.RunsSeen) != 0 || len(shown.RunsCited) != 1 || shown.RunsCited[0].ID != "operator-correction-a" || len(shown.EvidenceRuns) != 1 {
+		t.Fatalf("show -json conflated run evidence: %+v", shown)
+	}
+}
+
+func TestMemoryAddRejectsCitedRunsOutsideRepositoryOrBeforeCompletion(t *testing.T) {
+	t.Run("different repository", func(t *testing.T) {
+		f := newMemFix(t, nil)
+		other := f.acceptedRunWithNotes("other-repository-run", worthKnowing("Some note"))
+		other.RepositoryRoot = filepath.Join(t.TempDir(), "other")
+		if err := other.Save(f.data); err != nil {
+			t.Fatal(err)
+		}
+		c := f.cmd()
+		c.runIDs = []string{other.ID}
+		if err := c.add(context.Background(), []string{"Use the backend Go module"}); err == nil || !strings.Contains(err.Error(), "different repository") {
+			t.Fatalf("add with cross-repository evidence = %v", err)
+		}
+		if len(f.lessons()) != 0 {
+			t.Fatal("refused citation created a candidate")
+		}
+	})
+	t.Run("unfinished run", func(t *testing.T) {
+		f := newMemFix(t, nil)
+		unfinished := &run.Run{ID: "unfinished-run", State: run.StateVerifying, Project: f.project, RepositoryRoot: f.root}
+		if err := unfinished.Save(f.data); err != nil {
+			t.Fatal(err)
+		}
+		c := f.cmd()
+		c.runIDs = []string{unfinished.ID}
+		if err := c.add(context.Background(), []string{"Use the backend Go module"}); err == nil || !strings.Contains(err.Error(), "not finished") {
+			t.Fatalf("add with unfinished evidence = %v", err)
+		}
+		if len(f.lessons()) != 0 {
+			t.Fatal("refused citation created a candidate")
+		}
+	})
+	t.Run("unsafe id", func(t *testing.T) {
+		f := newMemFix(t, nil)
+		c := f.cmd()
+		c.runIDs = []string{"../outside"}
+		if err := c.add(context.Background(), []string{"Use the backend Go module"}); err == nil || !strings.Contains(err.Error(), "invalid run ID") {
+			t.Fatalf("add with unsafe evidence ID = %v", err)
+		}
+	})
+	t.Run("record ID mismatch", func(t *testing.T) {
+		f := newMemFix(t, nil)
+		record := f.acceptedRunWithNotes("actual-run-id", worthKnowing("Some note"))
+		requestedID := "copied-run-id"
+		if err := os.MkdirAll(run.Dir(f.data, requestedID), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(run.Dir(f.data, requestedID), "run.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c := f.cmd()
+		c.runIDs = []string{requestedID}
+		if err := c.add(context.Background(), []string{"Use the backend Go module"}); err == nil || !strings.Contains(err.Error(), "does not match requested ID") {
+			t.Fatalf("add with mismatched record ID = %v", err)
+		}
+		if len(f.lessons()) != 0 {
+			t.Fatal("refused citation created a candidate")
+		}
+	})
+}
+
+func TestMemoryRunFlagIsOnlyValidForAdd(t *testing.T) {
+	f := newMemFix(t, nil)
+	args := []string{"propose", "-workspace", f.root, "-data-dir", f.data, "-run", "some-finished-run"}
+	if _, err := memoryRun(f.dp, newMemoryFlags(), args, f.out); err == nil || !strings.Contains(err.Error(), "only valid with `factoryd memory add`") {
+		t.Fatalf("memory propose -run = %v", err)
+	}
+	if len(f.lessons()) != 0 {
+		t.Fatal("ignored -run reached proposal processing")
+	}
+}
+
 func TestMemoryOnAndOff(t *testing.T) {
 	f := newMemFix(t, nil)
 	c := f.cmd()

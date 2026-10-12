@@ -59,19 +59,21 @@ type memoryFlags struct {
 	reason    *string
 	jsonOut   *bool
 	remove    *exactListFlag
+	runIDs    *exactListFlag
 }
 
 // newMemoryFlags builds the one flag set every `factoryd memory` subcommand
 // parses, in isolation from parsing, so the doc-vs-flag drift test can
 // enumerate it.
 func newMemoryFlags() memoryFlags {
-	f := memoryFlags{set: flag.NewFlagSet("memory", flag.ContinueOnError), remove: &exactListFlag{}}
+	f := memoryFlags{set: flag.NewFlagSet("memory", flag.ContinueOnError), remove: &exactListFlag{}, runIDs: &exactListFlag{}}
 	f.workspace = f.set.String("workspace", "", "the repository whose memory to read or change: its root, or any directory inside it (required)")
 	f.config = f.set.String("config", "", "session config file or profile name; empty uses the active profile, then the default paths. Its memory.repositories list turns memory on per repository")
 	f.dataDir = f.set.String("data-dir", "data", "directory for durable records; must match what `factoryd worker` uses")
 	f.jsonOut = f.set.Bool("json", false, "list and show: print JSON instead of text")
 	f.reason = f.set.String("reason", "", "drop and off: why, recorded with the change")
 	f.set.Var(f.remove, "remove", "propose: an exact line of the section to remove, as `memory list` prints it. Repeatable")
+	f.set.Var(f.runIDs, "run", "add: completed run ID cited in support of this candidate. Repeatable")
 	finishFlags(f.set)
 	shared := f.set.Usage
 	f.set.Usage = func() {
@@ -82,8 +84,8 @@ func newMemoryFlags() memoryFlags {
 }
 
 const memorySubcommands = `  list                             the switch, the budget, the lines in force and the candidates
-  show <id>                        one candidate: its line, the runs that said it, its history
-  add "<text>"                     add your own candidate line
+  show <id>                        one candidate: its line, runs that said it, cited evidence runs, history
+  add "<text>"                     add your own candidate line; -run cites supporting runs
   drop [-reason <why>] <id>        drop a candidate
   propose [-remove "<line>"]... [<id>...]
                                    open one request that adds the named candidates
@@ -104,6 +106,7 @@ type memoryCmd struct {
 	jsonOut  bool
 	reason   string
 	remove   []string
+	runIDs   []string
 	now      time.Time
 }
 
@@ -135,6 +138,9 @@ func memoryRun(dp *deps, flags memoryFlags, args []string, out io.Writer) (strin
 	sub := args[0]
 	if err := flags.set.Parse(args[1:]); err != nil {
 		return "", err
+	}
+	if sub != "add" && len(flags.runIDs.values) > 0 {
+		return "", errors.New("-run is only valid with `factoryd memory add`")
 	}
 	mc, err := resolveMemoryCmd(dp, flags, out)
 	if err != nil {
@@ -196,6 +202,7 @@ func resolveMemoryCmd(dp *deps, flags memoryFlags, out io.Writer) (*memoryCmd, e
 	return &memoryCmd{
 		dp: dp, out: out, settings: settings, dataDir: dataAbs, repoRoot: repoRoot, project: project,
 		jsonOut: *flags.jsonOut, reason: *flags.reason, remove: flags.remove.values, now: time.Now(),
+		runIDs: flags.runIDs.values,
 	}, nil
 }
 
@@ -293,6 +300,13 @@ type memoryRunSeen struct {
 	Ended string `json:"ended,omitempty"`
 }
 
+// memoryRunCited is one finished run an operator cited in support of a
+// candidate. It is displayed separately from runs whose agent notes said it.
+type memoryRunCited struct {
+	ID    string `json:"id"`
+	Ended string `json:"ended,omitempty"`
+}
+
 // show prints one candidate. It reads the store and the run records only.
 func (mc *memoryCmd) show(args []string) error {
 	if len(args) != 1 {
@@ -319,11 +333,20 @@ func (mc *memoryCmd) show(args []string) error {
 		}
 		runs = append(runs, seen)
 	}
+	cited := make([]memoryRunCited, 0, len(l.EvidenceRuns))
+	for _, id := range l.EvidenceRuns {
+		item := memoryRunCited{ID: sanitize.Line(id)}
+		if r, err := run.Load(mc.dataDir, id); err == nil && len(r.Attempts) > 0 {
+			item.Ended = sanitize.Line(r.Attempts[len(r.Attempts)-1].FinishedAt)
+		}
+		cited = append(cited, item)
+	}
 	if mc.jsonOut {
 		return writeIndentedJSON(mc.out, struct {
 			memory.Lesson
-			RunsSeen []memoryRunSeen `json:"runs_seen"`
-		}{l, runs})
+			RunsSeen  []memoryRunSeen  `json:"runs_seen"`
+			RunsCited []memoryRunCited `json:"runs_cited"`
+		}{l, runs, cited})
 	}
 	// The store is a file: every value printed from it is cleaned first.
 	clean := sanitize.Line
@@ -336,6 +359,13 @@ func (mc *memoryCmd) show(args []string) error {
 		fmt.Fprintln(mc.out, "  (none)")
 	}
 	for _, r := range runs {
+		fmt.Fprintf(mc.out, "  %s  %s\n", r.ID, r.Ended)
+	}
+	fmt.Fprintln(mc.out, "\nruns cited by the operator (newest last):")
+	if len(cited) == 0 {
+		fmt.Fprintln(mc.out, "  (none)")
+	}
+	for _, r := range cited {
 		fmt.Fprintf(mc.out, "  %s  %s\n", r.ID, r.Ended)
 	}
 	fmt.Fprintln(mc.out, "\nhistory:")
@@ -363,6 +393,11 @@ func (mc *memoryCmd) add(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, memoryTextRuleHelp)
 	}
+	evidenceRuns, err := mc.validateEvidenceRuns()
+	if err != nil {
+		return err
+	}
+	lesson.EvidenceRuns = evidenceRuns
 	_, section, err := memorySectionAtHead(ctx, mc.dp, mc.repoRoot)
 	if err != nil {
 		return err
@@ -379,8 +414,17 @@ func (mc *memoryCmd) add(ctx context.Context, args []string) error {
 			if have.Line != lesson.Line {
 				continue
 			}
+			for _, id := range evidenceRuns {
+				if !containsMemoryRun(have.EvidenceRuns, id) {
+					have.EvidenceRuns = append(have.EvidenceRuns, id)
+				}
+			}
 			if have.State != memory.StateDropped {
-				said = fmt.Sprintf("already a %s line: %s  %s", have.State, have.ID, have.Line)
+				if len(evidenceRuns) > 0 {
+					said = fmt.Sprintf("updated cited run evidence for %s line: %s  %s", have.State, have.ID, have.Line)
+				} else {
+					said = fmt.Sprintf("already a %s line: %s  %s", have.State, have.ID, have.Line)
+				}
 				return nil
 			}
 			said = fmt.Sprintf("candidate again: %s  %s", have.ID, have.Line)
@@ -398,6 +442,45 @@ func (mc *memoryCmd) add(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintln(mc.out, said)
 	return nil
+}
+
+func containsMemoryRun(ids []string, id string) bool {
+	for _, have := range ids {
+		if have == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (mc *memoryCmd) validateEvidenceRuns() ([]string, error) {
+	if len(mc.runIDs) > memory.MaxLessonRuns {
+		return nil, fmt.Errorf("at most %d cited runs may be added at once", memory.MaxLessonRuns)
+	}
+	ids := make([]string, 0, len(mc.runIDs))
+	for _, id := range mc.runIDs {
+		if !run.ValidID(id) {
+			return nil, fmt.Errorf("invalid run ID %q", sanitize.Line(id))
+		}
+		if containsMemoryRun(ids, id) {
+			continue
+		}
+		record, err := run.Load(mc.dataDir, id)
+		if err != nil {
+			return nil, fmt.Errorf("load cited run %s: %w", sanitize.Line(id), err)
+		}
+		if record.ID != id {
+			return nil, fmt.Errorf("cited run record does not match requested ID %s", sanitize.Line(id))
+		}
+		if !record.TerminalConfirmed() {
+			return nil, fmt.Errorf("cited run %s is not finished", sanitize.Line(id))
+		}
+		if filepath.Clean(record.RepositoryRoot) != filepath.Clean(mc.repoRoot) {
+			return nil, fmt.Errorf("cited run %s belongs to a different repository", sanitize.Line(id))
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // drop moves a candidate or proposed line to dropped.
