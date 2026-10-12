@@ -2122,6 +2122,7 @@ var HarnessSiblingModules = map[string]bool{
 	"spec_conformity.formatting_rule.prompt.md":          true,
 	"spec_conformity.json_contract.prompt.md":            true,
 	"spec_conformity.prompt.md":                          true,
+	"spec_conformity.recheck.prompt.md":                  true,
 }
 
 // StageSiblingModules copies scriptDir's own HarnessSiblingModules

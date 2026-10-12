@@ -54,10 +54,9 @@ under --review-policy. 0 means both succeeded; 3 means both failed.
 from __future__ import annotations
 
 import argparse
-import os
-import shutil
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -195,44 +194,13 @@ def retry_timeout_minutes(part: str, started: float) -> int:
 	return min(own, left) if left >= RETRY_MIN_MINUTES else 0
 
 
-def _remove(path: str, is_real_dir: bool) -> None:
-	"""Removes path without following a link: a real directory with its
-	contents, anything else by its name."""
-	if is_real_dir:
-		shutil.rmtree(path, ignore_errors=True)
-		return
-	try:
-		os.unlink(path)
-	except OSError:
-		pass
-
-
-def fresh_retry_session_dir(workspace: Path) -> Path | None:
-	"""Returns the retry's session folder, new and empty, after removing what
-	the first turn (or an earlier launch, or the build) left in the review's
-	session folder: everything in it but the saved prompts, so the retry can
-	read neither the first turn's transcript nor its answer. No link is
-	followed: a session folder that is a link (or not a directory) is removed
-	by name and made again, and so is each entry in it. None when something
-	other than the prompts is still there afterwards; the caller then asks
-	nothing."""
-	session = workspace / SESSION_DIR
-	try:
-		if session.is_symlink() or (session.exists() and not session.is_dir()):
-			session.unlink()
-		session.mkdir(exist_ok=True)
-		with os.scandir(session) as entries:
-			for entry in entries:
-				if entry.name != build_app.saved_prompts.PROMPTS_DIR:
-					_remove(entry.path, entry.is_dir(follow_symlinks=False))
-		left = [name for name in os.listdir(session) if name != build_app.saved_prompts.PROMPTS_DIR]
-		if left or session.is_symlink():
-			return None
-		retry = session / RETRY_SESSION_SUBDIR
-		retry.mkdir()
-		return retry
-	except OSError:
-		return None
+def fresh_retry_session_dir(workspace: Path, subdir: str = RETRY_SESSION_SUBDIR) -> Path | None:
+	"""Returns a further turn's session folder (the retry's, or with subdir
+	the recheck's), new and empty, after removing what the first turn (or an
+	earlier launch, or the build) left in the review's session folder
+	(build_app.fresh_session_subdir). None when the folder could not be
+	emptied; the caller then asks nothing."""
+	return build_app.fresh_session_subdir(workspace / SESSION_DIR, subdir)
 
 
 def _evidences(
@@ -285,7 +253,14 @@ def run_combined_review(
 	when it finds no "criteria"/"findings" list at all. Both evidences then
 	carry one more key, "retry": one line saying what was asked again and
 	why, or why it was not. The key is absent when the first answer was whole
-	and when the first turn failed; no Go reader decodes it."""
+	and when the first turn failed; no Go reader decodes it.
+
+	Then a flag whose named missing text the result commit holds is judged
+	once more (conformity_review.run_recheck), in a new session folder,
+	within what is left of the same 20 minutes, shown only the lines of the
+	commit that hold the text; not under the advisory policy. Its verdict replaces the flag; a recheck that gives none leaves
+	it. CONFORMITY_EVIDENCE.json then carries "recheck", one line like
+	"retry", and a "recheck" record on each criterion asked about."""
 	started = clock()
 	criteria = build_app.read_acceptance_criteria(criteria_path)
 	spec_text = spec_path.read_text()
@@ -302,18 +277,85 @@ def run_combined_review(
 	)
 	error = build_app.single_line(build_app.redact(turn.error, 100_000)) if turn.error else ""
 
-	conformity_verdicts = build_app.parse_conformity_verdicts(turn.text, criteria)
 	available, findings = code_review.parse_code_review_findings(turn.text)
-
+	answer = Answer(
+		conformity_verdicts=build_app.parse_conformity_verdicts(turn.text, criteria), conformity_error=error,
+		available=available, findings=findings, review_error=error,
+	)
 	policies = dict(
 		conformity_policy=conformity_policy, review_policy=review_policy, thinking=thinking,
 		diff_fetch_failed=diff_fetch_failed,
 	)
-	conformity, review = _evidences(conformity_verdicts, error, available, findings, error, **policies)
-	part, why = missing_part(conformity_verdicts, available, error)
-	if not part:
-		return conformity, review
+	inputs = TurnInputs(
+		workspace=workspace, criteria=criteria, spec_text=spec_text, review_base_sha=review_base_sha,
+		diff=diff, instructions_block=instructions_block, thinking=thinking, adapter=adapter, prompt=prompt,
+	)
+	answer = _ask_missing_part(inputs, answer, started, policies)
 
+	recheck = ""
+	if conformity_policy == "required" and conformity_review.contradicted_facts(workspace, answer.conformity_verdicts):
+		# What the answer so far amounts to is on disk before the recheck
+		# starts: a recheck killed from outside leaves that, not nothing.
+		write_combined_evidence(workspace, *_answer_evidences(answer, policies))
+		answer.conformity_verdicts, recheck = conformity_review.run_recheck(
+			workspace, answer.conformity_verdicts, review_base_sha=review_base_sha, diff=diff,
+			instructions_block=instructions_block, thinking=thinking, adapter=adapter,
+			timeout_minutes=retry_timeout_minutes(RETRY_CONFORMITY, started),
+			prompt_session=workspace / SESSION_DIR,
+			fresh_session=lambda: fresh_retry_session_dir(workspace, conformity_review.RECHECK_SESSION_SUBDIR),
+			conformity_policy=conformity_policy,
+		)
+	conformity, review = _answer_evidences(answer, policies)
+	if recheck:
+		conformity["recheck"] = recheck
+	return conformity, review
+
+
+@dataclass
+class Answer:
+	"""What the review's turns have answered so far: the conformity verdicts
+	and the code review findings, each with the error of the turn it came
+	from, and the "retry" line when a part was asked for again."""
+	conformity_verdicts: list[dict]
+	conformity_error: str
+	available: bool
+	findings: list[dict]
+	review_error: str
+	retry: str = ""
+
+
+@dataclass(frozen=True)
+class TurnInputs:
+	"""The first turn's inputs, which every further turn reuses unchanged."""
+	workspace: Path
+	criteria: list[str]
+	spec_text: str
+	review_base_sha: str | None
+	diff: tuple[str, str] | None
+	instructions_block: str
+	thinking: str | None
+	adapter: object
+	prompt: str
+
+
+def _answer_evidences(answer: Answer, policies: dict) -> tuple[dict, dict]:
+	conformity, review = _evidences(
+		answer.conformity_verdicts, answer.conformity_error, answer.available, answer.findings,
+		answer.review_error, **policies,
+	)
+	if answer.retry:
+		conformity["retry"] = review["retry"] = answer.retry
+	return conformity, review
+
+
+def _ask_missing_part(inputs: TurnInputs, answer: Answer, started: float, policies: dict) -> Answer:
+	"""The answer after asking once more for a part the first answer lacks
+	(see run_combined_review's doc comment); the answer unchanged when it was
+	whole or its turn failed."""
+	part, why = missing_part(answer.conformity_verdicts, answer.available, answer.conformity_error)
+	if not part:
+		return answer
+	workspace = inputs.workspace
 	timeout_minutes = retry_timeout_minutes(part, started)
 	retry_session = None
 	if not timeout_minutes:
@@ -323,43 +365,44 @@ def run_combined_review(
 	else:
 		# What the first turn alone amounts to is on disk before the retry
 		# starts: a retry killed from outside leaves that, not nothing.
-		write_combined_evidence(workspace, conformity, review)
+		write_combined_evidence(workspace, *_answer_evidences(answer, policies))
 		retry_session = fresh_retry_session_dir(workspace)
 		skipped = "" if retry_session else "the first turn's session folder could not be emptied"
 	if skipped:
-		conformity["retry"] = review["retry"] = f"not asked again ({why}): {skipped}"[:400]
-		return conformity, review
+		answer.retry = f"not asked again ({why}): {skipped}"[:400]
+		return answer
 
+	criteria, review_base_sha, diff, instructions_block = (
+		inputs.criteria, inputs.review_base_sha, inputs.diff, inputs.instructions_block,
+	)
 	if part == RETRY_CONFORMITY:
 		retry_prompt = build_app.spec_conformity_prompt(
 			criteria, review_base_sha, diff=diff, instructions_block=instructions_block,
 		)
 	elif part == RETRY_CODE_REVIEW:
 		retry_prompt = code_review.code_review_prompt(
-			spec_text, review_base_sha, diff=diff, instructions_block=instructions_block,
+			inputs.spec_text, review_base_sha, diff=diff, instructions_block=instructions_block,
 		)
 	else:
-		retry_prompt = prompt
+		retry_prompt = inputs.prompt
 	# Saved beside the first turn's prompt, in the one folder the host copies
 	# for this step, not in the retry's own session folder.
 	build_app.saved_prompts.save_prompt(workspace / SESSION_DIR, RETRY_PROMPT_NAMES[part], retry_prompt)
 	build_app.print_progress({"stage": "agent", "event": "note", "detail": f"review: asking once more for {RETRY_ASKS[part]}"})
 	second = build_app.run_review_turn(
 		workspace, prompt=retry_prompt, session_dir=retry_session,
-		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter,
+		review_base_sha=review_base_sha, thinking=inputs.thinking, adapter=inputs.adapter,
 		timeout_minutes=timeout_minutes,
 	)
 	second_error = build_app.single_line(build_app.redact(second.error, 100_000)) if second.error else ""
-	conformity_error = review_error = error
 	if part != RETRY_CODE_REVIEW:
-		conformity_verdicts = build_app.parse_conformity_verdicts(second.text, criteria)
-		conformity_error = second_error
+		answer.conformity_verdicts = build_app.parse_conformity_verdicts(second.text, criteria)
+		answer.conformity_error = second_error
 	if part != RETRY_CONFORMITY:
-		available, findings = code_review.parse_code_review_findings(second.text)
-		review_error = second_error
-	conformity, review = _evidences(conformity_verdicts, conformity_error, available, findings, review_error, **policies)
-	conformity["retry"] = review["retry"] = f"asked once more for {RETRY_ASKS[part]}, in a new session: {why}"[:400]
-	return conformity, review
+		answer.available, answer.findings = code_review.parse_code_review_findings(second.text)
+		answer.review_error = second_error
+	answer.retry = f"asked once more for {RETRY_ASKS[part]}, in a new session: {why}"[:400]
+	return answer
 
 
 def write_combined_evidence(workspace: Path, conformity: dict, review: dict) -> tuple[Path, Path]:

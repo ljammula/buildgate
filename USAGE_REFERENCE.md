@@ -268,7 +268,7 @@ for the operator to read:
 | | |
 |---|---|
 | Saved by | `agent/pi/scripts/saved_prompts.py`'s `save_prompt(session_dir, name, text)`, at the one place each script hands a prompt to the harness. It never raises and never changes the turn; a failure is one progress note naming the exception class |
-| Names | `build-round-<n>`, `build-notes`, `build-sonnet-fallback` (the build); `review-conformity`, `review-code`, `review-combined`; `draft-spec`, `draft-spec-example-check`, `draft-plan`, `draft-oracle-c<nnn>`. A name saved twice in one session (a relaunch) gets `-2`, `-3`. Not covered: `goal_pilot.py`, which `factoryd intake` runs outside a run's or request's directory; the factory composes no prompt text there (each prompt is the one line `/spec-plan <input file> <pilot dir>` or `/contract-plan <pilot dir>`), and the model's output is in `<pilot dir>/logs/` |
+| Names | `build-round-<n>`, `build-notes`, `build-sonnet-fallback` (the build); `review-conformity`, `review-code`, `review-combined`, `review-conformity-recheck`; `draft-spec`, `draft-spec-example-check`, `draft-plan`, `draft-oracle-c<nnn>`. A name saved twice in one session (a relaunch) gets `-2`, `-3`. Not covered: `goal_pilot.py`, which `factoryd intake` runs outside a run's or request's directory; the factory composes no prompt text there (each prompt is the one line `/spec-plan <input file> <pilot dir>` or `/contract-plan <pilot dir>`), and the model's output is in `<pilot dir>/logs/` |
 | Caps | 2 MiB per prompt (cut, with a last line saying how many bytes), 50 per launch; the host enforces both again, takes only regular files named `[a-z0-9-]{1,64}.md`, and follows no link |
 | Stored | `<session folder>/prompts/<name>.md` in the worktree, copied by the host (through `sanitize.Text`: escapes, control characters and recognisable credentials removed) to `prompts/<launch>-<n>/<name>.md` in the run's directory (`<launch>` is `build`, `spec_conformity`, `code_review` or `review`; `<n>` the Temporal attempt), or in the request's directory (`spec-<n>`, `plan-<n>`, `oracle-<n>`) for a drafting job, then removed from the worktree before any later launch. A launch's prompts folder is also emptied before the launch (a folder left read-only is made removable first; a review or a build whose folder cannot be emptied fails as an infrastructure error and is not launched), so only files written during the launch are copied. No field of `run.json` names them |
 | What a saved prompt proves | A saved prompt is what the build's session folder held when the host copied it; a build can alter its own before that (the script and the coding agent run as one user in one sandbox). A review's prompt is saved by a launch that runs no build agent |
@@ -826,7 +826,20 @@ not files.
 
 Real correctness coverage is `-conformity-policy`'s
 per-criterion review (default `required`, no `.factory.yml` key) plus the
-deterministic gates and the human gates. Formatting drift never reaches
+deterministic gates and the human gates.
+
+The conformity reviewer is told that the ticket's verify command already
+passed on the tree it reviews, so a test it predicts would fail is no ground
+for a flag. A flag may name a file and the exact text the file lacks. Under
+`required`, when the result commit holds that text (and the worktree's copy of
+the file is the commit's), those criteria are judged once more by a fresh call
+in the same sandbox, shown the commit's lines that hold the text and nothing
+the first answer said; its verdict replaces the flag, and a call that gives
+none leaves it. The two calls share the review's 20 minutes, and the second is
+skipped under 5. `CONFORMITY_EVIDENCE.json` then holds a `recheck` line, each
+such criterion a `recheck` record, and the PR's `## Spec conformity` section
+marks it "judged again". This trades a quarantine on a false flag for the
+chance that the second call passes a criterion the first rightly flagged. Formatting drift never reaches
 the conformity reviewer:
 `build_app.py` runs `gofmt -w` on changed `.go` files once a round's
 verify passes, and the reviewer prompt excludes pure formatting/lint

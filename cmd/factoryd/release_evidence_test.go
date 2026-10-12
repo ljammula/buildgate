@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"buildgate/internal/api"
+	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
@@ -201,6 +202,29 @@ func TestRenderEvidenceMarkdownRendersSpecConformityVerdicts(t *testing.T) {
 	body = renderEvidenceMarkdown(withoutCriteria, &release.MergePolicy{})
 	if strings.Contains(body, "## Spec conformity") {
 		t.Errorf("evidence body should not render a Spec conformity section with no review verdicts:\n%s", body)
+	}
+}
+
+// TestSpecConformityVerdictJudgedAgainSaysSo: a flag overturned on a recheck
+// must not read as an ordinary clean in the pull request.
+func TestSpecConformityVerdictJudgedAgainSaysSo(t *testing.T) {
+	t.Parallel()
+	evidence := []byte(`{"schema_version":1,"review_verdicts":[
+		{"criterion":"1. Foo does X","verdict":"clean"},
+		{"criterion":"2. Docs name RFC 7386","verdict":"clean","recheck":{"fact":"\"merge.go\":\n    line 3: \"x\"","first_detail":"lacks RFC 7386","first_missing":{"file":"merge.go","text":"RFC 7386"},"outcome":"answered clean"}}]}`)
+	verdicts, err := conformity.ParseVerdicts(evidence)
+	if err != nil {
+		t.Fatalf("ParseVerdicts: %v", err)
+	}
+	if verdicts[1].Recheck == nil || verdicts[1].Recheck.Outcome != "answered clean" || verdicts[1].Recheck.FirstDetail != "lacks RFC 7386" {
+		t.Fatalf("recheck not decoded: %+v", verdicts[1].Recheck)
+	}
+	body := renderEvidenceMarkdown(&run.Run{ID: "run-1", SpecConformityVerdicts: verdicts}, &release.MergePolicy{})
+	if !strings.Contains(body, "2. Docs name RFC 7386: **clean** (judged again: an earlier answer flagged it for text the factory then found in the result commit; answered clean)") {
+		t.Errorf("evidence body does not say the verdict was judged again:\n%s", body)
+	}
+	if strings.Contains(body, "1. Foo does X: **clean** (judged again") {
+		t.Errorf("a verdict with no recheck is marked as judged again:\n%s", body)
 	}
 }
 

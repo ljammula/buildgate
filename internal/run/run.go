@@ -741,6 +741,19 @@ type ReviewVerdict struct {
 	Criterion string `json:"criterion"`
 	Verdict   string `json:"verdict"`
 	Detail    string `json:"detail,omitempty"`
+	// Recheck is set when an earlier answer flagged this criterion naming
+	// text a file lacked, the result commit held that text, and a fresh turn
+	// judged the criterion again (agent/pi/scripts/conformity_review.py,
+	// run_recheck). Verdict and Detail are then that turn's, or the earlier
+	// flag's when it gave none.
+	Recheck *ReviewVerdictRecheck `json:"recheck,omitempty"`
+}
+
+// ReviewVerdictRecheck is what ReviewVerdict.Recheck records: the earlier
+// flag's detail and what the recheck came to.
+type ReviewVerdictRecheck struct {
+	FirstDetail string `json:"first_detail,omitempty"`
+	Outcome     string `json:"outcome"`
 }
 
 // CodeReviewFinding is one free-form defect an independent code-review

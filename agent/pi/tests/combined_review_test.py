@@ -602,6 +602,117 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		self.assertIn("could not be emptied", review["retry"])
 
 
+class CombinedReviewRecheckTests(unittest.TestCase):
+	"""A conformity flag naming text the result commit holds is judged once
+	more, alone, by a fresh turn told only what the factory found; the code
+	review half is never touched."""
+
+	FLAG = {
+		"criterion": "2. Widget is documented", "verdict": "flagged", "detail": "README does not mention the widget",
+		"missing": {"file": "README.md", "text": "## Widget"},
+	}
+
+	reviewer_rewrites_readme = False
+
+	def _run(self, answers, *, clock=None):
+		directory = tempfile.TemporaryDirectory()
+		spec_dir = tempfile.TemporaryDirectory()
+		self.addCleanup(directory.cleanup)
+		self.addCleanup(spec_dir.cleanup)
+		root = Path(directory.name)
+		init_repo_with_commit(root)
+		base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+		(root / "README.md").write_text("# App\n\n## Widget\n\nIt widgets.\n")
+		subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True)
+		subprocess.run(["git", "commit", "-m", "docs"], cwd=root, check=True, capture_output=True)
+		criteria_path = Path(spec_dir.name) / "criteria.md"
+		criteria_path.write_text("1. Widget exists\n2. Widget is documented\n")
+		spec_path = Path(spec_dir.name) / "ticket.md"
+		spec_path.write_text("Add a widget.\n")
+		queue, turns = list(answers), []
+
+		def fake_sh(command, *, cwd, timeout, env):
+			session = Path(command[command.index("--session-dir") + 1])
+			turns.append({
+				"prompt": command[-1], "session": session, "timeout": timeout,
+				"session_was_empty": not session.exists() or not [p for p in session.iterdir() if p.name != "prompts"],
+				"evidence": json.loads((root / "CONFORMITY_EVIDENCE.json").read_text()) if (root / "CONFORMITY_EVIDENCE.json").exists() else None,
+			})
+			session.mkdir(parents=True, exist_ok=True)
+			(session / "transcript.jsonl").write_text("README does not mention the widget\n")
+			# A reviewer that edits another file changes neither the check nor the recheck's diff.
+			(root / "seed.txt").write_text("rewritten by reviewer turn %d\n" % len(turns))
+			if self.reviewer_rewrites_readme:
+				(root / "README.md").write_text("emptied by reviewer turn %d\n" % len(turns))
+			return queue.pop(0)
+
+		patches = [mock.patch.object(build_app, "sh", side_effect=fake_sh)]
+		if clock is not None:
+			patches.append(mock.patch.object(combined_review, "clock", side_effect=clock))
+		with contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()):
+			for patch in patches:
+				stack.enter_context(patch)
+			conformity, review = combined_review.run_combined_review(
+				root, criteria_path=criteria_path, spec_path=spec_path, review_base_sha=base, thinking="high",
+			)
+		self.assertEqual(queue, [], "every prepared answer is one model call")
+		return conformity, review, turns, root
+
+	def test_a_contradicted_flag_is_judged_again_alone_and_the_code_review_is_kept(self):
+		conformity, review, turns, root = self._run([
+			answer({"criteria": [VERDICTS[0], self.FLAG], "findings": []}),
+			answer({"criteria": [{"criterion": "2. Widget is documented", "verdict": "clean"}]}),
+		])
+		self.assertEqual(len(turns), 2)
+		recheck = turns[1]["prompt"]
+		self.assertIn('The factory read "README.md":\n    line 2: ""\n    line 3: "## Widget"\n    line 4: ""', recheck)
+		self.assertNotIn("README does not mention", recheck)
+		self.assertNotIn("1. Widget exists", recheck)
+		self.assertIn("+## Widget", recheck, "the recheck reviews the first turn's diff")
+		self.assertNotIn("rewritten by reviewer", recheck)
+		self.assertEqual(turns[1]["session"], root / ".pi-combined-review-session" / "recheck")
+		self.assertTrue(turns[1]["session_was_empty"])
+		self.assertEqual(turns[1]["evidence"]["review_verdicts"][1]["verdict"], "flagged", "the answer so far is on disk first")
+
+		self.assertTrue(conformity["succeeded"])
+		self.assertEqual(conformity["review_verdicts"][1]["recheck"]["outcome"], "answered clean")
+		self.assertIn("asked once more about criteria 2", conformity["recheck"])
+		self.assertNotIn("recheck", review)
+		self.assertNotIn("retry", conformity)
+		self.assertTrue(review["available"])
+		saved = sorted(p.name for p in (root / ".pi-combined-review-session" / "prompts").iterdir())
+		self.assertEqual(saved, ["review-combined.md", "review-conformity-recheck.md"])
+
+	def test_a_flag_from_a_conformity_retry_is_rechecked_too_within_the_same_time(self):
+		times = iter([0.0, 4 * 60.0, 9 * 60.0])
+		conformity, review, turns, _ = self._run([
+			answer({"findings": []}),
+			answer({"criteria": [VERDICTS[0], self.FLAG]}),
+			answer({"criteria": [{"criterion": "2. Widget is documented", "verdict": "clean"}]}),
+		], clock=lambda: next(times))
+		self.assertEqual(len(turns), 3)
+		self.assertEqual(turns[2]["timeout"], 10 * 60)
+		self.assertIn("asked once more for the spec conformity review alone", conformity["retry"])
+		self.assertIn("asked once more about criteria 2", conformity["recheck"])
+		self.assertTrue(conformity["succeeded"])
+
+	def test_a_file_the_first_turn_rewrote_is_not_checked_and_the_flag_stands(self):
+		self.reviewer_rewrites_readme = True
+		conformity, _, turns, _ = self._run([answer({"criteria": [VERDICTS[0], self.FLAG], "findings": []})])
+		self.assertEqual(len(turns), 1)
+		self.assertFalse(conformity["succeeded"])
+		self.assertNotIn("recheck", conformity)
+
+	def test_the_recheck_never_gets_more_than_is_left_of_the_one_turns_time(self):
+		times = iter([0.0, 17 * 60.0])
+		conformity, _, turns, _ = self._run(
+			[answer({"criteria": [VERDICTS[0], self.FLAG], "findings": []})], clock=lambda: next(times),
+		)
+		self.assertEqual(len(turns), 1)
+		self.assertFalse(conformity["succeeded"])
+		self.assertIn("not asked again", conformity["recheck"])
+
+
 class WriteCombinedEvidenceTests(unittest.TestCase):
 	def test_writes_both_evidence_files_in_their_existing_schema(self):
 		with tempfile.TemporaryDirectory() as directory:
