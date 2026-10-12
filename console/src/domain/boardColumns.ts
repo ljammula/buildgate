@@ -58,8 +58,9 @@ export function waitsOnYou(request: RequestSummary): boolean {
  * request stays in the column of the step it stopped at.
  *
  * States are a server-owned set that can grow. One this console does not know
- * lands in Spec, under Other: in view, without claiming the work is over. The
- * card shows the raw state.
+ * lands under Other, in the column of the step its history says it came
+ * from, or in Spec with no such history: in view, without claiming the work
+ * is over. The card shows the raw state.
  */
 export function columnForRequest(request: RequestSummary): BoardColumn {
   if (FINISHED_STATES.has(request.state)) return "finished";
@@ -98,6 +99,8 @@ export function visibleColumns(
 export interface BoardCell {
   /** The cards drawn, in order. */
   readonly requests: readonly RequestSummary[];
+  /** Every card of the cell, those behind the Finished cap included: what a group chip counts. */
+  readonly all: readonly RequestSummary[];
   /** How many more the Finished cap left out; 0 in every other column. */
   readonly more: number;
 }
@@ -208,7 +211,7 @@ export function buildBoard(requests: readonly RequestSummary[], options: BoardOp
   const lanes = [...byProject.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([project, columns]): BoardLane => {
-      const cells = emptyColumns<BoardCell>(() => ({ requests: [], more: 0 }));
+      const cells = emptyColumns<BoardCell>(() => ({ requests: [], all: [], more: 0 }));
       let count = 0;
       let waiting = 0;
       for (const column of boardColumns) {
@@ -217,7 +220,7 @@ export function buildBoard(requests: readonly RequestSummary[], options: BoardOp
         count += all.length;
         waiting += all.filter(waitsOnYou).length;
         const shown = column === "finished" ? all.slice(0, doneCap) : all;
-        cells[column] = { requests: shown, more: all.length - shown.length };
+        cells[column] = { requests: shown, all, more: all.length - shown.length };
       }
       return { project, count, waiting, cells };
     });

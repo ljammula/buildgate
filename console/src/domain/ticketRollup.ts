@@ -66,6 +66,12 @@ const LABELS: Readonly<Record<Status, string>> = {
  * even though the request itself had already moved on.
  */
 export function ticketStatus(ticket: RequestTicket, request: RequestSummary): Status {
+  // A closed request builds and reviews nothing more, and nothing reads its
+  // pull requests again: a merged one stays done, every other ticket ends
+  // with the request, a pull request left open included.
+  if (request.state === "closed") {
+    return ticket.prState === "merged" && ticket.prUrl !== "" ? "done" : "ended";
+  }
   if (ticket.prState !== "" && ticket.prUrl !== "") {
     return statusForPRState(ticket.prState);
   }
@@ -76,8 +82,6 @@ export function ticketStatus(ticket: RequestTicket, request: RequestSummary): St
       request.state === "done" ||
       requestAwaitingPullRequest(request));
   if (pastThisTicket || currentTicketAccepted) return "done";
-  // A closed request builds nothing more: a ticket with no pull request ends with it.
-  if (request.state === "closed") return "ended";
   // The current ticket of a request that stopped (quarantined, cancelled,
   // or halted for a reason other than a missing PR) is not building.
   const stopped =

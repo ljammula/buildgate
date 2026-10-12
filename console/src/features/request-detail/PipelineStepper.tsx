@@ -127,7 +127,10 @@ export function PipelineStepper({ request }: { readonly request: RequestSummary 
             <OutcomeIcon
               aria-hidden="true"
               className={cn(
-                toneClasses[statusTone(statusForToken(outcome.state))].text,
+                // A closed request ended by a person's choice: grey, not the red of a failure.
+                outcome.state === "closed"
+                  ? toneClasses[statusTone(statusForToken(outcome.state))].text
+                  : "text-tone-danger",
                 "mt-0.5 size-4 shrink-0",
               )}
             />

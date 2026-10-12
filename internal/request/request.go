@@ -1477,8 +1477,10 @@ func (r *Request) NextAction() string {
 }
 
 // closedNextAction is NextAction's StateClosed branch: the request is over,
-// but a pull request of another ticket may still be open, and only a person
-// merges or closes it. Empty when none is.
+// but a pull request of another ticket may have been open when it closed,
+// and only a person merges or closes it. Nothing polls a finished request,
+// so it says what was true when the request closed. Empty when none was
+// open.
 func (r *Request) closedNextAction() string {
 	var open []string
 	for _, t := range r.Tickets {
@@ -1489,7 +1491,7 @@ func (r *Request) closedNextAction() string {
 	if len(open) == 0 {
 		return ""
 	}
-	return "still open, merge or close by hand: " + strings.Join(open, ", ")
+	return "left open when the request closed, merge or close it on GitHub: " + strings.Join(open, ", ")
 }
 
 // prReviewNextAction is NextAction's own StatePRReview branch: what each

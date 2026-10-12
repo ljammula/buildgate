@@ -128,7 +128,7 @@ export function KanbanBoard({
       column,
       groupChips(
         column,
-        board.lanes.flatMap((lane) => lane.cells[column].requests),
+        board.lanes.flatMap((lane) => lane.cells[column].all),
       ),
     ]),
   );

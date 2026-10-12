@@ -83,7 +83,7 @@ never a state here — it stays a human action outside the system.
 ```text
 submitted -> spec_drafting -> spec_review* -> planning -> plan_review*
                                                   |
-                                              building -> pr_review -> done
+                                              building -> pr_review -> done | closed
                                                   |
                                     quarantined/halted --(retry)--> building
 

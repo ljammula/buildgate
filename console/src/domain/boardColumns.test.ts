@@ -252,6 +252,12 @@ describe("buildBoard", () => {
     const cell = board.lanes[0]!.cells.finished;
     expect(cell.requests).toHaveLength(20);
     expect(cell.more).toBe(3);
+    // A group chip counts the whole cell, those behind the cap included.
+    expect(cell.all).toHaveLength(23);
+    expect(groupChips("finished", cell.all)).toEqual([
+      { label: "Merged", short: "Merged", count: 12 },
+      { label: "Closed", short: "Closed", count: 11 },
+    ]);
     expect(cell.requests[0]!.id).toBe("done-22");
     expect(cell.requests.at(-1)!.id).toBe("done-03");
     // The header counts every finished request, not only the cards drawn.

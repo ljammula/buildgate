@@ -371,9 +371,13 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   PR merged: ticket marked `merged`; the request reaches `done` once
   every ticket has merged. Closed without merging: the request ends as
   `closed` and you are notified; another ticket's PR still open stays open
-  for you to merge or close. Only a state GitHub reports as `CLOSED` does
+  for you to merge or close, and is named as left open (nothing polls a
+  closed request after that). Only a state GitHub reports as `CLOSED` does
   this; an unreadable state is polled again. Reopening the PR does not
-  bring the request back. The factory never merges.
+  bring the request back. Pull requests are read only while the request is
+  in `pr_review`: one closed while a later ticket builds is seen once the
+  request next reaches `pr_review`, after that build. The factory never
+  merges.
 
 Every poll that finds no new thread also checks the pull request against
 the ready-to-merge bar ([STATUS.md § Ready to merge](STATUS.md#ready-to-merge))

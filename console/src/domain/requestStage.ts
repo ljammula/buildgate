@@ -1,7 +1,8 @@
 // Where a request is on the pipeline, read from its own record: its state,
 // its history and, while it waits in resume_review, the lost step. The board
-// places a card by it and the request page marks its steps by it, so the two
-// always agree. Structural facts only: never the text of an error.
+// places a card by it, and the request page marks the step a stopped request
+// stopped at by the same `stoppedAt`. Structural facts only: never the text
+// of an error.
 import type { RequestSummary, RequestTransition } from "@/domain/request";
 
 /** The canonical, linear pipeline of request states, first to last. */
