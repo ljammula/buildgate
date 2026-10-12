@@ -114,5 +114,22 @@
     ]
   },
   "approve_next_state": "building",
-  "next_action": "review the drafted tickets: `factoryd approve req-plan-review`, or `factoryd reject -reason ... req-plan-review` to redraft"
+  "next_action": "review the drafted tickets: `factoryd approve req-plan-review`, or `factoryd reject -reason ... req-plan-review` to redraft",
+  "inspect": {
+    "commands": [
+      {
+        "label": "The spec",
+        "command": "less /data/requests/req-plan-review/spec.md"
+      },
+      {
+        "label": "The drafted tickets",
+        "command": "ls /data/requests/req-plan-review/tickets"
+      },
+      {
+        "label": "The first ticket",
+        "command": "less /data/requests/req-plan-review/tickets/001.spec.md"
+      }
+    ],
+    "note": "Nothing is built yet: these are the files the gate approves. Change them in the console's editor, or reject with a reason to have them redrafted."
+  }
 }

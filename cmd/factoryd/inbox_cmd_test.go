@@ -85,10 +85,14 @@ func TestInboxListsWaitingRequestsAcrossProfilesOldestFirst(t *testing.T) {
 		"  reason: spec drafting failed: forged: line\n",
 		"  next: ",
 		"reason: verify failed",
+		"  look before deciding: factoryd inspect -config default spec-a\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output lacks %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "inspect -config default pr-d") {
+		t.Errorf("a pull request with no run to read offers an inspect line:\n%s", text)
 	}
 	if strings.Contains(text, "busy-g") || strings.Contains(text, "done-h") {
 		t.Errorf("requests that do not wait on the operator are listed:\n%s", text)

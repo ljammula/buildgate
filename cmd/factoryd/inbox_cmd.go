@@ -49,6 +49,9 @@ type inboxEntry struct {
 	Baseline   string   `json:"baseline,omitempty"`
 	PRURLs     []string `json:"pr_urls,omitempty"`
 	ConsoleURL string   `json:"console_url,omitempty"`
+	// Inspect is the command that prints how to look at the work before
+	// deciding (factoryd inspect), when there is anything to look at.
+	Inspect string `json:"inspect,omitempty"`
 
 	since time.Time
 }
@@ -173,6 +176,9 @@ func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, n
 		}
 	}
 	e.Baseline = inboxBaseline(dataDir, r)
+	if !request.Inspect(dataDir, r).Empty() {
+		e.Inspect = fmt.Sprintf("factoryd inspect -config %s %s", profile, r.ID)
+	}
 	switch r.State {
 	case request.StateSpecReview, request.StateOracleReview, request.StatePlanReview:
 		e.Approve = fmt.Sprintf("factoryd approve -config %s %s", profile, r.ID)
@@ -236,6 +242,9 @@ func printInboxEntry(w io.Writer, e inboxEntry) {
 	}
 	if e.Baseline != "" {
 		fmt.Fprintf(w, "  baseline verify: %s\n", e.Baseline)
+	}
+	if e.Inspect != "" {
+		fmt.Fprintf(w, "  look before deciding: %s\n", e.Inspect)
 	}
 	if e.ConsoleURL != "" {
 		fmt.Fprintf(w, "  console: %s\n", e.ConsoleURL)

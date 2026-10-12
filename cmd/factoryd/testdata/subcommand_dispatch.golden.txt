@@ -176,6 +176,12 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd inbox [flags]
 stderr:   List every request waiting on you, across profiles
 
+$ factoryd inspect -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd inspect [flags] <request-id | run-id>
+stderr:   Print the commands that show a request's or a run's work before you decide
+
 $ factoryd stop -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag

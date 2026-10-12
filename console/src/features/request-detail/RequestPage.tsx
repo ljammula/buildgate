@@ -7,6 +7,7 @@ import { PageBody } from "@/ui/PageLayout";
 import { AuditSection } from "./AuditSection";
 import { ContentSections } from "./ContentSections";
 import { CriteriaCoverage } from "./CriteriaCoverage";
+import { InspectPanel } from "./InspectPanel";
 import { NextActionBanner } from "./NextActionBanner";
 import { OracleSkipWarning } from "./OracleSkipWarning";
 import { Panel } from "./Panel";
@@ -61,6 +62,10 @@ export function RequestPage({
   const leads = ticketsLeadContent(request);
   const tickets = request.tickets.length > 0 ? <TicketsSection request={request} /> : null;
   const comparable = request.rejections.some((r) => rejectionStage(r) === request.state);
+  // Built work's commands lead the page; a draft gate's follow the files they open.
+  const inspect = request.inspect;
+  const inspectBuilt = inspect !== null && inspect.tickets.length > 0 ? inspect : null;
+  const inspectDraft = inspect !== null && inspect.tickets.length === 0 ? inspect : null;
 
   return (
     <>
@@ -90,6 +95,7 @@ export function RequestPage({
               anyEditorOpen={editorOpen}
             />
             <OracleSkipWarning request={request} />
+            {inspectBuilt ? <InspectPanel inspection={inspectBuilt} /> : null}
             {leads ? tickets : null}
             {comparable ? <RevisionCompare request={request} /> : null}
             {request.state === "plan_review" ? <CriteriaCoverage request={request} /> : null}
@@ -105,6 +111,7 @@ export function RequestPage({
               refetchRequest={refetchRequest}
             />
             {leads ? null : tickets}
+            {inspectDraft ? <InspectPanel inspection={inspectDraft} /> : null}
           </div>
           <div className="flex min-w-0 flex-col gap-6">
             <RequestFacts request={request} refreshError={refreshError} />

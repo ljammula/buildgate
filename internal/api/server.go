@@ -3404,6 +3404,11 @@ type requestDetailView struct {
 	// this is false, instead of letting the operator's first choice hit a
 	// 409 (adversarial review of SendBack, round 2, 2026-09-26).
 	CanSendBackToPlan bool `json:"can_send_back_to_plan,omitempty"`
+	// Inspect is request.Inspect: the commands that show the drafted files
+	// at a review gate, or each built ticket's commits, with its note. The
+	// CLI's `factoryd inspect` prints the same. Omitted when there is
+	// nothing to show.
+	Inspect *request.Inspection `json:"inspect,omitempty"`
 }
 
 // readRequestFileBestEffort reads path and returns its content, or ""
@@ -3523,6 +3528,9 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 			!loaded.AnyTicketAccepted(),
 	}
 	view.CanSendBackToPlan = view.CanSendBack && loaded.SendBackPlanAllowed()
+	if inspection := request.Inspect(dataDir, loaded); !inspection.Empty() {
+		view.Inspect = &inspection
+	}
 	if next, ok := request.NextApprovalState(loaded); ok {
 		view.ApproveNextState = next
 	}
