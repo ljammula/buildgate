@@ -958,8 +958,9 @@ func writeSpecConformitySection(b *strings.Builder, r *run.Run) {
 		// Still informational only; neither input is a gate here.
 		oraclePassed := conformity.OracleOutcome(r.GateResults)
 		disagreements := 0
-		for _, c := range conformity.CrossCheck(verdicts, r.OracleCoveredCriteria, oraclePassed) {
+		for i, c := range conformity.CrossCheck(verdicts, r.OracleCoveredCriteria, oraclePassed) {
 			fmt.Fprintf(b, "- %s: **%s**", sanitizeMarkdownField(c.Criterion), sanitizeMarkdownField(c.Verdict))
+			writeRecheckNote(b, verdicts[i].Recheck)
 			switch c.Agreement {
 			case conformity.AgreementAgree:
 				b.WriteString(" (oracle-checked, agrees)")
@@ -980,6 +981,17 @@ func writeSpecConformitySection(b *strings.Builder, r *run.Run) {
 		}
 		b.WriteString("\n")
 	}
+}
+
+// writeRecheckNote says, after a criterion's verdict, that the verdict came
+// from a second look: an earlier answer flagged the criterion for text a file
+// lacked, and the factory found that text in the result commit. Without it a
+// flag overturned to clean reads as an ordinary clean.
+func writeRecheckNote(b *strings.Builder, recheck *run.ReviewVerdictRecheck) {
+	if recheck == nil {
+		return
+	}
+	fmt.Fprintf(b, " (judged again: an earlier answer flagged it for text the factory then found in the result commit; %s)", sanitizeMarkdownField(recheck.Outcome))
 }
 
 // writeNamedGatesSection lists every command gate and the repository's own

@@ -1927,6 +1927,62 @@ def _iter_json_objects(output: str):
 		i = end
 
 
+MAX_MISSING_FILE_CHARS = 300
+MAX_MISSING_TEXT_CHARS = 1000
+
+
+def missing_evidence(entry: dict) -> dict | None:
+	"""The {"file", "text"} a flagged verdict names as text the criterion
+	requires and the file lacks (the conformity JSON contract's optional
+	"missing"), each cut to its cap; None when absent or not two non-empty
+	strings. The reviewer wrote both: conformity_review.found_in_result
+	checks them against the result commit before anything relies on them."""
+	missing = entry.get("missing")
+	if not isinstance(missing, dict):
+		return None
+	file, text = missing.get("file"), missing.get("text")
+	if not isinstance(file, str) or not isinstance(text, str) or not file.strip() or not text.strip():
+		return None
+	return {"file": file.strip()[:MAX_MISSING_FILE_CHARS], "text": text[:MAX_MISSING_TEXT_CHARS]}
+
+
+def fresh_session_subdir(session: Path, subdir: str) -> Path | None:
+	"""Returns session/subdir, new and empty, after removing everything in
+	session but its saved prompts, so a further review turn can read neither
+	an earlier turn's transcript nor its answer. No link is followed: a
+	session folder that is a link (or not a directory) is removed by name and
+	made again, and so is each entry in it. None when something other than
+	the prompts is still there afterwards; the caller then asks nothing."""
+	try:
+		if session.is_symlink() or (session.exists() and not session.is_dir()):
+			session.unlink()
+		session.mkdir(exist_ok=True)
+		with os.scandir(session) as entries:
+			for entry in entries:
+				if entry.name != saved_prompts.PROMPTS_DIR:
+					_remove_entry(entry.path, entry.is_dir(follow_symlinks=False))
+		left = [name for name in os.listdir(session) if name != saved_prompts.PROMPTS_DIR]
+		if left or session.is_symlink():
+			return None
+		fresh = session / subdir
+		fresh.mkdir()
+		return fresh
+	except OSError:
+		return None
+
+
+def _remove_entry(path: str, is_real_dir: bool) -> None:
+	"""Removes path without following a link: a real directory with its
+	contents, anything else by its name."""
+	if is_real_dir:
+		shutil.rmtree(path, ignore_errors=True)
+		return
+	try:
+		os.unlink(path)
+	except OSError:
+		pass
+
+
 def parse_conformity_verdicts(output: str, criteria: list[str]) -> list[dict]:
 	"""Extracts the reviewer's per-criterion verdict from its final
 	response text. Returns exactly one {"criterion", "verdict", "detail"}
@@ -2004,7 +2060,11 @@ def parse_conformity_verdicts(output: str, criteria: list[str]) -> list[dict]:
 
 	def verdict_of(entry) -> dict | None:
 		if isinstance(entry, dict) and entry.get("verdict") in ("clean", "flagged"):
-			return {"verdict": entry["verdict"], "detail": str(entry.get("detail") or "")}
+			resolved = {"verdict": entry["verdict"], "detail": str(entry.get("detail") or "")}
+			missing = missing_evidence(entry) if entry["verdict"] == "flagged" else None
+			if missing:
+				resolved["missing"] = missing
+			return resolved
 		return None
 
 	# matched_position[criterion index] = index in winning_entries of the
@@ -2145,7 +2205,21 @@ def run_spec_conformity_review(
 	operator with only "no-review-verdict" per criterion -- the actual
 	429 was invisible in that evidence before this fix."""
 	diff = workspace_diff(workspace, review_base_sha) if review_base_sha else None
-	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff, instructions_block=instructions_diff_block(instructions_diff))
+	return run_spec_conformity_turn(
+		workspace, criteria=criteria, review_base_sha=review_base_sha, diff=diff,
+		instructions_block=instructions_diff_block(instructions_diff), thinking=thinking,
+		timeout_minutes=timeout_minutes, adapter=adapter,
+	)
+
+
+def run_spec_conformity_turn(
+	workspace: Path, *, criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None,
+	instructions_block: str, thinking: str | None, timeout_minutes: int = 10, adapter=DEFAULT_ADAPTER,
+) -> tuple[list[dict], str]:
+	"""run_spec_conformity_review's turn over a diff and instruction block
+	already fetched, so a caller that asks a further turn can give it the
+	same inputs. Returns (verdicts, error) as that function does."""
+	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff, instructions_block=instructions_block)
 	turn = run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-conformity-session",
 		review_base_sha=review_base_sha, thinking=thinking,

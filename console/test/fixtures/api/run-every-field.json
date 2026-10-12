@@ -181,7 +181,11 @@
       {
         "criterion": "every-field criterion",
         "verdict": "every-field verdict",
-        "detail": "every-field detail"
+        "detail": "every-field detail",
+        "recheck": {
+          "first_detail": "every-field first_detail",
+          "outcome": "every-field outcome"
+        }
       }
     ]
   },
@@ -337,7 +341,11 @@
     {
       "criterion": "every-field criterion",
       "verdict": "every-field verdict",
-      "detail": "every-field detail"
+      "detail": "every-field detail",
+      "recheck": {
+        "first_detail": "every-field first_detail",
+        "outcome": "every-field outcome"
+      }
     }
   ],
   "code_review": {
