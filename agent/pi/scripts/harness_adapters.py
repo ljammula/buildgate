@@ -429,6 +429,9 @@ class PiAdapter:
 
 	name = "pi"
 	binary = "pi"
+	# Lines this CLI prints to stderr on every run that say nothing about a
+	# failure; build_app.stderr_hint skips them when it names a failure's cause.
+	stderr_noise: tuple[str, ...] = ()
 
 	def agent_dir(self) -> Path:
 		"""Where pi reads its state, models.json included."""
@@ -690,6 +693,10 @@ class CodexAdapter:
 
 	name = "codex"
 	binary = "codex"
+	# Printed whenever stdin is not a terminal. Found live (walk, 2026-10-12):
+	# it was the whole stderr of five planning runs that failed, so every
+	# reason named it; the cause was in the JSON error events on stdout.
+	stderr_noise: tuple[str, ...] = ("Reading additional input from stdin",)
 	# Environment variable Codex reads its provider key from; it carries the
 	# placeholder, and the relay strips whatever credential a request has.
 	key_env = "FACTORYD_RELAY_KEY"
@@ -877,6 +884,7 @@ class CopilotAdapter:
 
 	name = "copilot"
 	binary = "copilot"
+	stderr_noise: tuple[str, ...] = ()
 	# Holds the id of the session the first round started, so a continued
 	# round resumes it (Pi's --continue equivalent).
 	session_id_file = "copilot-session-id"

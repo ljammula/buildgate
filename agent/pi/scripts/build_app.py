@@ -328,16 +328,36 @@ def last_nonblank_line(text: str) -> str:
 	return ""
 
 
-def stderr_hint(stderr: str | bytes | None) -> str:
+def agent_exit_hint(output: harness_adapters.AgentOutput, stderr: str | bytes | None, noise: tuple[str, ...] = ()) -> str:
+	"""Why an agent exited non-zero or timed out, as one bounded, redacted
+	line, from what it reported (output, a harness_adapters.AgentOutput,
+	parsed from its stdout) and its stderr, in this order: the error that
+	ended its last turn; else stderr_hint (skipping noise, the harness's
+	stderr_noise); else the last model-route error. Earlier route errors are
+	often retries the agent recovered from, so they rank below stderr, and
+	only the last is kept: the first would name a retry, not the failure.
+	"" when nothing says anything."""
+	last_turn = output.last_turn_error
+	if last_turn:
+		return exited_zero_hint([last_turn])
+	from_stderr = stderr_hint(stderr, noise)
+	if from_stderr:
+		return from_stderr
+	return exited_zero_hint(output.route_errors[-1:])
+
+
+def stderr_hint(stderr: str | bytes | None, noise: tuple[str, ...] = ()) -> str:
 	"""pi's stderr folded to one bounded, redacted line (its last non-blank
-	line), or "" when it has none. Accepts bytes because a
+	line that does not start with one of noise, the harness's stderr_noise),
+	or "" when it has none. Accepts bytes because a
 	subprocess.TimeoutExpired carries whatever partial stderr it captured
 	undecoded -- draft_spec.py/plan_tickets.py print this on a timeout too, so
 	"agent timed out" names the route's last complaint (a 429, an auth
 	retry) instead of nothing."""
 	if isinstance(stderr, bytes):
 		stderr = stderr.decode(errors="replace")
-	return single_line(redact(last_nonblank_line(stderr or ""), 200))
+	lines = [line for line in (stderr or "").splitlines() if not (noise and line.strip().startswith(noise))]
+	return single_line(redact(last_nonblank_line("\n".join(lines)), 200))
 
 
 def single_line(text: str) -> str:

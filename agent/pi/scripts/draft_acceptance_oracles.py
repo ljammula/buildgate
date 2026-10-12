@@ -422,6 +422,10 @@ class AgentDigest:
 		self.errored = 0
 		self.oversize_lines = 0
 		self.last_error: str | None = None
+		# The error of the last turn when that turn failed; cleared by a turn
+		# that did not fail. last_error above is the last error ever seen,
+		# which a turn the agent recovered in leaves standing.
+		self.last_turn_error: str | None = None
 		self.last_text: str | None = None
 		# Untruncated (up to FULL_TEXT_MAX_CHARS) text of the LAST completed
 		# assistant turn -- mirrors harness_adapters.final_assistant_text's own
@@ -466,6 +470,8 @@ class AgentDigest:
 		error = facts.get("error")
 		if isinstance(error, str) and error:
 			self.last_error = error[:DIGEST_TEXT_CHARS]
+		if facts.get("turn"):
+			self.last_turn_error = (self.last_error if facts.get("failed") else None)
 		text = facts.get("text")
 		if isinstance(text, str):
 			self.last_text = text[-DIGEST_TEXT_CHARS:] or None
@@ -999,7 +1005,12 @@ def draft_one_criterion(
 	if result.timed_out:
 		failure_reason = f"the pi invocation exceeded its {timeout_minutes} minute wall-clock budget and was killed"
 	elif result.returncode != 0:
-		failure_reason = f"the pi invocation exited {result.returncode}"
+		reported = harness_adapters.AgentOutput(
+			final_text="", last_turn_error=result.digest.last_turn_error or "",
+			route_errors=[result.digest.last_error] if result.digest.last_error else [],
+		)
+		hint = build_app.agent_exit_hint(reported, result.stderr_tail, adapter.stderr_noise)
+		failure_reason = f"the pi invocation exited {result.returncode}" + (f": {hint}" if hint else "")
 	elif manifest_path.is_file():
 		try:
 			manifest = validate_manifest(

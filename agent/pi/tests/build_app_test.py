@@ -4079,6 +4079,53 @@ class ExitedZeroHintTests(unittest.TestCase):
 		self.assertEqual(build_app.exited_zero_hint(harness_adapters.model_route_errors('[1,2]\n{"type":"message_end","message":"str"}\nnot json')), "")
 
 
+class AgentExitHintTests(unittest.TestCase):
+	"""Why an agent exited non-zero. Found live (walk, 2026-10-12): five
+	Codex planning runs exited 1 with stderr holding only Codex's start-up
+	line, so every reason read "agent exited 1: Reading additional input
+	from stdin..."."""
+
+	codex = harness_adapters.get("codex")
+	startup = "Reading additional input from stdin...\n"
+
+	def _codex(self, *events):
+		return self.codex.parse("\n".join(json.dumps(e) for e in events))
+
+	def test_a_codex_error_event_on_stdout_is_the_reason_not_its_startup_line(self):
+		output = self._codex({"type": "error", "message": "stream disconnected: 429 Too Many Requests"})
+		self.assertEqual(build_app.agent_exit_hint(output, self.startup, self.codex.stderr_noise), "stream disconnected: 429 Too Many Requests")
+
+	def test_the_failure_that_ended_the_last_turn_beats_the_retries_before_it(self):
+		retries = [{"type": "error", "message": f"Reconnecting... {n}/5 (stream disconnected before completion)"} for n in range(1, 6)]
+		output = self._codex(*retries, {"type": "turn.failed", "error": {"message": "401 Unauthorized: model not allowed"}})
+		self.assertEqual(build_app.agent_exit_hint(output, self.startup, self.codex.stderr_noise), "401 Unauthorized: model not allowed")
+
+	def test_stderr_beats_an_earlier_error_the_agent_recovered_from(self):
+		output = self._codex({"type": "error", "message": "429 retrying"}, {"type": "turn.started"}, {"type": "turn.completed"})
+		stderr = "panic: index out of range\n" + self.startup
+		self.assertEqual(build_app.agent_exit_hint(output, stderr, self.codex.stderr_noise), "panic: index out of range")
+
+	def test_with_only_retries_the_last_one_is_the_reason(self):
+		output = self._codex({"type": "error", "message": "Reconnecting... 1/2"}, {"type": "error", "message": "Reconnecting... 2/2: 503"})
+		self.assertEqual(build_app.agent_exit_hint(output, self.startup, self.codex.stderr_noise), "Reconnecting... 2/2: 503")
+
+	def test_a_startup_line_alone_says_nothing(self):
+		self.assertEqual(build_app.agent_exit_hint(self._codex(), self.startup, self.codex.stderr_noise), "")
+		self.assertEqual(build_app.stderr_hint(b"  Reading additional input from stdin...\n", self.codex.stderr_noise), "")
+
+	def test_only_the_harness_that_prints_a_line_has_it_skipped(self):
+		pi = harness_adapters.get("pi")
+		self.assertEqual(build_app.agent_exit_hint(pi.parse(""), self.startup, pi.stderr_noise), "Reading additional input from stdin...")
+		for name in harness_adapters.ADAPTERS:
+			self.assertIsInstance(harness_adapters.get(name).stderr_noise, tuple, name)
+
+	def test_the_reason_is_one_redacted_line(self):
+		output = self._codex({"type": "turn.failed", "error": {"message": "401 Unauthorized\nAuthorization: Bearer sk-abcdefgh12345678"}})
+		hint = build_app.agent_exit_hint(output, "", ())
+		self.assertNotIn("\n", hint)
+		self.assertNotIn("sk-abcdefgh12345678", hint)
+
+
 class RoundStateTests(unittest.TestCase):
 	"""The round loop persists .pi-build-round-state.json after every round
 	and --resume-from-state continues from the round after the last one."""
