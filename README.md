@@ -3,11 +3,14 @@
 **Hand a coding agent a ticket. Get back a pull request with the evidence
 attached. Keep the merge button.**
 
+Buildgate coordinates coding agents from a reviewed spec to a pull request,
+with sandboxed execution and independent checks.
+
 ## Why
 
-Coding agents can change code quickly, but their claims alone are not enough
-to make a change safe to review. Buildgate checks work against durable evidence
-and keeps merge and deploy decisions with a person.
+Coding agents can act with your credentials and network and decide for
+themselves when work is done. Buildgate constrains execution and advances work
+only on factory-owned evidence.
 
 | An agent on its own | Buildgate |
 |---|---|
@@ -15,31 +18,23 @@ and keeps merge and deploy decisions with a person.
 | "Done, all tests pass" | Nothing advances on the agent's say-so: each stage is a factory-owned policy decision against durable evidence (test results, diff shape, hashes) |
 | Spends until you notice | Model calls leave only through the sandbox's supervisor, under a per-run policy and buildgate's own spend meter |
 | Starts coding from a one-line prompt | You review the spec and the plan (and, opt-in, the acceptance tests) before code is written |
-| Can push and merge | Merge and deploy are **permanently human**, by standing design: the factory records a decision and may open a PR |
 
 ## What
 
-Buildgate (binary: `factoryd`) is an unattended agent factory. It drafts a
-spec, plans tickets, builds each one inside a sealed sandbox, and refuses to
-call anything done until its own gates pass. It never merges.
-
-Go orchestration daemon (`factoryd`), a React operator console embedded in
-`factoryd serve`, and vendored build scripts under `agent/` (one set for
-every harness). [Apache 2.0](LICENSE).
-
-Mission Control, the console's home screen, on seeded demo data:
+Mission Control shows which requests need your attention and the latest
+activity:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="demo/mission-control-dark.png">
   <img src="demo/mission-control-light.png" alt="Mission Control: a health strip, a board of requests by who has to act (Needs you, Building, Done), the numbers and the recent moves">
 </picture>
 
-[View the interactive walkthrough and play the console tour after deployment](https://ljammula.github.io/buildgate/).
+[Watch the 2-minute console tour or explore the interactive walkthrough](https://ljammula.github.io/buildgate/).
 
 ## How
 
-At each stage, you approve the spec and plan, while Buildgate checks the
-sandboxed implementation and prepares a reviewable pull request:
+You approve the spec and plan. Buildgate then builds and checks each ticket in
+a sandbox and prepares a pull request.
 
 ```text
    YOU                        BUILDGATE                               YOU
@@ -49,7 +44,65 @@ sandboxed implementation and prepares a reviewable pull request:
                  [you approve]   [you approve]    policy gates        [you merge]
 ```
 
-### Request flow
+## Install
+
+On a new Mac, use Homebrew (or install the required tools yourself) and Docker.
+`make install` installs missing Go, Python, Git, GitHub CLI, Node and Docker
+packages, builds the images from source, installs `factoryd`, and runs
+`factoryd doctor -fix`. Node and npm are optional, only for building the console.
+
+```sh
+git clone https://github.com/ljammula/buildgate.git
+cd buildgate
+make install
+
+# In a new terminal, run the first request:
+factoryd quickstart ~/code/your-repo "Add X to Y"
+```
+
+The target must be a git checkout under `$HOME`, with a non-empty `AGENTS.md`
+committed at its root. `quickstart` starts Temporal, the OpenShell gateway and
+meter, a worker and the console, then stops at `spec_review` and prints the
+exact `factoryd approve` command. The Docker VM cannot see repositories under
+`/tmp`.
+
+For issue-based requests, route selection and each setup step, see
+[USAGE.md § Quick start](USAGE.md#quick-start-existing-repo). To drive requests
+from an agent, see [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgate-from-a-coding-agent).
+For troubleshooting, see [USAGE.md](USAGE.md#troubleshooting). Uninstall with
+`factoryd uninstall`; `factoryd uninstall -purge` also removes config, data and
+Docker VM state ([command reference](USAGE_REFERENCE.md#command-reference)).
+
+A longer live walkthrough is in [`DEMO.md`](DEMO.md).
+
+## Status
+
+Latest release tag: **`v0.0.1`** (tags are `vX.Y.Z`), cut only after
+`make live-smoke` passes on that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
+
+| | Area |
+|---|---|
+| ✅ Works, live-proven | The request pipeline end to end (spec review, plan review, sandboxed build, gates, PR) on several real repos; every build on Temporal; the OpenShell sandbox runtime; `quickstart` onboarding; the operator console; `pi` and `codex` harnesses on every role; compose sidecars (Postgres, Kafka, Redis) |
+| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, none for a gate that fails the same way on the base commit, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:` and `autofix:`; gate scripts under `.factory/` mounted read-only from the commit the config was read from |
+| 🟡 Opt-in or partial | Acceptance oracles (`submit -draft-oracles`, Go and Python); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
+| 🟡 Opt-in or partial | Repository memory (`factoryd memory`, off until a repository is listed under `memory.repositories`): candidate lines from build agents' notes, proposed by the operator as an ordinary request that rewrites the fenced section of `AGENTS.md` |
+| ⬛ Never, by design | Automatic merge or deploy; a host-execution path |
+
+## Known limits
+
+The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
+
+- **A lost step is never retried automatically.** Sleep, crash or stop halts the run and keeps the work; you choose `factoryd resume`, `resume -from scratch` or `cancel`.
+- **Repository memory is unchecked notes.** Lines come only from builds that ended without passing, or passed after a round that did not (and whose notes turn ran), and from the operator; no command a line names is verified, and nothing is proposed or removed automatically.
+- **The repository must be under `$HOME`.** The sandbox gateway sees nothing else.
+- **Your own worker image needs a `make` built without `posix_spawn`**; build it on the image `make install` produces (`make project-sandbox-image`). `su` and `sudo` fail in the sandbox too.
+- **A gate script is protected only under `.factory/`.** That directory is mounted read-only into every build, verify and gate sandbox as the commit `.factory.yml` was read from holds it; a script there that calls files outside it runs the build's copy of them, as `verify_command: make test` does.
+- **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
+- **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
+- **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.
+- **Narrow live coverage.** Multi-module `go.work`, cgo and generated code are unproven. Private Go modules are proven on one fixture (`make live-private-module`), with a file `GOPROXY` standing in for a company's.
+
+## How a request flows
 
 A request (`factoryd submit` / `quickstart`) moves through these states.
 `[brackets]` are the human gates; everything else is the factory.
@@ -128,122 +181,6 @@ Inside `building`, one ticket at a time:
 Exact state set and invariants:
 [`safety-contract.md` § State transitions](safety-contract.md#state-transitions).
 
-## Install
-
-Source-only: buildgate's Docker images are built on your machine, never
-pulled from a registry. OpenShell's three images (gateway, sandbox,
-supervisor) are pulled by pinned digest (`make openshell-images`).
-
-### A new Mac, start to finish
-
-About ten minutes from a Mac with only Homebrew, most of it image builds.
-
-```sh
-# 1. Install: the one command. It installs the tools this Mac lacks, starts
-#    Docker, builds the images, installs factoryd, puts it on PATH, logs gh
-#    in, asks which model and coding agent to use, and checks the result.
-git clone https://github.com/ljammula/buildgate.git && cd buildgate
-make install
-
-# 2. In a new terminal, run your first request (any git checkout under $HOME)
-factoryd quickstart ~/code/your-repo "Add X to Y"
-```
-
-`quickstart` takes a git checkout from nothing configured to a request
-waiting at its first review gate:
-
-- It starts Temporal, the OpenShell gateway and meter, a worker and the console, then prints the exact `factoryd approve` command.
-- With a ChatGPT/Codex login (`codex login`) it picks that route and `gpt-5.6-luna` itself. Add `-route chatgpt-codex -harness codex` to run the Codex CLI as the coding agent too.
-- `-issue <github issue url>` submits from an issue instead of inline text.
-- The repo needs an `AGENTS.md` committed at its root (its setup, test, build and lint commands, for the coding agent). `quickstart` refuses a repo without one before it sets anything up, and prints a prompt your coding agent can write it from.
-- Keep the repo under `$HOME`: the sandbox gateway sees only your home directory, and the Docker VM does not share `/tmp`.
-- `factoryd serve` hosts the console; open the URL its startup log prints.
-
-Each step: [USAGE.md § Quick start](USAGE.md#quick-start-existing-repo). A
-20-30 minute live walkthrough with talking points (with and without
-oracles, plus a failure case): [`DEMO.md`](DEMO.md).
-
-### What `make install` does
-
-Needs Homebrew, or the tools below already installed. Without Homebrew it
-names what is missing and stops; a missing `npm` alone only costs the console.
-
-| Step | Detail |
-|---|---|
-| Tools | `brew install` for what is not on `PATH`: `go`, `python`, `gh`, `git`, `node` (the console), `docker`; `docker-buildx` when `docker buildx` does not work, linked into `~/.docker/cli-plugins`; `colima` only on a machine with no `docker` at all. A tool already on `PATH` is left alone |
-| Docker | When Docker does not answer and `colima` is on `PATH`: `colima start` for an existing VM, else `colima start --memory 4`. Any other Docker is yours to start. `FACTORYD_AUTOSTART=0` turns it off |
-| Binary | `go install ./cmd/factoryd` into `$(go env GOPATH)/bin` (usually `~/go/bin`); prints the `export PATH=...` line if that is not on `PATH`, and warns if an older `factoryd` earlier on `PATH` shadows it |
-| Images | Requires Docker, starts Temporal, builds the sandbox, meter and registry-proxy images from source (`internal/sandbox/Dockerfile` and friends), pulls OpenShell's three by digest. An image whose inputs haven't changed is not rebuilt (it is still pushed, so the recorded digest is unchanged); `FORCE_IMAGE_BUILD=1` always rebuilds |
-| Config | Records buildgate's image refs in the default session config via `factoryd configure-images`. `FACTORYD_CONFIG="<config> <config>..."` re-points each listed config instead, so a second profile does not keep pinning a superseded image |
-| Console | Baked in if `npm` is on `PATH` and its build succeeds, else a placeholder page and, for a failed build, a warning naming the Node and npm versions ([`console/README.md`](console/README.md)) |
-| Agent skill | Installs the `buildgate` skill into `~/.agents/skills` (Copilot, Codex); refreshes `~/.claude/skills/buildgate` when it exists |
-| `PATH` | Links `~/.local/bin/factoryd` to the installed binary, so shells that never read a profile (an agent, a script, an ssh command) find it wherever `~/.local/bin` is on `PATH`; a `factoryd` already there that is not this link is left alone. When `factoryd` still does not resolve: appends the `export PATH=...` line to `~/.zshrc` (`~/.bash_profile` for bash), once; a new terminal picks it up |
-| GitHub | `gh auth login` when `gh` is not logged in and this is a terminal |
-| Model | `factoryd setup`: asks which model (detected ChatGPT/Codex and Copilot logins first) and, on a route that can run more than one, which coding agent; everything else is defaulted. Asks nothing when the config already names a model, or with no terminal (a single detected login is then used) |
-| Check | `factoryd doctor -fix`, which starts Temporal, the OpenShell gateway and the meter, and restarts a gateway and meter started from another meter image unless a build is using them. Its failures do not fail the install |
-| Closing list | Ends with `buildgate is installed.` and a numbered `Left for you:` list of whatever a step could not finish (open a new terminal, `gh auth login`, `factoryd setup`, failed checks), then the `quickstart` command |
-| Tree | Leaves `git status` clean |
-
-- **TLS interception:** `make install` detects a proxy that re-signs HTTPS and builds with its CA from the keychain; `BUILD_CA_BUNDLE=/path/to/ca.pem make install` overrides it ([USAGE.md § Quick start](USAGE.md#quick-start-existing-repo)).
-- **Model prices** live in `internal/prices/prices.yml`; edit it and run `make install` when a provider changes prices. A model with no entry costs $0 ([USAGE_REFERENCE.md § Model prices](USAGE_REFERENCE.md#model-prices)).
-
-### Drive it from a coding agent
-
-The `buildgate` skill tells an agent which commands it may run, how to
-submit and follow a request, and which gates stay yours. `make install`
-installs it for Copilot and Codex; for Claude Code, run once:
-
-```sh
-factoryd install-skill -dir ~/.claude/skills
-```
-
-Then say "use buildgate to implement `x_spec.md` in `~/code/<repo>`". The
-agent submits it (an existing repo without Buildgate's spec docs runs as
-brownfield), follows it, and hands you the console and Temporal links;
-every approval and the merge stay yours. `factoryd upgrade` refreshes the
-skill. [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgate-from-a-coding-agent).
-
-Any MCP client (Claude Code, Hermes, your own agent) can do the same over
-`serve`'s MCP endpoint: `factoryd mcp` turns it on and prints the endpoint
-and token. Its tools read requests and runs and submit a request; none
-approves, rejects or merges.
-[USAGE.md § Drive Buildgate from an MCP client](USAGE.md#drive-buildgate-from-an-mcp-client).
-
-To approve from another machine on your tailnet, `factoryd remote-console`
-prints an address and a token you paste into the console there, which then
-has its own credential: it reads and does the
-request actions, and cannot override a run.
-[USAGE.md § The console from another machine](USAGE.md#the-console-from-another-machine).
-
-### Troubleshooting a fresh Mac
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `make install`: `Docker is required to build the ... images` | No Docker daemon is running and it is not colima's to start (Docker Desktop, another VM), or `FACTORYD_AUTOSTART=0` | Start your Docker, then `make install` again |
-| `make install`: `needs these, and found no Homebrew` | Tools are missing and there is no `brew` to install them with | Install Homebrew or the named tools, then `make install` again |
-| `make install`: `the --mount option requires BuildKit` or `docker buildx` missing | The `buildx` plugin is missing and Homebrew is not there to install it | Install your platform's buildx plugin; `factoryd doctor` warns about it |
-| `factoryd: command not found` after install | The terminal predates the install, or the shell is neither zsh nor bash | Open a new terminal; otherwise add the `export PATH=...` line `make install` printed to your shell profile |
-| An agent or script cannot find `factoryd`, a terminal can | Its shell reads no profile and `~/.local/bin` is not on its `PATH` | Put `~/.local/bin` on `PATH` where every shell reads it (`~/.zshenv` for zsh), or call `~/.local/bin/factoryd` by path |
-| `doctor` warns the Docker VM shares all of `$HOME` | colima's default mounts | USAGE.md, "Data directory and colima" |
-| `doctor` fails `roles.execution is not configured` | No model was chosen: the install had no terminal and found no single login | `factoryd setup` (`-route chatgpt-codex` for a Codex login) |
-| Any command fails `parse .../config.yml: relay_image: deleted with the inference relay` | A `config.yml` written for the retired inference relay still has `relay_image` or `relay_upstream_timeout` | Delete that line; the error names the retired key it found |
-| `quickstart` fails `the repository ... is outside your home directory`, or `mount visibility (repository reachable inside a container)` | The gateway sees only your home directory, and the Docker VM must also share the repository's path (`/tmp` is neither) | Clone or move the repo under `$HOME`; if it still fails, add it to your VM's mounts (USAGE.md, "Data directory and colima") |
-| A request halts "the meter does not answer" / "sandbox runtime ... run `factoryd doctor -fix`" | The OpenShell gateway/meter is down (reboot, colima restart) or the config lost `meter_image` | `factoryd doctor -fix`; `worker` starts them too unless `FACTORYD_AUTOSTART=0` |
-| A request halts `model route error: Connection error.` on a network that re-signs TLS | The gateway was started before the proxy's CA was recorded, so the sandbox's supervisor refuses the model upstream | `factoryd doctor -fix`, then `factoryd retry <id>` (USAGE.md, Troubleshooting) |
-| `quickstart` fails `<repo> has no AGENTS.md committed at its root` or `AGENTS.md at HEAD of <repo> is empty` | The repo's root `AGENTS.md` is missing, empty or not committed | Give your coding agent the prompt the message prints, review the `AGENTS.md` it writes, commit it, then run `quickstart` again |
-| Stop what is running / drop a request | | `factoryd stop`; `factoryd cancel <request-id>` |
-
-### Uninstall
-
-| Command | Removes | Keeps |
-|---|---|---|
-| `factoryd uninstall -dry-run` | Nothing; prints the plan | Everything |
-| `factoryd uninstall` | What `make install` put on the machine, the `~/.local/bin/factoryd` link included | `~/.config/factoryd`, `~/buildgate`, the `PATH` line in your shell profile, tools Homebrew installed |
-| `factoryd uninstall -purge` | Also both of those, the Temporal volumes and the OpenShell gateway's state on the Docker VM (database, keys, stored credentials); you type `purge` to confirm | Docker/colima, Go, Node, `gh`, Homebrew packages, git config |
-
-Back up `~/.config/factoryd` and `~/buildgate` first if you want your
-requests and evidence. To start over: `-purge`, then `make install`.
-
 ## Sandbox
 
 ```text
@@ -301,33 +238,6 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 [§ pifork harness](USAGE_REFERENCE.md#pifork-harness-opt-in),
 [USAGE.md § Run a ticket](USAGE.md#run-a-ticket).
 
-## Status
-
-Latest release tag: **`v0.0.1`** (tags are `vX.Y.Z`), cut only after
-`make live-smoke` passes on that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
-
-| | Area |
-|---|---|
-| ✅ Works, live-proven | The request pipeline end to end (spec review, plan review, sandboxed build, gates, PR) on several real repos; every build on Temporal; the OpenShell sandbox runtime; `quickstart` onboarding; the operator console; `pi` and `codex` harnesses on every role; compose sidecars (Postgres, Kafka, Redis) |
-| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, none for a gate that fails the same way on the base commit, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:` and `autofix:`; gate scripts under `.factory/` mounted read-only from the commit the config was read from |
-| 🟡 Opt-in or partial | Acceptance oracles (`submit -draft-oracles`, Go and Python); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
-| 🟡 Opt-in or partial | Repository memory (`factoryd memory`, off until a repository is listed under `memory.repositories`): candidate lines from build agents' notes, proposed by the operator as an ordinary request that rewrites the fenced section of `AGENTS.md` |
-| ⬛ Never, by design | Automatic merge or deploy; a host-execution path |
-
-## Known limits
-
-The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
-
-- **A lost step is never retried automatically.** Sleep, crash or stop halts the run and keeps the work; you choose `factoryd resume`, `resume -from scratch` or `cancel`.
-- **Repository memory is unchecked notes.** Lines come only from builds that ended without passing, or passed after a round that did not (and whose notes turn ran), and from the operator; no command a line names is verified, and nothing is proposed or removed automatically.
-- **The repository must be under `$HOME`.** The sandbox gateway sees nothing else.
-- **Your own worker image needs a `make` built without `posix_spawn`**; build it on the image `make install` produces (`make project-sandbox-image`). `su` and `sudo` fail in the sandbox too.
-- **A gate script is protected only under `.factory/`.** That directory is mounted read-only into every build, verify and gate sandbox as the commit `.factory.yml` was read from holds it; a script there that calls files outside it runs the build's copy of them, as `verify_command: make test` does.
-- **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
-- **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
-- **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.
-- **Narrow live coverage.** Multi-module `go.work`, cgo and generated code are unproven. Private Go modules are proven on one fixture (`make live-private-module`), with a file `GOPROXY` standing in for a company's.
-
 ## Operations
 
 | To | Run |
@@ -348,6 +258,8 @@ Watching, costs, budgets and notifications:
 [USAGE.md § Observe and control](USAGE.md#observe-and-control).
 
 ## Build & test
+
+Buildgate is a Go orchestration daemon (`factoryd`), a React operator console embedded in `factoryd serve`, and vendored build scripts under `agent/` for each harness.
 
 ```sh
 make verify              # fmt-check, vet, go test -race ./... (cmd/factoryd as parallel shards; ~3-4 min)
@@ -377,7 +289,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 
 | Doc | What it's for |
 |---|---|
-| [Rendered demo and video (after Pages is enabled)](https://ljammula.github.io/buildgate/) | Interactive walkthrough and an in-page player for the captioned console tour |
+| [Rendered demo and video](https://ljammula.github.io/buildgate/) | Interactive walkthrough and an in-page player for the captioned console tour |
 | [`DEMO.md`](DEMO.md) | A 20-30 minute live demo script |
 | [`demo/how-buildgate-works.html`](demo/how-buildgate-works.html) | Why, what and how, for an engineering team |
 | [`demo/console-tour.mp4`](demo/console-tour.mp4) | A captioned recording of the operator console (1 min 55 s): board, triage, spec and plan review, editing, a build, and what a stopped request shows |
