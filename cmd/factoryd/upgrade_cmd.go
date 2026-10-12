@@ -55,7 +55,7 @@ func (impl realHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) {
 var upgradeWaitInterval = 10 * time.Second
 
 var (
-	upgradeReleaseTagPattern = regexp.MustCompile(`^m[0-9]`)
+	upgradeReleaseTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
 	upgradeModulePattern     = regexp.MustCompile(`(?m)^module buildgate\s*$`)
 )
 
@@ -69,7 +69,7 @@ type upgradeFlags struct {
 func newUpgradeFlags() (*flag.FlagSet, upgradeFlags) {
 	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	var f upgradeFlags
-	f.to = flags.String("to", "", "release tag or git ref to upgrade to; empty means the newest release tag (m<N>...)")
+	f.to = flags.String("to", "", "release tag or git ref to upgrade to; empty means the newest release tag (vX.Y.Z)")
 	f.source = flags.String("source", "", "buildgate checkout to build from; empty means the active profile's image_source_root")
 	f.yes = flags.Bool("yes", false, "do not ask for confirmation (required when stdin is not a terminal)")
 	f.wait = flags.Bool("wait", false, "when a request is building, wait until every profile's worker is between requests instead of refusing")
@@ -246,12 +246,13 @@ func upgradeGit(dp *deps, source string, args ...string) ([]byte, error) {
 	return dp.host.runUpgradeCommand(upgradeCmd{Dir: source, Name: "git", Args: append([]string{"-C", source}, args...)})
 }
 
-// upgradeTarget is -to, else the newest release tag.
+// upgradeTarget is -to, else the newest release tag: the highest vX.Y.Z by
+// version order, not by creation date.
 func upgradeTarget(dp *deps, source, flagValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
-	out, err := upgradeGit(dp, source, "tag", "--sort=-creatordate")
+	out, err := upgradeGit(dp, source, "tag", "--list", "v*", "--sort=-v:refname")
 	if err != nil {
 		return "", fmt.Errorf("git tag in %s failed: %s", source, sanitize.Line(hostcontrol.LastLine(string(out))))
 	}
@@ -260,7 +261,7 @@ func upgradeTarget(dp *deps, source, flagValue string) (string, error) {
 			return tag, nil
 		}
 	}
-	return "", fmt.Errorf("%s has no release tag (m<N>...); pass -to <tag|ref>", source)
+	return "", fmt.Errorf("%s has no release tag (vX.Y.Z); pass -to <tag|ref>", source)
 }
 
 // upgradeRevParse resolves ref to the 12-character commit sha `factoryd

@@ -46,7 +46,7 @@ func newFakeUpgrade(dp *deps, t *testing.T) *fakeUpgrade {
 	}
 	f := &fakeUpgrade{
 		t: t, source: source, binary: filepath.Join(t.TempDir(), "factoryd"),
-		tags: "m5.1\nm5\nfoo\nm4\n", head: upgradeOldSHA,
+		tags: "v0.1.0-rc1\nv0.1.0\nv0.0.2\nv0.0.1\n", head: upgradeOldSHA,
 		installed: upgradeOldSHA, afterMake: upgradeTargetSHA,
 	}
 	prev := fakeHostOf(dp).runUpgradeCommandFn
@@ -81,7 +81,7 @@ func (f *fakeUpgrade) exec(c upgradeCmd) ([]byte, error) {
 			return []byte(f.tags), nil
 		case rest == "rev-parse --short=12 HEAD^{commit}":
 			return []byte(f.head + "\n"), nil
-		case strings.HasPrefix(rest, "rev-parse --short=12 m5.1^{commit}"), strings.HasPrefix(rest, "rev-parse --short=12 "+upgradeTargetSHA):
+		case strings.HasPrefix(rest, "rev-parse --short=12 v0.1.0^{commit}"), strings.HasPrefix(rest, "rev-parse --short=12 "+upgradeTargetSHA):
 			return []byte(upgradeTargetSHA + "\n"), nil
 		case strings.HasPrefix(rest, "rev-parse"):
 			return []byte("fatal: unknown revision"), errors.New("exit 128")
@@ -218,11 +218,11 @@ func TestUpgradeCleanPath(t *testing.T) {
 		t.Errorf("restart used the wrong binary, config or data dir: %v", h.spawned)
 	}
 	for _, want := range []string{
-		"upgrade: " + upgradeOldSHA + " -> " + upgradeTargetSHA + " (m5.1, 42 commits)",
+		"upgrade: " + upgradeOldSHA + " -> " + upgradeTargetSHA + " (v0.1.0, 42 commits)",
 		"images:  re-pointed for default, work",
 		"restart: worker (" + dir + "), detached",
 		"restart: serve (" + dir + "), detached",
-		"upgraded to m5.1 (" + upgradeTargetSHA + ")",
+		"upgraded to v0.1.0 (" + upgradeTargetSHA + ")",
 		"skills refreshed:",
 	} {
 		if !strings.Contains(out, want) {
@@ -239,11 +239,36 @@ func TestUpgradeAlreadyUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
-	if !strings.Contains(out, "already on m5.1 ("+upgradeTargetSHA+")") {
+	if !strings.Contains(out, "already on v0.1.0 ("+upgradeTargetSHA+")") {
 		t.Errorf("output: %s", out)
 	}
 	if h.called("make") || h.called("git -C "+h.source+" checkout") {
 		t.Error("an up-to-date machine must not be touched")
+	}
+}
+
+func TestUpgradeTargetIsTheHighestVersionTag(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	h.installed = upgradeTargetSHA
+	if _, err := h.run(dp, "-yes"); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if !h.called("git -C " + h.source + " tag --list v* --sort=-v:refname") {
+		t.Errorf("tags must be listed in version order, calls: %v", h.calls)
+	}
+}
+
+func TestUpgradeWithNoVersionTagIsRefused(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	h.tags = "m12\nv1.0\nfoo\n"
+	out, err := h.run(dp, "-yes")
+	if err == nil || !strings.Contains(err.Error(), "no release tag (vX.Y.Z)") {
+		t.Fatalf("want a no-release-tag refusal, got %v\n%s", err, out)
+	}
+	if h.called("make") {
+		t.Error("nothing may be built without a target")
 	}
 }
 
@@ -283,7 +308,7 @@ func TestUpgradeFallsBackToActiveProfileImageSourceRoot(t *testing.T) {
 	if err := upgradeRun(dp, []string{"-yes"}, strings.NewReader(""), &out, false, false); err != nil {
 		t.Fatalf("upgrade: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "already on m5.1") {
+	if !strings.Contains(out.String(), "already on v0.1.0") {
 		t.Errorf("output: %s", out.String())
 	}
 }
@@ -375,7 +400,7 @@ func TestUpgradeMakeInstallFailureSaysStateAndRestore(t *testing.T) {
 	for _, want := range []string{
 		"boom: image build failed",
 		"worker (" + h.profiles.roots["default"] + ") is stopped",
-		h.source + " is checked out at m5.1 (" + upgradeTargetSHA + ")",
+		h.source + " is checked out at v0.1.0 (" + upgradeTargetSHA + ")",
 		"git -C " + h.source + " checkout " + upgradeOldSHA + " && make -C " + h.source + " install",
 	} {
 		if !strings.Contains(out, want) {
