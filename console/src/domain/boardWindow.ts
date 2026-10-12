@@ -1,5 +1,5 @@
 // The "last x days" window of Mission Control. It applies to finished work
-// only: the Done column (done and cancelled requests), the activity feed and
+// only: the Finished column (done, closed and cancelled requests), the activity feed and
 // the numbers. Time is a parameter; nothing here reads the clock.
 import type { ActivityEntry } from "@/domain/activity";
 import { columnForRequest, isCancelledRequest } from "@/domain/boardColumns";
@@ -17,17 +17,17 @@ export function instantInBoardWindow(at: string, days: BoardWindowDays, now: Dat
 
 /**
  * Whether the window keeps `request` in view. A request the factory or the
- * operator still has work on (Drafting, Needs you, Building, PR review) is
- * ALWAYS in view, whatever its age: the window must never hide something that
- * waits. Only a request in the Done column (done or cancelled) is judged, by
- * its last update.
+ * operator still has work on (Spec, Plan, Building, PR review) is ALWAYS in
+ * view, whatever its age: the window must never hide something that waits.
+ * Only a request in the Finished column (done, closed or cancelled) is
+ * judged, by its last update.
  */
 export function requestInBoardWindow(
   request: RequestSummary,
   days: BoardWindowDays,
   now: Date,
 ): boolean {
-  if (columnForRequest(request) !== "done") return true;
+  if (columnForRequest(request) !== "finished") return true;
   return instantInBoardWindow(request.updatedAt, days, now);
 }
 

@@ -261,7 +261,7 @@ func requestLogsTarget(dataDir, id string) logsTarget {
 				return false
 			}
 			switch r.State {
-			case request.StateDone, request.StateQuarantined, request.StateHalted, request.StateResumeReview, request.StateCancelled:
+			case request.StateDone, request.StateClosed, request.StateQuarantined, request.StateHalted, request.StateResumeReview, request.StateCancelled:
 				return true
 			}
 			return false

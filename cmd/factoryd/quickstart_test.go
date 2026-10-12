@@ -1153,6 +1153,14 @@ func TestQuickstartReportRequestStateDoneAndCancelled(t *testing.T) {
 	if err := quickstartReportRequestState(dataDir, &request.Request{ID: "req-6", State: request.StateCancelled}, &bytes.Buffer{}); err == nil {
 		t.Error("cancelled: want a non-nil error")
 	}
+	// A closed pull request is an outcome the operator chose, not a failure.
+	var out bytes.Buffer
+	if err := quickstartReportRequestState(dataDir, &request.Request{ID: "req-8", State: request.StateClosed}, &out); err != nil {
+		t.Errorf("closed: err = %v, want nil", err)
+	}
+	if !strings.Contains(out.String(), "closed without merging") {
+		t.Errorf("closed: output = %q, want it to say the pull request was closed without merging", out.String())
+	}
 }
 
 func TestQuickstartReportRequestStateUnknownIsInformationalNotFatal(t *testing.T) {

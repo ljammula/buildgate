@@ -83,7 +83,7 @@ never a state here — it stays a human action outside the system.
 ```text
 submitted -> spec_drafting -> spec_review* -> planning -> plan_review*
                                                   |
-                                              building -> pr_review -> done
+                                              building -> pr_review -> done | closed
                                                   |
                                     quarantined/halted --(retry)--> building
 
@@ -110,7 +110,7 @@ the workflow keeps no request state, and each step
 ```text
 loop
   LoadRequestStep            read request.json, say what is next   (light queue)
-    |-- done / cancelled ---------------------------> workflow ends
+    |-- done / closed / cancelled ------------------> workflow ends
     |-- submitted ----------------------------------> AdvanceRequest (light queue)
     |-- spec_drafting, oracle_drafting, planning,
     |   building, pr_review ------------------------> AdvanceRequest (jobs queue,

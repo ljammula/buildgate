@@ -737,6 +737,7 @@ func TestWatchRequestHints(t *testing.T) {
 		{"halted", request.StateHalted, "factoryd retry", true},
 		{"quarantined", request.StateQuarantined, "factoryd retry", true},
 		{"cancelled", request.StateCancelled, "", true},
+		{"closed", request.StateClosed, "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -763,6 +764,39 @@ func TestWatchRequestHints(t *testing.T) {
 				t.Errorf("output missing %q; got:\n%s", c.wantHint, out)
 			}
 		})
+	}
+}
+
+// TestWatchClosedRequestNamesEachPullRequestAndExitsZero: a request whose
+// pull request was closed without merging is over, not failed: watch names
+// each pull request with its last state and exits 0, even while following.
+func TestWatchClosedRequestNamesEachPullRequestAndExitsZero(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+	req := &request.Request{ID: "req-closed", Project: "proj", State: request.StateClosed, SubmittedAt: time.Now().Format(time.RFC3339),
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: "https://github.com/acme/app/pull/1", PRState: "closed"},
+			{Index: 2, PRURL: "https://github.com/acme/app/pull/2"},
+		}}
+	if err := req.Save(dataDir); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "watch-out")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	defer f.Close()
+	if err := watchRequest(f, dataDir, "req-closed", false); err != nil {
+		t.Fatalf("watchRequest: %v", err)
+	}
+	out, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PR: https://github.com/acme/app/pull/1 (closed)\n", "PR: https://github.com/acme/app/pull/2\n"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("output = %q, want %q", out, want)
+		}
 	}
 }
 

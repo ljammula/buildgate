@@ -2597,7 +2597,7 @@ type doctorRequestSourceRepo struct{ requestID, path string }
 
 // doctorInFlightSourceRepos lists the distinct Workspace paths (the source
 // repo the request clones and runs version control against) of every request
-// under dataDir that has not finished (not done/cancelled), oldest first,
+// under dataDir that has not finished (State.Finished), oldest first,
 // skipping skip (already probed as -workspace). An unreadable data dir yields
 // none: doctor must work on a fresh install.
 func doctorInFlightSourceRepos(dataDir, skip string) []doctorRequestSourceRepo {
@@ -2609,7 +2609,7 @@ func doctorInFlightSourceRepos(dataDir, skip string) []doctorRequestSourceRepo {
 	seen := map[string]bool{}
 	var repos []doctorRequestSourceRepo
 	for _, r := range requests {
-		if r.State == request.StateDone || r.State == request.StateCancelled || r.Workspace == "" {
+		if r.State.Finished() || r.Workspace == "" {
 			continue
 		}
 		abs, err := filepath.Abs(r.Workspace)

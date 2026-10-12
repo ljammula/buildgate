@@ -132,6 +132,28 @@ func terminalNotice(r *request.Request, reason string) requestNotice {
 	return requestNotice{Ask: ask, Detail: reason, Next: fmt.Sprintf("factoryd retry %s", r.ID)}
 }
 
+// closedNotice is the notice for a request that ended because ticket's pull
+// request was closed without merging. It asks nothing: the request is over.
+// Another ticket's pull request still open is named, since only a person
+// can merge or close it.
+func closedNotice(r *request.Request, ticket *request.Ticket) requestNotice {
+	detail := fmt.Sprintf("Ticket %d/%d's pull request %s was closed without merging; the request is closed.", ticket.Index, r.TicketCount, ticket.PRURL)
+	if open := r.NextAction(); open != "" {
+		detail += " " + strings.ToUpper(open[:1]) + open[1:] + "."
+	}
+	return requestNotice{Ask: "Pull request closed: request closed", Detail: detail}
+}
+
+// notifyClosedRequest saves r, just closed, and tells the operator.
+func notifyClosedRequest(dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) error {
+	n := prepareRequestNotification(dataDir, r, closedNotice(r, ticket), now)
+	if err := r.Save(dataDir); err != nil {
+		return err
+	}
+	notify.DispatchExternal(dataDir, n)
+	return nil
+}
+
 // The two things a ticket's pull request can ask of the operator.
 const (
 	pullRequestAskReview = "review"

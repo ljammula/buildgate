@@ -81,6 +81,7 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 	saveRequestInState(t, dataDir, "req-halted", request.StateHalted)
 	saveRequestInState(t, dataDir, "req-done", request.StateDone)
 	saveRequestInState(t, dataDir, "req-cancelled", request.StateCancelled)
+	saveRequestInState(t, dataDir, "req-closed", request.StateClosed)
 	starter := &recordingStarter{}
 	if err := startRequestWorkflows(context.Background(), starter, dataDir, "jobs-q", "light-q"); err != nil {
 		t.Fatal(err)

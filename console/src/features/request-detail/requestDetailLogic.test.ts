@@ -310,6 +310,52 @@ describe("pipelineSteps", () => {
     expect(steps.find((s) => s.step === "plan_review")?.status).toBe("done");
   });
 
+  test("a closed request reaches the pipeline's end as a merged one does, its last step named Closed", () => {
+    const history = [historyWire({ from: "building", to: "pr_review", at: at(0), by: "factoryd" })];
+    const closed = pipelineSteps(
+      req("closed", {
+        history: [
+          ...history,
+          historyWire({
+            from: "pr_review",
+            to: "closed",
+            at: at(1),
+            by: "factoryd",
+            reason:
+              "ticket 1/1: pull request https://github.com/acme/app/pull/1 closed without merging",
+          }),
+        ],
+      }),
+    );
+    const done = pipelineSteps(
+      req("done", {
+        history: [
+          ...history,
+          historyWire({ from: "pr_review", to: "done", at: at(1), by: "factoryd" }),
+        ],
+      }),
+    );
+    expect(closed.map((s) => s.status)).toEqual(done.map((s) => s.status));
+    expect(closed.at(-1)?.label).toBe("Closed");
+    expect(done.at(-1)?.label).toBe("Done");
+    // How it ended, with the pull request the history names.
+    const outcome = pipelineOutcome(
+      req("closed", {
+        history: [
+          historyWire({
+            from: "pr_review",
+            to: "closed",
+            at: at(1),
+            by: "factoryd",
+            reason: "pull request closed without merging",
+          }),
+        ],
+      }),
+    );
+    expect(outcome).toMatchObject({ state: "closed", label: "Closed" });
+    expect(outcome?.entry?.reason).toBe("pull request closed without merging");
+  });
+
   test("a terminal request with no history marks nothing", () => {
     expect(pipelineSteps(req("halted")).every((s) => s.status === "pending")).toBe(true);
   });

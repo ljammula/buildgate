@@ -37,7 +37,7 @@ import (
 // <id> is the data dir's random queue id (requestTaskQueues). At startup the
 // worker halts runs a stopped worker left behind (reclaimDeadOwnerRuns) and moves the
 // requests building them to resume_review, then starts (or wakes) the workflow of every request
-// that is not done or cancelled.
+// that is not finished.
 func workerMain(dp *deps, args []string) error {
 	cfg, dataDir, err := loadWorkerConfig(dp, args)
 	if err != nil {
@@ -192,14 +192,14 @@ func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, request
 }
 
 // startRequestWorkflows starts or wakes the workflow of every request in
-// dataDir that is not done or cancelled.
+// dataDir that is not finished.
 func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDir, jobsQueue, lightQueue string) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
 	}
 	for _, r := range requests {
-		if requestFinished(r.State) {
+		if r.State.Finished() {
 			continue
 		}
 		if err := startRequestWorkflow(ctx, c, r.ID, jobsQueue, lightQueue); err != nil {
@@ -207,11 +207,4 @@ func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDi
 		}
 	}
 	return nil
-}
-
-// requestFinished reports whether a request in state can never move again.
-// halted and quarantined are not finished: retry, send back and amend scope
-// revive them.
-func requestFinished(state request.State) bool {
-	return state == request.StateDone || state == request.StateCancelled
 }

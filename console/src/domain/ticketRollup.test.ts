@@ -185,3 +185,25 @@ test("a building ticket beside a ready PR shows both buckets", () => {
   );
   expect(new Set(labelled(entries))).toEqual(new Set(["1 awaiting review", "1 building"]));
 });
+
+test("a closed request's tickets end with it, a pull request left open included; a merged one stays done", () => {
+  const closed = requestOf({ state: "closed", ticketIndex: 1 });
+  expect(ticketStatus(ticketOf({ index: 1, prState: "closed" }), closed)).toBe("ended");
+  // Ready when the request closed: nothing polls it now, so it never says it waits.
+  expect(ticketStatus(ticketOf({ index: 2, prState: "ready" }), closed)).toBe("ended");
+  expect(ticketStatus(ticketOf({ index: 2 }), closed)).toBe("ended");
+  expect(ticketStatus(ticketOf({ index: 2, runId: "run-2" }), closed)).toBe("ended");
+  expect(ticketStatus(ticketOf({ index: 3, prState: "merged" }), closed)).toBe("done");
+  expect(
+    labelled(
+      computeTicketRollup(
+        [
+          ticketOf({ index: 1, prState: "closed" }),
+          ticketOf({ index: 2, prState: "ready" }),
+          ticketOf({ index: 3, prState: "merged" }),
+        ],
+        closed,
+      ),
+    ),
+  ).toEqual(["1 done", "2 closed"]);
+});

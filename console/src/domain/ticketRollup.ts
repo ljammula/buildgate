@@ -20,13 +20,21 @@ export interface TicketRollupEntry {
 // order, which is presentational rather than a spec: an operator
 // scanning this strip for the one thing they need to act on should find
 // it first, matching the "visibility first" triage principle.
-const DISPLAY_ORDER: readonly Status[] = ["needsHuman", "working", "unknown", "done", "failed"];
+const DISPLAY_ORDER: readonly Status[] = [
+  "needsHuman",
+  "working",
+  "unknown",
+  "done",
+  "ended",
+  "failed",
+];
 
 const LABELS: Readonly<Record<Status, string>> = {
   needsHuman: "changes requested",
   working: "building",
   unknown: "queued",
   done: "done",
+  ended: "closed",
   failed: "stopped",
 };
 
@@ -58,6 +66,12 @@ const LABELS: Readonly<Record<Status, string>> = {
  * even though the request itself had already moved on.
  */
 export function ticketStatus(ticket: RequestTicket, request: RequestSummary): Status {
+  // A closed request builds and reviews nothing more, and nothing reads its
+  // pull requests again: a merged one stays done, every other ticket ends
+  // with the request, a pull request left open included.
+  if (request.state === "closed") {
+    return ticket.prState === "merged" && ticket.prUrl !== "" ? "done" : "ended";
+  }
   if (ticket.prState !== "" && ticket.prUrl !== "") {
     return statusForPRState(ticket.prState);
   }

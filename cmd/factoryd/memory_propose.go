@@ -35,14 +35,14 @@ func memoryVerifyCommand(repoRoot string) (string, error) {
 }
 
 // activeMemoryRequest is the id of the project's memory request that is
-// neither done nor cancelled, "" when there is none.
+// not finished, "" when there is none.
 func activeMemoryRequest(dataDir, project string) (string, error) {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return "", fmt.Errorf("list requests: %w", err)
 	}
 	for _, r := range requests {
-		if r.Source.Kind == request.SourceMemory && r.Project == project && r.State != request.StateDone && r.State != request.StateCancelled {
+		if r.Source.Kind == request.SourceMemory && r.Project == project && !r.State.Finished() {
 			return r.ID, nil
 		}
 	}

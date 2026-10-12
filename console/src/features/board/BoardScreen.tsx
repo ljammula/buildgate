@@ -46,7 +46,7 @@ const SECTION_ORDER: readonly RequestBoardSection[] = ["needsYou", "working", "f
 
 /**
  * Mission Control, the home screen at /: the factory's health, every request
- * as a board (five columns by who has to act, a lane per project) or as the
+ * as a board (five columns in pipeline order, a lane per project) or as the
  * three-section list, the numbers and the latest activity. It is laid out to
  * fit the window: the strips and the toolbar stay put, and the board, the
  * list, the numbers and the activity each scroll inside their own box.

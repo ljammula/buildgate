@@ -362,9 +362,10 @@ func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket) bool {
 // to what it finds. Returns nil on every ordinary outcome (nothing to do
 // yet, a round started, ready/approved recorded) -- only a durable-save
 // failure or a structurally impossible ticket index is ever returned as an
-// error; a request moving to halted on a real failure (rounds exhausted, PR
-// closed unmerged) is itself a normal, nil-returning outcome, the same
-// shape HaltRequest's own callers elsewhere in this package already use.
+// error; a request moving to halted on a real failure (rounds exhausted),
+// or to closed on a PR closed unmerged, is itself a normal, nil-returning
+// outcome, the same shape HaltRequest's own callers elsewhere in this
+// package already use.
 func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, now time.Time) error {
 	if len(r.Tickets) == 0 {
 		return fmt.Errorf("request %s: in pr_review with no tickets", r.ID)
@@ -494,7 +495,7 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 // MemoryRequestReviewReply is what a trusted reviewer's comment on a memory
 // request's pull request is answered with. It is public, so it names no path
 // and no run.
-const MemoryRequestReviewReply = "This pull request changes the repository memory section of `AGENTS.md`. Its text is the text the operator approved, and the factory releases only that exact text, so no corrective build is started for this comment. To change a line, close this pull request, cancel the request, and propose the change again with `factoryd memory propose`."
+const MemoryRequestReviewReply = "This pull request changes the repository memory section of `AGENTS.md`. Its text is the text the operator approved, and the factory releases only that exact text, so no corrective build is started for this comment. To change a line, close this pull request (that ends the request) and propose the change again with `factoryd memory propose`."
 
 // answerMemoryRequestThreads handles new actionable threads on a memory
 // request's pull request: each is replied to once and recorded as seen, and
@@ -533,13 +534,16 @@ func prPollDue(lastPolledAt string, interval time.Duration, now time.Time) (bool
 	return now.Sub(last) >= interval, nil
 }
 
-// handleClosedOrMergedTicket handles a ticket's PR leaving OPEN:
-// MergedAt set means merged -- record it, and complete the request once
-// every ticket has merged; otherwise the PR was closed without merging,
-// which halts the request (the factory never merges, and never re-opens a
-// PR a human closed).
+// handleClosedOrMergedTicket handles a ticket's PR leaving OPEN. MERGED
+// records the merge, and completes the request once every ticket has
+// merged. CLOSED (closed without merging) ends the request as closed: the
+// factory never merges, and never re-opens a PR a person closed. Any other
+// state is a read the poll does not trust (an empty or unknown state from
+// gh): it is logged and the next poll reads again, so a misread can never
+// end a request.
 func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *request.Ticket, state forge.ReviewState, now time.Time) error {
-	if state.MergedAt != nil {
+	switch {
+	case state.MergedAt != nil || state.State == forge.PRStateMerged:
 		ticket.PRState = "merged"
 		ticket.MergeReadiness = nil
 		allMerged := true
@@ -555,8 +559,18 @@ func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *requ
 			}
 		}
 		return r.Save(dataDir)
+	case state.State == forge.PRStateClosed:
+		ticket.PRState = "closed"
+		reason := fmt.Sprintf("ticket %d/%d: pull request %s closed without merging", ticket.Index, r.TicketCount, ticket.PRURL)
+		if err := r.Close(reason, now); err != nil {
+			return err
+		}
+		log.Printf("request %s: pr_review -> closed (%s)", r.ID, reason)
+		return notifyClosedRequest(dataDir, r, ticket, now)
+	default:
+		log.Printf("request %s: ticket %d: pull request %s reported state %q, neither open, merged nor closed -- reading it again next poll", r.ID, ticket.Index, ticket.PRURL, state.State)
+		return r.Save(dataDir)
 	}
-	return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: pull request %s closed without merging", ticket.Index, r.TicketCount, ticket.PRURL), now)
 }
 
 // mergedTicketOnBranch returns the ticket in r whose Branch is

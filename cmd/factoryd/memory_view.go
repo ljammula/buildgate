@@ -227,7 +227,7 @@ func repositoryNotes(dataDir string, r *run.Run) []string {
 }
 
 // memoryRequestState is Reconcile's view of a request: known when its record
-// loads, active until it is done or cancelled.
+// loads, active until it is finished.
 func memoryRequestState(dataDir string) func(string) (active, known bool) {
 	return func(id string) (bool, bool) {
 		if id == "" {
@@ -237,7 +237,7 @@ func memoryRequestState(dataDir string) func(string) (active, known bool) {
 		if err != nil {
 			return false, false
 		}
-		return r.State != request.StateDone && r.State != request.StateCancelled, true
+		return !r.State.Finished(), true
 	}
 }
 

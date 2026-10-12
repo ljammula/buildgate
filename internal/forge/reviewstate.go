@@ -100,11 +100,18 @@ type ReviewState struct {
 	ActionableThreads []Thread
 }
 
+// The pull request states gh reports in ReviewState.State.
+const (
+	PRStateOpen   = "OPEN"
+	PRStateClosed = "CLOSED"
+	PRStateMerged = "MERGED"
+)
+
 // ShouldStopPolling reports whether r's PR has left the state a poll loop
 // tracks: OPEN is the only state still worth polling; CLOSED and MERGED
 // both mean stop (MergedAt is set only in the MERGED case).
 func (r ReviewState) ShouldStopPolling() bool {
-	return r.State != "OPEN"
+	return r.State != PRStateOpen
 }
 
 // DefaultIgnoreAuthors is the built-in default-ignore list for review-

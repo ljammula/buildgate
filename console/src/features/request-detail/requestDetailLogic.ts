@@ -10,6 +10,7 @@ import {
   requestAwaitingPullRequest,
   requestAwaitingPullRequestLabel,
 } from "@/domain/request";
+import { PIPELINE_STATES, stoppedAt } from "@/domain/requestStage";
 import { requestVerbs, stateLabel } from "@/domain/status";
 import { unifiedLineDiff } from "@/domain/textDiff";
 
@@ -56,6 +57,7 @@ const TICKETS_FIRST_STATES: ReadonlySet<string> = new Set([
   "halted",
   "quarantined",
   "done",
+  "closed",
   "cancelled",
   "resume_review",
 ]);
@@ -105,6 +107,7 @@ const FOLDED_CONTENT_STATES: ReadonlySet<string> = new Set([
   "halted",
   "quarantined",
   "done",
+  "closed",
   "cancelled",
 ]);
 
@@ -274,19 +277,8 @@ export function resumePlan(request: RequestSummary): ResumePlan {
   };
 }
 
-/** The canonical, linear pipeline; terminal states are not steps. */
-const PIPELINE_STEPS = [
-  "submitted",
-  "spec_drafting",
-  "spec_review",
-  "oracle_drafting",
-  "oracle_review",
-  "planning",
-  "plan_review",
-  "building",
-  "pr_review",
-  "done",
-] as const;
+/** The pipeline's steps; the request's ends (done, closed) share the last. */
+const PIPELINE_STEPS = PIPELINE_STATES;
 
 // The two opt-in oracle steps (`-draft-oracles`): hidden unless the request
 // asked for them or has been in one.
@@ -320,24 +312,6 @@ export interface PipelineStep {
 const TERMINAL_STATES: ReadonlySet<string> = new Set(["quarantined", "halted", "cancelled"]);
 
 /**
- * The step a terminal request stopped at, and the move that took it out of
- * it. The last entry's `from` is not enough: a request cancelled out of
- * quarantine moved `quarantined -> cancelled`, and `quarantined` is not a
- * pipeline step, so every step read pending (a real cancelled request). The
- * most recent move out of a pipeline step is where it stopped.
- */
-function stoppedAt(
-  request: RequestSummary,
-  steps: readonly string[],
-): { readonly step: string; readonly entry: RequestTransition } | null {
-  for (let i = request.history.length - 1; i >= 0; i--) {
-    const entry = request.history[i];
-    if (entry !== undefined && steps.includes(entry.from)) return { step: entry.from, entry };
-  }
-  return null;
-}
-
-/**
  * Where the request is in the pipeline: each step's glyph status and the
  * history entry behind it. A terminal request marks the step it stopped at
  * (see `stoppedAt`) as failed, as needs-you when only the pull request is
@@ -354,11 +328,16 @@ export function pipelineSteps(request: RequestSummary): PipelineStep[] {
     request.history.some((e) => OPTIONAL_ORACLE_STEPS.has(e.to));
   const steps = PIPELINE_STEPS.filter((s) => visitedOracleStage || !OPTIONAL_ORACLE_STEPS.has(s));
   const stopped = terminal ? stoppedAt(request, steps) : null;
+  // A closed request came to the pipeline's end like a merged one: its last
+  // step is drawn as Closed.
+  const closed = request.state === "closed";
   const activeState = resumeReview
     ? (request.resume?.fromState ?? "")
     : terminal
       ? (stopped?.step ?? "")
-      : request.state;
+      : closed
+        ? "done"
+        : request.state;
   const currentIndex = steps.findIndex((s) => s === activeState);
 
   const statusAt = (i: number): StepStatus => {
@@ -381,7 +360,7 @@ export function pipelineSteps(request: RequestSummary): PipelineStep[] {
     const status = statusAt(i);
     return {
       step,
-      label: STEP_LABELS[step] ?? step,
+      label: closed && step === "done" ? stateLabel("closed") : (STEP_LABELS[step] ?? step),
       status,
       entry: terminal && i === currentIndex ? (stopped?.entry ?? null) : lastEntryReaching(step),
       showsBuildProgress: step === "building" && status === "current",
@@ -405,7 +384,8 @@ export interface PipelineOutcome {
  * the pull request is missing (nothing failed; its step reads needs-you).
  */
 export function pipelineOutcome(request: RequestSummary): PipelineOutcome | null {
-  if (!TERMINAL_STATES.has(request.state) || requestAwaitingPullRequest(request)) return null;
+  const ended = TERMINAL_STATES.has(request.state) || request.state === "closed";
+  if (!ended || requestAwaitingPullRequest(request)) return null;
   let entry: RequestTransition | null = null;
   for (let i = request.history.length - 1; i >= 0; i--) {
     const candidate = request.history[i];

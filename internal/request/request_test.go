@@ -1,7 +1,15 @@
 package request
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"maps"
 	"reflect"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +49,7 @@ func TestLegalTransitionsSucceed(t *testing.T) {
 		{"RejectPlan", func(r *Request) error { r.State = StatePlanReview; return r.RejectPlan("op", "not good", fixedNow) }, StatePlanning},
 		{"StartPRReview", func(r *Request) error { r.State = StateBuilding; return r.StartPRReview(fixedNow) }, StatePRReview},
 		{"Complete", func(r *Request) error { r.State = StatePRReview; return r.Complete(fixedNow) }, StateDone},
+		{"Close", func(r *Request) error { r.State = StatePRReview; return r.Close("pull request closed", fixedNow) }, StateClosed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -126,6 +135,7 @@ func TestTransitionFunctionsAppendOneHistoryEntry(t *testing.T) {
 		{"StartPRReview", func(r *Request) error { r.State = StateBuilding; return r.StartPRReview(fixedNow) }, StateBuilding, StatePRReview, factoryActor},
 		{"ResumeBuilding", func(r *Request) error { r.State = StatePRReview; return r.ResumeBuilding(fixedNow) }, StatePRReview, StateBuilding, factoryActor},
 		{"Complete", func(r *Request) error { r.State = StatePRReview; return r.Complete(fixedNow) }, StatePRReview, StateDone, factoryActor},
+		{"Close", func(r *Request) error { r.State = StatePRReview; return r.Close("pull request closed", fixedNow) }, StatePRReview, StateClosed, factoryActor},
 		{"Quarantine", func(r *Request) error { return r.Quarantine("gate failed", fixedNow) }, StateSubmitted, StateQuarantined, factoryActor},
 		{"Halt", func(r *Request) error { return r.Halt("infra failure", fixedNow) }, StateSubmitted, StateHalted, factoryActor},
 		{"Cancel", func(r *Request) error { return r.Cancel("op", "", fixedNow) }, StateSubmitted, StateCancelled, "op"},
@@ -167,7 +177,7 @@ func TestIllegalTransitionsReturnErrorAndDoNotMutate(t *testing.T) {
 	allStates := []State{
 		StateSubmitted, StateSpecDrafting, StateSpecReview,
 		StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
-		StateDone, StateQuarantined, StateHalted, StateCancelled,
+		StateDone, StateClosed, StateQuarantined, StateHalted, StateCancelled,
 	}
 	transitions := []struct {
 		name    string
@@ -183,6 +193,7 @@ func TestIllegalTransitionsReturnErrorAndDoNotMutate(t *testing.T) {
 		{"RejectPlan", StatePlanReview, func(r *Request) error { return r.RejectPlan("op", "not good", fixedNow) }},
 		{"StartPRReview", StateBuilding, func(r *Request) error { return r.StartPRReview(fixedNow) }},
 		{"Complete", StatePRReview, func(r *Request) error { return r.Complete(fixedNow) }},
+		{"Close", StatePRReview, func(r *Request) error { return r.Close("x", fixedNow) }},
 	}
 
 	for _, tr := range transitions {
@@ -209,8 +220,8 @@ func TestIllegalTransitionsReturnErrorAndDoNotMutate(t *testing.T) {
 	// a same-state self-transition (e.g. quarantined -> quarantined).
 	// Cancel is exercised separately below: unlike Quarantine/Halt, it is
 	// legal from quarantined/halted (an operator dismissing a dead
-	// request), so it only fails from done and from cancelled itself.
-	for _, from := range []State{StateDone, StateQuarantined, StateHalted, StateCancelled} {
+	// request), so it only fails from done, closed and cancelled itself.
+	for _, from := range []State{StateDone, StateClosed, StateQuarantined, StateHalted, StateCancelled} {
 		for _, fn := range []struct {
 			name string
 			call func(r *Request) error
@@ -232,7 +243,7 @@ func TestIllegalTransitionsReturnErrorAndDoNotMutate(t *testing.T) {
 		}
 	}
 
-	for _, from := range []State{StateDone, StateCancelled} {
+	for _, from := range []State{StateDone, StateClosed, StateCancelled} {
 		t.Run("Cancel from terminal "+string(from), func(t *testing.T) {
 			r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
 			r.State = from
@@ -452,4 +463,71 @@ func TestQueuePositionsNumbersTheWaitingRequestsOldestFirst(t *testing.T) {
 	if got := QueuePositions(list, []string{"a"}, 2); len(got) != 0 {
 		t.Errorf("two slots, one free: %v, want nobody waiting", got)
 	}
+}
+
+func TestOnlyDoneClosedAndCancelledAreFinished(t *testing.T) {
+	for _, s := range AllStates() {
+		want := s == StateDone || s == StateClosed || s == StateCancelled
+		if got := s.Finished(); got != want {
+			t.Errorf("%s.Finished() = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// TestAllStatesIsEveryStateConstant keeps AllStates in step with the State
+// constants this package declares: a new state is classified (non-terminal,
+// finished, or a dead end Cancel dismisses) or this fails.
+func TestAllStatesIsEveryStateConstant(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[State]bool{}
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.CONST {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					vs := spec.(*ast.ValueSpec)
+					if ident, ok := vs.Type.(*ast.Ident); !ok || ident.Name != "State" {
+						continue
+					}
+					for _, v := range vs.Values {
+						lit, ok := v.(*ast.BasicLit)
+						if !ok {
+							continue
+						}
+						value, err := strconv.Unquote(lit.Value)
+						if err != nil {
+							t.Fatal(err)
+						}
+						declared[State(value)] = true
+					}
+				}
+			}
+		}
+	}
+	listed := map[State]bool{}
+	for _, s := range AllStates() {
+		listed[s] = true
+		nonTerminal := slices.Contains(nonTerminalStates, s)
+		deadEnd := s == StateQuarantined || s == StateHalted
+		if n := btoi(nonTerminal) + btoi(s.Finished()) + btoi(deadEnd); n != 1 {
+			t.Errorf("state %q is classified %d times, want exactly once", s, n)
+		}
+	}
+	if !maps.Equal(declared, listed) {
+		t.Errorf("AllStates() = %v, the State constants are %v", slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(declared)))
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

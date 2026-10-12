@@ -1,6 +1,8 @@
-// What one card of the Mission Control board says, per column. Pure: every
-// fact is read from the request list's own record, never fetched per card.
-import type { BoardColumn } from "@/domain/boardColumns";
+// What one card of the Mission Control board says. Pure: every fact is read
+// from the request list's own record, never fetched per card, and none from
+// the column the card is in: a request stuck in Building says what a stuck
+// request says.
+import { waitsOnYou } from "@/domain/boardColumns";
 import { stageLabels } from "@/domain/runDetail";
 import { digestText } from "@/domain/digest";
 import { formatAgeCompact } from "@/domain/elapsed";
@@ -11,6 +13,7 @@ import {
   requestRunningJob,
   requestWaitingSinceOrEnteredAt,
 } from "@/domain/request";
+import { FINISHED_STATES } from "@/domain/requestStage";
 import { safeHttpUrl } from "@/domain/safeUrl";
 import { stateLabel } from "@/domain/status";
 import { escapeInvisible } from "@/domain/textEscape";
@@ -41,7 +44,7 @@ export interface CardFacts {
   readonly alert: CardAlert | null;
   /** The server's stalled verdict on the build under way. */
   readonly stalled: boolean;
-  /** Opened pull requests, by ticket; empty outside PR review and Done. */
+  /** Opened pull requests, by ticket; empty before any is opened. */
   readonly pullRequests: readonly CardPullRequest[];
 }
 
@@ -72,7 +75,7 @@ const ASKS: Readonly<Record<string, string>> = {
 };
 
 /**
- * What a Needs-you card asks of the operator, in one line: a fixed sentence
+ * What a card that waits on the operator asks of them, in one line: a fixed sentence
  * per state (the server's `next_action` for a review state names CLI commands
  * for buttons the console has), else the first line of `next_action`.
  */
@@ -141,11 +144,41 @@ function reviewRoundsLine(prs: readonly CardPullRequest[]): string[] {
   return rounds === 0 ? [] : [rounds === 1 ? "1 review round" : `${rounds} review rounds`];
 }
 
-/** The facts a card shows for `request` in `column`. */
-export function cardFacts(request: RequestSummary, column: BoardColumn): CardFacts {
+/** The facts a card shows for `request`. */
+export function cardFacts(request: RequestSummary): CardFacts {
   const none: CardFacts = { lines: [], queue: null, alert: null, stalled: false, pullRequests: [] };
-  switch (column) {
-    case "drafting": {
+  const prs = pullRequests(request);
+  if (waitsOnYou(request)) {
+    return {
+      ...none,
+      lines: [needsYouAsk(request), ...reviewRoundsLine(prs)],
+      alert: cardAlert(request),
+      pullRequests: prs,
+    };
+  }
+  if (FINISHED_STATES.has(request.state)) {
+    return {
+      ...none,
+      lines: [
+        ...(request.state === "done" ? [] : [stateLabel(request.state)]),
+        ...reviewRoundsLine(prs),
+      ],
+      pullRequests: prs,
+    };
+  }
+  switch (request.state) {
+    case "building":
+      return {
+        ...none,
+        lines: buildingLines(request),
+        queue: queueLine(request),
+        stalled: request.build?.stalled ?? false,
+      };
+    case "pr_review":
+      return { ...none, lines: reviewRoundsLine(prs), pullRequests: prs };
+    default: {
+      // Drafting, planning, and a state this console does not know: its
+      // stage first, then the job running for it.
       const job = requestRunningJob(request);
       return {
         ...none,
@@ -155,49 +188,20 @@ export function cardFacts(request: RequestSummary, column: BoardColumn): CardFac
         queue: queueLine(request),
       };
     }
-    case "needsYou":
-      return {
-        ...none,
-        lines: [needsYouAsk(request)],
-        alert: cardAlert(request),
-        pullRequests: request.state === "pr_review" ? pullRequests(request) : [],
-      };
-    case "building":
-      return {
-        ...none,
-        lines: buildingLines(request),
-        queue: queueLine(request),
-        stalled: request.build?.stalled ?? false,
-      };
-    case "prReview": {
-      const prs = pullRequests(request);
-      return { ...none, lines: reviewRoundsLine(prs), pullRequests: prs };
-    }
-    case "done": {
-      const prs = pullRequests(request);
-      return {
-        ...none,
-        lines: [
-          ...(request.state === "done" ? [] : [stateLabel(request.state)]),
-          ...reviewRoundsLine(prs),
-        ],
-        pullRequests: prs,
-      };
-    }
   }
 }
 
 /**
  * When the request came to rest where the card shows it: since it started
- * waiting on the operator in Needs you, else since it entered its state.
+ * waiting on the operator when it does, else since it entered its state.
  */
-export function cardSince(request: RequestSummary, column: BoardColumn): string {
-  return column === "needsYou" ? requestWaitingSinceOrEnteredAt(request) : request.enteredAt;
+export function cardSince(request: RequestSummary): string {
+  return waitsOnYou(request) ? requestWaitingSinceOrEnteredAt(request) : request.enteredAt;
 }
 
 /** "for 5m", "for 2h 05m", "just now"; null when the record has no usable time. */
-export function cardAge(request: RequestSummary, column: BoardColumn, now: Date): string | null {
-  const since = Date.parse(cardSince(request, column));
+export function cardAge(request: RequestSummary, now: Date): string | null {
+  const since = Date.parse(cardSince(request));
   if (Number.isNaN(since)) return null;
   const ageMs = now.getTime() - since;
   return ageMs < 60_000 ? "just now" : `for ${formatAgeCompact(ageMs)}`;

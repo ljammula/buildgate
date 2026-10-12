@@ -33,6 +33,7 @@ func TestRequestStepForEveryState(t *testing.T) {
 		{request.StateHalted, workflow.RequestStep{}},
 		{request.StateQuarantined, workflow.RequestStep{}},
 		{request.StateDone, workflow.RequestStep{Done: true}},
+		{request.StateClosed, workflow.RequestStep{Done: true}},
 		{request.StateCancelled, workflow.RequestStep{Done: true}},
 	}
 	for _, c := range cases {

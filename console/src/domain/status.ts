@@ -1,5 +1,5 @@
 // The console's one shared semantic-status vocabulary: every chip across
-// every screen renders one of these five statuses, so the same colour and
+// every screen renders one of these six statuses, so the same colour and
 // icon always means the same thing to an operator regardless of which screen
 // they are looking at.
 //
@@ -12,7 +12,7 @@
 //   "danger"        failed; stalled; kill switch engaged
 //   "neutral"       unknown on a light surface
 //   "neutralOnDark" unknown on a dark surface
-//   "muted"         kill switch clear
+//   "muted"         ended; kill switch clear
 //
 // StatusIcon names are lucide's own, in snake case; ui/statusIcons maps each
 // to its component.
@@ -22,9 +22,9 @@
  * right now; unknown is reserved for anything this module does not recognize
  * (an unmapped state string, or a fetch that failed): an unrecognized value is
  * always rendered as unknown, never silently hidden or guessed into one of
- * the other four.
+ * the other five.
  */
-export type Status = "needsHuman" | "working" | "done" | "failed" | "unknown";
+export type Status = "needsHuman" | "working" | "done" | "ended" | "failed" | "unknown";
 
 export type StatusTone =
   "warning" | "info" | "success" | "danger" | "neutral" | "neutralOnDark" | "muted";
@@ -98,10 +98,12 @@ const STATUS_BY_TOKEN: Readonly<Record<string, Status>> = {
   accepted: "done",
   approved: "done",
   merged: "done",
+  // ended (grey): over, by a person's choice rather than a failure: a pull
+  // request closed without merging, and the request that ended with it.
+  closed: "ended",
   // failed (red): reached a negative terminal state.
   quarantined: "failed",
   cancelled: "failed",
-  closed: "failed",
 };
 
 /**
@@ -145,7 +147,7 @@ export function statusForReleaseDecision(allowed: boolean): Status {
  * be confused with a real failure; it is additionally rendered outlined, not
  * filled.
  *
- * `brightness` only changes unknown's grey: the other four render on their
+ * `brightness` only changes unknown's grey: the other five render on their
  * own filled, saturated background with white text, which stays equally
  * legible regardless of the surrounding surface, so there is nothing to
  * retune. Unknown instead renders outlined and transparent, so its grey sits
@@ -162,6 +164,8 @@ export function statusTone(status: Status, brightness: Brightness = "light"): St
       return "info";
     case "done":
       return "success";
+    case "ended":
+      return "muted";
     case "failed":
       return "danger";
     case "unknown":
@@ -182,6 +186,8 @@ export function statusIcon(status: Status): StatusIcon {
       return "circle_dot";
     case "done":
       return "circle_check";
+    case "ended":
+      return "circle_minus";
     case "failed":
       return "circle_x";
     case "unknown":
@@ -239,6 +245,7 @@ const REQUEST_STATES: Readonly<Record<string, RequestStateRow>> = {
   building: { label: "Building", verbs: [] },
   pr_review: { label: "PR review", verbs: [] },
   done: { label: "Done", verbs: [] },
+  closed: { label: "Closed", verbs: [] },
   halted: { label: "Halted", verbs: RECOVERY },
   resume_review: { label: "Needs resume", verbs: ["resume", "rebuild", "rerun", "cancel"] },
   quarantined: { label: "Quarantined", verbs: RECOVERY },

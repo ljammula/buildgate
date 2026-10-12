@@ -28,7 +28,8 @@ func TestDoctorInFlightSourceReposSkipsFinishedDuplicatesAndWorkspace(t *testing
 	saveDoctorTestRequest(t, dataDir, "req-b", b, request.StateDone)        // finished
 	saveDoctorTestRequest(t, dataDir, "req-c", c, request.StateHalted)      // -workspace, already probed
 	d := t.TempDir()
-	saveDoctorTestRequest(t, dataDir, "req-d", d, request.StateCancelled) // dismissed (e.g. cancelled from quarantined/halted)
+	saveDoctorTestRequest(t, dataDir, "req-d", d, request.StateCancelled)        // dismissed (e.g. cancelled from quarantined/halted)
+	saveDoctorTestRequest(t, dataDir, "req-e", t.TempDir(), request.StateClosed) // its pull request closed
 	got := doctorInFlightSourceRepos(dataDir, c)
 	if len(got) != 1 || got[0].path != a {
 		t.Fatalf("repos = %+v, want only %s", got, a)
