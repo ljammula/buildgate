@@ -44,13 +44,10 @@ func newConfigureImagesFlags() (flags *flag.FlagSet, f configureImagesFlags) {
 // (loading it first if it already exists, so unrelated keys -- the model
 // route, credentials, everything `factoryd quickstart` itself wrote --
 // survive untouched), creating one if it doesn't exist yet. This is
-// `make install`'s own local-images target's write path (Makefile): once
-// it builds sandbox/relay/registry-proxy locally and pushes them to
-// localhost:5050, it calls this to make those local, digest-pinned refs
-// the default here -- there is no other, published source for these
-// images (every image factoryd launches is built from source, see
-// AGENTS.md), so this is the one write needed for every subsequent
-// `factoryd quickstart`/`worker` on this machine to use them.
+// `make install`'s image-selection write path (Makefile): it records
+// digest-pinned refs from local builds or from the tagged release images
+// it pulled, making them this machine's defaults for subsequent
+// `factoryd quickstart`/`worker` commands.
 //
 // At least one of the three flags must be given -- an invocation with
 // none is certainly a mistake (there is nothing to configure), not a

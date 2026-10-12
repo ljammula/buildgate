@@ -1,7 +1,7 @@
-# Builds a project-specific sandbox image on top of a base worker image
-# (BASE_IMAGE -- the locally built worker `make sandbox-image` prints, or
-# another project image; every image factoryd launches is built from
-# source, never published, see AGENTS.md), baking in a TARGET project's own
+# Builds a project-specific sandbox image on top of a digest-pinned base
+# worker image (BASE_IMAGE -- the locally built worker `make sandbox-image`
+# prints, a tagged release image, or another project image), baking in a
+# TARGET project's own
 # Go module cache, npm package cache, and/or pip packages. Fixes a real
 # GitHub Codex App review finding on PR #51: the plain worker image
 # bakes only this repo's own go.sum, and a sandboxed build_app.py run has

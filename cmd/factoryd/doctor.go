@@ -851,7 +851,7 @@ func doctorMissingImageFixHint(configPath, flagName string) string {
 			installCmd = fmt.Sprintf("make install FACTORYD_CONFIG=%s", configPath)
 		}
 	}
-	return fmt.Sprintf("run `%s` from the buildgate checkout (builds images from source and records them via `factoryd configure-images`), or pass %s", installCmd, flagName)
+	return fmt.Sprintf("run `%s` from the buildgate checkout to install and configure the default images, or pass %s", installCmd, flagName)
 }
 
 // doctorChecksFor builds the check list `factoryd doctor` runs, shared
@@ -886,7 +886,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		})
 	} else {
 		present := doctorCheckImagePresent(ctx, in.sandboxDocker, "sandbox image", image,
-			"images are built from source, never pulled from a registry -- rerun with -fix to build a local copy (make sandbox-image)")
+			"restore the configured image with `make install`, using the same IMAGE_SOURCE and BUILDGATE_IMAGE_TAG that selected it")
 		checks = append(checks, present)
 		// No harness gate here: the image's own buildgate.image
 		// label (read by doctorCheckImageStale itself) says what kind it
@@ -908,7 +908,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	}
 	if in.registryProxyImage != "" {
 		checks = append(checks, doctorCheckImagePresent(ctx, in.sandboxDocker, "registry proxy image", in.registryProxyImage,
-			"images are built from source, never pulled from a registry -- rerun with -fix to build it locally (make registry-proxy-image)"))
+			"restore the configured image with `make install`, using the same IMAGE_SOURCE and BUILDGATE_IMAGE_TAG that selected it"))
 		if c, ok := doctorCheckImageStale(ctx, in.sandboxDocker, "registry proxy image", in.registryProxyImage, in.imageSourceRoot); ok {
 			checks = append(checks, c)
 		}
@@ -1558,12 +1558,12 @@ func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir 
 		return append(checks, doctorCheck{
 			Name: "sandbox image",
 			Err:  errors.New("no sandbox image configured"),
-			Fix:  "run `make install` from the buildgate checkout (builds images from source and records them via `factoryd configure-images`), or pass -sandbox-image",
+			Fix:  "run `make install` from the buildgate checkout to install and configure the default images, or pass -sandbox-image",
 		})
 	}
 	return append(checks,
 		doctorCheckImagePresent(ctx, dockerBinary, "sandbox image", image,
-			"images are built from source, never pulled from a registry -- run `make install` (or `make sandbox-image`) to build it"),
+			"run `make install` from the buildgate checkout to build or pull and configure the image"),
 		doctorCheckMountVisibility(ctx, dockerBinary, image, dir),
 	)
 }
@@ -1606,12 +1606,11 @@ func dockerReachableFix() string {
 }
 
 // doctorCheckBuildx confirms the `docker buildx` plugin (BuildKit) is
-// present. Every image factoryd launches is built from source with
-// `RUN --mount` and `--secret`, which the legacy builder rejects ("the
-// --mount option requires BuildKit"). A Homebrew CLI-only Docker (docker +
-// colima) ships without the plugin, so `make install` otherwise fails three
-// image builds deep. Advisory: a host whose images are already built runs
-// fine without it.
+// present for local image builds and automatic project toolchain derivation.
+// Every Dockerfile uses `RUN --mount` and `--secret`, which the legacy builder
+// rejects ("the --mount option requires BuildKit"). A Homebrew CLI-only
+// Docker (docker + colima) ships without the plugin. Advisory: projects whose
+// toolchains are already baked into the worker image run fine without it.
 func doctorCheckBuildx(ctx context.Context, dockerBinary string) doctorCheck {
 	const name = "docker buildx available (image builds)"
 	out, err := exec.CommandContext(ctx, dockerBinary, "buildx", "version").CombinedOutput()

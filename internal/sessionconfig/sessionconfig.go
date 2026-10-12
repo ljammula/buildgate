@@ -864,8 +864,9 @@ const DefaultMaxParallelJobs = 2
 // Example is the commented config `factoryd init-config` writes and the
 // no-config message shows. sandbox_image's digest is a placeholder: `make
 // install`/`make sandbox-image` prints a real one, and `factoryd
-// configure-images` writes it here -- there is no published image to
-// default to instead; every image is built from source.
+// configure-images` writes it here. `make install IMAGE_SOURCE=ghcr` can
+// record a published release image by digest; no image is selected by
+// default.
 // registry_proxy_image is omitted entirely -- see the comment below. The
 // model id must come from GET /v1/models. The
 // release_* keys below are DefaultReleaseMaxFilesChanged/

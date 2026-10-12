@@ -33,14 +33,11 @@ func registryHost(image string) string {
 }
 
 // ImagePresent reports whether image is already present in the local
-// Docker image store (`docker image inspect` exits zero). Every image
-// factoryd launches is built from source on this machine (`make
-// install`/`make sandbox-image` and friends) and recorded via `factoryd
-// configure-images`, never pulled from a public registry -- so, unlike
-// the prior CanonicalImageAvailable, this never falls back to a general
-// `docker pull`: an image that isn't present locally simply hasn't been
-// built yet, and the fix is to build it, not to fetch it from somewhere
-// else.
+// Docker image store (`docker image inspect` exits zero). `make install`
+// records either a local source build or a tagged release image that it
+// already pulled, via `factoryd configure-images`. This check does not
+// pull a public image on its own: an absent image is fixed by rerunning
+// the install path that selected it.
 //
 // The one exception is the local registry itself (LocalRegistryHost):
 // `make local-images` rebuilds and re-tags `:local` there, so builds are

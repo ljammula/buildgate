@@ -2017,7 +2017,7 @@ values a run will use).
 |---|---|
 | Writing a ticket by hand | `factoryd ticket-template [-o <path>]` for a skeleton; `factoryd check-ticket <path>` to validate the header lines. Point `-spec` at it. `-ticket-file` is a separate from-scratch format; leave it unset. Both run paths refuse a malformed or near-miss header (`Verify-command:`, `Allowed_Files:`). |
 | Module root is a subdirectory | Point `PROJECT_DIR` (for `make project-sandbox-image`) and `-verify-command` at it. `doctor -workspace <repo>` warns when it finds the manifest one level down. |
-| Need a worker image | `make sandbox-image` builds one locally (every image is built from source, never pulled); pass its printed ref as `BASE_IMAGE` to `make project-sandbox-image`. |
+| Need a worker image | `make sandbox-image` builds one locally, or `make install IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z` pulls a release image; pass its digest-pinned ref as `BASE_IMAGE` to `make project-sandbox-image`. |
 | The project needs another Go or Python version | `make project-sandbox-image` installs it: see Project toolchains below. |
 | Model host only on Tailscale | Use the Tailscale IP or full `*.ts.net` FQDN for the route's own `upstream`; the container may not share the host's resolver. `doctor` resolves the host from inside a sandbox container and fails with `container DNS cannot resolve ...`. |
 

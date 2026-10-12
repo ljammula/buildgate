@@ -211,10 +211,8 @@ jobs:
           echo "local Docker registry did not become healthy within 30s" >&2
           exit 1
 
-      # Every image factoryd launches is built from source, never
-      # published or pulled from a registry (see AGENTS.md) -- so the
-      # sandbox worker image is built and
-      # pushed through the local registry above to get a real,
+      # The live sandbox test explicitly uses a worker image built from
+      # this checkout; it is pushed through the local registry above to get a real,
       # engine-independent digest, and DOCKER_SANDBOX_IMAGE points the
       # live sandbox tests below at it instead of their own generic
       # python:3.13-slim-bookworm fallback -- so this job actually
@@ -236,10 +234,9 @@ jobs:
         run: |
           set -o pipefail
           DOCKER_SANDBOX_LIVE=1 go test -race -count=1 -v ./internal/sandbox/... -run TestRunLiveDocker 2>&1 | tee /tmp/live-sandbox.log
-          # Every image factoryd launches is built from source (see
-          # AGENTS.md) -- there is no published default to test resolving.
-          # This still proves the sandbox worker image builds cleanly from
-          # this repo's own Dockerfile, and that a target project needing a
+          # There is no built-in worker-image default to test resolving.
+          # This proves the sandbox worker image builds cleanly from this
+          # repo's own Dockerfile, and that a target project needing a
           # dependency the worker image doesn't already bake needs a
           # project-specific image (internal/sandbox/Dockerfile.project)
           # instead (found via a real GitHub Codex App review of PR #51).

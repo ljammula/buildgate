@@ -62,9 +62,8 @@ func TestValidateCORSAllowOrigin(t *testing.T) {
 
 // TestApiSandboxPolicyImageAllowedEmptyAllowlist proves the empty-
 // allowlist fallback: it means exactly this daemon's own configured
-// defaultImage, not sandbox.CanonicalImageRef (removed -- every image is
-// built from source now, never pulled from a registry) and not "anything"
-// -- and when the daemon itself has no image configured either, an empty
+// defaultImage, not an implicit image default and not "anything" -- and
+// when the daemon itself has no image configured either, an empty
 // allowlist accepts NOTHING (a naive "empty allowlist accepts everything"
 // implementation here would have reopened the exact containment gap the
 // image-allowlist fix closed).

@@ -26,8 +26,8 @@ func fakeOfflineBuildAppScript(t *testing.T) string {
 // TestRegistryProxyRequiresImageWhenUnconfigured covers
 // -registry-proxy-image's lack of a built-in default: -registry-proxy
 // with no -registry-proxy-image (and none in session config) must fail
-// configuration-time validation -- there is no published image to fall
-// back to, so this must be rejected before ever reaching Docker.
+// configuration-time validation -- the user must configure the image,
+// rather than relying on an implicit default, before reaching Docker.
 func TestRegistryProxyRequiresImageWhenUnconfigured(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")

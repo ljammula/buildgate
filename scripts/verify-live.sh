@@ -34,8 +34,8 @@
 #      ci.yml's own hand-picked -run list already requires).
 #
 # Prerequisites (not checked beyond what's below): Go, and either Docker
-# already logged in to pull any private image the live tests need, or local
-# images built via `make local-images`.
+# already logged in to pull any private image the live tests need, or the
+# images selected through `make local-images` (local builds or GHCR pulls).
 #
 # Temporal: the tests run through one test Temporal dev server this script
 # starts on a free loopback port (scripts/temporal-test-server.sh, which

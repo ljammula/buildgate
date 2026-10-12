@@ -52,7 +52,13 @@ a sandbox and prepares a pull request.
 On a new Mac, use Homebrew (or install the required tools yourself) and Docker.
 `make install` installs missing Go, Python, Git, GitHub CLI, Node and Docker
 packages, builds the images from source, installs `factoryd`, and runs
-`factoryd doctor -fix`. Node and npm are optional, only for building the console.
+`factoryd doctor -fix`. To use a tagged release's images, check out that
+same release tag and run `IMAGE_SOURCE=ghcr make install`; the tag is resolved
+to digests before it is saved. After the first tagged release, the three GHCR
+packages must be made public in their package settings for anonymous installs;
+GitHub does not allow public packages to be made private again. The binary is
+still built from this checkout.
+Node and npm are optional, only for building the console.
 
 ```sh
 git clone https://github.com/ljammula/buildgate.git
@@ -87,7 +93,7 @@ Latest release tag: **`v0.0.1`** (tags are `vX.Y.Z`), cut only after
 |---|---|
 | ✅ Works, live-proven | The request pipeline end to end (spec review, plan review, sandboxed build, gates, PR) on several real repos; every build on Temporal; the OpenShell sandbox runtime; `quickstart` onboarding; the operator console; `pi` and `codex` harnesses on every role; compose sidecars (Postgres, Kafka, Redis) |
 | ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, none for a gate that fails the same way on the base commit, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:` and `autofix:`; gate scripts under `.factory/` mounted read-only from the commit the config was read from |
-| 🟡 Opt-in or partial | Acceptance oracles (`submit -draft-oracles`, Go and Python); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
+| 🟡 Opt-in or partial | Acceptance oracles (`submit -draft-oracles`, Go and Python); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`); GHCR image installs (starts with the next tagged release; earlier tags are not republished); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
 | 🟡 Opt-in or partial | Repository memory (`factoryd memory`, off until a repository is listed under `memory.repositories`): candidate lines from build agents' notes, proposed by the operator as an ordinary request that rewrites the fenced section of `AGENTS.md` |
 | ⬛ Never, by design | Automatic merge or deploy; a host-execution path |
 
