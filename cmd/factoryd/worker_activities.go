@@ -70,7 +70,7 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 func requestStepFor(state request.State, cfg requestdriver.WorkerConfig) workflow.RequestStep {
 	step := workflow.RequestStep{State: string(state), RetryAfter: requestStepRetryAfter}
 	switch {
-	case requestFinished(state):
+	case state.Finished():
 		step.Done = true
 	case state == request.StateSubmitted:
 		step.Advance = workflow.RequestAdvanceLight

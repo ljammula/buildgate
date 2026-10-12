@@ -862,9 +862,24 @@ may not have: a request halted on an unconfirmed run can still have a
 Temporal execution in flight, and reclaim can still apply its result
 (including opening a PR), the same gap `cancelRequest` in
 `internal/api/server.go` documents for cancelling from `building`. Nothing
-moves the request out of `cancelled` again. `done` is excluded from `Cancel`'s allowed
-states: it is a genuine success outcome, not a dead end, and stays
-immutable.
+moves the request out of `cancelled` again. `done` and `closed` are excluded
+from `Cancel`'s allowed states: each is a final outcome, not a dead end, and
+stays immutable.
+
+### Request lifecycle: a pull request closed without merging
+
+The factory never merges and never re-opens a pull request a person closed.
+When the PR-review poll reads a ticket's pull request as `CLOSED` with no
+merge, `internal/request.Close` ends the request:
+
+- `pr_review -> closed`
+
+`closed` is terminal like `done`: nothing moves a request out of it, and
+`Cancel`, `Retry` and `Quarantine`/`Halt` refuse it. Only an explicit
+`CLOSED` state reaches it; an empty or unknown pull request state is a
+failed read, polled again (`handleClosedOrMergedTicket`,
+`internal/requestdriver/pr_review_driver.go`). Another ticket's pull request
+still open is left as it is, for a person to merge or close.
 
 ### Request lifecycle: a lost step waits for a human
 

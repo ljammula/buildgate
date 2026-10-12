@@ -43,34 +43,31 @@ describe("queueLine", () => {
 });
 
 describe("cardFacts", () => {
-  test("Drafting: the state, the running job, and the queue position", () => {
+  test("drafting: the state, the running job, and the queue position", () => {
     const drafting = wire(
       { id: "a", state: "planning" },
       { active_job: { stage: "planning", role: "planning", model: "luna", harness: "pi" } },
     );
-    expect(cardFacts(drafting, "drafting").lines).toEqual([
-      "Planning",
-      "planning role · luna · harness pi",
-    ]);
+    expect(cardFacts(drafting).lines).toEqual(["Planning", "planning role · luna · harness pi"]);
     const queued = wire({ id: "b", state: "submitted" }, { queue_position: 3 });
-    expect(cardFacts(queued, "drafting")).toMatchObject({
+    expect(cardFacts(queued)).toMatchObject({
       lines: ["Submitted"],
       queue: "Queued · position 3",
     });
   });
 
-  test("Drafting: a job left behind by another stage is not shown as running", () => {
+  test("drafting: a job left behind by another stage is not shown as running", () => {
     const stale = wire(
       { id: "a", state: "planning" },
       { active_job: { stage: "spec_drafting", role: "planning", model: "luna" } },
     );
-    expect(cardFacts(stale, "drafting").lines).toEqual(["Planning"]);
+    expect(cardFacts(stale).lines).toEqual(["Planning"]);
   });
 
   test("Building: ticket n of m, the stage and the stalled verdict, from the fixture's build", () => {
     const building = fixture("req-building");
     expect(columnForRequest(building)).toBe("building");
-    expect(cardFacts(building, "building")).toMatchObject({
+    expect(cardFacts(building)).toMatchObject({
       lines: ["Ticket 2 of 2", "Build"],
       stalled: true,
       queue: null,
@@ -79,16 +76,13 @@ describe("cardFacts", () => {
 
   test("Building: the round, with its limit when the server sends one", () => {
     const build = { run_id: "run-1", ticket: 1, tickets: 3, stage: "verify", round: 2 };
-    expect(cardFacts(wire({ id: "a", state: "building" }, { build }), "building").lines).toEqual([
+    expect(cardFacts(wire({ id: "a", state: "building" }, { build })).lines).toEqual([
       "Ticket 1 of 3",
       "Round 2",
       "Verify",
     ]);
     expect(
-      cardFacts(
-        wire({ id: "a", state: "building" }, { build: { ...build, max_rounds: 3 } }),
-        "building",
-      ).lines,
+      cardFacts(wire({ id: "a", state: "building" }, { build: { ...build, max_rounds: 3 } })).lines,
     ).toEqual(["Ticket 1 of 3", "Round 2 of 3", "Verify"]);
   });
 
@@ -97,19 +91,19 @@ describe("cardFacts", () => {
       { id: "a", state: "building", ticketIndex: 1, ticketCount: 2 },
       { queue_position: 1, waiting_on: "req-ahead" },
     );
-    expect(cardFacts(waiting, "building")).toMatchObject({
+    expect(cardFacts(waiting)).toMatchObject({
       lines: ["Ticket 1 of 2"],
       queue: "Queued · position 1 · behind req-ahead",
       stalled: false,
     });
   });
 
-  test("Needs you: one line of what is asked, and the reason of a quarantine in red", () => {
-    expect(cardFacts(fixture("req-spec-review"), "needsYou")).toMatchObject({
+  test("waits on you: one line of what is asked, and the reason of a quarantine in red", () => {
+    expect(cardFacts(fixture("req-spec-review"))).toMatchObject({
       lines: ["Review the drafted spec."],
       alert: null,
     });
-    const quarantined = cardFacts(fixture("req-quarantined"), "needsYou");
+    const quarantined = cardFacts(fixture("req-quarantined"));
     expect(quarantined.lines).toEqual(["Retry, send back or cancel."]);
     expect(quarantined.alert?.label).toBe("Quarantined");
     expect(quarantined.alert?.reason).toMatch(
@@ -117,7 +111,7 @@ describe("cardFacts", () => {
     );
   });
 
-  test("PR review and Done: a pull request per ticket, and the review rounds they took", () => {
+  test("PR review and Finished: a pull request per ticket, and the review rounds they took", () => {
     const reviewing = wire({
       id: "a",
       state: "pr_review",
@@ -129,7 +123,7 @@ describe("cardFacts", () => {
         ticketJson({ index: 2 }),
       ],
     });
-    expect(cardFacts(reviewing, "prReview")).toMatchObject({
+    expect(cardFacts(reviewing)).toMatchObject({
       lines: ["1 review round"],
       pullRequests: [
         {
@@ -140,10 +134,37 @@ describe("cardFacts", () => {
         },
       ],
     });
-    const done = cardFacts(fixture("req-done"), "done");
+    const done = cardFacts(fixture("req-done"));
     expect(done.lines).toEqual([]);
     expect(done.pullRequests.map((pr) => pr.prState)).toEqual(["merged"]);
-    expect(cardFacts(wire({ id: "c", state: "cancelled" }), "done").lines).toEqual(["Cancelled"]);
+    expect(cardFacts(wire({ id: "c", state: "cancelled" })).lines).toEqual(["Cancelled"]);
+    expect(cardFacts(wire({ id: "x", state: "closed" })).lines).toEqual(["Closed"]);
+  });
+
+  test("a stuck request says what a stuck request says, in whatever column it sits", () => {
+    const halted = wire(
+      { id: "h", state: "halted" },
+      {
+        error: "sandbox gone",
+        history: [{ from: "building", to: "halted", at: "2026-09-10T09:05:00Z", by: "factory" }],
+      },
+    );
+    expect(columnForRequest(halted)).toBe("building");
+    expect(cardFacts(halted)).toMatchObject({
+      lines: ["Retry, send back or cancel."],
+      alert: { label: "Halted", reason: "sandbox gone" },
+    });
+  });
+
+  test("a pull request that waits on a human asks for the review, with its rounds", () => {
+    const ready = wire({
+      id: "r",
+      state: "pr_review",
+      tickets: [ticketJson({ index: 1, prState: "ready" })],
+    });
+    expect(columnForRequest(ready)).toBe("prReview");
+    expect(cardFacts(ready).lines).toEqual(["Review and merge its pull requests."]);
+    expect(cardFacts(ready).pullRequests).toHaveLength(1);
   });
 
   test("a pull request address that is not http(s) is never a link", () => {
@@ -152,7 +173,7 @@ describe("cardFacts", () => {
       state: "done",
       tickets: [{ index: 1, pr_url: "javascript:alert(1)", pr_state: "merged" }],
     });
-    expect(cardFacts(request, "done").pullRequests[0]?.url).toBeNull();
+    expect(cardFacts(request).pullRequests[0]?.url).toBeNull();
   });
 });
 
@@ -220,24 +241,22 @@ describe("cardAlert", () => {
 describe("cardAge", () => {
   const now = new Date("2026-09-10T10:00:00Z");
 
-  test("counts from the wait's start in Needs you, from the state's entry elsewhere", () => {
+  test("counts from the wait's start when it waits on you, from the state's entry otherwise", () => {
     const waiting = wire({
       id: "a",
       state: "spec_review",
       enteredAt: "2026-09-10T09:00:00Z",
       waitingSince: "2026-09-10T09:15:00Z",
     });
-    expect(cardSince(waiting, "needsYou")).toBe("2026-09-10T09:15:00Z");
-    expect(cardAge(waiting, "needsYou", now)).toBe("for 45m");
+    expect(cardSince(waiting)).toBe("2026-09-10T09:15:00Z");
+    expect(cardAge(waiting, now)).toBe("for 45m");
     const building = wire({ id: "b", state: "building", enteredAt: "2026-09-10T07:55:00Z" });
-    expect(cardAge(building, "building", now)).toBe("for 2h 05m");
+    expect(cardAge(building, now)).toBe("for 2h 05m");
   });
 
   test("under a minute is just now; no usable time is no age", () => {
     const fresh = wire({ id: "a", state: "building", enteredAt: "2026-09-10T09:59:30Z" });
-    expect(cardAge(fresh, "building", now)).toBe("just now");
-    expect(
-      cardAge(wire({ id: "a", state: "building", enteredAt: "" }), "building", now),
-    ).toBeNull();
+    expect(cardAge(fresh, now)).toBe("just now");
+    expect(cardAge(wire({ id: "a", state: "building", enteredAt: "" }), now)).toBeNull();
   });
 });

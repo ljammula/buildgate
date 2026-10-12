@@ -40,8 +40,8 @@ export function TriageList({ requests, focusedId, now, onFocus }: TriageListProp
       >
         {requests.map((request, index) => {
           const selected = request.id === focusedId;
-          const since = cardSince(request, "needsYou");
-          const age = cardAge(request, "needsYou", now);
+          const since = cardSince(request);
+          const age = cardAge(request, now);
           return (
             <li key={request.id}>
               <button

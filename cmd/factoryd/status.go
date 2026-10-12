@@ -163,8 +163,8 @@ type requestStatusEntry struct {
 	// Tickets is a compact "<index>:<pr_state>" summary, space-separated,
 	// one entry per ticket that has an open pull request -- the
 	// PR-review driver's own per-ticket PR status (Ticket.PRState: "open"
-	// -- the default, shown when PRState is still "" -- "ready", "approved", or
-	// "merged"), followed by ",ready-to-merge" when the poll's last
+	// -- the default, shown when PRState is still "" -- "ready", "approved",
+	// "merged", or "closed"), followed by ",ready-to-merge" when the poll's last
 	// ready-to-merge check passed (Ticket.MergeReadiness). Empty when this request has no ticket with a PR yet
 	// (every state before building/pr_review, or a ticket not yet
 	// opened).

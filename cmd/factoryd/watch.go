@@ -803,6 +803,17 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 				}
 			}
 			return nil
+		case request.StateClosed:
+			for _, t := range r.Tickets {
+				switch {
+				case t.PRURL == "":
+				case t.PRState == "":
+					fmt.Fprintf(out, "PR: %s\n", t.PRURL)
+				default:
+					fmt.Fprintf(out, "PR: %s (%s)\n", t.PRURL, t.PRState)
+				}
+			}
+			return nil
 		case request.StateCancelled:
 			return fmt.Errorf("request %s was cancelled", r.ID)
 		default:

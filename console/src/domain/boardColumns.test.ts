@@ -4,17 +4,17 @@ import {
   boardColumns,
   buildBoard,
   activeGroup,
-  cardsAcross,
   columnForRequest,
   columnGroups,
   groupCards,
   groupChips,
   groupPreviewSize,
-  isGroupedColumn,
+  isCompactColumn,
   isNarrowColumn,
   isCancelledRequest,
   showsNeedsYou,
   visibleColumns,
+  waitsOnYou,
 } from "@/domain/boardColumns";
 import { requestStageGroupOf } from "@/domain/boardFilters";
 import { decodeRequestList, decodeRequestSummary } from "@/domain/request";
@@ -28,46 +28,128 @@ const wire = (o: Parameters<typeof requestJson>[0], extra: Record<string, unknow
 
 const at = (state: string) => columnForRequest(requestSummary({ id: `req-${state}`, state }));
 
+/** A request in `state` whose history ends with the move from `from` into it. */
+const movedFrom = (id: string, from: string, state: string, extra: Record<string, unknown> = {}) =>
+  wire(
+    { id, state },
+    {
+      history: [
+        { from: "submitted", to: "spec_drafting", at: "2026-09-10T09:00:00Z", by: "factory" },
+        { from, to: state, at: "2026-09-10T09:05:00Z", by: "factory" },
+      ],
+      ...extra,
+    },
+  );
+
+const none: Readonly<Record<BoardColumn, number>> = {
+  spec: 0,
+  plan: 0,
+  building: 0,
+  prReview: 0,
+  finished: 0,
+};
+
 describe("columnForRequest", () => {
-  test("each state is in the column of who has to act", () => {
+  test("each pipeline state is in its stage's column", () => {
     const expected: Readonly<Record<string, BoardColumn>> = {
-      submitted: "drafting",
-      spec_drafting: "drafting",
-      oracle_drafting: "drafting",
-      planning: "drafting",
-      spec_review: "needsYou",
-      oracle_review: "needsYou",
-      plan_review: "needsYou",
-      resume_review: "needsYou",
-      halted: "needsYou",
-      quarantined: "needsYou",
+      submitted: "spec",
+      spec_drafting: "spec",
+      spec_review: "spec",
+      oracle_drafting: "spec",
+      oracle_review: "spec",
+      planning: "plan",
+      plan_review: "plan",
       building: "building",
       pr_review: "prReview",
-      done: "done",
-      cancelled: "done",
+      done: "finished",
+      closed: "finished",
+      cancelled: "finished",
     };
     for (const [state, column] of Object.entries(expected)) {
       expect(at(state), state).toBe(column);
     }
   });
 
-  test("a pr_review request is in PR review while the factory has work on a PR, and in Needs you once every PR waits on a human", () => {
+  test("a request only moves right along one ticket's pipeline", () => {
+    const path = [
+      "submitted",
+      "spec_drafting",
+      "spec_review",
+      "oracle_drafting",
+      "oracle_review",
+      "planning",
+      "plan_review",
+      "building",
+      "pr_review",
+      "done",
+    ];
+    const indexes = path.map((state) => boardColumns.indexOf(at(state)));
+    for (let i = 1; i < indexes.length; i++) {
+      expect(indexes[i], path[i]).toBeGreaterThanOrEqual(indexes[i - 1]!);
+    }
+    // A pull request closed without merging ends where a merged one does.
+    expect(at("closed")).toBe(at("done"));
+  });
+
+  test("the request's own moves back are the only moves left", () => {
+    // advance_on: pr_approved: the next ticket builds after this one's PR is approved.
+    expect(boardColumns.indexOf(at("building"))).toBeLessThan(
+      boardColumns.indexOf(at("pr_review")),
+    );
+    // A send-back from a stuck build redrafts the plan.
+    expect(columnForRequest(movedFrom("sent-back", "quarantined", "planning"))).toBe("plan");
+  });
+
+  test("a stuck request stays in the column of the step it stopped at", () => {
+    expect(columnForRequest(movedFrom("h", "building", "halted"))).toBe("building");
+    expect(columnForRequest(movedFrom("q", "pr_review", "quarantined"))).toBe("prReview");
+    expect(columnForRequest(movedFrom("p", "planning", "halted"))).toBe("plan");
+    // resume_review names the lost step itself.
+    expect(
+      columnForRequest(
+        movedFrom("r", "oracle_drafting", "resume_review", {
+          resume: { from_state: "planning" },
+        }),
+      ),
+    ).toBe("plan");
+    // A move between two stuck states is skipped back to the step.
+    expect(
+      columnForRequest(
+        wire(
+          { id: "hq", state: "quarantined" },
+          {
+            history: [
+              { from: "building", to: "halted", at: "2026-09-10T09:00:00Z", by: "factory" },
+              { from: "halted", to: "quarantined", at: "2026-09-10T09:05:00Z", by: "op" },
+            ],
+          },
+        ),
+      ),
+    ).toBe("building");
+    // A record with no history to say where: the first column.
+    expect(at("halted")).toBe("spec");
+  });
+
+  test("a cancelled request is Finished, wherever it stopped", () => {
+    expect(columnForRequest(movedFrom("c", "building", "cancelled"))).toBe("finished");
+  });
+
+  test("a pr_review request is in PR review whoever has the next move", () => {
     const withPrs = (...prStates: string[]) =>
       requestSummary({
         id: "req-pr",
         state: "pr_review",
         tickets: prStates.map((prState, i) => ticketJson({ index: i + 1, prState })),
       });
-    expect(columnForRequest(withPrs("draft"))).toBe("prReview");
-    expect(columnForRequest(withPrs("ready", "approved"))).toBe("prReview");
-    expect(columnForRequest(withPrs("ready"))).toBe("needsYou");
-    expect(columnForRequest(withPrs("merged", "stacked"))).toBe("needsYou");
-    // The column and the tab title's count are one decision.
-    for (const request of [withPrs("draft"), withPrs("ready"), withPrs("merged", "ready")]) {
-      expect(columnForRequest(request) === "needsYou").toBe(
-        requestStageGroupOf(request) === "review",
-      );
+    for (const request of [withPrs("draft"), withPrs("ready"), withPrs("merged", "stacked")]) {
+      expect(columnForRequest(request)).toBe("prReview");
     }
+    // Who acts is the one decision the tab title's count reads.
+    for (const request of [withPrs("draft"), withPrs("ready"), withPrs("merged", "ready")]) {
+      expect(waitsOnYou(request)).toBe(requestStageGroupOf(request) === "review");
+    }
+    expect(waitsOnYou(withPrs("draft"))).toBe(false);
+    expect(waitsOnYou(withPrs("ready"))).toBe(true);
   });
 
   test("every request state in the contract fixtures lands in exactly one column", () => {
@@ -94,22 +176,22 @@ describe("columnForRequest", () => {
     }
   });
 
-  test("a state this console has never seen goes to Drafting, without throwing", () => {
-    expect(at("security_review")).toBe("drafting");
-    expect(at("")).toBe("drafting");
+  test("a state this console has never seen goes to Spec, without throwing", () => {
+    expect(at("security_review")).toBe("spec");
+    expect(at("")).toBe("spec");
     const board = buildBoard([requestSummary({ id: "req-new", state: "security_review" })], {
       showCancelled: false,
     });
-    expect(board.counts).toEqual({ drafting: 1, needsYou: 0, building: 0, prReview: 0, done: 0 });
+    expect(board.counts).toEqual({ ...none, spec: 1 });
   });
 
   test("the columns are named, in order", () => {
     expect(boardColumns.map((column) => boardColumnLabels[column])).toEqual([
-      "Drafting",
-      "Needs you",
+      "Spec",
+      "Plan",
       "Building",
       "PR review",
-      "Done",
+      "Finished",
     ]);
   });
 });
@@ -120,36 +202,34 @@ describe("buildBoard", () => {
     requestSummary({ id: "a-review", state: "spec_review", project: "alpha" }),
     requestSummary({ id: "b-build", state: "building", project: "beta" }),
     requestSummary({ id: "b-done", state: "done", project: "beta" }),
+    requestSummary({ id: "b-closed", state: "closed", project: "beta" }),
     requestSummary({ id: "b-cancelled", state: "cancelled", project: "beta" }),
   ];
 
   test("one lane per project, by name, each request in its column", () => {
     const board = buildBoard(requests, { showCancelled: false });
-    expect(board.lanes.map((lane) => [lane.project, lane.count])).toEqual([
-      ["alpha", 2],
-      ["beta", 2],
+    expect(board.lanes.map((lane) => [lane.project, lane.count, lane.waiting])).toEqual([
+      ["alpha", 2, 1],
+      ["beta", 3, 0],
     ]);
     const ids = (lane: number, column: BoardColumn) =>
       board.lanes[lane]!.cells[column].requests.map((r) => r.id);
-    expect(ids(0, "drafting")).toEqual(["a-draft"]);
-    expect(ids(0, "needsYou")).toEqual(["a-review"]);
+    expect(ids(0, "plan")).toEqual(["a-draft"]);
+    expect(ids(0, "spec")).toEqual(["a-review"]);
     expect(ids(1, "building")).toEqual(["b-build"]);
-    expect(ids(1, "done")).toEqual(["b-done"]);
-    expect(board.counts).toEqual({ drafting: 1, needsYou: 1, building: 1, prReview: 0, done: 1 });
+    expect(ids(1, "finished").sort()).toEqual(["b-closed", "b-done"]);
+    expect(board.counts).toEqual({ spec: 1, plan: 1, building: 1, prReview: 0, finished: 2 });
   });
 
-  test("cancelled requests are counted, and drawn in Done only when asked for", () => {
-    expect(isCancelledRequest(requests[4]!)).toBe(true);
+  test("cancelled requests are counted, and drawn in Finished only when asked for", () => {
+    expect(isCancelledRequest(requests[5]!)).toBe(true);
+    expect(isCancelledRequest(requests[4]!)).toBe(false);
     const hidden = buildBoard(requests, { showCancelled: false });
     expect(hidden.cancelled).toBe(1);
-    expect(hidden.counts.done).toBe(1);
+    expect(hidden.counts.finished).toBe(2);
     const shown = buildBoard(requests, { showCancelled: true });
     expect(shown.cancelled).toBe(1);
-    expect(shown.counts.done).toBe(2);
-    expect(shown.lanes[1]!.cells.done.requests.map((r) => r.id).sort()).toEqual([
-      "b-cancelled",
-      "b-done",
-    ]);
+    expect(shown.counts.finished).toBe(3);
   });
 
   test("a project whose only request is a hidden cancelled one has no lane", () => {
@@ -160,232 +240,177 @@ describe("buildBoard", () => {
     expect(board.cancelled).toBe(1);
   });
 
-  test("Done shows a lane's newest 20 and says how many it left out", () => {
+  test("Finished shows a lane's newest 20 and says how many it left out", () => {
     const done = Array.from({ length: 23 }, (_, i) =>
       requestSummary({
         id: `done-${String(i).padStart(2, "0")}`,
-        state: "done",
+        state: i % 2 === 0 ? "done" : "closed",
         updatedAt: `2026-09-10T09:${String(i).padStart(2, "0")}:00Z`,
       }),
     );
     const board = buildBoard(done, { showCancelled: false });
-    const cell = board.lanes[0]!.cells.done;
+    const cell = board.lanes[0]!.cells.finished;
     expect(cell.requests).toHaveLength(20);
     expect(cell.more).toBe(3);
     expect(cell.requests[0]!.id).toBe("done-22");
     expect(cell.requests.at(-1)!.id).toBe("done-03");
     // The header counts every finished request, not only the cards drawn.
-    expect(board.counts.done).toBe(23);
+    expect(board.counts.finished).toBe(23);
     expect(board.lanes[0]!.count).toBe(23);
-    expect(buildBoard(done, { showCancelled: false, doneCap: 5 }).lanes[0]!.cells.done.more).toBe(
-      18,
-    );
+    expect(
+      buildBoard(done, { showCancelled: false, doneCap: 5 }).lanes[0]!.cells.finished.more,
+    ).toBe(18);
   });
 
-  test("Needs you is oldest wait first; a waiting request follows the running ones in queue order", () => {
+  test("what waits on the operator is oldest wait first; jobs follow the running ones in queue order", () => {
     const board = buildBoard(
       [
         requestSummary({ id: "late", state: "spec_review", waitingSince: "2026-09-10T10:00:00Z" }),
-        requestSummary({ id: "early", state: "plan_review", waitingSince: "2026-09-10T08:00:00Z" }),
-        wire({ id: "third", state: "planning" }, { queue_position: 2 }),
+        requestSummary({
+          id: "early",
+          state: "oracle_review",
+          waitingSince: "2026-09-10T08:00:00Z",
+        }),
+        wire({ id: "third", state: "oracle_drafting" }, { queue_position: 2 }),
         wire({ id: "second", state: "submitted" }, { queue_position: 1 }),
         wire({ id: "running", state: "spec_drafting" }, {}),
       ],
       { showCancelled: false },
     );
-    expect(board.lanes[0]!.cells.needsYou.requests.map((r) => r.id)).toEqual(["early", "late"]);
-    expect(board.lanes[0]!.cells.drafting.requests.map((r) => r.id)).toEqual([
-      "running",
-      "second",
-      "third",
+    const groups = columnGroups("spec", board.lanes[0]!.cells.spec.requests);
+    expect(groups.map((g) => [g.label, g.requests.map((r) => r.id)])).toEqual([
+      ["Spec review", ["late"]],
+      ["Oracle review", ["early"]],
+      ["Drafting", ["running", "second", "third"]],
     ]);
   });
 });
 
 describe("visibleColumns", () => {
-  const none = { drafting: 0, needsYou: 0, building: 0, prReview: 0, done: 0 };
-
   test("no section filter draws all five", () => {
     expect(visibleColumns(null, none)).toEqual(boardColumns);
   });
 
   test("a section filter draws that section's columns", () => {
-    expect(visibleColumns("needsYou", none)).toEqual(["needsYou"]);
-    expect(visibleColumns("working", none)).toEqual(["drafting", "building", "prReview"]);
-    expect(visibleColumns("finished", none)).toEqual(["done"]);
+    const stages = ["spec", "plan", "building", "prReview"];
+    expect(visibleColumns("needsYou", none)).toEqual(stages);
+    expect(visibleColumns("working", none)).toEqual(stages);
+    expect(visibleColumns("finished", none)).toEqual(["finished"]);
   });
 
   test("a column that holds a card is drawn even outside the section", () => {
-    // An unknown state passes the Finished filter and sits in Drafting.
-    expect(visibleColumns("finished", { ...none, drafting: 1 })).toEqual(["drafting", "done"]);
+    // An unknown state passes the Finished filter and sits in Spec.
+    expect(visibleColumns("finished", { ...none, spec: 1 })).toEqual(["spec", "finished"]);
   });
 });
 
 test("showsNeedsYou is true exactly when a request in view waits on the operator", () => {
   expect(showsNeedsYou([requestSummary({ id: "a", state: "building" })])).toBe(false);
   expect(showsNeedsYou([requestSummary({ id: "a", state: "halted" })])).toBe(true);
+  expect(showsNeedsYou([requestSummary({ id: "a", state: "closed" })])).toBe(false);
 });
 
 describe("columnGroups", () => {
-  const cell = (column: BoardColumn, requests: Parameters<typeof buildBoard>[0]) =>
-    buildBoard(requests, { showCancelled: true }).lanes[0]?.cells[column].requests ?? [];
   const shape = (column: BoardColumn, requests: Parameters<typeof buildBoard>[0]) =>
-    columnGroups(column, cell(column, requests)).map((group) => [
-      group.label,
-      group.requests.map((r) => r.id),
+    columnGroups(
+      column,
+      buildBoard(requests, { showCancelled: true }).lanes[0]?.cells[column].requests ?? [],
+    ).map((group) => [group.label, group.requests.map((r) => r.id)]);
+  const pr = (id: string, prState: string) =>
+    requestSummary({ id, state: "pr_review", tickets: [ticketJson({ index: 1, prState })] });
+
+  test("Spec is Stuck, the reviews, then drafting", () => {
+    expect(
+      shape("spec", [
+        movedFrom("h", "spec_drafting", "halted"),
+        requestSummary({ id: "d", state: "spec_drafting" }),
+        requestSummary({ id: "o", state: "oracle_review" }),
+        requestSummary({ id: "s", state: "spec_review" }),
+        requestSummary({ id: "x", state: "security_review" }),
+      ]),
+    ).toEqual([
+      ["Stuck", ["h"]],
+      ["Spec review", ["s"]],
+      ["Oracle review", ["o"]],
+      ["Drafting", ["d"]],
+      ["Other", ["x"]],
     ]);
-  const readyPr = requestSummary({
-    id: "pr",
-    state: "pr_review",
-    tickets: [ticketJson({ index: 1, prState: "ready" })],
   });
 
-  test("Needs you is grouped by what is asked, in order", () => {
+  test("Plan is Stuck, Plan review, Planning", () => {
     expect(
-      shape("needsYou", [
-        requestSummary({ id: "q", state: "quarantined" }),
-        readyPr,
-        requestSummary({ id: "plan", state: "plan_review" }),
-        requestSummary({ id: "oracle", state: "oracle_review" }),
-        requestSummary({ id: "spec", state: "spec_review" }),
+      shape("plan", [
+        requestSummary({ id: "p", state: "planning" }),
+        requestSummary({ id: "r", state: "plan_review" }),
+        movedFrom("q", "planning", "quarantined"),
       ]),
     ).toEqual([
       ["Stuck", ["q"]],
-      ["Spec review", ["spec"]],
-      ["Oracle review", ["oracle"]],
-      ["Plan review", ["plan"]],
-      ["PR ready", ["pr"]],
+      ["Plan review", ["r"]],
+      ["Planning", ["p"]],
     ]);
   });
 
-  test("Stuck is drawn first but matched last: a review state never lands in it", () => {
-    const groups = columnGroups("needsYou", [
-      requestSummary({ id: "spec", state: "spec_review" }),
-      requestSummary({ id: "h", state: "halted" }),
-      requestSummary({ id: "new", state: "security_review" }),
-    ]);
-    expect(groups.map((g) => [g.label, g.requests.map((r) => r.id)])).toEqual([
-      ["Stuck", ["h", "new"]],
-      ["Spec review", ["spec"]],
-    ]);
-  });
-
-  test("Drafting is drawn Spec and oracles, Planning, Other", () => {
+  test("PR review keeps PR ready apart from the pull requests the factory still works on", () => {
     expect(
-      columnGroups("drafting", [
-        requestSummary({ id: "x", state: "security_review" }),
-        requestSummary({ id: "p", state: "planning" }),
-        requestSummary({ id: "s", state: "submitted" }),
-      ]).map((g) => g.label),
-    ).toEqual(["Spec and oracles", "Planning", "Other"]);
+      shape("prReview", [
+        pr("draft", "draft"),
+        pr("ready", "ready"),
+        movedFrom("lost", "pr_review", "resume_review", { resume: { from_state: "pr_review" } }),
+      ]),
+    ).toEqual([
+      ["Stuck", ["lost"]],
+      ["PR ready", ["ready"]],
+      ["Factory working", ["draft"]],
+    ]);
+  });
+
+  test("Finished is grouped by how the request ended", () => {
+    expect(
+      shape("finished", [
+        requestSummary({ id: "c", state: "cancelled" }),
+        requestSummary({ id: "x", state: "closed" }),
+        requestSummary({ id: "m", state: "done" }),
+      ]),
+    ).toEqual([
+      ["Merged", ["m"]],
+      ["Closed", ["x"]],
+      ["Cancelled", ["c"]],
+    ]);
+  });
+
+  test("Building puts a stuck build above the running ones", () => {
+    expect(
+      shape("building", [
+        requestSummary({ id: "b", state: "building" }),
+        movedFrom("h", "building", "halted"),
+      ]),
+    ).toEqual([
+      ["Stuck", ["h"]],
+      ["Building", ["b"]],
+    ]);
   });
 
   test("only a group that holds exactly one state is flagged oneState", () => {
-    const flags = (column: BoardColumn, states: string[]) =>
-      columnGroups(
-        column,
-        states.map((state) => requestSummary({ id: state, state })),
-      ).map((g) => [g.label, g.oneState]);
+    const flags = (column: BoardColumn, requests: Parameters<typeof buildBoard>[0]) =>
+      columnGroups(column, requests).map((g) => [g.label, g.oneState]);
     expect(
-      flags("needsYou", ["spec_review", "oracle_review", "plan_review", "pr_review", "halted"]),
+      flags("spec", [
+        requestSummary({ id: "s", state: "spec_review" }),
+        requestSummary({ id: "d", state: "submitted" }),
+      ]),
     ).toEqual([
-      ["Stuck", false],
       ["Spec review", true],
-      ["Oracle review", true],
-      ["Plan review", true],
-      ["PR ready", false],
+      ["Drafting", false],
     ]);
-    expect(flags("drafting", ["submitted", "planning", "security_review"])).toEqual([
-      ["Spec and oracles", false],
-      ["Planning", true],
-      ["Other", false],
-    ]);
-    expect(
-      columnGroups("building", [requestSummary({ id: "b", state: "building" })]).map(
-        (g) => g.oneState,
-      ),
-    ).toEqual([false]);
-  });
-
-  test("every Needs-you and Drafting state is in exactly one group", () => {
-    const expected: Readonly<Record<string, [BoardColumn, string]>> = {
-      spec_review: ["needsYou", "Spec review"],
-      oracle_review: ["needsYou", "Oracle review"],
-      plan_review: ["needsYou", "Plan review"],
-      halted: ["needsYou", "Stuck"],
-      quarantined: ["needsYou", "Stuck"],
-      resume_review: ["needsYou", "Stuck"],
-      submitted: ["drafting", "Spec and oracles"],
-      spec_drafting: ["drafting", "Spec and oracles"],
-      oracle_drafting: ["drafting", "Spec and oracles"],
-      planning: ["drafting", "Planning"],
-    };
-    for (const [state, [column, label]] of Object.entries(expected)) {
-      const request = requestSummary({ id: state, state });
-      expect(columnForRequest(request), state).toBe(column);
-      expect(shape(column, [request]), state).toEqual([[label, [state]]]);
-    }
-    expect(columnForRequest(readyPr)).toBe("needsYou");
-    expect(shape("needsYou", [readyPr])).toEqual([["PR ready", ["pr"]]]);
-  });
-
-  test("a group with no request is left out, and an empty column has none", () => {
-    expect(shape("needsYou", [requestSummary({ id: "h", state: "halted" })])).toEqual([
-      ["Stuck", ["h"]],
-    ]);
-    expect(columnGroups("needsYou", [])).toEqual([]);
-    expect(columnGroups("building", [])).toEqual([]);
-  });
-
-  test("a state this console does not know has a group, without throwing", () => {
-    const unknown = requestSummary({ id: "new", state: "security_review" });
-    expect(shape("drafting", [unknown])).toEqual([["Other", ["new"]]]);
-    // Whatever is handed to Needs you that is not a review is Stuck.
-    expect(columnGroups("needsYou", [unknown]).map((g) => g.label)).toEqual(["Stuck"]);
-  });
-
-  test("the columns without groups are one unnamed group", () => {
-    for (const [column, state] of [
-      ["building", "building"],
-      ["done", "done"],
-    ] as const) {
-      expect(shape(column, [requestSummary({ id: "a", state })])).toEqual([[null, ["a"]]]);
-    }
-    const draftPr = requestSummary({
-      id: "d",
-      state: "pr_review",
-      tickets: [ticketJson({ index: 1, prState: "draft" })],
-    });
-    expect(shape("prReview", [draftPr])).toEqual([[null, ["d"]]]);
-  });
-
-  test("inside a Needs-you group the longest wait is first", () => {
-    expect(
-      shape("needsYou", [
-        requestSummary({ id: "late", state: "spec_review", waitingSince: "2026-09-10T10:00:00Z" }),
-        requestSummary({ id: "halt-late", state: "halted", enteredAt: "2026-09-10T09:00:00Z" }),
-        requestSummary({ id: "early", state: "spec_review", waitingSince: "2026-09-10T08:00:00Z" }),
-        requestSummary({ id: "q-early", state: "quarantined", enteredAt: "2026-09-10T07:00:00Z" }),
-      ]),
-    ).toEqual([
-      ["Stuck", ["q-early", "halt-late"]],
-      ["Spec review", ["early", "late"]],
+    expect(flags("prReview", [pr("r", "ready")])).toEqual([["PR ready", false]]);
+    expect(flags("finished", [requestSummary({ id: "x", state: "closed" })])).toEqual([
+      ["Closed", true],
     ]);
   });
 
-  test("inside a Drafting group the running jobs come first, then the queue by position", () => {
-    expect(
-      shape("drafting", [
-        wire({ id: "spec-3", state: "submitted" }, { queue_position: 3 }),
-        wire({ id: "plan-2", state: "planning" }, { queue_position: 2 }),
-        wire({ id: "spec-1", state: "spec_drafting" }, { queue_position: 1 }),
-        wire({ id: "plan-run", state: "planning" }, {}),
-        wire({ id: "spec-run", state: "oracle_drafting" }, {}),
-      ]),
-    ).toEqual([
-      ["Spec and oracles", ["spec-run", "spec-1", "spec-3"]],
-      ["Planning", ["plan-run", "plan-2"]],
-    ]);
+  test("an empty column has no group", () => {
+    for (const column of boardColumns) expect(columnGroups(column, [])).toEqual([]);
   });
 
   test("grouping moves no request and changes no count", () => {
@@ -393,6 +418,9 @@ describe("columnGroups", () => {
       requestSummary({ id: "a", state: "spec_review" }),
       requestSummary({ id: "b", state: "halted" }),
       requestSummary({ id: "c", state: "planning" }),
+      requestSummary({ id: "d", state: "security_review" }),
+      pr("e", "draft"),
+      requestSummary({ id: "f", state: "closed" }),
     ];
     const board = buildBoard(requests, { showCancelled: false });
     for (const column of boardColumns) {
@@ -404,7 +432,7 @@ describe("columnGroups", () => {
   });
 });
 
-describe("density of the grouped columns", () => {
+describe("density and chips", () => {
   const waits = (n: number, state: string) =>
     Array.from({ length: n }, (_, i) =>
       requestSummary({
@@ -413,41 +441,33 @@ describe("density of the grouped columns", () => {
         waitingSince: `2026-09-10T0${i}:00:00Z`,
       }),
     );
-  const none = { drafting: 0, needsYou: 0, building: 0, prReview: 0, done: 0 };
 
-  test("Needs you and Drafting are the grouped columns", () => {
-    expect(boardColumns.filter(isGroupedColumn)).toEqual(["drafting", "needsYou"]);
+  test("Spec and Plan are the compact columns", () => {
+    expect(boardColumns.filter(isCompactColumn)).toEqual(["spec", "plan"]);
   });
 
   test("one chip per non-empty group, in the groups' order, with its real size", () => {
-    const requests = [
-      ...waits(3, "quarantined"),
-      ...waits(5, "spec_review"),
-      ...waits(2, "plan_review"),
-    ];
-    expect(groupChips("needsYou", requests)).toEqual([
+    const requests = [...waits(3, "halted"), ...waits(5, "spec_review"), ...waits(2, "submitted")];
+    expect(groupChips("spec", requests)).toEqual([
       { label: "Stuck", short: "Stuck", count: 3 },
       { label: "Spec review", short: "Spec", count: 5 },
-      { label: "Plan review", short: "Plan", count: 2 },
+      { label: "Drafting", short: "Drafting", count: 2 },
     ]);
-    expect(groupChips("needsYou", [])).toEqual([]);
-    // A column without groups has no chips.
-    expect(groupChips("building", [requestSummary({ id: "b", state: "building" })])).toEqual([]);
+    expect(groupChips("spec", [])).toEqual([]);
   });
 
   test("a pressed chip is in force only while its group still holds a card", () => {
-    const chips = groupChips("needsYou", waits(2, "spec_review"));
+    const chips = groupChips("spec", waits(2, "spec_review"));
     expect(activeGroup("Spec review", chips)).toBe("Spec review");
     expect(activeGroup(null, chips)).toBeNull();
     // Its last request moved on: every group is shown again.
-    expect(activeGroup("Plan review", chips)).toBeNull();
+    expect(activeGroup("Oracle review", chips)).toBeNull();
   });
 
   test("a group shows its first three and counts the rest behind +N more", () => {
-    const [group] = columnGroups("needsYou", waits(5, "spec_review"));
+    const [group] = columnGroups("spec", waits(5, "spec_review"));
     expect(groupPreviewSize).toBe(3);
     const folded = groupCards(group!, { expanded: false, alone: false });
-    // The oldest three waits, in order.
     expect(folded.shown.map((r) => r.id)).toEqual([
       "spec_review-0",
       "spec_review-1",
@@ -462,14 +482,9 @@ describe("density of the grouped columns", () => {
     expect(groupCards(group!, { expanded: false, alone: true }).shown).toHaveLength(5);
   });
 
-  test("a group of three or fewer has nothing more; no card is ever dropped", () => {
-    const [small] = columnGroups("needsYou", waits(3, "plan_review"));
-    expect(groupCards(small!, { expanded: false, alone: false })).toEqual({
-      shown: small!.requests,
-      more: 0,
-    });
+  test("no card is ever dropped", () => {
     for (const size of [1, 3, 4, 20]) {
-      const [group] = columnGroups("needsYou", waits(size, "halted"));
+      const [group] = columnGroups("spec", waits(size, "halted"));
       const view = groupCards(group!, { expanded: false, alone: false });
       expect(view.shown.length + view.more).toBe(size);
     }
@@ -484,30 +499,12 @@ describe("density of the grouped columns", () => {
       { showCancelled: false },
     );
     expect(boardColumns.filter((column) => isNarrowColumn(column, board.counts))).toEqual([
-      "drafting",
+      "plan",
       "prReview",
-      "done",
+      "finished",
     ]);
     // Building is empty in alpha's lane and not narrow: beta holds a card.
     expect(board.lanes[0]!.cells.building.requests).toEqual([]);
     expect(isNarrowColumn("building", board.counts)).toBe(false);
-  });
-
-  test("Needs you lays out two across once it is at least twice a normal column's width", () => {
-    const all = boardColumns;
-    // Five columns sharing: the normal width.
-    expect(
-      cardsAcross("needsYou", all, { drafting: 1, needsYou: 4, building: 1, prReview: 1, done: 1 }),
-    ).toBe(1);
-    // Three sharing: a third each, less than twice a fifth.
-    expect(cardsAcross("needsYou", all, { ...none, needsYou: 4, building: 1, done: 2 })).toBe(1);
-    // Two sharing: half each, more than twice a fifth.
-    expect(cardsAcross("needsYou", all, { ...none, needsYou: 4, building: 1 })).toBe(2);
-    expect(cardsAcross("needsYou", all, { ...none, needsYou: 4 })).toBe(2);
-    // The section filter draws Needs you alone.
-    expect(cardsAcross("needsYou", ["needsYou"], { ...none, needsYou: 1 })).toBe(2);
-    // Never another column, and never an empty Needs you.
-    expect(cardsAcross("building", all, { ...none, building: 9 })).toBe(1);
-    expect(cardsAcross("needsYou", all, none)).toBe(1);
   });
 });

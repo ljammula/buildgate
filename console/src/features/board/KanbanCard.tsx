@@ -3,7 +3,7 @@ import { memo } from "react";
 import { Link } from "react-router";
 
 import { cardAge, cardFacts, cardSince } from "@/domain/boardCard";
-import type { BoardColumn } from "@/domain/boardColumns";
+import { waitsOnYou } from "@/domain/boardColumns";
 import { formatLocalTimestamp } from "@/domain/elapsed";
 import {
   type RequestSummary,
@@ -25,12 +25,11 @@ import { RunningMark } from "./RunningMark";
 
 export interface KanbanCardProps {
   readonly request: RequestSummary;
-  readonly column: BoardColumn;
   readonly now: Date;
   /** Name the project on the card: several projects are on the board with no lane to say which. */
   readonly showProject: boolean;
   /**
-   * The dense card of a grouped column (Needs you, Drafting): the title on up
+   * The dense card of a compact column (Spec, Plan): the title on up
    * to two lines, the id, the stage and the age. The sentence of what is
    * asked, the reason of a failure and the controls appear while the card is
    * hovered or holds the focus. The controls stay in the tab order while folded, so the
@@ -84,7 +83,6 @@ const REVIEW_STATES: ReadonlySet<string> = new Set(["spec_review", "plan_review"
  */
 export const KanbanCard = memo(function KanbanCard({
   request,
-  column,
   now,
   showProject,
   compact = false,
@@ -95,23 +93,26 @@ export const KanbanCard = memo(function KanbanCard({
   changed = false,
   running = false,
 }: KanbanCardProps) {
-  const facts = cardFacts(request, column);
-  const age = cardAge(request, column, now);
+  const facts = cardFacts(request);
+  const age = cardAge(request, now);
+  // Whose move it is is the card's own mark, in whatever column it sits.
+  const waiting = waitsOnYou(request);
   const ageElement =
     age === null ? null : (
       <time
-        dateTime={cardSince(request, column)}
-        title={formatLocalTimestamp(cardSince(request, column))}
+        dateTime={cardSince(request)}
+        title={formatLocalTimestamp(cardSince(request))}
         className="text-fg-muted tabular-nums"
       >
         {age}
       </time>
     );
-  const reviewable = column === "needsYou" && REVIEW_STATES.has(request.state);
+  const reviewable = REVIEW_STATES.has(request.state);
   return (
     <li
       data-testid={`card-${request.id}`}
       data-density={compact ? "compact" : "full"}
+      data-waits-on-you={waiting ? "true" : undefined}
       data-changed={changed ? "true" : undefined}
       className={cn(
         "group/card border-border bg-surface relative flex shrink-0 flex-col rounded-lg border text-xs transition-colors",
@@ -119,7 +120,7 @@ export const KanbanCard = memo(function KanbanCard({
         "hover:bg-surface-hover focus-within:bg-surface-hover",
         // The "look here" tint fades back to the card's own background, once.
         "data-[changed=true]:animate-card-changed motion-reduce:animate-none",
-        column === "needsYou" && "shadow-[inset_2px_0_0_var(--color-tone-warning)]",
+        waiting && "shadow-[inset_2px_0_0_var(--color-tone-warning)]",
       )}
     >
       <Link
@@ -153,9 +154,9 @@ export const KanbanCard = memo(function KanbanCard({
           {request.project}
         </span>
       ) : null}
-      {column === "needsYou" && stateInHeading ? (
+      {waiting && stateInHeading ? (
         <span className="sr-only">{stateLabel(request.state)}</span>
-      ) : column === "needsYou" ? (
+      ) : waiting ? (
         // A long label ("Accepted · awaiting PR") in a narrow lane is clipped, never wider than the card.
         <div className="truncate">
           <RequestStageChip
@@ -189,8 +190,9 @@ export const KanbanCard = memo(function KanbanCard({
           title={line}
           className={cn(
             "text-fg-muted line-clamp-2",
-            // Drafting's first line is its stage, which a folded card keeps.
-            compact && !(column === "drafting" && index === 0 && !stateInHeading) && foldedText,
+            // The first line of a card the factory has is its stage, which a
+            // folded card keeps unless its group's heading says it.
+            compact && !(!waiting && index === 0 && !stateInHeading) && foldedText,
           )}
         >
           {line}

@@ -2888,7 +2888,7 @@ func pastSpecDrafting(state request.State) bool {
 	switch state {
 	case request.StateSpecReview, request.StateOracleDrafting, request.StateOracleReview,
 		request.StatePlanning, request.StatePlanReview,
-		request.StateBuilding, request.StatePRReview, request.StateDone:
+		request.StateBuilding, request.StatePRReview, request.StateDone, request.StateClosed:
 		return true
 	default:
 		return false
@@ -2912,7 +2912,7 @@ func planCostUnrecorded(req *request.Request) bool {
 // reachable after CompletePlanning has run.
 func pastPlanning(state request.State) bool {
 	switch state {
-	case request.StatePlanReview, request.StateBuilding, request.StatePRReview, request.StateDone:
+	case request.StatePlanReview, request.StateBuilding, request.StatePRReview, request.StateDone, request.StateClosed:
 		return true
 	default:
 		return false

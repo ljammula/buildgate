@@ -72,6 +72,7 @@ func TestSafetyContractContainsRequiredControls(t *testing.T) {
 		{"resume_review", "building"},
 		{"resume_review", "pr_review"},
 		{"resume_review", "cancelled"},
+		{"pr_review", "closed"},
 	}
 	for _, transition := range requiredTransitions {
 		line := "- `" + transition[0] + " -> " + transition[1] + "`"

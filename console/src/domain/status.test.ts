@@ -38,7 +38,7 @@ describe("statusForToken maps every known chip literal", () => {
     ["approved", "done"],
     ["changes_requested", "needsHuman"],
     ["merged", "done"],
-    ["closed", "failed"],
+    ["closed", "ended"],
     ["open", "working"],
     ["draft", "working"],
     // Run state.

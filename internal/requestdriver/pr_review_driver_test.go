@@ -331,9 +331,17 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			wantRequest:   request.StatePRReview,
 		},
 		{
-			name:        "closed without merging: request halted",
+			name:        "closed without merging: ticket PRState closed, request closed",
 			state:       forge.ReviewState{State: "CLOSED"},
-			wantRequest: request.StateHalted,
+			wantPRState: "closed",
+			wantRequest: request.StateClosed,
+		},
+		{
+			// An empty or unknown state is a read the poll does not trust:
+			// it must never end the request.
+			name:        "state neither open, merged nor closed: request stays in pr_review",
+			state:       forge.ReviewState{State: ""},
+			wantRequest: request.StatePRReview,
 		},
 		{
 			name:        "merged: ticket PRState merged, request done (single ticket)",
@@ -1122,6 +1130,49 @@ func TestAdvancePRReviewMergedStopsPolling(t *testing.T) {
 	}
 	if r.State != request.StateDone {
 		t.Errorf("request state = %q, want done (every ticket merged)", r.State)
+	}
+}
+
+// TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests: ticket 1's
+// pull request closed without merging ends the request as closed at once,
+// with ticket 2's still-open pull request left for a person, no longer
+// reported ready to merge, and the operator told.
+func TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 2)
+	r.Tickets[1].PRState = "ready"
+	r.Tickets[1].MergeReadiness = &request.MergeReadiness{Ready: true}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: forge.PRStateClosed}, nil)
+
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	saved, err := request.Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.State != request.StateClosed {
+		t.Fatalf("request state = %q, want closed", saved.State)
+	}
+	if saved.Tickets[0].PRState != "closed" {
+		t.Errorf("ticket 1 PRState = %q, want closed", saved.Tickets[0].PRState)
+	}
+	if saved.Tickets[1].MergeReadiness != nil {
+		t.Errorf("ticket 2 MergeReadiness = %+v, want nil once the request is closed", saved.Tickets[1].MergeReadiness)
+	}
+	if next := saved.NextAction(); !strings.Contains(next, r.Tickets[1].PRURL) {
+		t.Errorf("NextAction = %q, want it to name ticket 2's open pull request", next)
+	}
+	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, r.ID))
+	if err != nil {
+		t.Fatalf("read notifications.log: %v", err)
+	}
+	if !strings.Contains(string(log), "Pull request closed: request closed") || !strings.Contains(string(log), r.Tickets[1].PRURL) {
+		t.Errorf("notifications.log = %s, want the closed notice naming ticket 2's open pull request", log)
 	}
 }
 

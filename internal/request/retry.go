@@ -203,7 +203,7 @@ func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, open
 		return nil, fmt.Errorf("request %s: ticket index %d is out of range [0,%d] %w", id, r.TicketIndex, r.TicketCount, ErrIllegalTransition)
 	}
 	// A ticket that already has a PR was halted out of pr_review (review
-	// rounds exhausted, a rejected push, a PR closed by hand): resume
+	// rounds exhausted, a rejected push): resume
 	// watching that PR rather than rebuilding the ticket, which would try
 	// to open a second PR on the same branch.
 	var ticket *Ticket

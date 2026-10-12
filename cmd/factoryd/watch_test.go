@@ -737,6 +737,7 @@ func TestWatchRequestHints(t *testing.T) {
 		{"halted", request.StateHalted, "factoryd retry", true},
 		{"quarantined", request.StateQuarantined, "factoryd retry", true},
 		{"cancelled", request.StateCancelled, "", true},
+		{"closed", request.StateClosed, "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

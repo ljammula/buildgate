@@ -1,8 +1,8 @@
 import {
-  CircleAlert,
   CircleCheck,
   GitPullRequest,
   Hammer,
+  ListChecks,
   type LucideIcon,
   PencilLine,
 } from "lucide-react";
@@ -11,10 +11,11 @@ import type { BoardColumn } from "@/domain/boardColumns";
 
 /**
  * What tells one column from the next at a glance: an icon for its heading
- * and the tint of the heading's band. The tone is who has the work: amber
- * waits on the operator, teal is the factory's, grey waits on a reviewer,
- * green is finished. These are a column's marks, not a state's: a state's
- * icon comes from `ui/statusIcons`.
+ * and the tint of the heading's band. The columns are the pipeline's stages,
+ * so the factory's three are teal, PR review (on its reviewers) grey and
+ * Finished green. Who has to act is not a column's mark: a card that waits
+ * on the operator carries its own amber edge. These are a column's marks, not
+ * a state's: a state's icon comes from `ui/statusIcons`.
  */
 export interface ColumnMark {
   readonly icon: LucideIcon;
@@ -22,39 +23,41 @@ export interface ColumnMark {
   readonly text: string;
   /** The heading band: its tint and its edge. */
   readonly band: string;
-  /** Whose move it is, in one line: the heading's hover text. */
+  /** What the column holds, in one line: the heading's hover text. */
   readonly meaning: string;
 }
 
+const factoryTone = {
+  text: "text-tone-info",
+  band: "bg-tone-info-soft/60 border-tone-info-border",
+} as const;
+
 export const columnMarks: Readonly<Record<BoardColumn, ColumnMark>> = {
-  drafting: {
+  spec: {
     icon: PencilLine,
-    text: "text-tone-info",
-    band: "bg-tone-info-soft/60 border-tone-info-border",
-    meaning: "The factory is writing the spec, the oracles or the plan",
+    ...factoryTone,
+    meaning: "The spec and its acceptance tests: drafted by the factory, reviewed by you",
   },
-  needsYou: {
-    icon: CircleAlert,
-    text: "text-tone-warning",
-    band: "bg-tone-warning-soft/60 border-tone-warning-border",
-    meaning: "Waiting on you: a review to pass, or something stuck to unblock",
+  plan: {
+    icon: ListChecks,
+    ...factoryTone,
+    meaning: "The tickets: planned by the factory, reviewed by you",
   },
   building: {
     icon: Hammer,
-    text: "text-tone-info",
-    band: "bg-tone-info-soft/60 border-tone-info-border",
+    ...factoryTone,
     meaning: "The factory is building tickets in the sandbox",
   },
   prReview: {
     icon: GitPullRequest,
     text: "text-tone-neutral",
     band: "bg-tone-neutral-soft/60 border-tone-neutral-border",
-    meaning: "Pull requests are open and wait on their reviewers",
+    meaning: "Pull requests are open: the factory answers reviewers, a person merges",
   },
-  done: {
+  finished: {
     icon: CircleCheck,
     text: "text-tone-success",
     band: "bg-tone-success-soft/60 border-tone-success-border",
-    meaning: "Finished requests",
+    meaning: "Merged, closed without merging, or cancelled",
   },
 };

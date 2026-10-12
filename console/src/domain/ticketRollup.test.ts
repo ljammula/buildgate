@@ -185,3 +185,18 @@ test("a building ticket beside a ready PR shows both buckets", () => {
   );
   expect(new Set(labelled(entries))).toEqual(new Set(["1 awaiting review", "1 building"]));
 });
+
+test("a closed request's tickets end with it: its closed PR, and the tickets it will never build", () => {
+  const closed = requestOf({ state: "closed", ticketIndex: 1 });
+  expect(ticketStatus(ticketOf({ index: 1, prState: "closed" }), closed)).toBe("ended");
+  expect(ticketStatus(ticketOf({ index: 2 }), closed)).toBe("ended");
+  expect(ticketStatus(ticketOf({ index: 2, runId: "run-2" }), closed)).toBe("ended");
+  expect(
+    labelled(
+      computeTicketRollup(
+        [ticketOf({ index: 1, prState: "closed" }), ticketOf({ index: 2 })],
+        closed,
+      ),
+    ),
+  ).toEqual(["2 closed"]);
+});

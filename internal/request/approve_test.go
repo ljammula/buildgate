@@ -55,7 +55,7 @@ func TestApproveFromEachState(t *testing.T) {
 	allStates := []State{
 		StateSubmitted, StateSpecDrafting, StateSpecReview,
 		StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
-		StateDone, StateQuarantined, StateHalted, StateCancelled,
+		StateDone, StateClosed, StateQuarantined, StateHalted, StateCancelled,
 	}
 	for _, state := range allStates {
 		t.Run(string(state), func(t *testing.T) {
@@ -110,7 +110,7 @@ func TestRejectFromEachState(t *testing.T) {
 	allStates := []State{
 		StateSubmitted, StateSpecDrafting, StateSpecReview,
 		StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
-		StateDone, StateQuarantined, StateHalted, StateCancelled,
+		StateDone, StateClosed, StateQuarantined, StateHalted, StateCancelled,
 	}
 	for _, state := range allStates {
 		t.Run(string(state), func(t *testing.T) {

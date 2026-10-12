@@ -38,7 +38,9 @@ const WORKING_STATES: ReadonlySet<string> = new Set([
   "building",
   "pr_review",
 ]);
-const DONE_STATES: ReadonlySet<string> = new Set(["done"]);
+// closed: a pull request closed without merging ended the request. Finished,
+// like done: nothing in it waits on anyone.
+const DONE_STATES: ReadonlySet<string> = new Set(["done", "closed"]);
 const FAILED_STATES: ReadonlySet<string> = new Set(["cancelled"]);
 
 export function requestStageGroup(state: string): RequestStageGroup {

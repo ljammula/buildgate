@@ -3156,6 +3156,9 @@ func quickstartReportRequestState(dataDir string, r *request.Request, w io.Write
 	case request.StateDone:
 		fmt.Fprintf(w, "Request %s is done -- check its pull request with: factoryd status%s\n", r.ID, arg)
 		return nil
+	case request.StateClosed:
+		fmt.Fprintf(w, "Request %s is closed: its pull request was closed without merging.\n", r.ID)
+		return nil
 	default:
 		fmt.Fprintf(w, "Request %s is now %s -- keep watching with: factoryd watch%s %s (or factoryd status%s for a one-shot snapshot)\n", r.ID, r.State, arg, r.ID, arg)
 		return nil

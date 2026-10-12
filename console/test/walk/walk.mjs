@@ -170,14 +170,18 @@ async function showWholeGroups() {
 }
 const card = (id) => page.getByTestId(`card-${id}`);
 
-// The states of each board column, as the server names them. A pr_review
-// request is in "PR review" or "Needs you" by its pull requests' states, so
-// those two are checked together.
+// The states of each board column, as the server names them. A stuck
+// request (halted, quarantined, resume_review) is in the column of the step
+// it stopped at, so a column holds at least its own states, and the four
+// stage columns together hold every request that is not finished.
 const columnStates = {
-  Drafting: ["submitted", "spec_drafting", "oracle_drafting", "planning"],
+  Spec: ["submitted", "spec_drafting", "spec_review", "oracle_drafting", "oracle_review"],
+  Plan: ["planning", "plan_review"],
   Building: ["building"],
-  Done: ["done"],
+  "PR review": ["pr_review"],
+  Finished: ["done", "closed"],
 };
+const finishedStates = ["done", "closed", "cancelled"];
 
 step("mission-control", async () => {
   // The seeded requests are weeks old: with the default 7-day window the
@@ -187,7 +191,7 @@ step("mission-control", async () => {
   await showView("Board");
   const listed = (await api("/requests")).body;
   const counts = {};
-  for (const name of ["Drafting", "Needs you", "Building", "PR review", "Done"]) {
+  for (const name of Object.keys(columnStates)) {
     const text = await board()
       .getByRole("heading", { name: new RegExp(`^${name} \\(\\d+\\)$`) })
       .innerText();
@@ -195,15 +199,16 @@ step("mission-control", async () => {
   }
   for (const [name, states] of Object.entries(columnStates)) {
     const want = listed.filter((r) => states.includes(r.state)).length;
-    check(counts[name] === want, `${name} counts ${counts[name]}, the server has ${want}`);
+    check(counts[name] >= want, `${name} counts ${counts[name]}, the server has ${want} at least`);
   }
-  const elsewhere = listed.filter(
-    (r) => r.state !== "cancelled" && !Object.values(columnStates).flat().includes(r.state),
-  ).length;
+  const finishedWant = listed.filter((r) => columnStates.Finished.includes(r.state)).length;
   check(
-    counts["Needs you"] + counts["PR review"] === elsewhere,
-    `Needs you and PR review hold ${counts["Needs you"] + counts["PR review"]} cards, the server has ${elsewhere}`,
+    counts.Finished === finishedWant,
+    `Finished counts ${counts.Finished}, the server has ${finishedWant}`,
   );
+  const inFlight = listed.filter((r) => !finishedStates.includes(r.state)).length;
+  const staged = counts.Spec + counts.Plan + counts.Building + counts["PR review"];
+  check(staged === inFlight, `the stage columns hold ${staged} cards, the server has ${inFlight}`);
   // The running build's facts are on its card, from the list alone.
   const building = listed.find((r) => r.build !== undefined);
   check(building !== undefined, "the seeded data has no running build");
@@ -311,14 +316,14 @@ step("mission-control", async () => {
   await button("Working", { exact: true }).click();
   await page.waitForURL(/group=working/);
   await board()
-    .getByRole("heading", { name: /^Needs you \(/ })
+    .getByRole("heading", { name: /^Finished \(/ })
     .waitFor({ state: "detached" });
   await board()
     .getByRole("heading", { name: /^Building \(/ })
     .waitFor();
   await button("Working", { exact: true }).click();
   await board()
-    .getByRole("heading", { name: /^Needs you \(/ })
+    .getByRole("heading", { name: /^Finished \(/ })
     .waitFor();
 });
 
@@ -333,23 +338,23 @@ step("mission-control-window", async () => {
   check(await on("7 days"), "7 days is not the default window");
   const listed = (await api("/requests")).body;
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const finished = listed.filter((r) => r.state === "done" || r.state === "cancelled");
+  const finished = listed.filter((r) => finishedStates.includes(r.state));
   const old = finished.filter((r) => Date.parse(r.updated_at) < weekAgo);
   const doneCount = async () =>
     Number(
       /\((\d+)\)/.exec(
         await board()
-          .getByRole("heading", { name: /^Done \(\d+\)$/ })
+          .getByRole("heading", { name: /^Finished \(\d+\)$/ })
           .innerText(),
       )[1],
     );
-  const doneNow = (rows) => rows.filter((r) => r.state === "done").length;
+  const doneNow = (rows) => rows.filter((r) => r.state !== "cancelled").length;
   check(old.length > 0, "the seeded data has no finished request older than a week");
   const inWeek = doneNow(finished.filter((r) => !old.includes(r)));
-  check((await doneCount()) === inWeek, `Done shows ${await doneCount()}, want ${inWeek}`);
+  check((await doneCount()) === inWeek, `Finished shows ${await doneCount()}, want ${inWeek}`);
   await page.getByTestId("older-hidden").getByText(`${old.length} older hidden`).waitFor();
   // What waits or runs is in view at any age.
-  const inFlight = listed.filter((r) => r.state !== "done" && r.state !== "cancelled");
+  const inFlight = listed.filter((r) => !finishedStates.includes(r.state));
   check(
     inFlight.some((r) => Date.parse(r.updated_at) < weekAgo),
     "the seeded data has no old request in flight",
@@ -364,7 +369,7 @@ step("mission-control-window", async () => {
   await page.getByTestId("older-hidden").waitFor({ state: "detached" });
   check(
     (await doneCount()) === doneNow(finished),
-    `Done shows ${await doneCount()} over all time, want ${doneNow(finished)}`,
+    `Finished shows ${await doneCount()} over all time, want ${doneNow(finished)}`,
   );
   await page.getByTestId("numbers-window").getByText("All time").waitFor();
   // A link keeps the window; 7 days takes it out of the URL again.
@@ -392,15 +397,15 @@ step("mission-control-review", async () => {
   // text on screen. Nothing is written here, so no request is used up.
   await visit("/");
   await showView("Board");
-  const needsYou = board().getByRole("list", { name: "Needs you" });
-  await needsYou.getByTestId("card-req-spec-review").waitFor();
+  const spec = board().getByRole("list", { name: "Spec" });
+  await spec.getByTestId("card-req-spec-review").waitFor();
   check(
     (await board()
       .getByRole("button", { name: /approve/i })
       .count()) === 0,
     "a card offers Approve",
   );
-  // A Needs-you card is compact: its controls open while it is hovered or
+  // A review card is compact: its controls open while it is hovered or
   // holds the focus.
   for (const id of ["req-spec-review", "req-plan-review", "req-oracle-review"]) {
     await card(id).hover();

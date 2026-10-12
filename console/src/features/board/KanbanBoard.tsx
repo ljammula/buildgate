@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import {
   type Board,
   type BoardColumn,
+  type GroupChip,
   activeGroup,
   boardColumnLabels,
   groupChips,
@@ -27,7 +28,7 @@ export interface KanbanBoardProps {
   readonly collapsedLanes: CollapsedLanes;
   readonly showCancelled: boolean;
   readonly onShowCancelled: (show: boolean) => void;
-  /** Finished requests the time window left out of Done. */
+  /** Finished requests the time window left out of the Finished column. */
   readonly olderHidden: number;
   readonly onShowAllTime: () => void;
   readonly canWrite: boolean;
@@ -47,6 +48,49 @@ export interface KanbanBoardProps {
 function ColumnIcon({ column }: { column: BoardColumn }) {
   const { icon: Icon, text } = columnMarks[column];
   return <Icon aria-hidden className={cn("size-4 shrink-0", text)} />;
+}
+
+/** A column's summary chips, one per group, when it has more than one group. */
+function ColumnChips({
+  column,
+  chips,
+  only,
+  onPress,
+}: {
+  readonly column: BoardColumn;
+  readonly chips: readonly GroupChip[];
+  readonly only: string | null;
+  readonly onPress: (column: BoardColumn, label: string | null) => void;
+}) {
+  if (chips.length <= 1) return null;
+  return (
+    <div
+      role="group"
+      aria-label={`${boardColumnLabels[column]} groups`}
+      className="flex min-w-0 flex-wrap items-center gap-1"
+    >
+      {/* Pressing the chip in force, or All, shows every group again. */}
+      <FilterChip
+        pressed={only === null}
+        onPressedChange={() => {
+          onPress(column, null);
+        }}
+      >
+        All
+      </FilterChip>
+      {chips.map((chip) => (
+        <FilterChip
+          key={chip.label}
+          pressed={only === chip.label}
+          onPressedChange={() => {
+            onPress(column, only === chip.label ? null : chip.label);
+          }}
+        >
+          {`${chip.short} ${chip.count}`}
+        </FilterChip>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -77,24 +121,44 @@ export function KanbanBoard({
   className,
 }: KanbanBoardProps) {
   const laned = board.lanes.length > 1;
-  // The summary chips of Needs you, over every lane. The one pressed is view
-  // state for this visit: not stored, not in the URL.
-  const chips = groupChips(
-    "needsYou",
-    board.lanes.flatMap((lane) => lane.cells.needsYou.requests),
+  // The summary chips of each column, over every lane. The one pressed in a
+  // column is view state for this visit: not stored, not in the URL.
+  const chips = new Map<BoardColumn, GroupChip[]>(
+    columns.map((column) => [
+      column,
+      groupChips(
+        column,
+        board.lanes.flatMap((lane) => lane.cells[column].requests),
+      ),
+    ]),
   );
-  const [pressedGroup, setPressedGroup] = useState<string | null>(null);
-  const onlyGroup = activeGroup(pressedGroup, chips);
-  // The chosen group has emptied: forget the choice, so the column is not
+  const [pressedGroups, setPressedGroups] = useState<Partial<Record<BoardColumn, string>>>({});
+  const onlyGroups: Partial<Record<BoardColumn, string>> = {};
+  for (const [column, columnChips] of chips) {
+    const only = activeGroup(pressedGroups[column] ?? null, columnChips);
+    if (only !== null) onlyGroups[column] = only;
+  }
+  // A chosen group has emptied: forget the choice, so the column is not
   // narrowed again, unasked, when that group next holds a card.
-  if (pressedGroup !== null && onlyGroup === null) setPressedGroup(null);
+  if (Object.keys(pressedGroups).some((column) => !(column in onlyGroups))) {
+    setPressedGroups(onlyGroups);
+  }
+  const press = (column: BoardColumn, label: string | null): void => {
+    const next: Partial<Record<BoardColumn, string>> = {};
+    for (const [other, only] of Object.entries(onlyGroups) as [BoardColumn, string][]) {
+      if (other !== column) next[other] = only;
+    }
+    if (label !== null) next[column] = label;
+    setPressedGroups(next);
+  };
+  const waiting = board.lanes.reduce((sum, lane) => sum + lane.waiting, 0);
   const lanes = board.lanes.map((lane) => (
     <KanbanLane
       key={lane.project}
       lane={lane}
       columns={columns}
       counts={board.counts}
-      onlyGroup={onlyGroup}
+      onlyGroups={onlyGroups}
       headed={laned}
       collapsed={collapsedLanes.isCollapsed(lane.project)}
       onToggle={() => {
@@ -112,16 +176,24 @@ export function KanbanBoard({
   ));
   return (
     <section aria-label="Board" className={cn("flex min-h-0 flex-col gap-2", className)}>
-      {board.cancelled > 0 ? (
-        <div className="flex shrink-0 justify-end">
-          <FilterChip
-            pressed={showCancelled}
-            onPressedChange={() => {
-              onShowCancelled(!showCancelled);
-            }}
-          >
-            {`Show cancelled (${board.cancelled})`}
-          </FilterChip>
+      {board.cancelled > 0 || waiting > 0 ? (
+        <div className="flex shrink-0 items-center justify-end gap-3">
+          {/* Triage is the screen for deciding one after another. */}
+          {waiting > 0 ? (
+            <Link to={triagePath()} className="text-accent text-xs hover:underline">
+              {`Open in Triage (${waiting === 1 ? "1 waits" : `${waiting} wait`} on you)`}
+            </Link>
+          ) : null}
+          {board.cancelled > 0 ? (
+            <FilterChip
+              pressed={showCancelled}
+              onPressedChange={() => {
+                onShowCancelled(!showCancelled);
+              }}
+            >
+              {`Show cancelled (${board.cancelled})`}
+            </FilterChip>
+          ) : null}
         </div>
       ) : null}
       {/* Focusable, so the keyboard can scroll it sideways too. */}
@@ -141,7 +213,7 @@ export function KanbanBoard({
                 data-testid={`column-${column}`}
                 data-narrow={isNarrowColumn(column, board.counts) || undefined}
                 className={cn(
-                  columnWidthClass(column, isNarrowColumn(column, board.counts)),
+                  columnWidthClass(isNarrowColumn(column, board.counts)),
                   "flex flex-col gap-0.5 border px-2 py-0.5",
                   laned ? "rounded-md" : "rounded-t-md",
                   columnMarks[column].band,
@@ -156,42 +228,14 @@ export function KanbanBoard({
                     {boardColumnLabels[column]}{" "}
                     <span className="text-fg-muted font-normal">{`(${board.counts[column]})`}</span>
                   </h2>
-                  {column === "needsYou" && chips.length > 1 ? (
-                    <div
-                      role="group"
-                      aria-label="Needs you groups"
-                      className="flex min-w-0 flex-wrap items-center gap-1"
-                    >
-                      {/* Pressing the chip in force, or All, shows every group again. */}
-                      <FilterChip
-                        pressed={onlyGroup === null}
-                        onPressedChange={() => {
-                          setPressedGroup(null);
-                        }}
-                      >
-                        All
-                      </FilterChip>
-                      {chips.map((chip) => (
-                        <FilterChip
-                          key={chip.label}
-                          pressed={onlyGroup === chip.label}
-                          onPressedChange={() => {
-                            setPressedGroup(onlyGroup === chip.label ? null : chip.label);
-                          }}
-                        >
-                          {`${chip.short} ${chip.count}`}
-                        </FilterChip>
-                      ))}
-                    </div>
-                  ) : null}
-                  {/* Triage is the screen for deciding one after another. */}
-                  {column === "needsYou" && board.counts.needsYou > 0 ? (
-                    <Link to={triagePath()} className="text-accent ml-auto text-xs hover:underline">
-                      Open in Triage
-                    </Link>
-                  ) : null}
+                  <ColumnChips
+                    column={column}
+                    chips={chips.get(column) ?? []}
+                    only={onlyGroups[column] ?? null}
+                    onPress={press}
+                  />
                 </div>
-                {column === "done" ? (
+                {column === "finished" ? (
                   <OlderHiddenNote count={olderHidden} onShowAllTime={onShowAllTime} />
                 ) : null}
               </div>
@@ -215,7 +259,7 @@ export function KanbanBoard({
                   key={column}
                   aria-label={boardColumnLabels[column]}
                   className={cn(
-                    columnWidthClass(column, isNarrowColumn(column, board.counts)),
+                    columnWidthClass(isNarrowColumn(column, board.counts)),
                     isNarrowColumn(column, board.counts)
                       ? "p-2"
                       : "bg-surface-sunken min-h-14 rounded-md p-2",

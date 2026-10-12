@@ -52,7 +52,7 @@ import time
 FIXTURES = pathlib.Path(__file__).resolve().parent / "live-round"
 ADDRESSED = re.compile(r"^Addressed in ([0-9a-f]{7,40})\.$")
 NOT_PUSHED = re.compile(r"^Attempted in corrective round (\d+) of (\d+)")
-STOPPED = {"halted", "quarantined", "cancelled", "done", "resume_review"}
+STOPPED = {"halted", "quarantined", "cancelled", "done", "closed", "resume_review"}
 
 
 def results_file():
@@ -251,10 +251,12 @@ class Round:
 	def cleanup(self):
 		if os.environ.get("LIVE_ROUND_KEEP") == "1":
 			return
-		if self.pr:
-			self.gh("pr", "close", self.pr, "--delete-branch", check=False)
+		# Cancel first: closing the pull request ends the request as closed,
+		# which a cancel then refuses.
 		if self.request:
 			self.factoryd("cancel", "-reason", "live-round fixture finished", self.request, check=False)
+		if self.pr:
+			self.gh("pr", "close", self.pr, "--delete-branch", check=False)
 
 	def run(self):
 		for name, value in (("LIVE_ROUND_REPO", self.repo), ("LIVE_ROUND_REVIEWER", self.reviewer)):

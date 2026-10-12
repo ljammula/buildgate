@@ -20,13 +20,21 @@ export interface TicketRollupEntry {
 // order, which is presentational rather than a spec: an operator
 // scanning this strip for the one thing they need to act on should find
 // it first, matching the "visibility first" triage principle.
-const DISPLAY_ORDER: readonly Status[] = ["needsHuman", "working", "unknown", "done", "failed"];
+const DISPLAY_ORDER: readonly Status[] = [
+  "needsHuman",
+  "working",
+  "unknown",
+  "done",
+  "ended",
+  "failed",
+];
 
 const LABELS: Readonly<Record<Status, string>> = {
   needsHuman: "changes requested",
   working: "building",
   unknown: "queued",
   done: "done",
+  ended: "closed",
   failed: "stopped",
 };
 
@@ -68,6 +76,8 @@ export function ticketStatus(ticket: RequestTicket, request: RequestSummary): St
       request.state === "done" ||
       requestAwaitingPullRequest(request));
   if (pastThisTicket || currentTicketAccepted) return "done";
+  // A closed request builds nothing more: a ticket with no pull request ends with it.
+  if (request.state === "closed") return "ended";
   // The current ticket of a request that stopped (quarantined, cancelled,
   // or halted for a reason other than a missing PR) is not building.
   const stopped =

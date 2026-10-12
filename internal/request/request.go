@@ -71,6 +71,10 @@ const (
 	StateResumeReview State = "resume_review"
 	// StateDone is terminal: every ticket's PR has merged.
 	StateDone State = "done"
+	// StateClosed is terminal: a ticket's PR was closed without merging.
+	// Like done it is an outcome, not a failure: the factory never re-opens
+	// a pull request a person closed.
+	StateClosed State = "closed"
 	// StateQuarantined is terminal: a structural or gate failure the
 	// operator must resolve by hand. Error names the reason.
 	StateQuarantined State = "quarantined"
@@ -82,7 +86,7 @@ const (
 )
 
 // nonTerminalStates are the states Quarantine/Halt may move a request out
-// of -- every state except the four terminal ones themselves.
+// of -- every state except the five terminal ones themselves.
 var nonTerminalStates = []State{
 	StateSubmitted, StateSpecDrafting, StateSpecReview,
 	StateOracleDrafting, StateOracleReview,
@@ -95,8 +99,8 @@ var nonTerminalStates = []State{
 // still terminal end states in every other sense (nothing else ever
 // leaves them), but with no cancel path a dead quarantined/halted
 // request could never be dismissed -- `factoryd cancel` on one used to
-// fail outright. done is deliberately excluded: it is a genuine success
-// outcome, not a dead end, and must stay immutable.
+// fail outright. done and closed are deliberately excluded: each is a
+// final outcome, not a dead end, and must stay immutable.
 var cancellableStates = []State{
 	StateSubmitted, StateSpecDrafting, StateSpecReview,
 	StateOracleDrafting, StateOracleReview,
@@ -153,8 +157,8 @@ type Ticket struct {
 	// stacked on another ticket's unmerged PR: waiting on a human to merge
 	// that one), "ready" (draft cleared, gh pr ready called), "approved"
 	// (ReviewDecision == approved), "merged", or
-	// "closed" (closed without merging -- the request halts in this
-	// case, see advancePRReview's own doc comment).
+	// "closed" (closed without merging -- the request ends as closed,
+	// see handleClosedOrMergedTicket).
 	PRState string `json:"pr_state,omitempty"`
 	// MergeReadiness is the PR-review poll's last check of whether this
 	// ticket's open pull request is ready to merge. Nil until a poll has
@@ -1210,6 +1214,21 @@ func (r *Request) Complete(now time.Time) error {
 	return advance(r, []State{StatePRReview}, StateDone, factoryActor, "PR merged", now)
 }
 
+// Close moves a request from pr_review to closed, once a ticket's PR has
+// been closed without merging. reason, naming the pull request, is recorded
+// on the appended History entry. No ticket's pull request is ready to merge
+// for the request any more, so every MergeReadiness is cleared; a pull
+// request still open stays named by NextAction.
+func (r *Request) Close(reason string, now time.Time) error {
+	if err := advance(r, []State{StatePRReview}, StateClosed, factoryActor, reason, now); err != nil {
+		return err
+	}
+	for i := range r.Tickets {
+		r.Tickets[i].MergeReadiness = nil
+	}
+	return nil
+}
+
 // Quarantine moves a request from any non-terminal state to quarantined,
 // recording reason on Error and on the appended History entry.
 func (r *Request) Quarantine(reason string, now time.Time) error {
@@ -1450,9 +1469,27 @@ func (r *Request) NextAction() string {
 		return r.haltedNextAction()
 	case StatePRReview:
 		return r.prReviewNextAction()
+	case StateClosed:
+		return r.closedNextAction()
 	default:
 		return ""
 	}
+}
+
+// closedNextAction is NextAction's StateClosed branch: the request is over,
+// but a pull request of another ticket may still be open, and only a person
+// merges or closes it. Empty when none is.
+func (r *Request) closedNextAction() string {
+	var open []string
+	for _, t := range r.Tickets {
+		if t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
+			open = append(open, t.PRURL)
+		}
+	}
+	if len(open) == 0 {
+		return ""
+	}
+	return "still open, merge or close by hand: " + strings.Join(open, ", ")
 }
 
 // prReviewNextAction is NextAction's own StatePRReview branch: what each
@@ -1802,6 +1839,29 @@ func (r *Request) ClearReminderState() {
 func (r *Request) InStateSince() (since time.Time, ok bool) {
 	at, err := time.Parse(time.RFC3339Nano, r.EnteredAt)
 	return at, err == nil
+}
+
+// AllStates returns every request state, in lifecycle order.
+func AllStates() []State {
+	return []State{
+		StateSubmitted, StateSpecDrafting, StateSpecReview,
+		StateOracleDrafting, StateOracleReview,
+		StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
+		StateResumeReview, StateDone, StateClosed,
+		StateQuarantined, StateHalted, StateCancelled,
+	}
+}
+
+// Finished reports whether a request in s can never move again: done,
+// closed or cancelled. halted and quarantined are not finished: retry, send
+// back and amend scope revive them.
+func (s State) Finished() bool {
+	switch s {
+	case StateDone, StateClosed, StateCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 // RunsJob reports whether the request driver runs a job (drafting,

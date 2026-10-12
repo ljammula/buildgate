@@ -1,10 +1,11 @@
 import type { RequestSummary } from "@/domain/request";
-import { statusForToken, statusIconForToken, type StatusIcon } from "@/domain/status";
+import { statusForToken, statusIconForToken, statusTone, type StatusIcon } from "@/domain/status";
 import { DigestedText } from "@/shared/request/DigestedText";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { ElapsedText } from "@/ui/Time";
 import { cn } from "@/ui/cn";
 import { statusIcons } from "@/ui/statusIcons";
+import { toneClasses } from "@/ui/tone";
 
 import {
   type PipelineStep,
@@ -123,7 +124,13 @@ export function PipelineStepper({ request }: { readonly request: RequestSummary 
           className="border-border mt-1 flex gap-2 border-t pt-2"
         >
           {OutcomeIcon === null ? null : (
-            <OutcomeIcon aria-hidden="true" className="text-tone-danger mt-0.5 size-4 shrink-0" />
+            <OutcomeIcon
+              aria-hidden="true"
+              className={cn(
+                toneClasses[statusTone(statusForToken(outcome.state))].text,
+                "mt-0.5 size-4 shrink-0",
+              )}
+            />
           )}
           <div className="min-w-0 text-sm">
             <p className="font-semibold">{outcome.label}</p>
