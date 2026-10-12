@@ -30,7 +30,6 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 47 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 30 cmd/factoryd/watch.go printRunRecap
-30 cmd/factoryd/watch.go watchRequest
 27 cmd/factoryd/worker_config.go loadWorkerConfig
 32 cmd/factoryd/worker_uid_separation_live_test.go TestWorkerUIDSeparationLiveDocker
 32 internal/api/server.go (*Server).computeCostSummary

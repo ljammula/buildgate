@@ -36,36 +36,61 @@ func workerHeartbeatPath(dataDir string) string {
 	return daemonheartbeat.WorkerPath(dataDir)
 }
 
+// inFlightRequests is a list of request ids, one entry per step in flight,
+// oldest started first; a request with two steps in flight is listed twice.
+type inFlightRequests struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+func (l *inFlightRequests) add(id string) {
+	l.mu.Lock()
+	l.ids = append(l.ids, id)
+	l.mu.Unlock()
+	notifyActiveRequestsChanged()
+}
+
+// remove drops one entry of id.
+func (l *inFlightRequests) remove(id string) {
+	l.mu.Lock()
+	if i := slices.Index(l.ids, id); i >= 0 {
+		l.ids = slices.Delete(l.ids, i, i+1)
+	}
+	l.mu.Unlock()
+	notifyActiveRequestsChanged()
+}
+
+func (l *inFlightRequests) clear() {
+	l.mu.Lock()
+	l.ids = nil
+	l.mu.Unlock()
+}
+
+func (l *inFlightRequests) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.ids)
+}
+
 // activeRequests are the requests this process is running a job for right
 // now (worker's request driver, or the worker's jobs-queue steps),
-// published through the heartbeat's ActiveRequests; activeRequestChanged
-// wakes the heartbeat writer so a change is visible immediately rather than
-// on the next tick.
+// published through the heartbeat's ActiveRequests. slotRequests are every
+// request whose step holds a job slot, a pr_review pass included, published
+// as SlotRequests. activeRequestChanged wakes the heartbeat writer so a
+// change to either is visible immediately rather than on the next tick.
 var (
-	activeRequestsMu     sync.Mutex
-	activeRequests       []string
+	activeRequests       inFlightRequests
+	slotRequests         inFlightRequests
 	activeRequestChanged = make(chan struct{}, 1)
 )
 
 // addActiveRequest records id as a request whose job is in flight and asks
 // the heartbeat writer to publish it now.
-func addActiveRequest(id string) {
-	activeRequestsMu.Lock()
-	activeRequests = append(activeRequests, id)
-	activeRequestsMu.Unlock()
-	notifyActiveRequestsChanged()
-}
+func addActiveRequest(id string) { activeRequests.add(id) }
 
 // removeActiveRequest drops one entry of id (its job ended) and asks the
 // heartbeat writer to publish it now.
-func removeActiveRequest(id string) {
-	activeRequestsMu.Lock()
-	if i := slices.Index(activeRequests, id); i >= 0 {
-		activeRequests = slices.Delete(activeRequests, i, i+1)
-	}
-	activeRequestsMu.Unlock()
-	notifyActiveRequestsChanged()
-}
+func removeActiveRequest(id string) { activeRequests.remove(id) }
 
 func notifyActiveRequestsChanged() {
 	select {
@@ -78,17 +103,29 @@ func notifyActiveRequestsChanged() {
 // its task workers have stopped: a step that outlived the stop timeout never
 // reaches removeActiveRequest, and the final heartbeat must not list it.
 func clearActiveRequests() {
-	activeRequestsMu.Lock()
-	activeRequests = nil
-	activeRequestsMu.Unlock()
+	activeRequests.clear()
+	slotRequests.clear()
 }
 
 // currentActiveRequests returns a copy of the requests in flight, oldest
 // started first.
-func currentActiveRequests() []string {
-	activeRequestsMu.Lock()
-	defer activeRequestsMu.Unlock()
-	return slices.Clone(activeRequests)
+func currentActiveRequests() []string { return activeRequests.snapshot() }
+
+// slotHolders is the heartbeat's SlotRequests: the requests running a job
+// first (currentActiveRequests' order), then the other slot holders (pr_review
+// passes), so the first entry, the one a queued request is said to wait
+// behind, is a build or drafting job whenever one runs.
+func slotHolders() []string {
+	jobs := currentActiveRequests()
+	out := slices.Clone(jobs)
+	for _, id := range slotRequests.snapshot() {
+		if i := slices.Index(jobs, id); i >= 0 {
+			jobs = slices.Delete(jobs, i, i+1) // one entry per step
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 // heartbeatRoute is cfg's model route as the heartbeat records it (see
@@ -128,6 +165,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			RouteWorkerModel:    workerModel,
 			GitHubLogin:         githubLogin,
 			ActiveRequests:      currentActiveRequests(),
+			SlotRequests:        slotHolders(),
 			JobSlots:            slots,
 			TemporalAddress:     temporalAddress,
 		})

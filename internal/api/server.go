@@ -1395,6 +1395,10 @@ type WorkerStatus struct {
 	// is "alive".
 	ActiveRequests []string `json:"active_requests,omitempty"`
 	JobSlots       int      `json:"job_slots,omitempty"`
+	// SlotRequests are the requests holding a job slot, a pr_review pass
+	// included (the heartbeat's SlotRequests): what the busy-slot count is
+	// read from. Absent unless State is "alive".
+	SlotRequests []string `json:"slot_requests,omitempty"`
 }
 
 // getWorkerStatus serves GET /queue-run. Read-only; gated by
@@ -1415,7 +1419,7 @@ func (s *Server) getWorkerStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, WorkerStatus{State: "stale", LastHeartbeat: hb.UpdatedAt})
 		return
 	}
-	writeJSON(w, http.StatusOK, WorkerStatus{State: "alive", LastHeartbeat: hb.UpdatedAt, ActiveRequests: hb.ActiveRequests, JobSlots: max(hb.JobSlots, 1)})
+	writeJSON(w, http.StatusOK, WorkerStatus{State: "alive", LastHeartbeat: hb.UpdatedAt, ActiveRequests: hb.ActiveRequests, JobSlots: max(hb.JobSlots, 1), SlotRequests: hb.SlotRequests})
 }
 
 // ProjectSummary is one entry in GET /projects's response: a distinct
@@ -3621,7 +3625,9 @@ type requestQueue struct {
 // be in request.List's order.
 func (s *Server) requestQueueFor(requests []*request.Request) requestQueue {
 	now := time.Now()
-	active, slots := daemonheartbeat.WorkerActiveRequests(s.dataDir, now)
+	// Every request holding a job slot, a pr_review pass included: a full
+	// set of slots is what a request waits for.
+	active, slots := daemonheartbeat.WorkerSlotRequests(s.dataDir, now)
 	queue := requestQueue{waitingOn: request.WaitingOn(requests, active, slots)}
 	// A place in the queue means something only while a worker takes
 	// requests from it.

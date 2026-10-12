@@ -149,6 +149,13 @@ type Heartbeat struct {
 	// behind, which the request records alone can't: an older request can
 	// re-enter a job state while a newer one's build runs.
 	ActiveRequests []string `json:"active_requests,omitempty"`
+	// SlotRequests are the requests whose step holds one of the JobSlots
+	// right now: every entry of ActiveRequests, plus a pr_review pass, which
+	// runs on the jobs queue but is not a job (stop and upgrade do not wait
+	// for it). Running jobs come first, so the first entry is a job whenever
+	// one runs. With every slot held, status and the console say a job-state
+	// request that holds none is waiting for one.
+	SlotRequests []string `json:"slot_requests,omitempty"`
 	// JobSlots is how many jobs the daemon runs at once: max_parallel_jobs
 	// for `factoryd worker`. 0 (no heartbeat) reads as 1.
 	JobSlots int `json:"job_slots,omitempty"`
@@ -177,6 +184,16 @@ func WorkerActiveRequests(dataDir string, now time.Time) (ids []string, slots in
 		return nil, 1
 	}
 	return hb.ActiveRequests, max(hb.JobSlots, 1)
+}
+
+// WorkerSlotRequests returns the SlotRequests and JobSlots of dataDir's
+// worker heartbeat, or (nil, 1) when there is no heartbeat or it is stale.
+func WorkerSlotRequests(dataDir string, now time.Time) (ids []string, slots int) {
+	hb, err := Read(WorkerPath(dataDir))
+	if err != nil || Stale(hb, now, WorkerStaleAfter) {
+		return nil, 1
+	}
+	return hb.SlotRequests, max(hb.JobSlots, 1)
 }
 
 // Write persists hb to path atomically (write to a temp file, then

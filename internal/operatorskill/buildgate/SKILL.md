@@ -27,8 +27,9 @@ another profile:
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
   getting better, per repository and per week (read-only; counts, no model call)
-- `factoryd inbox [-json]`: everything waiting on the operator across every
-  profile, oldest first (it ignores the active profile and needs no `-config`)
+- `factoryd inbox [-config <profile>] [-project <name>] [-json]`: everything
+  waiting on the operator across every profile, oldest first (it ignores the
+  active profile; `-config` narrows it to one, `-project` to one repository)
 - `factoryd inspect [-json] <request-id | run-id>`: the commands that show the
   work before a decision (the command itself only reads). Relay its lines to
   the operator; you may run its `git log` and `git diff` lines and read the files

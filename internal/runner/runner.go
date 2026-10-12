@@ -225,7 +225,7 @@ func subprocessEnv() []string {
 func run(ctx context.Context, dir, logPath string, outputWriter func(*os.File) io.Writer, name string, args ...string) (Result, error) {
 	res := Result{Command: append([]string{name}, args...), StartedAt: time.Now(), ExitCode: -1}
 
-	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	logFile, err := sandbox.CreateLaunchLog(logPath)
 	if err != nil {
 		return res, fmt.Errorf("create log file: %w", err)
 	}

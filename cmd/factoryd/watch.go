@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -753,40 +754,9 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 
 		switch r.State {
 		case request.StateBuilding, request.StatePRReview:
-			if r.TicketIndex < 1 || r.TicketIndex > len(r.Tickets) {
-				return fmt.Errorf("request %s: ticket index %d out of range (%d ticket(s))", r.ID, r.TicketIndex, len(r.Tickets))
+			if done, err := watchRequestTicketStep(out, dataDir, r, noFollow, &lastRunID, wait, func() { sp.Stop("") }); done {
+				return err
 			}
-			ticket := r.Tickets[r.TicketIndex-1]
-			// pr_review waits on a human reviewer, possibly for days: say
-			// so and return, like spec_review/plan_review, rather than
-			// polling silently ("silence is a bug"). Attach to the ticket's
-			// run first if it hasn't been shown yet, so a corrective round
-			// in flight is still followed.
-			if r.State == request.StatePRReview && (ticket.RunID == "" || ticket.RunID == lastRunID) {
-				fmt.Fprintf(out, "waiting on PR review/merge for ticket %d/%d: %s\n", r.TicketIndex, r.TicketCount, ticket.PRURL)
-				return nil
-			}
-			if ticket.RunID == "" || ticket.RunID == lastRunID {
-				if noFollow {
-					if ticket.RunID == "" {
-						fmt.Fprintf(out, "ticket %d/%d has not started a run yet\n", r.TicketIndex, r.TicketCount)
-					}
-					return nil
-				}
-				wait(r)
-				time.Sleep(watchRequestPollInterval)
-				continue
-			}
-			lastRunID = ticket.RunID
-			sp.Stop("")
-			runErr := watchRun(out, dataDir, ticket.RunID, noFollow)
-			if noFollow {
-				return runErr
-			}
-			// Loop back around regardless of runErr: the next iteration
-			// waits (via lastRunID above) until request_driver.go's own
-			// poll has advanced r to its next ticket, pr_review, or a
-			// terminal state, then reports whatever r is now.
 			continue
 		case request.StateSpecReview:
 			fmt.Fprintf(out, "Review the drafted spec, then run: factoryd approve %s\n", r.ID)
@@ -846,6 +816,59 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 	}
 }
 
+// watchRequestTicketStep is one poll of watchRequest for a building or
+// pr_review request: it reports the ticket's state or attaches to its run.
+// done is true when the watch ends here, with err as its result; false means
+// poll again. lastRunID is the run already shown; stopSpinner clears the
+// working line before a run is attached.
+func watchRequestTicketStep(out *os.File, dataDir string, r *request.Request, noFollow bool, lastRunID *string, wait func(*request.Request), stopSpinner func()) (done bool, err error) {
+	pollAgain := func() (bool, error) {
+		wait(r)
+		time.Sleep(watchRequestPollInterval)
+		return false, nil
+	}
+	// Index 0 while building: the plan is approved and ticket 1 has not been
+	// picked up yet (it may be waiting for a job slot).
+	if r.State == request.StateBuilding && r.TicketIndex == 0 && len(r.Tickets) > 0 {
+		if noFollow {
+			fmt.Fprintf(out, "ticket 1/%d has not started a run yet: %s\n", r.TicketCount, requestWaitDetail(dataDir, r))
+			return true, nil
+		}
+		return pollAgain()
+	}
+	if r.TicketIndex < 1 || r.TicketIndex > len(r.Tickets) {
+		return true, fmt.Errorf("request %s: ticket index %d out of range (%d ticket(s))", r.ID, r.TicketIndex, len(r.Tickets))
+	}
+	ticket := r.Tickets[r.TicketIndex-1]
+	// pr_review waits on a human reviewer, possibly for days: say so and
+	// return, like spec_review/plan_review, rather than polling silently
+	// ("silence is a bug"). Attach to the ticket's run first if it hasn't
+	// been shown yet, so a corrective round in flight is still followed.
+	if r.State == request.StatePRReview && (ticket.RunID == "" || ticket.RunID == *lastRunID) {
+		fmt.Fprintf(out, "waiting on PR review/merge for ticket %d/%d: %s\n", r.TicketIndex, r.TicketCount, ticket.PRURL)
+		return true, nil
+	}
+	if ticket.RunID == "" || ticket.RunID == *lastRunID {
+		if noFollow {
+			if ticket.RunID == "" {
+				fmt.Fprintf(out, "ticket %d/%d has not started a run yet: %s\n", r.TicketIndex, r.TicketCount, requestWaitDetail(dataDir, r))
+			}
+			return true, nil
+		}
+		return pollAgain()
+	}
+	*lastRunID = ticket.RunID
+	stopSpinner()
+	runErr := watchRun(out, dataDir, ticket.RunID, noFollow)
+	if noFollow {
+		return true, runErr
+	}
+	// Poll again regardless of runErr: the next poll waits (via lastRunID)
+	// until the request driver has advanced r to its next ticket, pr_review,
+	// or a terminal state, then reports whatever r is now.
+	return false, nil
+}
+
 // newTTYSpinner returns a spinner for w when w is an interactive terminal,
 // or nil otherwise -- for waits that print nothing today and must stay silent
 // in logs, pipes and tests.
@@ -877,19 +900,33 @@ func requestWaitText(dataDir string, r *request.Request) (text string, since tim
 	}
 	switch r.State {
 	case request.StateSubmitted:
-		text += " · waiting for the request driver to pick it up"
+		text += " · " + requestWaitDetail(dataDir, r)
 	case request.StateBuilding:
-		text += fmt.Sprintf(" · ticket %d/%d waiting on the request driver", r.TicketIndex, r.TicketCount)
+		text += fmt.Sprintf(" · ticket %d/%d %s", max(r.TicketIndex, 1), r.TicketCount, requestWaitDetail(dataDir, r))
 	}
-	for i := len(r.History) - 1; i >= 0; i-- {
-		if r.History[i].To == r.State {
-			if at, err := time.Parse(time.RFC3339Nano, r.History[i].At); err == nil {
-				since = at
-			}
-			break
+	since, _ = r.InStateSince()
+	return text, since
+}
+
+// requestWaitDetail says what a request with no job or run in view is waiting
+// for: a job slot, when the worker's heartbeat shows every slot taken (the
+// same answer `factoryd status` gives), else the request driver.
+func requestWaitDetail(dataDir string, r *request.Request) string {
+	requests, err := request.List(dataDir)
+	if err == nil {
+		holders, slots := daemonheartbeat.WorkerSlotRequests(dataDir, time.Now())
+		if waitingOn := request.WaitingOn(requests, holders, slots)[r.ID]; waitingOn != "" {
+			return requestWaitingText(requestStatusEntry{
+				WaitingOn:     waitingOn,
+				QueuePosition: request.QueuePositions(requests, holders, slots)[r.ID],
+				JobSlots:      slots,
+			})
 		}
 	}
-	return text, since
+	if r.State == request.StateSubmitted {
+		return "waiting for the request driver to pick it up"
+	}
+	return "waiting on the request driver"
 }
 
 // renderTransitionLine formats one Request.History entry for `factoryd

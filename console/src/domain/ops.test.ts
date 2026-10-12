@@ -71,6 +71,7 @@ test("GET /queue-run decodes", () => {
     lastHeartbeat: "2026-09-10T09:50:00Z",
     activeRequests: [],
     jobSlots: 0,
+    slotRequests: [],
   });
 });
 
@@ -85,6 +86,7 @@ test("an empty queue-run answer reads as absent", () => {
     lastHeartbeat: "",
     activeRequests: [],
     jobSlots: 0,
+    slotRequests: [],
   });
 });
 
@@ -94,11 +96,13 @@ test("a live worker's queue-run answer names what it runs and its job slots", ()
       state: "alive",
       last_heartbeat: "2026-09-10T09:50:00Z",
       active_requests: ["req-a", "req-b"],
+      slot_requests: ["req-a", "req-b", "req-pr"],
       job_slots: 2,
     },
     "GET /queue-run",
   );
   expect(status.activeRequests).toEqual(["req-a", "req-b"]);
+  expect(status.slotRequests).toEqual(["req-a", "req-b", "req-pr"]);
   expect(status.jobSlots).toBe(2);
 });
 

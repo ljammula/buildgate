@@ -145,6 +145,7 @@ describe("getQueueRunStatus", () => {
       lastHeartbeat: "2026-09-10T09:50:00Z",
       activeRequests: [],
       jobSlots: 0,
+      slotRequests: [],
     });
   });
 

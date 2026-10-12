@@ -127,6 +127,13 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 	}
 	if requestdriver.RequestDriverOwnsState(r.State) {
 		onJobs := a.runsOnJobsQueue(ctx)
+		if onJobs {
+			// Every step on the jobs queue holds a slot, a pr_review pass
+			// included: status says what a request waiting for one is
+			// waiting on.
+			slotRequests.add(id)
+			defer slotRequests.remove(id)
+		}
 		if onJobs && r.State.RunsJob() {
 			// A pr_review poll is not a job, as in worker's driver.
 			addActiveRequest(id)

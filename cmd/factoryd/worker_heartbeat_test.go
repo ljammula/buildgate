@@ -40,8 +40,8 @@ func jobsQueueProbe(t *testing.T, env *testsuite.TestActivityEnvironment) string
 
 // TestAdvanceRequestPublishesTheRequestOnlyOnTheJobsQueue: a step on the jobs
 // task queue occupies a job slot, so its request is in the heartbeat's active
-// list while it runs (the repository-lock wait mark is only for builds); a step
-// on any other queue is not.
+// and slot lists while it runs (the repository-lock wait mark is only for
+// builds); a step on any other queue is in neither.
 func TestAdvanceRequestPublishesTheRequestOnlyOnTheJobsQueue(t *testing.T) {
 	dp := newTestDeps(t)
 	for _, tc := range []struct {
@@ -62,24 +62,25 @@ func TestAdvanceRequestPublishesTheRequestOnlyOnTheJobsQueue(t *testing.T) {
 			}
 			dataDir := t.TempDir()
 			saveRequestInState(t, dataDir, "req-1", request.StateSpecDrafting)
-			var during []string
+			var during, slots []string
 			var waits bool
 			acts := &requestActivities{dp: dp,
 				dataDir:   dataDir,
 				jobsQueue: jobsQueue,
 				specRunner: func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 					during = currentActiveRequests()
+					slots = slotRequests.snapshot()
 					waits = waitsForRepoLock(ctx)
 					return "", nil, errors.New("stop here")
 				},
 			}
 			actEnv.RegisterActivity(acts.AdvanceRequest)
 			_, _ = actEnv.ExecuteActivity(acts.AdvanceRequest, "req-1")
-			if !slices.Equal(during, tc.want) || waits != tc.wantWait {
-				t.Errorf("during the step: active %v, waits %v; want %v, %v", during, waits, tc.want, tc.wantWait)
+			if !slices.Equal(during, tc.want) || !slices.Equal(slots, tc.want) || waits != tc.wantWait {
+				t.Errorf("during the step: active %v, slots %v, waits %v; want %v, %v, %v", during, slots, waits, tc.want, tc.want, tc.wantWait)
 			}
-			if got := currentActiveRequests(); len(got) != 0 {
-				t.Errorf("after the step: active %v, want none", got)
+			if got, slots := currentActiveRequests(), slotRequests.snapshot(); len(got) != 0 || len(slots) != 0 {
+				t.Errorf("after the step: active %v, slots %v, want none", got, slots)
 			}
 		})
 	}
@@ -137,10 +138,14 @@ func TestClearActiveRequests(t *testing.T) {
 		t.Errorf("heartbeat GitHubLogin = %q (err %v), want what the worker found at startup", hb.GitHubLogin, err)
 	}
 	addActiveRequest("lost-3")
+	slotRequests.add("lost-4")
 	clearActiveRequests()
 	stop()
 	if ids, _ := daemonheartbeat.WorkerActiveRequests(dir, time.Now()); len(ids) != 0 {
 		t.Errorf("final heartbeat lists %v, want none", ids)
+	}
+	if ids, _ := daemonheartbeat.WorkerSlotRequests(dir, time.Now()); len(ids) != 0 {
+		t.Errorf("final heartbeat lists slot holders %v, want none", ids)
 	}
 }
 

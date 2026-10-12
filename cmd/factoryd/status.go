@@ -24,11 +24,6 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
-// statusShortIDLen is how many characters of a run's ID this command
-// prints in its default (non-JSON) table — enough to disambiguate runs by
-// eye without the full ID's line-wrapping.
-const statusShortIDLen = 8
-
 // statusEntry is one run's line of `factoryd status` output, in both the
 // -json and human-readable renderings.
 type statusEntry struct {
@@ -175,10 +170,20 @@ type requestStatusEntry struct {
 	// opened).
 	Tickets string `json:"tickets,omitempty"`
 	// WaitingOn is the id of the request the driver is advancing while
-	// this one waits its turn (request.WaitingOn). Without it, a request
+	// this one waits its turn (request.WaitingOn over the heartbeat's slot
+	// holders). Without it, a request
 	// queued behind another showed as plain "building", indistinguishable
 	// from one whose ticket is actually running (C5).
 	WaitingOn string `json:"waiting_on,omitempty"`
+	// QueuePosition is this request's place among those waiting for a job
+	// slot (request.QueuePositions), from 1; 0 when it is not waiting.
+	QueuePosition int `json:"queue_position,omitempty"`
+	// JobSlots is how many jobs the worker runs at once, set only while
+	// this request waits for one.
+	JobSlots int `json:"job_slots,omitempty"`
+	// InState is how long the request has been in State (since EnteredAt):
+	// what tells a request that is stuck from one that is merely old.
+	InState string `json:"in_state,omitempty"`
 }
 
 // requestTicketPRSummary renders requestStatusEntry's own Tickets field:
@@ -245,6 +250,9 @@ func buildRequestStatusEntry(r *request.Request, waitingOn string, now time.Time
 			entry.PullRequestURL = r.Tickets[r.TicketIndex-1].PRURL
 		}
 	}
+	if since, ok := r.InStateSince(); ok {
+		entry.InState = now.Sub(since).Round(time.Second).String()
+	}
 	entry.WaitingOn = waitingOn
 	return entry
 }
@@ -256,6 +264,7 @@ func buildRequestStatusEntry(r *request.Request, waitingOn string, now time.Time
 // to request.List's oldest-first result.
 func buildRequestStatusEntries(requests []*request.Request, active []string, slots int, project string, now time.Time) []requestStatusEntry {
 	waiting := request.WaitingOn(requests, active, slots)
+	positions := request.QueuePositions(requests, active, slots)
 
 	entries := make([]requestStatusEntry, 0, len(requests))
 	for i := len(requests) - 1; i >= 0; i-- {
@@ -263,7 +272,12 @@ func buildRequestStatusEntries(requests []*request.Request, active []string, slo
 		if project != "" && r.Project != project {
 			continue
 		}
-		entries = append(entries, buildRequestStatusEntry(r, waiting[r.ID], now))
+		entry := buildRequestStatusEntry(r, waiting[r.ID], now)
+		if entry.WaitingOn != "" {
+			entry.QueuePosition = positions[r.ID]
+			entry.JobSlots = slots
+		}
+		entries = append(entries, entry)
 	}
 	return entries
 }
@@ -592,8 +606,8 @@ func statusMain(args []string) error {
 	// a console filter instead, and a CLI -request-state would be
 	// speculative ahead of any caller needing it), so requests are only
 	// ever filtered by -project here.
-	activeRequests, jobSlots := daemonheartbeat.WorkerActiveRequests(*dataDir, now)
-	requestEntries := buildRequestStatusEntries(requests, activeRequests, jobSlots, *project, now)
+	slotHolders, jobSlots := daemonheartbeat.WorkerSlotRequests(*dataDir, now)
+	requestEntries := buildRequestStatusEntries(requests, slotHolders, jobSlots, *project, now)
 	entries := buildStatusEntries(runs, *project, *state, *n, now)
 	applyProgressStatus(entries, runs, *dataDir, now)
 
@@ -670,8 +684,25 @@ func statusMain(args []string) error {
 	return printStatusFooter(len(requestEntries) > 0 || len(entries) > 0, heartbeatLine, routeLine, roleLines)
 }
 
+// requestWaitingText is the reason column of a request queued for a job
+// slot: with one slot, the request the worker is advancing; with several,
+// that every slot is taken and the request's place in line, since the
+// request holding the first slot (perhaps a pr_review pass) is not one it
+// waits behind.
+func requestWaitingText(r requestStatusEntry) string {
+	if r.JobSlots <= 1 {
+		return "queued behind " + r.WaitingOn
+	}
+	text := fmt.Sprintf("waiting for a job slot (all %d in use)", r.JobSlots)
+	if r.QueuePosition > 0 {
+		text += fmt.Sprintf(", #%d in line", r.QueuePosition)
+	}
+	return text
+}
+
 // printRequestStatusRows prints one line per request, ids padded to the
-// widest.
+// widest: id, project, state, age since submitted, time in this state,
+// ticket, and the PR, reason or wait.
 func printRequestStatusRows(requestEntries []requestStatusEntry) error {
 	idWidth := 0
 	for _, r := range requestEntries {
@@ -708,9 +739,13 @@ func printRequestStatusRows(requestEntries []requestStatusEntry) error {
 			// the id it's queued behind, the same "asterisk marks a state
 			// this factory annotates" convention accepted* above uses.
 			stateCol = r.State + "*"
-			prOrError = "queued behind " + r.WaitingOn
+			prOrError = requestWaitingText(r)
 		}
-		line := fmt.Sprintf("%-*s  %-24s  %-13s  %-10s  %-7s  %s", idWidth, id, r.Project, stateCol, r.Age, ticketOrDash, prOrError)
+		inState := r.InState
+		if inState == "" {
+			inState = "-"
+		}
+		line := fmt.Sprintf("%-*s  %-24s  %-13s  %-10s  %-10s  %-7s  %s", idWidth, id, r.Project, stateCol, r.Age, inState, ticketOrDash, prOrError)
 		line += requestRowSuffix(r)
 		if _, err := fmt.Fprintln(os.Stdout, line); err != nil {
 			return fmt.Errorf("print request status line: %w", err)
@@ -719,12 +754,27 @@ func printRequestStatusRows(requestEntries []requestStatusEntry) error {
 	return nil
 }
 
-// printRunStatusRows prints one line per run, then its detail lines.
+// runIDColumn is a run's id as the table prints it: its ticket, then the
+// launch suffix (time and process) that tells one build of the ticket from
+// another, so two runs of a request never print alike.
+func runIDColumn(e statusEntry) string {
+	if suffix, ok := strings.CutPrefix(e.ID, e.Ticket+"-"); ok && e.Ticket != "" {
+		return e.Ticket + " " + suffix
+	}
+	return e.ID
+}
+
+// printRunStatusRows prints one line per run (its ticket and launch, its
+// project, state, time, cost and PR or reason), then its detail lines.
 func printRunStatusRows(entries []statusEntry) error {
+	idWidth := 0
 	for _, e := range entries {
-		id := e.ID
-		if len(id) > statusShortIDLen {
-			id = id[:statusShortIDLen]
+		idWidth = max(idWidth, len(runIDColumn(e)))
+	}
+	for _, e := range entries {
+		project := e.Project
+		if e.Repository != "" && e.Repository != e.Project {
+			project += " (repository " + e.Repository + ")"
 		}
 		elapsedOrDuration := e.Elapsed
 		if elapsedOrDuration == "" {
@@ -743,8 +793,8 @@ func printRunStatusRows(entries []statusEntry) error {
 		if e.nonTerminalRun {
 			prOrReason = statusProgressColumn(e)
 		}
-		if _, err := fmt.Fprintf(os.Stdout, "%s  %-24s  %-24s  %-16s  %-13s  %-10s  %-10s  %s\n",
-			id, e.Project, e.Repository, e.Ticket, e.State, elapsedOrDuration, cost, prOrReason); err != nil {
+		if _, err := fmt.Fprintf(os.Stdout, "%-*s  %-24s  %-13s  %-10s  %-10s  %s\n",
+			idWidth, runIDColumn(e), project, e.State, elapsedOrDuration, cost, prOrReason); err != nil {
 			return fmt.Errorf("print status line: %w", err)
 		}
 		for _, line := range statusRunDetailLines(e) {

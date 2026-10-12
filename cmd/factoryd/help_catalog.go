@@ -56,7 +56,7 @@ func commandCatalog() []commandInfo {
 		{"cancel", "<request-id>", "Cancel a request", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newCancelFlags(); return fs }},
 		{"amend-scope", "<request-id> <file>...", "Add files to a quarantined ticket's allowed scope", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newAmendScopeFlags(); return fs }},
 
-		{"inbox", "", "List every request waiting on you, across profiles", groupWatch, func() *flag.FlagSet { fs, _ := newInboxFlags(); return fs }},
+		{"inbox", "", "List every request waiting on you, across profiles or for one", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newInboxFlags(); return fs }},
 		{"status", "", "List requests and runs with their state", groupWatch, func() *flag.FlagSet { fs, _, _, _, _, _, _ := newStatusFlags(); return fs }},
 		{"watch", "<run-or-request-id>", "Follow a run's or a request's progress", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newWatchFlags(); return fs }},
 		{"inspect", "<request-id | run-id>", "Print the commands that show a request's or a run's work before you decide", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newInspectFlags(); return fs }},

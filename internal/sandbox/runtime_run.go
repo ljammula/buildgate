@@ -79,7 +79,7 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	if err := os.MkdirAll(filepath.Dir(s.LogPath), 0o750); err != nil {
 		return Result{}, SandboxRef{}, fmt.Errorf("create sandbox log directory: %w", err)
 	}
-	logFile, err := os.OpenFile(s.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	logFile, err := CreateLaunchLog(s.LogPath)
 	if err != nil {
 		return Result{}, SandboxRef{}, fmt.Errorf("create sandbox log: %w", err)
 	}

@@ -93,13 +93,17 @@ export function factoryHealth(
   requests: readonly RequestSummary[],
 ): FactoryHealth {
   const worker = status === null ? null : workerLiveness(status.state);
-  const active = status !== null && worker?.alive === true ? status.activeRequests : [];
+  const alive = status !== null && worker?.alive === true;
+  const active = alive ? status.activeRequests : [];
+  // A pull request review pass holds a slot without being a job: the busy
+  // count is the slot holders, the running list only the jobs.
+  const held = alive ? status.slotRequests : [];
   return {
     worker,
     lastHeartbeat: status?.lastHeartbeat ?? "",
     slots:
       status !== null && worker?.alive === true && status.jobSlots > 0
-        ? { busy: active.length, total: status.jobSlots }
+        ? { busy: held.length, total: status.jobSlots }
         : null,
     running: active.map((id) => runningJob(id, requests)),
     queued: worker?.alive === true ? requests.filter((r) => r.queuePosition !== null).length : null,
