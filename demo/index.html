@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="An interactive walkthrough of Buildgate and a captioned console tour video.">
+<title>Buildgate demo</title>
+<style>
+  :root { color-scheme: light dark; font: 16px/1.55 system-ui, sans-serif; }
+  body { max-width: 860px; margin: 3rem auto; padding: 0 1.25rem; color: CanvasText; background: Canvas; }
+  h1, h2 { line-height: 1.2; }
+  video { display: block; width: 100%; margin: 1rem 0; border-radius: .5rem; background: #111; }
+  a { color: LinkText; }
+  .note { color: color-mix(in srgb, CanvasText 70%, Canvas); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Buildgate demo</h1>
+  <p><a href="how-buildgate-works.html">Explore the interactive walkthrough</a> of the request lifecycle, human review gates, and sandboxed build.</p>
+  <h2>Operator console tour</h2>
+  <video controls preload="metadata" playsinline>
+    <source src="console-tour.mp4" type="video/mp4">
+    Your browser cannot play this video. <a href="console-tour.mp4">Download the MP4</a> instead.
+  </video>
+  <p class="note">Captioned tour, 1 min 55 s. The recording covers the board, triage, spec and plan review, editing, a build, and a stopped request.</p>
+</main>
+</body>
+</html>

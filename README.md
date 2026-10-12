@@ -34,6 +34,8 @@ Mission Control, the console's home screen, on seeded demo data:
   <img src="demo/mission-control-light.png" alt="Mission Control: a health strip, a board of requests by who has to act (Needs you, Building, Done), the numbers and the recent moves">
 </picture>
 
+[View the interactive walkthrough and play the console tour](https://ljammula.github.io/buildgate/).
+
 ## Install
 
 Source-only: buildgate's Docker images are built on your machine, never
@@ -362,6 +364,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 
 | Doc | What it's for |
 |---|---|
+| [Rendered demo and video (after Pages is enabled)](https://ljammula.github.io/buildgate/) | Interactive walkthrough and an in-page player for the captioned console tour |
 | [`DEMO.md`](DEMO.md) | A 20-30 minute live demo script |
 | [`demo/how-buildgate-works.html`](demo/how-buildgate-works.html) | Why, what and how, for an engineering team |
 | [`demo/console-tour.mp4`](demo/console-tour.mp4) | A captioned recording of the operator console (1 min 55 s): board, triage, spec and plan review, editing, a build, and what a stopped request shows |
