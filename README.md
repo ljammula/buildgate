@@ -376,6 +376,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`doc/designs/compose-sidecar-worker-wiring.md`](doc/designs/compose-sidecar-worker-wiring.md) | How a target repository's Compose sidecars are launched and reached from the worker |
 | [`doc/designs/pifork-harness.md`](doc/designs/pifork-harness.md) | The opt-in harness for a fork of Pi, and its image contract |
 | [`doc/designs/validation-plan.md`](doc/designs/validation-plan.md) | The reusable end-to-end validation checklist; [`scripts/validation/`](scripts/validation/README.md) is its executable half |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute: setup, the checks a change needs, what a pull request needs, what will not be merged |
 | [`AGENTS.md`](AGENTS.md) | Instructions for a coding agent (or a person) changing this repository: layout, checks, where a change goes, module boundaries |
 | [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-020) |
 | [`CLAIMS.md`](CLAIMS.md) | Every normative claim mapped to status + enforcing test |
