@@ -6,8 +6,9 @@ that alters either table updates this file in the same PR. The summary is in
 
 ## What works
 
-Latest release tag: **`m12`**. A tag is cut only after `make live-smoke`
-passes on that commit, and other machines upgrade by tag, not from `main`.
+Latest release tag: **`v0.0.1`**. Release tags are `vX.Y.Z`; a tag is cut
+only after `make live-smoke` passes on that commit, and other machines
+upgrade by tag, not from `main`.
 
 ✅ works · 🟡 partial or opt-in · ⬛ permanently out of scope, by design
 

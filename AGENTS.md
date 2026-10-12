@@ -19,10 +19,10 @@ only — it does not restate that content.
 
 ## Current state
 
-- Latest release tag `m12`; `main` may be ahead of it. The status table and
-  known limits are in [`STATUS.md`](STATUS.md), summarised in README's
-  "Status" and "Known limits" sections — update both in the same PR as a
-  change that alters either.
+- Release tags are `vX.Y.Z` (latest `v0.0.1`); `main` may be ahead of it.
+  The status table and known limits are in [`STATUS.md`](STATUS.md),
+  summarised in README's "Status" and "Known limits" sections — update both
+  in the same PR as a change that alters either.
 - Deliberately not built (don't add them): automatic merge/deploy, a
   host-execution path, a second worker launcher selectable by flag or config, runtime plugin loading, backward-compatibility shims
   for retired flags or config keys (delete them and update the docs).
