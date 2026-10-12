@@ -167,7 +167,7 @@ def run_plan(
 			evidence_path, usage=adapter.parse(partial_stdout or "").usage, agent_exit_code=-1,
 			duration_s=duration_s, agents_md_used=agents_md_used, thinking=thinking,
 		)
-		hint = build_app.stderr_hint(exc.stderr)
+		hint = build_app.agent_exit_hint(adapter.parse(partial_stdout or ""), exc.stderr, adapter.stderr_noise)
 		print(f"plan_tickets: agent timed out after {timeout_minutes} minutes" + (f": {hint}" if hint else ""), file=sys.stderr)
 		return 2
 	duration_s = time.monotonic() - started
@@ -197,7 +197,7 @@ def run_plan(
 		# (round-2 adversarial review of this same fix): this printed
 		# line is itself untrusted-text-derived and single-line
 		# operator-facing.
-		hint = build_app.stderr_hint(result.stderr)
+		hint = build_app.agent_exit_hint(adapter.parse(result.stdout), result.stderr, adapter.stderr_noise)
 		if hint:
 			print(f"plan_tickets: agent exited {result.returncode}: {hint}", file=sys.stderr)
 		else:

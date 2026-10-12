@@ -489,6 +489,34 @@ class RunPlanTests(unittest.TestCase):
 			reason_line = next(line for line in printed.splitlines() if line.startswith("plan_tickets: agent exited 1"))
 			self.assertNotIn("\n", reason_line)
 
+	def test_a_route_error_on_stdout_is_the_reason_when_stderr_holds_only_a_startup_line(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "repo"
+			workspace.mkdir()
+			init_repo(workspace)
+			spec_path = Path(directory) / "spec.md"
+			spec_path.write_text(VALID_SPEC)
+			request_path = Path(directory) / "request.md"
+			request_path.write_text("Add a feature")
+			out_dir = Path(directory) / "tickets"
+			evidence_path = Path(directory) / "evidence.json"
+			draft_dir = workspace / plan_tickets.DRAFT_RELATIVE_DIR
+			stdout = json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "429 Too Many Requests"}})
+
+			import contextlib
+			import io
+			stderr = io.StringIO()
+			with contextlib.redirect_stderr(stderr):
+				with mock.patch.object(
+					build_app, "sh",
+					side_effect=scripted_pi(1, stdout, writes_tickets=None, draft_dir=draft_dir, stderr="Reading additional input from stdin...\n"),
+				):
+					exit_code = plan_tickets.run_plan(workspace, spec_path, request_path, "make verify", out_dir, evidence_path, timeout_minutes=1)
+
+			self.assertEqual(exit_code, 2)
+			self.assertIn("plan_tickets: agent exited 1: 429 Too Many Requests", stderr.getvalue())
+			self.assertNotIn("Reading additional input", stderr.getvalue())
+
 	def test_no_tickets_written_exits_2_even_on_a_clean_pi_exit(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory) / "repo"

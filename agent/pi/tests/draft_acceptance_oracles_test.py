@@ -523,6 +523,53 @@ class RunDraftOraclesTests(unittest.TestCase):
 			self.assertEqual(evidence["status"], "failed")
 			self.assertEqual(len(evidence["failures"]), 1)
 
+	def test_a_failed_criterion_names_the_error_that_ended_the_turn(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "repo"
+			workspace.mkdir()
+			init_repo(workspace)
+			criteria_path = Path(directory) / "criteria.md"
+			criteria_path.write_text("1. Returns 200.\n")
+			out_dir = Path(directory) / "oracles"
+			evidence_path = Path(directory) / "evidence.json"
+			draft_dir_base = workspace / draft_acceptance_oracles.DRAFT_RELATIVE_DIR
+			stdout = json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "429 Too Many Requests"}})
+
+			specs = [(1, stdout, None, "", False)]
+			with mock.patch.object(
+				draft_acceptance_oracles, "run_pi_bounded",
+				side_effect=scripted_pi_sequence(specs, draft_dir_base),
+			):
+				draft_acceptance_oracles.run_draft_oracles(workspace, criteria_path, out_dir, evidence_path, timeout_minutes=1)
+
+			failure = json.dumps(json.loads(evidence_path.read_text())["failures"])
+			self.assertIn("the pi invocation exited 1: 429 Too Many Requests", failure)
+
+	def test_stderr_beats_an_error_a_later_turn_recovered_from(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "repo"
+			workspace.mkdir()
+			init_repo(workspace)
+			criteria_path = Path(directory) / "criteria.md"
+			criteria_path.write_text("1. Returns 200.\n")
+			out_dir = Path(directory) / "oracles"
+			evidence_path = Path(directory) / "evidence.json"
+			draft_dir_base = workspace / draft_acceptance_oracles.DRAFT_RELATIVE_DIR
+			stdout = "\n".join(json.dumps(e) for e in (
+				{"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "429 retrying"}},
+				{"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "ok"}]}},
+			))
+			specs = [(1, stdout, None, "panic: index out of range\n", False)]
+			with mock.patch.object(
+				draft_acceptance_oracles, "run_pi_bounded",
+				side_effect=scripted_pi_sequence(specs, draft_dir_base),
+			):
+				draft_acceptance_oracles.run_draft_oracles(workspace, criteria_path, out_dir, evidence_path, timeout_minutes=1)
+
+			failure = json.dumps(json.loads(evidence_path.read_text())["failures"])
+			self.assertIn("the pi invocation exited 1: panic: index out of range", failure)
+			self.assertNotIn("429 retrying", failure.split("exited 1:")[1].split(",")[0] if "exited 1:" in failure else failure)
+
 	def test_malformed_manifest_exits_2_even_on_a_clean_pi_exit(self):
 		# Regression for the exact failure class validate_manifest exists
 		# to catch: a clean pi exit (returncode 0) with a manifest that

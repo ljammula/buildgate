@@ -470,6 +470,31 @@ class RunDraftTests(unittest.TestCase):
 			reason_line = next(line for line in printed.splitlines() if line.startswith("draft_spec: agent exited 1"))
 			self.assertNotIn("\n", reason_line)
 
+	def test_the_error_that_ended_the_turn_is_the_reason_when_stderr_holds_only_a_startup_line(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "repo"
+			workspace.mkdir()
+			init_repo(workspace)
+			request_path = Path(directory) / "request.md"
+			request_path.write_text("Add a feature")
+			out_path = Path(directory) / "spec.md"
+			evidence_path = Path(directory) / "evidence.json"
+			draft_path = workspace / draft_spec.DRAFT_RELATIVE_PATH
+			stdout = json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "429 Too Many Requests"}})
+
+			import contextlib
+			import io
+			stderr = io.StringIO()
+			with contextlib.redirect_stderr(stderr):
+				with mock.patch.object(
+					build_app, "sh",
+					side_effect=scripted_pi(1, stdout, writes_draft=None, draft_path=draft_path, stderr="Reading additional input from stdin...\n"),
+				):
+					exit_code = draft_spec.run_draft(workspace, request_path, out_path, evidence_path, timeout_minutes=1)
+
+			self.assertEqual(exit_code, 2)
+			self.assertIn("draft_spec: agent exited 1: 429 Too Many Requests", stderr.getvalue())
+
 	def test_no_draft_written_exits_2_even_on_a_clean_pi_exit(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory) / "repo"
