@@ -96,6 +96,79 @@ func TestGetProjectObservationsReadsOnlyThatProjectsFinishedRuns(t *testing.T) {
 	}
 }
 
+func TestGetProjectObservationsIncludesOnlyTheProseFreeDirectLearningChain(t *testing.T) {
+	dataDir := t.TempDir()
+	failed := run.Run{
+		ID: "run-quarantined", Ticket: "req-1-001", RequestID: "req-1", Project: "app",
+		RepositoryRoot: "/private/work/app", State: run.StateQuarantined,
+		UpdatedAt: "2026-10-08T09:00:00Z", ProjectConfigCommitSHA: "base-a",
+		ProjectConfigSHA256: strings.Repeat("a", 64), SpecSHA256: strings.Repeat("b", 64),
+		GateResults: []run.GateResult{{Check: "canonical_verify", Command: []string{"COMMAND-MARKER-5522"}, ExitCode: 1}},
+		HaltError:   "HALT-MARKER-5523",
+	}
+	accepted := run.Run{
+		ID: "run-accepted", Ticket: failed.Ticket, RequestID: failed.RequestID, Project: "app",
+		RepositoryRoot: failed.RepositoryRoot, State: run.StateAccepted,
+		UpdatedAt: "2026-10-08T10:00:00Z", EarlierAttemptOf: failed.ID,
+		ProjectConfigCommitSHA: "base-b", ProjectConfigSHA256: failed.ProjectConfigSHA256, SpecSHA256: failed.SpecSHA256,
+		GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true, Command: []string{"COMMAND-MARKER-5522"}}},
+	}
+	seedRun(t, dataDir, failed)
+	seedRun(t, dataDir, accepted)
+
+	rec, report := getObservations(t, NewServer(dataDir), "/projects/app/observations", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(report.LearningChains) != 1 || !report.LearningChains[0].Eligible ||
+		report.LearningChains[0].FailedRunID != failed.ID || report.LearningChains[0].AcceptedRunID != accepted.ID {
+		t.Fatalf("learning chains = %+v", report.LearningChains)
+	}
+	for _, marker := range []string{"/private/work/app", "COMMAND-MARKER-5522", "HALT-MARKER-5523"} {
+		if strings.Contains(rec.Body.String(), marker) {
+			t.Errorf("observations response contains %q: %s", marker, rec.Body.String())
+		}
+	}
+}
+
+func TestGetProjectObservationsRejectsMissingOrChangedSpecSnapshots(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		failedSpec string
+		acceptSpec string
+		wantReason string
+	}{
+		{name: "missing", failedSpec: "", acceptSpec: "spec-a", wantReason: "missing_spec_snapshot"},
+		{name: "changed", failedSpec: strings.Repeat("b", 64), acceptSpec: strings.Repeat("c", 64), wantReason: "spec_changed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			failed := run.Run{
+				ID: "run-quarantined", Ticket: "req-1-001", RequestID: "req-1", Project: "app",
+				RepositoryRoot: "/private/work/app", State: run.StateQuarantined,
+				UpdatedAt: "2026-10-08T09:00:00Z", ProjectConfigCommitSHA: "base-a",
+				ProjectConfigSHA256: strings.Repeat("a", 64), SpecSHA256: tc.failedSpec,
+				GateResults: []run.GateResult{{Check: "canonical_verify", ExitCode: 1}},
+			}
+			accepted := run.Run{
+				ID: "run-accepted", Ticket: failed.Ticket, RequestID: failed.RequestID, Project: "app",
+				RepositoryRoot: failed.RepositoryRoot, State: run.StateAccepted,
+				UpdatedAt: "2026-10-08T10:00:00Z", EarlierAttemptOf: failed.ID,
+				ProjectConfigCommitSHA: "base-b", ProjectConfigSHA256: failed.ProjectConfigSHA256, SpecSHA256: tc.acceptSpec,
+			}
+			seedRun(t, dataDir, failed)
+			seedRun(t, dataDir, accepted)
+			rec, report := getObservations(t, NewServer(dataDir), "/projects/app/observations", nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			if len(report.LearningChains) != 1 || report.LearningChains[0].Eligible || report.LearningChains[0].IneligibleReason != tc.wantReason {
+				t.Fatalf("learning chains = %+v, want ineligible reason %q", report.LearningChains, tc.wantReason)
+			}
+		})
+	}
+}
+
 func TestGetProjectObservationsIsGatedLikeTheRunsItIsMadeFrom(t *testing.T) {
 	server := NewServer(t.TempDir(), WithReadToken("read-token"))
 	if rec, _ := getObservations(t, server, "/projects/app/observations", nil); rec.Code != http.StatusForbidden {

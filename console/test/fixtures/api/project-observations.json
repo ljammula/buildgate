@@ -103,5 +103,27 @@
       ]
     }
   ],
+  "learning_chains": [
+    {
+      "id": "0b9a945ff5e997033bf41097f6216b720931ac698df82bb56d0d02c6b99ed91a",
+      "request_id": "req-done",
+      "ticket": "every-field ticket",
+      "failed_run_id": "every-field earlier_attempt_of",
+      "accepted_run_id": "run-every-field",
+      "failed_outcome": "",
+      "accepted_outcome": "accepted",
+      "failed_at": "",
+      "accepted_at": "2026-09-10T09:04:00Z",
+      "failed_check_types": null,
+      "failed_config_commit_sha": "",
+      "accepted_config_commit_sha": "",
+      "failed_config_content_sha256": "",
+      "accepted_config_content_sha256": "",
+      "complete": false,
+      "eligible": false,
+      "ineligible_reason": "missing_predecessor"
+    }
+  ],
+  "learning_chains_truncated": false,
   "truncated": false
 }

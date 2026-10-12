@@ -120,7 +120,10 @@ echo "verify-live: pass 1/2 -- go test -race <all non-data packages> (DOCKER_SAN
 	# Scoped away from gitignored data/, same as the Makefile's GO_PACKAGES:
 	# run artifacts there are not this module's source.
 	# shellcheck disable=SC2046 -- deliberate word-split package list
-	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -p 1 $(go list ./... | grep -v /data/)
+	# cmd/factoryd runs the full test package here. On a developer Mac with
+	# the race detector and live tests enabled, that can exceed Go's 10-minute
+	# default package timeout even though each test completes successfully.
+	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -timeout=15m -p 1 $(go list ./... | grep -v /data/)
 ) >"$LOG" 2>&1 9>&- || status=1
 tail -100 "$LOG"
 if [ "$status" -ne 0 ]; then
