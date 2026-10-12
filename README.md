@@ -3,17 +3,11 @@
 **Hand a coding agent a ticket. Get back a pull request with the evidence
 attached. Keep the merge button.**
 
-Buildgate (binary: `factoryd`) is an unattended agent factory. It drafts a
-spec, plans tickets, builds each one inside a sealed sandbox, and refuses to
-call anything done until its own gates pass. It never merges.
+## Why
 
-```text
-   YOU                        BUILDGATE                               YOU
-   ---                        ---------                               ---
- "Add X to Y" --> draft spec --> plan tickets --> build in a sealed --> draft PR
-                      |               |           sandbox, then            |
-                 [you approve]   [you approve]    policy gates        [you merge]
-```
+Coding agents can change code quickly, but their claims alone are not enough
+to make a change safe to review. Buildgate checks work against durable evidence
+and keeps merge and deploy decisions with a person.
 
 | An agent on its own | Buildgate |
 |---|---|
@@ -22,6 +16,12 @@ call anything done until its own gates pass. It never merges.
 | Spends until you notice | Model calls leave only through the sandbox's supervisor, under a per-run policy and buildgate's own spend meter |
 | Starts coding from a one-line prompt | You review the spec and the plan (and, opt-in, the acceptance tests) before code is written |
 | Can push and merge | Merge and deploy are **permanently human**, by standing design: the factory records a decision and may open a PR |
+
+## What
+
+Buildgate (binary: `factoryd`) is an unattended agent factory. It drafts a
+spec, plans tickets, builds each one inside a sealed sandbox, and refuses to
+call anything done until its own gates pass. It never merges.
 
 Go orchestration daemon (`factoryd`), a React operator console embedded in
 `factoryd serve`, and vendored build scripts under `agent/` (one set for
@@ -34,7 +34,99 @@ Mission Control, the console's home screen, on seeded demo data:
   <img src="demo/mission-control-light.png" alt="Mission Control: a health strip, a board of requests by who has to act (Needs you, Building, Done), the numbers and the recent moves">
 </picture>
 
-[View the interactive walkthrough and play the console tour](https://ljammula.github.io/buildgate/).
+[View the interactive walkthrough and play the console tour after deployment](https://ljammula.github.io/buildgate/).
+
+## How
+
+At each stage, you approve the spec and plan, while Buildgate checks the
+sandboxed implementation and prepares a reviewable pull request:
+
+```text
+   YOU                        BUILDGATE                               YOU
+   ---                        ---------                               ---
+ "Add X to Y" --> draft spec --> plan tickets --> build in a sealed --> draft PR
+                      |               |           sandbox, then            |
+                 [you approve]   [you approve]    policy gates        [you merge]
+```
+
+### Request flow
+
+A request (`factoryd submit` / `quickstart`) moves through these states.
+`[brackets]` are the human gates; everything else is the factory.
+
+```text
+submitted -> spec_drafting -> [spec_review] -----------------+
+                                    |                         |
+                    -draft-oracles (opt-in)                   |
+                                    v                         |
+                            oracle_drafting -> [oracle_review] |
+                                    |                          |
+                                    +------------> planning <--+
+                                                       |
+                                                  [plan_review]
+                                                       |
+                                                       v
+                                        building (sandbox + gates)
+                                            |              |
+                                      gate fails      crash/timeout
+                                            v              v
+                                     quarantined        halted
+                                            |
+                                            v (gates pass)
+                                       [pr_review] (draft PR)
+                                            |
+                                            v
+                                   human merges (never the factory)
+```
+
+Inside `building`, one ticket at a time:
+
+```text
+  ticket + spec
+       |
+       v
+  baseline verify: the verify command on the untouched base commit,
+  in a fresh sandbox, no model call
+       |
+       +-- fails, and the failure is not the ticket's own work --> halted
+       |
+       v
+  agent builds in the sandbox -- no verdict (worker lost, route down) ---+
+       |                                                                 |
+       v                                                                 v
+  gates, all factory-owned:                              run halts, worktree is kept,
+    canonical_verify        full_suite_verify            request waits in resume_review:
+    diff_scope              spec_conformity                factoryd resume <id>
+    required_files_changed  code_review       (policy)     factoryd resume -from scratch <id>
+    tests_added             reference_oracle  (oracles,    factoryd cancel <id>
+                                               + canary)
+       |              |
+     pass            fail
+       |              |
+       v              v
+   accepted      quarantined
+       |
+       v
+  release policy decision (recorded only)
+       |
+       v
+  draft PR --> human merges (permanently outside this system)
+```
+
+| Topic | Behaviour |
+|---|---|
+| Execution | One path, live-proven: Temporal, for every command (`worker`, the single-ticket run, `live-smoke`), started with Docker when down. A run whose Temporal is unreachable halts |
+| Lost steps | A build that was lost, or whose sandbox could not be started, keeps its worktree for `factoryd resume`; nothing reruns such a step on its own, and its round is not counted |
+| Baseline verify | Before a build spends a model call, every ticket's verify command runs on the commit the ticket starts from. Passed: the build runs, unless the command left files outside the ticket's `Allowed-Files:` that the repository does not ignore (every build would be quarantined by `diff_scope`): then the run halts. Failed for a reason that is the ticket's own work (it names every failing test, or the command needs a path the ticket creates): the build runs and is told. Failed any other way: the run halts with the failing test named. [USAGE.md § Baseline verify](USAGE.md#baseline-verify-the-verify-command-runs-before-the-build) |
+| `code_review` | `-code-review-policy off\|advisory\|required`; CLI default `off`, `quickstart` writes `required` for new configs |
+| The PR | Title from the ticket's `## Goal`; branch `factoryd/<slug>-<shorthash>`; opens as a draft, and `factoryd` marks it ready (`gh pr ready`) once checks pass and no reviewer thread blocks it |
+| Ready to merge | The deliverable. Checked on every poll: out of draft, checks pass, no review thread open, head is the commit the factory built, and that build's code review of the whole diff passed. `factoryd status` and the request page say so, or name what is missing: [STATUS.md § Ready to merge](STATUS.md#ready-to-merge). Merging is yours |
+| `factoryd retry` | Re-runs a halted or quarantined request. On an accepted ticket whose PR never opened, it re-opens only the PR, pinned to the accepted commit (`ResultSHA`), after re-running the release decision; a denial falls back to a full rebuild of that ticket only |
+| Following every request | The console's home screen, Mission Control: [USAGE.md § Mission Control](USAGE.md#mission-control) |
+| Following a run | `factoryd watch <run-or-request-id>`, the console's Timeline and Pipeline views, or the Temporal Web UI: [USAGE.md § Observe and control](USAGE.md#observe-and-control) |
+
+Exact state set and invariants:
+[`safety-contract.md` § State transitions](safety-contract.md#state-transitions).
 
 ## Install
 
@@ -151,85 +243,6 @@ request actions, and cannot override a run.
 
 Back up `~/.config/factoryd` and `~/buildgate` first if you want your
 requests and evidence. To start over: `-purge`, then `make install`.
-
-## How a request flows
-
-A request (`factoryd submit` / `quickstart`) moves through these states.
-`[brackets]` are the human gates; everything else is the factory.
-
-```text
-submitted -> spec_drafting -> [spec_review] -----------------+
-                                    |                         |
-                    -draft-oracles (opt-in)                   |
-                                    v                         |
-                            oracle_drafting -> [oracle_review] |
-                                    |                          |
-                                    +------------> planning <--+
-                                                       |
-                                                  [plan_review]
-                                                       |
-                                                       v
-                                        building (sandbox + gates)
-                                            |              |
-                                      gate fails      crash/timeout
-                                            v              v
-                                     quarantined        halted
-                                            |
-                                            v (gates pass)
-                                       [pr_review] (draft PR)
-                                            |
-                                            v
-                                   human merges (never the factory)
-```
-
-Inside `building`, one ticket at a time:
-
-```text
-  ticket + spec
-       |
-       v
-  baseline verify: the verify command on the untouched base commit,
-  in a fresh sandbox, no model call
-       |
-       +-- fails, and the failure is not the ticket's own work --> halted
-       |
-       v
-  agent builds in the sandbox -- no verdict (worker lost, route down) ---+
-       |                                                                 |
-       v                                                                 v
-  gates, all factory-owned:                              run halts, worktree is kept,
-    canonical_verify        full_suite_verify            request waits in resume_review:
-    diff_scope              spec_conformity                factoryd resume <id>
-    required_files_changed  code_review       (policy)     factoryd resume -from scratch <id>
-    tests_added             reference_oracle  (oracles,    factoryd cancel <id>
-                                               + canary)
-       |              |
-     pass            fail
-       |              |
-       v              v
-   accepted      quarantined
-       |
-       v
-  release policy decision (recorded only)
-       |
-       v
-  draft PR --> human merges (permanently outside this system)
-```
-
-| Topic | Behaviour |
-|---|---|
-| Execution | One path, live-proven: Temporal, for every command (`worker`, the single-ticket run, `live-smoke`), started with Docker when down. A run whose Temporal is unreachable halts |
-| Lost steps | A build that was lost, or whose sandbox could not be started, keeps its worktree for `factoryd resume`; nothing reruns such a step on its own, and its round is not counted |
-| Baseline verify | Before a build spends a model call, every ticket's verify command runs on the commit the ticket starts from. Passed: the build runs, unless the command left files outside the ticket's `Allowed-Files:` that the repository does not ignore (every build would be quarantined by `diff_scope`): then the run halts. Failed for a reason that is the ticket's own work (it names every failing test, or the command needs a path the ticket creates): the build runs and is told. Failed any other way: the run halts with the failing test named. [USAGE.md § Baseline verify](USAGE.md#baseline-verify-the-verify-command-runs-before-the-build) |
-| `code_review` | `-code-review-policy off\|advisory\|required`; CLI default `off`, `quickstart` writes `required` for new configs |
-| The PR | Title from the ticket's `## Goal`; branch `factoryd/<slug>-<shorthash>`; opens as a draft, and `factoryd` marks it ready (`gh pr ready`) once checks pass and no reviewer thread blocks it |
-| Ready to merge | The deliverable. Checked on every poll: out of draft, checks pass, no review thread open, head is the commit the factory built, and that build's code review of the whole diff passed. `factoryd status` and the request page say so, or name what is missing: [STATUS.md § Ready to merge](STATUS.md#ready-to-merge). Merging is yours |
-| `factoryd retry` | Re-runs a halted or quarantined request. On an accepted ticket whose PR never opened, it re-opens only the PR, pinned to the accepted commit (`ResultSHA`), after re-running the release decision; a denial falls back to a full rebuild of that ticket only |
-| Following every request | The console's home screen, Mission Control: [USAGE.md § Mission Control](USAGE.md#mission-control) |
-| Following a run | `factoryd watch <run-or-request-id>`, the console's Timeline and Pipeline views, or the Temporal Web UI: [USAGE.md § Observe and control](USAGE.md#observe-and-control) |
-
-Exact state set and invariants:
-[`safety-contract.md` § State transitions](safety-contract.md#state-transitions).
 
 ## Sandbox
 
