@@ -154,7 +154,14 @@ type Report struct {
 	Counts map[string]int `json:"counts"`
 	// Observations are newest run first, at most MaxObservations.
 	Observations []Observation `json:"observations"`
-	Truncated    bool          `json:"truncated"`
+	// LearningChains is a prose-free audit projection of quarantined runs
+	// and directly linked accepted successors. It is never passed to a
+	// model or used to create repository memory, and is capped at
+	// maxLearningChains newest entries.
+	LearningChains []LearningChain `json:"learning_chains"`
+	// LearningChainsTruncated reports that older chains were omitted.
+	LearningChainsTruncated bool `json:"learning_chains_truncated"`
+	Truncated               bool `json:"truncated"`
 }
 
 // RoundLog returns the start of the retained output of a run's round and
@@ -179,7 +186,7 @@ type Sources struct {
 // lists, one round each, so a long history costs no more reads than a
 // full page.
 func FromRuns(project string, runs []*run.Run, requests []*request.Request, src Sources) Report {
-	report := Report{Project: project, Counts: map[string]int{}, Observations: []Observation{}}
+	report := Report{Project: project, Counts: map[string]int{}, Observations: []Observation{}, LearningChains: []LearningChain{}}
 	for _, kind := range Kinds {
 		report.Counts[kind] = 0
 	}
@@ -190,6 +197,11 @@ func FromRuns(project string, runs []*run.Run, requests []*request.Request, src 
 		}
 	}
 	report.Runs = len(finished)
+	report.LearningChains = learningChains(finished)
+	if len(report.LearningChains) > maxLearningChains {
+		report.LearningChains = report.LearningChains[:maxLearningChains]
+		report.LearningChainsTruncated = true
+	}
 	var all []Observation
 	for _, r := range finished {
 		if acceptedFirstRound(r) {
