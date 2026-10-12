@@ -21,8 +21,8 @@ import (
 var ErrStore = errors.New("memory: store refused")
 
 const (
-	// StoreSchemaVersion is the only state.json schema this build reads.
-	StoreSchemaVersion = 1
+	// StoreSchemaVersion is the current state.json schema this build writes.
+	StoreSchemaVersion = 2
 	// MaxStateBytes bounds state.json, on read and on write.
 	MaxStateBytes = 1 << 20
 	// MaxLessons bounds the lessons one project keeps.
@@ -133,6 +133,11 @@ func (s *Store) read() (StoreState, error) {
 	if err := dec.Decode(&st); err != nil {
 		return empty, fmt.Errorf("%w: state.json: %v", ErrStore, err)
 	}
+	if st.SchemaVersion == 1 {
+		// EvidenceRuns was added in schema 2. Existing lessons have no
+		// operator-cited run references, so they migrate without data loss.
+		st.SchemaVersion = StoreSchemaVersion
+	}
 	if st.SchemaVersion != StoreSchemaVersion {
 		return empty, fmt.Errorf("%w: state.json schema_version %d, this build reads %d", ErrStore, st.SchemaVersion, StoreSchemaVersion)
 	}
@@ -227,6 +232,9 @@ func enforceBounds(st *StoreState) ([]byte, error) {
 	for _, l := range st.Lessons {
 		if len(l.Runs) > MaxLessonRuns {
 			return nil, fmt.Errorf("%w: lesson %s lists %d runs, over the %d limit", ErrStore, clip(l.ID), len(l.Runs), MaxLessonRuns)
+		}
+		if len(l.EvidenceRuns) > MaxLessonRuns {
+			return nil, fmt.Errorf("%w: lesson %s lists %d evidence runs, over the %d limit", ErrStore, clip(l.ID), len(l.EvidenceRuns), MaxLessonRuns)
 		}
 	}
 	if n := len(st.CountedRuns); n > MaxCountedRuns {

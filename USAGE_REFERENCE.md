@@ -1503,8 +1503,8 @@ Flags come before the arguments. The walkthrough is in USAGE.md.
 | Subcommand | Does | Writes |
 |---|---|---|
 | `list` | Prints whether memory is on (and which switch has it off), the budget and its use, the lines in force (the fenced section of root `AGENTS.md` at the checkout's HEAD, read from git, never the worktree) and the candidates: `ID`, `SEEN`, `SOURCE`, `STATE`, `LINE`, most seen first, then newest, dropped last. With memory on it first collects candidates from the newest 200 finished runs of this repository (a run recorded against another checkout of the same name, or against none, is skipped) and reconciles the store with the section. A section line that holds a control or format character, or a file with no section that ends inside a code fence, is `unreadable section: fix AGENTS.md by hand`. An open memory request whose `AGENTS.md` at HEAD is neither the file it was rendered from nor the file it proposes is shown as `stale: propose again`. Every line is printed with escapes and control characters removed | The store, only with memory on |
-| `show <id>` | One candidate: its line, the runs that said it and when each ended, its history. An id may be shortened to a unique prefix | Nothing |
-| `add "<text>"` | Adds your own candidate under the text rule; the refusal names the rule broken. A dropped line added again is a candidate again | The store |
+| `show <id>` | One candidate: its line, runs whose agent notes said it, operator-cited evidence runs and when each ended, and its history. An id may be shortened to a unique prefix | Nothing |
+| `add "<text>"` | Adds your own candidate under the text rule; the refusal names the rule broken. Repeat `-run <id>` to cite up to 20 finished runs of this repository in support; citations remain distinct from agent notes. A dropped line added again is a candidate again | The store |
 | `drop [-reason <why>] <id>` | Moves a candidate or proposed line to `dropped`. A dropped line still counts the runs that say it and is never proposed | The store |
 | `propose [-remove "<line>"]... [<id>...]` | Opens one memory request: adds the named candidates (none named: the most seen that fit) and removes each `-remove` line. At most five changes. Refused when the section would be over its budget (pass `-remove`, or raise `budget_lines`/`budget_chars`), when the repository has no `verify_command`, while another memory request of the repository is neither `done` nor `cancelled`, or when the section at HEAD cannot be read (a line with a control character; a file with no section that ends inside a code fence, which you close by hand) | The proposal, the request, the store |
 | `off [-reason <why>]` / `on` | Writes / removes the project's stop marker. While it exists every changing subcommand is refused and the run of a memory request already in flight is not released (`repository memory is switched off (factoryd memory off)`). `on` does not list a repository under `memory.repositories`: that is your edit | The stop marker |
@@ -1517,6 +1517,7 @@ Flags come before the arguments. The walkthrough is in USAGE.md.
 | `-json` | `list` (the shape of `GET /projects/{project}/memory`) and `show` |
 | `-reason <text>` | `drop`, `off` |
 | `-remove "<exact line>"` | `propose`: a line as `memory list` prints it, `- ` included. Repeatable |
+| `-run <run-id>` | `add`: a finished run of this repository cited in support of the candidate. Repeatable, up to 20 |
 
 The text rule a line passes (never repaired, for a build agent's note and for
 `add` alike):
@@ -1535,7 +1536,7 @@ of the repository's root path:
 
 | File | Holds |
 |---|---|
-| `state.json` | The candidates (`candidate`, `proposed`, `dropped`), each with its line, source, the runs that said it (at most 20) and its history; and the runs already collected. At most 200 lines and 1 MiB. A line in force is not stored: the file is the memory |
+| `state.json` | The candidates (`candidate`, `proposed`, `dropped`), each with its line, source, runs whose agent notes said it, operator-cited evidence runs (each list at most 20), and history; and the runs already collected. At most 200 lines and 1 MiB. A line in force is not stored: the file is the memory |
 | `off` | The stop marker `memory off` wrote |
 | `proposals/<request-id>.json` | The exact `AGENTS.md` a memory request must produce and its SHA-256, and the SHA-256 of the `AGENTS.md` it was rendered from: what the release check compares against the run's result and against the run's base |
 | `proposals/<request-id>.changes.json` | The lines that request adds and removes and the run ids an added line came from, for the pull request body |
