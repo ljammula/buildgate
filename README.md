@@ -29,7 +29,10 @@ activity:
   <img src="demo/mission-control-light.png" alt="Mission Control: a health strip, a board of requests by who has to act (Needs you, Building, Done), the numbers and the recent moves">
 </picture>
 
-[Watch the 2-minute console tour or explore the interactive walkthrough](https://ljammula.github.io/buildgate/).
+[![A 7-second, silent looping preview of approving a plan and watching the
+build begin](demo/console-tour-preview.gif)](https://ljammula.github.io/buildgate/)
+
+[Watch the full 1:55 captioned console tour or explore the interactive walkthrough](https://ljammula.github.io/buildgate/).
 
 ## How
 
