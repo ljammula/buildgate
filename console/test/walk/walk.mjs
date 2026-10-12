@@ -192,8 +192,9 @@ step("mission-control", async () => {
   const listed = (await api("/requests")).body;
   const counts = {};
   for (const name of Object.keys(columnStates)) {
+    // The column's own heading: a group under it can share its name.
     const text = await board()
-      .getByRole("heading", { name: new RegExp(`^${name} \\(\\d+\\)$`) })
+      .getByRole("heading", { level: 2, name: new RegExp(`^${name} \\(\\d+\\)$`) })
       .innerText();
     counts[name] = Number(/\((\d+)\)/.exec(text)[1]);
   }
@@ -316,14 +317,14 @@ step("mission-control", async () => {
   await button("Working", { exact: true }).click();
   await page.waitForURL(/group=working/);
   await board()
-    .getByRole("heading", { name: /^Finished \(/ })
+    .getByRole("heading", { level: 2, name: /^Finished \(/ })
     .waitFor({ state: "detached" });
   await board()
-    .getByRole("heading", { name: /^Building \(/ })
+    .getByRole("heading", { level: 2, name: /^Building \(/ })
     .waitFor();
   await button("Working", { exact: true }).click();
   await board()
-    .getByRole("heading", { name: /^Finished \(/ })
+    .getByRole("heading", { level: 2, name: /^Finished \(/ })
     .waitFor();
 });
 
@@ -344,7 +345,7 @@ step("mission-control-window", async () => {
     Number(
       /\((\d+)\)/.exec(
         await board()
-          .getByRole("heading", { name: /^Finished \(\d+\)$/ })
+          .getByRole("heading", { level: 2, name: /^Finished \(\d+\)$/ })
           .innerText(),
       )[1],
     );
@@ -423,7 +424,9 @@ step("mission-control-review", async () => {
       .evaluate((node) => node === document.activeElement),
     "Tab from a card's title does not reach Review",
   );
-  await board().getByRole("link", { name: "Open in Triage", exact: true }).waitFor();
+  await board()
+    .getByRole("link", { name: /^Open in Triage \(\d+ waits? on you\)$/ })
+    .waitFor();
   // Request changes opens its dialog from the card; cancelled, it sends nothing.
   const before = await request("req-spec-review");
   await card("req-spec-review").hover();
