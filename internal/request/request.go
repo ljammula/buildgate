@@ -1797,6 +1797,13 @@ func (r *Request) ClearReminderState() {
 	r.LastAsk = ""
 }
 
+// InStateSince is when r entered its current state (EnteredAt); ok is false
+// when that does not parse.
+func (r *Request) InStateSince() (since time.Time, ok bool) {
+	at, err := time.Parse(time.RFC3339Nano, r.EnteredAt)
+	return at, err == nil
+}
+
 // RunsJob reports whether the request driver runs a job (drafting,
 // planning or a ticket build) to move a request out of s. The driver
 // advances only the oldest request in such a state per pass, so these
@@ -1812,9 +1819,9 @@ func (s State) RunsJob() bool {
 }
 
 // WaitingOn maps each request that is queued behind another to the id of
-// the request the daemon is advancing instead. active are the requests the
-// daemon is running a job for right now (the heartbeat's ActiveRequests),
-// slots how many jobs it runs at once (its JobSlots).
+// the request the daemon is advancing instead. active are the requests
+// holding a job slot right now, running jobs first (the heartbeat's
+// SlotRequests), slots how many jobs it runs at once (its JobSlots).
 //
 // With one slot (worker), the driver works on active[0], or between jobs
 // on the oldest request whose state RunsJob; every other job-state request

@@ -415,7 +415,12 @@ describe("health strip", () => {
 
   test("a live worker: its slots, what it runs, the queue and the last transition", async () => {
     renderApp(<BoardScreen />, {
-      server: fixtureServer({ ...alive, active_requests: ["req-building"], job_slots: 2 }),
+      server: fixtureServer({
+        ...alive,
+        active_requests: ["req-building"],
+        slot_requests: ["req-building"],
+        job_slots: 2,
+      }),
     });
     const health = await strip();
     await within(health).findByText("Running", { selector: "span" });

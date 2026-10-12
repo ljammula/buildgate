@@ -131,6 +131,8 @@ export interface QueueRunStatus {
   readonly activeRequests: readonly string[];
   /** How many jobs the worker runs at once; 0 when the server sent none (not alive, or an older server). */
   readonly jobSlots: number;
+  /** The requests holding a job slot: the running jobs and any pull request review pass. Sent only while `state` is "alive". */
+  readonly slotRequests: readonly string[];
 }
 
 export function decodeQueueRunStatus(o: JsonObject, at: string): QueueRunStatus {
@@ -139,6 +141,7 @@ export function decodeQueueRunStatus(o: JsonObject, at: string): QueueRunStatus 
     lastHeartbeat: optString(o, "last_heartbeat", at),
     activeRequests: stringList(o, "active_requests", at),
     jobSlots: numberOr(o, "job_slots", at, 0),
+    slotRequests: stringList(o, "slot_requests", at),
   };
 }
 

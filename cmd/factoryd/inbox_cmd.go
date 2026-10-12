@@ -13,6 +13,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
+	"buildgate/internal/sessionconfig"
 )
 
 // inboxStates are the request states that wait on the operator: the four
@@ -56,11 +57,13 @@ type inboxEntry struct {
 	since time.Time
 }
 
-func newInboxFlags() (flags *flag.FlagSet, jsonOutput *bool) {
+func newInboxFlags() (flags *flag.FlagSet, jsonOutput *bool, configPath, project *string) {
 	flags = flag.NewFlagSet("inbox", flag.ContinueOnError)
 	jsonOutput = flags.Bool("json", false, "print the entries as a JSON array instead of text")
+	configPath = flags.String("config", "", "only the requests of this profile (a name or a session config path); empty: every profile")
+	project = flags.String("project", "", "only the requests of this project id, which is the name of the repository's root directory")
 	finishFlags(flags)
-	return flags, jsonOutput
+	return flags, jsonOutput, configPath, project
 }
 
 // inboxMain implements `factoryd inbox`: everything waiting on the
@@ -70,14 +73,14 @@ func inboxMain(args []string) error {
 }
 
 func inboxRun(args []string, w, warn io.Writer) error {
-	flags, jsonOutput := newInboxFlags()
+	flags, jsonOutput, configPath, project := newInboxFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("inbox takes no arguments, got %q", flags.Arg(0))
 	}
-	entries, err := collectInbox(warn, time.Now())
+	entries, err := collectInbox(warn, time.Now(), *configPath, *project)
 	if err != nil {
 		return err
 	}
@@ -104,32 +107,12 @@ func inboxRun(args []string, w, warn io.Writer) error {
 
 // collectInbox gathers the waiting requests of every distinct data dir among
 // the profiles (or of the one resolved data dir when there are no profiles),
-// oldest first.
-func collectInbox(warn io.Writer, now time.Time) ([]inboxEntry, error) {
-	profiles, err := loadProfiles()
+// oldest first. A configArg (a profile name or a config path) narrows it to
+// that config's data dir, a project to that project's requests.
+func collectInbox(warn io.Writer, now time.Time, configArg, project string) ([]inboxEntry, error) {
+	dirs, label, err := inboxDataDirs(warn, configArg)
 	if err != nil {
 		return nil, err
-	}
-	for _, p := range profiles {
-		if p.LoadErr != nil {
-			fmt.Fprintf(warn, "profile %s: skipped, its config does not load: %s\n", p.Name, sanitize.Line(p.LoadErr.Error()))
-		}
-	}
-	dirs, owners := distinctDataDirs(profiles)
-	label := map[string]string{}
-	for _, d := range dirs {
-		label[d] = owners[d][0]
-	}
-	if len(profiles) == 0 {
-		dataDir := "data"
-		if err := resolveDataDirFromSessionConfig(flag.NewFlagSet("inbox", flag.ContinueOnError), &dataDir, ""); err != nil {
-			return nil, err
-		}
-		name, _ := statusProfile("")
-		if name == "" {
-			name = "default"
-		}
-		dirs, label = []string{dataDir}, map[string]string{dataDir: name}
 	}
 
 	var entries []inboxEntry
@@ -140,7 +123,7 @@ func collectInbox(warn io.Writer, now time.Time) ([]inboxEntry, error) {
 		}
 		base := resolveConsoleBaseURL("", dir)
 		for _, r := range requests {
-			if inboxStates[r.State] {
+			if inboxStates[r.State] && (project == "" || r.Project == project) {
 				entries = append(entries, buildInboxEntry(r, label[dir], dir, base, now))
 			}
 		}
@@ -153,6 +136,49 @@ func collectInbox(warn io.Writer, now time.Time) ([]inboxEntry, error) {
 		return a.since.Before(b.since)
 	})
 	return entries, nil
+}
+
+// inboxDataDirs are the data dirs inbox reads, each with the profile name it
+// prints: configArg's alone when given, else every distinct one among the
+// profiles, else the one the session config resolves.
+func inboxDataDirs(warn io.Writer, configArg string) ([]string, map[string]string, error) {
+	single := func(arg string) ([]string, map[string]string, error) {
+		dataDir := "data"
+		if err := resolveDataDirFromSessionConfig(flag.NewFlagSet("inbox", flag.ContinueOnError), &dataDir, arg); err != nil {
+			return nil, nil, err
+		}
+		name, path := statusProfile(arg)
+		switch {
+		case path != "" && sessionconfig.ProfileNameOfPath(path) == "":
+			// A config file that is not a profile: the printed commands
+			// take its path, which only that file resolves to.
+			name = request.ShellPath(path)
+		case name == "":
+			name = "default"
+		}
+		return []string{dataDir}, map[string]string{dataDir: name}, nil
+	}
+	if configArg != "" {
+		return single(configArg)
+	}
+	profiles, err := loadProfiles()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range profiles {
+		if p.LoadErr != nil {
+			fmt.Fprintf(warn, "profile %s: skipped, its config does not load: %s\n", p.Name, sanitize.Line(p.LoadErr.Error()))
+		}
+	}
+	if len(profiles) == 0 {
+		return single("")
+	}
+	dirs, owners := distinctDataDirs(profiles)
+	label := map[string]string{}
+	for _, d := range dirs {
+		label[d] = owners[d][0]
+	}
+	return dirs, label, nil
 }
 
 func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, now time.Time) inboxEntry {

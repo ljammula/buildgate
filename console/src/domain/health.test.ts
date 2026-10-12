@@ -12,7 +12,12 @@ const wire = (o: Parameters<typeof requestJson>[0], extra: Record<string, unknow
 
 test("a live worker: its slots, and the build it runs with ticket, stage and stalled verdict", () => {
   const health = factoryHealth(
-    status({ state: "alive", active_requests: ["req-building"], job_slots: 2 }),
+    status({
+      state: "alive",
+      active_requests: ["req-building"],
+      slot_requests: ["req-building"],
+      job_slots: 2,
+    }),
     fixtureRequests,
   );
   expect(health.worker).toEqual({ label: "Running", tone: "success", alive: true });
@@ -25,6 +30,20 @@ test("a live worker: its slots, and the build it runs with ticket, stage and sta
       stalled: true,
     },
   ]);
+});
+
+test("a pull request review pass holds a slot without being a running job", () => {
+  const health = factoryHealth(
+    status({
+      state: "alive",
+      active_requests: ["req-building"],
+      slot_requests: ["req-building", "req-pr"],
+      job_slots: 2,
+    }),
+    fixtureRequests,
+  );
+  expect(health.slots).toEqual({ busy: 2, total: 2 });
+  expect(health.running.map((job) => job.requestId)).toEqual(["req-building"]);
 });
 
 test("a running build names its round; a drafting job names its stage", () => {

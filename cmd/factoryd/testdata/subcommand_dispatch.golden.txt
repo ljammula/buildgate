@@ -174,7 +174,7 @@ $ factoryd inbox -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd inbox [flags]
-stderr:   List every request waiting on you, across profiles
+stderr:   List every request waiting on you, across profiles or for one
 
 $ factoryd inspect -zz-not-a-flag
 exit 1

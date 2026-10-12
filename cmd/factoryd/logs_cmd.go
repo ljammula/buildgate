@@ -56,6 +56,10 @@ type logsTarget struct {
 	// dirs are the run and request directories whose saved prompts the id
 	// names (-prompt); none for a process log.
 	dirs func() []string
+	// notStarted, when set, says why a building request has no run in view
+	// yet ("" once it has one): its newest log is then an earlier step's,
+	// not the ticket the operator is asking about.
+	notStarted func() string
 }
 
 func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, follow *bool, lines *int) {
@@ -103,6 +107,15 @@ func runLogs(ctx context.Context, w io.Writer, dataDir, id string, list, follow 
 	}
 	if list {
 		return printLogList(w, dataDir, target)
+	}
+	if target.notStarted != nil {
+		if note := target.notStarted(); note != "" {
+			fmt.Fprintln(w, note)
+			if !follow {
+				fmt.Fprintf(w, "(factoryd logs -list %s shows the earlier steps' logs)\n", id)
+				return nil
+			}
+		}
 	}
 	if follow {
 		return followLogs(ctx, w, dataDir, target, lines)
@@ -200,6 +213,17 @@ func requestLogsTarget(dataDir, id string) logsTarget {
 		}
 		return r
 	}
+	notStarted := func() string {
+		r := load()
+		if r == nil || r.State != request.StateBuilding || r.TicketCount == 0 {
+			return ""
+		}
+		i := max(r.TicketIndex, 1)
+		if i > len(r.Tickets) || r.Tickets[i-1].RunID != "" {
+			return ""
+		}
+		return fmt.Sprintf("ticket %d/%d has not started a run yet: %s", i, r.TicketCount, requestWaitDetail(dataDir, r))
+	}
 	gather := func(runIDs func(*request.Request) []string) []logFile {
 		out := walkLogs(request.Dir(dataDir, id))
 		if r := load(); r != nil {
@@ -219,7 +243,15 @@ func requestLogsTarget(dataDir, id string) logsTarget {
 			}
 			return dirs
 		},
-		files: func() []logFile { return gather(currentTicketRunIDs) },
+		// No log is current while the ticket has not started: -f then
+		// waits for its run instead of tailing an earlier step's log.
+		files: func() []logFile {
+			if notStarted() != "" {
+				return nil
+			}
+			return gather(currentTicketRunIDs)
+		},
+		notStarted: notStarted,
 		listFiles: func() []logFile {
 			return gather(func(r *request.Request) []string { return allRequestRunIDs(dataDir, r) })
 		},
