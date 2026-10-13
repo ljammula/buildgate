@@ -158,6 +158,110 @@ func TestContentEntriesIncludeOperatorSkill(t *testing.T) {
 	t.Fatal("operator skill is missing from content inventory")
 }
 
+func TestContentEntriesIncludeInlinePromptSourceMetadata(t *testing.T) {
+	entries, err := contentEntries(sessionconfig.Settings{}, os.DirFS(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.selector != "prompt-source:draft-spec.context" {
+			continue
+		}
+		if entry.kind != "prompt-source" || entry.role != "planning" || entry.path != "agent/pi/scripts/draft_spec.py" || entry.hash != contentHash(entry.data) || !strings.Contains(string(entry.data), "source_sha256") || entry.selection != "metadata only; composed at runtime" {
+			t.Fatalf("inline prompt source entry = %+v", entry)
+		}
+		var shown bytes.Buffer
+		if err := showContent(entries, entry.selector, &shown); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(shown.String(), "build_prompt") || !strings.Contains(shown.String(), "draft_spec.prompt.md") || !strings.Contains(shown.String(), "metadata only; composed at runtime") {
+			t.Fatalf("inline source display metadata = %s", shown.String())
+		}
+		return
+	}
+	t.Fatal("inline prompt source metadata missing from content catalog")
+}
+
+func TestContentEntriesIncludeLanguageProfileMetadata(t *testing.T) {
+	entries, err := contentEntries(sessionconfig.Settings{}, os.DirFS(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.selector != "language-profile:rust" {
+			continue
+		}
+		if entry.kind != "language-profile" || entry.path != "internal/languageprofile/profile.go" || entry.hash != contentHash(entry.data) || !strings.Contains(string(entry.data), "cargo test --workspace") {
+			t.Fatalf("language profile entry = %+v", entry)
+		}
+		return
+	}
+	t.Fatal("language profile metadata missing from content catalog")
+}
+
+func TestContentEntriesListSelectedEditableSpecDraftGuidance(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	one := "---\nname: team-spec\nslot: spec-drafting\nformat_version: 1\n---\nAsk about the user-visible behavior.\n"
+	two := "---\nname: team-spec\nslot: spec-drafting\nformat_version: 1\n---\nLater duplicate.\n"
+	for dir, body := range map[string]string{first: one, second: two} {
+		if err := os.WriteFile(filepath.Join(dir, "team-spec.md"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := sessionconfig.Settings{
+		SpecDraftGuidanceDirs: []string{first, second},
+		Roles:                 &sessionconfig.Roles{Planning: &sessionconfig.RoleConfig{SpecDraftGuidance: "team-spec"}},
+	}
+	entries, err := contentEntries(settings, os.DirFS(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected, duplicate contentEntry
+	for _, entry := range entries {
+		if entry.selector == "spec-guidance:team-spec" {
+			selected = entry
+		}
+		if strings.HasPrefix(entry.selector, "team-spec-guidance:team-spec:") {
+			duplicate = entry
+		}
+	}
+	if selected.selector != "spec-guidance:team-spec" || selected.selection != "selected: planning/spec drafting" || selected.hash != contentHash([]byte(one)) {
+		t.Fatalf("selected spec guidance = %+v", selected)
+	}
+	var shown bytes.Buffer
+	if err := showContent(entries, selected.selector, &shown); err != nil || !strings.Contains(shown.String(), "Ask about the user-visible behavior") {
+		t.Fatalf("show selected guidance = %v, output %q", err, shown.String())
+	}
+	if duplicate.selector != "team-spec-guidance:team-spec:"+contentHash([]byte(two))+":2" || duplicate.selection != "shadowed duplicate; runtime validation pending" {
+		t.Fatalf("shadowed guidance = %+v", duplicate)
+	}
+}
+
+func TestContentEntriesShowsMissingSelectedSpecDraftGuidance(t *testing.T) {
+	settings := sessionconfig.Settings{
+		SpecDraftGuidanceDirs: []string{filepath.Join(t.TempDir(), "missing")},
+		Roles:                 &sessionconfig.Roles{Planning: &sessionconfig.RoleConfig{SpecDraftGuidance: "team-spec"}},
+	}
+	entries, err := contentEntries(settings, os.DirFS(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry contentEntry
+	for _, candidate := range entries {
+		if candidate.selector == "spec-guidance:team-spec" {
+			entry = candidate
+			break
+		}
+	}
+	if entry.name != "team-spec" || entry.selection != "selected but unavailable" || !strings.Contains(entry.problem, "not found") {
+		t.Fatalf("missing selected spec guidance = %+v", entry)
+	}
+	var shown bytes.Buffer
+	if err := showContent(entries, entry.selector, &shown); err != nil || !strings.Contains(shown.String(), "selected but unavailable") {
+		t.Fatalf("show missing selected guidance = %v, output %q", err, shown.String())
+	}
+}
+
 func TestContentEntriesListDesignGuides(t *testing.T) {
 	sources := newContentTestSources(t)
 	entries, err := contentEntries(sources.settings, os.DirFS(sources.scripts))

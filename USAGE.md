@@ -35,13 +35,16 @@ The shortest path from a fresh install to a reviewable pull request:
 -h` shows a command's arguments and flags, and `factoryd help -json
 [<command>]` prints the same as JSON for a script or a coding agent.
 
-Use `factoryd content` to inspect embedded prompt templates, the operator
-skill, built-in worker skills, every skill found in configured `skill_dirs`, the skills selected for
-each role, and available team design guides, including source paths and
+Use `factoryd content` to inspect embedded prompt templates and inline prompt
+sources, language profiles, the operator skill, built-in worker skills, every skill found in configured `skill_dirs`, the skills selected for
+each role, and available team design guides and spec-drafting guidance, including source paths and
 SHA-256 hashes. Invalid or oversized team content appears with an unavailable
 status instead of hiding the rest of the catalog. A readable team skill is marked
 as pending runtime validation; the inventory does not claim that the worker
-would accept its full skill tree. Add `-show prompt:<filename>`, `-show skill:<name>`,
+would accept its full skill tree. Inline prompt-source entries show composition
+metadata and referenced templates, not a rendered model prompt. Add
+`-show prompt:<filename>`, `-show prompt-source:<id>`,
+`-show language-profile:<id>`, `-show spec-guidance:<name>`, `-show skill:<name>`,
 `-show operator-skill:buildgate` or `-show guide:<name>` to print a source. When a team skill shadows a built-in,
 use `-show builtin-skill:<name>` to inspect the built-in too; later duplicate
 team skills have a `team-skill:<name>:<sha256>:<n>` selector in the inventory.
@@ -49,6 +52,9 @@ This is a local read-only inventory; displayed content is sanitized for
 obvious secrets. Embedded prompt templates are editable in source control and
 take effect when BuildGate is rebuilt. This command does not preview the full
 effective prompt or provide runtime prompt overrides.
+
+For the opt-in editable spec-drafting guidance slot and its limits, see
+[`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#editable-prompt-guidance-spec_draft_guidance_dirs).
 
 `factoryd quickstart <repo-path> "<task>"` is the whole path for an
 existing repo checkout — see "Quick start" below. For a brand-new app

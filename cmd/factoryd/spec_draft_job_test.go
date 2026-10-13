@@ -540,3 +540,40 @@ func TestDraftSpecArgsIncludesDesignGuideFileWhenGiven(t *testing.T) {
 		t.Errorf("draftSpecArgs = %v, want --design-guide-file /workspace/.factory-spec-draft/design-guide.md", args)
 	}
 }
+
+func TestDraftSpecArgsIncludesSpecGuidanceFileOnlyWhenGiven(t *testing.T) {
+	args := draftSpecArgs("/harness/draft_spec.py", "/workspace", "/inputs/run/request.md", "/workspace/out/spec.md", "/workspace/out/evidence.json", draftInputFiles{specGuidance: "/host/scratch/team-guidance.md"}.inContainer("/workspace/.factory-spec-draft"), 7, "", "pi")
+	if !slices.Contains(args, "--spec-guidance-file") || args[slices.Index(args, "--spec-guidance-file")+1] != "/workspace/.factory-spec-draft/team-guidance.md" {
+		t.Fatalf("draftSpecArgs = %v, want --spec-guidance-file /workspace/.factory-spec-draft/team-guidance.md", args)
+	}
+	without := draftSpecArgs("/harness/draft_spec.py", "/workspace", "/inputs/run/request.md", "/workspace/out/spec.md", "/workspace/out/evidence.json", draftInputFiles{}, 7, "", "pi")
+	if slices.Contains(without, "--spec-guidance-file") {
+		t.Fatalf("draftSpecArgs without selection = %v, unexpectedly has guidance", without)
+	}
+}
+
+func TestStageSpecDraftGuidanceUsesOnlyTheOperatorSelectedFile(t *testing.T) {
+	dir := t.TempDir()
+	guidancePath := filepath.Join(dir, "team-spec.md")
+	if err := os.WriteFile(guidancePath, []byte("---\nname: team-spec\nslot: spec-drafting\nformat_version: 1\n---\nPrefer measurable criteria.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(t.TempDir(), ".factory-spec-draft")
+	staged, err := stageSpecDraftGuidance(sessionconfig.Settings{
+		SpecDraftGuidanceDirs: []string{dir},
+		Roles:                 &sessionconfig.Roles{Planning: &sessionconfig.RoleConfig{SpecDraftGuidance: "team-spec"}},
+	}, scratch, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "Prefer measurable criteria.\n" {
+		t.Fatalf("staged guidance = %q", got)
+	}
+	if staged != filepath.Join(scratch, "team-guidance.md") {
+		t.Fatalf("staged path = %q", staged)
+	}
+}

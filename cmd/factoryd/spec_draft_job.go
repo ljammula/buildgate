@@ -17,6 +17,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sessionconfig"
 	wsisolation "buildgate/internal/workspace"
 )
 
@@ -235,12 +236,16 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	if err != nil {
 		return "", nil, err
 	}
+	hostGuidancePath, err := stageSpecDraftGuidance(cfg.Settings, scratchDir, sandboxUser)
+	if err != nil {
+		return "", nil, err
+	}
 
 	hostPreviousPath, err := stagePreviousSpec(dataDir, r, scratchDir, sandboxUser)
 	if err != nil {
 		return "", nil, err
 	}
-	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, previousDraft: hostPreviousPath}
+	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath}
 
 	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
 	if timeoutMinutes <= 0 {
@@ -329,6 +334,23 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 		return "", evidence, fmt.Errorf("%s", requestJobExitReason("draft_spec.py", 0, "but wrote an empty spec.md", res.LogPath))
 	}
 	return specMD, evidence, nil
+}
+
+// stageSpecDraftGuidance resolves and stages the operator-selected planning
+// guidance. The target repository is not involved in selection.
+func stageSpecDraftGuidance(settings sessionconfig.Settings, scratchDir, sandboxUser string) (string, error) {
+	guidance, err := sessionconfig.ResolveSpecDraftGuidance(settings)
+	if err != nil || guidance == nil {
+		return "", err
+	}
+	if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
+		return "", fmt.Errorf("create spec-draft scratch dir: %w", err)
+	}
+	path := filepath.Join(scratchDir, "team-guidance.md")
+	if err := writeRequestJobFeedbackFile(path, []byte(guidance.Text+"\n"), sandboxUser); err != nil {
+		return "", fmt.Errorf("stage spec-draft guidance: %w", err)
+	}
+	return path, nil
 }
 
 // previousDraftFileName is the staged copy of a handed-over spec's current

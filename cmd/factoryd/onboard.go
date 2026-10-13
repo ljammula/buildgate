@@ -331,7 +331,7 @@ func doOnboard(dp *deps, opts onboardOptions) (onboardResult, error) {
 	}
 	if writeFactoryYML {
 		if verifyCommand != "" {
-			fmt.Printf("Detected verify command: %q -- pre-filled into %s alongside preflight_profile: %s.\n", verifyCommand, projectconfig.FileName, projectconfig.PreflightProfileBrownfield)
+			fmt.Printf("Verify-command candidate: %q -- pre-filled into %s alongside preflight_profile: %s; review it before committing the file.\n", verifyCommand, projectconfig.FileName, projectconfig.PreflightProfileBrownfield)
 		} else {
 			fmt.Printf("Could not detect a real verify command -- %s's verify_command still needs filling in by hand.\n", projectconfig.FileName)
 		}
@@ -420,7 +420,7 @@ func detectVerifyCommand(repoRoot string) (command, source string) {
 			}
 		}
 	}
-	return "", ""
+	return suggestedProfileVerifyCommand(repoRoot)
 }
 
 // scaffoldArchitectureForOnboarding is scaffoldArchitecture with one
