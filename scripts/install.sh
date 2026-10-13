@@ -89,5 +89,11 @@ if ! git -C "$source_dir" checkout --detach "$release_tag"; then
 	fail "could not check out release $release_tag"
 fi
 
+# Older release Makefiles leave an ignored console bundle in place when npm
+# is unavailable, so remove any bundle from a previous checkout before build.
+rm -rf "$source_dir/internal/consoleweb/dist" || fail "could not clear the previous console build"
+mkdir -p "$source_dir/internal/consoleweb/dist" || fail "could not prepare the console build directory"
+touch "$source_dir/internal/consoleweb/dist/.gitkeep" || fail "could not prepare the console placeholder"
+
 printf 'Installing Buildgate %s from %s\n' "$release_tag" "$source_dir"
 IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG="$release_tag" make -C "$source_dir" install
