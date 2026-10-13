@@ -33,20 +33,35 @@ release_tags=$(git ls-remote --tags --refs --sort=-version:refname "$repo" 'refs
 image_available() {
 	package=$1
 	tag=$2
-	token=$(curl -fsSL "https://ghcr.io/token?scope=repository:$package:pull" |
-		sed -n 's/.*"token":"\([^"]*\)".*/\1/p') || return 1
-	[ -n "$token" ] || return 1
-	curl -fsSI \
+	token_response=$(curl -fsSL "https://ghcr.io/token?scope=repository:$package:pull") || return 2
+	token=$(printf '%s\n' "$token_response" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+	[ -n "$token" ] || return 2
+	status=$(curl -sS -o /dev/null -w '%{http_code}' \
 		-H "Authorization: Bearer $token" \
 		-H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
-		"https://ghcr.io/v2/$package/manifests/$tag" >/dev/null
+		"https://ghcr.io/v2/$package/manifests/$tag") || return 2
+	case "$status" in
+		200) return 0 ;;
+		404) return 1 ;;
+		*) return 2 ;;
+	esac
 }
 
 release_tag=
 for candidate in $release_tags; do
-	if image_available ljammula/buildgate-worker "$candidate" &&
-		image_available ljammula/factoryd-meter "$candidate" &&
-		image_available ljammula/buildgate-registry-proxy "$candidate"; then
+	images_complete=1
+	for package in ljammula/buildgate-worker ljammula/factoryd-meter ljammula/buildgate-registry-proxy; do
+		if image_available "$package" "$candidate"; then
+			:
+		else
+			probe_status=$?
+			case "$probe_status" in
+				1) images_complete=0; break ;;
+				*) fail "could not verify the GHCR image $package:$candidate" ;;
+			esac
+		fi
+	done
+	if [ "$images_complete" -eq 1 ]; then
 		release_tag=$candidate
 		break
 	fi
