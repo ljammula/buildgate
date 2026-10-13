@@ -182,22 +182,27 @@ cd buildgate
 make install
 ```
 
-To install a release from source while pulling its published images, check
-out the matching version tag first:
+For development, install `factoryd` and images built from the same checkout:
 
 ```sh
-git checkout vX.Y.Z
-IMAGE_SOURCE=ghcr make install
+make install
 ```
 
-This builds and installs `factoryd` from that tagged source. It pulls the
-matching worker, meter and registry-proxy images, then records their registry
-digests in every session profile by default. `FACTORYD_CONFIG` can target
-specific profiles, and existing project-specific sandbox images are retained.
-The tag is detected from the checkout; `BUILDGATE_IMAGE_TAG=vX.Y.Z` can select
-it explicitly. Only future versioned releases are published; earlier releases
-may not have GHCR packages, and development checkouts continue to build images
-locally. The GHCR packages must be public for anonymous pulls.
+To skip building images and pull them from a published release:
+
+```sh
+IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z make install
+```
+
+Replace `vX.Y.Z` with a published version tag. `factoryd` builds from the
+current checkout, including `main`. If that checkout changed image build
+inputs since the release, `factoryd doctor` can warn that the worker image is
+out of date. For matching release code and images, check out `vX.Y.Z` first
+and run `IMAGE_SOURCE=ghcr make install`; the image tag is detected
+automatically. GHCR image references are pinned by digest in every session
+profile by default. `FACTORYD_CONFIG` can target specific profiles, and
+existing project-specific sandbox images are retained. GHCR packages must be
+public for anonymous pulls.
 GitHub creates each package as private on its first publish. After the first
 tagged release, open each package's settings and change visibility to Public,
 then rerun the release workflow to complete its anonymous-pull check. GitHub
