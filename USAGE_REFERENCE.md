@@ -639,7 +639,7 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 # test_patterns:                                     # glob patterns for the always-on "tests_added" gate
 #   - "*_test.go"
 #   - "*.spec.ts"
-# required_binaries:                                 # bare executable names checked in the configured base image by doctor -target-repo
+# required_binaries:                                 # bare executable names required in the final worker image; doctor checks the configured base image
 #   - cargo
 #   - rustc
 preflight_profile: brownfield          # "" (strict, default) or "brownfield"
@@ -652,16 +652,19 @@ cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; l
 ```
 
 `required_binaries` is an optional list of at most 32 bare executable names,
-each at most 64 bytes. Names cannot contain paths or shell syntax. When you run
-`factoryd doctor -target-repo <repo>`, it checks each name inside the
-configured operator-selected base sandbox image using a bounded container with no
-network, mounts, or credentials, running as the configured/default isolated
-worker identity. It does not validate a different per-run identity override. A
-missing name identifies a tool the image needs. This diagnostic does not select
-or build an image, change `verify_command`, or count as an acceptance gate. When
-BuildGate derives a project image to match
-an existing Go or Python version declaration, this check still describes the
-configured base image; the derived image inherits its toolchain binaries.
+each at most 64 bytes. Names cannot contain paths or shell syntax. Before a run
+starts, BuildGate checks each name inside the final worker image selected for
+that run, using a bounded container with no network, mounts, or credentials,
+running as the configured/default isolated worker identity. A missing name or
+an image that cannot start the probe refuses the run before build or model work
+begins. When BuildGate derives a project image to match an existing Go or
+Python version declaration, the check uses that derived image.
+
+`factoryd doctor -target-repo <repo>` checks the configured operator-selected
+base sandbox image as an earlier diagnostic. It does not derive a toolchain
+image or validate a different per-run identity override. A missing name
+identifies a tool the image needs. BuildGate does not install these
+executables; add them to the operator-selected worker image.
 
 ### Built-in language profile suggestions
 

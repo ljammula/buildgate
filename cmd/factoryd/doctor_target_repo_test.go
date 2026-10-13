@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
 )
@@ -106,15 +108,18 @@ func TestDoctorChecksCommittedRequiredBinariesInConfiguredImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(args)
-	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=65532:65532", "--pids-limit=32", "--memory=128m", "--entrypoint\nsh\noperator-worker@sha256:abc", "IFS=:; for dir in $PATH", "[ -f \"$dir/$name\" ] && [ -x \"$dir/$name\" ]"} {
+	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=65532:65532", "--pids-limit=32", "--memory=128m", "--env\nPATH=" + sandbox.WorkerPath, "--entrypoint\nsh\noperator-worker@sha256:abc", "IFS=:; for dir in $PATH", "[ -f \"$dir/$name\" ] && [ -x \"$dir/$name\" ]"} {
 		if !strings.Contains(got, required) {
 			t.Errorf("docker probe args missing %q:\n%s", required, got)
 		}
 	}
-	for _, forbidden := range []string{"--mount", "--volume", "--env", "--network=bridge"} {
+	for _, forbidden := range []string{"--mount", "--volume", "--network=bridge"} {
 		if strings.Contains(got, forbidden) {
 			t.Errorf("docker probe args contain forbidden %q:\n%s", forbidden, got)
 		}
+	}
+	if count := strings.Count(got, "--env\n"); count != 1 {
+		t.Errorf("docker probe has %d environment entries, want only the worker PATH:\n%s", count, got)
 	}
 }
 
@@ -127,6 +132,32 @@ func TestRequiredBinaryProbeRejectsShellBuiltins(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != "cd" {
 		t.Fatalf("built-in probe output = %q, want missing executable cd", got)
+	}
+}
+
+func TestProbeRequiredBinariesBoundsImageOutput(t *testing.T) {
+	docker := filepath.Join(t.TempDir(), "docker")
+	argsPath := filepath.Join(t.TempDir(), "docker-args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsPath + "'\nif [ \"$1\" = run ]; then i=0; while [ \"$i\" -lt 2000 ]; do printf 'probe output exceeds the configured byte limit\\n'; i=$((i + 1)); done; fi\n"
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := probeRequiredBinaries(context.Background(), docker, "worker", "65532:65532", []string{"cargo"})
+	if err == nil || !strings.Contains(err.Error(), "output exceeded 16384 bytes") {
+		t.Fatalf("error = %v, want bounded-output refusal", err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(args)), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "rm --force factoryd-required-binaries-") {
+		t.Fatalf("docker calls = %q, want run followed by forced container cleanup", lines)
+	}
+	fields := strings.Fields(lines[0])
+	nameIndex := slices.Index(fields, "--name")
+	if nameIndex < 0 || nameIndex+1 >= len(fields) || fields[nameIndex+1] != strings.TrimPrefix(lines[1], "rm --force ") {
+		t.Fatalf("run/cleanup container names differ: %q", lines)
 	}
 }
 

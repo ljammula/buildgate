@@ -19,13 +19,14 @@ import (
 // fakeDocker is a dockerBoundary whose every method is a field, set by newTestDeps
 // to the real method and replaced by a test that needs another answer.
 type fakeDocker struct {
-	colimaBinaryFn func() string
-	dockerBinaryFn func() string
-	imageToolsFn   func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
-	initChecksFn   func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
-	makeImageFn    func(repoRoot string, target string, vars ...string) (string, error)
-	toolImageFn    func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
-	workerChecksFn func(ctx context.Context, in doctorInputs) []doctorCheck
+	colimaBinaryFn     func() string
+	dockerBinaryFn     func() string
+	imageToolsFn       func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
+	initChecksFn       func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
+	makeImageFn        func(repoRoot string, target string, vars ...string) (string, error)
+	toolImageFn        func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
+	requiredBinariesFn func(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
+	workerChecksFn     func(ctx context.Context, in doctorInputs) []doctorCheck
 }
 
 func (f *fakeDocker) colimaBinary() string { return f.colimaBinaryFn() }
@@ -41,6 +42,9 @@ func (f *fakeDocker) makeImage(repoRoot string, target string, vars ...string) (
 }
 func (f *fakeDocker) toolchainImage(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error) {
 	return f.toolImageFn(ctx, dockerBinary, base, buildArgs)
+}
+func (f *fakeDocker) requiredBinaries(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error) {
+	return f.requiredBinariesFn(ctx, dockerBinary, image, user, names)
 }
 func (f *fakeDocker) workerChecks(ctx context.Context, in doctorInputs) []doctorCheck {
 	return f.workerChecksFn(ctx, in)
@@ -268,6 +272,9 @@ func newTestDeps(t testing.TB) *deps {
 		makeImageFn:  realDocker.makeImage,
 		toolImageFn: func(context.Context, string, string, []string) (string, error) {
 			return "", errors.New("test docker: no image is built")
+		},
+		requiredBinariesFn: func(context.Context, string, string, string, []string) ([]string, error) {
+			return nil, errors.New("test docker: no image is probed for required binaries")
 		},
 		workerChecksFn: realDocker.workerChecks,
 	}

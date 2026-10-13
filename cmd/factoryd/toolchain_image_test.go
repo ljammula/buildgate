@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
 )
 
@@ -178,6 +179,61 @@ func TestToolchainImageForLeavesTheBaseWhenItCannotCompareAndRefusesWhatCannotPa
 			t.Errorf("image = %q, %v; want a refusal", image, err)
 		}
 	})
+}
+
+func TestFitSandboxToRepositoryChecksRequiredBinariesInFinalImage(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	const base = "worker@sha256:aaaa"
+	const derived = "localhost:5050/buildgate-toolchain@sha256:bbbb"
+	repo := toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n"})
+	for _, tc := range []struct {
+		name    string
+		missing []string
+		wantErr string
+	}{
+		{name: "present"},
+		{name: "missing", missing: []string{"cargo"}, wantErr: "missing required executable(s) on PATH"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			fake := fakeDockerOf(dp)
+			fake.imageToolsFn = func(context.Context, string, string) (toolchain.Installed, string, error) {
+				installed, codename := parseImageToolchains(workerImageToolchains)
+				return installed, codename, nil
+			}
+			fake.toolImageFn = func(context.Context, string, string, []string) (string, error) {
+				return derived, nil
+			}
+			var probedImage, probedUser string
+			var probedNames []string
+			fake.requiredBinariesFn = func(_ context.Context, _ string, image, user string, names []string) ([]string, error) {
+				probedImage, probedUser, probedNames = image, user, append([]string(nil), names...)
+				return tc.missing, nil
+			}
+			image, docker, user, uid := base, "docker", "65532:65532", sandbox.DefaultWorkerUID
+			tr := &ticketRun{
+				dp: dp, lifecycleCtx: context.Background(), resolvedWorkspace: repo,
+				sandboxImage: &image, sandboxDocker: &docker, sandboxUser: &user, sandboxWorkerUID: &uid,
+				requiredBinaries: []string{"cargo", "rustc"},
+			}
+			err := tr.fitSandboxToRepository()
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("fitSandboxToRepository: %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
+			}
+			if image != derived || probedImage != derived {
+				t.Errorf("final image = %q, probed image = %q, want derived image %q", image, probedImage, derived)
+			}
+			if probedUser != "65532:65532" {
+				t.Errorf("probed worker identity = %q, want 65532:65532", probedUser)
+			}
+			if want := []string{"cargo", "rustc"}; !reflect.DeepEqual(probedNames, want) {
+				t.Errorf("probed names = %q, want %q", probedNames, want)
+			}
+		})
+	}
 }
 
 func TestToolchainBuildFailureQuotesTheScriptsVerdict(t *testing.T) {

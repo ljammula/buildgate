@@ -569,7 +569,7 @@ unset (an explicit flag always wins).
 
 ```yaml
 verify_command: "make verify"
-required_binaries: [cargo, rustc]        # optional: check these in sandbox_image with doctor -target-repo
+required_binaries: [cargo, rustc]        # optional: required in the final worker image before a run starts
 preflight_profile: brownfield          # "" (strict, default) or "brownfield"
 ```
 

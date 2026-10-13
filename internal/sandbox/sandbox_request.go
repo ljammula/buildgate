@@ -121,8 +121,11 @@ func (s LaunchSpec) SandboxRequest(launch SandboxLaunch) (SandboxRequest, error)
 }
 
 // workerFixedEnvironment is what every worker gets whatever the spec says.
+// WorkerPath is the PATH used by every launched worker.
+const WorkerPath = "/usr/local/bin:/usr/bin:/bin"
+
 var workerFixedEnvironment = []string{
-	"PATH=/usr/local/bin:/usr/bin:/bin",
+	"PATH=" + WorkerPath,
 	"GIT_CONFIG_COUNT=1",
 	"GIT_CONFIG_KEY_0=safe.directory",
 	"GIT_CONFIG_VALUE_0=/workspace",
