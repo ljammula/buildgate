@@ -53,13 +53,30 @@ a sandbox and prepares a pull request.
 
 On a new Mac, use Homebrew (or install the required tools yourself) and Docker.
 `make install` installs missing Go, Python, Git, GitHub CLI, Node and Docker
-packages, builds the images from source, installs `factoryd`, and runs
-`factoryd doctor -fix`. To use a tagged release's images, check out that
-same release tag and run `IMAGE_SOURCE=ghcr make install`; the tag is resolved
-to digests before it is saved. After the first tagged release, the three GHCR
-packages must be made public in their package settings for anonymous installs;
-GitHub does not allow public packages to be made private again. The binary is
-still built from this checkout.
+packages, builds images from source, installs `factoryd`, and runs
+`factoryd doctor -fix`.
+
+For development, install `factoryd` and images built from the same `main`
+checkout:
+
+```sh
+git switch main
+git pull
+make install
+```
+
+To skip building images and use ones published for a release, run:
+
+```sh
+IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z make install
+```
+
+Replace `vX.Y.Z` with a published release tag. `factoryd` still builds from
+the current checkout. Using a different release's images can produce an
+out-of-date image warning if `main` changed their build inputs. For a matching
+release install, check out `vX.Y.Z` first and run `IMAGE_SOURCE=ghcr make
+install`; the tag is detected automatically. GHCR image references are pinned
+by digest in the config. GHCR packages must be public for anonymous installs.
 Node and npm are optional, only for building the console.
 
 ```sh
