@@ -324,6 +324,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		self.assertNotIn("retry", conformity)
 		self.assertNotIn("retry", review)
 		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
+		self.assertIn("account for every relevant return value and branch", self._saved_prompts(root)["review-combined.md"])
 		self.assertFalse((root / ".pi-combined-review-session" / "retry").exists())
 
 	def test_a_missing_findings_list_is_asked_for_alone_and_the_verdicts_are_kept(self):
