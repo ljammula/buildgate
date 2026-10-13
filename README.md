@@ -51,39 +51,35 @@ a sandbox and prepares a pull request.
 
 ## Install
 
-On a new Mac, use Homebrew (or install the required tools yourself) and Docker.
-`make install` installs missing Go, Python, Git, GitHub CLI, Node and Docker
-packages, builds images from source, installs `factoryd`, and runs
-`factoryd doctor -fix`.
-
-For development, install `factoryd` and images built from the same `main`
-checkout:
+Install the latest stable release, including its matching GHCR images:
 
 ```sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/ljammula/buildgate/main/scripts/install.sh | sh'
+```
+
+The installer chooses the newest stable release with all three GHCR images
+published, checks out its source under `~/.local/share/buildgate/source` by
+default (or `$XDG_DATA_HOME/buildgate/source` when `XDG_DATA_HOME` is set),
+installs missing prerequisites with Homebrew, pulls the matching worker,
+meter and registry-proxy images, and runs `factoryd doctor -fix`. It needs
+`bash`, `curl`, `make`, and `git` (or Homebrew to install Git). GHCR packages
+must be public for anonymous pulls.
+
+For development, clone the repository and build `factoryd` and its images
+from `main`:
+
+```sh
+git clone https://github.com/ljammula/buildgate.git
+cd buildgate
 git switch main
 git pull
 make install
 ```
 
-To skip building images and use ones published for a release, run:
+`make install` builds images from source. Node and npm are optional, only for
+building the console.
 
 ```sh
-IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z make install
-```
-
-Replace `vX.Y.Z` with a published release tag. `factoryd` still builds from
-the current checkout. Using a different release's images can produce an
-out-of-date image warning if `main` changed their build inputs. For a matching
-release install, check out `vX.Y.Z` first and run `IMAGE_SOURCE=ghcr make
-install`; the tag is detected automatically. GHCR image references are pinned
-by digest in the config. GHCR packages must be public for anonymous installs.
-Node and npm are optional, only for building the console.
-
-```sh
-git clone https://github.com/ljammula/buildgate.git
-cd buildgate
-make install
-
 # In a new terminal, run the first request:
 factoryd quickstart ~/code/your-repo "Add X to Y"
 ```

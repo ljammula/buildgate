@@ -268,6 +268,13 @@ class CodeReviewPromptTest(unittest.TestCase):
 		self.assertIn("Ticket spec text.", prompt)
 		self.assertIn("abc123", prompt)
 
+	def test_prompt_requires_findings_to_follow_verified_code_paths(self):
+		prompt = code_review.code_review_prompt("Ticket spec text.", "abc123")
+		self.assertIn("trace the triggering input or state through its actual control flow", prompt)
+		self.assertIn("account for every relevant return value and branch", prompt)
+		self.assertIn("A concern that depends on an assumption you cannot verify", prompt)
+		self.assertIn("the code path it takes", prompt)
+
 	def test_prompt_with_diff_inlines_it_and_forbids_re_fetching(self):
 		prompt = code_review.code_review_prompt(
 			"Ticket spec text.", "abc123", diff=(" 1 file changed\n", "diff --git a/x.go b/x.go\n+line\n"),

@@ -195,35 +195,45 @@ building the console. A model route (any OpenAI-compatible endpoint, an
 Anthropic key, GitHub Copilot, or a Codex login —
 [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-routes)).
 
-Install from a checkout, building images locally:
+Install the latest stable release with its matching GHCR images:
+
+```sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/ljammula/buildgate/main/scripts/install.sh | sh'
+```
+
+The installer chooses the newest stable release with all three GHCR images
+published, checks out its source under `~/.local/share/buildgate/source` by
+default (or `$XDG_DATA_HOME/buildgate/source` when `XDG_DATA_HOME` is set),
+installs missing prerequisites with Homebrew, pulls the matching worker,
+meter and registry-proxy images, and runs `factoryd doctor -fix`. It needs
+`bash`, `curl`, `make`, and `git` (or Homebrew to install Git). GHCR packages
+must be public for anonymous pulls.
+
+For development, clone the repository and build `factoryd` plus its images
+from `main`:
 
 ```sh
 git clone https://github.com/ljammula/buildgate.git
 cd buildgate
+git switch main
+git pull
 make install
 ```
 
-For development, install `factoryd` and images built from the same checkout:
-
-```sh
-make install
-```
-
-To skip building images and pull them from a published release:
+To build `factoryd` from the current checkout while pulling images from a
+specific published release:
 
 ```sh
 IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z make install
 ```
 
-Replace `vX.Y.Z` with a published version tag. `factoryd` builds from the
-current checkout, including `main`. If that checkout changed image build
-inputs since the release, `factoryd doctor` can warn that the worker image is
-out of date. For matching release code and images, check out `vX.Y.Z` first
-and run `IMAGE_SOURCE=ghcr make install`; the image tag is detected
+Replace `vX.Y.Z` with a published version tag. If the checkout changed image
+build inputs since the selected release, `factoryd doctor` can warn that the
+worker image is out of date. For matching release code and images, check out
+`vX.Y.Z` first and run `IMAGE_SOURCE=ghcr make install`; the tag is detected
 automatically. GHCR image references are pinned by digest in every session
 profile by default. `FACTORYD_CONFIG` can target specific profiles, and
-existing project-specific sandbox images are retained. GHCR packages must be
-public for anonymous pulls.
+existing project-specific sandbox images are retained.
 GitHub creates each package as private on its first publish. After the first
 tagged release, open each package's settings and change visibility to Public,
 then rerun the release workflow to complete its anonymous-pull check. GitHub

@@ -114,10 +114,13 @@ console-build:
 # placeholder page when npm isn't on PATH or the build fails (an npm that
 # crashes under the machine's Node, a registry it cannot reach), so
 # `make install` still installs factoryd on a machine with no working Node
-# toolchain. A failed build empties internal/consoleweb/dist first: a bundle
-# left by an earlier build would otherwise be embedded in the new binary.
+# toolchain. Both cases empty internal/consoleweb/dist first: a bundle left by
+# an earlier build would otherwise be embedded in the new binary.
 console-build-optional:
 	@if ! command -v npm >/dev/null 2>&1; then \
+		if ! rm -rf internal/consoleweb/dist || ! mkdir -p internal/consoleweb/dist || ! touch internal/consoleweb/dist/.gitkeep; then \
+			echo "error: could not clear the previous console build" >&2; exit 1; \
+		fi; \
 		echo "npm not installed -- factoryd will serve the console placeholder page (see console/README.md for make console-build)"; \
 	elif ! $(MAKE) console-build; then \
 		rm -rf internal/consoleweb/dist; \
