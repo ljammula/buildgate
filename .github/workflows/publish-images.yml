@@ -1,0 +1,121 @@
+name: Publish release images
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - image: buildgate-worker
+            kind: worker
+            dockerfile: internal/sandbox/Dockerfile
+          - image: factoryd-meter
+            kind: meter
+            dockerfile: internal/meter/Dockerfile
+          - image: buildgate-registry-proxy
+            kind: registry-proxy
+            dockerfile: internal/registryproxy/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and publish ${{ matrix.image }}
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          IMAGE_KIND: ${{ matrix.kind }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          IMAGE_TAG: ${{ github.ref_name }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "refusing non-release image tag: $IMAGE_TAG" >&2
+            exit 1
+          fi
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE_NAME"
+          inputs_hash="$(go run ./cmd/factoryd image-inputs-hash -repo-root . "$IMAGE_KIND")"
+          if [[ ! "$inputs_hash" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "invalid image inputs hash for $IMAGE_KIND: $inputs_hash" >&2
+            exit 1
+          fi
+          digest=""
+          manifest="$(mktemp)"
+          raw_manifest="$(mktemp)"
+          inspect_error="$(mktemp)"
+          # --raw fetches only the tag's top-level manifest. The formatted
+          # inspect below also loads child manifests/configs, whose 404s must
+          # never be mistaken for an absent release tag.
+          if docker buildx imagetools inspect --raw "$image:$IMAGE_TAG" > "$raw_manifest" 2>"$inspect_error"; then
+            if ! docker buildx imagetools inspect --format '{{json .Manifest}}' "$image:$IMAGE_TAG" > "$manifest" 2>"$inspect_error"; then
+              cat "$inspect_error" >&2
+              echo "could not inspect the existing manifest list for $image:$IMAGE_TAG; refusing to publish over it" >&2
+              exit 1
+            fi
+            docker pull "$image:$IMAGE_TAG"
+            published_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image:$IMAGE_TAG")"
+            published_hash="$(docker image inspect --format '{{ index .Config.Labels "buildgate.inputs-hash" }}' "$image:$IMAGE_TAG")"
+            published_kind="$(docker image inspect --format '{{ index .Config.Labels "buildgate.image" }}' "$image:$IMAGE_TAG")"
+            if [[ "$published_revision" != "$SOURCE_REVISION" || "$published_hash" != "$inputs_hash" || "$published_kind" != "$IMAGE_KIND" ]]; then
+              echo "refusing to replace $image:$IMAGE_TAG: it was published from a different revision or input set" >&2
+              exit 1
+            fi
+            digest="$(jq -r '.digest // empty' "$manifest")"
+          else
+            if ! grep -Eiq '(^|[[:space:]:])not found([[:space:]]|$)|manifest unknown|no such manifest' "$inspect_error"; then
+              cat "$inspect_error" >&2
+              echo "could not confirm whether $image:$IMAGE_TAG exists; refusing to publish over an uncertain tag" >&2
+              exit 1
+            fi
+            metadata="$(mktemp)"
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --file "$DOCKERFILE" \
+              --tag "$image:$IMAGE_TAG" \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.revision=$SOURCE_REVISION" \
+              --label "buildgate.inputs-hash=$inputs_hash" \
+              --label "buildgate.image=$IMAGE_KIND" \
+              --metadata-file "$metadata" \
+              --push \
+              .
+            digest="$(jq -r '.["containerimage.digest"] // empty' "$metadata")"
+          fi
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "could not read a manifest-list digest for $image:$IMAGE_TAG" >&2
+            exit 1
+          fi
+          docker logout ghcr.io
+          if ! docker pull "$image@$digest"; then
+            echo "anonymous pull failed for $image@$digest; set this GHCR package to Public, then rerun the release workflow" >&2
+            exit 1
+          fi
+          {
+            echo "### $IMAGE_NAME"
+            echo "- Image: \`$image@$digest\`"
+            echo "- Release tag: \`$IMAGE_TAG\`"
+            echo "- Source revision: \`$SOURCE_REVISION\`"
+            echo "- Inputs hash: \`$inputs_hash\`"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"

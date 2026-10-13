@@ -174,14 +174,34 @@ building the console. A model route (any OpenAI-compatible endpoint, an
 Anthropic key, GitHub Copilot, or a Codex login —
 [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-routes)).
 
-Install, source-only (every image factoryd launches is built from source,
-never pulled from a registry):
+Install from a checkout, building images locally:
 
 ```sh
 git clone https://github.com/ljammula/buildgate.git
 cd buildgate
 make install
 ```
+
+To install a release from source while pulling its published images, check
+out the matching version tag first:
+
+```sh
+git checkout vX.Y.Z
+IMAGE_SOURCE=ghcr make install
+```
+
+This builds and installs `factoryd` from that tagged source. It pulls the
+matching worker, meter and registry-proxy images, then records their registry
+digests in every session profile by default. `FACTORYD_CONFIG` can target
+specific profiles, and existing project-specific sandbox images are retained.
+The tag is detected from the checkout; `BUILDGATE_IMAGE_TAG=vX.Y.Z` can select
+it explicitly. Only future versioned releases are published; earlier releases
+may not have GHCR packages, and development checkouts continue to build images
+locally. The GHCR packages must be public for anonymous pulls.
+GitHub creates each package as private on its first publish. After the first
+tagged release, open each package's settings and change visibility to Public,
+then rerun the release workflow to complete its anonymous-pull check. GitHub
+does not allow a public package to be made private again.
 
 `make install` -> `$(go env GOPATH)/bin/factoryd`, and that directory onto
 `PATH` in your shell profile when a new shell would not find `factoryd`
@@ -190,10 +210,11 @@ make install
 install` to confirm which one resolves.
 
 On a network that intercepts TLS (a corporate proxy that re-signs HTTPS),
-`make install` needs the proxy's CA: for the image builds' downloads, and for
-the console's `npm ci`, which without it cannot verify the registry and, under
+local image builds and the console's `npm ci` need the proxy's CA. GHCR image
+installs skip the image builds, but still run the console build when Node is
+available. Without the CA, `npm ci` cannot verify the registry and, under
 some Node versions, fails with `Exit handler never called!` instead of a
-certificate error. `make install` finds it:
+certificate error. `make install` finds the CA:
 
 ```text
 make install
@@ -209,7 +230,8 @@ make install
 
 | Consumer | How it reads the bundle |
 |---|---|
-| Image builds | A BuildKit secret, mounted only for the dependency downloads and never stored in an image |
+| Local image builds | A BuildKit secret, mounted only for the dependency downloads and never stored in an image |
+| GHCR image pulls | The selected release's published images; their version tags are resolved to registry digests before being written to config |
 | pip (project images) | In place of its own roots, so a bundle you pass yourself must include any public roots the proxy does not cover |
 | Console `npm ci` | `NODE_EXTRA_CA_CERTS`, beside Node's own roots |
 

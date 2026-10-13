@@ -916,10 +916,10 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 	// configured (session config, written by `make install`/`factoryd
 	// configure-images`), never host execution. An explicit -sandbox-image
 	// still gets Docker's own real error if it's missing locally, not this
-	// one -- images are built from source, never pulled from a registry
-	// (see sandbox.ImagePresent's own doc comment).
+	// one -- `make install` is the path that builds or pulls and records the
+	// image (see sandbox.ImagePresent's own comment).
 	if *tr.sandboxImage == "" {
-		return fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout (builds images from source and records them via `factoryd configure-images`), or pass -sandbox-image")
+		return fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
 	}
 	if *tr.fullSuiteCadence < 0 {
 		return fmt.Errorf("-full-suite-cadence must be zero or a positive integer, got %d", *tr.fullSuiteCadence)

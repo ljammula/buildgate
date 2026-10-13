@@ -248,7 +248,7 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	}
 	sandboxImage := cfg.SandboxImage
 	if sandboxImage == "" && !cfg.AllowUnsandboxedSpecDraft {
-		return "", nil, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout (builds images from source and records them via `factoryd configure-images`), or pass -sandbox-image")
+		return "", nil, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
 	}
 	roleOverride, roleErr := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", r.Models["planning"], r.Harnesses["planning"])
 	if roleErr != nil {

@@ -768,7 +768,7 @@ func launchOracleDraftScript(ctx context.Context, cfg requestdriver.WorkerConfig
 	}
 	sandboxImage := cfg.SandboxImage
 	if sandboxImage == "" && !cfg.AllowUnsandboxedSpecDraft {
-		return runner.Result{}, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout (builds images from source and records them via `factoryd configure-images`), or pass -sandbox-image")
+		return runner.Result{}, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
 	}
 	criterionMinutes := l.CriterionTimeoutMinutes
 	if criterionMinutes <= 0 {

@@ -189,6 +189,140 @@ class InstallPrereqsTest(unittest.TestCase):
         self.assertTrue((self.home / ".docker" / "cli-plugins" / "docker-buildx").is_symlink())
         self.assertNotIn("colima", result.stdout)
 
+    def test_ghcr_image_install_still_installs_buildx_for_toolchain_derivation(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
+        result = self.run_script(FACTORYD_IMAGE_SOURCE="ghcr")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.brew_calls(), ["--prefix", "install docker-buildx", "--prefix"])
+        self.assertTrue((self.home / ".docker" / "cli-plugins" / "docker-buildx").is_symlink())
+
+    def test_make_local_images_pulls_release_refs_and_records_digests(self):
+        self.install(
+            "docker",
+            """#!/bin/sh
+case "$1 $2" in
+  "info ") exit 0 ;;
+  "pull "*) echo "$*" >> "$HOME/docker.log"; exit 0 ;;
+  "image inspect")
+    case "$5" in
+      *buildgate-worker*) echo ghcr.io/ljammula/buildgate-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+      *factoryd-meter*) echo ghcr.io/ljammula/factoryd-meter@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+      *) echo ghcr.io/ljammula/buildgate-registry-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc ;;
+    esac; exit 0 ;;
+  "buildx version") exit 0 ;;
+  "inspect factoryd-local-registry") echo "$*" >> "$HOME/docker.log"; exit 0 ;;
+esac
+exit 1
+""",
+        )
+        self.install(
+            "go",
+            """#!/bin/sh
+if [ "$1" = run ] && [ "$2" = ./cmd/factoryd ]; then
+  if [ "$3" = build-ca-bundle ]; then exit 0; fi
+  printf '%s\n' "$*" >> "$HOME/go.log"
+fi
+""",
+        )
+        for utility in ("grep", "tail"):
+            os.symlink(shutil.which(utility), self.bin / utility)
+        self.install("curl", "#!/bin/sh\nexit 0\n")
+        makefile = Path(__file__).resolve().parents[2] / "Makefile"
+        result = subprocess.run(
+            [
+                shutil.which("make"),
+                "-f",
+                str(makefile),
+                "IMAGE_SOURCE=ghcr",
+                "BUILDGATE_IMAGE_TAG=v1.2.3",
+                "local-images",
+            ],
+            env={"PATH": str(self.bin), "HOME": str(self.home)},
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (self.home / "docker.log").read_text().splitlines(),
+            [
+                "inspect factoryd-local-registry",
+                "pull ghcr.io/ljammula/buildgate-worker:v1.2.3",
+                "pull ghcr.io/ljammula/factoryd-meter:v1.2.3",
+                "pull ghcr.io/ljammula/buildgate-registry-proxy:v1.2.3",
+            ],
+        )
+        configured = (self.home / "go.log").read_text()
+        self.assertIn("-sandbox-image ghcr.io/ljammula/buildgate-worker@sha256:" + "a" * 64, configured)
+        self.assertIn("-meter-image ghcr.io/ljammula/factoryd-meter@sha256:" + "b" * 64, configured)
+        self.assertIn("-registry-proxy-image ghcr.io/ljammula/buildgate-registry-proxy@sha256:" + "c" * 64, configured)
+
+    def test_release_image_publish_only_builds_after_confirmed_tag_absence(self):
+        workflow = Path(__file__).resolve().parents[2] / ".github/workflows/publish-images.yml"
+        lines = workflow.read_text().splitlines()
+        step_index = next(index for index, line in enumerate(lines) if "Build and publish" in line)
+        run_index = next(index for index in range(step_index + 1, len(lines)) if lines[index].strip() == "run: |")
+        indent = len(lines[run_index]) - len(lines[run_index].lstrip()) + 2
+        script_lines = []
+        for line in lines[run_index + 1 :]:
+            if line.strip() and not line.startswith(" " * indent):
+                break
+            script_lines.append(line[indent:] if line.strip() else "")
+        workflow_script = "\n".join(script_lines)
+        # GitHub's Ubuntu runner uses Bash 5; the system Bash on macOS 3.2
+        # cannot parse the lowercase expansion. The test owner is lowercase.
+        workflow_script = workflow_script.replace("${GITHUB_REPOSITORY_OWNER,,}", "$GITHUB_REPOSITORY_OWNER")
+
+        self.install("go", "#!/bin/sh\nprintf '%064d\\n' 0\n")
+        log = self.home / "publish-docker.log"
+        for raw_error, child_error, want_build, expected_message in (
+            ("ERROR: registry: 503 Service Unavailable", "", False, "uncertain tag"),
+            ("ERROR: ghcr.io/ljammula/buildgate-worker:v1.2.3: not found", "", True, ""),
+            ("", "ERROR: child manifest config: not found", False, "existing manifest list"),
+        ):
+            with self.subTest(raw_error=raw_error, child_error=child_error):
+                log.unlink(missing_ok=True)
+                self.install(
+                    "docker",
+                    "#!/bin/sh\n"
+                    'printf "%s\\n" "$*" >> "$DOCKER_LOG"\n'
+                    'if [ "$1 $2 $3" = "buildx imagetools inspect" ]; then\n'
+                    '  if [ "$4" = "--raw" ]; then\n'
+                    '    if [ -n "$RAW_ERROR" ]; then echo "$RAW_ERROR" >&2; exit 1; fi\n'
+                    '    echo \'{"schemaVersion":2}\'\n    exit 0\n  fi\n'
+                    '  if [ -n "$CHILD_ERROR" ]; then echo "$CHILD_ERROR" >&2; exit 1; fi\n'
+                    '  echo \'{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}\'\n'
+                    '  exit 0\nfi\n'
+                    'if [ "$1 $2" = "buildx build" ]; then exit 71; fi\n'
+                    "exit 0\n",
+                )
+                env = {
+                    **os.environ,
+                    "PATH": f"{self.bin}:{os.environ['PATH']}",
+                    "DOCKER_LOG": str(log),
+                    "RAW_ERROR": raw_error,
+                    "CHILD_ERROR": child_error,
+                    "IMAGE_TAG": "v1.2.3",
+                    "IMAGE_KIND": "worker",
+                    "IMAGE_NAME": "buildgate-worker",
+                    "DOCKERFILE": "internal/sandbox/Dockerfile",
+                    "SOURCE_REVISION": "test-revision",
+                    "GITHUB_REPOSITORY_OWNER": "ljammula",
+                    "GITHUB_REPOSITORY": "ljammula/buildgate",
+                    "GITHUB_STEP_SUMMARY": str(self.home / "summary.md"),
+                }
+                result = subprocess.run(
+                    ["/bin/bash", "-c", workflow_script],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertTrue(log.exists(), f"docker was not called: {result.stderr}")
+                calls = log.read_text().splitlines()
+                self.assertEqual(any(line.startswith("buildx build ") for line in calls), want_build)
+                if expected_message:
+                    self.assertIn(expected_message, result.stderr)
+
     def test_an_installed_buildx_formula_is_linked_without_brew_install(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
         plugin = self.prefix / "lib/docker/cli-plugins/docker-buildx"

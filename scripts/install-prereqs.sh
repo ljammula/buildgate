@@ -1,7 +1,8 @@
 #!/bin/sh
 # install-prereqs.sh: `make install`'s first step. Installs, with Homebrew,
 # the tools the rest of the install needs and this machine lacks, links
-# Docker's buildx plugin and starts Docker, so a new Mac needs no
+# Docker's buildx plugin for image builds and automatic toolchain derivation,
+# and starts Docker, so a new Mac needs no
 # `brew install` or `colima start` line first.
 #
 #   Tool                    Formula          Missing when

@@ -1,19 +1,12 @@
 // Package imageinputs computes a stable hash of the real source inputs
 // that determine a locally built Docker image's content, so a caller can
 // tell whether an already-built image is stale relative to the current
-// checkout. Ported from the former
-// .github/scripts/canonical-image-inputs-hash.sh (deleted alongside this
-// package, once every image this repo launches stopped being published
-// and started being built from source only) so the Makefile and
-// `factoryd doctor`/`quickstart` share one Go definition instead of
-// drifting the way that shell script's own history warns about: it
-// hashed git blob IDs and needed LC_ALL=C pinned against a real
-// cross-machine mismatch (a local macOS shell disagreeing with a CI
-// runner over `sort`'s own locale-dependent order). This package hashes
-// file contents directly (no git dependency, so it works against an
-// uncommitted local checkout too) and sorts with Go's own sort.Strings,
-// which is a plain byte-wise comparison independent of the process
-// locale.
+// checkout. The Makefile, `factoryd doctor`/`quickstart`, and the release
+// workflow share this Go definition so their reuse and publication checks
+// agree. It hashes file contents directly (no git dependency, so it works
+// against an uncommitted local checkout too) and sorts with Go's own
+// sort.Strings, which is a plain byte-wise comparison independent of the
+// process locale.
 package imageinputs
 
 import (

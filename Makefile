@@ -1,4 +1,8 @@
-.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+
+# source remains the default for development checkouts. Release users can
+# install the published, digest-pinned images with IMAGE_SOURCE=ghcr.
+IMAGE_SOURCE ?= source
 
 # data/ is gitignored runtime state (queue entries, workspaces, tickets --
 # see AGENTS.md's repo-layout table) that can contain arbitrary .go files
@@ -229,10 +233,11 @@ probe-instruction-paths:
 
 # install-prereqs is `make install`'s first step: Homebrew installs the
 # tools the later steps need and this machine lacks, Docker's buildx plugin
-# is linked, and a Docker that does not answer is started through colima
-# (scripts/install-prereqs.sh's header has the table).
+# is linked for image builds and automatic toolchain derivation. Docker that
+# does not answer is started through colima; see scripts/install-prereqs.sh's
+# header for the table.
 install-prereqs:
-	@scripts/install-prereqs.sh
+	@FACTORYD_IMAGE_SOURCE="$(IMAGE_SOURCE)" scripts/install-prereqs.sh
 
 # install-prereqs-test: offline tests for scripts/install-prereqs.sh and
 # scripts/install-finish.sh against stand-in brew, docker, colima, gh and
@@ -327,16 +332,11 @@ temporal-up:
 		echo "Docker not available -- skipping Temporal bring-up (builds need Temporal and will halt until it is running, see USAGE.md, "Temporal: what runs every build")."; \
 	fi
 
-# Builds the sandbox/meter/registry-proxy images locally (via sandbox-image/
-# meter-image/registry-proxy-image below, each already pushing through
-# .local-registry and printing a real digest-pinned ref) and writes those
-# refs into the session config (factoryd configure-images) so they
-# become this machine's default sandbox_image/meter_image/
-# registry_proxy_image. Every image factoryd launches is built from
-# source (see AGENTS.md) -- there is no published fallback -- so unlike
-# temporal-up/console-build-optional above, this is NOT best-effort:
-# Docker is required, and `make install` fails loudly without it rather
-# than silently leaving factoryd with no usable image.
+# Resolves the sandbox/meter/registry-proxy images and writes their
+# digest-pinned refs into the session config (factoryd configure-images).
+# IMAGE_SOURCE=source builds from this checkout; IMAGE_SOURCE=ghcr pulls
+# the immutable version tags published by the release workflow, then
+# records their manifest digests. `make install` needs Docker either way.
 #
 # With FACTORYD_CONFIG empty the refs go to every profile (`factoryd use`
 # lists them), so no profile keeps pinning a superseded image.
@@ -352,25 +352,55 @@ temporal-up:
 local-images: docker-buildx-check
 	@: one lookup for the image builds below and the console build after them: $(BUILD_CA_BUNDLE)
 	@if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then \
-		echo "Docker is required to build the sandbox/meter/registry-proxy images (every image factoryd launches is built from source, never published) -- start Docker (colima: 'colima start --memory 4') and re-run 'make install'." >&2; exit 1; \
+		echo "Docker is required to install the sandbox/meter/registry-proxy images -- start Docker (colima: 'colima start --memory 4') and re-run 'make install'." >&2; exit 1; \
 	fi
-	@echo "Building sandbox/meter/registry-proxy images locally (several minutes)..."; \
+	@if [ "$(IMAGE_SOURCE)" = ghcr ]; then \
+		$(MAKE) .local-registry; \
+		$(MAKE) ghcr-images; \
+	elif [ "$(IMAGE_SOURCE)" != source ]; then \
+		echo "IMAGE_SOURCE must be source or ghcr, got '$(IMAGE_SOURCE)'" >&2; exit 1; \
+	else \
+		echo "Building sandbox/meter/registry-proxy images locally (several minutes)..."; \
 	sandbox_ref="$$($(MAKE) sandbox-image | grep -oE 'localhost:5050/buildgate-worker@sha256:[0-9a-f]+' | tail -1)"; \
 	meter_ref="$$($(MAKE) meter-image | grep -oE 'localhost:5050/factoryd-meter@sha256:[0-9a-f]+' | tail -1)"; \
 	registry_proxy_ref="$$($(MAKE) registry-proxy-image | grep -oE 'localhost:5050/factoryd-registry-proxy@sha256:[0-9a-f]+' | tail -1)"; \
 	if [ -z "$$sandbox_ref" ] || [ -z "$$meter_ref" ] || [ -z "$$registry_proxy_ref" ]; then \
 		echo "one or more local image builds did not produce a digest -- see output above" >&2; exit 1; \
 	fi; \
-	$(if $(FACTORYD_CONFIG),for config in $(FACTORYD_CONFIG); do ,)go run ./cmd/factoryd configure-images -sandbox-image "$$sandbox_ref" -meter-image "$$meter_ref" -registry-proxy-image "$$registry_proxy_ref" $(if $(FACTORYD_CONFIG),-config "$$config" || exit 1; done,-all-profiles)
+	$(if $(FACTORYD_CONFIG),for config in $(FACTORYD_CONFIG); do ,)go run ./cmd/factoryd configure-images -sandbox-image "$$sandbox_ref" -meter-image "$$meter_ref" -registry-proxy-image "$$registry_proxy_ref" $(if $(FACTORYD_CONFIG),-config "$$config" || exit 1; done,-all-profiles); \
+	fi
 
-# Every image build uses BuildKit (RUN --mount, --secret); the legacy builder
-# fails each one with "the --mount option requires BuildKit". A Homebrew
+# Pulls images published by this repository's tagged release workflow and
+# records their immutable registry manifest digests. The caller must select
+# an exact vX.Y.Z tag (or set BUILDGATE_IMAGE_TAG explicitly); mutable tags
+# such as latest are deliberately unsupported.
+BUILDGATE_IMAGE_TAG ?= $(shell git describe --exact-match --tags HEAD 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' || true)
+ghcr-images:
+	@if [ "$(IMAGE_SOURCE)" != ghcr ]; then echo "ghcr-images requires IMAGE_SOURCE=ghcr" >&2; exit 1; fi
+	@if ! printf '%s' "$(BUILDGATE_IMAGE_TAG)" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "set BUILDGATE_IMAGE_TAG to a published vX.Y.Z release (for example, IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=<published-tag> make install)" >&2; exit 1; \
+	fi
+	@set -e; \
+	worker="ghcr.io/ljammula/buildgate-worker:$(BUILDGATE_IMAGE_TAG)"; \
+	meter="ghcr.io/ljammula/factoryd-meter:$(BUILDGATE_IMAGE_TAG)"; \
+	proxy="ghcr.io/ljammula/buildgate-registry-proxy:$(BUILDGATE_IMAGE_TAG)"; \
+	for image in "$$worker" "$$meter" "$$proxy"; do docker pull "$$image"; done; \
+	worker_ref="$$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$$worker" | grep '^ghcr.io/ljammula/buildgate-worker@sha256:' | tail -1)"; \
+	meter_ref="$$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$$meter" | grep '^ghcr.io/ljammula/factoryd-meter@sha256:' | tail -1)"; \
+	proxy_ref="$$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$$proxy" | grep '^ghcr.io/ljammula/buildgate-registry-proxy@sha256:' | tail -1)"; \
+	if [ -z "$$worker_ref" ] || [ -z "$$meter_ref" ] || [ -z "$$proxy_ref" ]; then \
+		echo "one or more GHCR pulls did not provide a digest-pinned repository ref" >&2; exit 1; \
+	fi; \
+	$(if $(FACTORYD_CONFIG),for config in $(FACTORYD_CONFIG); do ,)go run ./cmd/factoryd configure-images -sandbox-image "$$worker_ref" -meter-image "$$meter_ref" -registry-proxy-image "$$proxy_ref" -image-source-root . $(if $(FACTORYD_CONFIG),-config "$$config" || exit 1; done,-all-profiles)
+
+# Image builds and automatic project toolchain derivation use BuildKit
+# (RUN --mount, --secret); the legacy builder fails those builds. A Homebrew
 # CLI-only Docker (docker + colima) has no buildx plugin, so check before
 # `install` pulls Temporal or starts a build. Skipped when Docker is absent --
 # local-images reports that case itself.
 docker-buildx-check:
 	@if command -v docker >/dev/null 2>&1 && ! docker buildx version >/dev/null 2>&1; then \
-		echo "docker buildx (BuildKit) is required to build the images -- install it, then re-run:" >&2; \
+		echo "docker buildx (BuildKit) is required to build images and project toolchains -- install it, then re-run:" >&2; \
 		if [ "$$(uname)" = Darwin ]; then \
 			echo "  brew install docker-buildx && mkdir -p ~/.docker/cli-plugins && ln -sf \"\$$(brew --prefix)/lib/docker/cli-plugins/docker-buildx\" ~/.docker/cli-plugins/docker-buildx" >&2; \
 		else \
@@ -437,9 +467,9 @@ install: install-prereqs docker-buildx-check temporal-up local-images openshell-
 
 # Builds the sandbox worker image (internal/sandbox/Dockerfile) locally
 # and pushes it through the local registry above, printing a real,
-# digest-pinned reference usable with -sandbox-image. This is the only way
-# to get a sandbox worker image -- every image factoryd launches is built
-# from source, never published or pulled from a registry (see AGENTS.md).
+# digest-pinned reference usable with -sandbox-image. This target builds
+# locally from source; tagged releases are also published by the separate
+# GHCR workflow for `make install IMAGE_SOURCE=ghcr`.
 # `make install`'s own local-images target calls this and records the
 # printed ref via `factoryd configure-images`. Stamped with a
 # buildgate.inputs-hash label (internal/imageinputs.Hash, via the
@@ -572,9 +602,9 @@ openshell-images:
 # Builds the per-run read-only package-registry proxy image
 # (internal/registryproxy/Dockerfile) locally and pushes it through the
 # local registry above, printing a real, digest-pinned reference usable
-# with -registry-proxy-image. This is the only way to get a registry-proxy
-# image -- built from source, never published or pulled from a registry
-# (see AGENTS.md). `make install`'s own local-images target calls this and
+# with -registry-proxy-image. This target builds locally from source; tagged
+# releases are also published by the separate GHCR workflow.
+# `make install`'s own local-images target calls this and
 # records the printed ref via `factoryd configure-images`.
 #
 # Skips `docker build` (but still pushes) when `factoryd image-reuse`

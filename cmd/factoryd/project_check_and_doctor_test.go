@@ -1760,10 +1760,9 @@ func TestDoctorCheckImagePullableFailsClosedOnAMissingBinary(t *testing.T) {
 
 // TestDoctorCheckImagePresentNeverFallsBackToPull proves
 // doctorCheckImagePresent only ever consults `docker image inspect` --
-// images are built from source, never pulled from a registry, so this
-// fake docker script's "pull"-succeeds branch must never be reached (a
-// missing "image inspect" case would panic the script instead of exiting
-// 0, catching a regression back to the old pull fallback).
+// install already pulled or built the configured image; this preflight
+// doesn't fetch images itself, so this fake docker script's "pull"-
+// succeeds branch must never be reached.
 func TestDoctorCheckImagePresentNeverFallsBackToPull(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
