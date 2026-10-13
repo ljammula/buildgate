@@ -1,5 +1,7 @@
 # buildgate
 
+[![Publish release images](https://github.com/ljammula/buildgate/actions/workflows/publish-images.yml/badge.svg)](https://github.com/ljammula/buildgate/actions/workflows/publish-images.yml)
+
 **Hand a coding agent a ticket. Get back a pull request with the evidence
 attached. Keep the merge button.**
 
