@@ -59,6 +59,9 @@ integration_test_command: "go test -tags=integration ./..."
 test_patterns:
   - "*_test.go"
   - "*.spec.ts"
+required_binaries:
+  - cargo
+  - rustc
 preflight_profile: brownfield
 protected_paths:
   - "README.md"
@@ -104,6 +107,9 @@ cost_ceiling_micro_usd: 5000000
 	if want := []string{"*_test.go", "*.spec.ts"}; len(cfg.TestPatterns) != len(want) || cfg.TestPatterns[0] != want[0] || cfg.TestPatterns[1] != want[1] {
 		t.Errorf("TestPatterns = %v, want %v", cfg.TestPatterns, want)
 	}
+	if want := []string{"cargo", "rustc"}; len(cfg.RequiredBinaries) != len(want) || cfg.RequiredBinaries[0] != want[0] || cfg.RequiredBinaries[1] != want[1] {
+		t.Errorf("RequiredBinaries = %v, want %v", cfg.RequiredBinaries, want)
+	}
 	if cfg.PreflightProfile != "brownfield" {
 		t.Errorf("PreflightProfile = %q", cfg.PreflightProfile)
 	}
@@ -115,6 +121,28 @@ cost_ceiling_micro_usd: 5000000
 	}
 	if cfg.CostCeilingMicroUSD != 5000000 {
 		t.Errorf("CostCeilingMicroUSD = %d", cfg.CostCeilingMicroUSD)
+	}
+}
+
+func TestValidateRequiredBinaries(t *testing.T) {
+	cases := map[string]string{
+		"blank":          "required_binaries: [\"\"]\n",
+		"whitespace":     "required_binaries: [\" cargo\"]\n",
+		"path":           "required_binaries: [\"bin/cargo\"]\n",
+		"shell metachar": "required_binaries: [\"cargo;id\"]\n",
+		"duplicate":      "required_binaries: [cargo, cargo]\n",
+		"name too long":  "required_binaries: [\"" + strings.Repeat("a", maxRequiredBinaryNameBytes+1) + "\"]\n",
+		"too many":       "required_binaries:\n" + strings.Repeat("  - tool\n", MaxRequiredBinaries+1),
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(content)); err == nil {
+				t.Fatalf("Parse accepted invalid required_binaries: %s", content)
+			}
+		})
+	}
+	if _, err := Parse([]byte("required_binaries: [cargo, rustc, my-linter_2.0]\n")); err != nil {
+		t.Fatalf("Parse rejected valid bare executable names: %v", err)
 	}
 }
 
@@ -290,11 +318,11 @@ func TestLoadFindsGitTopLevelFromSubdirectory(t *testing.T) {
 func TestLoadReadsCommittedContentNotModifiedWorktreeCopy(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
-	commitFile(t, root, ".factory.yml", "verify_command: \"make verify\"\n")
+	commitFile(t, root, ".factory.yml", "verify_command: \"make verify\"\nrequired_binaries: [cargo]\n")
 
 	// An uncommitted edit in the worktree, as an agent running unisolated
 	// might make.
-	if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte("verify_command: \"echo pwned\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte("verify_command: \"echo pwned\"\nrequired_binaries: [evil-tool]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -307,6 +335,9 @@ func TestLoadReadsCommittedContentNotModifiedWorktreeCopy(t *testing.T) {
 	}
 	if cfg.VerifyCommand != "make verify" {
 		t.Errorf("VerifyCommand = %q, want the committed value, not the worktree edit", cfg.VerifyCommand)
+	}
+	if len(cfg.RequiredBinaries) != 1 || cfg.RequiredBinaries[0] != "cargo" {
+		t.Errorf("RequiredBinaries = %v, want committed [cargo], not the worktree edit", cfg.RequiredBinaries)
 	}
 }
 

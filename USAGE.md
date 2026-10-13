@@ -35,6 +35,21 @@ The shortest path from a fresh install to a reviewable pull request:
 -h` shows a command's arguments and flags, and `factoryd help -json
 [<command>]` prints the same as JSON for a script or a coding agent.
 
+Use `factoryd content` to inspect embedded prompt templates, the operator
+skill, built-in worker skills, every skill found in configured `skill_dirs`, the skills selected for
+each role, and available team design guides, including source paths and
+SHA-256 hashes. Invalid or oversized team content appears with an unavailable
+status instead of hiding the rest of the catalog. A readable team skill is marked
+as pending runtime validation; the inventory does not claim that the worker
+would accept its full skill tree. Add `-show prompt:<filename>`, `-show skill:<name>`,
+`-show operator-skill:buildgate` or `-show guide:<name>` to print a source. When a team skill shadows a built-in,
+use `-show builtin-skill:<name>` to inspect the built-in too; later duplicate
+team skills have a `team-skill:<name>:<sha256>:<n>` selector in the inventory.
+This is a local read-only inventory; displayed content is sanitized for
+obvious secrets. Embedded prompt templates are editable in source control and
+take effect when BuildGate is rebuilt. This command does not preview the full
+effective prompt or provide runtime prompt overrides.
+
 `factoryd quickstart <repo-path> "<task>"` is the whole path for an
 existing repo checkout — see "Quick start" below. For a brand-new app
 with no code yet, see "New app from scratch" further down.
@@ -548,6 +563,7 @@ unset (an explicit flag always wins).
 
 ```yaml
 verify_command: "make verify"
+required_binaries: [cargo, rustc]        # optional: check these in sandbox_image with doctor -target-repo
 preflight_profile: brownfield          # "" (strict, default) or "brownfield"
 ```
 

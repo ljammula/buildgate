@@ -982,6 +982,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorTargetRepoChecks(ctx, in)...)
 		checks = append(checks, doctorTargetRepoSubmitChecks(in.targetRepo)...)
 		checks = append(checks, doctorCheckProjectToolchains(ctx, in)...)
+		checks = append(checks, doctorCheckRequiredBinaries(ctx, in)...)
 	}
 	for _, gate := range []struct{ label, command string }{
 		{"-lint-command", in.lintCommand},

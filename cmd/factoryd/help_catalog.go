@@ -64,6 +64,7 @@ func commandCatalog() []commandInfo {
 		{"console", "", "Print the link to the web console, starting it if needed", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newConsoleFlags(); return fs }},
 		{"cost", "", "Show model spend per accepted ticket", groupWatch, func() *flag.FlagSet { fs, _, _, _, _, _ := newCostFlags(); return fs }},
 		{"stats", "", "Show whether builds are getting better, per project", groupWatch, func() *flag.FlagSet { return newStatsFlags().set }},
+		{"content", "", "List prompt, skill and design-guide sources", groupWatch, func() *flag.FlagSet { return newContentFlags().set }},
 
 		{"worker", "", "Drive every request of the data dir (submit and quickstart start it)", groupMachine, func() *flag.FlagSet { fs, _ := newWorkerFlags(); return fs }},
 		{"serve", "", "Serve the console and the API", groupMachine, func() *flag.FlagSet { fs, _ := newServeFlags(); return fs }},

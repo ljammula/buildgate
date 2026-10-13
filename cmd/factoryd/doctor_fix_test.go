@@ -408,9 +408,10 @@ func TestDoctorFixFailsWhenMakePrintsNoDigestPinnedReference(t *testing.T) {
 }
 
 // TestIntegrationDoctorWithoutFixNamesTheFixFlag proves the FAIL line for
-// an absent image now points at -fix and the Makefile target instead of
-// leaving the operator to discover the make target on their own.
-func TestIntegrationDoctorWithoutFixNamesTheFixFlag(t *testing.T) {
+// an absent configured image points at the install command that selected
+// its source and tag, rather than suggesting that a mutable local rebuild
+// can safely replace it.
+func TestIntegrationDoctorWithoutFixNamesConfiguredImageRestoration(t *testing.T) {
 	t.Parallel()
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
 	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
@@ -426,8 +427,7 @@ func TestIntegrationDoctorWithoutFixNamesTheFixFlag(t *testing.T) {
 	cmd.Env = append(os.Environ(), isolatedSessionConfigEnv(t, "sandbox_docker: "+fakeDocker+"\n")...)
 	out, _ := cmd.CombinedOutput()
 	for _, want := range []string{
-		"rerun with -fix to build a local copy (make sandbox-image)",
-		"rerun with -fix to build it locally (make registry-proxy-image)",
+		"restore the configured image with `make install`, using the same IMAGE_SOURCE and BUILDGATE_IMAGE_TAG that selected it",
 	} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

@@ -17,6 +17,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. A building request whose current ticket has not started a run yet prints `ticket <i>/<n> has not started a run yet: <what it waits for>` instead of an earlier step's log. A launch that writes a log where an earlier launch left a non-empty one (a retried drafting job) first renames the earlier one to `<name>.<n>.log`, so a retry keeps the log its halt quoted. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt, as saved by the build]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. |
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. The same figures as `GET /requests`' `cost_summary`. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. |
 | `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by. `-since 30d\|YYYY-MM-DD` counts tickets whose first run began on or after it, `-bucket <days>` sets the bucket (default 7), and `-all` also counts `live-smoke-` tickets. |
+| `factoryd content [-config <profile>] [-show <selector>]` | Lists embedded prompts, the operator skill, built-in worker skills, all skills found under configured `skill_dirs`, role selections, and available design guides with source path/editability and SHA-256. Invalid or oversized team files appear as unavailable; readable team skills are marked as pending runtime validation because the full skill tree is not checked here. `-show prompt:<filename>`, `skill:<name>`, `operator-skill:buildgate` or `guide:<name>` prints a source; `builtin-skill:<name>` and `team-skill:<name>:<sha256>:<n>` identify shadowed/duplicate sources. Displayed text is sanitized. Reads config and content only; no run prompts, model calls or writes. Embedded prompt edits require a source change and BuildGate rebuild; this command does not preview full effective prompts or provide runtime overrides. |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. |
@@ -638,6 +639,9 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 # test_patterns:                                     # glob patterns for the always-on "tests_added" gate
 #   - "*_test.go"
 #   - "*.spec.ts"
+# required_binaries:                                 # bare executable names checked in the configured base image by doctor -target-repo
+#   - cargo
+#   - rustc
 preflight_profile: brownfield          # "" (strict, default) or "brownfield"
 protected_paths:                       # same as session config's release_protected_paths
   - "go.mod"
@@ -646,6 +650,18 @@ token_ceiling: 5000000                 # same as meter_token_ceiling; may only l
 cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; lower-only, like token_ceiling
 # design_guide: go-service             # team design guide for spec drafting and planning; see "Design guide"
 ```
+
+`required_binaries` is an optional list of at most 32 bare executable names,
+each at most 64 bytes. Names cannot contain paths or shell syntax. When you run
+`factoryd doctor -target-repo <repo>`, it checks each name inside the
+configured operator-selected base sandbox image using a bounded container with no
+network, mounts, or credentials, running as the configured/default isolated
+worker identity. It does not validate a different per-run identity override. A
+missing name identifies a tool the image needs. This diagnostic does not select
+or build an image, change `verify_command`, or count as an acceptance gate. When
+BuildGate derives a project image to match
+an existing Go or Python version declaration, this check still describes the
+configured base image; the derived image inherits its toolchain binaries.
 
 **Repo-defined gates.** `gates:` lists further command gates, for a check
 none of the five named gates fits (a license check, a migration check, a

@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"buildgate/internal/composeservices"
 	"buildgate/internal/projectconfig"
@@ -195,3 +198,58 @@ func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 	}
 	return append(checks, doctorCheck{Name: name + ": spec/spec.md, spec/contract.md and ARCHITECTURE.md pass"})
 }
+
+// doctorCheckRequiredBinaries checks a repo's committed required_binaries
+// against the configured worker image. It starts the operator-selected image
+// as the resolved worker identity with a fixed shell probe: no network,
+// mounts, credentials, writable filesystem, or added capabilities are provided.
+func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorCheck {
+	if in.targetRepo == "" {
+		return nil
+	}
+	cfg, found, err := projectconfig.Load(in.targetRepo)
+	if err != nil {
+		return []doctorCheck{{Name: "required binaries for " + in.targetRepo, Err: err}}
+	}
+	if !found || len(cfg.RequiredBinaries) == 0 {
+		return nil
+	}
+	if in.sandboxImage == "" {
+		return []doctorCheck{{Name: "required binaries for " + in.targetRepo, Advisory: true,
+			Err: errors.New("no sandbox image is configured to check these executables"),
+			Fix: "configure an operator-selected sandbox_image, then run doctor -target-repo again"}}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	user, _ := sandbox.ResolveDefaultWorkerIdentity(in.settings.SandboxUser, in.settings.SandboxWorkerUID, os.Getgid())
+	args := []string{"run", "--rm", "--network=none", "--read-only", "--cap-drop=ALL",
+		"--security-opt=no-new-privileges", "--user=" + user, "--pids-limit=32", "--memory=128m",
+		"--entrypoint", "sh", in.sandboxImage, "-c", requiredBinaryProbe, "required-binaries"}
+	args = append(args, cfg.RequiredBinaries...)
+	out, err := exec.CommandContext(probeCtx, in.sandboxDocker, args...).CombinedOutput()
+	if err != nil {
+		return []doctorCheck{{Name: "required binaries in configured base sandbox image (" + in.sandboxImage + ")",
+			Err: fmt.Errorf("could not inspect image: %w: %s", err, strings.TrimSpace(string(out))),
+			Fix: "confirm Docker is reachable and the configured sandbox_image can start a shell probe"}}
+	}
+	missing := map[string]bool{}
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if name != "" {
+			missing[name] = true
+		}
+	}
+	checks := make([]doctorCheck, 0, len(cfg.RequiredBinaries))
+	for _, name := range cfg.RequiredBinaries {
+		check := doctorCheck{Name: fmt.Sprintf("required executable %s available as configured/default isolated worker %s in base image (%s)", name, user, in.sandboxImage)}
+		if missing[name] {
+			check.Err = fmt.Errorf("%q is not executable on PATH as the configured/default isolated worker identity %s", name, user)
+			check.Fix = fmt.Sprintf("install %s in the operator-selected base sandbox image, then run doctor -target-repo again", name)
+		}
+		checks = append(checks, check)
+	}
+	return checks
+}
+
+// requiredBinaryProbe checks PATH entries directly so shell built-ins do not
+// count as executables, while an executable sharing a built-in's name does.
+const requiredBinaryProbe = `set -f; for name do found=; old_ifs=$IFS; IFS=:; for dir in $PATH; do [ -n "$dir" ] || dir=.; if [ -f "$dir/$name" ] && [ -x "$dir/$name" ]; then found=1; break; fi; done; IFS=$old_ifs; [ "$found" = 1 ] || printf '%s\n' "$name"; done`

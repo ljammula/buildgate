@@ -601,7 +601,8 @@ func subcommands() map[string]subcommand {
 		"gate-token": func(dp *deps, args []string) error {
 			return gateTokenMain(dp, os.Stdout, args)
 		},
-		"memory": memoryMain,
+		"memory":  memoryMain,
+		"content": contentMain,
 		"help": func(_ *deps, args []string) error {
 			return helpMain(os.Stdout, args)
 		},
