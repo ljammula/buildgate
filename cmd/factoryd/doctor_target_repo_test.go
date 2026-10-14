@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"buildgate/internal/projectconfig"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
@@ -45,6 +46,68 @@ func TestDoctorRequiredBinaryProbeUsesConfiguredWorkerIdentity(t *testing.T) {
 	}
 	if !strings.Contains(string(args), "--user=1234:5678") {
 		t.Fatalf("probe did not use configured worker identity:\n%s", args)
+	}
+}
+
+func TestDoctorLanguageProfileOffersReviewableFactoryYMLFields(t *testing.T) {
+	repo := commitFiles(t, map[string]string{"pom.xml": "<project/>\n"})
+	check := doctorCheckLanguageProfile(repo)
+	var out strings.Builder
+	if failed := runDoctorChecks([]doctorCheck{check}, &out); failed != 0 {
+		t.Fatalf("failed = %d, want an advisory profile suggestion:\n%s", failed, out.String())
+	}
+	for _, want := range []string{
+		"warn  language profile Java / Maven",
+		`verify_command: "mvn test"`,
+		`full_suite_command: "mvn test"`,
+		`required_binaries: ["java", "mvn"]`,
+		`test_patterns: ["*Test.java"]`,
+		"project-sandbox-image supports: pom.xml",
+		"registry proxy ecosystems: none",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	start := strings.Index(out.String(), "candidate .factory.yml fields (review before commit):\n")
+	if start < 0 {
+		t.Fatal("output did not include a candidate .factory.yml block")
+	}
+	block := strings.SplitN(out.String()[start+len("candidate .factory.yml fields (review before commit):\n"):], "; review the command", 2)[0]
+	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.VerifyCommand != "mvn test" || cfg.FullSuiteCommand != "mvn test" || !slices.Contains(cfg.RequiredBinaries, "mvn") || !slices.Contains(cfg.TestPatterns, "*Test.java") {
+		t.Fatalf("candidate .factory.yml does not parse or lost its values: config=%+v err=%v\n%s", cfg, err, block)
+	}
+}
+
+func TestDoctorLanguageProfileReportsAmbiguousAndNestedLayouts(t *testing.T) {
+	t.Run("ambiguous root markers", func(t *testing.T) {
+		repo := commitFiles(t, map[string]string{"go.mod": "module example.test/x\n", "package.json": "{}\n"})
+		check := doctorCheckLanguageProfile(repo)
+		if !check.Advisory || check.Err == nil || !strings.Contains(check.Err.Error(), "multiple root-level profiles matched") || !strings.Contains(check.Fix, "does not resolve nested") {
+			t.Fatalf("check = %+v, want actionable ambiguity advisory", check)
+		}
+	})
+	t.Run("nested manifest", func(t *testing.T) {
+		repo := commitFiles(t, map[string]string{"backend/pom.xml": "<project/>\n"})
+		check := doctorCheckLanguageProfile(repo)
+		if !check.Advisory || check.Err == nil || !strings.Contains(check.Err.Error(), "no built-in root-level") || !strings.Contains(check.Fix, "operator-approved worker image") {
+			t.Fatalf("check = %+v, want generic setup guidance for nested manifest", check)
+		}
+	})
+}
+
+func TestDoctorRequiredBinaryProbeIncludesImageOnlyProfileRequirements(t *testing.T) {
+	repo := commitFiles(t, map[string]string{"Cargo.toml": "[package]\nname='x'\n"})
+	docker, _ := requiredBinaryDocker(t, "rustc")
+	in := doctorTargetRepoInputs(repo, docker)
+	in.sandboxImage = "operator-worker@sha256:abc"
+	checks := doctorCheckRequiredBinaries(context.Background(), in)
+	var out strings.Builder
+	if failed := runDoctorChecks(checks, &out); failed != 0 || !strings.Contains(out.String(), `warn  profile executable hint rustc`) || !strings.Contains(out.String(), `"rustc" is not executable`) {
+		t.Fatalf("failed = %d, checks = %#v, output:\n%s", failed, checks, out.String())
+	}
+	if !strings.Contains(out.String(), "profile hint only") || !strings.Contains(out.String(), "final worker image") {
+		t.Fatalf("profile binary hints must stay advisory until committed in .factory.yml:\n%s", out.String())
 	}
 }
 

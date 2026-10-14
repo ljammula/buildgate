@@ -27,7 +27,7 @@ another profile:
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
   getting better, per repository and per week (read-only; counts, no model call)
-- `factoryd content [-config <profile>] [-show <selector>]`: list built-in prompts and skills, team skills, selected roles and design guides with source and hash, or print one source (read-only; displayed text is sanitized)
+- `factoryd content [-config <profile>] [-show <selector>]`: list built-in prompts and skills, team skills, selected roles, design guides, and compiled language profiles with source and hash; `-show` prints one source or full profile metadata (read-only; displayed text is sanitized)
 - `factoryd inbox [-config <profile>] [-project <name>] [-json]`: everything
   waiting on the operator across every profile, oldest first (it ignores the
   active profile; `-config` narrows it to one, `-project` to one repository)
