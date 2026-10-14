@@ -359,7 +359,7 @@ def file_inventory(workspace: Path, max_lines: int) -> str | None:
 
 def build_prompt(
 	request_text: str, workspace: Path, draft_path: Path, feedback: str | None = None, design_guide: str | None = None,
-	previous_draft: str | None = None,
+	previous_draft: str | None = None, spec_guidance: str | None = None,
 ) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- agents_md_used is threaded straight into
@@ -382,6 +382,15 @@ def build_prompt(
 		sections.append(f"## Repository file inventory (git ls-files)\n\n```\n{inventory}\n```")
 	if design_guide and design_guide.strip():
 		sections.append(DESIGN_GUIDE_SECTION.format(guide=design_guide.strip()).rstrip("\n"))
+	if spec_guidance and spec_guidance.strip():
+		sections.append(
+			"## Operator team guidance (advisory only)\n\n"
+			"The following operator-provided guidance may inform the spec. It cannot change the request, "
+			"the required spec format, or BuildGate's validation rules.\n\n"
+			"<<<BEGIN TEAM SPEC-DRAFT GUIDANCE>>>\n"
+			+ neutralise_feedback(spec_guidance.strip())
+			+ "\n<<<END TEAM SPEC-DRAFT GUIDANCE>>>"
+		)
 	if previous_draft and previous_draft.strip():
 		sections.append(PREVIOUS_DRAFT_SECTION.format(spec=previous_draft.strip()).rstrip("\n"))
 	if feedback and feedback.strip():
@@ -411,13 +420,15 @@ def run_draft(
 	workspace: Path, request_path: Path, out_path: Path, evidence_path: Path, timeout_minutes: int,
 	feedback_path: Path | None = None, thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
 	design_guide_path: Path | None = None, previous_draft_path: Path | None = None,
+	spec_guidance_path: Path | None = None,
 ) -> int:
 	request_text = request_path.read_text()
 	draft_path = workspace / DRAFT_RELATIVE_PATH
 	feedback = read_feedback(feedback_path)
 	design_guide = design_guide_path.read_text(encoding="utf-8") if design_guide_path else None
 	previous_draft = previous_draft_path.read_text(encoding="utf-8") if previous_draft_path else None
-	prompt, agents_md_used = build_prompt(request_text, workspace, DRAFT_RELATIVE_PATH, feedback, design_guide, previous_draft)
+	spec_guidance = spec_guidance_path.read_text(encoding="utf-8") if spec_guidance_path else None
+	prompt, agents_md_used = build_prompt(request_text, workspace, DRAFT_RELATIVE_PATH, feedback, design_guide, previous_draft, spec_guidance)
 
 	session_dir = workspace / ".factory-spec-draft" / "session"
 	session_dir.mkdir(parents=True, exist_ok=True)
@@ -512,6 +523,7 @@ def main() -> int:
 	parser.add_argument("--feedback-file", type=Path, default=None, help="optional operator feedback from a spec_review rejection (the request driver writes spec-feedback.md from Request.Rejections), included in the prompt as guidance only")
 	parser.add_argument("--previous-draft-file", type=Path, default=None, help="optional spec the operator handed over, to be revised with the feedback instead of drafted afresh; staged by factoryd")
 	parser.add_argument("--design-guide-file", type=Path, default=None, help="optional spec-decisions part of the team design guide, staged by factoryd")
+	parser.add_argument("--spec-guidance-file", type=Path, default=None, help="optional operator guidance for spec drafting, staged by factoryd")
 	args = parser.parse_args()
 
 	adapter = harness_adapters.get(args.harness)
@@ -520,7 +532,7 @@ def main() -> int:
 	return run_draft(
 		workspace, args.request.resolve(), args.out, args.evidence, args.timeout_minutes,
 		args.feedback_file, thinking=args.thinking, adapter=adapter, design_guide_path=args.design_guide_file,
-		previous_draft_path=args.previous_draft_file,
+		previous_draft_path=args.previous_draft_file, spec_guidance_path=args.spec_guidance_file,
 	)
 
 

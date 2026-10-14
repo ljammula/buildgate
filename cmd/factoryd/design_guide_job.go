@@ -24,6 +24,7 @@ const designGuideFileName = "design-guide.md"
 type draftInputFiles struct {
 	feedback      string // --feedback-file: a review rejection's notes
 	designGuide   string // --design-guide-file: this job's part of the team design guide
+	specGuidance  string // --spec-guidance-file: operator guidance for spec drafting
 	previousDraft string // --previous-draft-file: a handed-over document to revise
 }
 
@@ -34,6 +35,9 @@ func (f draftInputFiles) args() []string {
 	}
 	if f.designGuide != "" {
 		args = append(args, "--design-guide-file", f.designGuide)
+	}
+	if f.specGuidance != "" {
+		args = append(args, "--spec-guidance-file", f.specGuidance)
 	}
 	if f.previousDraft != "" {
 		args = append(args, "--previous-draft-file", f.previousDraft)
@@ -50,7 +54,7 @@ func (f draftInputFiles) inContainer(containerScratchDir string) draftInputFiles
 		}
 		return containerScratchDir + "/" + filepath.Base(hostPath)
 	}
-	return draftInputFiles{feedback: at(f.feedback), designGuide: at(f.designGuide), previousDraft: at(f.previousDraft)}
+	return draftInputFiles{feedback: at(f.feedback), designGuide: at(f.designGuide), specGuidance: at(f.specGuidance), previousDraft: at(f.previousDraft)}
 }
 
 // Which part of the guide a drafting job is given: spec drafting gets the

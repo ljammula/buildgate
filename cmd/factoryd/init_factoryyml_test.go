@@ -102,6 +102,41 @@ func TestDetectInitVerifyCommandNoneDetected(t *testing.T) {
 	}
 }
 
+func TestDetectInitVerifyCommandSuggestsBuiltInLanguageProfile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Cargo.toml"), []byte("[package]\nname='sample'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := detectInitVerifyCommand(root), "cargo test --workspace"; got != want {
+		t.Errorf("detectInitVerifyCommand = %q, want %q", got, want)
+	}
+}
+
+func TestDetectInitVerifyCommandDoesNotGuessForAmbiguousProfiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, name := range []string{"Cargo.toml", "Gemfile"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := detectInitVerifyCommand(root); got != "" {
+		t.Errorf("detectInitVerifyCommand = %q, want empty for ambiguous project", got)
+	}
+}
+
+func TestDetectInitVerifyCommandDoesNotAssumeComposerHasTestScript(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "composer.json"), []byte(`{"name":"sample/package"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := detectInitVerifyCommand(root); got != "" {
+		t.Errorf("detectInitVerifyCommand = %q, want no unverified Composer script", got)
+	}
+}
+
 func TestInitWithWriteFactoryYMLWritesFile(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()

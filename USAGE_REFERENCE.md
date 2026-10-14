@@ -17,6 +17,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. A building request whose current ticket has not started a run yet prints `ticket <i>/<n> has not started a run yet: <what it waits for>` instead of an earlier step's log. A launch that writes a log where an earlier launch left a non-empty one (a retried drafting job) first renames the earlier one to `<name>.<n>.log`, so a retry keeps the log its halt quoted. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt, as saved by the build]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. |
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. The same figures as `GET /requests`' `cost_summary`. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. |
 | `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by. `-since 30d\|YYYY-MM-DD` counts tickets whose first run began on or after it, `-bucket <days>` sets the bucket (default 7), and `-all` also counts `live-smoke-` tickets. |
+| `factoryd content [-config <profile>] [-show <selector>]` | Lists embedded prompt templates, inline prompt-assembly sources, compiled language profiles, the operator skill, built-in worker skills, all skills found under configured `skill_dirs`, role selections, and available design guides and spec-drafting guidance with source paths and hashes. Inline prompt entries show source metadata and referenced templates, not rendered prompt text. Invalid or oversized team files appear as unavailable; readable team skills are marked as pending runtime validation because the full skill tree is not checked here. `-show prompt:<filename>`, `prompt-source:<id>`, `language-profile:<id>`, `spec-guidance:<name>`, `skill:<name>`, `operator-skill:buildgate` or `guide:<name>` prints a source or metadata; `builtin-skill:<name>` and `team-skill:<name>:<sha256>:<n>` identify shadowed/duplicate sources. Displayed text is sanitized. Reads config and content only; no run prompts, model calls or writes. Embedded prompt edits require a source change and BuildGate rebuild; this command does not preview full effective prompts or provide runtime overrides. |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. |
@@ -638,6 +639,9 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 # test_patterns:                                     # glob patterns for the always-on "tests_added" gate
 #   - "*_test.go"
 #   - "*.spec.ts"
+# required_binaries:                                 # bare executable names required in the final worker image; doctor checks the configured base image
+#   - cargo
+#   - rustc
 preflight_profile: brownfield          # "" (strict, default) or "brownfield"
 protected_paths:                       # same as session config's release_protected_paths
   - "go.mod"
@@ -646,6 +650,34 @@ token_ceiling: 5000000                 # same as meter_token_ceiling; may only l
 cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; lower-only, like token_ceiling
 # design_guide: go-service             # team design guide for spec drafting and planning; see "Design guide"
 ```
+
+`required_binaries` is an optional list of at most 32 bare executable names,
+each at most 64 bytes. Names cannot contain paths or shell syntax. Before a run
+starts, BuildGate checks each name inside the final worker image selected for
+that run, using a bounded container with no network, mounts, or credentials,
+running as the configured/default isolated worker identity. A missing name or
+an image that cannot start the probe refuses the run before build or model work
+begins. When BuildGate derives a project image to match an existing Go or
+Python version declaration, the check uses that derived image.
+
+`factoryd doctor -target-repo <repo>` checks the configured operator-selected
+base sandbox image as an earlier diagnostic. It does not derive a toolchain
+image or validate a different per-run identity override. A missing name
+identifies a tool the image needs. BuildGate does not install these
+executables; add them to the operator-selected worker image.
+
+### Built-in language profile suggestions
+
+`factoryd onboard` and `factoryd init -write-factory-yml` use a compiled-in
+profile catalog only after their existing Makefile and Go, npm, and Python
+checks. Root-level markers identify Rust, Ruby, PHP/Composer, Java/Maven,
+Java/Gradle, .NET, and Dart. Only an unambiguous profile with a reviewed
+default command can prefill `verify_command` in a new `.factory.yml`; review
+that suggestion before committing the file. Multiple matches produce no
+command. Profiles do not install toolchains, select images, run lifecycle
+hooks, alter an existing `verify_command`, or decide acceptance. Other
+languages use the generic path: choose an operator-approved worker image,
+write an explicit `verify_command`, and use `required_binaries` to check it.
 
 **Repo-defined gates.** `gates:` lists further command gates, for a check
 none of the five named gates fits (a license check, a migration check, a
@@ -786,6 +818,10 @@ the release decision). Unset falls back to
 gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
 `tests_added` and it declares no `Tests-Required` opt-out.
+
+The Ruby defaults include both `*_spec.rb` and `*_test.rb`, covering common
+RSpec and Minitest file names. Supply `test_patterns` for a repository whose
+test files use another naming convention.
 
 What refuses a drafted plan reads its structure only, never the meaning
 of its prose:
@@ -1697,6 +1733,48 @@ name and SHA-256 recorded on the request's spec and plan drafting records
 | Service-specific facts | Its upstreams, replica count and latency targets belong in that repository's `ARCHITECTURE.md`, which drafting already reads |
 | Rules a tool can check | Put them in the repository's `verify_command`, where every agent and human hits them; the guide is not enforced on the built code. The sandbox has no network and no lint tool (`golangci-lint`, `gocyclo`), so write such a rule as a test that needs only the language toolchain: a Go test that parses the repository with `go/ast` and fails on a function over the team's complexity limit, or on a package importing a layer it must not, with a list of existing exceptions that may shrink but not grow. A `lint_command` works only when its tool is in the image (`make project-sandbox-image`) |
 
+## Editable prompt guidance (`spec_draft_guidance_dirs:`)
+
+Team-owned guidance files can add local conventions to spec drafting without
+replacing BuildGate's prompt template or output checks. This first slot is
+planning-only and opt-in; repository configuration cannot select it.
+
+```yaml
+# operator session config
+spec_draft_guidance_dirs:
+  - ~/code/team-guidance
+roles:
+  planning:
+    spec_draft_guidance: product-spec
+```
+
+```markdown
+---
+name: product-spec
+slot: spec-drafting
+format_version: 1
+---
+Ask for measurable user-visible behavior and call out unresolved decisions.
+```
+
+The selected file is read on the host and copied into the spec-draft job's
+writable scratch directory; the source file is not modified by the job. It must
+be a regular UTF-8 Markdown file under 16 KiB, with matching
+front-matter name, the `spec-drafting` slot, version 1, and no placeholders.
+The guidance is explicitly labeled advisory. BuildGate's required spec
+instructions and structural validation remain in force. `factoryd content`
+lists configured files, the selected role/stage, source path, and SHA-256; it
+does not record this hash in durable request evidence yet. The worker reads
+session configuration at startup; restart it after changing the selection or
+directory list. An edit to the selected file affects the next drafting job.
+This slot does not configure plan, oracle, build, conformity, or review prompts;
+worker skills and design guides remain separate features.
+
+| Key | Meaning |
+|---|---|
+| `spec_draft_guidance_dirs` | Ordered operator-owned host folders, absolute or `~/`, each an existing directory; guidance files are `<name>.md` |
+| `roles.planning.spec_draft_guidance` | Optional bare file name; resolves only for the planning role. Execution and review selections are rejected |
+
 Measured on six requests against a Go, Kafka, Postgres and Redis service:
 with a guide 5 of 6 requests stated or raised every applicable design
 decision, against 3 of 6 without, for about 2% more planning tokens.
@@ -2064,10 +2142,35 @@ the build runs in localhost:5050/buildgate-toolchain@sha256:<digest>
 
 `make project-sandbox-image PROJECT_DIR=<repo> BASE_IMAGE=<worker ref>` builds
 the same toolchains into an image that also carries the project's
-dependencies (Go modules, npm packages, pip packages), for a build that must
-not fetch them. It prints a reference to set with `factoryd configure-images
+dependencies (Go modules, npm packages, Maven artifacts from `pom.xml`, Ruby
+gems from `Gemfile.lock`, pip packages), for a build that must not fetch them.
+It prints a reference to set with `factoryd configure-images
 -sandbox-image <ref>`; `sandbox_image` is per profile, and `.factory.yml`
 cannot name an image.
+
+### Verified language coverage
+
+Live BuildGate runs completed each target repository's verify command and
+full suite in Go, Python, Java/Maven, Ruby/Bundler, and React Native/TypeScript.
+The .NET restore, build, and test commands also passed in the configured
+worker image, but that request did not reach an accepted PR: the target
+repository's release policy denied its change to protected `.factory.yml`.
+
+| Language / platform | Toolchain used | Project dependency manifests baked by `project-sandbox-image` |
+|---|---|---|
+| Go | Go from the configured image, or derived from `go.mod` when needed | `go.mod`, `go.sum` |
+| Python | Python from the configured image, or derived from `.python-version` / `pyproject.toml` when needed | `requirements.txt` |
+| Java / Maven | Java and Maven in the configured worker image | `pom.xml` |
+| Ruby / Bundler | Ruby and Bundler in the configured worker image | `Gemfile`, `Gemfile.lock` |
+| React Native / TypeScript | Node and npm in the configured worker image | `package.json`, `package-lock.json` |
+| C# / .NET | .NET in an operator-configured worker image | Not baked by `project-sandbox-image`; install it in the image |
+
+This is verified command coverage for the listed repositories, not automatic
+toolchain installation for every language or framework. Only Go and Python
+have automatic version derivation; Node is checked in the configured image
+and is not replaced. Other tools must be present in the selected image and
+can be checked with `.factory.yml` `required_binaries`. See [BuildGate
+status](STATUS.md) for the current limits.
 
 ### Private Go modules
 

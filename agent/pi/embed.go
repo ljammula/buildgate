@@ -6,7 +6,7 @@ package pi
 
 import "embed"
 
-//go:embed scripts/*.py scripts/*.mjs scripts/*.prompt.md
+//go:embed scripts/*.py scripts/*.mjs scripts/*.prompt.md scripts/prompt_sources.json
 var Scripts embed.FS
 
 // Tests is the scripts' own test suite and its fixtures. An image build that

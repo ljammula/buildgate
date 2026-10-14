@@ -149,6 +149,9 @@ func validateRoles(settings sessionconfig.Settings) error {
 	if err := sessionconfig.ValidateDesignGuideDirs(settings); err != nil {
 		return err
 	}
+	if err := sessionconfig.ValidateSpecDraftGuidance(settings); err != nil {
+		return err
+	}
 	if err := sessionconfig.ValidateRouting(settings); err != nil {
 		return fmt.Errorf("roles: %w", err)
 	}

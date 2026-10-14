@@ -749,7 +749,7 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 		args = append(args, "--env", key)
 	}
 	args = append(args,
-		"--env", "PATH=/usr/local/bin:/usr/bin:/bin",
+		"--env", "PATH="+WorkerPath,
 		"--env", "GIT_CONFIG_COUNT=1",
 		"--env", "GIT_CONFIG_KEY_0=safe.directory",
 		"--env", "GIT_CONFIG_VALUE_0=/workspace",

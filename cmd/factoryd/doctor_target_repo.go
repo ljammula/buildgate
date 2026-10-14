@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"buildgate/internal/composeservices"
 	"buildgate/internal/projectconfig"
@@ -194,4 +200,140 @@ func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 			Fix: fmt.Sprintf("commit preflight_profile: brownfield in %s (or submit with -preflight-profile brownfield) if this repo has not adopted spec/spec.md, spec/contract.md and ARCHITECTURE.md", projectconfig.FileName)})
 	}
 	return append(checks, doctorCheck{Name: name + ": spec/spec.md, spec/contract.md and ARCHITECTURE.md pass"})
+}
+
+// doctorCheckRequiredBinaries checks a repo's committed required_binaries
+// against the configured worker image. It starts the operator-selected image
+// as the resolved worker identity with a fixed shell probe: no network,
+// mounts, credentials, writable filesystem, or added capabilities are provided.
+func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorCheck {
+	if in.targetRepo == "" {
+		return nil
+	}
+	cfg, found, err := projectconfig.Load(in.targetRepo)
+	if err != nil {
+		return []doctorCheck{{Name: "required binaries for " + in.targetRepo, Err: err}}
+	}
+	if !found || len(cfg.RequiredBinaries) == 0 {
+		return nil
+	}
+	if in.sandboxImage == "" {
+		return []doctorCheck{{Name: "required binaries for " + in.targetRepo, Advisory: true,
+			Err: errors.New("no sandbox image is configured to check these executables"),
+			Fix: "configure an operator-selected sandbox_image, then run doctor -target-repo again"}}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	user, _ := sandbox.ResolveDefaultWorkerIdentity(in.settings.SandboxUser, in.settings.SandboxWorkerUID, os.Getgid())
+	missingNames, err := probeRequiredBinaries(probeCtx, in.sandboxDocker, in.sandboxImage, user, cfg.RequiredBinaries)
+	if err != nil {
+		return []doctorCheck{{Name: "required binaries in configured base sandbox image (" + in.sandboxImage + ")",
+			Err: fmt.Errorf("could not inspect image: %w", err),
+			Fix: "confirm Docker is reachable and the configured sandbox_image can start a shell probe"}}
+	}
+	missing := map[string]bool{}
+	for _, name := range missingNames {
+		missing[name] = true
+	}
+	checks := make([]doctorCheck, 0, len(cfg.RequiredBinaries))
+	for _, name := range cfg.RequiredBinaries {
+		check := doctorCheck{Name: fmt.Sprintf("required executable %s available as configured/default isolated worker %s in base image (%s)", name, user, in.sandboxImage)}
+		if missing[name] {
+			check.Err = fmt.Errorf("%q is not executable on PATH as the configured/default isolated worker identity %s", name, user)
+			check.Fix = fmt.Sprintf("install %s in the operator-selected base sandbox image, then run doctor -target-repo again", name)
+		}
+		checks = append(checks, check)
+	}
+	return checks
+}
+
+// requiredBinaryProbe checks PATH entries directly so shell built-ins do not
+// count as executables, while an executable sharing a built-in's name does.
+const requiredBinaryProbe = `set -f; for name do found=; old_ifs=$IFS; IFS=:; for dir in $PATH; do [ -n "$dir" ] || dir=.; if [ -f "$dir/$name" ] && [ -x "$dir/$name" ]; then found=1; break; fi; done; IFS=$old_ifs; [ "$found" = 1 ] || printf '%s\n' "$name"; done`
+
+const requiredBinaryProbeOutputLimit = 16 * 1024
+
+type requiredBinaryProbeOutput struct {
+	mu       sync.Mutex
+	data     []byte
+	exceeded bool
+	cancel   context.CancelFunc
+}
+
+func (out *requiredBinaryProbeOutput) Write(p []byte) (int, error) {
+	out.mu.Lock()
+	defer out.mu.Unlock()
+	remaining := requiredBinaryProbeOutputLimit - len(out.data)
+	if remaining > 0 {
+		if len(p) > remaining {
+			out.data = append(out.data, p[:remaining]...)
+		} else {
+			out.data = append(out.data, p...)
+		}
+	}
+	if len(p) > remaining && !out.exceeded {
+		out.exceeded = true
+		out.cancel()
+	}
+	return len(p), nil
+}
+
+func (out *requiredBinaryProbeOutput) snapshot() ([]byte, bool) {
+	out.mu.Lock()
+	defer out.mu.Unlock()
+	return append([]byte(nil), out.data...), out.exceeded
+}
+
+func probeRequiredBinaries(ctx context.Context, dockerBinary, image, user string, names []string) ([]string, error) {
+	containerName, err := requiredBinaryProbeContainerName()
+	if err != nil {
+		return nil, fmt.Errorf("name required-binary probe container: %w", err)
+	}
+	args := []string{"run", "--rm", "--network=none", "--read-only", "--cap-drop=ALL",
+		"--name", containerName, "--security-opt=no-new-privileges", "--user=" + user, "--pids-limit=32", "--memory=128m",
+		"--env", "PATH=" + sandbox.WorkerPath, "--entrypoint", "sh", image, "-c", requiredBinaryProbe, "required-binaries"}
+	args = append(args, names...)
+	commandCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	out := &requiredBinaryProbeOutput{cancel: cancel}
+	cmd := exec.CommandContext(commandCtx, dockerBinary, args...)
+	cmd.Stdout, cmd.Stderr = out, out
+	err = cmd.Run()
+	output, exceeded := out.snapshot()
+	if err != nil {
+		if cleanupErr := removeRequiredBinaryProbeContainer(dockerBinary, containerName); cleanupErr != nil {
+			return nil, fmt.Errorf("required-binary probe failed: %w; container cleanup failed: %v", err, cleanupErr)
+		}
+	}
+	if exceeded {
+		return nil, fmt.Errorf("required-binary probe output exceeded %d bytes", requiredBinaryProbeOutputLimit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	var missing []string
+	for _, name := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if name != "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing, nil
+}
+
+func requiredBinaryProbeContainerName() (string, error) {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	return "factoryd-required-binaries-" + hex.EncodeToString(suffix[:]), nil
+}
+
+func removeRequiredBinaryProbeContainer(dockerBinary, containerName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, dockerBinary, "rm", "--force", containerName).CombinedOutput()
+	if err == nil || strings.Contains(string(out), "No such container") {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 }

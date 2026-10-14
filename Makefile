@@ -761,8 +761,11 @@ project-sandbox-image: .local-registry
 	if [ -f "$(PROJECT_DIR)/package.json" ] && [ ! -f "$(PROJECT_DIR)/package-lock.json" ]; then \
 	  echo "$(PROJECT_DIR) has package.json but no package-lock.json -- generate and commit the lockfile before baking an offline sandbox image" >&2; exit 1; \
 	fi; \
+	if [ -f "$(PROJECT_DIR)/Gemfile" ] && [ ! -f "$(PROJECT_DIR)/Gemfile.lock" ]; then \
+	  echo "$(PROJECT_DIR) has Gemfile but no Gemfile.lock -- generate and commit the lockfile before baking an offline sandbox image" >&2; exit 1; \
+	fi; \
 	copied=0; \
-	for f in go.mod go.sum package.json package-lock.json requirements.txt; do \
+	for f in go.mod go.sum package.json package-lock.json requirements.txt pom.xml Gemfile Gemfile.lock; do \
 	  if [ -f "$(PROJECT_DIR)/$$f" ]; then cp "$(PROJECT_DIR)/$$f" "$$stage/$$f"; copied=1; fi; \
 	done; \
 	if [ "$$copied" = 0 ]; then \

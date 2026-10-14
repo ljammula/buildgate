@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
 )
@@ -27,6 +29,25 @@ func commitComposeFile(t *testing.T, content string) string {
 	return repo
 }
 
+func TestDoctorRequiredBinaryProbeUsesConfiguredWorkerIdentity(t *testing.T) {
+	repo := commitFiles(t, map[string]string{".factory.yml": "required_binaries: [cargo]\n"})
+	docker, argsPath := requiredBinaryDocker(t, "")
+	in := doctorTargetRepoInputs(repo, docker)
+	in.sandboxImage = "operator-worker@sha256:abc"
+	in.settings.SandboxUser = "1234:5678"
+	checks := doctorCheckRequiredBinaries(context.Background(), in)
+	if len(checks) != 1 || checks[0].Err != nil {
+		t.Fatalf("checks = %#v, want one successful required-binary check", checks)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--user=1234:5678") {
+		t.Fatalf("probe did not use configured worker identity:\n%s", args)
+	}
+}
+
 // fakeDockerMemTotal is a docker stand-in whose `info` reports memTotal bytes.
 func fakeDockerMemTotal(t *testing.T, memTotal string) string {
 	t.Helper()
@@ -43,6 +64,128 @@ func doctorTargetRepoInputs(repo, docker string) doctorInputs {
 	settings.SandboxMemory = "2g"
 	settings.ComposeServicesMemory = "512m"
 	return doctorInputs{sandboxDocker: docker, composeServices: true, targetRepo: repo, settings: settings}
+}
+
+func requiredBinaryDocker(t *testing.T, missing string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "docker")
+	argsPath := filepath.Join(dir, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsPath + "'\n"
+	if missing != "" {
+		script += "printf '%s\\n' '" + missing + "'\n"
+	}
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return binary, argsPath
+}
+
+func TestDoctorChecksCommittedRequiredBinariesInConfiguredImage(t *testing.T) {
+	repo := commitFiles(t, map[string]string{
+		".factory.yml": "required_binaries: [cargo, rustc]\n",
+	})
+	docker, argsPath := requiredBinaryDocker(t, "rustc")
+	in := doctorTargetRepoInputs(repo, docker)
+	in.sandboxImage = "operator-worker@sha256:abc"
+	in.settings.SandboxUser = "65532:65532"
+	checks := doctorCheckRequiredBinaries(context.Background(), in)
+	var out strings.Builder
+	if failed := runDoctorChecks(checks, &out); failed != 1 {
+		t.Fatalf("failed = %d, want only missing rustc to fail:\n%s", failed, out.String())
+	}
+	for _, want := range []string{
+		"ok    required executable cargo available as configured/default isolated worker 65532:65532 in base image (operator-worker@sha256:abc)",
+		"FAIL  required executable rustc available as configured/default isolated worker 65532:65532 in base image (operator-worker@sha256:abc): \"rustc\" is not executable on PATH as the configured/default isolated worker identity 65532:65532",
+		"install rustc in the operator-selected base sandbox image",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(args)
+	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=65532:65532", "--pids-limit=32", "--memory=128m", "--env\nPATH=" + sandbox.WorkerPath, "--entrypoint\nsh\noperator-worker@sha256:abc", "IFS=:; for dir in $PATH", "[ -f \"$dir/$name\" ] && [ -x \"$dir/$name\" ]"} {
+		if !strings.Contains(got, required) {
+			t.Errorf("docker probe args missing %q:\n%s", required, got)
+		}
+	}
+	for _, forbidden := range []string{"--mount", "--volume", "--network=bridge"} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("docker probe args contain forbidden %q:\n%s", forbidden, got)
+		}
+	}
+	if count := strings.Count(got, "--env\n"); count != 1 {
+		t.Errorf("docker probe has %d environment entries, want only the worker PATH:\n%s", count, got)
+	}
+}
+
+func TestRequiredBinaryProbeRejectsShellBuiltins(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", requiredBinaryProbe, "required-binaries", "cd")
+	cmd.Env = []string{"PATH=" + t.TempDir()}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run probe: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "cd" {
+		t.Fatalf("built-in probe output = %q, want missing executable cd", got)
+	}
+}
+
+func TestProbeRequiredBinariesBoundsImageOutput(t *testing.T) {
+	docker := filepath.Join(t.TempDir(), "docker")
+	argsPath := filepath.Join(t.TempDir(), "docker-args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsPath + "'\nif [ \"$1\" = run ]; then i=0; while [ \"$i\" -lt 2000 ]; do printf 'probe output exceeds the configured byte limit\\n'; i=$((i + 1)); done; fi\n"
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := probeRequiredBinaries(context.Background(), docker, "worker", "65532:65532", []string{"cargo"})
+	if err == nil || !strings.Contains(err.Error(), "output exceeded 16384 bytes") {
+		t.Fatalf("error = %v, want bounded-output refusal", err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(args)), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "rm --force factoryd-required-binaries-") {
+		t.Fatalf("docker calls = %q, want run followed by forced container cleanup", lines)
+	}
+	fields := strings.Fields(lines[0])
+	nameIndex := slices.Index(fields, "--name")
+	if nameIndex < 0 || nameIndex+1 >= len(fields) || fields[nameIndex+1] != strings.TrimPrefix(lines[1], "rm --force ") {
+		t.Fatalf("run/cleanup container names differ: %q", lines)
+	}
+}
+
+func TestRequiredBinaryProbeAcceptsExecutableNamedLikeShellBuiltin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "printf")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", requiredBinaryProbe, "required-binaries", "printf")
+	cmd.Env = []string{"PATH=" + dir}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run probe: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "" {
+		t.Fatalf("executable probe output = %q, want no missing commands", got)
+	}
+}
+
+func TestDoctorRequiredBinaryProbeIsAdvisoryWithoutAnImage(t *testing.T) {
+	repo := commitFiles(t, map[string]string{".factory.yml": "required_binaries: [cargo]\n"})
+	in := doctorTargetRepoInputs(repo, "unused")
+	checks := doctorCheckRequiredBinaries(context.Background(), in)
+	var out strings.Builder
+	if failed := runDoctorChecks(checks, &out); failed != 0 || !strings.Contains(out.String(), "warn  required binaries") {
+		t.Fatalf("failed = %d, output:\n%s; want advisory warning", failed, out.String())
+	}
 }
 
 func TestDoctorTargetRepoReportsEachServiceAndItsWorkerEnv(t *testing.T) {

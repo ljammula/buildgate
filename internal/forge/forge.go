@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -122,8 +123,12 @@ func (o GHPullRequestOpener) OpenDraftPullRequest(ctx context.Context, workspace
 	if out, err := push.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git push %s: %w: %s", refspec, err, strings.TrimSpace(string(out)))
 	}
+	repository, err := originRepository(ctx, gitBinary, workspaceDir)
+	if err != nil {
+		return "", err
+	}
 
-	args := []string{"pr", "create", "--draft", "--head", branch, "--title", title, "--body", body}
+	args := []string{"pr", "create", "--repo", repository, "--draft", "--head", branch, "--title", title, "--body", body}
 	// base's own existence on "origin" is checked here, not assumed: it
 	// can have been deleted since ticketQueueEntry computed it (e.g. the
 	// ticket it names has since merged and GitHub deleted its branch) --
@@ -158,6 +163,36 @@ func (o GHPullRequestOpener) OpenDraftPullRequest(ctx context.Context, workspace
 		return "", fmt.Errorf("gh pr create produced no output naming the new PR's URL: %s", strings.TrimSpace(string(out)))
 	}
 	return url, nil
+}
+
+func originRepository(ctx context.Context, gitBinary, workspaceDir string) (string, error) {
+	remote := exec.CommandContext(ctx, gitBinary, "remote", "get-url", "origin")
+	remote.Dir = workspaceDir
+	out, err := remote.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git remote get-url origin: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	value := strings.TrimSpace(string(out))
+	var host, repositoryPath string
+	if at := strings.Index(value, "://"); at >= 0 {
+		parsed, parseErr := url.Parse(value)
+		if parseErr != nil {
+			return "", fmt.Errorf("parse origin URL %q: %w", value, parseErr)
+		}
+		host, repositoryPath = parsed.Host, parsed.Path
+	} else if colon := strings.Index(value, ":"); colon >= 0 {
+		host = value[:colon]
+		if at := strings.LastIndex(host, "@"); at >= 0 {
+			host = host[at+1:]
+		}
+		repositoryPath = value[colon+1:]
+	}
+	repositoryPath = strings.Trim(strings.TrimSuffix(repositoryPath, ".git"), "/")
+	parts := strings.Split(repositoryPath, "/")
+	if host == "" || len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", fmt.Errorf("origin URL %q does not name a GitHub repository", value)
+	}
+	return host + "/" + repositoryPath, nil
 }
 
 // VerifyExistingPullRequest runs `gh pr view <url> --json

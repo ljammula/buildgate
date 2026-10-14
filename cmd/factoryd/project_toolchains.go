@@ -28,6 +28,10 @@ func (impl realDocker) imageToolchains(ctx context.Context, dockerBinary, image 
 	return imageToolchains(ctx, dockerBinary, image)
 }
 
+func (impl realDocker) requiredBinaries(ctx context.Context, dockerBinary, image, user string, names []string) ([]string, error) {
+	return probeRequiredBinaries(ctx, dockerBinary, image, user, names)
+}
+
 // warnProjectToolchains prints, as a request is submitted, each toolchain
 // version the repository declares that its builds will not have: a Node
 // mismatch always, and a Go or Python one only under FACTORYD_AUTOSTART=0,

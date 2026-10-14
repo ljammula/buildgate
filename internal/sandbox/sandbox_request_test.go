@@ -79,7 +79,7 @@ func TestSandboxRequestCarriesTheLaunchSpec(t *testing.T) {
 	}
 	wantEnv := []string{
 		"BG_SERVICE_DB_URL=postgres://u:p@10.0.0.2/db",
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=" + WorkerPath,
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=safe.directory",
 		"GIT_CONFIG_VALUE_0=/workspace",

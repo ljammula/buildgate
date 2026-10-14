@@ -15,7 +15,15 @@ import (
 func writeFakeExecutable(t *testing.T, dir, name, script string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+	prefix := ""
+	if name == "fake-git" {
+		prefix = `if [ "$1" = "remote" ] && [ "$2" = "get-url" ] && [ "$3" = "origin" ]; then
+echo "https://github.com/acme/widgets.git"
+exit 0
+fi
+`
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+prefix+script), 0o755); err != nil {
 		t.Fatalf("write fake %s: %v", name, err)
 	}
 	return path
@@ -63,10 +71,33 @@ exit 0
 		t.Fatalf("read pr log: %v", err)
 	}
 	got := strings.TrimSpace(string(prArgs))
-	for _, want := range []string{"pr create", "--draft", "--head factoryd/run-1", "--title ticket(001): fixture", "--body evidence body"} {
+	for _, want := range []string{"pr create", "--repo github.com/acme/widgets", "--draft", "--head factoryd/run-1", "--title ticket(001): fixture", "--body evidence body"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gh argv = %q, want it to contain %q", got, want)
 		}
+	}
+}
+
+func TestOriginRepositorySupportsHTTPSAndSSHRemotes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		url  string
+	}{
+		{name: "https", url: "https://github.com/acme/widgets.git"},
+		{name: "ssh uri", url: "ssh://git@github.com/acme/widgets.git"},
+		{name: "scp style", url: "git@github.com:acme/widgets.git"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			gitBinary := writeFakeExecutable(t, dir, "fake-origin-git", "echo \""+test.url+"\"\n")
+			got, err := originRepository(context.Background(), gitBinary, dir)
+			if err != nil {
+				t.Fatalf("originRepository: %v", err)
+			}
+			if got != "github.com/acme/widgets" {
+				t.Errorf("originRepository = %q, want github.com/acme/widgets", got)
+			}
+		})
 	}
 }
 

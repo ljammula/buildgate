@@ -51,8 +51,10 @@ type Runtime struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 
 	// pushed is what PushCredential last stored in each provider.
-	pushedMu sync.Mutex
-	pushed   map[string]pushedCredential
+	pushLocksMu sync.Mutex
+	pushLocks   map[string]chan struct{}
+	pushedMu    sync.Mutex
+	pushed      map[string]pushedCredential
 }
 
 // pushedCredential is one stored credential as this process knows it: its
@@ -264,6 +266,35 @@ func credentialDigest(profileID string, secrets map[string]string, expiresAt tim
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// acquireCredentialPush serializes writes to one provider without holding up
+// a canceled launch. Providers for different routes can be updated separately.
+func (r *Runtime) acquireCredentialPush(ctx context.Context, provider string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.pushLocksMu.Lock()
+	if r.pushLocks == nil {
+		r.pushLocks = make(map[string]chan struct{})
+	}
+	lock := r.pushLocks[provider]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		r.pushLocks[provider] = lock
+	}
+	r.pushLocksMu.Unlock()
+
+	select {
+	case lock <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-lock
+			return nil, err
+		}
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // PushCredential stores the credential in the route's provider, creating the
 // profile and the provider on first use. A provider this process already
 // gave this credential, and that nothing has changed since (its revision is
@@ -280,6 +311,11 @@ func (r *Runtime) PushCredential(ctx context.Context, cred sandbox.RouteCredenti
 	if cred.Provider == "" || len(secrets) == 0 {
 		return errors.New("openshell: a credential needs a provider and at least one value")
 	}
+	release, err := r.acquireCredentialPush(ctx, cred.Provider)
+	if err != nil {
+		return err
+	}
+	defer release()
 	names := make([]string, 0, len(secrets))
 	for name := range secrets {
 		names = append(names, name)
@@ -317,6 +353,15 @@ func (r *Runtime) PushCredential(ctx context.Context, cred sandbox.RouteCredenti
 	switch {
 	case v1.IsNotFound(err):
 		stored, err = providers.Create(ctx, r.workspace(), &v1.Provider{Name: cred.Provider, Type: profile.ID, Spec: spec})
+		if v1.IsAlreadyExists(err) {
+			// Another request may have created the same route provider after
+			// our Get. Read its current revision before replacing its value.
+			existing, err = providers.Get(ctx, r.workspace(), cred.Provider)
+			if err == nil {
+				existing.Type, existing.Spec = profile.ID, spec
+				stored, err = providers.Update(ctx, r.workspace(), existing)
+			}
+		}
 	case err == nil:
 		if r.holds(cred.Provider, pushedCredential{digest: digest, revision: existing.ResourceVersion}) {
 			return nil

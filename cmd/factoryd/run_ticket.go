@@ -402,10 +402,11 @@ type ticketRun struct {
 	isolatedParentDir                     string
 	isolatedRepoDir                       string
 	productSpecSHA256                     string
-	// setup/autofix/projectConfigSHA256 come from the committed
-	// .factory.yml (applyCommittedProjectConfig); carried only, nothing
-	// runs them yet.
+	// setup/autofix/requiredBinaries/projectConfigSHA256 come from the
+	// committed .factory.yml (applyCommittedProjectConfig). Required binaries
+	// are checked against the final worker image before the workflow starts.
 	setup, autofix      []string
+	requiredBinaries    []string
 	projectConfigSHA256 string
 	// headBeforeProjectConfig is the workspace's HEAD commit before the
 	// first read of .factory.yml; projectConfigCommitSHA is that commit
@@ -1413,6 +1414,19 @@ func (tr *ticketRun) fitSandboxToRepository() error {
 		return err
 	}
 	*tr.sandboxImage = image
+	if len(tr.requiredBinaries) == 0 {
+		return nil
+	}
+	user, _ := sandbox.ResolveDefaultWorkerIdentity(*tr.sandboxUser, *tr.sandboxWorkerUID, os.Getgid())
+	probeCtx, cancel := context.WithTimeout(tr.lifecycleCtx, 20*time.Second)
+	defer cancel()
+	missing, err := tr.dp.docker.requiredBinaries(probeCtx, *tr.sandboxDocker, image, user, tr.requiredBinaries)
+	if err != nil {
+		return fmt.Errorf("check required_binaries in final worker image %s: %w", image, err)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("final worker image %s is missing required executable(s) on PATH as worker %s: %s; install them in the operator-selected sandbox image or choose an image that provides them", image, user, strings.Join(missing, ", "))
+	}
 	return nil
 }
 
@@ -2487,7 +2501,7 @@ func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 		if !fullSuiteExplicit && cfg.FullSuiteCommand != "" {
 			*tr.fullSuiteCommand = cfg.FullSuiteCommand
 		}
-		tr.setup, tr.autofix, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.SHA256
+		tr.setup, tr.autofix, tr.requiredBinaries, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.RequiredBinaries, cfg.SHA256
 	}
 	// HEAD is the commit it was before the first read of the file
 	// (headBeforeProjectConfig) and that commit's file is the one just read,

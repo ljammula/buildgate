@@ -43,6 +43,23 @@ func TestTicketRunCarriesSetupAndAutofixFromTheCommittedFile(t *testing.T) {
 	}
 }
 
+func TestTicketRunCarriesRequiredBinariesFromTheCommittedFile(t *testing.T) {
+	workspace := newFixtureRepo(t)
+	committed := "required_binaries:\n  - cargo\n  - rustc\n"
+	commitFactoryYML(t, workspace, committed)
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("required_binaries: [evil-tool]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full := ""
+	tr := &ticketRun{workspace: &workspace, fullSuiteCommand: &full}
+	if err := tr.applyCommittedProjectConfig(false); err != nil {
+		t.Fatalf("applyCommittedProjectConfig: %v", err)
+	}
+	if want := []string{"cargo", "rustc"}; !reflect.DeepEqual(tr.requiredBinaries, want) {
+		t.Errorf("requiredBinaries = %q, want committed values %q", tr.requiredBinaries, want)
+	}
+}
+
 func headOf(t *testing.T, workspace string) string {
 	t.Helper()
 	out, err := runGit(t, workspace, "rev-parse", "HEAD")

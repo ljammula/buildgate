@@ -102,6 +102,9 @@ type Config struct {
 	// searched, in order, for the <name>.md a target repository's
 	// .factory.yml design_guide names. See LoadDesignGuide.
 	DesignGuideDirs []string `yaml:"design_guide_dirs,omitempty"`
+	// SpecDraftGuidanceDirs lists operator-owned directories searched for
+	// the selected planning role's spec_draft_guidance file.
+	SpecDraftGuidanceDirs []string `yaml:"spec_draft_guidance_dirs,omitempty"`
 	// Memory lists the repositories whose repository memory is switched on;
 	// off for every repository not listed. See MemoryFor.
 	Memory *MemoryConfig `yaml:"memory,omitempty"`
@@ -372,6 +375,10 @@ type RoleConfig struct {
 	// folder NAMES only, never paths, resolved through Config.SkillDirs
 	// (ResolveRoleSkills). A path-shaped entry is refused by ValidateSkills.
 	Skills []string `yaml:"skills,omitempty"`
+	// SpecDraftGuidance names one operator-owned additive guidance file for
+	// spec drafting. It is only read from the planning role and cannot be
+	// selected by a target repository.
+	SpecDraftGuidance string `yaml:"spec_draft_guidance,omitempty"`
 	// Escalation names the model an automatic corrective build of a ticket
 	// runs on instead of Model. Only roles.execution may set it
 	// (ValidateRouting); nil means a corrective build runs as the first
@@ -556,6 +563,8 @@ type Settings struct {
 	SkillDirs []string
 	// DesignGuideDirs mirrors Config.DesignGuideDirs.
 	DesignGuideDirs []string
+	// SpecDraftGuidanceDirs mirrors Config.SpecDraftGuidanceDirs.
+	SpecDraftGuidanceDirs []string
 	// Memory is the resolved memory.repositories list; see MemoryFor.
 	Memory []MemoryRepository
 }
@@ -803,7 +812,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 }
 
 // applyListKeys overlays the list-valued keys (workspaces, skill_dirs,
-// design_guide_dirs, memory) that are present in c onto s.
+// design_guide_dirs, spec_draft_guidance_dirs, memory) that are present in c onto s.
 func (c *Config) applyListKeys(s *Settings) error {
 	if c.Workspaces != nil {
 		s.Workspaces = c.Workspaces
@@ -813,6 +822,9 @@ func (c *Config) applyListKeys(s *Settings) error {
 	}
 	if c.DesignGuideDirs != nil {
 		s.DesignGuideDirs = c.DesignGuideDirs
+	}
+	if c.SpecDraftGuidanceDirs != nil {
+		s.SpecDraftGuidanceDirs = c.SpecDraftGuidanceDirs
 	}
 	repos, err := resolveMemory(c.Memory)
 	if err != nil {
@@ -938,6 +950,12 @@ roles:
 # Folders holding team design guides (<name>.md); a repository selects one
 # with design_guide: <name> in its .factory.yml.
 # design_guide_dirs: [~/code/team-standards]
+# Folders holding operator-owned additive spec-drafting guidance files
+# (<name>.md). Select one for planning in roles.planning.spec_draft_guidance.
+# spec_draft_guidance_dirs: [~/code/team-guidance]
+# roles:
+#   planning:
+#     spec_draft_guidance: product-spec
 # Repository memory is off for every repository. List a repository's root to
 # let factoryd keep short, checked lessons about it (budget keys optional).
 # memory:

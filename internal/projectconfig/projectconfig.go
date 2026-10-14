@@ -96,7 +96,10 @@ type Config struct {
 	// "*_test.go" matches "internal/foo/bar_test.go" via the basename
 	// form without also having to be written as "**/*_test.go". Empty
 	// (the default) falls back to policy.DefaultTestPatterns.
-	TestPatterns        []string `yaml:"test_patterns"`
+	TestPatterns []string `yaml:"test_patterns"`
+	// RequiredBinaries names executables the operator-selected worker image
+	// must provide for this repository's verify/setup commands.
+	RequiredBinaries    []string `yaml:"required_binaries"`
 	PreflightProfile    string   `yaml:"preflight_profile"`
 	ProtectedPaths      []string `yaml:"protected_paths"`
 	TokenCeiling        int64    `yaml:"token_ceiling"`
@@ -126,6 +129,35 @@ type Config struct {
 
 // MaxSetupCommands bounds each of Config.Setup and Config.Autofix.
 const MaxSetupCommands = 8
+
+// MaxRequiredBinaries bounds the number of executable names a repo can ask
+// doctor to probe in the operator-selected worker image.
+const MaxRequiredBinaries = 32
+
+const maxRequiredBinaryNameBytes = 64
+
+var requiredBinaryNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+func validateRequiredBinaries(names []string) error {
+	if len(names) > MaxRequiredBinaries {
+		return fmt.Errorf("required_binaries has %d entries, at most %d are allowed", len(names), MaxRequiredBinaries)
+	}
+	seen := make(map[string]bool, len(names))
+	for i, name := range names {
+		switch {
+		case strings.TrimSpace(name) == "":
+			return fmt.Errorf("required_binaries entry %d is blank", i+1)
+		case len(name) > maxRequiredBinaryNameBytes:
+			return fmt.Errorf("required_binaries entry %d is %d bytes, at most %d are allowed", i+1, len(name), maxRequiredBinaryNameBytes)
+		case !requiredBinaryNameRE.MatchString(name):
+			return fmt.Errorf("required_binaries entry %d %q must be a bare executable name using only letters, digits, '.', '_', '+' or '-'", i+1, name)
+		case seen[name]:
+			return fmt.Errorf("required_binaries entry %q is listed twice", name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
 
 // maxSetupCommandBytes bounds one Setup or Autofix entry.
 const maxSetupCommandBytes = 2000
@@ -274,6 +306,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateCommandList("autofix", c.Autofix); err != nil {
+		return err
+	}
+	if err := validateRequiredBinaries(c.RequiredBinaries); err != nil {
 		return err
 	}
 	return c.validateGates()

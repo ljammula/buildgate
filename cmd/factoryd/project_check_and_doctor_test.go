@@ -1129,6 +1129,25 @@ func TestDetectVerifyCommand(t *testing.T) {
 			t.Errorf("command, source = %q, %q, want empty (no test script declared)", command, source)
 		}
 	})
+
+	t.Run("compiled language profile is advisory fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "Cargo.toml", "[package]\nname='sample'\n")
+		command, source := detectVerifyCommand(dir)
+		if command != "cargo test --workspace" || source != "profile rust" {
+			t.Errorf("command, source = %q, %q, want rust profile suggestion", command, source)
+		}
+	})
+
+	t.Run("ambiguous compiled profiles do not choose a command", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "Cargo.toml", "")
+		write(t, dir, "Gemfile", "")
+		command, source := detectVerifyCommand(dir)
+		if command != "" || source != "" {
+			t.Errorf("command, source = %q, %q, want empty for ambiguous profiles", command, source)
+		}
+	})
 }
 
 // TestDoctorCheckRelayUpstreamPathComposition covers the regression check

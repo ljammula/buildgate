@@ -106,7 +106,7 @@ func initMain(dp *deps, args []string) error {
 	}
 	if *writeFactoryYML {
 		if detectedVerifyCommand != "" {
-			fmt.Printf("Detected verify command: %q -- pre-filled into %s alongside preflight_profile: %s.\n", detectedVerifyCommand, projectconfig.FileName, projectconfig.PreflightProfileBrownfield)
+			fmt.Printf("Verify-command candidate: %q -- pre-filled into %s alongside preflight_profile: %s; review it before committing the file.\n", detectedVerifyCommand, projectconfig.FileName, projectconfig.PreflightProfileBrownfield)
 		} else {
 			fmt.Printf("Could not detect a real verify command (no Makefile verify target, go.mod, package.json, or pyproject.toml/requirements.txt found) -- %s's verify_command still needs filling in by hand.\n", projectconfig.FileName)
 		}
@@ -316,5 +316,6 @@ func detectInitVerifyCommand(root string) string {
 	if _, err := os.Stat(filepath.Join(root, "requirements.txt")); err == nil {
 		return "pytest"
 	}
-	return ""
+	command, _ := suggestedProfileVerifyCommand(root)
+	return command
 }
