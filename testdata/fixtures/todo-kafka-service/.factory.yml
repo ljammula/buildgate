@@ -1,5 +1,7 @@
 verify_command: "make verify-integration"
 preflight_profile: brownfield
+setup:
+  - make db-migrate up
 # lint_command: "golangci-lint run ./..."
 # security_command: "govulncheck ./..."
 # unit_test_command: "go test ./..."

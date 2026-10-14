@@ -7,8 +7,10 @@ design, and the README the services, configuration and endpoints.
 
 ## Commands
 
-- Setup: none for unit tests beyond Go. Integration tests need the Postgres,
-  Kafka and Redis services of `docker-compose.yml`.
+- Setup: `make db-migrate up` applies pending database migrations. Buildgate
+  runs it from `.factory.yml` after Compose sidecars are ready.
+- Integration tests need the Postgres, Kafka and Redis services of
+  `docker-compose.yml`.
 - Build: `go build ./...`
 - Vet: `go vet ./...`
 - Test: `make test` (unit tests, needs nothing)
@@ -22,6 +24,7 @@ design, and the README the services, configuration and endpoints.
 From `README.md` and the `Makefile`:
 
 - A migration is the next number in `pgstore/migrations/`
-  (`NNN_description.sql`, no gaps). Never edit one that has shipped.
+  (`NNNNNN_description.up.sql` and `.down.sql`, no gaps). Never edit one that
+  has shipped.
 - Integration tests carry the `integration` build tag and run with `-p 1`:
   packages share one `todos` table.
