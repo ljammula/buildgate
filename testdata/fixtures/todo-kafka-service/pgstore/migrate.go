@@ -1,107 +1,79 @@
 package pgstore
 
 import (
+	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
-	"path"
-	"sort"
-	"strconv"
-	"strings"
+
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-// migrationLockID is the pg_advisory_xact_lock key Migrate holds while it
-// runs. The API and cmd/consumer both call New at startup, often at the
-// same moment against a fresh database; the lock makes the second one wait
-// and then find every migration already applied, instead of both racing to
-// run the same DDL.
-const migrationLockID = 7_311_2026
+const migrationsTable = "todo_service_migrations"
 
-type migration struct {
-	version int
-	name    string
-	sql     string
-}
-
-// loadMigrations reads migrations/NNN_name.sql in version order. Versions
-// must be unique, start at 1 and have no gaps, so a file added out of order
-// or with a typo'd prefix fails loudly at startup instead of being applied
-// in a surprising position.
-func loadMigrations() ([]migration, error) {
-	entries, err := migrationFiles.ReadDir("migrations")
-	if err != nil {
-		return nil, fmt.Errorf("read migrations: %w", err)
-	}
-	var out []migration
-	for _, e := range entries {
-		prefix, _, ok := strings.Cut(e.Name(), "_")
-		version, err := strconv.Atoi(prefix)
-		if !ok || err != nil || version <= 0 {
-			return nil, fmt.Errorf("migration %q: name must be NNN_description.sql", e.Name())
-		}
-		body, err := migrationFiles.ReadFile(path.Join("migrations", e.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("read migration %q: %w", e.Name(), err)
-		}
-		out = append(out, migration{version: version, name: e.Name(), sql: string(body)})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].version < out[j].version })
-	for i, m := range out {
-		if m.version != i+1 {
-			return nil, fmt.Errorf("migration %q: expected version %d (versions must be 1..N with no gaps or duplicates)", m.name, i+1)
-		}
-	}
-	return out, nil
-}
-
-// Migrate applies every migration not yet recorded in schema_migrations,
-// in one transaction: Postgres DDL is transactional, so a failing
-// migration leaves the schema exactly as it was, with nothing recorded.
+// Migrate applies every pending migration in order.
 func Migrate(db *sql.DB) error {
-	migrations, err := loadMigrations()
+	return runMigrations(db, (*migrate.Migrate).Up)
+}
+
+// MigrateDown rolls back every applied migration. It is intended for explicit
+// operator use; application startup expects the schema to be migrated already.
+func MigrateDown(db *sql.DB) error {
+	return runMigrations(db, (*migrate.Migrate).Down)
+}
+
+// MigrateForce sets the migration version without running SQL. Use it only
+// after confirming the database schema matches version.
+func MigrateForce(db *sql.DB, version int) error {
+	if version < -1 || version == 0 {
+		return fmt.Errorf("migration version must be -1 or positive, got %d", version)
+	}
+	return runMigrations(db, func(m *migrate.Migrate) error {
+		return m.Force(version)
+	})
+}
+
+func runMigrations(db *sql.DB, run func(*migrate.Migrate) error) error {
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("get migration connection: %w", err)
 	}
-
-	tx, err := db.Begin()
+	database, err := postgres.WithConnection(ctx, conn, &postgres.Config{
+		MigrationsTable:       migrationsTable,
+		MultiStatementEnabled: false,
+	})
 	if err != nil {
-		return fmt.Errorf("begin migration transaction: %w", err)
+		conn.Close()
+		return fmt.Errorf("configure Postgres migrations: %w", err)
 	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, migrationLockID); err != nil {
-		return fmt.Errorf("acquire migration lock: %w", err)
+	source, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		database.Close()
+		return fmt.Errorf("open embedded migrations: %w", err)
 	}
-	if _, err := tx.Exec(`
-CREATE TABLE IF NOT EXISTS schema_migrations (
-	version    INTEGER PRIMARY KEY,
-	name       TEXT NOT NULL,
-	applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)`); err != nil {
-		return fmt.Errorf("create schema_migrations: %w", err)
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", database)
+	if err != nil {
+		source.Close()
+		database.Close()
+		return fmt.Errorf("create migrator: %w", err)
 	}
-
-	var current int
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
+	err = run(m)
+	sourceErr, databaseErr := m.Close()
+	if errors.Is(err, migrate.ErrNoChange) {
+		err = nil
 	}
-	if current > len(migrations) {
-		return fmt.Errorf("database schema is at version %d, newer than this binary's latest migration %d", current, len(migrations))
+	if err != nil {
+		return fmt.Errorf("run database migrations: %w", err)
 	}
-
-	for _, m := range migrations[current:] {
-		if _, err := tx.Exec(m.sql); err != nil {
-			return fmt.Errorf("apply migration %s: %w", m.name, err)
-		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`, m.version, m.name); err != nil {
-			return fmt.Errorf("record migration %s: %w", m.name, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migrations: %w", err)
+	if sourceErr != nil || databaseErr != nil {
+		return errors.Join(sourceErr, databaseErr)
 	}
 	return nil
 }

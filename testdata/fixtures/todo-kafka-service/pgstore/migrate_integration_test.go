@@ -48,38 +48,22 @@ func scratchDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func appliedVersions(t *testing.T, db *sql.DB) []int {
+func appliedVersion(t *testing.T, db *sql.DB) (int, bool) {
 	t.Helper()
-	rows, err := db.Query(`SELECT version FROM schema_migrations ORDER BY version`)
-	if err != nil {
-		t.Fatalf("read schema_migrations: %v", err)
+	var version int
+	var dirty bool
+	if err := db.QueryRow(`SELECT version, dirty FROM todo_service_migrations`).Scan(&version, &dirty); err != nil {
+		t.Fatalf("read todo_service_migrations: %v", err)
 	}
-	defer rows.Close()
-	var out []int
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			t.Fatalf("scan version: %v", err)
-		}
-		out = append(out, v)
-	}
-	return out
+	return version, dirty
 }
 
 func wantAllApplied(t *testing.T, db *sql.DB) {
 	t.Helper()
-	migrations, err := loadMigrations()
-	if err != nil {
-		t.Fatalf("loadMigrations: %v", err)
-	}
-	got := appliedVersions(t, db)
-	if len(got) != len(migrations) {
-		t.Fatalf("applied versions %v, want 1..%d", got, len(migrations))
-	}
-	for i, v := range got {
-		if v != i+1 {
-			t.Fatalf("applied versions %v, want 1..%d", got, len(migrations))
-		}
+	version, dirty := appliedVersion(t, db)
+	versions := migrationVersions(t)
+	if version != versions[len(versions)-1] || dirty {
+		t.Fatalf("migration state version=%d dirty=%v, want version=%d dirty=false", version, dirty, versions[len(versions)-1])
 	}
 }
 
@@ -110,9 +94,63 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	wantAllApplied(t, db)
 }
 
-// TestMigrateAdoptsPreMigrationsDatabase covers a database created by the
-// old inline CREATE TABLE in New, before schema_migrations existed: its
-// rows must survive and gain created_at.
+func TestMigrateDownRollsBackAllVersions(t *testing.T) {
+	db := scratchDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if err := MigrateDown(db); err != nil {
+		t.Fatalf("MigrateDown: %v", err)
+	}
+	var todosAbsent bool
+	if err := db.QueryRow(`SELECT to_regclass('todos') IS NULL`).Scan(&todosAbsent); err != nil {
+		t.Fatalf("check rolled-back table: %v", err)
+	}
+	if !todosAbsent {
+		t.Fatal("todos table still exists after rolling back all migrations")
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate after rollback: %v", err)
+	}
+	wantAllApplied(t, db)
+}
+
+func TestMigrateForceRecoversDirtyVersion(t *testing.T) {
+	db := scratchDB(t)
+	if _, err := db.Exec(`CREATE TABLE todos (title TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create incompatible legacy schema: %v", err)
+	}
+	if err := Migrate(db); err == nil {
+		t.Fatal("Migrate should fail when migration 2 cannot create its index")
+	}
+	version, dirty := appliedVersion(t, db)
+	if version != 2 || !dirty {
+		t.Fatalf("migration state version=%d dirty=%v, want version=2 dirty=true", version, dirty)
+	}
+	var hasCreatedAt bool
+	if err := db.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_name = 'todos' AND column_name = 'created_at'
+	)`).Scan(&hasCreatedAt); err != nil {
+		t.Fatalf("check failed migration side effects: %v", err)
+	}
+	if hasCreatedAt {
+		t.Fatal("failed migration left created_at behind")
+	}
+	if err := MigrateForce(db, 1); err != nil {
+		t.Fatalf("MigrateForce: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE todos ADD COLUMN id TEXT`); err != nil {
+		t.Fatalf("repair legacy schema: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate after force: %v", err)
+	}
+	wantAllApplied(t, db)
+}
+
+// TestMigrateAdoptsPreMigrationsDatabase covers a database created before
+// the migration runner existed: its rows must survive and gain created_at.
 func TestMigrateAdoptsPreMigrationsDatabase(t *testing.T) {
 	db := scratchDB(t)
 	if _, err := db.Exec(`
@@ -171,10 +209,14 @@ func TestMigrateRefusesNewerSchema(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO schema_migrations (version, name) VALUES (999, '999_from_a_newer_binary.sql')`); err != nil {
+	if _, err := db.Exec(`UPDATE todo_service_migrations SET version = 999, dirty = false`); err != nil {
 		t.Fatalf("record future migration: %v", err)
 	}
 	if err := Migrate(db); err == nil {
 		t.Fatal("Migrate should refuse a schema newer than its own migrations")
+	}
+	version, dirty := appliedVersion(t, db)
+	if version != 999 || dirty {
+		t.Fatalf("migration state version=%d dirty=%v, want version=999 dirty=false", version, dirty)
 	}
 }

@@ -1,9 +1,38 @@
-.PHONY: test verify verify-integration
+.PHONY: test db-migrate up down force verify verify-integration
 
 # Fast unit tests only -- the in-memory Store with the noop publisher, no
 # Docker required.
 test:
 	go test ./...
+
+# Apply or roll back database migrations. `make db-migrate up` applies all
+# pending migrations; `make db-migrate down` rolls back all applied ones.
+# `make db-migrate force VERSION=N` sets a verified schema version after a
+# failed migration; it does not run SQL.
+# Buildgate runs the up form after starting Compose sidecars and supplies
+# BG_SERVICE_POSTGRES.
+db-migrate:
+	@action="$(filter up down force,$(MAKECMDGOALS))"; \
+	if [ "$$action" != up ] && [ "$$action" != down ] && [ "$$action" != force ]; then \
+		echo "usage: make db-migrate up|down|force VERSION=<version>" >&2; exit 2; \
+	fi; \
+	pg_addr="$${PG_ADDR:-}"; \
+	if [ -z "$$pg_addr" ]; then \
+		if [ -n "$${BG_SERVICE_POSTGRES:-}" ]; then \
+			pg_addr="$$BG_SERVICE_POSTGRES:$${BG_SERVICE_POSTGRES_PORT:-5432}"; \
+		else \
+			pg_addr=localhost:5433; \
+		fi; \
+	fi; \
+	dsn="$${TODO_DATABASE_URL:-postgres://todo:todo@$$pg_addr/todo?sslmode=disable}"; \
+	if [ "$$action" = force ]; then \
+		if [ -z "$(VERSION)" ]; then echo "usage: make db-migrate force VERSION=<version>" >&2; exit 2; fi; \
+		TODO_DATABASE_URL="$$dsn" go run ./cmd/migrate force "$(VERSION)"; \
+	else \
+		TODO_DATABASE_URL="$$dsn" go run ./cmd/migrate "$$action"; \
+	fi
+
+up down force: db-migrate
 
 # Full suite: brings up the docker-compose Postgres, Kafka and Redis
 # dependencies, waits for all three to be healthy, runs the Postgres-backed integration
@@ -13,12 +42,15 @@ test:
 # itself -- see docker-compose.yml.
 verify: test
 	docker compose up -d --wait postgres kafka redis
-	PG_ADDR=localhost:5433 KAFKA_BROKERS=localhost:9094 REDIS_ADDR=localhost:6380 \
-	TODO_DATABASE_URL="postgres://todo:todo@localhost:5433/todo?sslmode=disable" \
-		go test -p 1 -tags=integration ./... ; \
-		status=$$?; \
-		docker compose down -v; \
-		exit $$status
+	@status=0; \
+	TODO_DATABASE_URL="postgres://todo:todo@localhost:5433/todo?sslmode=disable" $(MAKE) db-migrate up || status=$$?; \
+	if [ $$status -eq 0 ]; then \
+		PG_ADDR=localhost:5433 KAFKA_BROKERS=localhost:9094 REDIS_ADDR=localhost:6380 \
+		TODO_DATABASE_URL="postgres://todo:todo@localhost:5433/todo?sslmode=disable" \
+			go test -p 1 -tags=integration ./... || status=$$?; \
+	fi; \
+	docker compose down -v; \
+	exit $$status
 
 # Same build/vet/test as `verify`, but against a Postgres/Kafka/Redis the
 # caller already launched -- this target never runs `docker compose
@@ -58,21 +90,27 @@ verify: test
 # pgstore's tests TRUNCATE it, so they must not run alongside the root
 # package's integration tests.
 verify-integration:
-	go build ./...
-	go vet ./...
-	go test ./...
-	@pg_addr="$${PG_ADDR:-localhost:5433}"; \
-	if [ -n "$$BG_SERVICE_POSTGRES" ] && [ -z "$$PG_ADDR" ]; then \
-		pg_addr="$$BG_SERVICE_POSTGRES:$${BG_SERVICE_POSTGRES_PORT:-5432}"; \
+	@pg_addr="$${PG_ADDR:-}"; \
+	if [ -z "$$pg_addr" ]; then \
+		if [ -n "$${BG_SERVICE_POSTGRES:-}" ]; then \
+			pg_addr="$$BG_SERVICE_POSTGRES:$${BG_SERVICE_POSTGRES_PORT:-5432}"; \
+		else \
+			pg_addr=localhost:5433; \
+		fi; \
 	fi; \
 	kafka_brokers="$${KAFKA_BROKERS:-localhost:9094}"; \
 	redis_addr="$${REDIS_ADDR:-localhost:6380}"; \
-	if [ -n "$$BG_SERVICE_REDIS" ] && [ -z "$$REDIS_ADDR" ]; then \
+	if [ -n "$${BG_SERVICE_REDIS:-}" ] && [ -z "$${REDIS_ADDR:-}" ]; then \
 		redis_addr="$$BG_SERVICE_REDIS:$${BG_SERVICE_REDIS_PORT:-6379}"; \
 	fi; \
+	dsn="$${TODO_DATABASE_URL:-postgres://todo:todo@$$pg_addr/todo?sslmode=disable}"; \
 	echo "verify-integration: resolved PG_ADDR=$$pg_addr KAFKA_BROKERS=$$kafka_brokers REDIS_ADDR=$$redis_addr"; \
+	TODO_DATABASE_URL="$$dsn" $(MAKE) db-migrate up && \
+	go build ./... && \
+	go vet ./... && \
+	go test ./... && \
 	PG_ADDR="$$pg_addr" \
 	KAFKA_BROKERS="$$kafka_brokers" \
 	REDIS_ADDR="$$redis_addr" \
-	TODO_DATABASE_URL="postgres://todo:todo@$$pg_addr/todo?sslmode=disable" \
+	TODO_DATABASE_URL="$$dsn" \
 		go test -p 1 -tags=integration ./...

@@ -41,13 +41,12 @@ consumer (`cmd/consumer`).
         Redis error -> read Postgres, no write-back
 ```
 
-Startup, both processes:
+Local startup:
 
 ```text
-REDIS_ADDR set and PING ok? --no--> exit 1
-            | yes
-pgstore.New: pg_advisory_xact_lock -> apply pending pgstore/migrations/*.sql
-             -> record each in schema_migrations   (one transaction)
+docker compose up -d --wait postgres kafka redis
+make db-migrate up
+start API and consumer against the migrated schema
 ```
 
 ## Services
@@ -79,14 +78,34 @@ pgstore.New: pg_advisory_xact_lock -> apply pending pgstore/migrations/*.sql
 
 ## Migrations
 
-`pgstore/migrations/NNN_description.sql`, versions 1..N with no gaps, applied
-in order by `pgstore.New`. Add a migration as the next number; never edit
-one that has shipped.
+Migrations use [golang-migrate](https://pkg.go.dev/github.com/golang-migrate/migrate/v4)
+files named `NNNNNN_description.up.sql` and
+`NNNNNN_description.down.sql` under `pgstore/migrations/`. Add the next
+version; never edit one that has shipped.
+
+| Command | Effect |
+|---|---|
+| `make db-migrate up` | Apply every pending migration |
+| `make db-migrate down` | Roll back all applied migrations |
+| `make db-migrate force VERSION=N` | Set a verified migration version without running SQL |
+
+All migration commands use `TODO_DATABASE_URL`, then `PG_ADDR`, then
+`BG_SERVICE_POSTGRES`/`BG_SERVICE_POSTGRES_PORT`, then `localhost:5433`.
+Application startup expects the schema to be migrated already. Buildgate runs
+`make db-migrate up` from `.factory.yml` setup after it starts the Compose
+sidecars, before build, verify and gate steps. `down` rolls back every version;
+run `up` before starting the API or consumer again. If a failed migration leaves
+the migration record dirty, inspect the schema and use `force VERSION=N` only
+after confirming which migration version matches the database. Use
+`VERSION=-1` when no migration has been applied.
 
 ## Verify
 
 | Command | Needs |
 |---|---|
 | `make test` | nothing (unit tests) |
+| `make db-migrate up` | reachable Postgres; applies pending SQL migrations |
+| `make db-migrate down` | reachable Postgres; rolls back all applied migrations |
+| `make db-migrate force VERSION=N` | reachable Postgres; records the verified schema version |
 | `make verify` | Docker; starts and removes the compose stack |
 | `make verify-integration` | Postgres, Kafka and Redis already running (`BG_SERVICE_*` or `PG_ADDR`/`KAFKA_BROKERS`/`REDIS_ADDR`); buildgate's `verify_command` |
