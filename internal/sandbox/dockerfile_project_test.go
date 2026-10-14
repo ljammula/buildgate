@@ -146,6 +146,61 @@ func TestDockerfileProjectDownloadsModulesWhenOnlyGoModExists(t *testing.T) {
 	}
 }
 
+func TestDockerfileProjectBakesMavenDependencies(t *testing.T) {
+	dockerfile, err := os.ReadFile("Dockerfile.project")
+	if err != nil {
+		t.Fatalf("read Dockerfile.project: %v", err)
+	}
+	text := string(dockerfile)
+	for _, want := range []string{
+		"ENV MAVEN_OPTS=\"-Dmaven.repo.local=/usr/local/maven-repository\"",
+		"if [ -f pom.xml ]; then",
+		"mvn -B -ntp -DskipTests dependency:go-offline",
+		"mvn -B -ntp -DskipTests test",
+		"org.apache.maven.plugins:maven-dependency-plugin:3.6.1:get",
+		"-Dartifact=org.apache.maven.surefire:surefire-junit4:2.22.2",
+		"-Dtransitive=true",
+		"chmod -R a+rX /usr/local/npm-cache /usr/local/gomodcache /usr/local/maven-repository",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Dockerfile.project is missing Maven dependency-cache step %q", want)
+		}
+	}
+}
+
+func TestDockerfileProjectBakesRubyDependencies(t *testing.T) {
+	dockerfile, err := os.ReadFile("Dockerfile.project")
+	if err != nil {
+		t.Fatalf("read Dockerfile.project: %v", err)
+	}
+	text := string(dockerfile)
+	for _, want := range []string{
+		"ENV BUNDLE_PATH=/usr/local/bundle",
+		"if [ -f Gemfile.lock ]; then",
+		"gem install bundler --no-document --version 2.4.22",
+		"bundle _2.4.22_ install --jobs 4 --retry 3",
+		"/usr/local/maven-repository /usr/local/bundle",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Dockerfile.project is missing Ruby dependency-cache step %q", want)
+		}
+	}
+}
+
+func TestProjectSandboxImageStagesMavenPom(t *testing.T) {
+	makefile, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	text := string(makefile)
+	if !strings.Contains(text, "for f in go.mod go.sum package.json package-lock.json requirements.txt pom.xml Gemfile Gemfile.lock; do") {
+		t.Fatal("project-sandbox-image does not stage Maven and Ruby manifests for its dependency build")
+	}
+	if !strings.Contains(text, "-f \"$(PROJECT_DIR)/Gemfile\" ] && [ ! -f \"$(PROJECT_DIR)/Gemfile.lock\"") {
+		t.Fatal("project-sandbox-image does not require a lockfile for Ruby dependencies")
+	}
+}
+
 func TestProjectSandboxImageRejectsNPMProjectWithoutLockfile(t *testing.T) {
 	makefile, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
 	if err != nil {
@@ -177,8 +232,8 @@ func TestDockerfileProjectBakesMissingDependencyDependencyIsNovel(t *testing.T) 
 }
 
 // stageManifests copies only the manifest files internal/sandbox/
-// Dockerfile.project's own RUN step reads (go.mod/go.sum,
-// package.json/package-lock.json) from projectDir into a fresh, empty
+// Dockerfile.project's own RUN step reads the supported dependency manifests
+// from projectDir into a fresh, empty
 // directory, and returns that directory -- never projectDir itself. This
 // is exactly what `make project-sandbox-image` does before invoking
 // `docker build` (see that target's own comment): the build context must
@@ -192,7 +247,7 @@ func stageManifests(t *testing.T, projectDir string) string {
 		t.Fatalf("create stage dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(stageDir) })
-	for _, name := range []string{"go.mod", "go.sum", "package.json", "package-lock.json"} {
+	for _, name := range []string{"go.mod", "go.sum", "package.json", "package-lock.json", "pom.xml", "Gemfile", "Gemfile.lock"} {
 		src := filepath.Join(projectDir, name)
 		b, err := os.ReadFile(src)
 		if err != nil {

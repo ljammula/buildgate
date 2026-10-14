@@ -2,7 +2,7 @@
 # worker image (BASE_IMAGE -- the locally built worker `make sandbox-image`
 # prints, a tagged release image, or another project image), baking in a
 # TARGET project's own
-# Go module cache, npm package cache, and/or pip packages. Fixes a real
+# Go module cache, npm package cache, Maven repository, Ruby gems, and/or pip packages. Fixes a real
 # GitHub Codex App review finding on PR #51: the plain worker image
 # bakes only this repo's own go.sum, and a sandboxed build_app.py run has
 # no package-registry network at all (only the optional model relay --
@@ -29,6 +29,8 @@
 #   cp <target-project-root>/go.mod <target-project-root>/go.sum "$stage/"    # if present
 #   cp <target-project-root>/package.json <target-project-root>/package-lock.json "$stage/"  # if present
 #   cp <target-project-root>/requirements.txt "$stage/"  # if present
+#   cp <target-project-root>/pom.xml "$stage/"  # if present
+#   cp <target-project-root>/Gemfile <target-project-root>/Gemfile.lock "$stage/"  # if present
 #   docker build -f <this repo>/internal/sandbox/Dockerfile.project \
 #     --build-arg BASE_IMAGE=<canonical or another project image> \
 #     -t <project>-worker:local "$stage"
@@ -38,8 +40,11 @@
 # tag can't be used directly. Prefer it over invoking `docker build`
 # yourself.
 #
-# Supports Go (go.mod/go.sum), npm (package.json/package-lock.json), and
-# pip (requirements.txt) today. Found live, 2026-09-08: a real Python
+# Supports Go (go.mod/go.sum), npm (package.json/package-lock.json), Maven
+# (pom.xml), Ruby Bundler (Gemfile/Gemfile.lock), and pip (requirements.txt).
+# Dependencies for each are resolved during this host-side image build and
+# are available to offline worker runs.
+# Found live, 2026-09-08: a real Python
 # project (a notes app repo) whose own Makefile requires mypy for `make verify`'s
 # lint step had no way to get it into a sandboxed run at all before this --
 # the canonical base image only ever bakes what this repo's own toolchain
@@ -130,6 +135,8 @@ FROM toolchains
 USER root
 
 ENV npm_config_cache=/usr/local/npm-cache
+ENV MAVEN_OPTS="-Dmaven.repo.local=/usr/local/maven-repository"
+ENV BUNDLE_PATH=/usr/local/bundle
 
 # Safe only because the build context is the staged manifests-only
 # directory described above, never the target project's own root.
@@ -141,7 +148,7 @@ RUN --mount=type=secret,id=build-ca,required=false \
             NODE_EXTRA_CA_CERTS=/run/secrets/build-ca \
             PIP_CERT=/run/secrets/build-ca; \
     fi; \
-    mkdir -p /usr/local/npm-cache; \
+    mkdir -p /usr/local/npm-cache /usr/local/maven-repository /usr/local/bundle; \
     cd /tmp/project-src; \
     if [ -f go.mod ]; then \
         echo "baking Go module cache from go.mod"; \
@@ -155,8 +162,21 @@ RUN --mount=type=secret,id=build-ca,required=false \
         echo "installing pip packages from requirements.txt"; \
         pip install --no-cache-dir -r requirements.txt; \
     fi; \
+    if [ -f pom.xml ]; then \
+        echo "baking Maven dependencies from pom.xml"; \
+        mvn -B -ntp -DskipTests dependency:go-offline; \
+        mvn -B -ntp -DskipTests test; \
+        mvn -B -ntp org.apache.maven.plugins:maven-dependency-plugin:3.6.1:get \
+            -Dartifact=org.apache.maven.surefire:surefire-junit4:2.22.2 \
+            -Dtransitive=true; \
+    fi; \
+    if [ -f Gemfile.lock ]; then \
+        echo "baking Ruby dependencies from Gemfile.lock"; \
+        gem install bundler --no-document --version 2.4.22; \
+        bundle _2.4.22_ install --jobs 4 --retry 3; \
+    fi; \
     cd /; \
     rm -rf /tmp/project-src /tmp/buildgate-agent; \
-    chmod -R a+rX /usr/local/npm-cache /usr/local/gomodcache
+    chmod -R a+rX /usr/local/npm-cache /usr/local/gomodcache /usr/local/maven-repository /usr/local/bundle
 
 USER 65532:65532

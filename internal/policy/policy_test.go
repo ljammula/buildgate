@@ -485,6 +485,7 @@ func TestTestsAddedDefaultPatternsCoverMultipleLanguages(t *testing.T) {
 		"src/app.spec.js",
 		"src/app.spec.ts",
 		"spec/widget_spec.rb",
+		"test/get_process_mem_test.rb",
 		"src/com/acme/WidgetTest.java",
 		"WidgetTests.cs",
 		"src/widget_test.rs",
@@ -529,6 +530,17 @@ func TestTicketTestsAddedFeasibleTrueWithATestFileInAllowedFiles(t *testing.T) {
 	got := TicketTestsAddedFeasible([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, "")
 	if !got {
 		t.Error("TicketTestsAddedFeasible() = false, want true when Allowed-Files includes a file matching a test pattern")
+	}
+}
+
+func TestTicketTestsAddedFeasibleTrueWithRubyMinitestFile(t *testing.T) {
+	got := TicketTestsAddedFeasible([]string{
+		"lib/get_process_mem.rb",
+		"test/fixtures/heroku-bash-status-unsupported-unit",
+		"test/get_process_mem_test.rb",
+	}, nil, "")
+	if !got {
+		t.Error("TicketTestsAddedFeasible() = false, want true when Allowed-Files includes a Ruby Minitest *_test.rb file")
 	}
 }
 

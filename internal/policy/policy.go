@@ -181,7 +181,7 @@ var DefaultTestPatterns = []string{
 	"test_*.py", "*_test.py",
 	"*.test.js", "*.test.ts", "*.test.tsx",
 	"*.spec.js", "*.spec.ts",
-	"*_spec.rb",
+	"*_spec.rb", "*_test.rb",
 	"*Test.java",
 	"*Tests.cs",
 	"*_test.rs",

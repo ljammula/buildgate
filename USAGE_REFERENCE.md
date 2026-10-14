@@ -2138,8 +2138,9 @@ the build runs in localhost:5050/buildgate-toolchain@sha256:<digest>
 
 `make project-sandbox-image PROJECT_DIR=<repo> BASE_IMAGE=<worker ref>` builds
 the same toolchains into an image that also carries the project's
-dependencies (Go modules, npm packages, pip packages), for a build that must
-not fetch them. It prints a reference to set with `factoryd configure-images
+dependencies (Go modules, npm packages, Maven artifacts from `pom.xml`, Ruby
+gems from `Gemfile.lock`, pip packages), for a build that must not fetch them.
+It prints a reference to set with `factoryd configure-images
 -sandbox-image <ref>`; `sandbox_image` is per profile, and `.factory.yml`
 cannot name an image.
 
