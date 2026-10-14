@@ -225,18 +225,21 @@ test("columns read Run, Run ID, State, Activity, Elapsed, Created, Project, with
   expect(screen.getByText("04:00").closest("td")).toHaveClass("text-right");
 });
 
-test("a long project path is shortened to its last two segments, whole on hover", async () => {
+test("a long project path is shown and copied in full", async () => {
+  const user = userEvent.setup();
+  const fullPath = "/home/José/buildgate/walk/café-workspace";
   renderApp(<RunListScreen />, {
     server: [
       {
         on: "GET /runs",
-        reply: () => json([runJson({ project_path: "/home/op/buildgate/walk/workspace" })]),
+        reply: () => json([runJson({ project_path: fullPath })]),
       },
       noRequests,
     ],
   });
-  const path = await screen.findByText("…/walk/workspace");
-  expect(path).toHaveAttribute("title", "/home/op/buildgate/walk/workspace");
+  expect(await screen.findByText(fullPath)).toHaveAttribute("title", fullPath);
+  await user.click(screen.getByRole("button", { name: "Copy project path" }));
+  expect(await navigator.clipboard.readText()).toBe(fullPath);
 });
 
 test("a run row copies its run id", async () => {

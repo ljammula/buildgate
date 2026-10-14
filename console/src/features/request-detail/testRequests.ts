@@ -31,6 +31,7 @@ export function requestWire({ id = "req-1", state, ...rest }: RequestWireOptions
 export function ticketWire(o: {
   index: number;
   specPath?: string;
+  fullPath?: string;
   runId?: string;
   prUrl?: string;
   prState?: string;
@@ -39,6 +40,7 @@ export function ticketWire(o: {
   return {
     index: o.index,
     spec_path: o.specPath ?? "",
+    full_path: o.fullPath ?? "",
     run_id: o.runId ?? "",
     pr_url: o.prUrl ?? "",
     pr_state: o.prState ?? "",

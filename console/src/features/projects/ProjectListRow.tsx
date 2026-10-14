@@ -2,10 +2,10 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Link } from "react-router";
 
 import { acceptedText } from "@/domain/project";
-import { shortPath } from "@/domain/middleTruncate";
 import { NO_VALUE } from "@/domain/noValue";
 import { newRunPath } from "@/routes/paths";
 import { CompactId } from "@/ui/CompactId";
+import { CopyButton } from "@/ui/CopyButton";
 import { IconButton } from "@/ui/IconButton";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { KillSwitchChip } from "@/ui/StatusChip";
@@ -36,14 +36,17 @@ export function ProjectListRow({ row, expanded, onToggle }: ProjectListRowProps)
       <TableCell className="text-xs">
         <CompactId value={summary.project} max={24} label={`project id ${summary.project}`} />
       </TableCell>
-      <TableCell className="font-mono text-xs">
-        <Link
-          title={summary.projectPath}
-          to={`${newRunPath()}?${quickFill.toString()}`}
-          className="block truncate text-accent hover:underline"
-        >
-          {shortPath(summary.projectPath)}
-        </Link>
+      <TableCell>
+        <div className="flex min-w-0 items-start gap-1">
+          <Link
+            title={summary.projectPath}
+            to={`${newRunPath()}?${quickFill.toString()}`}
+            className="block min-w-0 break-all font-mono text-xs text-accent hover:underline"
+          >
+            {summary.projectPath}
+          </Link>
+          <CopyButton size="sm" kind="path" text={summary.projectPath} label="Copy project path" />
+        </div>
       </TableCell>
       <TableCell numeric>{summary.runCount}</TableCell>
       <TableCell className="text-xs">

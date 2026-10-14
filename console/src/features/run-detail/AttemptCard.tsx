@@ -9,8 +9,8 @@ import { attemptFailed } from "@/domain/runSummary";
 import { ReviewMaskedPaths } from "@/features/run-detail/ReviewMaskedPaths";
 import { Button } from "@/ui/Button";
 import { Card, CardBody } from "@/ui/Card";
-import { CompactId } from "@/ui/CompactId";
 import { CopyButton } from "@/ui/CopyButton";
+import { PathValue } from "@/ui/PathValue";
 import { cn } from "@/ui/cn";
 
 export interface AttemptCardProps {
@@ -52,11 +52,11 @@ export function AttemptCard({ attempt, onOpenLog }: AttemptCardProps) {
         </p>
         {modelLine !== null ? <p>{modelLine}</p> : null}
         <ReviewMaskedPaths paths={attempt.reviewMaskedPaths} />
-        <div className="flex items-center justify-between gap-3">
-          <p className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-1">
             Log:
-            <CompactId value={attempt.logPath} max={48} label="log path" className="text-xs" />
-          </p>
+            <PathValue path={attempt.logPath} copyLabel="log path" />
+          </div>
           <Button size="sm" variant="ghost" onClick={onOpenLog}>
             Open log
           </Button>

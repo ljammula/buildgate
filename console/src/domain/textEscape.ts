@@ -160,3 +160,17 @@ export function decodeUtf8Escaping(bytes: ArrayLike<number>): string {
 export function pastesAsShown(text: string): boolean {
   return /^[\x20-\x7e]+$/.test(text);
 }
+
+/**
+ * Whether a filesystem path can be copied exactly as displayed. Paths may
+ * contain visible Unicode letters, but not hidden/control characters or
+ * Unicode spacing that looks like an ordinary shell space.
+ */
+export function pastesPathAsShown(path: string): boolean {
+  if (path === "") return false;
+  for (const character of path) {
+    if (character === " ") continue;
+    if (/[\p{C}\p{Z}\p{Default_Ignorable_Code_Point}]/u.test(character)) return false;
+  }
+  return true;
+}

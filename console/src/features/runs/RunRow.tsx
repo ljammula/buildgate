@@ -7,7 +7,7 @@ import { stageLabels } from "@/domain/runDetail";
 import { runPath } from "@/routes/paths";
 import { CompactId } from "@/ui/CompactId";
 import { TableCell, TableRow } from "@/ui/Table";
-import { ShortPath } from "@/ui/ShortPath";
+import { PathValue } from "@/ui/PathValue";
 import { StatusChipForToken } from "@/ui/StatusChip";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { ElapsedText, StallChip } from "@/ui/Time";
@@ -66,7 +66,7 @@ export function RunRow({ run, request }: RunRowProps) {
         <RelativeTime value={run.createdAt} />
       </TableCell>
       <TableCell>
-        <ShortPath path={run.projectPath} />
+        <PathValue path={run.projectPath} copyLabel="project path" />
       </TableCell>
     </TableRow>
   );

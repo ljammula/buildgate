@@ -1,12 +1,11 @@
-import { Check, Copy, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
-import { IconButton } from "@/ui/IconButton";
+import { CopyButton } from "@/ui/CopyButton";
 import { Disclosure } from "@/ui/Disclosure";
 import { Markdown } from "@/ui/Markdown";
-import { useCopied } from "@/ui/useCopied";
 
 import { FileEditor } from "./FileEditor";
 import { Panel } from "./Panel";
@@ -17,7 +16,7 @@ export interface FileContentSectionProps {
   readonly title: string;
   /** The request-relative path, e.g. "spec.md" or "tickets/001.spec.md". */
   readonly path: string;
-  /** Home-relativized real path on the serve host; empty on a server predating it. */
+  /** Absolute path on the serve host; empty on a server predating it. */
   readonly fullPath: string;
   /**
    * The content EXACTLY as shown: the approval hashes this same string, so
@@ -45,19 +44,6 @@ export interface FileContentSectionProps {
    * (requestDetailLogic.foldsContent). Undefined leaves it open, whole.
    */
   readonly foldedSummary?: string;
-}
-
-/** The button that copies the file's real path so the operator can edit it in their own editor. */
-function CopyPathButton({ fullPath }: { readonly fullPath: string }) {
-  const { copied, copy } = useCopied();
-  return (
-    <IconButton
-      label={copied ? "Path copied" : "Copy path to edit this file"}
-      onClick={() => void copy(fullPath)}
-    >
-      {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-    </IconButton>
-  );
 }
 
 /**
@@ -106,10 +92,12 @@ export function FileContentSection({
   );
   const pathRow = (
     <div className="flex items-center justify-between gap-2">
-      <p className="text-fg-muted min-w-0 truncate font-mono text-xs">
+      <p className="text-fg-muted min-w-0 break-all whitespace-normal font-mono text-xs">
         {fullPath !== "" ? fullPath : path}
       </p>
-      {fullPath !== "" ? <CopyPathButton fullPath={fullPath} /> : null}
+      {fullPath !== "" ? (
+        <CopyButton kind="path" text={fullPath} label="Copy path to edit this file" />
+      ) : null}
     </div>
   );
   const text = raw ? (

@@ -37,3 +37,25 @@ test("no button is drawn for text that would not paste as it reads", () => {
   );
   expect(container.querySelector("button")).toBeNull();
 });
+
+test("path copy buttons preserve visible Unicode paths", async () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  render(
+    <CopyButton
+      kind="path"
+      size="sm"
+      text="/Users/José/code/café"
+      label="Copy project path"
+      writeText={writeText}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Copy project path" }));
+  expect(writeText).toHaveBeenCalledWith("/Users/José/code/café");
+});
+
+test("path copy buttons refuse hidden characters", () => {
+  const { container } = render(
+    <CopyButton kind="path" text={"/Users/José/code/proj\u200bect"} label="Copy project path" />,
+  );
+  expect(container.querySelector("button")).toBeNull();
+});

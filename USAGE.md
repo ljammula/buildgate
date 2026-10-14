@@ -1023,6 +1023,10 @@ same tabs; **Close** dismisses it.
 The worker's state is on Mission Control's health strip, which shows
 `factoryd worker` with a copy button whenever no worker is alive.
 
+The Projects and Runs lists show full absolute project paths; request pages
+show workspace, spec and ticket-plan paths; run details show attempt-log paths.
+Each path has a copy control.
+
 ### Notifications
 
 `factoryd` notifies when a request starts waiting on you. Each notification

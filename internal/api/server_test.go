@@ -2647,64 +2647,7 @@ func TestRunLogFollowStreamsAppendedContent(t *testing.T) {
 	}
 }
 
-// TestHomeRelativePath is a pure-function unit test for the console-ux
-// full-path finding (2026-09-14, see TestGetRequestIncludesFullPath in
-// request_handlers_test.go for the integration-level coverage): a path
-// under the home directory shortens to "~/...", still directly usable
-// (a shell/editor expands "~" back to the real path) unlike a redacted
-// username -- but only ever shortened when it's genuinely a path
-// component boundary, not merely a same-prefix sibling directory.
-func TestHomeRelativePath(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	cases := []struct {
-		name string
-		path string
-		want string
-	}{
-		{
-			name: "under home",
-			path: filepath.Join(home, "code", "software-factory", "data", "requests", "req-1", "spec.md"),
-			want: "~/code/software-factory/data/requests/req-1/spec.md",
-		},
-		{
-			name: "exactly the home directory",
-			path: home,
-			want: "~",
-		},
-		{
-			name: "sibling directory sharing home's own prefix, not actually under it",
-			path: home + "-sibling/spec.md",
-			want: home + "-sibling/spec.md",
-		},
-		{
-			name: "outside home entirely",
-			path: "/var/lib/factoryd/data/spec.md",
-			want: "/var/lib/factoryd/data/spec.md",
-		},
-		{
-			name: "relative path -- never shortened, no absolute path to compare against",
-			path: "data/requests/req-1/spec.md",
-			want: "data/requests/req-1/spec.md",
-		},
-		{
-			name: "empty path",
-			path: "",
-			want: "",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := homeRelativePath(c.path); got != c.want {
-				t.Errorf("homeRelativePath(%q) = %q, want %q", c.path, got, c.want)
-			}
-		})
-	}
-}
-
-// TestAbsPathBestEffort covers the companion helper homeRelativePath's
-// callers use to make a possibly-relative -data-dir-derived path
+// TestAbsPathBestEffort covers making a possibly-relative -data-dir-derived path
 // absolute first, matching how resolveTicketSpecPath/request.SpecPath's
 // own relative-path convention resolves against the process's working
 // directory.
