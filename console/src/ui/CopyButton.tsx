@@ -1,6 +1,6 @@
 import { Check, Copy } from "lucide-react";
 
-import { pastesAsShown } from "@/domain/textEscape";
+import { pastesAsShown, pastesPathAsShown } from "@/domain/textEscape";
 import { IconButton } from "@/ui/IconButton";
 import { cn } from "@/ui/cn";
 import { useCopied } from "@/ui/useCopied";
@@ -8,6 +8,8 @@ import { useCopied } from "@/ui/useCopied";
 export interface CopyButtonProps {
   /** What is written to the clipboard. */
   readonly text: string;
+  /** Paths may use visible Unicode; ordinary text remains printable ASCII only. */
+  readonly kind?: "text" | "path";
   /** The accessible name while idle, e.g. "Copy request id"; it reads "Copied" for a moment after a copy. */
   readonly label: string;
   /** "sm": a 20px inline glyph beside text (with a tooltip); "md": a ghost icon button in a card. */
@@ -17,11 +19,18 @@ export interface CopyButtonProps {
 }
 
 /** An icon-only copy button: the Copy glyph, then a check and the name "Copied". */
-export function CopyButton({ text, label, size = "md", writeText, className }: CopyButtonProps) {
+export function CopyButton({
+  text,
+  kind = "text",
+  label,
+  size = "md",
+  writeText,
+  className,
+}: CopyButtonProps) {
   const { copied, copy } = useCopied(writeText);
   // No button for text that would paste as something other than it reads:
   // the one gate for every copy control in the console.
-  if (!pastesAsShown(text)) return null;
+  if (!(kind === "path" ? pastesPathAsShown(text) : pastesAsShown(text))) return null;
   const name = copied ? "Copied" : label;
   const glyph = copied ? (
     <Check aria-hidden="true" className={size === "sm" ? "size-3" : undefined} />

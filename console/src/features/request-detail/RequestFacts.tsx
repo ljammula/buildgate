@@ -6,7 +6,7 @@ import { DigestedText } from "@/shared/request/DigestedText";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Disclosure } from "@/ui/Disclosure";
 import { RelativeTime } from "@/ui/RelativeTime";
-import { ShortPath } from "@/ui/ShortPath";
+import { PathValue } from "@/ui/PathValue";
 import { TicketRollupStrip } from "@/ui/TicketRollupStrip";
 
 import { Panel } from "./Panel";
@@ -30,11 +30,7 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
     <Panel title="Request">
       <DescriptionList labelWidth="sm">
         <DescriptionItem label="Workspace">
-          <ShortPath
-            path={request.workspace}
-            copyLabel="workspace path"
-            className="break-words whitespace-normal"
-          />
+          <PathValue path={request.workspace} copyLabel="workspace path" />
         </DescriptionItem>
         <DescriptionItem label="Updated">
           <RelativeTime value={request.updatedAt} />

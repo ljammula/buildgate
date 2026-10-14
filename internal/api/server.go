@@ -3307,13 +3307,9 @@ func runCostFromRun(r *run.Run) (cost float64, complete bool, subscriptionBilled
 type requestTicketView struct {
 	request.Ticket
 	Content string `json:"content,omitempty"`
-	// FullPath is where this ticket's plan file actually lives on disk,
-	// home-relativized (see homeRelativePath) -- lets the console tell the
-	// operator exactly what to edit in place (USAGE.md's documented
-	// spec_review/plan_review workflow) without them reconstructing
-	// -data-dir/requests/<id>/<SpecPath> by hand. Only correct when the
-	// console's viewer and this server share a home directory (see
-	// homeRelativePath's own doc comment).
+	// FullPath is where this ticket's plan file actually lives on disk --
+	// an absolute path lets the console show and copy it without the operator
+	// reconstructing -data-dir/requests/<id>/<SpecPath> by hand.
 	FullPath string `json:"full_path,omitempty"`
 	// ActiveRoundRunID is the run of a PR-review corrective round that is
 	// under way on this ticket, set only on GET /requests/{id} for a request
@@ -3368,8 +3364,7 @@ type requestDetailView struct {
 	// ActiveJob: see requestSummaryView.ActiveJob.
 	ActiveJob *request.ActiveJob `json:"active_job,omitempty"`
 	Spec      string             `json:"spec,omitempty"`
-	// SpecFullPath is spec.md's own real path, home-relativized the same
-	// way requestTicketView.FullPath is -- see that field's doc comment.
+	// SpecFullPath is spec.md's own absolute path, like requestTicketView.FullPath.
 	SpecFullPath string              `json:"spec_full_path,omitempty"`
 	Tickets      []requestTicketView `json:"tickets,omitempty"`
 	CostSummary  CostSummary         `json:"cost_summary"`
@@ -3428,44 +3423,11 @@ func readRequestFileBestEffort(path string) string {
 	return string(b)
 }
 
-// homeRelativePath returns path with this process's own home directory
-// prefix replaced by "~", for a friendlier and less identity-revealing
-// display in the console than the raw absolute path -- still directly
-// usable (a shell, $EDITOR, or most editors expand "~" back to the real
-// path themselves) unlike a path that redacted the username outright.
-// Falls back to path unchanged when it isn't absolute, isn't under the
-// home directory, or the home directory can't be determined -- the
-// console always has something to show, just not the shortened form.
-// Only correct when the console's own viewer and this server process
-// share a home directory, true for every deployment this repo documents
-// today (single-engineer, co-located); a multi-host deployment, where
-// viewer and server don't share a home directory, would need this
-// reconsidered.
-func homeRelativePath(path string) string {
-	if !filepath.IsAbs(path) {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	rel, err := filepath.Rel(home, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return path
-	}
-	if rel == "." {
-		return "~"
-	}
-	return filepath.Join("~", rel)
-}
-
 // absPathBestEffort makes path absolute, resolving a relative one against
 // this process's own working directory -- the same base resolveTicketSpecPath
 // and request.SpecPath's caller already resolve relative paths against, so
 // the path shown to the operator matches the one actually read from. Falls
-// back to path unchanged if os.Getwd fails (rare, and homeRelativePath's own
-// filepath.IsAbs guard already covers it doing nothing useful with a
-// relative path either way).
+// back to path unchanged if it cannot make the path absolute.
 func absPathBestEffort(path string) string {
 	if path == "" || filepath.IsAbs(path) {
 		return path
@@ -3523,7 +3485,7 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 		Request:      loaded,
 		Title:        request.Title(dataDir, id),
 		Spec:         readRequestFileBestEffort(specPath),
-		SpecFullPath: homeRelativePath(absPathBestEffort(specPath)),
+		SpecFullPath: absPathBestEffort(specPath),
 		CostSummary:  s.ComputeCostSummary(loaded),
 		ActiveJob:    request.LoadActiveJob(dataDir, id),
 		NextAction:   loaded.NextAction(),
@@ -3546,7 +3508,7 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 			view.Tickets = append(view.Tickets, requestTicketView{
 				Ticket:           ticket,
 				Content:          readRequestFileBestEffort(resolved),
-				FullPath:         homeRelativePath(absPathBestEffort(resolved)),
+				FullPath:         absPathBestEffort(resolved),
 				ActiveRoundRunID: activeRounds[ticket.Index],
 			})
 		}

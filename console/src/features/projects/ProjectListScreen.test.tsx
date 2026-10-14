@@ -33,6 +33,8 @@ const appRelease = (engaged: boolean) => ({
 });
 
 test("project list renders known projects and prefills a run", async () => {
+  const user = userEvent.setup();
+  const projectPath = "/home/kanna/workspaces/café-app";
   const { location } = renderApp(<ProjectListScreen />, {
     path: "/app/projects",
     pattern: "/app/projects",
@@ -42,7 +44,7 @@ test("project list renders known projects and prefills a run", async () => {
         reply: () =>
           json([
             {
-              project_path: "/home/kanna/workspaces/app",
+              project_path: projectPath,
               project: "app",
               workspace_path: "/workspaces/app",
               spec_path: "/specs/app-latest.md",
@@ -55,7 +57,7 @@ test("project list renders known projects and prefills a run", async () => {
     ],
   });
 
-  const row = await screen.findByRole("link", { name: "…/workspaces/app" });
+  const row = await screen.findByRole("link", { name: projectPath });
   // Each heading is true: the first column is a path, the second is the project id.
   expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
     "Project",
@@ -66,12 +68,15 @@ test("project list renders known projects and prefills a run", async () => {
     "Last run",
     "Details",
   ]);
-  expect(row).toHaveAttribute("title", "/home/kanna/workspaces/app");
+  expect(row).toHaveAttribute("title", projectPath);
   expect(screen.getByText("app")).toBeInTheDocument();
   // The count is a number under its heading; the stats were not served, so these read as unavailable.
   expect(screen.getByText("3")).toBeInTheDocument();
 
-  await userEvent.click(row);
+  await user.click(screen.getByRole("button", { name: "Copy project path" }));
+  expect(await navigator.clipboard.readText()).toBe(projectPath);
+
+  await user.click(row);
 
   // The new-run form reads these three from its query string.
   expect(await screen.findByText(/Navigated to \/app\/runs\/new\?/)).toBeInTheDocument();

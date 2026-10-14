@@ -45,6 +45,65 @@ test.each(ALL_STATES)("renders a request in state %s without error", async (stat
   }
 });
 
+test("a request's spec path is shown and copied in full", async () => {
+  const user = userEvent.setup();
+  const specPath = "/home/José/buildgate/data/requests/req-1/spec-café.md";
+  openRequest(
+    requestWire({
+      state: "spec_review",
+      title: "Add idempotency keys",
+      spec: "# Spec\n\nDetail.",
+      spec_full_path: specPath,
+    }),
+  );
+  await loaded();
+
+  expect(screen.getByText(specPath)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Copy path to edit this file" }));
+  expect(await navigator.clipboard.readText()).toBe(specPath);
+});
+
+test("a request's workspace path is shown and copied in full", async () => {
+  const user = userEvent.setup();
+  const workspacePath = "/home/José/buildgate/workspaces/café-app";
+  openRequest(
+    requestWire({
+      state: "building",
+      title: "Add idempotency keys",
+      workspace: workspacePath,
+    }),
+  );
+  await loaded();
+
+  expect(screen.getByText(workspacePath)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Copy workspace path" }));
+  expect(await navigator.clipboard.readText()).toBe(workspacePath);
+});
+
+test("a ticket plan path is shown and copied in full", async () => {
+  const user = userEvent.setup();
+  const planPath = "/home/José/buildgate/data/requests/req-1/tickets/001-café.spec.md";
+  openRequest(
+    requestWire({
+      state: "plan_review",
+      title: "Add idempotency keys",
+      tickets: [
+        ticketWire({
+          index: 1,
+          specPath: "tickets/001.spec.md",
+          fullPath: planPath,
+          content: "Verify-Command: true\n## Goal\n",
+        }),
+      ],
+    }),
+  );
+  await loaded();
+
+  expect(screen.getByText(planPath)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Copy path to edit this file" }));
+  expect(await navigator.clipboard.readText()).toBe(planPath);
+});
+
 test("shows a spinner while loading, then the not-found error with the way back", async () => {
   const view = openRequest(requestWire({ state: "building" }), { id: "req-1" });
   expect(screen.getByRole("heading", { level: 1, name: "Request detail" })).toBeInTheDocument();

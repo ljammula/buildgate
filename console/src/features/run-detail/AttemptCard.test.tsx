@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { asObject } from "@/domain/decode";
 import { type Attempt, decodeRun } from "@/domain/run";
@@ -63,4 +64,14 @@ test("the contract fixture's attempt renders its masked path", () => {
   expect(screen.getByTestId("review-masked-paths")).toHaveTextContent(
     "every-field review_masked_paths",
   );
+});
+
+test("a log path is shown and copied in full", async () => {
+  const user = userEvent.setup();
+  const logPath = "/home/José/buildgate/data/runs/run-1/001-build_app-café.log";
+  renderCard({ ...reviewAttempt([]), logPath });
+
+  expect(screen.getByText(logPath)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Copy log path" }));
+  expect(await navigator.clipboard.readText()).toBe(logPath);
 });

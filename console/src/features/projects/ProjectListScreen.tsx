@@ -100,11 +100,11 @@ export function ProjectListScreen() {
           </Callout>
         ) : null}
         <TableFrame>
-          <Table className="table-fixed max-md:min-w-[44rem]">
+          <Table className="table-fixed max-md:min-w-[58rem]">
             <TableHead>
               <TableRow className="hover:bg-transparent">
                 <TableHeaderCell className="w-28">Project</TableHeaderCell>
-                <TableHeaderCell>Workspace</TableHeaderCell>
+                <TableHeaderCell className="w-72">Workspace</TableHeaderCell>
                 <TableHeaderCell numeric className="w-16">
                   Runs
                 </TableHeaderCell>

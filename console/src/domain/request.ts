@@ -81,7 +81,7 @@ export interface RequestTicket {
   readonly prState: string;
   readonly content: string;
   /**
-   * Home-relativized (internal/api's homeRelativePath); absent on
+   * Absolute on the serve host; absent on
    * GET /requests, which never fetches file contents, and on a server
    * predating this field.
    */
@@ -529,7 +529,7 @@ export interface RequestSummary {
   readonly haltKind: string;
   /** spec.md's content. Only GET /requests/{id} populates it. */
   readonly spec: string;
-  /** Home-relativized; only GET /requests/{id} populates it, like `spec`. */
+  /** Absolute on the serve host; only GET /requests/{id} populates it, like `spec`. */
   readonly specFullPath: string;
   /**
    * Present on both routes: request.Request embeds the evidence directly.

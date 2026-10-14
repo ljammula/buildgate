@@ -3,6 +3,7 @@ import {
   escapeInvisible,
   segmentEscapes,
   pastesAsShown,
+  pastesPathAsShown,
 } from "@/domain/textEscape";
 
 describe("decodeUtf8Escaping", () => {
@@ -96,4 +97,16 @@ test("text is offered for copying only when it pastes exactly as it reads", () =
   expect(pastesAsShown("req\ufe0f-1")).toBe(false);
   // Not ASCII: selectable by hand, not offered as a button.
   expect(pastesAsShown("~/proj\u00e9t/spec.md")).toBe(false);
+});
+
+test("filesystem paths allow visible Unicode and reject hidden or ambiguous characters", () => {
+  expect(pastesPathAsShown("/Users/José/code/app")).toBe(true);
+  expect(pastesPathAsShown("/home/op/projects/café/日本語")).toBe(true);
+  expect(pastesPathAsShown("/home/op/project name/app")).toBe(true);
+  expect(pastesPathAsShown("")).toBe(false);
+  expect(pastesPathAsShown("/home/op/project\u00a0name/app")).toBe(false);
+  expect(pastesPathAsShown("/home/op/proj\u200bect/app")).toBe(false);
+  expect(pastesPathAsShown("/home/op/project\tname/app")).toBe(false);
+  expect(pastesPathAsShown("/home/op/project\nname/app")).toBe(false);
+  expect(pastesPathAsShown("/home/op/proj\ufe0f/app")).toBe(false);
 });

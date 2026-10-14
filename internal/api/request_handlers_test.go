@@ -314,8 +314,8 @@ func TestGetRequestIncludesSpecAndTicketContent(t *testing.T) {
 // (2026-09-14): the console only ever rendered a request-relative
 // fragment ("spec.md", "tickets/001.spec.md"), leaving the operator to
 // reconstruct -data-dir/requests/<id>/<fragment> by hand. spec_full_path/
-// full_path close that gap, home-relativized (see homeRelativePath) so
-// the console doesn't have to show the operator's own username.
+// full_path close that gap with absolute paths the operator can paste into
+// a shell or editor.
 func TestGetRequestIncludesFullPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -345,11 +345,11 @@ func TestGetRequestIncludesFullPath(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	wantSpec := "~/code/software-factory/data/requests/req-1/spec.md"
+	wantSpec := filepath.Join(home, "code", "software-factory", "data", "requests", "req-1", "spec.md")
 	if got.SpecFullPath != wantSpec {
 		t.Errorf("SpecFullPath = %q, want %q", got.SpecFullPath, wantSpec)
 	}
-	wantTicket := "~/code/software-factory/data/requests/req-1/tickets/001.spec.md"
+	wantTicket := filepath.Join(home, "code", "software-factory", "data", "requests", "req-1", "tickets", "001.spec.md")
 	if len(got.Tickets) != 1 || got.Tickets[0].FullPath != wantTicket {
 		t.Errorf("Tickets = %+v, want one entry with FullPath %q", got.Tickets, wantTicket)
 	}
@@ -379,6 +379,10 @@ func TestGetRequestReadsTicketContentWithRelativeDataDir(t *testing.T) {
 	if err := os.Chdir(t.TempDir()); err != nil {
 		t.Fatalf("Chdir: %v", err)
 	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd after Chdir: %v", err)
+	}
 
 	const dataDir = "data" // relative, matching factoryd's own default
 	seedApprovableRequest(t, dataDir, "req-1", request.StatePlanReview, true)
@@ -402,8 +406,10 @@ func TestGetRequestReadsTicketContentWithRelativeDataDir(t *testing.T) {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
 	var got struct {
-		Tickets []struct {
-			Content string `json:"content"`
+		SpecFullPath string `json:"spec_full_path"`
+		Tickets      []struct {
+			Content  string `json:"content"`
+			FullPath string `json:"full_path"`
 		} `json:"tickets"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
@@ -414,6 +420,14 @@ func TestGetRequestReadsTicketContentWithRelativeDataDir(t *testing.T) {
 	}
 	if got.Tickets[0].Content != seedApprovableRequestTicket {
 		t.Errorf("Tickets[0].Content = %q, want %q", got.Tickets[0].Content, seedApprovableRequestTicket)
+	}
+	wantSpec := filepath.Join(workingDir, dataDir, "requests", "req-1", "spec.md")
+	if got.SpecFullPath != wantSpec {
+		t.Errorf("SpecFullPath = %q, want absolute path %q", got.SpecFullPath, wantSpec)
+	}
+	wantTicket := filepath.Join(workingDir, dataDir, "requests", "req-1", "tickets", "001.spec.md")
+	if got.Tickets[0].FullPath != wantTicket {
+		t.Errorf("Tickets[0].FullPath = %q, want absolute path %q", got.Tickets[0].FullPath, wantTicket)
 	}
 }
 
