@@ -819,6 +819,10 @@ gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
 `tests_added` and it declares no `Tests-Required` opt-out.
 
+The Ruby defaults include both `*_spec.rb` and `*_test.rb`, covering common
+RSpec and Minitest file names. Supply `test_patterns` for a repository whose
+test files use another naming convention.
+
 What refuses a drafted plan reads its structure only, never the meaning
 of its prose:
 
@@ -2143,6 +2147,30 @@ gems from `Gemfile.lock`, pip packages), for a build that must not fetch them.
 It prints a reference to set with `factoryd configure-images
 -sandbox-image <ref>`; `sandbox_image` is per profile, and `.factory.yml`
 cannot name an image.
+
+### Verified language coverage
+
+Live BuildGate runs completed each target repository's verify command and
+full suite in Go, Python, Java/Maven, Ruby/Bundler, and React Native/TypeScript.
+The .NET restore, build, and test commands also passed in the configured
+worker image, but that request did not reach an accepted PR: the target
+repository's release policy denied its change to protected `.factory.yml`.
+
+| Language / platform | Toolchain used | Project dependency manifests baked by `project-sandbox-image` |
+|---|---|---|
+| Go | Go from the configured image, or derived from `go.mod` when needed | `go.mod`, `go.sum` |
+| Python | Python from the configured image, or derived from `.python-version` / `pyproject.toml` when needed | `requirements.txt` |
+| Java / Maven | Java and Maven in the configured worker image | `pom.xml` |
+| Ruby / Bundler | Ruby and Bundler in the configured worker image | `Gemfile`, `Gemfile.lock` |
+| React Native / TypeScript | Node and npm in the configured worker image | `package.json`, `package-lock.json` |
+| C# / .NET | .NET in an operator-configured worker image | Not baked by `project-sandbox-image`; install it in the image |
+
+This is verified command coverage for the listed repositories, not automatic
+toolchain installation for every language or framework. Only Go and Python
+have automatic version derivation; Node is checked in the configured image
+and is not replaced. Other tools must be present in the selected image and
+can be checked with `.factory.yml` `required_binaries`. See [BuildGate
+status](STATUS.md) for the current limits.
 
 ### Private Go modules
 
