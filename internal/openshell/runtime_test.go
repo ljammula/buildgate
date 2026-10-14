@@ -241,6 +241,26 @@ func newTestRuntime() (*Runtime, clientWithProfiles, *fakeContainers) {
 	return rt, client, containers
 }
 
+type providerCreateConflict struct {
+	v1.ProviderInterface
+}
+
+func (p providerCreateConflict) Create(ctx context.Context, workspace string, provider *v1.Provider) (*v1.Provider, error) {
+	if _, err := p.ProviderInterface.Create(ctx, workspace, provider); err != nil {
+		return nil, err
+	}
+	_, err := p.ProviderInterface.Create(ctx, workspace, provider)
+	return nil, err
+}
+
+type clientWithProviderCreateConflict struct {
+	clientWithProfiles
+}
+
+func (c clientWithProviderCreateConflict) Providers() v1.ProviderInterface {
+	return providerCreateConflict{ProviderInterface: c.clientWithProfiles.Providers()}
+}
+
 func TestCreateStoresTheSandboxWithItsRunLabels(t *testing.T) {
 	rt, client, _ := newTestRuntime()
 	ctx := context.Background()
@@ -459,6 +479,57 @@ func TestPushCredentialCreatesThenReplacesTheProvidersValues(t *testing.T) {
 	if err != nil || len(all) != 1 {
 		t.Errorf("providers = %d, %v; want one", len(all), err)
 	}
+}
+
+func TestPushCredentialRecoversWhenAnotherRequestCreatesTheProvider(t *testing.T) {
+	rt, client, _ := newTestRuntime()
+	rt.Client = clientWithProviderCreateConflict{clientWithProfiles: client}
+	cred := chatGPTCredential(t, "tok-1", time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC))
+
+	if err := rt.PushCredential(context.Background(), cred); err != nil {
+		t.Fatalf("PushCredential after a concurrent provider create: %v", err)
+	}
+	provider, err := client.Providers().Get(context.Background(), DefaultWorkspace, cred.Provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Spec.Credentials["BG_CHATGPT_TOKEN"] != "tok-1" {
+		t.Errorf("provider token = %q, want tok-1", provider.Spec.Credentials["BG_CHATGPT_TOKEN"])
+	}
+}
+
+func TestCredentialPushLockIsScopedAndCancellationAware(t *testing.T) {
+	rt := &Runtime{}
+	release, err := rt.acquireCredentialPush(context.Background(), "provider-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	releaseOther, err := rt.acquireCredentialPush(context.Background(), "provider-b")
+	if err != nil {
+		release()
+		t.Fatalf("a different provider was blocked: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := rt.acquireCredentialPush(ctx, "provider-a")
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("waiting for the same provider with a deadline: %v", err)
+		}
+	case <-time.After(time.Second):
+		release()
+		releaseOther()
+		t.Fatal("a canceled launch stayed blocked behind another credential push")
+	}
+	release()
+	releaseOther()
 }
 
 // TestPushCredentialLeavesAProviderThatHoldsTheCredentialAlone: an update
