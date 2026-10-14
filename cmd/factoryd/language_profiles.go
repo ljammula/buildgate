@@ -1,6 +1,13 @@
 package main
 
-import "buildgate/internal/languageprofile"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"buildgate/internal/languageprofile"
+	"buildgate/internal/projectconfig"
+)
 
 // suggestedProfileVerifyCommand is used only by onboarding/scaffolding when
 // creating a new .factory.yml. An ambiguous or malformed project receives no
@@ -15,4 +22,161 @@ func suggestedProfileVerifyCommand(root string) (command, source string) {
 		return "", ""
 	}
 	return profile.VerifyCommand, "profile " + profile.ID
+}
+
+// doctorCheckLanguageProfile reports the best matching root-level profile
+// and a candidate .factory.yml block. The profile is advisory: it neither
+// writes the repository nor changes the commands or gates a run uses.
+func doctorCheckLanguageProfile(root string) doctorCheck {
+	matches, err := languageprofile.Detect(root)
+	if err != nil {
+		return doctorCheck{Name: "language profile for " + root, Err: err, Advisory: true,
+			Fix: "inspect the named marker and pass the repository or module root that contains its real manifest"}
+	}
+	if len(matches) == 0 {
+		return doctorCheck{Name: "language profile for " + root,
+			Err: fmt.Errorf("no built-in root-level language profile matched"), Advisory: true,
+			Fix: "choose an operator-approved worker image, then commit an explicit verify_command and required_binaries in .factory.yml; add test_patterns when the test naming differs from the defaults"}
+	}
+	if len(matches) > 1 {
+		var candidates []string
+		for _, match := range matches {
+			candidates = append(candidates, match.Profile.ID+" ("+strings.Join(match.Markers, ", ")+")")
+		}
+		return doctorCheck{Name: "language profile for " + root,
+			Err:      fmt.Errorf("multiple root-level profiles matched: %s", strings.Join(candidates, "; ")),
+			Advisory: true,
+			Fix:      "choose the module/profile whose commands describe this workspace; detection is root-level only and does not resolve nested or multi-module layouts"}
+	}
+	profile := matches[0].Profile
+	loadedConfig, found, configErr := projectconfig.Load(root)
+	if configErr != nil {
+		return doctorCheck{Name: "language profile " + profile.Name + " for " + root, Err: configErr,
+			Fix: "fix the repository's .factory.yml before using its suggestions"}
+	}
+	var config projectconfig.Config
+	if found && loadedConfig != nil {
+		config = *loadedConfig
+	}
+	name := "language profile " + profile.Name + " for " + root
+	detail := profileDoctorDetail(profile, matches[0].Markers, config)
+	if profile.VerifyCommand != "" && config.VerifyCommand == "" {
+		return doctorCheck{Name: name, Err: fmt.Errorf(".factory.yml has no verify_command; the profile has a reviewed candidate"), Advisory: true,
+			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(profile, config) + "; review the command and commit .factory.yml"}
+	}
+	missing := missingProfileBinaries(profile.RequiredBinaries, config.RequiredBinaries)
+	if len(missing) > 0 {
+		return doctorCheck{Name: name, Err: fmt.Errorf(".factory.yml required_binaries does not name: %s", strings.Join(missing, ", ")), Advisory: true,
+			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(profile, config) + "; review the fields and commit .factory.yml so each run checks these executables in its final image"}
+	}
+	if !found {
+		return doctorCheck{Name: name, Err: fmt.Errorf("no committed .factory.yml describes this project"), Advisory: true,
+			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(profile, config) + "; review and commit .factory.yml"}
+	}
+	return doctorCheck{Name: name, Detail: detail}
+}
+
+func profileDoctorDetail(profile languageprofile.Profile, markers []string, config projectconfig.Config) string {
+	verify := config.VerifyCommand
+	if verify == "" {
+		verify = profile.VerifyCommand
+	}
+	if verify == "" {
+		verify = "not suggested; set verify_command explicitly"
+	}
+	fullSuite := config.FullSuiteCommand
+	if fullSuite == "" && config.VerifyCommand != "" {
+		fullSuite = "verify_command fallback (" + config.VerifyCommand + ")"
+	} else if fullSuite == "" {
+		fullSuite = profile.FullSuiteCommand
+	}
+	if fullSuite == "" && verify != "not suggested; set verify_command explicitly" {
+		fullSuite = "verify_command (default)"
+	} else if fullSuite == "" {
+		fullSuite = "not configured"
+	} else if fullSuite == verify {
+		fullSuite = "verify_command (same command)"
+	}
+	testPatterns := profile.TestPatterns
+	if len(config.TestPatterns) > 0 {
+		testPatterns = config.TestPatterns
+	}
+	parts := []string{
+		"working-tree root markers: " + strings.Join(markers, ", "),
+		"verify command: " + strconv.Quote(verify),
+		"full-suite command: " + strconv.Quote(fullSuite),
+		"required_binaries: " + strings.Join(profile.RequiredBinaries, ", "),
+		"test_patterns: " + strings.Join(testPatterns, ", "),
+		"version sources to inspect: " + strings.Join(profile.VersionSources, ", "),
+		"toolchain: " + profile.ToolchainProvisioning,
+		"dependency manifests: " + strings.Join(profile.DependencyManifests, ", "),
+		"project-sandbox-image supports: " + profileSupportList(profile.ProjectImageManifests),
+		"registry proxy ecosystems: " + profileEcosystemList(profile.RegistryProxyEcosystems),
+		"baseline named-failure parser: " + profile.BaselineFailureFormat,
+	}
+	return strings.Join(parts, "; ")
+}
+
+func profileFactoryYMLFix(profile languageprofile.Profile, config projectconfig.Config) string {
+	var lines []string
+	if config.VerifyCommand == "" && profile.VerifyCommand != "" {
+		lines = append(lines, "verify_command: "+strconv.Quote(profile.VerifyCommand))
+	} else if config.VerifyCommand == "" {
+		lines = append(lines, "# verify_command: choose the repository's real verification command")
+	}
+	if config.FullSuiteCommand == "" && profile.FullSuiteCommand != "" && (config.VerifyCommand == "" || config.VerifyCommand == profile.VerifyCommand) {
+		lines = append(lines, "full_suite_command: "+strconv.Quote(profile.FullSuiteCommand))
+	}
+	if missing := missingProfileBinaries(profile.RequiredBinaries, config.RequiredBinaries); len(missing) > 0 {
+		lines = append(lines, "required_binaries: ["+quotedYAMLList(mergeProfileBinaries(config.RequiredBinaries, profile.RequiredBinaries))+"]")
+	}
+	if len(config.TestPatterns) == 0 && len(profile.TestPatterns) > 0 {
+		lines = append(lines, "test_patterns: ["+quotedYAMLList(profile.TestPatterns)+"]")
+	}
+	if len(lines) == 0 {
+		return "choose and commit .factory.yml values for verify_command, required_binaries, and test_patterns"
+	}
+	return "candidate .factory.yml fields (review before commit):\n" + strings.Join(lines, "\n")
+}
+
+func mergeProfileBinaries(configured, required []string) []string {
+	merged := append([]string(nil), configured...)
+	merged = append(merged, required...)
+	return uniqueProfileBinaries(merged)
+}
+
+func missingProfileBinaries(required, configured []string) []string {
+	set := make(map[string]bool, len(configured))
+	for _, name := range configured {
+		set[name] = true
+	}
+	var missing []string
+	for _, name := range required {
+		if !set[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func quotedYAMLList(values []string) string {
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = strconv.Quote(value)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+func profileSupportList(items []string) string {
+	if len(items) == 0 {
+		return "none; use an operator-built worker image"
+	}
+	return strings.Join(items, ", ")
+}
+
+func profileEcosystemList(items []string) string {
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ", ")
 }

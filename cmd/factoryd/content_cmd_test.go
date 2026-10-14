@@ -191,7 +191,7 @@ func TestContentEntriesIncludeLanguageProfileMetadata(t *testing.T) {
 		if entry.selector != "language-profile:rust" {
 			continue
 		}
-		if entry.kind != "language-profile" || entry.path != "internal/languageprofile/profile.go" || entry.hash != contentHash(entry.data) || !strings.Contains(string(entry.data), "cargo test --workspace") {
+		if entry.kind != "language-profile" || entry.path != "internal/languageprofile/profile.go" || entry.hash != contentHash(entry.data) || !strings.Contains(string(entry.data), "cargo test --workspace") || !strings.Contains(string(entry.data), "ProjectImageManifests") || !strings.Contains(string(entry.data), "RegistryProxyEcosystems") || !strings.Contains(string(entry.data), "BaselineFailureFormat") {
 			t.Fatalf("language profile entry = %+v", entry)
 		}
 		return

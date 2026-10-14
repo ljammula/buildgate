@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"buildgate/internal/composeservices"
+	"buildgate/internal/languageprofile"
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
@@ -210,11 +211,23 @@ func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorC
 	if in.targetRepo == "" {
 		return nil
 	}
-	cfg, found, err := projectconfig.Load(in.targetRepo)
+	cfg, _, err := projectconfig.Load(in.targetRepo)
 	if err != nil {
 		return []doctorCheck{{Name: "required binaries for " + in.targetRepo, Err: err}}
 	}
-	if !found || len(cfg.RequiredBinaries) == 0 {
+	var requested []string
+	configured := make(map[string]bool)
+	if cfg != nil {
+		requested = append(requested, cfg.RequiredBinaries...)
+		for _, name := range cfg.RequiredBinaries {
+			configured[name] = true
+		}
+	}
+	if matches, detectErr := languageprofile.Detect(in.targetRepo); detectErr == nil && len(matches) == 1 && matches[0].Profile.ToolchainProvisioning != languageprofile.ToolchainAutomatic {
+		requested = append(requested, matches[0].Profile.RequiredBinaries...)
+	}
+	requested = uniqueProfileBinaries(requested)
+	if len(requested) == 0 {
 		return nil
 	}
 	if in.sandboxImage == "" {
@@ -225,7 +238,7 @@ func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorC
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	user, _ := sandbox.ResolveDefaultWorkerIdentity(in.settings.SandboxUser, in.settings.SandboxWorkerUID, os.Getgid())
-	missingNames, err := probeRequiredBinaries(probeCtx, in.sandboxDocker, in.sandboxImage, user, cfg.RequiredBinaries)
+	missingNames, err := probeRequiredBinaries(probeCtx, in.sandboxDocker, in.sandboxImage, user, requested)
 	if err != nil {
 		return []doctorCheck{{Name: "required binaries in configured base sandbox image (" + in.sandboxImage + ")",
 			Err: fmt.Errorf("could not inspect image: %w", err),
@@ -235,16 +248,36 @@ func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorC
 	for _, name := range missingNames {
 		missing[name] = true
 	}
-	checks := make([]doctorCheck, 0, len(cfg.RequiredBinaries))
-	for _, name := range cfg.RequiredBinaries {
+	checks := make([]doctorCheck, 0, len(requested))
+	for _, name := range requested {
 		check := doctorCheck{Name: fmt.Sprintf("required executable %s available as configured/default isolated worker %s in base image (%s)", name, user, in.sandboxImage)}
+		if !configured[name] {
+			check.Name = fmt.Sprintf("profile executable hint %s available as configured/default isolated worker %s in base image (%s)", name, user, in.sandboxImage)
+			check.Advisory = true
+		}
 		if missing[name] {
 			check.Err = fmt.Errorf("%q is not executable on PATH as the configured/default isolated worker identity %s", name, user)
-			check.Fix = fmt.Sprintf("install %s in the operator-selected base sandbox image, then run doctor -target-repo again", name)
+			if check.Advisory {
+				check.Fix = fmt.Sprintf("profile hint only: add %s to .factory.yml required_binaries if the repository's reviewed commands need it, then ensure it exists in the final worker image", name)
+			} else {
+				check.Fix = fmt.Sprintf("install %s in the operator-selected base sandbox image, then run doctor -target-repo again; this is an early base-image check, while each run checks required_binaries in its final image", name)
+			}
 		}
 		checks = append(checks, check)
 	}
 	return checks
+}
+
+func uniqueProfileBinaries(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if !seen[value] {
+			seen[value] = true
+			unique = append(unique, value)
+		}
+	}
+	return unique
 }
 
 // requiredBinaryProbe checks PATH entries directly so shell built-ins do not

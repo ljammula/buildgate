@@ -669,15 +669,38 @@ executables; add them to the operator-selected worker image.
 ### Built-in language profile suggestions
 
 `factoryd onboard` and `factoryd init -write-factory-yml` use a compiled-in
-profile catalog only after their existing Makefile and Go, npm, and Python
-checks. Root-level markers identify Rust, Ruby, PHP/Composer, Java/Maven,
-Java/Gradle, .NET, and Dart. Only an unambiguous profile with a reviewed
-default command can prefill `verify_command` in a new `.factory.yml`; review
-that suggestion before committing the file. Multiple matches produce no
-command. Profiles do not install toolchains, select images, run lifecycle
-hooks, alter an existing `verify_command`, or decide acceptance. Other
-languages use the generic path: choose an operator-approved worker image,
-write an explicit `verify_command`, and use `required_binaries` to check it.
+profile catalog after their existing Makefile and Go, npm, and Python checks.
+The catalog describes root-level markers, required binaries, version-source
+files, toolchain provisioning, dependency manifests, the manifests supported
+by `make project-sandbox-image`, the package ecosystems served by the registry
+proxy, reviewed verify and full-suite command candidates, test-file patterns, and baseline failure
+formats. Go, Python, Node.js, Rust, Ruby, PHP/Composer, Java/Maven,
+Java/Gradle, .NET, and Dart have entries. See
+[the language profile contract](doc/designs/language-profiles.md) for field
+semantics and support limits.
+
+Only an unambiguous profile with a reviewed verify candidate can prefill
+`verify_command`; review it before committing. Profiles do not install
+toolchains, select images, run lifecycle hooks, change an existing
+`verify_command`, or decide acceptance. Root-level detection does not resolve
+nested modules or monorepo layouts. `factoryd doctor -target-repo <repo>`
+reports ambiguity, candidate `.factory.yml` fields, and profile binary hints
+missing from the configured base image as warnings. Committed
+`required_binaries` missing from that base image are an early diagnostic;
+each run checks them against its final image. Doctor detects markers in the
+working tree, while `.factory.yml` is read from committed HEAD, so working-tree
+markers are onboarding hints rather than a claim about what the next run sees. Other
+languages and unsupported manifests use the generic path: choose an
+operator-approved worker image, write an explicit `verify_command`, and use
+`required_binaries` to check executables before a run.
+
+Profile test patterns are suggestions only, and a profile may omit a pattern
+when it cannot safely cover common layouts. The `tests_added` gate uses
+committed `test_patterns` or the global defaults. For example, the Rust
+profile does not suggest a file pattern because in-source unit tests and
+`tests/` integration tests need different coverage. Baseline failure names are
+parsed for Go and pytest only. Other formats remain fail-closed and may halt
+before a model call when their baseline fails.
 
 **Repo-defined gates.** `gates:` lists further command gates, for a check
 none of the five named gates fits (a license check, a migration check, a
