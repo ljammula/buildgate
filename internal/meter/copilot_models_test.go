@@ -2,6 +2,7 @@ package meter
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -151,6 +152,10 @@ func TestListGitHubCopilotModelsNeverLeaksTokenOnError(t *testing.T) {
 	_, err := listGitHubCopilotModels(t.Context(), http.DefaultClient, tokenServer.URL, modelsServer.URL, secretGithubToken)
 	if err == nil {
 		t.Fatal("listGitHubCopilotModels with a 401 response = nil error, want one naming the failure")
+	}
+	var statusErr *CopilotModelsHTTPStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("listGitHubCopilotModels error = %T %v, want CopilotModelsHTTPStatusError with status 401", err, err)
 	}
 	if strings.Contains(err.Error(), secretGithubToken) {
 		t.Fatalf("error %q leaks the GitHub OAuth token", err.Error())

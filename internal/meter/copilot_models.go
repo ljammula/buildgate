@@ -19,6 +19,18 @@ import (
 // method override in pi's own fetchJson call), not a POST.
 const copilotTokenExchangeURL = "https://api.github.com/copilot_internal/v2/token"
 
+// CopilotModelsHTTPStatusError reports an HTTP status returned by the
+// Copilot model-catalog endpoint, after the GitHub token exchange succeeded.
+// The status is useful to callers that need to distinguish a rejected
+// catalog request from a model ID that was successfully checked and absent.
+type CopilotModelsHTTPStatusError struct {
+	StatusCode int
+}
+
+func (e *CopilotModelsHTTPStatusError) Error() string {
+	return fmt.Sprintf("copilot models request: upstream returned status %d", e.StatusCode)
+}
+
 // OutboundTransport returns http.DefaultTransport when caBundlePath is
 // empty, or a Transport whose TLS RootCAs is the platform's default system
 // cert pool PLUS caBundlePath's certificate(s) when set, for cmd/factoryd's
@@ -343,7 +355,7 @@ func listGitHubCopilotModels(ctx context.Context, client *http.Client, tokenURL,
 		return nil, fmt.Errorf("read copilot models response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("copilot models request: upstream returned status %d", resp.StatusCode)
+		return nil, &CopilotModelsHTTPStatusError{StatusCode: resp.StatusCode}
 	}
 	var parsed struct {
 		Data []struct {

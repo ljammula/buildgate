@@ -2199,17 +2199,16 @@ func doctorCheckCopilotModelListed(ctx context.Context, tokenFile, tokenKey, caB
 	name := fmt.Sprintf("github copilot lists the configured worker model (%s)", modelID)
 	nonDefaultUpstream := relayUpstream != "" && relayUpstream != meter.CopilotAPIBase
 	effectiveUpstream := effectiveCopilotUpstream(relayUpstream)
-	fallbackFix := fmt.Sprintf("set %s to one of the ids GET %s/models lists for this account (see `factoryd doctor -list-models`)", keys.workerModelID, effectiveUpstream)
 	if err := doctorValidateCopilotUpstream(effectiveUpstream, allowPlaintextUpstream); err != nil {
 		return doctorCheck{Name: name, Err: err, Fix: fmt.Sprintf("point %s at Copilot's own API host (unset it to use the individual-plan default), or set %s only for a private/loopback host with no real credential", keys.upstream, keys.allowPlaintextUpstream)}
 	}
 	token, err := resolveGitHubCopilotToken(tokenFile, tokenKey)
 	if err != nil {
-		return doctorCheck{Name: name, Err: err, Fix: fallbackFix}
+		return doctorCheck{Name: name, Err: err, Fix: "configure a GitHub Copilot login token with `pi login`, GITHUB_COPILOT_TOKEN, or the route's github_token_file, then rerun `factoryd doctor`"}
 	}
 	models, err := listGitHubCopilotModelsFn(ctx, caBundlePath, token, relayUpstream)
 	if err != nil {
-		return doctorCheck{Name: name, Err: fmt.Errorf("list copilot models: %w", err), Fix: fallbackFix, Advisory: nonDefaultUpstream}
+		return doctorCheck{Name: name, Err: fmt.Errorf("list copilot models: %w", err), Fix: copilotModelsFailureNextStep(err), Advisory: nonDefaultUpstream}
 	}
 	ids := copilotServableModelIDs(models, workerAPI, 5)
 	for _, m := range models {
