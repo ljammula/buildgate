@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,20 @@ import (
 	"buildgate/internal/modelrole"
 	"buildgate/internal/sandbox"
 )
+
+// copilotModelsFailureNextStep keeps Doctor's advice tied to the stage
+// that failed. An HTTP status from /models means token exchange succeeded,
+// but the configured model ID was not checked against a returned catalog.
+func copilotModelsFailureNextStep(err error) string {
+	var statusErr *meter.CopilotModelsHTTPStatusError
+	if errors.As(err, &statusErr) {
+		if statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden {
+			return fmt.Sprintf("Copilot's model catalog rejected the request (HTTP %d) after token exchange succeeded. Confirm this GitHub account has Copilot access and its organization allows model access, then retry `factoryd doctor -list-models`. The configured model ID was not checked; don't change it based on this error. If access is confirmed and this persists, contact your organization admin or GitHub Support.", statusErr.StatusCode)
+		}
+		return fmt.Sprintf("Copilot's model catalog returned HTTP %d. Check Copilot service availability and network access, then retry `factoryd doctor -list-models`. The configured model ID was not checked.", statusErr.StatusCode)
+	}
+	return "Check the GitHub Copilot login/token source and network access, then retry `factoryd doctor -list-models`. The configured model ID was not checked."
+}
 
 // listGitHubCopilotModelsFn is meter.ListGitHubCopilotModels, indirected
 // through a package var (the same pattern forge.userLogin uses)
@@ -139,11 +154,11 @@ func doctorListModels(ctx context.Context, w io.Writer, in doctorInputs) error {
 		}
 		token, err := resolveGitHubCopilotToken(in.relayGitHubTokenFile, in.relayGitHubTokenKey)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w; configure a GitHub Copilot login token with `pi login`, `GITHUB_COPILOT_TOKEN`, or the route's github_token_file, then retry", err)
 		}
 		models, err := listGitHubCopilotModelsFn(ctx, in.egressCABundle, token, in.relayUpstream)
 		if err != nil {
-			return fmt.Errorf("list copilot models: %w", err)
+			return fmt.Errorf("list copilot models: %w; %s", err, copilotModelsFailureNextStep(err))
 		}
 		if len(models) == 0 {
 			fmt.Fprintln(w, "No Copilot models listed for this account.")

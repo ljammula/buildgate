@@ -5,12 +5,41 @@
 # defaults to input and cache_write defaults to input when omitted (no cache
 # discount/premium assumed).
 
+# OpenAI API model prices use the published standard, short-context rates.
+# This table has one rate per model and token class; service-tier,
+# long-context, modality-specific, per-minute, and per-call prices cannot
+# be represented here.
+gpt-6-astra:
+  input: 10.00
+  cached_input: 1.00
+  cache_write: 12.50
+  output: 50.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
+gpt-6.1-sol:
+  input: 2.00
+  cached_input: 0.10
+  cache_write: 2.50
+  output: 10.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
+gpt-6-luna:
+  input: 0.10
+  cached_input: 0.01
+  cache_write: 0.125
+  output: 0.50
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
 gpt-5.6-sol:
   input: 4.00
   cached_input: 0.40
+  cache_write: 5.00
   output: 20.00
   source: https://developers.openai.com/api/docs/pricing
-  as_of: 2026-09-28
+  as_of: 2026-10-14
 
 gpt-5.6-terra:
   input: 2.00
@@ -25,6 +54,42 @@ gpt-5.6-luna:
   output: 1.20
   source: https://developers.openai.com/api/docs/pricing
   as_of: 2026-09-28
+
+gpt-5.6-cyber:
+  input: 12.50
+  cached_input: 1.25
+  cache_write: 15.625
+  output: 75.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
+gpt-rosalind-research:
+  input: 5.00
+  cached_input: 0.50
+  output: 25.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
+gpt-rosalind-discovery:
+  input: 5.00
+  cached_input: 0.50
+  output: 25.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
+chat-latest:
+  input: 5.00
+  cached_input: 0.50
+  output: 30.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
+
+gpt-5.3-codex:
+  input: 1.75
+  cached_input: 0.175
+  output: 14.00
+  source: https://developers.openai.com/api/docs/pricing
+  as_of: 2026-10-14
 
 # Anthropic cache_write is the 5-minute prompt-cache write price.
 claude-fable-5-1:

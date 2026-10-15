@@ -503,13 +503,44 @@ func TestDoctorCheckCopilotModelListedFailsWithFixNamingRealIDs(t *testing.T) {
 func TestDoctorCheckCopilotModelListedFailsClosedOnListingError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
-		return nil, errors.New("token exchange: upstream returned status 401")
+		return nil, &meter.CopilotModelsHTTPStatusError{StatusCode: http.StatusUnauthorized}
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
 	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil || !strings.Contains(check.Err.Error(), "401") {
 		t.Fatalf("doctorCheckCopilotModelListed with a listing error: Err = %v, want it to surface the listing failure", check.Err)
+	}
+	for _, want := range []string{"model catalog rejected", "token exchange succeeded", "model ID was not checked", "organization admin"} {
+		if !strings.Contains(check.Fix, want) {
+			t.Errorf("Fix = %q, want it to contain %q", check.Fix, want)
+		}
+	}
+	if strings.Contains(check.Fix, "set models.") {
+		t.Errorf("Fix = %q, must not suggest changing a model ID when the catalog request failed", check.Fix)
+	}
+}
+
+func TestDoctorListModelsCopilotUnauthorizedExplainsNextStep(t *testing.T) {
+	t.Setenv("GITHUB_COPILOT_TOKEN", "gho_test_token")
+	t.Setenv("HOME", t.TempDir())
+	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+		return nil, &meter.CopilotModelsHTTPStatusError{StatusCode: http.StatusUnauthorized}
+	})
+
+	var out bytes.Buffer
+	in := doctorInputsForRoute(sessionconfig.Route{CredentialMode: meter.CredentialModeGitHubCopilot}, "gpt-5.6-luna")
+	err := doctorListModels(context.Background(), &out, in)
+	if err == nil {
+		t.Fatal("doctorListModels with a rejected Copilot catalog request = nil error, want a failure")
+	}
+	for _, want := range []string{"model catalog rejected", "token exchange succeeded", "model ID was not checked", "factoryd doctor -list-models"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "set models.") {
+		t.Errorf("error = %q, must not recommend changing a model ID after a catalog request failure", err)
 	}
 }
 
