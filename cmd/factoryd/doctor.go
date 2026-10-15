@@ -308,7 +308,8 @@ func doctorMain(dp *deps, args []string) error {
 		// An explicit -temporal-address already has its own reachability check.
 		checks = append(checks, doctorCheckTemporal(dp, context.Background(), false, os.Stdout))
 	}
-	checks = append(checks, doctorOpenShellChecks(dp, context.Background(), in, *fix, os.Stdout)...)
+	openShell := doctorOpenShellChecks(dp, context.Background(), in, *fix, os.Stdout)
+	checks = append(checks, openShell...)
 	checks = append(checks, doctorWorkerBinaryChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorWorkerGitHubLoginChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorGateTokenChecks(in.configPath, time.Now())...)
@@ -384,6 +385,9 @@ func doctorMain(dp *deps, args []string) error {
 			cancel()
 		}
 	}
+	// After -fix, so the probe launches the image a fix just built from the
+	// data dir a fix just set.
+	checks = append(checks, doctorSandboxGoBuildChecks(dp, openShell, in)...)
 	if failed := runDoctorChecks(checks, os.Stdout); failed > 0 {
 		return fmt.Errorf("%d doctor check(s) failed", failed)
 	}

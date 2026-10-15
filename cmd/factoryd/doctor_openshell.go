@@ -197,8 +197,11 @@ func doctorCheckOpenShellImages(ctx context.Context, dockerBinary string) doctor
 	}
 }
 
+// doctorOpenShellGatewayCheckName names doctorCheckOpenShellGateway's row.
+const doctorOpenShellGatewayCheckName = "OpenShell gateway healthy"
+
 func doctorCheckOpenShellGateway(dp *deps, ctx context.Context) doctorCheck {
-	name := "OpenShell gateway healthy"
+	name := doctorOpenShellGatewayCheckName
 	if err := dp.sandbox.gatewayHealthy(ctx); err != nil {
 		return openShellDownCheck(dp, ctx, name, err, hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellGatewayHealthAddr)
 	}
