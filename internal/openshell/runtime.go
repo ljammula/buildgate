@@ -49,6 +49,9 @@ type Runtime struct {
 	Containers Containers
 	// Volumes is required when a request sets Scratch.
 	Volumes Volumes
+	// Warn is where the runtime reports a cleanup it left for the sweep (a
+	// scratch volume that would not go); nil discards.
+	Warn func(format string, args ...any)
 	// Readiness is asked before Create returns a sandbox with a
 	// credentialed model route.
 	Readiness RouteReadiness
@@ -254,8 +257,10 @@ func (r *Runtime) present(ctx context.Context, name string) (bool, error) {
 // container removal, but the result is then an error: the gateway may still
 // hold the sandbox and start it again. Once the containers are confirmed gone
 // it removes the launch's scratch volume (one that does not exist is
-// success); a removal that fails is an unconfirmed cleanup. While a container
-// may remain the volume is kept.
+// success). A removal that fails is not an error: the name is unique to the
+// launch, so the leftover volume cannot affect a later one; it is reported
+// through Warn and the daemon's reclaim or `factoryd doctor -fix` removes it.
+// While a container may remain the volume is kept.
 func (r *Runtime) Delete(ctx context.Context, name string) error {
 	_, gatewayErr := r.Client.Sandboxes().Delete(ctx, r.workspace(), name, v1.DeleteOptions{AllowMissing: true})
 	if v1.IsNotFound(gatewayErr) {
@@ -273,14 +278,13 @@ func (r *Runtime) Delete(ctx context.Context, name string) error {
 	case left:
 		return fmt.Errorf("%w: sandbox %s still has a container: %v", sandbox.ErrCleanupUnconfirmed, name, errors.Join(gatewayErr, removeErr))
 	}
-	var volumeErr error
 	if r.Volumes != nil {
-		volumeErr = r.Volumes.Remove(ctx, sandbox.ScratchVolumeName(name))
+		volume := sandbox.ScratchVolumeName(name)
+		if err := r.Volumes.Remove(ctx, volume); err != nil && r.Warn != nil {
+			r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the daemon's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
+		}
 	}
-	switch {
-	case volumeErr != nil:
-		return fmt.Errorf("%w: sandbox %s: remove scratch volume: %v", sandbox.ErrCleanupUnconfirmed, name, errors.Join(gatewayErr, volumeErr))
-	case gatewayErr != nil:
+	if gatewayErr != nil {
 		return fmt.Errorf("%w: sandbox %s: the gateway did not confirm the delete: %v", sandbox.ErrCleanupUnconfirmed, name, gatewayErr)
 	}
 	return nil

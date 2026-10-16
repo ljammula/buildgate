@@ -21,6 +21,9 @@ type Lazy struct {
 	Ready      func(ctx context.Context) error
 	Containers Containers
 	Volumes    Volumes
+	// Warn is the runtime's Warn: where it reports a cleanup it left for the
+	// sweep; nil discards.
+	Warn func(format string, args ...any)
 
 	mu sync.Mutex
 	rt *Runtime
@@ -52,7 +55,7 @@ func (l *Lazy) runtime(ctx context.Context) (*Runtime, error) {
 		_ = client.Close()
 		return nil, err
 	}
-	l.rt = &Runtime{Client: client, Containers: l.Containers, Volumes: l.Volumes, Readiness: readiness}
+	l.rt = &Runtime{Client: client, Containers: l.Containers, Volumes: l.Volumes, Warn: l.Warn, Readiness: readiness}
 	return l.rt, nil
 }
 

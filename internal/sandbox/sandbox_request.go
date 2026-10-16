@@ -36,6 +36,8 @@ const (
 // WorkerExitSetupFailed, which is the step's own script's exit, after the
 // wrapper redirected output, and leaves a line in the output naming the command.
 const (
+	// WorkerExitNoScratch: the worker cannot create its directories in /scratch.
+	WorkerExitNoScratch = 95
 	// WorkerExitNoGo: the factory never released the command.
 	WorkerExitNoGo = 96
 	// WorkerExitRerun: the runtime started the command a second time.
@@ -234,13 +236,14 @@ type workerWrapper struct {
 }
 
 // scratchCheck is the wrapper step that makes the worker's directories in the
-// scratch volume and fails with the cause when the image's /scratch is not
-// writable by the worker (an image built before the volume).
-func scratchCheck() string {
-	mount := shSingleQuote(WorkerScratchMount)
-	dirs := shSingleQuote(WorkerScratchMount+"/go-build") + " " + shSingleQuote(WorkerScratchMount+"/go-tmp") + " " + shSingleQuote(WorkerScratchMount+"/gomodcache")
-	return "mkdir -p " + dirs + " || { echo \"buildgate: the worker cannot write " + WorkerScratchMount +
-		" (uid $(id -u), $(stat -c %u:%g:%a " + mount + " 2>/dev/null)): the worker image predates the scratch volume; rebuild it with make install or factoryd configure-images\"; exit 1; }"
+// scratch volume mounted at mount and exits WorkerExitNoScratch with the cause
+// when the image's /scratch is not writable by the worker (an image built
+// before the volume).
+func scratchCheck(mount string) string {
+	quoted := shSingleQuote(mount)
+	dirs := shSingleQuote(mount+"/go-build") + " " + shSingleQuote(mount+"/go-tmp") + " " + shSingleQuote(mount+"/gomodcache")
+	return "mkdir -p " + dirs + " || { echo \"buildgate: the worker cannot write " + mount +
+		" (uid $(id -u), $(stat -c %u:%g:%a " + quoted + " 2>/dev/null)): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)\"; exit " + strconv.Itoa(WorkerExitNoScratch) + "; }"
 }
 
 // workerWrapperScript is the `sh -c` script that runs the worker command
@@ -266,7 +269,7 @@ func workerWrapperScript(w workerWrapper, scratch bool) string {
 		"ulimit -n 4096",
 	}
 	if scratch {
-		script = append(script, scratchCheck())
+		script = append(script, scratchCheck(WorkerScratchMount))
 	}
 	if w.Umask == "" {
 		script = append(script, `exec "$@"`)

@@ -3,6 +3,7 @@ package openshell
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -233,8 +234,17 @@ func TestDeleteRemovesTheVolumeOnceTheContainersAreGone(t *testing.T) {
 		t.Errorf("calls = %q, want the volume removed", *log)
 	}
 	volumes.removeErr = errors.New("in use")
-	if err := rt.Delete(context.Background(), "bg-a"); !errors.Is(err, sandbox.ErrCleanupUnconfirmed) {
-		t.Errorf("a volume that will not go: err = %v, want ErrCleanupUnconfirmed", err)
+	var warned []string
+	rt.Warn = func(format string, args ...any) { warned = append(warned, fmt.Sprintf(format, args...)) }
+	if err := rt.Delete(context.Background(), "bg-a"); err != nil {
+		t.Errorf("a volume that will not go: err = %v, want nil", err)
+	}
+	if len(warned) != 1 || !strings.Contains(warned[0], "bg-scratch-bg-a") || !strings.Contains(warned[0], "in use") {
+		t.Errorf("warnings = %q, want one naming the volume and the error", warned)
+	}
+	rt.Warn = nil
+	if err := rt.Delete(context.Background(), "bg-a"); err != nil {
+		t.Errorf("a volume that will not go, nil Warn: err = %v, want nil", err)
 	}
 }
 

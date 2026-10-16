@@ -142,7 +142,7 @@ func TestSandboxRequestScratchIsAVolumeNotABind(t *testing.T) {
 		}
 	}
 	script := req.Command[2]
-	const mkdir = `mkdir -p '/scratch/go-build' '/scratch/go-tmp' '/scratch/gomodcache' || { echo "buildgate: the worker cannot write /scratch (uid $(id -u), $(stat -c %u:%g:%a '/scratch' 2>/dev/null)): the worker image predates the scratch volume; rebuild it with make install or factoryd configure-images"; exit 1; }; `
+	const mkdir = `mkdir -p '/scratch/go-build' '/scratch/go-tmp' '/scratch/gomodcache' || { echo "buildgate: the worker cannot write /scratch (uid $(id -u), $(stat -c %u:%g:%a '/scratch' 2>/dev/null)): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)"; exit 95; }; `
 	if !strings.Contains(script, `ulimit -n 4096; `+mkdir+`umask 0002; "$@"`) {
 		t.Errorf("script = %q, want the scratch mkdir after the setup, before the command (inside the output redirect)", script)
 	}
@@ -331,5 +331,28 @@ func TestParseByteSize(t *testing.T) {
 		if got, err := ParseByteSize(value); err == nil {
 			t.Errorf("ParseByteSize(%q) = %d, want an error", value, got)
 		}
+	}
+}
+
+func TestScratchCheckExitsWithItsOwnCodeWhenTheScratchIsNotWritable(t *testing.T) {
+	// A regular file stands in for the mount: mkdir under it fails even for root.
+	mount := filepath.Join(t.TempDir(), "scratch")
+	touch(t, mount)
+	out, err := exec.Command("/bin/sh", "-c", scratchCheck(mount)).CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != WorkerExitNoScratch {
+		t.Fatalf("err = %v, want exit %d", err, WorkerExitNoScratch)
+	}
+	for _, want := range []string{"buildgate: the worker cannot write " + mount, "rebuild the worker image with make install (Pi) or make pifork-image (pifork)"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("output %q lacks %q", out, want)
+		}
+	}
+	if strings.Contains(string(out), "configure-images") {
+		t.Errorf("output %q advises configure-images", out)
+	}
+	writable := t.TempDir()
+	if err := exec.Command("/bin/sh", "-c", scratchCheck(writable)).Run(); err != nil {
+		t.Errorf("a writable scratch: %v", err)
 	}
 }

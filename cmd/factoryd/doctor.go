@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -3143,15 +3145,34 @@ const doctorRebuildWorkerImageFix = "rebuild the worker image with make install 
 // volume, and the worker (uid 65532) writes its Go caches there.
 const doctorScratchWant = "65532:65532:770"
 
-// doctorCheckScratchOwned runs image once, with no network, and confirms its
-// /scratch is owned by the worker as doctorScratchWant says. An image built
-// before the per-launch scratch volume has no /scratch or a root-owned one,
-// and every launch fails at the wrapper's mkdir.
+// doctorCheckScratchOwned tests the mechanism a launch relies on: it makes a
+// throwaway volume (named outside the bg-scratch- prefix, so no sweep takes
+// it), mounts it at /scratch in image with no network and confirms the
+// worker owns the mount as doctorScratchWant says, then removes the volume.
+// It fails when the image's /scratch is not the worker's (an image built
+// before the per-launch scratch volume) or when this Docker does not copy an
+// image's ownership into a new volume; either way every launch would fail at
+// the wrapper's mkdir.
 func doctorCheckScratchOwned(ctx context.Context, dockerBinary, image string) doctorCheck {
-	name := fmt.Sprintf("worker image owns /scratch (%s)", image)
-	cmd := exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none",
-		"--entrypoint", "stat", image, "-c", "%u:%g:%a", "/scratch")
-	out, err := cmd.CombinedOutput()
+	name := fmt.Sprintf("a new scratch volume is writable by the worker (%s)", image)
+	fail := func(format string, args ...any) doctorCheck {
+		return doctorCheck{Name: name, Err: fmt.Errorf(format, args...), Fix: doctorRebuildWorkerImageFix}
+	}
+	var suffix [4]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return fail("name a throwaway volume: %v", err)
+	}
+	volume := "bg-doctor-scratch-" + hex.EncodeToString(suffix[:])
+	if out, err := exec.CommandContext(ctx, dockerBinary, "volume", "create", volume).CombinedOutput(); err != nil {
+		return fail("create a throwaway volume: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	defer func() {
+		rmCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(rmCtx, dockerBinary, "volume", "rm", volume).Run()
+	}()
+	out, err := exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none", "-v", volume+":/scratch",
+		"--entrypoint", "stat", image, "-c", "%u:%g:%a", "/scratch").CombinedOutput()
 	got := strings.TrimSpace(string(out))
 	if err == nil && got == doctorScratchWant {
 		return doctorCheck{Name: name}
@@ -3160,9 +3181,5 @@ func doctorCheckScratchOwned(ctx context.Context, dockerBinary, image string) do
 	if err != nil {
 		detail = fmt.Sprintf("%v: %s", err, got)
 	}
-	return doctorCheck{
-		Name: name,
-		Err:  fmt.Errorf("/scratch in %s is not %s (stat: %s): every launch would fail at the worker's setup", image, doctorScratchWant, detail),
-		Fix:  doctorRebuildWorkerImageFix,
-	}
+	return fail("a new volume at /scratch in %s is not %s (stat: %s): either the image's /scratch is not owned by the worker or this Docker does not copy an image's ownership into a new volume; every launch would fail at the worker's setup", image, doctorScratchWant, detail)
 }

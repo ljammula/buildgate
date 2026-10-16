@@ -145,7 +145,9 @@ func noSuchVolume(err error) bool {
 }
 
 // Create makes the volume; one of that name that already exists is an error,
-// because it may hold another launch's files.
+// because it may hold another launch's files. The existence check is inspect
+// then create, which is safe without atomicity because the name derives from
+// a per-launch hashed sandbox name no worker can predict or create.
 func (d *DockerVolumes) Create(ctx context.Context, name string, labels map[string]string) error {
 	if !scratchVolumePattern.MatchString(name) {
 		return fmt.Errorf("invalid scratch volume name %q", name)
