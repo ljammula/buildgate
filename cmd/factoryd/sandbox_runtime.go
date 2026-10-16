@@ -168,5 +168,6 @@ func newGatewayRuntime(dp *deps) *openshell.Lazy {
 			return nil
 		},
 		Containers: &openshell.DockerContainers{Binary: dp.docker.dockerBinary()},
+		Volumes:    &openshell.DockerVolumes{Binary: dp.docker.dockerBinary()},
 	}
 }

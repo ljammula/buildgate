@@ -32,6 +32,14 @@ type Containers interface {
 	Remove(ctx context.Context, sandboxName string) error
 }
 
+// Volumes is what the runtime asks Docker about the per-launch scratch volume.
+type Volumes interface {
+	// Create makes the named volume with the labels; it fails when a volume of that name already exists.
+	Create(ctx context.Context, name string, labels map[string]string) error
+	// Remove removes the named volume; a volume that does not exist is success.
+	Remove(ctx context.Context, name string) error
+}
+
 // DefaultWorkspace is the gateway workspace buildgate's sandboxes live in.
 const DefaultWorkspace = "default"
 
@@ -39,6 +47,8 @@ const DefaultWorkspace = "default"
 type Runtime struct {
 	Client     v1.ClientInterface
 	Containers Containers
+	// Volumes is required when a request sets Scratch.
+	Volumes Volumes
 	// Readiness is asked before Create returns a sandbox with a
 	// credentialed model route.
 	Readiness RouteReadiness
@@ -77,8 +87,11 @@ func (r *Runtime) workspace() string {
 // its supervisor has rebuilt its proxy: when its route has a credential,
 // until that credential is installed (waitRouteReady); when it reaches the
 // network with no credential, for the first settings poll
-// (waitFirstSettingsPoll). A failure can leave a sandbox behind: the caller
-// deletes by the name it recorded.
+// (waitFirstSettingsPoll). A request that sets Scratch gets a fresh volume
+// before the gateway is asked for the sandbox; a failure up to the gateway
+// creating the sandbox removes it again, and after that Delete does. A
+// failure can leave a sandbox behind: the caller deletes by the name it
+// recorded.
 func (r *Runtime) Create(ctx context.Context, req sandbox.SandboxRequest) (sandbox.SandboxRef, error) {
 	spec, err := sandboxSpec(req)
 	if err != nil {
@@ -89,16 +102,18 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.SandboxRequest) (sandb
 		return sandbox.SandboxRef{}, err
 	}
 	labels := map[string]string{LabelRun: labelValue(req.RunID), LabelDataDir: labelValue(dataDirLabel)}
-	template, err := workloadTemplate(req, spec)
+	var removeVolume func() error
+	if req.Scratch {
+		if removeVolume, err = r.createScratch(ctx, req.Name, labels); err != nil {
+			return sandbox.SandboxRef{}, err
+		}
+	}
+	created, template, err := r.createSandbox(ctx, req, spec, labels)
 	if err != nil {
+		if removeVolume != nil {
+			err = errors.Join(err, removeVolume())
+		}
 		return sandbox.SandboxRef{}, err
-	}
-	if _, err := r.Client.SandboxTemplates().Create(ctx, r.workspace(), template); err != nil {
-		return sandbox.SandboxRef{}, fmt.Errorf("openshell: create workload template %s: %w", req.Name, err)
-	}
-	created, err := r.Client.CreateSandboxFromTemplate(ctx, r.workspace(), req.Name, template.Name, spec, labels)
-	if err != nil {
-		return sandbox.SandboxRef{}, fmt.Errorf("openshell: create sandbox %s: %w", req.Name, err)
 	}
 	// The template has done its work once the sandbox exists. Removing it
 	// now leaves the sandbox as the only gateway object of this launch, so
@@ -120,6 +135,40 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.SandboxRequest) (sandb
 		}
 	}
 	return sandbox.SandboxRef{Name: ready.Name, ID: ready.ID}, nil
+}
+
+// createScratch makes the launch's scratch volume and returns what removes it.
+func (r *Runtime) createScratch(ctx context.Context, sandboxName string, labels map[string]string) (func() error, error) {
+	if r.Volumes == nil {
+		return nil, errors.New("openshell: the request needs a scratch volume and the runtime has no Volumes")
+	}
+	volume := sandbox.ScratchVolumeName(sandboxName)
+	if err := r.Volumes.Create(ctx, volume, labels); err != nil {
+		return nil, fmt.Errorf("openshell: create scratch volume %s: %w", volume, err)
+	}
+	return func() error {
+		if err := r.Volumes.Remove(ctx, volume); err != nil {
+			return fmt.Errorf("openshell: remove scratch volume %s: %w", volume, err)
+		}
+		return nil
+	}, nil
+}
+
+// createSandbox creates the launch's workload template and the sandbox from
+// it, and returns both.
+func (r *Runtime) createSandbox(ctx context.Context, req sandbox.SandboxRequest, spec *v1.SandboxSpec, labels map[string]string) (*v1.Sandbox, *v1.SandboxWorkloadTemplate, error) {
+	template, err := workloadTemplate(req, spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := r.Client.SandboxTemplates().Create(ctx, r.workspace(), template); err != nil {
+		return nil, nil, fmt.Errorf("openshell: create workload template %s: %w", req.Name, err)
+	}
+	created, err := r.Client.CreateSandboxFromTemplate(ctx, r.workspace(), req.Name, template.Name, spec, labels)
+	if err != nil {
+		return nil, nil, fmt.Errorf("openshell: create sandbox %s: %w", req.Name, err)
+	}
+	return created, template, nil
 }
 
 // conditions is the gateway's own account of a sandbox that failed, for an
@@ -200,7 +249,10 @@ func (r *Runtime) present(ctx context.Context, name string) (bool, error) {
 // Delete removes the sandbox through the gateway, removes whatever container
 // is left, and confirms. A gateway that cannot be asked does not stop the
 // container removal, but the result is then an error: the gateway may still
-// hold the sandbox and start it again.
+// hold the sandbox and start it again. Once the containers are confirmed gone
+// it removes the launch's scratch volume (one that does not exist is
+// success); a removal that fails is an unconfirmed cleanup. While a container
+// may remain the volume is kept.
 func (r *Runtime) Delete(ctx context.Context, name string) error {
 	_, gatewayErr := r.Client.Sandboxes().Delete(ctx, r.workspace(), name, v1.DeleteOptions{AllowMissing: true})
 	if v1.IsNotFound(gatewayErr) {
@@ -217,6 +269,14 @@ func (r *Runtime) Delete(ctx context.Context, name string) error {
 		return fmt.Errorf("%w: sandbox %s: %v", sandbox.ErrCleanupUnconfirmed, name, errors.Join(gatewayErr, removeErr, presentErr))
 	case left:
 		return fmt.Errorf("%w: sandbox %s still has a container: %v", sandbox.ErrCleanupUnconfirmed, name, errors.Join(gatewayErr, removeErr))
+	}
+	var volumeErr error
+	if r.Volumes != nil {
+		volumeErr = r.Volumes.Remove(ctx, sandbox.ScratchVolumeName(name))
+	}
+	switch {
+	case volumeErr != nil:
+		return fmt.Errorf("%w: sandbox %s: remove scratch volume: %v", sandbox.ErrCleanupUnconfirmed, name, errors.Join(gatewayErr, volumeErr))
 	case gatewayErr != nil:
 		return fmt.Errorf("%w: sandbox %s: the gateway did not confirm the delete: %v", sandbox.ErrCleanupUnconfirmed, name, gatewayErr)
 	}

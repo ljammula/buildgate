@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,10 +37,15 @@ type DockerContainers struct {
 var _ Containers = (*DockerContainers)(nil)
 
 func (d *DockerContainers) docker(ctx context.Context, args ...string) ([]byte, error) {
-	if d.run != nil {
-		return d.run(ctx, args...)
+	return runDocker(ctx, d.run, d.Binary, args...)
+}
+
+// runDocker runs the Docker CLI, or run when a test supplies one. A failure's
+// error carries the CLI's stderr.
+func runDocker(ctx context.Context, run func(ctx context.Context, args ...string) ([]byte, error), binary string, args ...string) ([]byte, error) {
+	if run != nil {
+		return run(ctx, args...)
 	}
-	binary := d.Binary
 	if binary == "" {
 		binary = "docker"
 	}
@@ -114,4 +120,63 @@ func (d *DockerContainers) Remove(ctx context.Context, sandboxName string) error
 	}
 	_, err = d.docker(ctx, append([]string{"rm", "-f"}, ids...)...)
 	return err
+}
+
+// scratchVolumePattern is the name of a launch's scratch volume; a name
+// outside it never reaches the CLI.
+var scratchVolumePattern = regexp.MustCompile(`^bg-scratch-[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// DockerVolumes is Volumes over the Docker CLI.
+type DockerVolumes struct {
+	// Binary defaults to "docker".
+	Binary string
+	// run executes the CLI and returns its stdout; tests replace it.
+	run func(ctx context.Context, args ...string) ([]byte, error)
+}
+
+var _ Volumes = (*DockerVolumes)(nil)
+
+func (d *DockerVolumes) docker(ctx context.Context, args ...string) ([]byte, error) {
+	return runDocker(ctx, d.run, d.Binary, args...)
+}
+
+func noSuchVolume(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such volume")
+}
+
+// Create makes the volume; one of that name that already exists is an error,
+// because it may hold another launch's files.
+func (d *DockerVolumes) Create(ctx context.Context, name string, labels map[string]string) error {
+	if !scratchVolumePattern.MatchString(name) {
+		return fmt.Errorf("invalid scratch volume name %q", name)
+	}
+	_, err := d.docker(ctx, "volume", "inspect", "--format", "{{.Name}}", name)
+	switch {
+	case err == nil:
+		return fmt.Errorf("scratch volume %s already exists", name)
+	case !noSuchVolume(err):
+		return err
+	}
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := []string{"volume", "create"}
+	for _, k := range keys {
+		args = append(args, "--label", k+"="+labels[k])
+	}
+	_, err = d.docker(ctx, append(args, name)...)
+	return err
+}
+
+// Remove removes the volume; one that does not exist is success.
+func (d *DockerVolumes) Remove(ctx context.Context, name string) error {
+	if !scratchVolumePattern.MatchString(name) {
+		return fmt.Errorf("invalid scratch volume name %q", name)
+	}
+	if _, err := d.docker(ctx, "volume", "rm", name); err != nil && !noSuchVolume(err) {
+		return err
+	}
+	return nil
 }

@@ -108,3 +108,73 @@ func TestANameOutsideTheGatewayAlphabetNeverReachesDocker(t *testing.T) {
 		t.Errorf("docker was called: %q", docker.calls)
 	}
 }
+
+func volumesOver(s *scriptedDocker) *DockerVolumes { return &DockerVolumes{run: s.run} }
+
+func TestVolumeCreateInspectsThenCreatesWithSortedLabels(t *testing.T) {
+	docker := &scriptedDocker{errs: map[string]error{"volume": errors.New("docker volume: exit status 1: Error response from daemon: get bg-scratch-bg-a: No such volume: bg-scratch-bg-a")}}
+	calls := 0
+	v := &DockerVolumes{run: func(ctx context.Context, args ...string) ([]byte, error) {
+		calls++
+		if calls == 2 {
+			docker.errs = nil
+		}
+		return docker.run(ctx, args...)
+	}}
+	if err := v.Create(context.Background(), "bg-scratch-bg-a", map[string]string{"buildgate.run": "r1", "buildgate.data-dir": "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"volume", "inspect", "--format", "{{.Name}}", "bg-scratch-bg-a"},
+		{"volume", "create", "--label", "buildgate.data-dir=d1", "--label", "buildgate.run=r1", "bg-scratch-bg-a"},
+	}
+	if !reflect.DeepEqual(docker.calls, want) {
+		t.Errorf("calls =\n%q\nwant\n%q", docker.calls, want)
+	}
+}
+
+func TestVolumeCreateRefusesAnExistingVolume(t *testing.T) {
+	docker := &scriptedDocker{}
+	err := volumesOver(docker).Create(context.Background(), "bg-scratch-bg-a", nil)
+	if err == nil || !strings.Contains(err.Error(), "bg-scratch-bg-a already exists") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(docker.calls) != 1 {
+		t.Errorf("calls = %q, want the inspect only", docker.calls)
+	}
+}
+
+func TestVolumeCreateReturnsAnotherInspectFailure(t *testing.T) {
+	docker := &scriptedDocker{errs: map[string]error{"volume": errors.New("cannot connect to the daemon")}}
+	if err := volumesOver(docker).Create(context.Background(), "bg-scratch-bg-a", nil); err == nil || len(docker.calls) != 1 {
+		t.Errorf("err = %v, calls = %q", err, docker.calls)
+	}
+}
+
+func TestVolumeRemoveTreatsAMissingVolumeAsGone(t *testing.T) {
+	ctx := context.Background()
+	missing := &scriptedDocker{errs: map[string]error{"volume": errors.New("docker volume: exit 1: Error: No such volume: bg-scratch-bg-a")}}
+	if err := volumesOver(missing).Remove(ctx, "bg-scratch-bg-a"); err != nil {
+		t.Errorf("a missing volume: %v", err)
+	}
+	if want := [][]string{{"volume", "rm", "bg-scratch-bg-a"}}; !reflect.DeepEqual(missing.calls, want) {
+		t.Errorf("calls = %q, want %q", missing.calls, want)
+	}
+	busy := &scriptedDocker{errs: map[string]error{"volume": errors.New("volume is in use")}}
+	if err := volumesOver(busy).Remove(ctx, "bg-scratch-bg-a"); err == nil {
+		t.Error("a volume in use was reported removed")
+	}
+}
+
+func TestVolumeNamesOutsideThePatternNeverReachTheCLI(t *testing.T) {
+	docker := &scriptedDocker{}
+	v := volumesOver(docker)
+	for _, name := range []string{"", "other", "bg-scratch-", "bg-scratch-A", "bg-scratch-a b", "bg-scratch-a;rm"} {
+		if v.Create(context.Background(), name, nil) == nil || v.Remove(context.Background(), name) == nil {
+			t.Errorf("%q was accepted", name)
+		}
+	}
+	if len(docker.calls) != 0 {
+		t.Errorf("calls = %q, want none", docker.calls)
+	}
+}

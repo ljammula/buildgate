@@ -20,6 +20,7 @@ type Lazy struct {
 	// why the stack cannot be used and what to do about it.
 	Ready      func(ctx context.Context) error
 	Containers Containers
+	Volumes    Volumes
 
 	mu sync.Mutex
 	rt *Runtime
@@ -51,7 +52,7 @@ func (l *Lazy) runtime(ctx context.Context) (*Runtime, error) {
 		_ = client.Close()
 		return nil, err
 	}
-	l.rt = &Runtime{Client: client, Containers: l.Containers, Readiness: readiness}
+	l.rt = &Runtime{Client: client, Containers: l.Containers, Volumes: l.Volumes, Readiness: readiness}
 	return l.rt, nil
 }
 
