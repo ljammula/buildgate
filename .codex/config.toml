@@ -1,5 +1,0 @@
-[mcp_servers.buildgate]
-url = "http://127.0.0.1:8090/mcp"
-
-[mcp_servers.buildgate.http_headers]
-Authorization = "Bearer 5sK50VH2d0Qc00Qb_SPQ-8o4sjEPmOXvNh67DL2nNxo"

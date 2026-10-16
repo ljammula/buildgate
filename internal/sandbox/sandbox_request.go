@@ -266,7 +266,7 @@ func workerWrapperScript(w workerWrapper, scratch bool) string {
 		"ulimit -n 4096",
 	}
 	if scratch {
-		script = append(script[:4], append([]string{scratchCheck()}, script[4:]...)...)
+		script = append(script, scratchCheck())
 	}
 	if w.Umask == "" {
 		script = append(script, `exec "$@"`)
