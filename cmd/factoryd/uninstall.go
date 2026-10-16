@@ -49,7 +49,7 @@ func newUninstallFlags() (flags *flag.FlagSet, yes, dryRun, purge, force *bool) 
 	flags = flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	yes = flags.Bool("yes", false, "do not ask for confirmation (required when stdin is not a terminal)")
 	dryRun = flags.Bool("dry-run", false, "print what would be removed and change nothing")
-	purge = flags.Bool("purge", false, "also delete the session config (~/.config/factoryd), the data directory (~/buildgate), the Temporal volumes and the OpenShell gateway's state on the Docker VM. Irreversible")
+	purge = flags.Bool("purge", false, "also delete the session config (~/.config/factoryd), the data directory (~/buildgate), the Temporal volumes, the OpenShell gateway's state and the worker scratch volumes on the Docker VM. Irreversible")
 	force = flags.Bool("force", false, "stop daemons even when a request is building (its build is cancelled)")
 	finishFlags(flags)
 	return
@@ -209,6 +209,30 @@ func (e *uninstallEnv) gatewayStatePurgeSteps() []uninstallStep {
 	}}
 }
 
+// scratchVolumePurgeSteps removes every worker scratch volume a sandbox left
+// on the Docker VM. Only a purge does: the volumes are cache, and the daemon's
+// reclaim removes those of a finished run.
+func (e *uninstallEnv) scratchVolumePurgeSteps() []uninstallStep {
+	prefix := sandbox.ScratchVolumeName("")
+	listed, err := e.dockOut("volume", "ls", "-q", "--filter", "name="+prefix)
+	if err != nil {
+		return nil
+	}
+	var volumes []string
+	for _, name := range strings.Fields(listed) {
+		if strings.HasPrefix(name, prefix) {
+			volumes = append(volumes, name)
+		}
+	}
+	if len(volumes) == 0 {
+		return nil
+	}
+	return []uninstallStep{{
+		desc: "DELETE the worker scratch volume(s) on the Docker VM: " + strings.Join(volumes, ", "),
+		run:  func() error { return e.runDock(append([]string{"volume", "rm"}, volumes...)...) },
+	}}
+}
+
 func (e *uninstallEnv) purgeTargets() []string {
 	var found []string
 	for _, p := range []string{filepath.Join(e.xdgConfg, "factoryd"), filepath.Join(e.home, "buildgate")} {
@@ -294,6 +318,7 @@ func (e *uninstallEnv) plan() []uninstallStep {
 	}
 	if e.purge && dockerUp {
 		steps = append(steps, e.gatewayStatePurgeSteps()...)
+		steps = append(steps, e.scratchVolumePurgeSteps()...)
 	}
 	if dockerUp {
 		// The images builds derived for a repository's toolchains carry a

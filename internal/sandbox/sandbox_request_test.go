@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -40,11 +41,7 @@ func TestSandboxRequestCarriesTheLaunchSpec(t *testing.T) {
 	spec, launch := sandboxRequestFixture(t)
 	spec.Environment = []string{"FACTORY_MODEL=m"}
 	spec.UnrecordedEnvironment = []string{"BG_SERVICE_DB_URL=postgres://u:p@10.0.0.2/db"}
-	scratch := filepath.Join(filepath.Dir(spec.WorkDir), "scratch")
-	if err := os.Mkdir(scratch, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	spec.ScratchDir = scratch
+	spec.Scratch = true
 	skills := filepath.Join(filepath.Dir(spec.WorkDir), "skills")
 	if err := os.Mkdir(skills, 0o750); err != nil {
 		t.Fatal(err)
@@ -63,7 +60,6 @@ func TestSandboxRequestCarriesTheLaunchSpec(t *testing.T) {
 		{Source: spec.WorkDir, Target: "/workspace"},
 		{Source: filepath.Join(spec.WorkDir, ".git"), Target: "/workspace/.git", ReadOnly: true},
 		{Source: spec.InputDir, Target: "/inputs", ReadOnly: true},
-		{Source: scratch, Target: "/scratch"},
 		{Source: skills, Target: "/inputs/skills", ReadOnly: true},
 		{Source: launch.GuardDir, Target: "/guard", ReadOnly: true},
 		{Source: launch.OutputDir, Target: "/worker-log"},
@@ -92,6 +88,7 @@ func TestSandboxRequestCarriesTheLaunchSpec(t *testing.T) {
 		Name: launch.Name, DataDir: spec.DataDir, RunID: "run1", Image: spec.Image,
 		Memory: "512m", CPUs: "1", GuardDir: launch.GuardDir, OutputDir: launch.OutputDir, Timeout: time.Minute,
 		Sidecars: []SidecarEndpoint{{Name: "registry-proxy", IP: "172.28.0.2", Ports: []int{8092}}},
+		Scratch:  true,
 	}
 	got := req
 	got.Mounts, got.ReadOnlyPaths, got.ReadWritePaths, got.Environment, got.Command = nil, nil, nil, nil, nil
@@ -115,14 +112,51 @@ func TestSandboxRequestCommandIsTheWrapperThenTheSpecCommand(t *testing.T) {
 	}
 
 	spec.WorkerUmask = "0002"
-	spec.ScratchDir = launch.OutputDir // any existing directory
 	req, err = spec.SandboxRequest(launch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const tail = `ulimit -n 4096; umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' 2>/dev/null || true; chmod -R g+rwX -- '/scratch' 2>/dev/null || true; exit $ec`
+	const tail = `ulimit -n 4096; umask 0002; "$@"; ec=$?; chmod -R g+rwX -- '/workspace' 2>/dev/null || true; exit $ec`
 	if !strings.HasSuffix(req.Command[2], tail) {
 		t.Errorf("script = %q, want suffix %q", req.Command[2], tail)
+	}
+}
+
+func TestSandboxRequestScratchIsAVolumeNotABind(t *testing.T) {
+	spec, launch := sandboxRequestFixture(t)
+	spec.Scratch = true
+	spec.WorkerUmask = "0002"
+	req, err := spec.SandboxRequest(launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !req.Scratch {
+		t.Error("request Scratch = false, want true")
+	}
+	if !slices.Contains(req.ReadWritePaths, "/scratch") {
+		t.Errorf("ReadWritePaths = %v, want /scratch", req.ReadWritePaths)
+	}
+	for _, m := range req.Mounts {
+		if m.Target == "/scratch" {
+			t.Errorf("mount %+v targets /scratch, want none: the volume is the runtime's", m)
+		}
+	}
+	script := req.Command[2]
+	const mkdir = `mkdir -p '/scratch/go-build' '/scratch/go-tmp' '/scratch/gomodcache' || { echo "buildgate: the worker cannot write /scratch (uid $(id -u), $(stat -c %u:%g:%a '/scratch' 2>/dev/null)): the worker image predates the scratch volume; rebuild it with make install or factoryd configure-images"; exit 1; }; `
+	if !strings.Contains(script, `exec </dev/null >>'/worker-log/output.log' 2>&1; `+mkdir+`cd '/workspace'`) {
+		t.Errorf("script = %q, want the scratch mkdir right after the output redirect", script)
+	}
+	if strings.Contains(script, "chmod -R g+rwX -- '/scratch'") {
+		t.Errorf("script = %q, want no /scratch reclaim", script)
+	}
+
+	spec.Scratch = false
+	req, err = spec.SandboxRequest(launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Scratch || slices.Contains(req.ReadWritePaths, "/scratch") || strings.Contains(req.Command[2], "/scratch") {
+		t.Errorf("a spec without Scratch produced a scratch request: %+v", req)
 	}
 }
 

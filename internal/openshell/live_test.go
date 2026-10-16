@@ -54,7 +54,7 @@ func liveLaunch(t *testing.T, image, script string) (sandbox.LaunchSpec, sandbox
 	t.Helper()
 	root := filepath.Join(sessionconfig.DataRoot(), "openshell-live", fmt.Sprintf("%d", time.Now().UnixNano()))
 	dirs := map[string]string{}
-	for _, name := range []string{"workspace", "inputs", "data", "guard", "output", "scratch"} {
+	for _, name := range []string{"workspace", "inputs", "data", "guard", "output"} {
 		dirs[name] = filepath.Join(root, name)
 		if err := os.MkdirAll(dirs[name], 0o775); err != nil {
 			t.Fatal(err)
@@ -73,7 +73,7 @@ func liveLaunch(t *testing.T, image, script string) (sandbox.LaunchSpec, sandbox
 		t.Fatal(err)
 	}
 	spec := sandbox.LaunchSpec{
-		Image: image, WorkDir: dirs["workspace"], InputDir: dirs["inputs"], ScratchDir: dirs["scratch"],
+		Image: image, WorkDir: dirs["workspace"], InputDir: dirs["inputs"], Scratch: true,
 		LogPath: filepath.Join(root, "worker.log"), Name: name, User: fmt.Sprintf("65532:%d", os.Getgid()),
 		Command: []string{"/bin/sh", "-c", script},
 		Memory:  "1g", CPUs: "1", TmpfsSize: "64m", Timeout: 3 * time.Minute,
@@ -756,13 +756,11 @@ pip download --no-deps -d /tmp/p idna==3.6 2>&1 | tail -4 | sed 's/^/pip: /'; ls
 	if err := proxy.Ensure(ctx, ""); err != nil {
 		t.Fatalf("start the registry proxy: %v", err)
 	}
-	spec.ScratchDir = ""
+	spec.Scratch = false
 	if spec, err = proxy.PrepareWorker(spec); err != nil {
 		t.Fatal(err)
 	}
-	if spec, err = sandbox.PrepareWorkerScratch(spec); err != nil {
-		t.Fatal(err)
-	}
+	spec = sandbox.PrepareWorkerScratch(spec)
 	t.Logf("sidecars %+v", spec.Sidecars)
 	if _, _, err := sandbox.RunThroughRuntime(ctx, rt, spec, sandbox.RuntimeLaunch{Nonce: "attempt-1"}); err != nil {
 		t.Fatalf("RunThroughRuntime: %v", err)

@@ -195,20 +195,18 @@ type LaunchSpec struct {
 	// belongs to. Both are required — see Validate.
 	RunID   string
 	DataDir string
-	// ScratchDir, when set, is a writable, disk-backed host directory
-	// bind-mounted rw at WorkerScratchMount for build caches too large for
-	// the memory-backed /home/worker tmpfs -- today the Go module and
-	// build caches a RegistryProxyLifecycle points GOMODCACHE/GOCACHE at.
-	// It belongs to this one container and Run removes it on exit (see
-	// RunScratchDir). Found live 2026-09-10: the registry proxy set
-	// GOPROXY but left GOMODCACHE on the image's read-only baked cache, so
-	// any module the canonical image lacked failed with "read-only file
-	// system" and the proxy could never actually replace a per-project
-	// image; a real target repo's module graph (~1 GB extracted) does not
-	// fit the tmpfs on a default 4 GiB Docker VM either. Must be absolute
-	// and must not lie inside WorkDir (it would show up in the worker's
-	// diff). Created and removed by the host side, never by the worker.
-	ScratchDir string
+	// Scratch gives the worker a writable, disk-backed WorkerScratchMount
+	// that is private to this launch and empty at its start, for build
+	// caches too large for the memory-backed /home/worker tmpfs -- today the
+	// Go module and build caches. Through a Runtime it is a per-launch
+	// Docker volume (SandboxRequest.Scratch) that Delete removes; Run, the
+	// stand-in of the factorydtest binary, binds a host directory instead.
+	// No later container sees what this one wrote: canonical verify must
+	// never replay a cache the build phase wrote.
+	Scratch bool
+	// scratchDir is the host directory Run binds at WorkerScratchMount
+	// when Scratch is set. Set by Run only.
+	scratchDir string
 	// GitCommonDir is populated by Run for linked Git worktrees whose .git
 	// entry is a file. It is mounted read-only at the same absolute path in
 	// the container so Git can follow the worktree's gitdir/commondir links
@@ -357,7 +355,7 @@ func (s LaunchSpec) Validate() error {
 		s.validateImageCommandAndWorkDir,
 		s.validateGitCommonDir,
 		s.validateInputAndOracleDirs,
-		s.validateScratchDirAndInputs,
+		s.validateInputMounts,
 		s.validateIdentityAndLimits,
 		s.validateNetworks,
 		s.validateEnvironment,
@@ -450,16 +448,8 @@ func (s LaunchSpec) validateInputAndOracleDirs() error {
 	return nil
 }
 
-// validateScratchDirAndInputs checks the scratch directory and the input mounts.
-func (s LaunchSpec) validateScratchDirAndInputs() error {
-	if s.ScratchDir != "" {
-		if !filepath.IsAbs(s.ScratchDir) {
-			return errors.New("sandbox scratch directory must be absolute")
-		}
-		if s.ScratchDir == s.WorkDir || strings.HasPrefix(s.ScratchDir, s.WorkDir+string(filepath.Separator)) {
-			return errors.New("sandbox scratch directory must not be inside the workspace")
-		}
-	}
+// validateInputMounts checks the input mounts.
+func (s LaunchSpec) validateInputMounts() error {
 	for _, mount := range s.Inputs {
 		if !filepath.IsAbs(mount.Source) || mount.Target == "" || filepath.IsAbs(mount.Target) || filepath.Clean(mount.Target) != mount.Target || strings.Contains(mount.Target, "..") {
 			return fmt.Errorf("sandbox input mount %q is invalid", mount.Target)
@@ -738,8 +728,8 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 	if s.InputDir != "" {
 		args = append(args, "--volume", s.InputDir+":/inputs:ro")
 	}
-	if s.ScratchDir != "" {
-		args = append(args, "--volume", s.ScratchDir+":"+WorkerScratchMount+":rw")
+	if s.scratchDir != "" {
+		args = append(args, "--volume", s.scratchDir+":"+WorkerScratchMount+":rw")
 	}
 	for _, mount := range s.Inputs {
 		args = append(args, "--volume", mount.Source+":/inputs/"+mount.Target+":ro")
@@ -802,7 +792,7 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 		// walk always reports it, and that line landed in every step's
 		// captured output, a gate's failing lines included.
 		reclaim := "chmod -R g+rwX -- " + shSingleQuote(workerContainerWorkDir) + " 2>/dev/null || true"
-		if s.ScratchDir != "" {
+		if s.scratchDir != "" {
 			// stderr dropped: go's build cache trims itself concurrently,
 			// so this walk routinely reports a file that vanished under
 			// it -- harmless, and otherwise a noisy line in every run log.
@@ -967,14 +957,12 @@ func resolveWorkspaceMasks(masks []WorkspaceMask, oraclePath string) ([]Workspac
 // into LogPath. The process group is killed on cancellation; Docker's rm
 // flag and a best-effort explicit rm keep a canceled container from lingering.
 func Run(ctx context.Context, dockerBinary string, s LaunchSpec) (Result, error) {
-	if s.ScratchDir != "" {
-		// This container's own scratch directory (RunScratchDir): no later
-		// container may see what this one wrote. Removed after the
-		// container exits, by which point its exit wrapper has reclaimed
-		// group write on the tree (DockerCommand).
-		defer func() { _ = removeScratchTree(s.ScratchDir) }()
+	s, removeScratch, err := s.withStandInScratch()
+	if err != nil {
+		return Result{}, err
 	}
-	s, err := s.withResolvedMounts()
+	defer removeScratch()
+	s, err = s.withResolvedMounts()
 	if err != nil {
 		return Result{}, err
 	}
@@ -1230,12 +1218,15 @@ func imageDigest(image string) string {
 // a silent no-op on every real run).
 const workerContainerWorkDir = "/workspace"
 
-// WorkerScratchMount is where LaunchSpec.ScratchDir appears inside the
+// WorkerScratchMount is where LaunchSpec.Scratch appears inside the
 // worker container.
 const WorkerScratchMount = "/scratch"
 
 // RunScratchDir is the per-run host directory holding each launch's
-// LaunchSpec.ScratchDir: <dataDir>/scratch/<runID>/<launch>. One
+// scratch directory under the stand-in Run: <dataDir>/scratch/<runID>/<launch>.
+// The gateway path uses a Docker volume instead (ScratchVolumeName); an
+// install that predates it may have left directories here, which
+// ReconcileScratchDirs removes. One
 // directory per worker container, never shared: a cache one container
 // wrote is worker-writable state, and the canonical verify, full-suite
 // and gate containers must not compile or replay what the build phase
@@ -1279,6 +1270,42 @@ func removeScratchTree(dir string) error {
 		return nil
 	})
 	return os.RemoveAll(dir)
+}
+
+// withStandInScratch is s with this launch's host scratch directory made and
+// recorded for DockerCommand to bind, and the function that removes it:
+// no later container may see what this one wrote. Removal is after the
+// container exits, by which point its exit wrapper has reclaimed group
+// write on the tree (DockerCommand). Without Scratch the function is a no-op.
+func (s LaunchSpec) withStandInScratch() (LaunchSpec, func(), error) {
+	if !s.Scratch {
+		return s, func() {}, nil
+	}
+	dir, err := ensureStandInScratch(s)
+	if err != nil {
+		return s, nil, err
+	}
+	s.scratchDir = dir
+	return s, func() { _ = removeScratchTree(dir) }, nil
+}
+
+// ensureStandInScratch creates the host scratch directory of a Run launch
+// and its go-build and go-tmp subdirectories.
+func ensureStandInScratch(s LaunchSpec) (string, error) {
+	dir, err := EnsureScratchDir(s.DataDir, s.RunID, s.Name, s.User)
+	if err != nil {
+		return "", err
+	}
+	for _, sub := range []string{"go-build", "go-tmp"} {
+		d := filepath.Join(dir, sub)
+		if err := os.MkdirAll(d, 0o770); err != nil {
+			return "", fmt.Errorf("create worker scratch subdirectory: %w", err)
+		}
+		if err := grantScratchDir(d, s.User); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
 }
 
 // ReconcileScratchDirs removes every scratch directory under dataDir whose

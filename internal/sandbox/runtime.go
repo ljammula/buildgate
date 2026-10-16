@@ -82,13 +82,16 @@ type SandboxRequest struct {
 	Scratch bool
 }
 
+// scratchVolumePrefix starts the name of every scratch volume.
+const scratchVolumePrefix = "bg-scratch-"
+
 // ScratchVolumeName is the name of the Docker volume of a launch that sets
 // SandboxRequest.Scratch. It is a pure function of the recorded sandbox name,
 // so a sweep over run records finds a volume a launch left behind. It lives
 // here, not in openshell, because sweeps in this package and in cmd/factoryd
 // need it and this package cannot import openshell.
 func ScratchVolumeName(sandboxName string) string {
-	return "bg-scratch-" + sandboxName
+	return scratchVolumePrefix + sandboxName
 }
 
 // SidecarEndpoint is one container of the factory's (the registry proxy, a

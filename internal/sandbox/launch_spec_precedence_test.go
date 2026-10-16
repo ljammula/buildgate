@@ -28,8 +28,6 @@ var launchSpecViolations = []struct {
 	{"oracle dir inside workspace", "oracle", func(s *LaunchSpec) {
 		s.ReferenceOracleDir, s.ReferenceOracleMountPath = "/tmp/workspace/oracle", "oracle"
 	}},
-	{"relative scratch dir", "scratch", func(s *LaunchSpec) { s.ScratchDir = "scratch" }},
-	{"scratch dir inside workspace", "scratch", func(s *LaunchSpec) { s.ScratchDir = "/tmp/workspace/scratch" }},
 	{"invalid input mount", "inputs", func(s *LaunchSpec) { s.Inputs = []InputMount{{Source: "/tmp/in", Target: "../in"}} }},
 	{"missing log path", "logpath", func(s *LaunchSpec) { s.LogPath = "" }},
 	{"missing name", "name", func(s *LaunchSpec) { s.Name = "" }},

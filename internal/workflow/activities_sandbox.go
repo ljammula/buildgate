@@ -624,10 +624,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 			s = prepared
 		}
-		s, err := sandbox.PrepareWorkerScratch(s)
-		if err != nil {
-			return last, joinCleanup(err, factoryDir.Remove())
-		}
+		s = sandbox.PrepareWorkerScratch(s)
 		// compose.ApplyToWorkerLaunch, not a PrepareWorker call: compose
 		// services add ComposeNetwork (which sandbox.Run makes the primary
 		// network when s.Network is "none"), this attempt's own

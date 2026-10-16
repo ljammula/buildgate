@@ -97,6 +97,19 @@ func TestDockerfilesEndInTheSandboxWorkdirOwnedByTheWorkerUser(t *testing.T) {
 	}
 }
 
+// TestDockerfileCreatesTheScratchMountPointForTheWorker pins the /scratch
+// directory a new scratch volume takes its owner and mode from.
+func TestDockerfileCreatesTheScratchMountPointForTheWorker(t *testing.T) {
+	data, err := os.ReadFile("Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "RUN mkdir -p /scratch && chown 65532:65532 /scratch && chmod 0770 /scratch \\\n    && test \"$(stat -c %u:%g:%a /scratch)\" = 65532:65532:770\n"
+	if !strings.Contains(string(data), want) {
+		t.Errorf("Dockerfile must create /scratch owned 65532:65532, mode 0770, and assert it in the same RUN")
+	}
+}
+
 // TestWorkerDockerfilesEndAsTheNonRootWorkerUser pins the user a worker
 // image is left with: the last USER instruction of every stage a worker
 // image is built to (the canonical image's last stage, the project recipe's

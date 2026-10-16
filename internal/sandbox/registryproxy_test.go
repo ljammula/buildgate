@@ -385,15 +385,13 @@ func TestRegistryProxyLifecyclePrepareWorkerSetsNetworkAndEnv(t *testing.T) {
 	}
 	// The Go route only works with a writable module cache: the image's
 	// baked GOMODCACHE is read-only, so it must be replaced, not kept,
-	// and backed by this container's own scratch directory (found live
-	// 2026-09-10; per launch since the 2026-09-29 demo, see RunScratchDir).
-	if want := filepath.Join(RunScratchDir(dataDir, spec.RunID), "factoryd-worker-1"); worker.ScratchDir != want {
-		t.Errorf("ScratchDir = %q, want %q", worker.ScratchDir, want)
+	// and backed by this container's own scratch volume (found live
+	// 2026-09-10; per launch since the 2026-09-29 demo).
+	if !worker.Scratch {
+		t.Error("Scratch = false, want true")
 	}
-	if info, statErr := os.Stat(worker.ScratchDir); statErr != nil {
-		t.Errorf("scratch dir not created: %v", statErr)
-	} else if info.Mode().Perm()&0o070 != 0o070 {
-		t.Errorf("scratch dir mode = %v, want group rwx for the worker's host gid", info.Mode().Perm())
+	if _, statErr := os.Stat(RunScratchDir(dataDir, spec.RunID)); !os.IsNotExist(statErr) {
+		t.Errorf("a host scratch directory exists under the data dir: %v", statErr)
 	}
 	for _, value := range worker.Environment {
 		if value == "GOMODCACHE=/usr/local/gomodcache" {

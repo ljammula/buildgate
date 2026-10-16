@@ -1497,7 +1497,7 @@ func (tr *ticketRun) lockRepository() error {
 	if !isolatedRun {
 		reconcileStranded(directLock)
 	}
-	removeScratchDirs(tr.sandboxDataDir)
+	removeScratchDirs(tr.lifecycleCtx, *tr.sandboxDocker, tr.sandboxDataDir)
 	if *tr.preflightProfile != "" && *tr.preflightProfile != preflightProfileBrownfield {
 		return fmt.Errorf("-preflight-profile must be \"\" or %q, got %q", preflightProfileBrownfield, *tr.preflightProfile)
 	}

@@ -140,6 +140,7 @@ func reconcileMain(args []string) error {
 	} else if len(removed) > 0 {
 		log.Printf("sandbox: removed %d orphaned compose services resource(s) from a prior run: %v", len(removed), removed)
 	}
+	removeScratchDirs(context.Background(), *sandboxDocker, absDataDir)
 	// Propagated, unlike the direct-run startup path's own best-effort
 	// call to this same function (found via review): this command's only
 	// job is reconciliation, so a caller or script needs its exit status
