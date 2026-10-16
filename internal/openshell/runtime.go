@@ -146,8 +146,11 @@ func (r *Runtime) createScratch(ctx context.Context, sandboxName string, labels 
 	if err := r.Volumes.Create(ctx, volume, labels); err != nil {
 		return nil, fmt.Errorf("openshell: create scratch volume %s: %w", volume, err)
 	}
+	// The removal outlives a canceled launch: a cancellation is the
+	// commonest reason the sandbox was never created.
+	cleanupCtx := context.WithoutCancel(ctx)
 	return func() error {
-		if err := r.Volumes.Remove(ctx, volume); err != nil {
+		if err := r.Volumes.Remove(cleanupCtx, volume); err != nil {
 			return fmt.Errorf("openshell: remove scratch volume %s: %w", volume, err)
 		}
 		return nil
