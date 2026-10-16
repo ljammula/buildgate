@@ -179,7 +179,7 @@ func removeFinishedRunContainers(ctx context.Context, dockerBinary, dataDir stri
 	} else if len(removed) > 0 {
 		log.Printf("sandbox: removed %d orphaned compose services resource(s) from a prior run: %v", len(removed), removed)
 	}
-	removeScratchDirs(dataDir)
+	removeScratchDirs(ctx, dockerBinary, dataDir)
 }
 
 // reclaimLostWork halts what a factoryd process that is gone left in dataDir:

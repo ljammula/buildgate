@@ -1,33 +1,21 @@
 package sandbox
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestPrepareWorkerScratchUsesPrivateDiskBackedGoPaths(t *testing.T) {
 	dataDir := t.TempDir()
-	spec, err := PrepareWorkerScratch(LaunchSpec{
+	spec := PrepareWorkerScratch(LaunchSpec{
 		DataDir:     dataDir,
 		RunID:       "run-1",
 		Name:        "worker-1",
-		User:        fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		Environment: []string{"GOCACHE=/old-cache", "GOTMPDIR=/old-tmp", "APP_ENV=test"},
 	})
-	if err != nil {
-		t.Fatalf("PrepareWorkerScratch: %v", err)
-	}
-	wantScratch := filepath.Join(RunScratchDir(dataDir, "run-1"), "worker-1")
-	if spec.ScratchDir != wantScratch {
-		t.Fatalf("ScratchDir = %q, want %q", spec.ScratchDir, wantScratch)
-	}
-	for _, dir := range []string{"go-build", "go-tmp"} {
-		if info, err := os.Stat(filepath.Join(spec.ScratchDir, dir)); err != nil || !info.IsDir() {
-			t.Fatalf("scratch subdirectory %q was not created: %v", dir, err)
-		}
+	if !spec.Scratch {
+		t.Fatal("Scratch = false, want true")
 	}
 	environment := strings.Join(spec.Environment, "\n")
 	for _, want := range []string{"GOCACHE=/scratch/go-build", "GOTMPDIR=/scratch/go-tmp", "APP_ENV=test"} {
@@ -38,7 +26,11 @@ func TestPrepareWorkerScratchUsesPrivateDiskBackedGoPaths(t *testing.T) {
 	if strings.Contains(environment, "/old-cache") || strings.Contains(environment, "/old-tmp") {
 		t.Fatalf("old cache paths survived normalization: %q", environment)
 	}
-	if err := RemoveScratchDir(dataDir, "run-1"); err != nil {
-		t.Fatalf("RemoveScratchDir: %v", err)
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("PrepareWorkerScratch created %d entries under the data directory, want none", len(entries))
 	}
 }

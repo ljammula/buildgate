@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -901,6 +903,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 			for _, d := range doctorDistinctHarnesses(roleHarnesses) {
 				checks = append(checks, doctorCheckHarnessInImage(ctx, in.sandboxDocker, image, d))
 			}
+			checks = append(checks, doctorCheckScratchOwned(ctx, in.sandboxDocker, image))
 			if runtime.GOOS == "darwin" {
 				checks = append(checks, doctorCheckHomeNotShared(ctx, in.sandboxDocker, image))
 			}
@@ -2991,7 +2994,7 @@ func doctorCheckHarnessInImage(ctx context.Context, dockerBinary, image string, 
 	name := fmt.Sprintf("%s binary in sandbox image (%s)", d.Binary, image)
 	cmd := exec.CommandContext(ctx, dockerBinary, doctorHarnessProbeArgs(image, d)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		fix := "rebuild the worker image with make install (Pi) or make pifork-image (pifork), or point the role's harness at one the image contains"
+		fix := doctorRebuildWorkerImageFix + ", or point the role's harness at one the image contains"
 		return doctorCheck{
 			Name: name,
 			Err:  fmt.Errorf("`%s --version` failed in %s: %s", d.Binary, image, strings.TrimSpace(string(out))),
@@ -3132,3 +3135,51 @@ func doctorCheckStaleTemporalWorkflowsUsing(ctx context.Context, lister temporal
 // -- so this only ever rejects a symlink an attacker (or a stale prior
 // run) planted before this invocation, not the ordinary fresh-scaffold
 // case.
+
+// doctorRebuildWorkerImageFix is the fix text of a check that finds the
+// worker image lacking something a launch needs.
+const doctorRebuildWorkerImageFix = "rebuild the worker image with make install (Pi) or make pifork-image (pifork)"
+
+// doctorScratchWant is the owner, group and mode of /scratch the worker
+// image must carry: Docker copies them into each launch's empty scratch
+// volume, and the worker (uid 65532) writes its Go caches there.
+const doctorScratchWant = "65532:65532:770"
+
+// doctorCheckScratchOwned tests the mechanism a launch relies on: it makes a
+// throwaway volume (named outside the bg-scratch- prefix, so no sweep takes
+// it), mounts it at /scratch in image with no network and confirms the
+// worker owns the mount as doctorScratchWant says, then removes the volume.
+// It fails when the image's /scratch is not the worker's (an image built
+// before the per-launch scratch volume) or when this Docker does not copy an
+// image's ownership into a new volume; either way every launch would fail at
+// the wrapper's mkdir.
+func doctorCheckScratchOwned(ctx context.Context, dockerBinary, image string) doctorCheck {
+	name := fmt.Sprintf("a new scratch volume is writable by the worker (%s)", image)
+	fail := func(format string, args ...any) doctorCheck {
+		return doctorCheck{Name: name, Err: fmt.Errorf(format, args...), Fix: doctorRebuildWorkerImageFix}
+	}
+	var suffix [4]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return fail("name a throwaway volume: %v", err)
+	}
+	volume := "bg-doctor-scratch-" + hex.EncodeToString(suffix[:])
+	if out, err := exec.CommandContext(ctx, dockerBinary, "volume", "create", volume).CombinedOutput(); err != nil {
+		return fail("create a throwaway volume: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	defer func() {
+		rmCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(rmCtx, dockerBinary, "volume", "rm", volume).Run()
+	}()
+	out, err := exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none", "-v", volume+":/scratch",
+		"--entrypoint", "stat", image, "-c", "%u:%g:%a", "/scratch").CombinedOutput()
+	got := strings.TrimSpace(string(out))
+	if err == nil && got == doctorScratchWant {
+		return doctorCheck{Name: name}
+	}
+	detail := got
+	if err != nil {
+		detail = fmt.Sprintf("%v: %s", err, got)
+	}
+	return fail("a new volume at /scratch in %s is not %s (stat: %s): either the image's /scratch is not owned by the worker or this Docker does not copy an image's ownership into a new volume; every launch would fail at the worker's setup", image, doctorScratchWant, detail)
+}

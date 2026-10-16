@@ -50,9 +50,15 @@ func sandboxSpec(req sandbox.SandboxRequest) (*v1.SandboxSpec, error) {
 		}
 		environment[key] = value
 	}
-	mounts := make([]any, 0, len(req.Mounts))
+	mounts := make([]any, 0, len(req.Mounts)+1)
 	for _, m := range req.Mounts {
+		if req.Scratch && m.Target == sandbox.WorkerScratchMount {
+			return nil, fmt.Errorf("openshell: the request mounts %s twice: Scratch and a mount", sandbox.WorkerScratchMount)
+		}
 		mounts = append(mounts, driverMount(m))
+	}
+	if req.Scratch {
+		mounts = append(mounts, scratchVolumeMount(req.Name))
 	}
 	spec := &v1.SandboxSpec{
 		Environment: environment,
@@ -169,6 +175,16 @@ func driverMount(m sandbox.SandboxMount) map[string]any {
 		}
 	}
 	return map[string]any{"type": "bind", "source": m.Source, "target": m.Target, "read_only": m.ReadOnly}
+}
+
+// scratchVolumeMount is the driver mount of a launch's scratch volume.
+func scratchVolumeMount(sandboxName string) map[string]any {
+	return map[string]any{
+		"type":      "volume",
+		"source":    sandbox.ScratchVolumeName(sandboxName),
+		"target":    sandbox.WorkerScratchMount,
+		"read_only": false,
+	}
 }
 
 func stringsAsAny(values []string) []any {

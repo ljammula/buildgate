@@ -745,12 +745,16 @@ func TestRunRecordsImageDigest(t *testing.T) {
 	}
 }
 
-// TestRunRemovesItsScratchDir: a container's scratch directory (Go build
-// and module caches) is removed once it exits, so no later container of
-// the run -- canonical verify in particular -- can reuse what it wrote.
+// TestRunRemovesItsScratchDir: the stand-in Run creates a container's host
+// scratch directory (Go build and module caches) with its go-build and
+// go-tmp subdirectories, binds it at /scratch, and removes it once the
+// container exits, so no later container of the run -- canonical verify in
+// particular -- can reuse what it wrote.
 func TestRunRemovesItsScratchDir(t *testing.T) {
+	argvPath := filepath.Join(t.TempDir(), "argv")
 	docker := filepath.Join(t.TempDir(), "docker-fake")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\nfor a in \"$@\"; do case \"$a\" in *:/scratch:rw) d=\"${a%%:/scratch:rw}\"; test -d \"$d/go-build\" && test -d \"$d/go-tmp\" && echo subdirs-present >> %s;; esac; done\nexit 0\n", argvPath, argvPath)
+	if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	spec := validSpec()
@@ -758,16 +762,21 @@ func TestRunRemovesItsScratchDir(t *testing.T) {
 	spec.InputDir = ""
 	spec.LogPath = filepath.Join(t.TempDir(), "worker.log")
 	spec.DataDir = t.TempDir()
-	scratch, err := EnsureScratchDir(spec.DataDir, spec.RunID, spec.Name, "")
+	spec.Scratch = true
+	spec.User = fmt.Sprintf("65532:%d", os.Getgid())
+	if _, err := Run(context.Background(), docker, spec); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	scratch := filepath.Join(spec.DataDir, "scratch", spec.RunID, spec.Name)
+	argv, err := os.ReadFile(argvPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(scratch, "planted-cache-entry"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	if !strings.Contains(string(argv), scratch+":/scratch:rw") {
+		t.Errorf("docker argv = %q, want a bind of %s at /scratch", argv, scratch)
 	}
-	spec.ScratchDir = scratch
-	if _, err := Run(context.Background(), docker, spec); err != nil {
-		t.Fatalf("Run: %v", err)
+	if !strings.Contains(string(argv), "subdirs-present") {
+		t.Errorf("go-build and go-tmp did not exist under the bound directory while the container ran: %q", argv)
 	}
 	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
 		t.Fatalf("scratch dir %s still exists after its container exited: %v", scratch, err)

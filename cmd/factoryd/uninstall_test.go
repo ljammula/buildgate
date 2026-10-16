@@ -48,6 +48,7 @@ func newUninstallFixture(dp *deps, t *testing.T) *uninstallFixture {
 echo "$@" >> `+f.dockerLog+`
 case "$1 $2" in
   "compose -p") [ "$4" = ps ] && echo abc123 ;;
+  "volume ls") echo bg-scratch-bg-1; echo xbg-scratch-bg-2; echo other-volume ;;
 esac
 exit 0
 `)
@@ -366,6 +367,27 @@ func TestUninstallPurgeDeletesGatewayStateBeforeRemovingItsImage(t *testing.T) {
 	}
 	if !strings.Contains(f.out.String(), "done    DELETE the gateway's state on the Docker VM") {
 		t.Errorf("output does not report the state deletion:\n%s", f.out.String())
+	}
+}
+
+// A purge removes the worker scratch volumes (the exact bg-scratch- prefix
+// only); without -purge they are left to the daemon's reclaim.
+func TestUninstallPurgeRemovesScratchVolumes(t *testing.T) {
+	dp := newTestDeps(t)
+	f := newUninstallFixture(dp, t)
+	f.env.purge = true
+	if err := uninstallRun(f.env, true, false, false, strings.NewReader("")); err != nil {
+		t.Fatalf("uninstallRun: %v\n%s", err, f.out.String())
+	}
+	if !strings.Contains(f.dockerCalls(), "volume rm bg-scratch-bg-1\n") {
+		t.Errorf("want exactly the scratch volume removed:\n%s", f.dockerCalls())
+	}
+	f = newUninstallFixture(dp, t)
+	if err := uninstallRun(f.env, true, false, false, strings.NewReader("")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.dockerCalls(), "volume") {
+		t.Errorf("a non-purge uninstall touched volumes:\n%s", f.dockerCalls())
 	}
 }
 

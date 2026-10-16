@@ -36,6 +36,8 @@ const (
 // WorkerExitSetupFailed, which is the step's own script's exit, after the
 // wrapper redirected output, and leaves a line in the output naming the command.
 const (
+	// WorkerExitNoScratch: the worker cannot create its directories in /scratch.
+	WorkerExitNoScratch = 95
 	// WorkerExitNoGo: the factory never released the command.
 	WorkerExitNoGo = 96
 	// WorkerExitRerun: the runtime started the command a second time.
@@ -117,6 +119,7 @@ func (s LaunchSpec) SandboxRequest(launch SandboxLaunch) (SandboxRequest, error)
 		OutputDir:      launch.OutputDir,
 		Timeout:        s.Timeout,
 		Sidecars:       append([]SidecarEndpoint(nil), s.Sidecars...),
+		Scratch:        s.Scratch,
 	}, nil
 }
 
@@ -195,8 +198,8 @@ func (s LaunchSpec) sandboxMounts(launch SandboxLaunch, tmpfsBytes int64) (mount
 	if s.InputDir != "" {
 		bind(s.InputDir, "/inputs", true)
 	}
-	if s.ScratchDir != "" {
-		bind(s.ScratchDir, WorkerScratchMount, false)
+	if s.Scratch {
+		// A per-launch volume (SandboxRequest.Scratch), not a bind.
 		readWrite = append(readWrite, WorkerScratchMount)
 	}
 	for _, mount := range s.Inputs {
@@ -218,7 +221,7 @@ func (s LaunchSpec) sandboxCommand() []string {
 		WorkDir:    workerContainerWorkDir,
 		Umask:      s.WorkerUmask,
 		GuardTries: workerGuardWaitTries,
-	}, s.ScratchDir != "")
+	}, s.Scratch)
 	return append([]string{"/bin/sh", "-c", script, "--"}, s.Command...)
 }
 
@@ -232,12 +235,23 @@ type workerWrapper struct {
 	GuardTries int
 }
 
+// scratchCheck is the wrapper step that makes the worker's directories in the
+// scratch volume mounted at mount and exits WorkerExitNoScratch with the cause
+// when the image's /scratch is not writable by the worker (an image built
+// before the volume).
+func scratchCheck(mount string) string {
+	quoted := shSingleQuote(mount)
+	dirs := shSingleQuote(mount+"/go-build") + " " + shSingleQuote(mount+"/go-tmp") + " " + shSingleQuote(mount+"/gomodcache")
+	return "mkdir -p " + dirs + " || { echo \"buildgate: the worker cannot write " + mount +
+		" (uid $(id -u), $(stat -c %u:%g:%a " + quoted + " 2>/dev/null)): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)\"; exit " + strconv.Itoa(WorkerExitNoScratch) + "; }"
+}
+
 // workerWrapperScript is the `sh -c` script that runs the worker command
 // ("$@"): the guard, the output redirect, the change to the worktree, the
 // core and open-file limits and, when Umask is set, the same umask and
 // group-write reclaim as DockerCommand. Stdin is closed: a harness given an
 // open stdin waits on it.
-func workerWrapperScript(w workerWrapper, reclaimScratch bool) string {
+func workerWrapperScript(w workerWrapper, scratch bool) string {
 	guard := shSingleQuote(w.GuardDir + "/" + WorkerGuardGoFile)
 	started := shSingleQuote(w.GuardDir + "/" + WorkerGuardStartedFile)
 	output := shSingleQuote(w.OutputDir + "/" + WorkerOutputFile)
@@ -254,6 +268,9 @@ func workerWrapperScript(w workerWrapper, reclaimScratch bool) string {
 		"ulimit -c 0",
 		"ulimit -n 4096",
 	}
+	if scratch {
+		script = append(script, scratchCheck(WorkerScratchMount))
+	}
 	if w.Umask == "" {
 		script = append(script, `exec "$@"`)
 	} else {
@@ -261,9 +278,6 @@ func workerWrapperScript(w workerWrapper, reclaimScratch bool) string {
 		// walk always reports it, and that line landed in every step's
 		// captured output, a gate's failing lines included.
 		reclaim := "chmod -R g+rwX -- " + workDir + " 2>/dev/null || true"
-		if reclaimScratch {
-			reclaim += "; chmod -R g+rwX -- " + shSingleQuote(WorkerScratchMount) + " 2>/dev/null || true"
-		}
 		script = append(script, "umask "+w.Umask, `"$@"`, "ec=$?", reclaim, "exit $ec")
 	}
 	return strings.Join(script, "; ")

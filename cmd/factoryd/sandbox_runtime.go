@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -168,5 +169,7 @@ func newGatewayRuntime(dp *deps) *openshell.Lazy {
 			return nil
 		},
 		Containers: &openshell.DockerContainers{Binary: dp.docker.dockerBinary()},
+		Volumes:    &openshell.DockerVolumes{Binary: dp.docker.dockerBinary()},
+		Warn:       log.Printf,
 	}
 }

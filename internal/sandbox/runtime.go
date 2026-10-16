@@ -77,6 +77,21 @@ type SandboxRequest struct {
 	// Sidecars are the factory's own containers the worker may reach, each
 	// by address: the worker joins no Docker network and resolves no alias.
 	Sidecars []SidecarEndpoint
+	// Scratch gives the worker a fresh, private volume at WorkerScratchMount,
+	// created for this launch and removed by Delete.
+	Scratch bool
+}
+
+// scratchVolumePrefix starts the name of every scratch volume.
+const scratchVolumePrefix = "bg-scratch-"
+
+// ScratchVolumeName is the name of the Docker volume of a launch that sets
+// SandboxRequest.Scratch. It is a pure function of the recorded sandbox name,
+// so a sweep over run records finds a volume a launch left behind. It lives
+// here, not in openshell, because sweeps in this package and in cmd/factoryd
+// need it and this package cannot import openshell.
+func ScratchVolumeName(sandboxName string) string {
+	return scratchVolumePrefix + sandboxName
 }
 
 // SidecarEndpoint is one container of the factory's (the registry proxy, a

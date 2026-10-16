@@ -66,9 +66,6 @@ type RuntimeLaunch struct {
 // start exits at it. A start time that moved, or the guard's own exit code,
 // is ErrSandboxRerun.
 func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeLaunch) (result Result, ref SandboxRef, err error) {
-	if s.ScratchDir != "" {
-		defer func() { _ = removeScratchTree(s.ScratchDir) }()
-	}
 	launch, req, launchDir, err := prepareRuntimeLaunch(s, l)
 	if err != nil {
 		return Result{}, SandboxRef{}, err

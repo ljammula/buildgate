@@ -202,14 +202,11 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 			// /usr/local/gomodcache for GOPROXY to mean anything: a
 			// module the image lacks has to land somewhere writable, and
 			// the memory-backed $HOME tmpfs is too small for a real
-			// target repo's graph -- see LaunchSpec.ScratchDir. The
-			// baked cache is then unused for this run; every module comes
+			// target repo's graph, so the worker gets the disk-backed
+			// per-launch scratch volume (LaunchSpec.Scratch). The baked
+			// cache is then unused for this run; every module comes
 			// through the proxy, which is the whole point of the proxy.
-			scratch, err := EnsureScratchDir(workerSpec.DataDir, workerSpec.RunID, workerSpec.Name, workerSpec.User)
-			if err != nil {
-				return LaunchSpec{}, err
-			}
-			workerSpec.ScratchDir = scratch
+			workerSpec.Scratch = true
 			additions = append(additions,
 				"GOPROXY="+strings.TrimRight(base, "/"),
 				"GOMODCACHE="+WorkerScratchMount+"/gomodcache",
@@ -219,16 +216,14 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 				// GOCACHE into -- the verify gate died on "no space left
 				// on device" right after the module cache fix landed
 				// (found live 2026-09-10, attempt 6). Same disk-backed
-				// scratch directory, which is this container's alone (see
-				// RunScratchDir): canonical verify must never compile or
-				// replay a cache the build phase wrote.
+				// scratch volume, which is this container's alone:
+				// canonical verify must never compile or replay a cache
+				// the build phase wrote.
 				"GOCACHE="+WorkerScratchMount+"/go-build",
 				// The go command extracts modules read-only (0444 files
-				// in 0555 directories); on the host that makes the
-				// scratch directory undeletable by a plain RemoveAll
-				// once the run ends (found live 2026-09-10). -modcacherw
-				// is Go's own documented answer for a cache that is
-				// cleaned up by something other than `go clean`.
+				// in 0555 directories); -modcacherw is Go's own documented
+				// answer for a cache cleaned up by something other than
+				// `go clean` (the stand-in Run removes a host directory).
 				"GOFLAGS="+withModCacheRW(workerSpec.Environment),
 				// sum.golang.org (Go's own default GOSUMDB), not "off":
 				// goSumDBRoutePrefix registers a route serving exactly

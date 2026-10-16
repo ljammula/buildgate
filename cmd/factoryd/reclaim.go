@@ -51,9 +51,19 @@ func scratchRunInFlight(dataDir string) func(runID string) bool {
 }
 
 // removeScratchDirs removes the scratch cache of every run under dataDir
-// that is no longer in flight, logging each removal.
-func removeScratchDirs(dataDir string) {
-	for _, stale := range sandbox.ReconcileScratchDirs(dataDir, scratchRunInFlight(dataDir)) {
+// that is no longer in flight, logging each removal: the scratch volumes
+// of the gateway launches and the host directories of the stand-in launcher
+// and of older installs. Best effort: an error is logged, never fatal.
+func removeScratchDirs(ctx context.Context, dockerBinary, dataDir string) {
+	inFlight := scratchRunInFlight(dataDir)
+	removed, err := sandbox.ReconcileScratchVolumes(ctx, dockerBinary, dataDir, inFlight)
+	for _, volume := range removed {
+		log.Printf("removed scratch volume %s", volume)
+	}
+	if err != nil {
+		log.Printf("scratch volume reconciliation for %s: %v", dataDir, err)
+	}
+	for _, stale := range sandbox.ReconcileScratchDirs(dataDir, inFlight) {
 		log.Printf("removed scratch cache left by run %s", stale)
 	}
 }

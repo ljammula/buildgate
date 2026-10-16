@@ -383,13 +383,13 @@ func (d *daemonRun) startHeartbeat() error {
 		} else if len(removed) > 0 {
 			log.Printf("sandbox: removed %d orphaned compose services resource(s) from a prior run: %v", len(removed), removed)
 		}
-		// The registry proxy's per-run scratch cache (see
-		// sandbox.LaunchSpec.ScratchDir) is created by whichever Worker
-		// runs the sandboxed phases -- this daemon, for a repository-owner
-		// run -- so it is this daemon's to remove: at startup for a prior
+		// A launch's scratch volume (see sandbox.LaunchSpec.Scratch) is
+		// created by whichever Worker runs the sandboxed phases -- this
+		// daemon, for a repository-owner run -- so it is this daemon's to
+		// remove: at startup for a prior
 		// crash, and on every reclaim tick for a run reconciled terminal
 		// after its submitter stopped waiting (see scratchRunInFlight).
-		removeScratchDirs(d.absDataDir)
+		removeScratchDirs(ctx, *d.sandboxDocker, d.absDataDir)
 	}
 	d.reconcileSandboxOrphans(d.signalCtx)
 

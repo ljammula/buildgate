@@ -309,10 +309,7 @@ func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx co
 				return last, err
 			}
 		}
-		s, err = sandbox.PrepareWorkerScratch(s)
-		if err != nil {
-			return last, err
-		}
+		s = sandbox.PrepareWorkerScratch(s)
 		// compose.ApplyToWorkerLaunch, not a PrepareWorker call: compose
 		// services add ComposeNetwork and this attempt's own
 		// BG_SERVICE_*/BG_COMPOSE_SERVICES environment. Run promotes that

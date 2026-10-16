@@ -77,7 +77,7 @@ it explains what the flag changes. Flags come before positional arguments.
 | `-force` | `stop`, `uninstall`, `install-service` | Proceeds past the refusal: `stop` despite a building request, whose build then waits in `resume_review` |
 | `-fix` | `doctor` | Repairs what it can: starts Temporal, the gateway and the meter, writes missing config values, and reclaims a sandbox whose build is gone |
 | `-target-repo <checkout>` | `doctor` | Checks a repository as a run and a `submit` would: verify command, root `AGENTS.md`, preflight, compose file, declared toolchains |
-| `-purge` | `uninstall` | Also deletes `~/.config/factoryd`, `~/buildgate`, the Temporal volumes and the gateway's state; asks you to type `purge` |
+| `-purge` | `uninstall` | Also deletes `~/.config/factoryd`, `~/buildgate`, the Temporal volumes, the gateway's state and the worker scratch volumes; asks you to type `purge` |
 
 `factoryd doctor` reports the launchd service state as info. It fails only
 when an installed plist points at a `factoryd` binary that no longer exists
@@ -120,8 +120,8 @@ each `daemon` child it runs.
 | One `worker` per data dir | A second fails: "a factoryd worker is already driving" (naming the pid from the heartbeat). Kernel `flock`; a crash leaves no stale lock. |
 | Ctrl-C / SIGTERM on `worker` | Request steps are single saves, so nothing is lost mid-drafting; a mid-`building` ticket's run is picked up again. |
 | Explicit `registry_proxy` needs explicit `-sandbox-image` | An explicit `-registry-proxy`/`-registry-proxy=false` flag or `registry_proxy` key without `-sandbox-image` fails: `-registry-proxy requires -sandbox-image`. Pass the digest `doctor` prints, or drop the key. |
-| Registry-proxy caches are on disk | Go module/build caches live under `<data-dir>/scratch/<run-id>/<launch>` (one directory per worker container, removed when that container exits), not the sandbox tmpfs. |
-| Every container starts with a cold Go build cache | Canonical verify, full suite and each gate get their own scratch dir, so none replays a cache the build phase wrote (no `(cached)` test results); modules come back through the registry proxy. Expect the first `go test` of each phase to compile from scratch. |
+| Go caches are on disk | Go module/build caches live in a per-launch Docker volume `bg-scratch-<sandbox>` inside the Docker VM, mounted at `/scratch` and removed when the sandbox is deleted (the daemon's reclaim removes a leftover), not the sandbox tmpfs. A worker image built before the volume fails its launch naming the image: rebuild with `make install`; `doctor` fails the row `a new scratch volume is writable by the worker` for one whose `/scratch` is not `65532:65532` mode `770` or a Docker that does not copy it into a new volume, and warns `leftover scratch volume(s) of finished runs` for volumes a killed factoryd left, which `doctor -fix` removes. |
+| Every container starts with a cold Go build cache | Canonical verify, full suite and each gate get their own scratch volume, so none replays a cache the build phase wrote (no `(cached)` test results); modules come back through the registry proxy. Expect the first `go test` of each phase to compile from scratch. |
 | Stale `factoryd` on `$PATH` | `doctor` runs or fixes a shadowing binary only in `$HOME/.local/bin`, `$GOPATH/bin` or a Homebrew prefix (elsewhere: `stat` only). `-fix` prints the `rm`/`mv`; add `FACTORYD_DOCTOR_APPLY_PATH_FIX=1` to rename it to `<path>.stale-<date>`. |
 | `worker` start after a kill -9 | With the drain lock held, it reclaims every nonterminal run whose owner is gone: the pid in the run's `sandbox-owner.pid` no longer exists (a live pid, no marker, or a terminal run is never touched). Each is halted with the triage "the factoryd process running this build stopped mid-run", its Temporal workflow is terminated if still `Running` (unreachable Temporal: the run is left for the next start), and its worker, supervisor, registry-proxy and compose containers are removed; its ticket rebuilds as a new run. One log line per run. |
 | Paths colima does not share | colima should share only `~/buildgate` read-write and your repositories read-only (USAGE.md, "Data directory and colima"), so a data dir or workspace anywhere else — `/tmp`, `~/.cache` — fails inside the sandbox ("does not appear to share ... into its containers"). `doctor -workspace <dir>` probes the workspace and data dir; `worker` and `factoryd <run>` preflights probe the data dir when it already exists. `doctor -fix` can repoint `data_dir` to `~/buildgate/data`. `mkdir -p` the data dir before a first bare `factoryd` run. On macOS `doctor` also warns (`Docker VM does not share all of $HOME`) while the VM still sees all of `$HOME`. |
@@ -2091,7 +2091,7 @@ LIVE_SMOKE_ONLY=oracle LIVE_SMOKE_TEMPORAL=localhost:7233 scripts/live-smoke.sh
   [`containment-matrix.md`](containment-matrix.md).
 - The registry-proxy policy travels in the Workflow input. Whichever
   worker runs the Activity launches one proxy per sandboxed Activity. Its
-  scratch cache is removed when the container exits (see Gotchas);
+  scratch volume is removed when its sandbox is deleted (see Gotchas);
   `factoryd daemon` also reaps leftovers at startup and on each reclaim
   scan.
 

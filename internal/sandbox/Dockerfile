@@ -178,6 +178,10 @@ RUN XDG_CACHE_HOME=/opt/copilot-cache copilot --version \
     && test -f /opt/copilot-pkg/index.js
 ENV COPILOT_CLI_DIST_DIR=/opt/copilot-pkg
 
+# /scratch is copied into each new, empty scratch volume on its first mount,
+# so the worker can write it: the launch's wrapper fails when it cannot.
+RUN mkdir -p /scratch && chown 65532:65532 /scratch && chmod 0770 /scratch \
+    && test "$(stat -c %u:%g:%a /scratch)" = 65532:65532:770
 RUN mkdir -p /sandbox && chown 65532:65532 /sandbox
 USER 65532:65532
 WORKDIR /sandbox

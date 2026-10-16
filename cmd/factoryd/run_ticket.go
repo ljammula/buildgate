@@ -1497,7 +1497,7 @@ func (tr *ticketRun) lockRepository() error {
 	if !isolatedRun {
 		reconcileStranded(directLock)
 	}
-	removeScratchDirs(tr.sandboxDataDir)
+	removeScratchDirs(tr.lifecycleCtx, *tr.sandboxDocker, tr.sandboxDataDir)
 	if *tr.preflightProfile != "" && *tr.preflightProfile != preflightProfileBrownfield {
 		return fmt.Errorf("-preflight-profile must be \"\" or %q, got %q", preflightProfileBrownfield, *tr.preflightProfile)
 	}
@@ -1590,13 +1590,13 @@ func (tr *ticketRun) snapshotSpec() error {
 		if err := spec.Validate(); err != nil {
 			return fmt.Errorf("-registry-proxy configuration: %w", err)
 		}
-		// The per-run scratch directory holds each container's own
-		// <container> subdirectory for the proxy's Go caches (see
-		// sandbox.RunScratchDir), never shared between containers;
-		// sandbox.Run removes each on exit, and this removes any a launch
-		// left behind when the run ends however it ends, so a ~1 GB
-		// module graph never accumulates under -data-dir. Best-effort and
-		// logged, never fatal to the run's own outcome.
+		// A gateway launch's Go caches live in a per-launch Docker volume
+		// the runtime's Delete removes. This removes the host scratch
+		// directory the stand-in launcher makes (see sandbox.RunScratchDir:
+		// one <container> subdirectory per container, never shared) and any
+		// an older install left, when the run ends however it ends, so a
+		// ~1 GB module graph never accumulates under -data-dir. Best-effort
+		// and logged, never fatal to the run's own outcome.
 		// Guarded by scratchRunInFlight, not unconditional: on the
 		// Temporal path the Worker that populates this cache may be a
 		// daemon in another process, and a submitter that gave up waiting

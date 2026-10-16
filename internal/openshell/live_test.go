@@ -45,7 +45,7 @@ func liveRuntime(t *testing.T) (*Runtime, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = readiness.Close() })
-	return &Runtime{Client: client, Containers: &DockerContainers{}, Readiness: readiness, PollEvery: 500 * time.Millisecond}, image
+	return &Runtime{Client: client, Containers: &DockerContainers{}, Volumes: &DockerVolumes{}, Readiness: readiness, PollEvery: 500 * time.Millisecond}, image
 }
 
 // liveLaunch builds one launch's directories under the data root (the only
@@ -54,7 +54,7 @@ func liveLaunch(t *testing.T, image, script string) (sandbox.LaunchSpec, sandbox
 	t.Helper()
 	root := filepath.Join(sessionconfig.DataRoot(), "openshell-live", fmt.Sprintf("%d", time.Now().UnixNano()))
 	dirs := map[string]string{}
-	for _, name := range []string{"workspace", "inputs", "data", "guard", "output", "scratch"} {
+	for _, name := range []string{"workspace", "inputs", "data", "guard", "output"} {
 		dirs[name] = filepath.Join(root, name)
 		if err := os.MkdirAll(dirs[name], 0o775); err != nil {
 			t.Fatal(err)
@@ -73,7 +73,7 @@ func liveLaunch(t *testing.T, image, script string) (sandbox.LaunchSpec, sandbox
 		t.Fatal(err)
 	}
 	spec := sandbox.LaunchSpec{
-		Image: image, WorkDir: dirs["workspace"], InputDir: dirs["inputs"], ScratchDir: dirs["scratch"],
+		Image: image, WorkDir: dirs["workspace"], InputDir: dirs["inputs"], Scratch: true,
 		LogPath: filepath.Join(root, "worker.log"), Name: name, User: fmt.Sprintf("65532:%d", os.Getgid()),
 		Command: []string{"/bin/sh", "-c", script},
 		Memory:  "1g", CPUs: "1", TmpfsSize: "64m", Timeout: 3 * time.Minute,
@@ -756,13 +756,11 @@ pip download --no-deps -d /tmp/p idna==3.6 2>&1 | tail -4 | sed 's/^/pip: /'; ls
 	if err := proxy.Ensure(ctx, ""); err != nil {
 		t.Fatalf("start the registry proxy: %v", err)
 	}
-	spec.ScratchDir = ""
+	spec.Scratch = false
 	if spec, err = proxy.PrepareWorker(spec); err != nil {
 		t.Fatal(err)
 	}
-	if spec, err = sandbox.PrepareWorkerScratch(spec); err != nil {
-		t.Fatal(err)
-	}
+	spec = sandbox.PrepareWorkerScratch(spec)
 	t.Logf("sidecars %+v", spec.Sidecars)
 	if _, _, err := sandbox.RunThroughRuntime(ctx, rt, spec, sandbox.RuntimeLaunch{Nonce: "attempt-1"}); err != nil {
 		t.Fatalf("RunThroughRuntime: %v", err)
@@ -880,4 +878,97 @@ func TestLiveScript(t *testing.T) {
 	result, _, err := sandbox.RunThroughRuntime(ctx, rt, spec, sandbox.RuntimeLaunch{Nonce: "attempt-1"})
 	logged, _ := os.ReadFile(spec.LogPath)
 	t.Logf("exit %d, err %v, output:\n%s", result.ExitCode, err, logged)
+}
+
+// liveScratchScript runs 8 parallel workers of 2000 temp-directory creations
+// each under /scratch/go-tmp, as `go build` does, and prints one line per
+// worker; the volume root's owner, group and mode come first.
+const liveScratchScript = `echo "root=$(stat -c %u:%g:%a /scratch)"
+mkdir -p /scratch/go-tmp
+for w in 1 2 3 4 5 6 7 8; do
+  (
+    i=0
+    while [ $i -lt 2000 ]; do
+      i=$((i+1))
+      d=$(mktemp -d /scratch/go-tmp/go-build.XXXXXX) && echo x > $d/f && cat $d/f >/dev/null || { echo "W$w FAIL $i"; exit 1; }
+    done
+    echo "W$w done"
+  ) &
+done
+wait
+exit 0`
+
+// TestLiveScratchVolumeSurvivesParallelWrites launches one sandbox with a
+// scratch volume, checks the volume root is the worker's, creates many
+// directories in parallel, and checks Delete removes the volume.
+func TestLiveScratchVolumeSurvivesParallelWrites(t *testing.T) {
+	rt, image := liveRuntime(t)
+	spec, launch := liveLaunch(t, image, liveScratchScript)
+	req, err := spec.SandboxRequest(launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !req.Scratch {
+		t.Fatal("the request has no scratch volume")
+	}
+	hasScratch := false
+	for _, p := range req.ReadWritePaths {
+		hasScratch = hasScratch || p == sandbox.WorkerScratchMount
+	}
+	if !hasScratch {
+		t.Fatalf("ReadWritePaths = %v, want it to hold %s", req.ReadWritePaths, sandbox.WorkerScratchMount)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	if err := sandbox.RecordSandbox(spec.DataDir, spec.RunID, sandbox.SandboxRecord{Name: launch.Name}); err != nil {
+		t.Fatal(err)
+	}
+	deleted := false
+	t.Cleanup(func() {
+		if !deleted {
+			_ = rt.Delete(context.Background(), launch.Name)
+		}
+	})
+	if _, err := rt.Create(ctx, req); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	volume := sandbox.ScratchVolumeName(launch.Name)
+	if out, err := exec.Command("docker", "volume", "inspect", volume).CombinedOutput(); err != nil {
+		t.Fatalf("scratch volume %s does not exist after Create: %v: %s", volume, err, out)
+	}
+	outputFile := filepath.Join(launch.OutputDir, sandbox.WorkerOutputFile)
+	if err := os.WriteFile(filepath.Join(launch.GuardDir, sandbox.WorkerGuardGoFile), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForFile(t, outputFile, 30*time.Second)
+	if err := os.WriteFile(filepath.Join(launch.GuardDir, sandbox.WorkerGuardStartedFile), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exit, err := rt.Wait(ctx, launch.Name)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	logged, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0; output:\n%s", exit.ExitCode, logged)
+	}
+	if got := strings.Count(string(logged), " done\n"); got != 8 {
+		t.Errorf("%d workers finished, want 8; output:\n%s", got, logged)
+	}
+	if strings.Contains(string(logged), " FAIL ") {
+		t.Errorf("a worker failed; output:\n%s", logged)
+	}
+	if !strings.Contains(string(logged), "root=65532:65532:770\n") {
+		t.Errorf("the volume root is not 65532:65532:770; output:\n%s", logged)
+	}
+	deleted = true
+	if err := rt.Delete(ctx, launch.Name); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if out, err := exec.Command("docker", "volume", "inspect", volume).CombinedOutput(); err == nil {
+		t.Errorf("scratch volume %s still exists after Delete: %s", volume, out)
+	}
 }
