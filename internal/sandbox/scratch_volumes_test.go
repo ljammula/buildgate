@@ -88,3 +88,20 @@ func TestReconcileScratchVolumesReportsAVolumeThatWillNotGo(t *testing.T) {
 		t.Errorf("removed = %v, want none", removed)
 	}
 }
+
+func TestStaleScratchVolumesSelectsWithoutRemoving(t *testing.T) {
+	dataDir := t.TempDir()
+	recordNames(t, dataDir, "run-done", "bg-aaaa")
+	recordNames(t, dataDir, "run-live", "bg-bbbb")
+	docker, removedPath := volumeDocker(t, "bg-scratch-bg-aaaa", "bg-scratch-bg-bbbb", "bg-scratch-bg-other")
+	stale, err := StaleScratchVolumes(context.Background(), docker, dataDir, func(runID string) bool { return runID == "run-live" })
+	if err != nil {
+		t.Fatalf("StaleScratchVolumes: %v", err)
+	}
+	if want := []string{"bg-scratch-bg-aaaa"}; !reflect.DeepEqual(stale, want) {
+		t.Errorf("stale = %v, want %v", stale, want)
+	}
+	if _, err := os.Stat(removedPath); err == nil {
+		t.Error("StaleScratchVolumes ran `docker volume rm`")
+	}
+}

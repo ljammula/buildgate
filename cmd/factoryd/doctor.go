@@ -901,6 +901,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 			for _, d := range doctorDistinctHarnesses(roleHarnesses) {
 				checks = append(checks, doctorCheckHarnessInImage(ctx, in.sandboxDocker, image, d))
 			}
+			checks = append(checks, doctorCheckScratchOwned(ctx, in.sandboxDocker, image))
 			if runtime.GOOS == "darwin" {
 				checks = append(checks, doctorCheckHomeNotShared(ctx, in.sandboxDocker, image))
 			}
@@ -2991,7 +2992,7 @@ func doctorCheckHarnessInImage(ctx context.Context, dockerBinary, image string, 
 	name := fmt.Sprintf("%s binary in sandbox image (%s)", d.Binary, image)
 	cmd := exec.CommandContext(ctx, dockerBinary, doctorHarnessProbeArgs(image, d)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		fix := "rebuild the worker image with make install (Pi) or make pifork-image (pifork), or point the role's harness at one the image contains"
+		fix := doctorRebuildWorkerImageFix + ", or point the role's harness at one the image contains"
 		return doctorCheck{
 			Name: name,
 			Err:  fmt.Errorf("`%s --version` failed in %s: %s", d.Binary, image, strings.TrimSpace(string(out))),
@@ -3132,3 +3133,36 @@ func doctorCheckStaleTemporalWorkflowsUsing(ctx context.Context, lister temporal
 // -- so this only ever rejects a symlink an attacker (or a stale prior
 // run) planted before this invocation, not the ordinary fresh-scaffold
 // case.
+
+// doctorRebuildWorkerImageFix is the fix text of a check that finds the
+// worker image lacking something a launch needs.
+const doctorRebuildWorkerImageFix = "rebuild the worker image with make install (Pi) or make pifork-image (pifork)"
+
+// doctorScratchWant is the owner, group and mode of /scratch the worker
+// image must carry: Docker copies them into each launch's empty scratch
+// volume, and the worker (uid 65532) writes its Go caches there.
+const doctorScratchWant = "65532:65532:770"
+
+// doctorCheckScratchOwned runs image once, with no network, and confirms its
+// /scratch is owned by the worker as doctorScratchWant says. An image built
+// before the per-launch scratch volume has no /scratch or a root-owned one,
+// and every launch fails at the wrapper's mkdir.
+func doctorCheckScratchOwned(ctx context.Context, dockerBinary, image string) doctorCheck {
+	name := fmt.Sprintf("worker image owns /scratch (%s)", image)
+	cmd := exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none",
+		"--entrypoint", "stat", image, "-c", "%u:%g:%a", "/scratch")
+	out, err := cmd.CombinedOutput()
+	got := strings.TrimSpace(string(out))
+	if err == nil && got == doctorScratchWant {
+		return doctorCheck{Name: name}
+	}
+	detail := got
+	if err != nil {
+		detail = fmt.Sprintf("%v: %s", err, got)
+	}
+	return doctorCheck{
+		Name: name,
+		Err:  fmt.Errorf("/scratch in %s is not %s (stat: %s): every launch would fail at the worker's setup", image, doctorScratchWant, detail),
+		Fix:  doctorRebuildWorkerImageFix,
+	}
+}

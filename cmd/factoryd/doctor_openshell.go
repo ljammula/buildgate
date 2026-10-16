@@ -49,10 +49,45 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 	if sandboxesListed {
 		checks = append(checks, sandboxes)
 	}
+	if check, ok := doctorScratchVolumesCheck(ctx, in, fix); ok {
+		checks = append(checks, check)
+	}
 	if check, ok := doctorCheckSupervisorTrustsInterceptingCA(); ok {
 		checks = append(checks, check)
 	}
 	return append(checks, doctorCheckMeter(dp, ctx), doctorCheckMeterRunsConfiguredImage(in.meterImage))
+}
+
+// doctorScratchVolumesCheck is the advisory row of the scratch volumes of
+// finished runs that a launch's Delete did not remove (a factoryd killed
+// mid-run). With fix they are removed first (removeScratchDirs). ok is false
+// when dataDir is unset or Docker cannot list volumes: the Docker row says
+// why.
+func doctorScratchVolumesCheck(ctx context.Context, in doctorInputs, fix bool) (check doctorCheck, ok bool) {
+	if in.dataDir == "" {
+		return doctorCheck{}, false
+	}
+	inFlight := scratchRunInFlight(in.dataDir)
+	stale, err := sandbox.StaleScratchVolumes(ctx, in.sandboxDocker, in.dataDir, inFlight)
+	if err != nil {
+		return doctorCheck{}, false
+	}
+	if fix && len(stale) > 0 {
+		removeScratchDirs(ctx, in.sandboxDocker, in.dataDir)
+		if stale, err = sandbox.StaleScratchVolumes(ctx, in.sandboxDocker, in.dataDir, inFlight); err != nil {
+			return doctorCheck{}, false
+		}
+	}
+	name := "no leftover scratch volumes of finished runs"
+	if len(stale) == 0 {
+		return doctorCheck{Name: name}, true
+	}
+	return doctorCheck{
+		Name:     name,
+		Advisory: true,
+		Err:      fmt.Errorf("%d leftover scratch volume(s) of finished runs: %s", len(stale), strings.Join(stale, ", ")),
+		Fix:      "run `factoryd doctor -fix` to remove them",
+	}, true
 }
 
 // stackRestartReason is why a stack that was started has to be stopped and
