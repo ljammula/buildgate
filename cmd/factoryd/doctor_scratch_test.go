@@ -128,3 +128,29 @@ func TestDoctorScratchVolumesCheck(t *testing.T) {
 		t.Error("a row with Docker failing, want it skipped")
 	}
 }
+
+// Every image a profile pins, other than the active one, is probed: a stale
+// one fails naming its profiles and the file to re-point, so make install's
+// doctor run lists it instead of reporting nothing left to do.
+func TestDoctorCheckProfileImages(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\ncase \"$1\" in\nrun) case \"$*\" in *stale:1*) echo '0:0:755' ;; *) echo '65532:65532:770' ;; esac ;;\nesac\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	groups := []doctorProfileImage{
+		{image: "active:1", profiles: []string{"default"}, path: "/cfg/config.yml"},
+		{image: "fresh:1", profiles: []string{"a", "b"}, path: "/cfg/a.yml"},
+		{image: "stale:1", profiles: []string{"walk4"}, path: "/cfg/walk4.yml"},
+	}
+	checks := doctorCheckProfileImages(context.Background(), bin, "active:1", groups)
+	if len(checks) != 2 {
+		t.Fatalf("rows = %+v, want one per image other than the active one", checks)
+	}
+	if checks[0].Err != nil || !strings.Contains(checks[0].Name, "profile a, b") {
+		t.Errorf("fresh image row = %+v", checks[0])
+	}
+	if checks[1].Err == nil || !strings.Contains(checks[1].Name, "profile walk4") || !strings.Contains(checks[1].Fix, "/cfg/walk4.yml") {
+		t.Errorf("stale image row = %+v, want a failure naming walk4 and its file", checks[1])
+	}
+}

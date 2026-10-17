@@ -256,6 +256,7 @@ func doctorMain(dp *deps, args []string) error {
 		workspace:              *workspace,
 		dataDir:                *dataDir,
 		temporalAddress:        *temporalAddress,
+		profileImages:          doctorProfileImages(),
 		baselineCheck:          doctorBaselineCheckRunner(dp, resolvedConfigPath, doctorExplicitDataDir(flags, *dataDir), *temporalAddress),
 		egressCABundle:         *egressCABundle,
 		lintCommand:            *lintCommand,
@@ -787,6 +788,9 @@ type doctorInputs struct {
 	// baselineCheck runs `factoryd -baseline-check` on a repository (see
 	// doctorCheckBaseline); nil skips the check.
 	baselineCheck func(repo string) error
+	// profileImages is each profile's sandbox_image, keyed by image, the
+	// profiles in order (doctorProfileImages); empty checks none.
+	profileImages []doctorProfileImage
 	// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan feed
 	// doctorCheckReleasePolicy: the same three
 	// release_max_files_changed/release_max_insertions/release_rollback_plan
@@ -908,6 +912,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 				checks = append(checks, doctorCheckHarnessInImage(ctx, in.sandboxDocker, image, d))
 			}
 			checks = append(checks, doctorCheckScratchOwned(ctx, in.sandboxDocker, image))
+			checks = append(checks, doctorCheckProfileImages(ctx, in.sandboxDocker, image, in.profileImages)...)
 			if runtime.GOOS == "darwin" {
 				checks = append(checks, doctorCheckHomeNotShared(ctx, in.sandboxDocker, image))
 			}
@@ -3187,4 +3192,66 @@ func doctorCheckScratchOwned(ctx context.Context, dockerBinary, image string) do
 		detail = fmt.Sprintf("%v: %s", err, got)
 	}
 	return fail("a new volume at /scratch in %s is not %s (stat: %s): either the image's /scratch is not owned by the worker or this Docker does not copy an image's ownership into a new volume; every launch would fail at the worker's setup", image, doctorScratchWant, detail)
+}
+
+// doctorProfileImage is one image some profiles pin as their sandbox_image.
+type doctorProfileImage struct {
+	image    string
+	profiles []string
+	path     string // the first profile's config file
+}
+
+// doctorProfileImages groups every profile under the config directory by the
+// sandbox_image it pins, in profile order. A profile that sets none, or whose
+// file does not load, is left out.
+func doctorProfileImages() []doctorProfileImage {
+	names, err := sessionconfig.Profiles()
+	if err != nil {
+		return nil
+	}
+	var groups []doctorProfileImage
+	index := map[string]int{}
+	for _, name := range names {
+		cfg, err := sessionconfig.Load(sessionconfig.ProfilePath(name))
+		if err != nil || cfg.SandboxImage == nil || *cfg.SandboxImage == "" {
+			continue
+		}
+		image := *cfg.SandboxImage
+		if i, ok := index[image]; ok {
+			groups[i].profiles = append(groups[i].profiles, name)
+			continue
+		}
+		index[image] = len(groups)
+		groups = append(groups, doctorProfileImage{image: image, profiles: []string{name}, path: sessionconfig.ProfilePath(name)})
+	}
+	return groups
+}
+
+// doctorCheckProfileImages runs doctorCheckScratchOwned on every image a
+// profile pins other than activeImage (checked already), one row per image
+// naming the profiles that use it. make install rebuilds and re-points the
+// standard images, but a profile with an image of its own (a project or
+// toolchain image built on an older worker) keeps it, and every launch from
+// that profile would fail at the worker's setup; install runs doctor, so the
+// failure reaches its list of what is left to do.
+func doctorCheckProfileImages(ctx context.Context, dockerBinary, activeImage string, groups []doctorProfileImage) []doctorCheck {
+	var checks []doctorCheck
+	for _, g := range groups {
+		if g.image == activeImage {
+			continue
+		}
+		name := fmt.Sprintf("profile %s: its sandbox_image can run this factoryd's worker (%s)", strings.Join(g.profiles, ", "), g.image)
+		if !sandbox.ImagePresent(ctx, dockerBinary, g.image) {
+			checks = append(checks, doctorCheck{Name: name, Err: errors.New("the image is not on this machine"),
+				Fix: "rebuild that image, or re-point sandbox_image in " + g.path})
+			continue
+		}
+		check := doctorCheckScratchOwned(ctx, dockerBinary, g.image)
+		check.Name = name
+		if check.Err != nil {
+			check.Fix = "rebuild that image on the current worker image (its own recipe, or make project-sandbox-image for a project image) and re-point sandbox_image in " + g.path
+		}
+		checks = append(checks, check)
+	}
+	return checks
 }

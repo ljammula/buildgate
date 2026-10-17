@@ -307,3 +307,22 @@ func TestNoteLeftoversBoundsAndCleansWhatItRecords(t *testing.T) {
 		t.Errorf("a ticket with no Allowed-Files recorded %+v", b)
 	}
 }
+
+// The worker wrapper's own exit when the image cannot give the worker
+// /scratch is not a verify failure: the record names the stale image, the
+// run halts, and the advice is to rebuild the image, not to fix the verify
+// command (walk4's pinned image after the scratch-volume change).
+func TestEvaluateNamesAWorkerImageThatPredatesTheScratchVolume(t *testing.T) {
+	log := "mkdir: cannot create directory '/scratch/go-build': Permission denied\n" +
+		run.WorkerNoScratchPrefix + "/scratch (uid 65532, 0:0:755): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)\n"
+	for _, evaluate := range []func(string, int, string, string, string, []string) *run.BaselineVerify{Evaluate, EvaluateWithSetup} {
+		b := evaluate("make verify", run.SetupFailedExitCode, log, "mkdir: cannot create directory", "ticket", nil)
+		if !strings.HasPrefix(b.WorkerImageStale, run.WorkerNoScratchPrefix) || !b.Halts() {
+			t.Fatalf("record = %+v, want the stale image named and a halt", b)
+		}
+		msg := b.HaltMessage()
+		if !strings.HasPrefix(msg, "baseline verify failed: the worker image predates") || !strings.Contains(msg, "make install") || strings.Contains(msg, "Fix the verify command") {
+			t.Errorf("halt message = %q", msg)
+		}
+	}
+}

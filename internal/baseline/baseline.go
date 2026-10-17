@@ -186,6 +186,13 @@ func EvaluateWithSetup(command string, exitCode int, log, firstError, ticket str
 // run builds, and created the paths the ticket declares that the base
 // commit does not have (CreatedPaths).
 func Evaluate(command string, exitCode int, log, firstError, ticket string, created []string) *run.BaselineVerify {
+	if exitCode == run.SetupFailedExitCode {
+		// The wrapper's own exit when the image cannot give the worker
+		// /scratch: the command never ran, so nothing here is its failure.
+		if line := run.WorkerNoScratchLine(log); line != "" {
+			return &run.BaselineVerify{Command: command, ExitCode: exitCode, WorkerImageStale: sanitize.Line(line)}
+		}
+	}
 	b := &run.BaselineVerify{Command: command, ExitCode: exitCode, Passed: exitCode == 0}
 	if b.Passed {
 		return b
