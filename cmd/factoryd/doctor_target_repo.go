@@ -328,11 +328,19 @@ func probeRequiredBinaries(ctx context.Context, dockerBinary, image, user string
 	args = append(args, names...)
 	commandCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// The probe's answer is its stdout; Docker writes everything else (pull
+	// progress on an image's first use, its own errors) to stderr, which is
+	// kept apart so it can only explain a failure, never read as a name.
 	out := &requiredBinaryProbeOutput{cancel: cancel}
+	diag := &requiredBinaryProbeOutput{cancel: func() {}} // truncated, never stops the probe
 	cmd := exec.CommandContext(commandCtx, dockerBinary, args...)
-	cmd.Stdout, cmd.Stderr = out, out
+	cmd.Stdout, cmd.Stderr = out, diag
 	err = cmd.Run()
 	output, exceeded := out.snapshot()
+	diagnostics, diagTruncated := diag.snapshot()
+	if diagTruncated {
+		diagnostics = append(diagnostics, []byte(" [stderr truncated]")...)
+	}
 	if err != nil {
 		if cleanupErr := removeRequiredBinaryProbeContainer(dockerBinary, containerName); cleanupErr != nil {
 			return nil, fmt.Errorf("required-binary probe failed: %w; container cleanup failed: %v", err, cleanupErr)
@@ -342,7 +350,7 @@ func probeRequiredBinaries(ctx context.Context, dockerBinary, image, user string
 		return nil, fmt.Errorf("required-binary probe output exceeded %d bytes", requiredBinaryProbeOutputLimit)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)+"\n"+string(diagnostics)))
 	}
 	var missing []string
 	for _, name := range strings.Split(strings.TrimSpace(string(output)), "\n") {

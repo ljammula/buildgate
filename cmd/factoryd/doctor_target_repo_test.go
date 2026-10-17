@@ -434,3 +434,17 @@ func TestDoctorTargetRepoFailsAnAgentsFileEmptyAtHead(t *testing.T) {
 		t.Fatalf("failed checks = %q, want only the empty AGENTS.md", failed)
 	}
 }
+
+// Docker's pull progress on an image's first use goes to stderr and is never
+// read as a missing executable: only the probe's stdout names one.
+func TestProbeRequiredBinariesIgnoresPullProgress(t *testing.T) {
+	docker := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\nif [ \"$1\" = run ]; then\n  echo \"Unable to find image 'img@sha256:abc' locally\" >&2\n  echo 'eff67d702678: Pull complete' >&2\n  echo 'Status: Downloaded newer image' >&2\n  echo 'cargo'\nfi\n"
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := probeRequiredBinaries(context.Background(), docker, "img@sha256:abc", "65532:65532", []string{"cargo", "go"})
+	if err != nil || !slices.Equal(missing, []string{"cargo"}) {
+		t.Fatalf("missing = %q, err = %v, want only the probe's own answer [cargo]", missing, err)
+	}
+}

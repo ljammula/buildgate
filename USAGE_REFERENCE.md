@@ -2213,6 +2213,17 @@ repository's release policy denied its change to protected `.factory.yml`.
 | React Native / TypeScript | Node and npm in the configured worker image | `package.json`, `package-lock.json` |
 | C# / .NET | .NET in an operator-configured worker image | Not baked by `project-sandbox-image`; install it in the image |
 
+A project image keeps npm's and Maven's caches under `/scratch`
+(`npm_config_cache=/scratch/npm-cache`, `MAVEN_OPTS=-Dmaven.repo.local=/scratch/maven-repository`):
+both tools write to their cache even offline, the sandbox keeps `/usr`
+read-only and `/home/worker` is a fresh tmpfs, and each launch's scratch
+volume starts as a copy of the image's `/scratch`. That copy is made for every
+launch, so a large baked cache costs time and Docker VM disk on each one.
+Bundler's gems (`/usr/local/bundle`) and the Go module cache stay read-only
+under `/usr/local`, which both tools accept. An operator image that bakes the
+npm or Maven cache does the same, with `/scratch` owned by `65532:65532`,
+mode `770`.
+
 This is verified command coverage for the listed repositories, not automatic
 toolchain installation for every language or framework. Only Go and Python
 have automatic version derivation; Node is checked in the configured image
