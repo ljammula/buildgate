@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -38,6 +39,7 @@ func withFakeSandboxSettings(t *testing.T) {
 	settings := sessionconfig.DefaultSettings()
 	settings.SandboxDocker = fakeSandboxDockerBinary(t)
 	settings.SandboxImage = fakeSandboxImage
+	settings.SandboxWorkerUID = testSandboxWorkerUID()
 	tier2SettingsOverride = &settings
 	t.Cleanup(func() {
 		tier2SettingsOverride = nil
@@ -101,6 +103,7 @@ func writeNativeTicketForAPI(t *testing.T, workspace, ticket string) {
 
 func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 	dp := newTestDeps(t)
+	withFakeSandboxSettings(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -120,7 +123,7 @@ func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 	}
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{allowedImages: []string{fakeSandboxImage}})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{allowedImages: []string{fakeSandboxImage}})(context.Background(), api.StartRequest{
 		TemporalAddress: "127.0.0.1:1", // nothing listens there
 		ID:              "api-start-unreachable-temporal",
 		Ticket:          "api-ticket",
@@ -351,7 +354,7 @@ func TestAPIStartStarterAllowsIsolateWorkspaceWithTemporalAddress(t *testing.T) 
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
 		Ticket:    "api-ticket",
 		Workspace: workspace,
 		Spec:      spec,
@@ -897,7 +900,7 @@ func TestAPIStartStarterRefusesAStartWithNoTemporalAddress(t *testing.T) {
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
 
-	_, err = apiStartStarter(dp, t.TempDir(), &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err = apiStartStarter(dp, t.TempDir(), &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
 		Ticket:              "api-ticket",
 		Workspace:           workspace,
 		Spec:                spec,
@@ -1259,6 +1262,7 @@ func TestServeMainRejectsDefaultSandboxImageNotAllowlisted(t *testing.T) {
 		"-data-dir", t.TempDir(),
 		"-api-allowed-sandbox-images", allowed,
 		"-api-default-sandbox-image", other,
+		"-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID()),
 	})
 	if err == nil || !strings.Contains(err.Error(), "-api-default-sandbox-image") || !strings.Contains(err.Error(), "not allowlisted") {
 		t.Fatalf("serveMain with a non-allowlisted -api-default-sandbox-image: error = %v, want it to name the misconfigured default", err)
@@ -1280,6 +1284,7 @@ func TestServeMainRefusesInvalidRolesBlock(t *testing.T) {
 	err := serveMain(dp, []string{
 		"-data-dir", t.TempDir(),
 		"-config", configPath,
+		"-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID()),
 	})
 	if err == nil || !strings.Contains(err.Error(), "roles.execution") {
 		t.Fatalf("serveMain with an invalid roles: block: error = %v, want it to name roles.execution", err)
