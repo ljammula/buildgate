@@ -448,3 +448,34 @@ func TestProbeRequiredBinariesIgnoresPullProgress(t *testing.T) {
 		t.Fatalf("missing = %q, err = %v, want only the probe's own answer [cargo]", missing, err)
 	}
 }
+
+// doctor's unpushed-commits row reads local refs only: no origin is a
+// skipped advisory, an unpushed commit is a warning naming it, and a pushed
+// HEAD passes.
+func TestDoctorCheckUnpushedCommits(t *testing.T) {
+	dir := t.TempDir()
+	git := func(cwd string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"}, args...)...)
+		cmd.Dir = cwd
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	repo, origin := filepath.Join(dir, "repo"), filepath.Join(dir, "origin.git")
+	git(dir, "init", repo)
+	git(repo, "commit", "--allow-empty", "-m", "first")
+	if c := doctorCheckUnpushedCommits(context.Background(), repo); !c.Advisory || c.Err == nil || !strings.Contains(c.Err.Error(), "no origin") {
+		t.Fatalf("no origin: %+v", c)
+	}
+	git(dir, "init", "--bare", origin)
+	git(repo, "remote", "add", "origin", origin)
+	git(repo, "push", "origin", "HEAD:main")
+	if c := doctorCheckUnpushedCommits(context.Background(), repo); c.Err != nil {
+		t.Fatalf("pushed: %+v", c)
+	}
+	git(repo, "commit", "--allow-empty", "-m", "local experiment")
+	if c := doctorCheckUnpushedCommits(context.Background(), repo); !c.Advisory || c.Err == nil || !strings.Contains(c.Err.Error(), "local experiment") {
+		t.Fatalf("unpushed: %+v", c)
+	}
+}
