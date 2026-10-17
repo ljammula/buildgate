@@ -403,7 +403,22 @@ def review_signal(traces: list[dict]) -> ReviewSignal:
 			continue
 		else:
 			decisive = ReviewSignal("unavailable", str(metadata.get("reason") or outcome))
-	return decisive or ReviewSignal("unavailable", startup_reason or "no-review-verdict")
+	return decisive or ReviewSignal("unavailable", startup_reason or NO_REVIEWER_TRACE)
+
+
+# review_signal's detail when no round wrote a "reviewer" trace at all: the
+# whole-diff reviewer extension never ran (it is not in the sandbox image),
+# as opposed to one that ran and gave no verdict.
+NO_REVIEWER_TRACE = "no-review-verdict"
+
+
+def advisory_stopped_reason(reviewer: ReviewSignal) -> str:
+	"""The stopped_reason of a build that passed under advisory review. A
+	reviewer that never ran is left out: naming it as "unavailable" on every
+	build reads as a failed review when none was attempted."""
+	if reviewer.outcome == "unavailable" and reviewer.detail == NO_REVIEWER_TRACE:
+		return "canonical verification passed"
+	return f"canonical verification passed; advisory review ({reviewer.outcome}: {reviewer.detail or 'no detail'})"
 
 
 def unchanged_round_is_rechecked(earlier_rounds: list, verify_passed: bool | None, pi_failed: bool, setup_failed: str | None) -> bool:
@@ -3282,7 +3297,7 @@ def _run_build(
 			if reviewer.outcome == "clean":
 				result.stopped_reason = "canonical verification passed and independent review was clean"
 			elif review_policy == "advisory":
-				result.stopped_reason = f"canonical verification passed; advisory review ({reviewer.outcome}: {reviewer.detail or 'no detail'})"
+				result.stopped_reason = advisory_stopped_reason(reviewer)
 			else:
 				result.stopped_reason = f"canonical verification passed; degraded review ({reviewer.detail})"
 			persist(round_index, state_prompt, fingerprint_after, passed=True)

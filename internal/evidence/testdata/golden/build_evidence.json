@@ -9,7 +9,7 @@
   "agents_md_git_blob": "f55d748f1f4a5821f806fe1809936f827ea088e8",
   "review_verdicts": [],
   "succeeded": true,
-  "stopped_reason": "canonical verification passed; advisory review (unavailable: no-review-verdict)",
+  "stopped_reason": "canonical verification passed",
   "notes_turn": {
     "ran": false,
     "skipped_reason": "not reached",
