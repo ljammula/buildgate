@@ -29,13 +29,11 @@ several different tickets (e.g. "tests cover A, B and C" where A, B and C
 belong to three different tickets' own Allowed-Files), list that
 criterion under EVERY ticket that owns one of those files, not just one
 of them -- and each such ticket's own part of the criterion (the file(s)
-it owns) must actually be satisfied by that ticket's own plan. Found
-live (example-app habit-insights request, 2026-09-28): a criterion named a handler
-file, a service file, and an MCP-tool file across three tickets, but was
-only listed as covered by the MCP-tool ticket -- that ticket could never
-satisfy the part of the criterion that named the other two tickets' own
-files, and the factory now rejects a plan shaped like this before a
-human ever sees it.
+it owns) must actually be satisfied by that ticket's own plan. For
+example, a criterion that names a handler file, a service file and an
+MCP-tool file owned by three tickets is listed under all three; listed
+under the MCP-tool ticket alone, no ticket can satisfy it, and the
+factory rejects the plan.
 
 Write EVERY spec acceptance criterion into at least one ticket's own
 "### Acceptance criteria covered" list (see the exact shape below) --

@@ -6,18 +6,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"buildgate/internal/workerskills"
 )
 
-// SkillRef is one resolved skill: its name and either the absolute path of
-// its folder in skill_dirs (~ expanded, symlinks NOT resolved -- the
-// snapshot step resolves and checks them) or Builtin, for one of
-// buildgate's embedded skills (Dir empty).
+// SkillRef is one resolved skill: its name and the absolute path of its
+// folder in skill_dirs (~ expanded, symlinks NOT resolved -- the snapshot
+// step resolves and checks them).
 type SkillRef struct {
-	Name    string
-	Dir     string
-	Builtin bool
+	Name string
+	Dir  string
 }
 
 var skillNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -68,9 +64,7 @@ func expandedSkillDirs(s Settings) ([]string, error) {
 
 // ResolveRoleSkills resolves role's skill names: for each name, in order,
 // the first skill_dirs entry holding <dir>/<name>/SKILL.md (symlinks
-// followed) wins, then buildgate's built-in skills (internal/workerskills),
-// so an operator folder can add skills or override a built-in one. A role
-// that is absent or names no skills yields nil, nil.
+// followed) wins. A role that is absent or names no skills yields nil, nil.
 func ResolveRoleSkills(s Settings, role string) ([]SkillRef, error) {
 	rc, err := roleConfig(s, role)
 	if err != nil {
@@ -96,21 +90,17 @@ func ResolveRoleSkills(s Settings, role string) ([]SkillRef, error) {
 				break
 			}
 		}
-		if found != "" {
-			refs = append(refs, SkillRef{Name: name, Dir: found})
-			continue
+		if found == "" {
+			return nil, fmt.Errorf("skills: role %s: skill %q is in no skill_dirs entry %v (want <dir>/%s/SKILL.md)", role, name, dirs, name)
 		}
-		if !workerskills.Has(name) {
-			return nil, fmt.Errorf("skills: role %s: skill %q is neither in skill_dirs %v nor built in (built-in: %s)", role, name, dirs, strings.Join(workerskills.Names(), ", "))
-		}
-		refs = append(refs, SkillRef{Name: name, Builtin: true})
+		refs = append(refs, SkillRef{Name: name, Dir: found})
 	}
 	return refs, nil
 }
 
 // ValidateSkills checks skill_dirs and every role's skills: dirs absolute
 // (after ~ expansion) and existing, names bare and unique per role, and
-// every name resolvable (in skill_dirs or built in). An empty config
+// every name resolvable in skill_dirs. An empty config
 // passes.
 func ValidateSkills(s Settings) error {
 	dirs, err := expandedSkillDirs(s)

@@ -347,45 +347,21 @@ func TestProjectSkillsBoundedAndSanitized(t *testing.T) {
 	}
 }
 
-// A built-in skill snapshots from the binary itself with the same refusals
-// as a disk skill: a repo skill of its name still refuses the launch, and an
-// unknown name is not a built-in.
-func TestSnapshotSkillsBuiltin(t *testing.T) {
-	work := t.TempDir()
-	dst := filepath.Join(t.TempDir(), "snap")
-	h1, err := SnapshotSkills(work, dst, []SkillSource{{Name: "buildgate-tdd", Builtin: true}})
-	if err != nil || h1 == "" {
-		t.Fatalf("hash %q err %v", h1, err)
-	}
-	info, err := os.Stat(filepath.Join(dst, "buildgate-tdd", "SKILL.md"))
-	if err != nil || info.Mode().Perm() != 0o640 {
-		t.Fatalf("snapshot file: %v %v", info, err)
-	}
-	if h2, _ := SnapshotSkills(work, dst, []SkillSource{{Name: "buildgate-tdd", Builtin: true}}); h2 != h1 {
-		t.Fatalf("hash not stable: %q vs %q", h2, h1)
-	}
-	if _, err := SnapshotSkills(work, dst, []SkillSource{{Name: "no-such-skill", Builtin: true}}); err == nil {
-		t.Fatal("unknown built-in accepted")
-	}
-	writeSkill(t, filepath.Join(work, ".agents", "skills"), "buildgate-tdd", nil)
-	if _, err := SnapshotSkills(work, dst, []SkillSource{{Name: "buildgate-tdd", Builtin: true}}); err == nil || !strings.Contains(err.Error(), "same name") {
-		t.Fatalf("shadowed built-in: %v", err)
-	}
-}
-
-// Under a strict umask the built-in copy still gets group-readable modes:
-// the worker reads /inputs/skills as another user through the group bit.
+// Under a strict umask a snapshot still gets group-readable modes: the
+// worker reads /inputs/skills as another user through the group bit.
 // Process-wide umask: not t.Parallel.
-func TestSnapshotSkillsBuiltinModesSurviveStrictUmask(t *testing.T) {
+func TestSnapshotSkillsModesSurviveStrictUmask(t *testing.T) {
+	src := t.TempDir()
+	writeSkill(t, src, "team-tdd", nil)
 	old := syscall.Umask(0o077)
 	defer syscall.Umask(old)
 	dst := filepath.Join(t.TempDir(), "snap")
-	if _, err := SnapshotSkills(t.TempDir(), dst, []SkillSource{{Name: "buildgate-tdd", Builtin: true}}); err != nil {
+	if _, err := SnapshotSkills(t.TempDir(), dst, []SkillSource{{Name: "team-tdd", Dir: filepath.Join(src, "team-tdd")}}); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]os.FileMode{
-		filepath.Join(dst, "buildgate-tdd"):             0o750,
-		filepath.Join(dst, "buildgate-tdd", "SKILL.md"): 0o640,
+		filepath.Join(dst, "team-tdd"):             0o750,
+		filepath.Join(dst, "team-tdd", "SKILL.md"): 0o640,
 	} {
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != want {

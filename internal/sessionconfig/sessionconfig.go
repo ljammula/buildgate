@@ -926,12 +926,10 @@ models:
 roles:
   planning: { model: local-model }
   execution: { model: local-model }
-  # Optional worker skills (none by default): uncomment to give build rounds
-  # buildgate's built-in skills, or add skill_dirs: [<folder>] for your own
-  # (a same-name skill there overrides the built-in). Built in:
-  # buildgate-tdd, buildgate-diagnosing, go-service, typescript-service,
-  # flutter-app, kafka-processing, postgres-change, temporal-go.
-  # execution: { model: local-model, skills: [buildgate-tdd, buildgate-diagnosing, go-service] }
+  # Optional worker skills (none by default): your team's knowledge the model
+  # cannot find in the repository, one <name>/SKILL.md folder each under a
+  # skill_dirs entry (top level: skill_dirs: [~/team-skills]).
+  # execution: { model: local-model, skills: [payments-api] }
   # Optional: run a ticket's automatic corrective builds on another models:
   # entry, listed in allowed (thinking defaults to the role's own).
   # execution: { model: local-model, allowed: [local-model, stronger-model], escalation: { model: stronger-model, thinking: high } }

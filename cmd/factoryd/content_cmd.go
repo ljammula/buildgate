@@ -22,7 +22,6 @@ import (
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
-	"buildgate/internal/workerskills"
 )
 
 type contentFlags struct {
@@ -368,26 +367,21 @@ func contentSkillEntries(settings sessionconfig.Settings, reader *contentReader)
 			continue
 		}
 		for _, ref := range refs {
-			key := skillSourceKey(ref.Name, ref.Dir, ref.Builtin)
+			key := skillSourceKey(ref.Name, ref.Dir)
 			selected[key] = append(selected[key], role)
 		}
 	}
-	teamEntries, teamWinner, err := contentTeamSkillEntries(settings, selected, reader)
+	entries, err := contentTeamSkillEntries(settings, selected, reader)
 	if err != nil {
 		return nil, err
 	}
-	builtinEntries, err := contentBuiltinSkillEntries(selected, teamWinner)
-	if err != nil {
-		return nil, err
-	}
-	entries := append(teamEntries, builtinEntries...)
 	return append(entries, selectionProblems...), nil
 }
 
-func contentTeamSkillEntries(settings sessionconfig.Settings, selected map[string][]string, reader *contentReader) ([]contentEntry, map[string]string, error) {
+func contentTeamSkillEntries(settings sessionconfig.Settings, selected map[string][]string, reader *contentReader) ([]contentEntry, error) {
 	roots, err := contentSkillRoots(settings)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	teamByName := map[string][]contentEntry{}
 	teamWinner := map[string]string{}
@@ -405,7 +399,7 @@ func contentTeamSkillEntries(settings sessionconfig.Settings, selected map[strin
 				continue
 			}
 			dir := filepath.Join(root, name)
-			if seenTeamDirs[skillSourceKey(name, dir, false)] {
+			if seenTeamDirs[skillSourceKey(name, dir)] {
 				continue
 			}
 			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
@@ -413,8 +407,8 @@ func contentTeamSkillEntries(settings sessionconfig.Settings, selected map[strin
 			}
 			path := filepath.Join(dir, "SKILL.md")
 			data, err := reader.read(path)
-			seenTeamDirs[skillSourceKey(name, dir, false)] = true
-			roles := selected[skillSourceKey(name, dir, false)]
+			seenTeamDirs[skillSourceKey(name, dir)] = true
+			roles := selected[skillSourceKey(name, dir)]
 			selection := "readable, not selected; runtime validation pending"
 			if len(roles) != 0 {
 				selection = "selected: " + strings.Join(roles, ", ") + "; runtime validation pending"
@@ -444,28 +438,7 @@ func contentTeamSkillEntries(settings sessionconfig.Settings, selected map[strin
 			entries = append(entries, sources[i])
 		}
 	}
-	return append(entries, rootProblems...), teamWinner, nil
-}
-
-func contentBuiltinSkillEntries(selected map[string][]string, teamWinner map[string]string) ([]contentEntry, error) {
-	var entries []contentEntry
-	for _, name := range workerskills.Names() {
-		data, path, source, err := readSkill(sessionconfig.SkillRef{Name: name, Builtin: true})
-		if err != nil {
-			return nil, fmt.Errorf("built-in skill %s: %w", name, err)
-		}
-		roles := selected[skillSourceKey(name, "", true)]
-		selection := "available, not selected"
-		if len(roles) != 0 {
-			selection = "selected: " + strings.Join(roles, ", ")
-		}
-		selector := "skill:" + name
-		if teamWinner[name] != "" {
-			selector = "builtin-skill:" + name
-		}
-		entries = append(entries, contentEntry{kind: "skill", name: name, selector: selector, role: strings.Join(roles, ", "), stage: "worker", source: source, path: path, data: data, hash: contentHash(data), selection: selection})
-	}
-	return entries, nil
+	return append(entries, rootProblems...), nil
 }
 
 func contentGuideEntries(settings sessionconfig.Settings, reader *contentReader) ([]contentEntry, error) {
@@ -520,10 +493,7 @@ func contentGuidePath(settings sessionconfig.Settings, name string) string {
 	return filepath.Join("design_guide_dirs", name+".md")
 }
 
-func skillSourceKey(name, dir string, builtin bool) string {
-	if builtin {
-		return "builtin:" + name
-	}
+func skillSourceKey(name, dir string) string {
 	return "team:" + name + ":" + filepath.Clean(dir)
 }
 
@@ -593,24 +563,6 @@ func promptRoleStage(name string) (string, string) {
 	default:
 		return "execution", "build"
 	}
-}
-
-func readSkill(ref sessionconfig.SkillRef) ([]byte, string, string, error) {
-	if ref.Builtin {
-		path := ref.Name + "/SKILL.md"
-		data, err := fs.ReadFile(workerskills.FS(), path)
-		return data, filepath.Join("internal/workerskills/skills", path), "built-in (edit source-controlled internal/workerskills/skills/)", err
-	}
-	path := filepath.Join(ref.Dir, "SKILL.md")
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, path, "team file (editable)", err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, path, "team file (editable)", fmt.Errorf("%s is not a regular file", path)
-	}
-	data, err := os.ReadFile(path)
-	return data, path, "team file (editable)", err
 }
 
 func listContent(entries []contentEntry, out io.Writer) error {

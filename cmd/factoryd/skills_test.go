@@ -250,6 +250,7 @@ func TestCheckSkillsBindsInputToWorkerConfig(t *testing.T) {
 	elsewhere := writeTestSkill(t, t.TempDir(), "alpha")
 	for name, input := range map[string][]sandbox.SkillSource{
 		"another folder": {{Name: "alpha", Dir: elsewhere}},
+		"no folder":      {{Name: "alpha"}},
 		"an extra skill": append(slices.Clone(own), sandbox.SkillSource{Name: "beta", Dir: elsewhere}),
 		"none at all":    nil,
 	} {
@@ -273,28 +274,5 @@ func TestJobSpendCarriesSkills(t *testing.T) {
 	later := &request.JobSpend{Skills: []string{"beta"}, SkillsSHA256: "bbb"}
 	if merged := got.Add(later); !slices.Equal(merged.Skills, []string{"beta"}) || merged.SkillsSHA256 != "bbb" {
 		t.Fatalf("Add = %+v, want the later attempt's skills", merged)
-	}
-}
-
-// doctor labels a built-in skill "built-in" rather than its cache path.
-func TestDoctorCheckSkillsLabelsBuiltins(t *testing.T) {
-	settings := sessionconfig.Settings{Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "m", Skills: []string{"buildgate-tdd"}}}}
-	c := doctorCheckSkills(doctorInputs{settings: settings})
-	if c.Err != nil || c.Detail != "execution: buildgate-tdd (built-in)" {
-		t.Fatalf("doctor skills row = %+v", c)
-	}
-}
-
-// Built-in refs carry no host path, so a Temporal Worker accepts a run's
-// built-in skills whatever its user, HOME or binary path.
-func TestCheckSkillsAcceptsBuiltinRefs(t *testing.T) {
-	settings := sessionconfig.Settings{Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "m", Skills: []string{"buildgate-tdd", "go-service"}}}}
-	input := []sandbox.SkillSource{{Name: "buildgate-tdd", Builtin: true}, {Name: "go-service", Builtin: true}}
-	if err := checkSkillsFunc(settings)("execution", input); err != nil {
-		t.Fatalf("built-in refs refused: %v", err)
-	}
-	disguised := []sandbox.SkillSource{{Name: "buildgate-tdd", Dir: t.TempDir()}, {Name: "go-service", Builtin: true}}
-	if err := checkSkillsFunc(settings)("execution", disguised); err == nil {
-		t.Fatal("a host folder posing as a built-in was accepted")
 	}
 }

@@ -17,7 +17,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. A building request whose current ticket has not started a run yet prints `ticket <i>/<n> has not started a run yet: <what it waits for>` instead of an earlier step's log. A launch that writes a log where an earlier launch left a non-empty one (a retried drafting job) first renames the earlier one to `<name>.<n>.log`, so a retry keeps the log its halt quoted. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt, as saved by the build]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. |
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. The same figures as `GET /requests`' `cost_summary`. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. |
 | `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by. `-since 30d\|YYYY-MM-DD` counts tickets whose first run began on or after it, `-bucket <days>` sets the bucket (default 7), and `-all` also counts `live-smoke-` tickets. |
-| `factoryd content [-config <profile>] [-show <selector>]` | Lists embedded prompt templates, inline prompt-assembly sources, compiled language profiles, the operator skill, built-in worker skills, all skills found under configured `skill_dirs`, role selections, and available design guides and spec-drafting guidance with source paths and hashes. Inline prompt entries show source metadata and referenced templates, not rendered prompt text. Invalid or oversized team files appear as unavailable; readable team skills are marked as pending runtime validation because the full skill tree is not checked here. `-show prompt:<filename>`, `prompt-source:<id>`, `language-profile:<id>`, `spec-guidance:<name>`, `skill:<name>`, `operator-skill:buildgate` or `guide:<name>` prints a source or metadata; `builtin-skill:<name>` and `team-skill:<name>:<sha256>:<n>` identify shadowed/duplicate sources. Displayed text is sanitized. Reads config and content only; no run prompts, model calls or writes. Embedded prompt edits require a source change and BuildGate rebuild; this command does not preview full effective prompts or provide runtime overrides. |
+| `factoryd content [-config <profile>] [-show <selector>]` | Lists embedded prompt templates, inline prompt-assembly sources, compiled language profiles, the operator skill, all skills found under configured `skill_dirs`, role selections, and available design guides and spec-drafting guidance with source paths and hashes. Inline prompt entries show source metadata and referenced templates, not rendered prompt text. Invalid or oversized team files appear as unavailable; readable team skills are marked as pending runtime validation because the full skill tree is not checked here. `-show prompt:<filename>`, `prompt-source:<id>`, `language-profile:<id>`, `spec-guidance:<name>`, `skill:<name>`, `operator-skill:buildgate` or `guide:<name>` prints a source or metadata; `team-skill:<name>:<sha256>:<n>` identifies a later duplicate in `skill_dirs`. Displayed text is sanitized. Reads config and content only; no run prompts, model calls or writes. Embedded prompt edits require a source change and BuildGate rebuild; this command does not preview full effective prompts or provide runtime overrides. |
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. |
 | `factoryd reject -reason "<text>" <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. |
@@ -1433,26 +1433,50 @@ as a read-only snapshot, opt-in per role. No host harness folder
 (`~/.codex`, `~/.copilot`, `~/.claude`, `~/.pi`) is ever mounted, and no
 sessions or memories are shared.
 
+A skill is for your team's knowledge the model cannot find in the
+repository: an internal API, an in-house library whose source the worker
+does not have, a service's behaviour only your team knows. Put other things
+where they work better:
+
+| What you want the worker to know | Where it goes |
+|---|---|
+| A rule a test or linter can check (layer boundaries, no direct database access from handlers) | A check in the repository's `verify_command` or a `.factory.yml` `gates:` entry: a failing check reaches the next round, a skill may be ignored |
+| A short fact every job needs (commands, conventions, a gotcha) | The repository's `AGENTS.md`: always loaded, nothing for the model to choose |
+| The design: layers, seams, domain terms | The repository's `ARCHITECTURE.md`: spec drafting and planning read it in full |
+| General practice (test-first, small functions) | Nowhere: the model knows it, and repeating it costs tokens |
+| Larger team knowledge, needed only by some tickets | A skill |
+
 ```yaml
 roles:
   execution:
     model: luna
-    skills: [buildgate-tdd, buildgate-diagnosing, go-service]   # built in; nothing is on by default
-skill_dirs:                      # optional: your own skills, searched first, in order
+    skills: [payments-api]       # nothing is on by default
+skill_dirs:                      # searched in order; the first <dir>/<name>/SKILL.md wins
   - ~/team-skills
 ```
 
-Built-in skills ship inside `factoryd` (`internal/workerskills`), written
-for sandboxed, non-interactive build rounds and buildgate's own prompts.
-They are conditional knowledge, loaded by the agent only when relevant; the
-every-round definition of done is part of the build prompt itself.
+```markdown
+---
+name: payments-api
+description: The internal payments service's client API. Use when a ticket calls or changes code that charges, refunds or looks up a payment.
+---
 
-| Built-in skill | Use |
-|---|---|
-| `buildgate-tdd` | One seam, one failing test, minimal code; expected values from an independent source |
-| `buildgate-diagnosing` | Red/green loop before changing code when a check fails |
-| `go-service`, `typescript-service`, `flutter-app` | Stack practice when the repo has `go.mod` / `package.json` / `pubspec.yaml` |
-| `kafka-processing`, `postgres-change`, `temporal-go` | Delivery semantics, migration safety, workflow determinism when the repo uses them |
+# Payments API
+
+- Charges are idempotent by `IdempotencyKey`; a retry with the same key returns the first result, never a second charge.
+- Amounts are integer minor units (cents); never a float.
+- `ErrDeclined` is a final answer: do not retry it. `ErrUnavailable` may be retried with backoff.
+```
+
+The `description` decides whether the skill is used: the worker sees each
+skill's name, description and path, and opens `SKILL.md` only when it judges
+the ticket matches. Say what the skill covers and when to use it, in the
+words a ticket would use. Keep the body to facts the worker cannot look up;
+it is read as instructions in an unattended build, so it asks no questions
+and runs no scripts (the snapshot refuses executable files).
+
+`factoryd doctor` lists each role's skills and dry-runs their snapshot;
+`factoryd content -show skill:<name>` prints the file a launch would snapshot.
 
 Planning and review jobs have fully specified, JSON- or file-only prompts;
 a measured live comparison found skills there added tokens and conflicting
@@ -1460,11 +1484,11 @@ instructions, so none is recommended for those roles.
 
 | Key | Meaning |
 |---|---|
-| `skill_dirs` | Optional ordered host folders, absolute or `~/`, searched before the built-ins (a same-name skill there overrides the built-in). Read by `factoryd` on the host; they need not be shared with the Docker VM |
+| `skill_dirs` | Ordered host folders, absolute or `~/`, holding one `<name>/SKILL.md` folder per skill; the first folder holding a name wins. Read by `factoryd` on the host; they need not be shared with the Docker VM |
 | `roles.<role>.skills` | Skill names only (`^[a-z0-9][a-z0-9-]{0,63}$`), never paths. No key means no skills. A request cannot add, remove or name one |
 
 ```text
-config load ── every name resolves (skill_dirs, then built in)? ──no──> refused (run, submit, worker, serve, daemon)
+config load ── every name resolves in skill_dirs? ──no──> refused (run, submit, worker, serve, daemon)
 launch of a model-backed job (build, review, spec/plan/oracle drafting)
   └─ host: resolve the job's role skills, snapshot them under the job's log dir,
            SHA-256 the snapshot ── a refusal below fails the launch

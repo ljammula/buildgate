@@ -51,9 +51,9 @@ your file against them and the host type-checks it before review:
   behaviour described -- and never reach it through another layer (an HTTP
   handler, a store, a CLI) unless the criterion is itself about that
   layer. If no criterion names what to call, mark the criterion null
-  rather than guessing (found live 2026-09-24: 4 of 30 drafted tests called
-  an invented helper, an unrelated existing function, or the HTTP handler,
-  each with otherwise correct expected values).
+  rather than guessing: a test that calls an invented helper, an unrelated
+  existing function or the HTTP handler fails even when its expected
+  values are right.
 - When asserting on an error value, use errors.Is/errors.As against an
   exported sentinel or type the package already declares, or compare the
   error's message text -- never errors.Is(err, someConstructor(x)) against
@@ -64,8 +64,8 @@ your file against them and the host type-checks it before review:
   method -- most hand-written error types do not. A test built this way
   only passes if the implementation is changed to add that method, which
   can force an otherwise-unrelated ticket outside its own declared file
-  scope just to satisfy your test (found live 2026-09-22: exactly this
-  pattern quarantined a correct, in-scope ticket).
+  scope just to satisfy your test, and quarantines a correct, in-scope
+  ticket.
 
 Write {manifest_name} FIRST, before any oracle file, to that same
 directory, then write the oracle files it names one at a time. A run can be

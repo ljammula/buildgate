@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"buildgate/internal/workerskills"
 )
 
 func mkSkill(t *testing.T, dir, name string) string {
@@ -116,9 +114,9 @@ func TestValidateSkillsRefusals(t *testing.T) {
 		{"missing dir", skillSettings([]string{filepath.Join(d, "gone")}), "skill_dirs entry"},
 		{"dir is file", skillSettings([]string{file}), "not a directory"},
 		{"duplicate", skillSettings([]string{d}, "ok", "ok"), "twice"},
-		{"not built in and no skill_dirs", skillSettings(nil, "ok"), "nor built in"},
+		{"no skill_dirs", skillSettings(nil, "ok"), "is in no skill_dirs entry"},
 		{"unknown name", skillSettings([]string{d}, "nope"), `"nope"`},
-		{"missing SKILL.md", skillSettings([]string{d}, "nomd"), `"nomd" is neither in skill_dirs`},
+		{"missing SKILL.md", skillSettings([]string{d}, "nomd"), `"nomd" is in no skill_dirs entry`},
 	}
 	for _, c := range cases {
 		err := ValidateSkills(c.s)
@@ -147,35 +145,14 @@ func TestSkillsConfigKeysLoad(t *testing.T) {
 	}
 }
 
-// A role may name buildgate's built-in skills with no skill_dirs at all,
-// and an operator skill_dirs entry of the same name overrides the built-in.
-func TestResolveRoleSkillsBuiltinsAndOverride(t *testing.T) {
-	got, err := ResolveRoleSkills(skillSettings(nil, "buildgate-tdd", "go-service"), "execution")
-	if err != nil || len(got) != 2 {
-		t.Fatalf("built-ins: %v %v", got, err)
-	}
-	for _, r := range got {
-		if !r.Builtin || r.Dir != "" {
-			t.Errorf("%s: want a built-in ref with no folder, got %+v", r.Name, r)
-		}
-	}
-	if err := ValidateSkills(skillSettings(nil, "buildgate-tdd")); err != nil {
-		t.Fatalf("ValidateSkills with only built-ins: %v", err)
-	}
+// A name no skill_dirs entry holds is refused, naming the folder it wants.
+func TestResolveRoleSkillsRefusesAnUnknownName(t *testing.T) {
 	d := t.TempDir()
-	mkSkill(t, d, "go-service")
-	got, err = ResolveRoleSkills(skillSettings([]string{d}, "go-service"), "execution")
-	if err != nil || len(got) != 1 || got[0].Dir != filepath.Join(d, "go-service") || got[0].Builtin {
-		t.Fatalf("override: %v %v", got, err)
+	_, err := ResolveRoleSkills(skillSettings([]string{d}, "team-tdd"), "execution")
+	if err == nil || !strings.Contains(err.Error(), "team-tdd/SKILL.md") {
+		t.Fatalf("unknown skill: %v", err)
 	}
-}
-
-// init-config's scaffold lists every built-in skill, so the opt-in example
-// never drifts from what ships.
-func TestExampleListsEveryBuiltinSkill(t *testing.T) {
-	for _, name := range workerskills.Names() {
-		if !strings.Contains(Example, name) {
-			t.Errorf("sessionconfig.Example does not mention built-in skill %q", name)
-		}
+	if err := ValidateSkills(skillSettings(nil, "team-tdd")); err == nil {
+		t.Fatal("ValidateSkills accepted a skill with no skill_dirs")
 	}
 }
