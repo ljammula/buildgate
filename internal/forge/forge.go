@@ -13,11 +13,14 @@ package forge
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -58,6 +61,13 @@ type PullRequestOpener interface {
 	// against the default branch exactly as before this parameter existed,
 	// with no extra origin check at all.
 	OpenDraftPullRequest(ctx context.Context, workspaceDir, branch, base, headSHA, title, body string) (url string, err error)
+	// UnpushedBaseCommits lists the commits a pull request for a run based
+	// on baseSHA would carry that the run never made: those reachable from
+	// baseSHA but not from base on "origin" (the default branch when base
+	// is empty or gone), newest first as "<short sha> <subject>". No gate
+	// checked them, so the caller opens no PR while any exist. Empty when
+	// baseSHA is already on origin.
+	UnpushedBaseCommits(ctx context.Context, workspaceDir, base, baseSHA string) ([]string, error)
 	// VerifyExistingPullRequest reads url's own current state -- a
 	// finding from that same review: cmd/factoryd's retryPullRequestOpener
 	// calls this to confirm a PR recovered from gh's own "already exists" error
@@ -164,6 +174,82 @@ func (o GHPullRequestOpener) OpenDraftPullRequest(ctx context.Context, workspace
 	}
 	return url, nil
 }
+
+// UnpushedBaseCommits is PullRequestOpener.UnpushedBaseCommits. A named
+// base that is gone from origin (an earlier ticket's branch, merged and
+// deleted) is the factory's own earlier work, so nothing is reported for it.
+// The base branch is fetched into a ref private to this call, so parallel
+// runs never contend for a ref and the checkout's own remote-tracking refs
+// stay where the operator left them; git never prompts for credentials.
+func (o GHPullRequestOpener) UnpushedBaseCommits(ctx context.Context, workspaceDir, base, baseSHA string) ([]string, error) {
+	if baseSHA == "" {
+		return nil, nil
+	}
+	gitBinary := o.GitBinary
+	if gitBinary == "" {
+		gitBinary = "git"
+	}
+	git := func(args ...string) (string, int, error) {
+		cmd := exec.CommandContext(ctx, gitBinary, args...)
+		cmd.Dir = workspaceDir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.CombinedOutput()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return string(out), exitErr.ExitCode(), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		if err != nil {
+			return string(out), -1, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return string(out), 0, nil
+	}
+	ref := base
+	if ref != "" {
+		if _, code, err := git("ls-remote", "--exit-code", "origin", "refs/heads/"+ref); code == 2 {
+			return nil, nil
+		} else if err != nil {
+			return nil, err
+		}
+	} else {
+		out, _, err := git("ls-remote", "--symref", "origin", "HEAD")
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if target, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+				ref, _, _ = strings.Cut(target, "\t")
+				break
+			}
+		}
+		if ref == "" {
+			return nil, fmt.Errorf("origin names no default branch")
+		}
+	}
+	var suffix [6]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return nil, err
+	}
+	private := "refs/factoryd/base-check/" + hex.EncodeToString(suffix[:])
+	if _, _, err := git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+ref+":"+private); err != nil {
+		return nil, err
+	}
+	defer func() { _, _, _ = git("update-ref", "-d", private) }()
+	out, _, err := git("log", "--format=%h %s", private+".."+baseSHA)
+	if err != nil {
+		return nil, err
+	}
+	var commits []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line != "" {
+			commits = append(commits, urlPattern.ReplaceAllString(line, "<url>"))
+		}
+	}
+	return commits, nil
+}
+
+// urlPattern keeps a URL in a commit subject out of a refusal's text, which
+// the pull-request recovery path reads for a pull request's URL.
+var urlPattern = regexp.MustCompile(`https?://\S+`)
 
 func originRepository(ctx context.Context, gitBinary, workspaceDir string) (string, error) {
 	remote := exec.CommandContext(ctx, gitBinary, "remote", "get-url", "origin")

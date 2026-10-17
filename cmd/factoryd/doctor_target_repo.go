@@ -448,3 +448,35 @@ func doctorExplicitDataDir(flags *flag.FlagSet, dataDir string) string {
 func (impl realHost) baselineCheck(args []string) error {
 	return runMain(impl.dp, args)
 }
+
+// doctorCheckUnpushedCommits warns when the repository's HEAD has commits no
+// branch on origin has, as of the checkout's last fetch: a run builds on
+// HEAD, and no pull request opens while its base carries commits no gate
+// checked (uncheckedBaseCommitsRefusal). It reads local refs only: no
+// network, nothing changed. Advisory: a run with pull requests off is
+// unaffected, and a repository with no origin has nothing to compare.
+func doctorCheckUnpushedCommits(ctx context.Context, repo string) doctorCheck {
+	name := "HEAD of " + repo + " is on origin, so a pull request carries only the run's own work"
+	git := func(args ...string) (string, error) {
+		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...).Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	if _, err := git("remote", "get-url", "origin"); err != nil {
+		return doctorCheck{Name: name, Err: errors.New("skipped: the repository has no origin remote"), Advisory: true}
+	}
+	out, err := git("log", "--format=%h %s", "HEAD", "--not", "--remotes=origin")
+	if err != nil {
+		return doctorCheck{Name: name, Err: fmt.Errorf("skipped: %v", err), Advisory: true}
+	}
+	if out == "" {
+		return doctorCheck{Name: name}
+	}
+	commits := strings.Split(out, "\n")
+	shown := commits
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	return doctorCheck{Name: name, Advisory: true,
+		Err: fmt.Errorf("%d commit(s) are on no origin branch as of the last fetch (%s): with pull requests on, no pull request opens until they are pushed or dropped", len(commits), strings.Join(shown, "; ")),
+		Fix: "git push them (or drop them) before submitting"}
+}

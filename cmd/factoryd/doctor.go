@@ -994,6 +994,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorTargetRepoChecks(ctx, in)...)
 		checks = append(checks, doctorTargetRepoSubmitChecks(in.targetRepo)...)
 		checks = append(checks, doctorCheckLanguageProfile(in.targetRepo))
+		checks = append(checks, doctorCheckUnpushedCommits(ctx, in.targetRepo))
 		checks = append(checks, doctorCheckProjectToolchains(ctx, in)...)
 		checks = append(checks, doctorCheckRequiredBinaries(ctx, in)...)
 		checks = append(checks, doctorCheckBaseline(in, doctorChecksFailed(checks)))

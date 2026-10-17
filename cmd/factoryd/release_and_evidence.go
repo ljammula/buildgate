@@ -417,6 +417,11 @@ func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *re
 	body := renderEvidenceMarkdown(r, policy) + memoryChangesMarkdown(dataDir, r)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	if msg := uncheckedBaseCommitsRefusal(ctx, opener, execDir, r); msg != "" {
+		log.Printf("run %s: -open-pull-request: %s (run remains accepted)", id, msg)
+		r.PROpenError = msg
+		return ""
+	}
 	// r.ResultSHA pinned into an explicit push refspec, not a bare branch
 	// push -- applied here too, not just retryPullRequestOpener's own
 	// call, since it's
@@ -432,6 +437,26 @@ func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *re
 	}
 	fmt.Printf("run %s: opened draft pull request %s\n", id, url)
 	return url
+}
+
+// uncheckedBaseCommitsRefusal is why no pull request may open for r, or ""
+// when one may: its base commit has commits the PR's base branch on origin
+// lacks (local commits never pushed), which the PR would carry although no
+// gate checked them. Failing to tell is a refusal too: the PR would only be
+// opened blind.
+func uncheckedBaseCommitsRefusal(ctx context.Context, opener forge.PullRequestOpener, execDir string, r *run.Run) string {
+	commits, err := opener.UnpushedBaseCommits(ctx, execDir, r.PRBase, r.BaseSHA)
+	if err != nil {
+		return "could not check that the run's base commit is on origin, so no pull request was opened: " + err.Error()
+	}
+	if len(commits) == 0 {
+		return ""
+	}
+	shown := commits
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	return fmt.Sprintf("no pull request was opened: the run's base commit has %d commit(s) that are not on origin (%s), and the pull request would carry them although no gate checked them; push or drop them, then factoryd retry", len(commits), strings.Join(shown, "; "))
 }
 
 // retryPullRequestOpener is request.PROpener's one real implementation.

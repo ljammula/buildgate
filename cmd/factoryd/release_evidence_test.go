@@ -36,6 +36,13 @@ type fakePullRequestOpener struct {
 	verifyHeadRefOid        string
 	verifyIsCrossRepository bool
 	verifyErr               error
+	// unpushed/unpushedErr script UnpushedBaseCommits.
+	unpushed    []string
+	unpushedErr error
+}
+
+func (f *fakePullRequestOpener) UnpushedBaseCommits(context.Context, string, string, string) ([]string, error) {
+	return f.unpushed, f.unpushedErr
 }
 
 func (f *fakePullRequestOpener) OpenDraftPullRequest(_ context.Context, workspaceDir, branch, base, headSHA, title, body string) (string, error) {
@@ -1409,5 +1416,28 @@ func TestRenderEvidenceMarkdownCodeReviewSanitizesInjection(t *testing.T) {
 		// The embedded newline must have folded to a space, not vanished
 		// with the words glued together or split across markdown lines.
 		t.Errorf("evidence body does not fold the embedded newline into one line:\n%s", body)
+	}
+}
+
+// A run whose base commit has commits origin lacks opens no pull request,
+// and its PR-open error names them; a failure to check refuses too.
+func TestOpenEvidencePullRequestRefusesUncheckedBaseCommits(t *testing.T) {
+	r := &run.Run{ID: "r1", Branch: "factoryd/r1", BaseSHA: "base", ResultSHA: "head"}
+	opener := &fakePullRequestOpener{url: "https://example/pr/1", unpushed: []string{"0b57b23 Mark targets as brownfield", "8e82850 Configure verification"}}
+	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "r1", r, nil, opener); url != "" || opener.called {
+		t.Fatalf("url %q, opened %v: want no pull request", url, opener.called)
+	}
+	if !strings.Contains(r.PROpenError, "2 commit(s) that are not on origin") || !strings.Contains(r.PROpenError, "0b57b23") || !strings.Contains(r.PROpenError, "factoryd retry") {
+		t.Errorf("PROpenError = %q", r.PROpenError)
+	}
+	r2 := &run.Run{ID: "r2", Branch: "factoryd/r2", BaseSHA: "base", ResultSHA: "head"}
+	failing := &fakePullRequestOpener{url: "https://example/pr/2", unpushedErr: errors.New("git fetch: network down")}
+	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "r2", r2, nil, failing); url != "" || failing.called || !strings.Contains(r2.PROpenError, "could not check") {
+		t.Fatalf("check failure: url %q opened %v error %q, want a refusal", url, failing.called, r2.PROpenError)
+	}
+	r3 := &run.Run{ID: "r3", Branch: "factoryd/r3", BaseSHA: "base", ResultSHA: "head"}
+	clean := &fakePullRequestOpener{url: "https://example/pr/3"}
+	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "r3", r3, nil, clean); url != "https://example/pr/3" || !clean.called {
+		t.Fatalf("clean base: url %q opened %v, want the pull request", url, clean.called)
 	}
 }
