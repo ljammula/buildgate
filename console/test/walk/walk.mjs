@@ -154,6 +154,41 @@ step("theme", async () => {
   check((await theme()) === null, "system did not clear the attribute");
 });
 
+// The console installs as an app of its own: Chrome's own reading of the
+// manifest (what an install uses) opens the console at its root in a window
+// of its own. Chrome offers to install any page, so it reports no
+// installability error to check; the walk installs nothing either, since an
+// install writes an app into the operator's ~/Applications.
+step("installable", async () => {
+  await visit("/");
+  const response = await fetch(`${base}/manifest.webmanifest`);
+  check(response.status === 200, `GET /manifest.webmanifest = ${response.status}`);
+  const type = response.headers.get("content-type");
+  check(type === "application/manifest+json", `the manifest is served as ${type}`);
+  const manifest = await response.json();
+  check(manifest.start_url === "/" && manifest.scope === "/", "the app does not open at /");
+  for (const icon of manifest.icons) {
+    const image = await fetch(base + icon.src);
+    check(image.status === 200, `GET ${icon.src} = ${image.status}`);
+    const bytes = Buffer.from(await image.arrayBuffer());
+    // A PNG's width and height are the two big-endian words at byte 16.
+    const size = `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
+    check(size === icon.sizes, `${icon.src} is ${size}, the manifest says ${icon.sizes}`);
+  }
+  const cdp = await context.newCDPSession(page);
+  const read = await cdp.send("Page.getAppManifest");
+  check(read.errors.length === 0, `manifest errors: ${JSON.stringify(read.errors)}`);
+  const app = read.manifest;
+  check(app !== undefined, "Chrome read no manifest");
+  // Chrome names the display mode by its own enum ("kStandalone").
+  check(/^(k)?standalone$/i.test(app.display), `Chrome reads the display as ${app.display}`);
+  for (const key of ["id", "scope", "startUrl"]) {
+    check(app[key] === `${base}/`, `Chrome reads the ${key} as ${app[key]}`);
+  }
+  check(app.icons?.length === manifest.icons.length, "Chrome dropped an icon");
+  await cdp.detach();
+});
+
 /** Mission Control's Board or List view; the choice is kept by the browser. */
 async function showView(name) {
   const toggle = page.getByRole("group", { name: "View" }).getByRole("button", { name });

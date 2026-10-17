@@ -98,3 +98,48 @@ test("Projects is the current item on the Projects screen", async () => {
   expect(screen.getByRole("link", { name: "Runs" })).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", { name: "Mission Control" })).not.toHaveAttribute("aria-current");
 });
+
+test("an installed console's app icon shows the same count, and clears when nothing waits", async () => {
+  const badges: string[] = [];
+  Object.defineProperty(navigator, "setAppBadge", {
+    configurable: true,
+    value: (count?: number) => {
+      badges.push(`set:${String(count)}`);
+      return Promise.resolve();
+    },
+  });
+  Object.defineProperty(navigator, "clearAppBadge", {
+    configurable: true,
+    // Tagged with what the sidebar says at the time, to tell the clear before
+    // the first answer from the one for an empty list.
+    value: () => {
+      badges.push(`clear:${screen.queryByRole("status")?.textContent ?? ""}`);
+      return Promise.resolve();
+    },
+  });
+  try {
+    const waiting = renderApp(<AppShell>x</AppShell>, {
+      server: shell([
+        { id: "a", state: "spec_review" },
+        { id: "b", state: "building" },
+      ]),
+    });
+    await waitFor(() => {
+      expect(badges).toContain("set:1");
+    });
+    waiting.unmount();
+
+    badges.length = 0;
+    renderApp(<AppShell>x</AppShell>, { server: shell([{ id: "b", state: "building" }]) });
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Nothing is waiting on you.");
+    });
+    await waitFor(() => {
+      expect(badges).toContain("clear:Nothing is waiting on you.");
+    });
+    expect(badges.filter((b) => b.startsWith("set:"))).toEqual([]);
+  } finally {
+    Reflect.deleteProperty(navigator, "setAppBadge");
+    Reflect.deleteProperty(navigator, "clearAppBadge");
+  }
+});

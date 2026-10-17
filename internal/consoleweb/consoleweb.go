@@ -68,6 +68,14 @@ func Embedded() bool {
 	return true
 }
 
+// contentTypes are the bundle's file types that Go's own table
+// (mime.TypeByExtension) lacks. Without one, the type would come from the
+// host's mime.types, which differs between machines or is absent.
+var contentTypes = map[string]string{
+	// The web app manifest that makes the console installable as an app.
+	".webmanifest": "application/manifest+json",
+}
+
 // Handler serves the embedded console bundle with SPA fallback: a request
 // path with no file extension that doesn't match a real embedded file
 // serves index.html instead of 404, so the console's own path-based deep
@@ -98,6 +106,9 @@ func Handler() http.Handler {
 			r2.URL.Path = "/"
 			fileServer.ServeHTTP(w, r2)
 			return
+		}
+		if contentType, ok := contentTypes[path.Ext(trimmed)]; ok {
+			w.Header().Set("Content-Type", contentType)
 		}
 		fileServer.ServeHTTP(w, r)
 	})
