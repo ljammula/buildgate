@@ -324,6 +324,23 @@ class BuildAppTests(unittest.TestCase):
 		)
 		self.assertEqual(required_blockers, ["review unavailable (no-review-verdict)"])
 
+	def test_advisory_stopped_reason_omits_a_reviewer_that_never_ran(self):
+		# No reviewer trace at all (the extension is not in the sandbox image):
+		# the summary names verification only, not an "unavailable" review.
+		absent = build_app.review_signal([])
+		self.assertEqual(build_app.advisory_stopped_reason(absent), "canonical verification passed")
+		# A reviewer that ran and gave no verdict is still named, with its reason.
+		failed = build_app.ReviewSignal("unavailable", "request-failed")
+		self.assertEqual(
+			build_app.advisory_stopped_reason(failed),
+			"canonical verification passed; advisory review (unavailable: request-failed)",
+		)
+		flagged = build_app.ReviewSignal("flagged", "f1")
+		self.assertEqual(
+			build_app.advisory_stopped_reason(flagged),
+			"canonical verification passed; advisory review (flagged: f1)",
+		)
+
 	def test_advisory_policy_records_review_without_blocking_on_flag_or_unavailable(self):
 		flagged = harness_adapters.parse_pi_traces(pi_output("flagged", "api.go: reviewer saw a stale diff"))
 		blockers, review = build_app.round_blockers(

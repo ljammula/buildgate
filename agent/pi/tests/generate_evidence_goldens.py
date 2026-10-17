@@ -95,7 +95,7 @@ def generate(out_dir: Path) -> dict[str, Path]:
 		agents_md_git_blob="f55d748f1f4a5821f806fe1809936f827ea088e8",
 		review_verdicts=[],
 		succeeded=True,
-		stopped_reason="canonical verification passed; advisory review (unavailable: no-review-verdict)",
+		stopped_reason="canonical verification passed",
 		rounds=[
 			build_app.Round(
 				index=1,
