@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -1870,7 +1871,8 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // to criteriaCount is claimed by at least one ticket
 // (request.ValidatePlanCoverage), then reports the infeasible tickets
 // (errPlanInfeasible): one whose own declared Allowed-Files could
-// never pass the tests_added gate (policy.TicketTestsAddedFeasible) --
+// never pass the tests_added gate (policy.TicketTestsAddedFeasible), and
+// one that names a path release always refuses (ticketProtectedPaths) --
 // found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
 // approved, and burned a full build round before quarantining on a
 // tests_added failure its own Allowed-Files made structurally
@@ -1911,10 +1913,14 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		} else if len(allowed) == 0 {
 			return nil, contentErr(fmt.Errorf("ticket %s: missing Allowed-Files", ticket.Filename))
 		}
-		if required, err := ticketspec.ParseRequiredChangedFiles(ticketPath); err != nil {
+		required, err := ticketspec.ParseRequiredChangedFiles(ticketPath)
+		if err != nil {
 			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		} else if len(required) == 0 {
 			return nil, contentErr(fmt.Errorf("ticket %s: missing Required-Changed-Files", ticket.Filename))
+		}
+		if problem := ticketProtectedPaths(ticket.Filename, allowed, required); problem != "" {
+			infeasible = append(infeasible, problem)
 		}
 		testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(ticketPath)
 		if err != nil {
@@ -1933,6 +1939,35 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		return nil, contentErr(fmt.Errorf("%s: %w", strings.Join(infeasible, "; "), errPlanInfeasible))
 	}
 	return requestTickets, nil
+}
+
+// ticketProtectedPaths reports a ticket whose Allowed-Files or
+// Required-Changed-Files name a path release never merges from a build's own
+// change (release.MergePolicy's floor: .factory.yml, anything under
+// .factory/, the oracle index): such a build is accepted and then denied at
+// release, after its model spend. Each entry is cleaned and case-folded
+// first, as a case-insensitive worktree would let either spelling through.
+// It reads the two file lists only, never prose, and checks literal entries:
+// a broad glob or "." is not refused. Empty when the ticket names none.
+func ticketProtectedPaths(filename string, allowed, required []string) string {
+	original := map[string]string{}
+	var folded []string
+	for _, entry := range append(append([]string{}, allowed...), required...) {
+		key := strings.ToLower(path.Clean(entry))
+		if _, seen := original[key]; !seen {
+			original[key] = entry
+			folded = append(folded, key)
+		}
+	}
+	floor := release.MergePolicy{}
+	var named []string
+	for _, key := range floor.ProtectedFilesTouched(folded) {
+		named = append(named, original[key])
+	}
+	if len(named) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("ticket %s: names %v, which release never merges from a build (the repository's factory configuration is the operator's to change) -- drop the path from Allowed-Files and Required-Changed-Files, and leave the change to the operator", filename, named)
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file
