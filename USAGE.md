@@ -309,6 +309,7 @@ the target: it says so and changes nothing.
 | Pick a model route | Detects an existing Codex/Copilot/Anthropic login and offers it first (`-route` to pick explicitly: `openai`/`anthropic`/`copilot`/`chatgpt-codex`); lists models, picks a usable one, warns on a weak model | `factoryd init-config`, edit, `factoryd doctor -list-models` |
 | Start the queue daemon | Detached, tracked for this session, survives you closing this terminal | `factoryd worker` |
 | Start the console | Reuses one already running, else spawns one; opens the tokenized link (`-no-serve` to skip, `-no-open` to skip only the browser open) | `factoryd serve` |
+| Check the verify commands | Before a repository's first request, and before asking for the goal: runs the verify command, and the full-suite command when it differs, in the sandbox with no model call; stops with the halt sentence when either fails | `factoryd -baseline-check -workspace <repo>` |
 | Submit the request | Prints the request id, the `approve` command with `-data-dir`, and a console link | `factoryd submit -verify-command "..." -preflight-profile brownfield <repo> "<task>"` |
 
 Non-interactively (or a non-terminal stdin, detected automatically),

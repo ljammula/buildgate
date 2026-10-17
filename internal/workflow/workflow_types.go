@@ -168,6 +168,12 @@ type RunWorkflowInput struct {
 	// queue can dispatch to a different Worker than the submitter's own).
 	// Empty (default) skips the gate entirely, matching cmd/factoryd.
 	FullSuiteCommand string `json:"full_suite_command,omitempty"`
+	// BaselineCheck stops the run after the baseline: the verify command,
+	// then FullSuiteCommand when it differs, on the untouched repository, and
+	// no build (factoryd run -baseline-check, see baselineCheckChange). A
+	// passing check ends with RunWorkflowResult.BaselineChecked and no
+	// State, so nothing reaches release or a pull request.
+	BaselineCheck bool `json:"baseline_check,omitempty"`
 	// GateCommands is every operator-configured command gate (see
 	// policy.CommandGates -- "lint", "security_audit", "unit_tests",
 	// "integration_tests", "reference_oracle" today, keyed by
@@ -940,8 +946,11 @@ type RunProgress struct {
 }
 
 type RunWorkflowResult struct {
-	State              run.State `json:"state"`
-	CleanupUnconfirmed bool      `json:"cleanup_unconfirmed,omitempty"`
+	State run.State `json:"state"`
+	// BaselineChecked reports a BaselineCheck run whose baseline passed: its
+	// State is empty and its worktree is rolled back.
+	BaselineChecked    bool `json:"baseline_checked,omitempty"`
+	CleanupUnconfirmed bool `json:"cleanup_unconfirmed,omitempty"`
 	// HaltReasonCode mirrors run.Run.HaltReasonCode (see its own doc
 	// comment) for a run that went through RepositoryOwnerWorkflow: that
 	// workflow cannot propagate a failed child RunWorkflow's raw error to

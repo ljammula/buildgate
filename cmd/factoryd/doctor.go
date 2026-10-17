@@ -256,6 +256,7 @@ func doctorMain(dp *deps, args []string) error {
 		workspace:              *workspace,
 		dataDir:                *dataDir,
 		temporalAddress:        *temporalAddress,
+		baselineCheck:          doctorBaselineCheckRunner(dp, resolvedConfigPath, doctorExplicitDataDir(flags, *dataDir), *temporalAddress),
 		egressCABundle:         *egressCABundle,
 		lintCommand:            *lintCommand,
 		securityCommand:        *securityCommand,
@@ -783,6 +784,9 @@ type doctorInputs struct {
 	composeServices             bool
 	// targetRepo is -target-repo: see doctorTargetRepoChecks.
 	targetRepo string
+	// baselineCheck runs `factoryd -baseline-check` on a repository (see
+	// doctorCheckBaseline); nil skips the check.
+	baselineCheck func(repo string) error
 	// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan feed
 	// doctorCheckReleasePolicy: the same three
 	// release_max_files_changed/release_max_insertions/release_rollback_plan
@@ -987,6 +991,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorCheckLanguageProfile(in.targetRepo))
 		checks = append(checks, doctorCheckProjectToolchains(ctx, in)...)
 		checks = append(checks, doctorCheckRequiredBinaries(ctx, in)...)
+		checks = append(checks, doctorCheckBaseline(in, doctorChecksFailed(checks)))
 	}
 	for _, gate := range []struct{ label, command string }{
 		{"-lint-command", in.lintCommand},

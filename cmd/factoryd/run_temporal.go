@@ -16,7 +16,6 @@ import (
 	"go.temporal.io/sdk/temporal"
 	temporalworker "go.temporal.io/sdk/worker"
 
-	"buildgate/internal/forge"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
@@ -362,6 +361,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		FastCheckCommand:                 o.FastCheckCommand,
 		SpecAcceptanceCriteria:           o.SpecAcceptanceCriteria,
 		FullSuiteCommand:                 o.FullSuiteCommand,
+		BaselineCheck:                    o.BaselineCheck,
 		GateCommands:                     o.GateCommands,
 		SetupCommands:                    o.SetupCommands,
 		AutofixCommands:                  o.AutofixCommands,
@@ -765,7 +765,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 	result = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, result)
 	// underRunLock=false: this call site holds no run.WithLock on id (see
 	// applyRunWorkflowResult's own doc comment on that parameter).
-	return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, taskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, false)
+	return finishRunWorkflow(dp, r, opts, taskQueue, result)
 }
 
 // keepEligibleRun reports whether a lost or resumed run's worktree may be

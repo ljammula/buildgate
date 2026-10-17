@@ -24,6 +24,11 @@ const explicitActivityIDsChange = "explicit-activity-ids"
 // replays with the rollback Activity its history already holds.
 const keepWorktreeWhenLostChange = "keep-worktree-when-lost"
 
+// baselineCheckChange is the GetVersion change ID for a BaselineCheck run's
+// stop after the baseline (runBaselineCheck). It is consulted only when the
+// input asks for a check, which no history recorded before it does.
+const baselineCheckChange = "baseline-check"
+
 // heartbeatLost reports whether err means an Activity's worker went away: a
 // heartbeat timeout. A start-to-close timeout is deliberately not a loss
 // here (unlike RequestWorkflow's lostActivity): a hang past StartToClose

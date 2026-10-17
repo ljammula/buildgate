@@ -587,6 +587,10 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 	// means an interactive prompt is the right next step -- -issue/
 	// -request-file each already carry their own request text, so neither
 	// needs (or gets) this prompt.
+	// Before the goal is asked: a red check would discard what was typed.
+	if err := quickstartBaselineCheck(dp, w, configPath, dataDir, repoRoot, temporalAddress, verifyCommand, verifyExplicit); err != nil {
+		return err
+	}
 	goal := opts.Goal
 	if goal == "" && opts.Issue == "" && opts.RequestFile == "" {
 		goal, err = p.ask(w, "What should the factory build? ")
@@ -599,6 +603,32 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 	}
 
 	return quickstartSubmitAndWatch(dp, w, settings, repoRoot, dataDir, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, opts.PollInterval, opts.PollTimeout, consoleToken, !opts.NoOpen)
+}
+
+// quickstartBaselineCheck runs the baseline check (factoryd -baseline-check)
+// before a repository's first request in dataDir, and stops quickstart when
+// it fails: a verify or full-suite command that is red in the sandbox would
+// halt the build only after its spec and plan had spent model calls. A
+// repository that already has a request has been through this once.
+func quickstartBaselineCheck(dp *deps, w io.Writer, configPath, dataDir, repoRoot, temporalAddress, verifyCommand string, verifyExplicit bool) error {
+	requests, err := request.List(dataDir)
+	if err != nil {
+		return fmt.Errorf("list existing requests: %w", err)
+	}
+	for _, r := range requests {
+		if r.Workspace == repoRoot {
+			return nil
+		}
+	}
+	fmt.Fprintln(w, "Checking that the repository's verify and full-suite commands pass in the sandbox (no model call)...")
+	var extra []string
+	if verifyExplicit {
+		extra = []string{"-verify-command", verifyCommand}
+	}
+	if err := doctorBaselineCheckRunner(dp, configPath, dataDir, temporalAddress, extra...)(repoRoot); err != nil {
+		return fmt.Errorf("%s -- fix verify_command or full_suite_command in the repository's .factory.yml, then run quickstart again", baselineCheckSentence(err))
+	}
+	return nil
 }
 
 // gitToplevel resolves the git repository containing dir, via

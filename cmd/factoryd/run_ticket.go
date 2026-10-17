@@ -180,6 +180,7 @@ type runFlags struct {
 	composeServices              *bool
 	egressCABundle               *string
 	dataDir                      *string
+	baselineCheck                *bool
 	requireDeclaredScope         *bool
 	temporalAddress              *string
 	repository                   *string
@@ -245,6 +246,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.composeServices = flags.Bool("compose-services", true, "start the services the repository's compose file declares, fresh for every build, verify and full-suite attempt. Does nothing without a compose file. Unset uses the session config's value")
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-inspecting proxy's, that the registry proxy and host-side model calls trust. Empty uses ~/.config/factoryd/build-ca.pem when it exists")
 	f.dataDir = flags.String("data-dir", "data", "directory for durable run records and logs")
+	f.baselineCheck = flags.Bool("baseline-check", false, "check that the repository's verify and full-suite commands pass in the sandbox, with no model call and nothing built. Takes -workspace, no ticket")
 	f.requireDeclaredScope = flags.Bool("require-declared-scope", false, "halt before the build if the ticket does not declare both Allowed-Files: and Required-Changed-Files:")
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts it with Docker if it is down; with FACTORYD_AUTOSTART=0 the address is required. An unreachable server halts the run")
 	f.repository = flags.String("repository", "", "repository name; runs that pass the same name run one at a time")
@@ -765,6 +767,11 @@ func (tr *ticketRun) selectRoleRoutes() error {
 // applyProjectDefaults requires the ticket, workspace and spec, then applies
 // the repository's project config to the flags the operator left unset.
 func (tr *ticketRun) applyProjectDefaults() error {
+	if *tr.rf.baselineCheck {
+		if err := tr.prepareBaselineCheck(); err != nil {
+			return err
+		}
+	}
 	if *tr.ticket == "" || *tr.workspace == "" || *tr.spec == "" {
 		tr.flags.Usage()
 		return fmt.Errorf("-ticket, -workspace, and -spec are required")
@@ -2415,6 +2422,7 @@ func (tr *ticketRun) dispatch() error {
 			VerifyCommand:            tr.verifyCmd,
 			FastCheckCommand:         *tr.fastCheckCommand,
 			FullSuiteCommand:         tr.effectiveFullSuiteCommand,
+			BaselineCheck:            *tr.rf.baselineCheck,
 			GateCommands:             tr.gateCommands,
 			SetupCommands:            tr.setup,
 			AutofixCommands:          tr.autofix,

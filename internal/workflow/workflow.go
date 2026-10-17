@@ -475,7 +475,56 @@ func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return nil, wrapActivityFailure("baseline verify activity", err, nil, baseSHA, committed, worktreePath, branch)
 	}
 	input.BaselineNotePath = baseline.BuildNotePath
+	if input.BaselineCheck && temporalworkflow.GetVersion(ctx, baselineCheckChange, temporalworkflow.DefaultVersion, 1) == 1 {
+		return runBaselineCheck(ctx, ids, buildVerifyCtx, *input, current, baseline.Attempts, baseSHA, committed, worktreePath, branch)
+	}
 	return baseline.Attempts, nil
+}
+
+// errBaselineCheckPassed is how preBuildChecks reports a BaselineCheck run
+// whose checks passed: the run stops there, and preBuildEnd turns it into
+// a result with BaselineChecked.
+var errBaselineCheckPassed = errors.New("baseline check passed")
+
+// preBuildEnd is RunWorkflow's return when preBuildChecks did not let the
+// build start: a passed baseline check (errBaselineCheckPassed) ends with
+// BaselineChecked, its attempts and no State, so the deferred rollback
+// discards the worktree and nothing reaches release; any other error ends
+// the run as it always has.
+func preBuildEnd(result RunWorkflowResult, attempts []run.Attempt, err error) (RunWorkflowResult, error) {
+	if !errors.Is(err, errBaselineCheckPassed) {
+		return RunWorkflowResult{}, err
+	}
+	result.Attempts = append(result.Attempts, attempts...)
+	result.BaselineChecked, result.State = true, ""
+	return result, nil
+}
+
+// runBaselineCheck finishes a BaselineCheck run after its baseline verify
+// passed: it runs the full-suite command too when it differs from the
+// verify command (a request's full-suite gate would run it on every
+// ticket). A red full suite halts with BaselineVerifyFailureType, the same
+// way a red verify command does; a pass returns errBaselineCheckPassed.
+func runBaselineCheck(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, attempts []run.Attempt, baseSHA string, committed bool, worktreePath, branch string) ([]run.Attempt, error) {
+	if input.BaselineNotePath != "" {
+		// A baseline failure the ticket would own: a check has no ticket,
+		// so any failure is red.
+		return nil, wrapActivityFailure("baseline check", temporal.NewNonRetryableApplicationError("baseline check failed: the verify command fails on the untouched repository. No model call was made. Fix verify_command in .factory.yml", BaselineVerifyFailureType, nil), attempts, baseSHA, committed, worktreePath, branch)
+	}
+	if input.FullSuiteCommand == "" || input.FullSuiteCommand == input.VerifyCommand {
+		return attempts, errBaselineCheckPassed
+	}
+	current.Stage, current.StartedAt = "full_suite_verify", temporalworkflow.Now(ctx)
+	var fullSuite VerifyActivityResult
+	if err := temporalworkflow.ExecuteActivity(ids.with(buildVerifyCtx, "baseline-check-full-suite"), RunFullSuiteVerifyActivityName, input).Get(ctx, &fullSuite); err != nil {
+		return nil, wrapActivityFailure("baseline check full-suite activity", err, attempts, baseSHA, committed, worktreePath, branch)
+	}
+	attempts = append(attempts, fullSuite.Attempts...)
+	if fullSuite.Result.ExitCode != 0 {
+		msg := fmt.Sprintf("baseline check failed: the full-suite command exits %d on the untouched repository, so every request's full-suite gate would fail. No model call was made. Fix full_suite_command in %s", fullSuite.Result.ExitCode, ".factory.yml")
+		return nil, wrapActivityFailure("baseline check", temporal.NewNonRetryableApplicationError(msg, BaselineVerifyFailureType, nil), attempts, baseSHA, committed, worktreePath, branch)
+	}
+	return attempts, errBaselineCheckPassed
 }
 
 // RunWorkflow covers only slice_running -> verifying -> accepted|quarantined.
@@ -880,7 +929,7 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	// baselineVerifyChange.
 	baselineAttempts, err := preBuildChecks(ctx, ids, buildVerifyCtx, &input, &current, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	if err != nil {
-		return RunWorkflowResult{}, err
+		return preBuildEnd(result, baselineAttempts, err)
 	}
 	result.Attempts = append(result.Attempts, baselineAttempts...)
 

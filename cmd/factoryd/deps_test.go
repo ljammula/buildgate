@@ -117,6 +117,7 @@ func fakeForgeOf(dp *deps) *fakeForge { return dp.forge.(*fakeForge) }
 // fakeHost is a hostBoundary whose every method is a field, set by newTestDeps
 // to the real method and replaced by a test that needs another answer.
 type fakeHost struct {
+	baselineCheckFn      func(args []string) error
 	blobAtCommitFn       func(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommandFn     func(target string) *exec.Cmd
 	executableFn         func() (string, error)
@@ -150,6 +151,7 @@ func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit 
 }
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
+func (f *fakeHost) baselineCheck(args []string) error      { return f.baselineCheckFn(args) }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	return f.goCommandFn(ctx, dir, env, args...)
 }
@@ -306,6 +308,8 @@ func newTestDeps(t testing.TB) *deps {
 		rootTreeAtCommitFn: realHost.rootTreeAtCommit,
 		browserCommandFn:   realHost.browserCommand,
 		executableFn:       realHost.executable,
+		// A passing check, decided in the test process: no run is started.
+		baselineCheckFn: func([]string) error { return nil },
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
 			return nil, errors.New("test host: no go command is run")
 		},
