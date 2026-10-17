@@ -86,8 +86,8 @@ func TestDockerfileProjectBakesMissingDependency(t *testing.T) {
 	// normalizes permissions leniently, but a real Linux engine enforces
 	// the bind-mounted directory's actual host ownership, and UID 65532
 	// has no relation to whatever host account is running this test).
-	// /usr/local/gomodcache and /usr/local/npm-cache stay readable by any
-	// UID regardless (Dockerfile.project chmods them world-readable).
+	// /usr/local/gomodcache stays readable by any UID regardless
+	// (Dockerfile.project chmods it world-readable).
 	hostUser := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 	runOffline := func(image string) ([]byte, error) {
 		return exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none",
@@ -153,14 +153,14 @@ func TestDockerfileProjectBakesMavenDependencies(t *testing.T) {
 	}
 	text := string(dockerfile)
 	for _, want := range []string{
-		"ENV MAVEN_OPTS=\"-Dmaven.repo.local=/usr/local/maven-repository\"",
+		"ENV MAVEN_OPTS=\"-Dmaven.repo.local=/scratch/maven-repository\"",
 		"if [ -f pom.xml ]; then",
 		"mvn -B -ntp -DskipTests dependency:go-offline",
 		"mvn -B -ntp -DskipTests test",
 		"org.apache.maven.plugins:maven-dependency-plugin:3.6.1:get",
 		"-Dartifact=org.apache.maven.surefire:surefire-junit4:2.22.2",
 		"-Dtransitive=true",
-		"chmod -R a+rX /usr/local/npm-cache /usr/local/gomodcache /usr/local/maven-repository",
+		"chown -R 65532:65532 /scratch",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Dockerfile.project is missing Maven dependency-cache step %q", want)
@@ -179,7 +179,7 @@ func TestDockerfileProjectBakesRubyDependencies(t *testing.T) {
 		"if [ -f Gemfile.lock ]; then",
 		"gem install bundler --no-document --version 2.4.22",
 		"bundle _2.4.22_ install --jobs 4 --retry 3",
-		"/usr/local/maven-repository /usr/local/bundle",
+		"chmod -R a+rX /usr/local/gomodcache /usr/local/bundle",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Dockerfile.project is missing Ruby dependency-cache step %q", want)
