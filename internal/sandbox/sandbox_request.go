@@ -242,7 +242,7 @@ type workerWrapper struct {
 func scratchCheck(mount string) string {
 	quoted := shSingleQuote(mount)
 	dirs := shSingleQuote(mount+"/go-build") + " " + shSingleQuote(mount+"/go-tmp") + " " + shSingleQuote(mount+"/gomodcache")
-	return "mkdir -p " + dirs + " || { echo \"buildgate: the worker cannot write " + mount +
+	return "mkdir -p " + dirs + " || { echo \"" + run.WorkerNoScratchPrefix + mount +
 		" (uid $(id -u), $(stat -c %u:%g:%a " + quoted + " 2>/dev/null)): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)\"; exit " + strconv.Itoa(WorkerExitNoScratch) + "; }"
 }
 

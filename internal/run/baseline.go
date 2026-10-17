@@ -17,6 +17,22 @@ import (
 // and leaves SetupFailedPrefix plus the command as a line of its log.
 const SetupFailedExitCode = 95
 
+// WorkerNoScratchPrefix starts the line the sandbox's worker wrapper logs,
+// before exiting SetupFailedExitCode too, when the image's /scratch is not
+// writable by the worker: an image built before the per-launch scratch volume
+// (internal/sandbox scratchCheck writes it).
+const WorkerNoScratchPrefix = "buildgate: the worker cannot write "
+
+// WorkerNoScratchLine is that line from log, "" when the log has none.
+func WorkerNoScratchLine(log string) string {
+	for _, line := range strings.Split(log, "\n") {
+		if strings.HasPrefix(line, WorkerNoScratchPrefix) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
 // SetupFailedPrefix starts the log line that names the failed setup command.
 const SetupFailedPrefix = "buildgate: setup failed: "
 
@@ -150,6 +166,10 @@ type BaselineVerify struct {
 	// commit (exit SetupFailedExitCode): the verify command never ran, and
 	// no change the build makes could pass it.
 	SetupFailed string `json:"setup_failed,omitempty"`
+	// WorkerImageStale is the worker wrapper's own line when the sandbox
+	// could not run the command at all because the worker image predates
+	// this factoryd (WorkerNoScratchPrefix): the verify command never ran.
+	WorkerImageStale string `json:"worker_image_stale,omitempty"`
 	// Expected is true when the command failed and the failure is the work
 	// the ticket asks for (it names every failing test, or NeedsCreated is
 	// set), so the build ran and was told about it.
@@ -209,6 +229,9 @@ func (b *BaselineVerify) Summary() string {
 
 // expectedSummary is Summary without the paths the command leaves.
 func (b *BaselineVerify) expectedSummary() string {
+	if b.WorkerImageStale != "" {
+		return "failed: the worker image predates this factoryd, so the command never ran"
+	}
 	if b.SetupFailed != "" {
 		return "setup fails on the base commit: " + b.SetupFailed
 	}
@@ -263,6 +286,10 @@ func (b *BaselineVerify) HaltAdvice() string {
 	if b.leavesOutOfScope() {
 		return "No model call was made: every build of this ticket would be quarantined by diff_scope, because the factory commits what the command leaves. " +
 			"Ignore those paths in the repository's .gitignore, or make the command remove them."
+	}
+	if b.WorkerImageStale != "" {
+		return "No model call was made: the sandbox's worker could not start (" + b.WorkerImageStale + "). " +
+			"Rebuild the worker image with make install, and re-point any profile whose sandbox_image pins its own image; factoryd doctor -config <profile> names it."
 	}
 	if b.SetupFailed != "" {
 		return "No model call was made: a setup: command of the repository's .factory.yml fails on the untouched repository, so no build could pass verification. " +

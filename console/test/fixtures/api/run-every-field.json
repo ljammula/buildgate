@@ -392,6 +392,7 @@
     "needs_created": "every-field needs_created",
     "first_error": "every-field first_error",
     "setup_failed": "every-field setup_failed",
+    "worker_image_stale": "every-field worker_image_stale",
     "expected": true,
     "left_out_of_scope": [
       "every-field left_out_of_scope"
