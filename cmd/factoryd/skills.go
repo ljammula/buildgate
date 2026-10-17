@@ -32,7 +32,7 @@ func skillSources(refs []sessionconfig.SkillRef) []sandbox.SkillSource {
 	}
 	out := make([]sandbox.SkillSource, len(refs))
 	for i, r := range refs {
-		out[i] = sandbox.SkillSource{Name: r.Name, Dir: r.Dir, Builtin: r.Builtin}
+		out[i] = sandbox.SkillSource{Name: r.Name, Dir: r.Dir}
 	}
 	return out
 }
@@ -81,11 +81,7 @@ func doctorCheckSkills(in doctorInputs) doctorCheck {
 		}
 		names := make([]string, len(skills))
 		for i, s := range skills {
-			from := s.Dir
-			if s.Builtin {
-				from = "built-in"
-			}
-			names[i] = s.Name + " (" + from + ")"
+			names[i] = s.Name + " (" + s.Dir + ")"
 		}
 		parts = append(parts, string(role)+": "+strings.Join(names, ", "))
 	}

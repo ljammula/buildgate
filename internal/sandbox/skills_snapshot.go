@@ -16,7 +16,6 @@ import (
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/sanitize"
-	"buildgate/internal/workerskills"
 )
 
 // MaxSkillsBundleBytes caps the total size of all snapshotted skills.
@@ -28,13 +27,9 @@ var projectSkillDirs = []string{".github/skills", ".agents/skills", ".claude/ski
 
 // SkillSource is one operator skill to snapshot: its name and the folder
 // that holds its SKILL.md (a symlink is allowed at the root only).
-// Builtin marks one of buildgate's embedded skills (internal/workerskills):
-// it is copied straight from this binary, never from a host folder, and
-// Dir is empty.
 type SkillSource struct {
-	Name    string `json:"name"`
-	Dir     string `json:"dir,omitempty"`
-	Builtin bool   `json:"builtin,omitempty"`
+	Name string `json:"name"`
+	Dir  string `json:"dir,omitempty"`
 }
 
 // ProjectSkillShadows returns the workspace-relative paths of project
@@ -238,7 +233,6 @@ func SnapshotSkills(workDir, dst string, skills []SkillSource) (sha256Hash strin
 
 	type resolved struct {
 		name, dir string
-		builtin   bool
 	}
 	var plan []resolved
 	var total int64
@@ -248,14 +242,7 @@ func SnapshotSkills(workDir, dst string, skills []SkillSource) (sha256Hash strin
 			return "", fmt.Errorf("skills: %s: listed twice", s.Name)
 		}
 		seen[s.Name] = true
-		var dir string
-		var size int64
-		var err error
-		if s.Builtin {
-			size, err = checkBuiltinSkill(s.Name)
-		} else {
-			dir, size, err = checkSkill(workDir, s)
-		}
+		dir, size, err := checkSkill(workDir, s)
 		if err != nil {
 			return "", err
 		}
@@ -263,20 +250,14 @@ func SnapshotSkills(workDir, dst string, skills []SkillSource) (sha256Hash strin
 		if total > MaxSkillsBundleBytes {
 			return "", fmt.Errorf("skills: %s: bundle exceeds %d bytes", s.Name, MaxSkillsBundleBytes)
 		}
-		plan = append(plan, resolved{s.Name, dir, s.Builtin})
+		plan = append(plan, resolved{s.Name, dir})
 	}
 
 	if err := os.MkdirAll(dst, 0o750); err != nil {
 		return "", fmt.Errorf("skills: create snapshot directory: %w", err)
 	}
 	for _, p := range plan {
-		var err error
-		if p.builtin {
-			err = copyBuiltinSkill(p.name, filepath.Join(dst, p.name))
-		} else {
-			err = evidence.SnapshotTree(p.dir, filepath.Join(dst, p.name))
-		}
-		if err != nil {
+		if err := evidence.SnapshotTree(p.dir, filepath.Join(dst, p.name)); err != nil {
 			return "", fmt.Errorf("skills: %s: snapshot: %w", p.name, err)
 		}
 	}
@@ -346,68 +327,6 @@ func checkSkill(workDir string, s SkillSource) (string, int64, error) {
 		return "", 0, err
 	}
 	return root, size, nil
-}
-
-// checkBuiltinSkill applies checkSkill's content rules to an embedded skill
-// and returns its total file bytes.
-func checkBuiltinSkill(name string) (int64, error) {
-	tree := workerskills.FS()
-	body, err := fs.ReadFile(tree, name+"/SKILL.md")
-	if err != nil {
-		return 0, fmt.Errorf("skills: %s: not a built-in skill: %w", name, err)
-	}
-	got, err := frontMatterName(body)
-	if err != nil {
-		return 0, fmt.Errorf("skills: %s: SKILL.md front matter: %w", name, err)
-	}
-	if got != name {
-		return 0, fmt.Errorf("skills: %s: SKILL.md front-matter name is %q, want %q", name, got, name)
-	}
-	var size int64
-	err = fs.WalkDir(tree, name, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		size += info.Size()
-		return nil
-	})
-	return size, err
-}
-
-// copyBuiltinSkill writes the embedded skill name into dst with the same
-// modes evidence.SnapshotTree uses (directories 0750, files 0640), set with
-// an explicit chmod: the worker reads the mount as another user through the
-// group bit, which a strict umask (077) would otherwise strip.
-func copyBuiltinSkill(name, dst string) error {
-	tree := workerskills.FS()
-	return fs.WalkDir(tree, name, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(name, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			if err := os.MkdirAll(target, 0o750); err != nil {
-				return err
-			}
-			return os.Chmod(target, 0o750)
-		}
-		data, err := fs.ReadFile(tree, path)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, data, 0o640); err != nil {
-			return err
-		}
-		return os.Chmod(target, 0o640)
-	})
 }
 
 // frontMatterName returns the name: value of the YAML front matter between

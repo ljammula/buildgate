@@ -115,10 +115,6 @@ func TestContentEntriesListAllSkillsAndShadowSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	byKey := contentEntryMap(entries)
-	builtin := byKey["skill:go-service:"]
-	if builtin.source != "built-in (edit source-controlled internal/workerskills/skills/)" || builtin.hash != contentHash(builtin.data) || !strings.Contains(builtin.path, "internal/workerskills/skills/go-service/SKILL.md") || builtin.selector != "builtin-skill:go-service" || builtin.selection != "available, not selected" {
-		t.Errorf("built-in skill entry = %+v", builtin)
-	}
 	external := byKey["skill:team-skill:execution, review"]
 	if external.source != "team file (editable)" || external.path != sources.skillPath || external.hash != contentHash([]byte(sources.skillText)) || external.selector != "skill:team-skill" || external.selection != "selected: execution, review; runtime validation pending" {
 		t.Errorf("external skill entry = %+v", external)
@@ -128,10 +124,6 @@ func TestContentEntriesListAllSkillsAndShadowSources(t *testing.T) {
 		t.Errorf("shadowing team skill entry = %+v", shadow)
 	}
 	var shown bytes.Buffer
-	if err := showContent(entries, "builtin-skill:go-service", &shown); err != nil || !strings.Contains(shown.String(), "Read `go.mod`") {
-		t.Errorf("show shadowed built-in = %v, output %q", err, shown.String())
-	}
-	shown.Reset()
 	if err := showContent(entries, "skill:go-service", &shown); err != nil || !strings.Contains(shown.String(), "Use the team's Go conventions.") {
 		t.Errorf("show effective team skill = %v, output %q", err, shown.String())
 	}
@@ -322,7 +314,7 @@ func TestContentEntriesShowsSelectedUnreadableSkill(t *testing.T) {
 	}
 }
 
-func TestContentDoesNotLetSymlinkedTeamSkillShadowBuiltin(t *testing.T) {
+func TestContentShowsASymlinkedTeamSkillAsUnavailable(t *testing.T) {
 	root := t.TempDir()
 	teamDir := filepath.Join(root, "go-service")
 	if err := os.MkdirAll(teamDir, 0o750); err != nil {
@@ -338,10 +330,6 @@ func TestContentDoesNotLetSymlinkedTeamSkillShadowBuiltin(t *testing.T) {
 	entries, err := contentEntries(sessionconfig.Settings{SkillDirs: []string{root}, Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Skills: []string{"go-service"}}}}, os.DirFS(t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
-	}
-	byKey := contentEntryMap(entries)
-	if builtin := byKey["skill:go-service:"]; builtin.selector != "builtin-skill:go-service" || builtin.hash == "" {
-		t.Fatalf("built-in skill lost its shadowed selector: %+v", builtin)
 	}
 	var team contentEntry
 	for _, entry := range entries {
@@ -472,10 +460,6 @@ func TestContentCatalogSurvivesMissingConfiguredSkillDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing skill directory hid the content catalog: %v", err)
 	}
-	byKey := contentEntryMap(entries)
-	if byKey["skill:go-service:"].name != "go-service" {
-		t.Fatal("built-in skill catalog was hidden by missing team directory")
-	}
 	var row contentEntry
 	for _, entry := range entries {
 		if entry.selector == "skill-dir:1" {
@@ -494,9 +478,6 @@ func TestContentCatalogSurvivesMissingDesignGuideDirectory(t *testing.T) {
 		t.Fatalf("missing guide directory hid the content catalog: %v", err)
 	}
 	byKey := contentEntryMap(entries)
-	if byKey["skill:go-service:"].name != "go-service" {
-		t.Fatal("built-in skill catalog was hidden by missing guide directory")
-	}
 	if entry := byKey["guide:design guide directories:"]; entry.problem == "" {
 		t.Fatalf("missing guide directory row = %+v", entry)
 	}
