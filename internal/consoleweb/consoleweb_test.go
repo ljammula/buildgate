@@ -147,3 +147,22 @@ func TestBundleIsEmbedded(t *testing.T) {
 		t.Errorf("GET the asset = %d %q, want the file", rec.Code, rec.Body.String())
 	}
 }
+
+// TestManifestHasItsContentType: the web app manifest is served as
+// application/manifest+json on every machine, not as whatever the host's
+// mime.types says about .webmanifest.
+func TestManifestHasItsContentType(t *testing.T) {
+	withFS(t, fstest.MapFS{
+		"index.html":           {Data: []byte("<!doctype html><title>Buildgate</title>")},
+		".vite/manifest.json":  {Data: []byte("{}")},
+		"manifest.webmanifest": {Data: []byte(`{"name":"Buildgate"}`)},
+	})
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"name":"Buildgate"}` {
+		t.Fatalf("GET /manifest.webmanifest = %d %q, want the file", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/manifest+json" {
+		t.Errorf("Content-Type = %q, want application/manifest+json", got)
+	}
+}

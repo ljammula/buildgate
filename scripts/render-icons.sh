@@ -15,6 +15,10 @@
 #                                           sidebar mark and tab icon
 #   console/public/favicon.png              32px, the tab icon the "needs you"
 #                                           badge is drawn onto
+#   console/public/icon-192.png             the installed console's icons, named
+#   console/public/icon-512.png             by console/public/manifest.webmanifest
+#   console/public/icon-maskable-512.png    (512px, the mark inside the maskable
+#                                           safe zone on a full-bleed tile)
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,9 +36,18 @@ trap 'rm -rf "$work"' EXIT
 # render SVG SIZE OUT -- the SVG is inlined into the page rather than
 # referenced by <img src>, which headless Chrome can screenshot before the
 # image has loaded (observed: blank PNGs).
+#
+# A fourth argument "maskable" draws the mark at 80% on a square tile of its
+# own colour, so a launcher's mask (a circle at the smallest) cuts only tile.
 render() {
+	if [ "${4:-}" = maskable ]; then
+		inset=$(($2 / 10))
+		style="body{margin:0;background:#1c1917}svg{display:block;margin:${inset}px;width:$(($2 - 2 * inset))px;height:$(($2 - 2 * inset))px}"
+	else
+		style="body{margin:0}svg{display:block;width:$2px;height:$2px}"
+	fi
 	{
-		printf '<html><head><style>body{margin:0}svg{display:block;width:%spx;height:%spx}</style></head><body>' "$2" "$2"
+		printf '<html><head><style>%s</style></head><body>' "$style"
 		cat "$1"
 		printf '</body></html>'
 	} >"$work/page.html"
@@ -53,3 +66,9 @@ mkdir -p "$root/console/public"
 cp "$src" "$root/console/public/buildgate.svg"
 echo "wrote $root/console/public/buildgate.svg"
 render "$src" 32 "$root/console/public/favicon.png"
+
+# The installed console (a web app installed from the browser): the icons its
+# manifest names.
+render "$src" 192 "$root/console/public/icon-192.png"
+render "$src" 512 "$root/console/public/icon-512.png"
+render "$src" 512 "$root/console/public/icon-maskable-512.png" maskable

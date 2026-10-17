@@ -1005,6 +1005,23 @@ The console's home screen: what the factory is doing, and what each request wait
 
 The queue place and the build's stage come from the server (`queue_position` and `build` on `GET /requests`, `active_requests`, `slot_requests` (the busy-slot count: jobs and pull request review passes) and `job_slots` on `GET /queue-run`), so the console and `factoryd status` agree. From another machine it is the same screen: [the console from another machine](#the-console-from-another-machine).
 
+### The console as an app
+
+In Chrome the console installs as an app of its own: a Dock icon, its own
+window, and a badge on the icon with the number of requests waiting on you.
+It is the same console `serve` serves, so it always matches the installed
+`factoryd`, and it needs nothing else installed. Open the console, then the
+install icon at the right of the address bar, or ⋮ → Cast, save, and share.
+Safari's File → Add to Dock has not been tried with it.
+
+| What | How it behaves |
+|---|---|
+| The badge | The count in the sidebar's Triage item, on every screen, updated while the app's window is open; the last count can stay on the icon after the window closes. No count while the console cannot read the list. macOS draws it only while the app may badge its icon: System Settings → Notifications → Buildgate → Badge application icon |
+| Its address | An installed app is tied to the exact address it was installed from (`localhost:8090` and `127.0.0.1:8090` are two apps). `127.0.0.1:8090` belongs to the first profile whose `serve` starts; another profile's `serve` takes a free port, a different one after each restart, so an app installed from it stops opening. With several profiles, install from the one that starts first: if another starts first, the app opens that profile's console |
+| A notification's link | A desktop banner and a Slack or Discord link open the request in the default browser, or in the app when Chrome is the default browser and the app's "Open supported links" is on. A notification the app's own window raises ("Turn on notifications" in its sidebar) opens the request in the app |
+| From another machine | `factoryd remote-console`'s `https://` address can be installed the same way (not yet tried). The app needs the gate token there like any tab, and stops opening after `remote-console -off` |
+| Offline | Nothing is cached: with `serve` stopped the window shows the browser's error page until `factoryd console` starts it again |
+
 ### Projects
 
 The Projects screen is the one place for a project's figures. Each row is a

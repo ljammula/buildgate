@@ -8,10 +8,11 @@ import {
   Plus,
   Sun,
 } from "lucide-react";
-import type { ComponentType, ReactNode } from "react";
+import { type ComponentType, type ReactNode, useEffect } from "react";
 import { Link, matchPath, useLocation } from "react-router";
 
 import { useApi } from "@/api/ApiProvider";
+import { setAppBadge } from "@/platform/appBadge";
 import { nextThemeMode, useThemeMode } from "@/platform/theme";
 import type { ThemeMode } from "@/platform/themeStore";
 import { boardPath, newRequestPath, projectsPath, runsPath, triagePath } from "@/routes/paths";
@@ -79,6 +80,10 @@ export interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const { canWrite } = useApi();
   const needsYou = useNeedsYouCount();
+  // An installed console's app icon carries the same count, on every screen.
+  useEffect(() => {
+    setAppBadge(needsYou);
+  }, [needsYou]);
   const notifier = useBrowserNotifier();
   const { pathname } = useLocation();
   return (
