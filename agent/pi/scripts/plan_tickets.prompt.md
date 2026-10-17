@@ -24,6 +24,12 @@ that genuinely cannot be tested (e.g. a docs-only change): declare
 "Tests-Required: no -- <reason>" as an extra header line instead of
 adding a test file -- see the ticket format below.
 
+Never list `.factory.yml`, or anything under `.factory/` or `.buildgate/`, in a ticket's
+Allowed-Files or Required-Changed-Files: they are the operator's factory
+configuration, the factory never merges a build that changes them, and it
+rejects a plan that names them. If the request needs a change there, say
+so under the ticket's "Out of scope" for the operator to make.
+
 Multi-file criteria rule: when one criterion names files owned by
 several different tickets (e.g. "tests cover A, B and C" where A, B and C
 belong to three different tickets' own Allowed-Files), list that

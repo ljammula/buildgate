@@ -1430,6 +1430,63 @@ func TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket(t *testing.T) {
 	}
 }
 
+// A drafted ticket that names .factory.yml or a path under .factory/ or
+// .buildgate/, in either file list and in any spelling a case-insensitive
+// worktree accepts, halts planning naming the ticket and the entry: release
+// never merges a build that changes one. A lookalike path still reaches
+// plan_review.
+func TestAdvancePlanningRefusesATicketNamingAProtectedPath(t *testing.T) {
+	cases := []struct {
+		name, allowedExtra, requiredExtra string
+		refused                           bool
+	}{
+		{"factory.yml in Allowed-Files", ".factory.yml", "", true},
+		{"file under .factory/", ".factory/lint.sh", "", true},
+		{"only in Required-Changed-Files", "", ".buildgate/index.json", true},
+		{"case variant", ".Factory.YML", "", true},
+		{"lookalike directory", ".factoryx/a.txt", "", false},
+		{"nested .factory", "src/.factory/a.txt", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dp := newFakeDeps(t)
+			dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+			allowed := "backend/internal/handler/dispatch_mux.go, backend/internal/handler/dispatch_mux_test.go"
+			required := "backend/internal/handler/dispatch_mux.go, backend/internal/handler/dispatch_mux_test.go"
+			for extra, list := range map[string]*string{c.allowedExtra: &allowed, c.requiredExtra: &required} {
+				if extra != "" {
+					*list += ", " + extra
+				}
+			}
+			content := strings.Replace(infeasibleTestsAddedTicket("make verify", 1, 2),
+				"Allowed-Files: backend/internal/handler/dispatch_mux.go\nRequired-Changed-Files: backend/internal/handler/dispatch_mux.go\n",
+				"Allowed-Files: "+allowed+"\nRequired-Changed-Files: "+required+"\n", 1)
+			tickets := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}
+			runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+				t.Fatalf("driveRequests: %v", err)
+			}
+			loaded, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !c.refused {
+				if loaded.State != request.StatePlanReview {
+					t.Fatalf("State = %q (%s), want %q", loaded.State, loaded.Error, request.StatePlanReview)
+				}
+				return
+			}
+			entry := c.allowedExtra + c.requiredExtra
+			if loaded.State != request.StateHalted {
+				t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
+			}
+			if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, entry) || strings.Contains(loaded.Error, "tests_added") {
+				t.Errorf("Error = %q, want it to name the ticket and %s, and not the tests_added gate", loaded.Error, entry)
+			}
+		})
+	}
+}
+
 // sequencedPlanTicketsRunner returns a planTicketsRunner that plays back
 // calls[0], calls[1], ... in order (one entry per launch), for tests
 // exercising advancePlanning's own bounded automatic re-plan. It also
