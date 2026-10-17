@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -521,6 +523,19 @@ func TestUninstallServiceRemovesServeAgentToo(t *testing.T) {
 	}
 }
 
+func parsedPlistUmaskDecimal(t *testing.T, plist string) int {
+	t.Helper()
+	match := regexp.MustCompile(`<key>Umask</key>\s*<integer>([0-9]+)</integer>`).FindStringSubmatch(plist)
+	if len(match) != 2 {
+		t.Fatalf("plist has no parseable Umask integer:\n%s", plist)
+	}
+	value, err := strconv.Atoi(match[1])
+	if err != nil {
+		t.Fatalf("parse plist Umask %q as decimal: %v", match[1], err)
+	}
+	return value
+}
+
 // TestBuildServePlistIncludesConfigFlagAndUmask is the regression test
 // for two adversarial-review findings: the serve plist's ProgramArguments
 // must carry -config <path> (so the supervised serve derives the SAME
@@ -540,8 +555,18 @@ func TestBuildServePlistIncludesConfigFlagAndUmask(t *testing.T) {
 	if !strings.Contains(s, "<string>-config</string>") || !strings.Contains(s, "<string>/Users/op/.config/factoryd/config.yml</string>") {
 		t.Errorf("plist ProgramArguments missing -config <path>:\n%s", s)
 	}
-	if !strings.Contains(s, "<key>Umask</key>\n\t<integer>77</integer>") {
-		t.Errorf("plist missing Umask 077 (adversarial review):\n%s", s)
+	if !strings.Contains(s, "<key>Umask</key>\n\t<integer>63</integer>") {
+		t.Errorf("plist missing decimal Umask 63 (Unix umask 077):\n%s", s)
+	}
+	if strings.Contains(s, "<key>Umask</key>\n\t<integer>77</integer>") {
+		t.Errorf("plist serialized Umask as decimal 77 instead of decimal 63:\n%s", s)
+	}
+	got := parsedPlistUmaskDecimal(t, s)
+	if got != 63 {
+		t.Errorf("parsed plist Umask = %d, want decimal 63", got)
+	}
+	if got != int(0o077) {
+		t.Errorf("parsed plist Umask = %d, want Unix umask 077 (%d)", got, 0o077)
 	}
 }
 
@@ -557,8 +582,18 @@ func TestBuildServicePlistIncludesUmask(t *testing.T) {
 		HomeDir:    "/Users/op",
 	}
 	s := string(buildWorkerPlist(cfg))
-	if !strings.Contains(s, "<key>Umask</key>\n\t<integer>77</integer>") {
-		t.Errorf("worker plist missing Umask 077 (adversarial review):\n%s", s)
+	if !strings.Contains(s, "<key>Umask</key>\n\t<integer>63</integer>") {
+		t.Errorf("worker plist missing decimal Umask 63 (Unix umask 077):\n%s", s)
+	}
+	if strings.Contains(s, "<key>Umask</key>\n\t<integer>77</integer>") {
+		t.Errorf("worker plist serialized Umask as decimal 77 instead of decimal 63:\n%s", s)
+	}
+	got := parsedPlistUmaskDecimal(t, s)
+	if got != 63 {
+		t.Errorf("parsed worker plist Umask = %d, want decimal 63", got)
+	}
+	if got != int(0o077) {
+		t.Errorf("parsed worker plist Umask = %d, want Unix umask 077 (%d)", got, 0o077)
 	}
 }
 
