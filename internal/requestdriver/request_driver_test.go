@@ -14,6 +14,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
+	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
 )
 
@@ -385,6 +386,46 @@ func TestTicketQueueEntryCarriesExecutionModel(t *testing.T) {
 		}
 		if !found || got != model {
 			t.Errorf("Models[execution]=%q: -execution-model = %q (found=%v), want %q", model, got, found, model)
+		}
+	}
+}
+
+// A full-suite command that was only the request's verify command at submit
+// follows the ticket's own Verify-Command: after the operator fixes
+// .factory.yml and the request is re-planned, the tickets carry the new
+// command and the request's copy is the old one (walk4: "python -m pytest"
+// at submit, "PYTHONPATH=src python -m pytest" in the re-planned ticket, a
+// build quarantined on full_suite_verify). A configured full-suite command
+// and an opt-out are forwarded as they are.
+func TestTicketFullSuiteCommandFollowsTheTicketsVerifyCommand(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "001.spec.md")
+	if err := os.WriteFile(specPath, []byte("Verify-Command: PYTHONPATH=src python -m pytest\n\n## Goal\n\ndo the thing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ticket := request.Ticket{Index: 1, SpecPath: specPath}
+	fullSuiteArg := func(args []string) string {
+		for i, a := range args {
+			if a == "-full-suite-command" {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+	for _, c := range []struct {
+		name, command, source, want string
+	}{
+		{"defaulted from the verify command", "python -m pytest", requestsubmit.FullSuiteSourceVerifyCommand, "PYTHONPATH=src python -m pytest"},
+		{"from before FullSuiteSource existed", "", "", "PYTHONPATH=src python -m pytest"},
+		{"configured", "make full", "", "make full"},
+		{"opted out", "", requestsubmit.FullSuiteSourceNone, ""},
+	} {
+		r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", VerifyCommand: "python -m pytest", FullSuiteCommand: c.command, FullSuiteSource: c.source}
+		args, err := requestdriver.BuildRequestBuildArgs("data", r, ticket, requestdriver.WorkerConfig{})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := fullSuiteArg(args); got != c.want {
+			t.Errorf("%s: -full-suite-command %q, want %q", c.name, got, c.want)
 		}
 	}
 }

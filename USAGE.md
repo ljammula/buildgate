@@ -835,7 +835,9 @@ gates every build). Console review UI: [`console/README.md`](console/README.md).
 `full_suite_verify` needs no separate `-full-suite-command`: unset, it
 runs the resolved canonical verify command instead (recorded as
 `full_suite_source: verify_command`); pass the literal value `none` to
-leave the gate unconfigured instead.
+leave the gate unconfigured instead. In a request, that default follows each
+ticket's own `Verify-Command:`, so a verify command fixed in `.factory.yml`
+and re-planned reaches the full suite too.
 
 ## Five repos, zero terminals: `submit` + `worker`
 
