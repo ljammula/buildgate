@@ -68,8 +68,10 @@ func buildWorkerPlist(cfg workerPlistConfig) []byte {
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")
 	// Umask 077 (an adversarial review): the worker's own logs can
 	// mention paths/ticket content an unrelated local account has no
-	// reason to read; matches buildServePlist's identical key.
-	b.WriteString("\t<key>Umask</key>\n\t<integer>77</integer>\n")
+	// reason to read; matches buildServePlist's identical key. launchd
+	// reads the plist integer as decimal, so 63 is the decimal encoding
+	// of the intended Unix umask 077.
+	b.WriteString("\t<key>Umask</key>\n\t<integer>63</integer>\n")
 	fmt.Fprintf(&b, "\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", escapeXML(stdoutLog))
 	fmt.Fprintf(&b, "\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", escapeXML(stderrLog))
 	b.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
@@ -102,13 +104,14 @@ type servePlistConfig struct {
 // serve_start_token_file.go's own doc comments) -- `serveMain` reads it
 // back from there itself, so a `launchctl kickstart` restart or a plain
 // `cat` of this plist never discloses it (safety-contract.md's "Console
-// loopback writes" row). Sets Umask 077 (an adversarial review):
-// launchd applies this to every file the job itself creates, including
-// StandardOutPath/StandardErrorPath below -- without it those log files
-// land at the process's inherited umask (typically 022, world-readable),
-// and serve's own startup log can carry operationally sensitive detail
-// (which token source is in use, resolved paths) an unrelated local
-// account has no business reading.
+// loopback writes" row). Sets Umask 077 (an adversarial review): the
+// plist integer is decimal 63, which launchd interprets as Unix umask
+// 077. launchd applies this to every file the job itself creates,
+// including StandardOutPath/StandardErrorPath below -- without it those
+// log files land at the process's inherited umask (typically 022,
+// world-readable), and serve's own startup log can carry operationally
+// sensitive detail (which token source is in use, resolved paths) an
+// unrelated local account has no business reading.
 func buildServePlist(cfg servePlistConfig) []byte {
 	stdoutLog := filepath.Join(cfg.DataDir, "logs", "serve.out.log")
 	stderrLog := filepath.Join(cfg.DataDir, "logs", "serve.err.log")
@@ -130,7 +133,9 @@ func buildServePlist(cfg servePlistConfig) []byte {
 	b.WriteString("\t<key>KeepAlive</key>\n\t<true/>\n")
 	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>60</integer>\n")
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")
-	b.WriteString("\t<key>Umask</key>\n\t<integer>77</integer>\n")
+	// launchd plist integers are decimal: 63 encodes the intended Unix
+	// umask 077, protecting serve-created logs from unrelated accounts.
+	b.WriteString("\t<key>Umask</key>\n\t<integer>63</integer>\n")
 	fmt.Fprintf(&b, "\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", escapeXML(stdoutLog))
 	fmt.Fprintf(&b, "\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", escapeXML(stderrLog))
 	b.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
