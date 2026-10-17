@@ -280,6 +280,8 @@ func TestDaemonMainWritesHeartbeatBeforeStartingWorkers(t *testing.T) {
 func TestDaemonMainFailsFastWhenInitialHeartbeatWriteFails(t *testing.T) {
 	dp := newTestDeps(t)
 	parent := t.TempDir()
+	path := isolateSessionConfig(t)
+	writeSessionConfig(t, path, fmt.Sprintf("sandbox_worker_uid: %d\n", testSandboxWorkerUID()))
 	dataDir := filepath.Join(parent, "not-a-directory")
 	if err := os.WriteFile(dataDir, []byte("blocks MkdirAll"), 0o644); err != nil {
 		t.Fatal(err)
@@ -311,7 +313,7 @@ func TestDaemonMainFailsFastWhenInitialHeartbeatWriteFails(t *testing.T) {
 func TestDaemonMainRejectsEmptySandboxDockerFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "sandbox_docker: \"\"\n")
+	writeSessionConfig(t, path, fmt.Sprintf("sandbox_docker: \"\"\nsandbox_worker_uid: %d\n", testSandboxWorkerUID()))
 	err := daemonMain(dp, []string{
 		"-temporal-address", "127.0.0.1:1",
 		"-repository", "fixture/repo",

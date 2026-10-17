@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,7 +72,8 @@ func TestRunMainWithReadyRejectsReferenceOracleInLoopRetryWithoutCommand(t *test
 	dp := newTestDeps(t)
 	t.Setenv("HOME", t.TempDir())
 	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "sandbox_image: example.test/worker@sha256:"+strings.Repeat("a", 64)+"\n"+
+	writeSessionConfig(t, path, "sandbox_worker_uid: "+strconv.Itoa(testSandboxWorkerUID())+"\n"+
+		"sandbox_image: example.test/worker@sha256:"+strings.Repeat("a", 64)+"\n"+
 		"routes:\n  local:\n    allow_no_credential: true\n    upstream: https://model-a.example.invalid\n"+
 		"models:\n  m:\n    id: some-model\n    routes: [local]\n"+
 		"roles:\n  execution:\n    model: m\n")
