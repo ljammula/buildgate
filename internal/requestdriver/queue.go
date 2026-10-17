@@ -28,8 +28,8 @@ type QueueEntry struct {
 	// FullSuiteSource is forwarded as -full-suite-source when set --
 	// "verify_command" when FullSuiteCommand above is itself a
 	// substitution (this ticket/request never configured a separate full
-	// suite command, so the resolved canonical verify command is being
-	// used as one instead -- an operator-approved decision, "none" when the
+	// suite command, so this ticket's own verify command is being used as
+	// one instead -- an operator-approved decision, "none" when the
 	// request explicitly opted out (-full-suite-command none /
 	// .factory.yml full_suite_command: none), or "" for a genuinely
 	// operator/`.factory.yml`-configured command. Threaded across the

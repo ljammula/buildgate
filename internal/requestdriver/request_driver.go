@@ -23,6 +23,7 @@ import (
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
+	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
@@ -2218,21 +2219,19 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("reference oracle for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	// fullSuiteCommand/fullSuiteSource: forward r's own already-resolved
-	// values (set at submit time by ResolveFullSuiteCommand -- see
-	// submitRequest) in the common case. A request submitted before
-	// r.FullSuiteSource existed (FullSuiteCommand=="" AND
-	// FullSuiteSource=="", genuinely indistinguishable from a fresh
-	// request's own zero value otherwise) gets the identical substitution
-	// applied here instead, as a defensive fallback -- using THIS
-	// ticket's own resolved verify command when it declares one
-	// (ticketspec Verify-Command:, which can differ from the request-wide
-	// default), falling back to r.VerifyCommand otherwise. A request that
-	// explicitly opted out (FullSuiteSource == fullSuiteSourceNone) is
-	// left alone -- FullSuiteCommand stays "" and is never re-substituted.
+	// fullSuiteCommand/fullSuiteSource: a configured full-suite command
+	// (set at submit, FullSuiteSource "") is forwarded as it is, and an
+	// opt-out (FullSuiteSourceNone) stays off. A full-suite command that was
+	// only the verify command by default (FullSuiteSourceVerifyCommand), or
+	// a request from before FullSuiteSource existed (both empty), follows
+	// THIS ticket's own verify command (ticketspec Verify-Command:), the one
+	// the ticket is judged by, falling back to r.VerifyCommand: the request's
+	// copy is the verify command as it was at submit, and a re-plan after the
+	// operator fixes .factory.yml carries the new one in its tickets, so the
+	// frozen copy would run a command the ticket no longer uses.
 	fullSuiteCommand := r.FullSuiteCommand
 	fullSuiteSource := r.FullSuiteSource
-	if fullSuiteCommand == "" && fullSuiteSource == "" {
+	if fullSuiteSource == requestsubmit.FullSuiteSourceVerifyCommand || (fullSuiteCommand == "" && fullSuiteSource == "") {
 		effectiveVerifyCommand := verifyCommand
 		if effectiveVerifyCommand == "" {
 			effectiveVerifyCommand = r.VerifyCommand

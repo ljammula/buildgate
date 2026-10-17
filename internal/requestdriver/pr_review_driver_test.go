@@ -616,9 +616,12 @@ func TestRunCorrectiveRoundCarriesFullSuiteSource(t *testing.T) {
 		name             string
 		fullSuiteCommand string
 		fullSuiteSource  string
+		want             string
 	}{
-		{name: "none opt-out", fullSuiteCommand: "", fullSuiteSource: requestsubmit.FullSuiteSourceNone},
-		{name: "verify_command substitution", fullSuiteCommand: "go test ./...", fullSuiteSource: requestsubmit.FullSuiteSourceVerifyCommand},
+		{name: "none opt-out", fullSuiteCommand: "", fullSuiteSource: requestsubmit.FullSuiteSourceNone, want: ""},
+		// A defaulted full suite follows the ticket's own Verify-Command
+		// (the fixture's "make verify"), not the request's copy from submit.
+		{name: "verify_command substitution", fullSuiteCommand: "go test ./...", fullSuiteSource: requestsubmit.FullSuiteSourceVerifyCommand, want: "make verify"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			threads := []forge.Thread{
@@ -650,8 +653,8 @@ func TestRunCorrectiveRoundCarriesFullSuiteSource(t *testing.T) {
 			if got := requestdrivertest.ArgValue(capturedArgs, "-full-suite-source"); got != tc.fullSuiteSource {
 				t.Errorf("-full-suite-source = %q, want %q (from r.FullSuiteSource)", got, tc.fullSuiteSource)
 			}
-			if got := requestdrivertest.ArgValue(capturedArgs, "-full-suite-command"); got != tc.fullSuiteCommand {
-				t.Errorf("-full-suite-command = %q, want %q (from r.FullSuiteCommand)", got, tc.fullSuiteCommand)
+			if got := requestdrivertest.ArgValue(capturedArgs, "-full-suite-command"); got != tc.want {
+				t.Errorf("-full-suite-command = %q, want %q", got, tc.want)
 			}
 		})
 	}

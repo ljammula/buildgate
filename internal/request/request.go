@@ -482,11 +482,10 @@ type Request struct {
 	// VerifyCommand in that case), or "none" when the operator explicitly
 	// opted out (`-full-suite-command none` / `.factory.yml
 	// full_suite_command: none`; FullSuiteCommand is empty). A request
-	// submitted before this field existed has both empty -- see
-	// resolveFullSuiteCommand's own doc comment (cmd/factoryd/
-	// release_and_evidence.go) for the resolution logic, and
-	// buildRequestBuildArgs for the legacy-request fallback that still
-	// applies it per-ticket in that case.
+	// submitted before this field existed has both empty. For
+	// "verify_command" and for that legacy case, each ticket build runs its
+	// own Verify-Command as the full suite instead of FullSuiteCommand, the
+	// verify command as it was at submit (ticketQueueEntry).
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
 	// NoCommitOracles is `factoryd submit -no-commit-oracles`: an explicit,
 	// recorded per-request opt-out from the host commit of accepted oracles.
