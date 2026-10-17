@@ -38,9 +38,11 @@ type runOptions struct {
 	VerifyCommand       string
 	FastCheckCommand    string
 	FullSuiteCommand    string
-	GateCommands        map[string]string
-	SetupCommands       []string
-	AutofixCommands     []string
+	// BaselineCheck stops the run after its baseline (-baseline-check).
+	BaselineCheck   bool
+	GateCommands    map[string]string
+	SetupCommands   []string
+	AutofixCommands []string
 	// ProjectConfigCommitSHA is the commit .factory.yml was read from; see
 	// the RunWorkflowInput field of the same name.
 	ProjectConfigCommitSHA string

@@ -52,7 +52,9 @@ func runInputGoldenConfig(t *testing.T) string {
 // that reach RunWorkflowInput, each with a value that is not its default.
 // -compose-services stays at its default (true), which is the value the JSON
 // shows. Not set, so absent from the golden: -prior-run, -on-branch,
-// -diff-base and -resume-worktree-of (each needs an earlier run), and the
+// -diff-base and -resume-worktree-of (each needs an earlier run),
+// -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
+// covers it), and the
 // spec's Required-Content and the config's skills and test patterns.
 // inputs is the directory the flag files (spec, criteria, oracle) are written to.
 func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, address string) []string {

@@ -102,6 +102,11 @@ type forgeBoundary interface {
 type realForge struct{ dp *deps }
 
 type hostBoundary interface {
+	// baselineCheck runs `factoryd -baseline-check` with args in this
+	// process (runMain: its own context, owning SIGINT/SIGTERM, so a caller's
+	// probe deadline cannot cut the run short): a real run through the
+	// sandbox that stops after its baseline.
+	baselineCheck(args []string) error
 	// blobAtCommit reads path as of commit in repoDir from git objects,
 	// never from a worktree: (nil, false, nil) when absent, errNotRegularBlob
 	// for a symlink or submodule, errBlobTooLarge over 1 MiB.

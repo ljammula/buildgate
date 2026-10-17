@@ -370,3 +370,73 @@ func removeRequiredBinaryProbeContainer(dockerBinary, containerName string) erro
 	}
 	return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 }
+
+// doctorCheckBaseline runs the repository's verify and full-suite commands
+// through a real run that stops after its baseline (factoryd
+// -baseline-check): the check a build would otherwise reach only after its
+// spec and plan had spent model calls. It runs only when no earlier row
+// failed, since a check on a broken stack would only repeat that failure.
+func doctorCheckBaseline(in doctorInputs, failedBefore int) doctorCheck {
+	name := "baseline check: the verify and full-suite commands pass in the sandbox on " + in.targetRepo
+	if in.baselineCheck == nil {
+		return doctorCheck{Name: name, Err: errors.New("skipped"), Advisory: true}
+	}
+	if failedBefore > 0 {
+		return doctorCheck{Name: name, Err: errors.New("skipped: fix the failures above first"), Advisory: true}
+	}
+	if err := in.baselineCheck(in.targetRepo); err != nil {
+		return doctorCheck{Name: name, Err: errors.New(baselineCheckSentence(err)),
+			Fix: "fix verify_command or full_suite_command in the repository's .factory.yml (the line above names the logs), then run doctor -target-repo again"}
+	}
+	return doctorCheck{Name: name}
+}
+
+// baselineCheckSentence is the operator's part of a failed check's error:
+// from its "baseline verify failed" or "baseline check failed" sentence on,
+// without the Temporal wrapping around it.
+func baselineCheckSentence(err error) string {
+	text := err.Error()
+	for _, marker := range []string{"baseline check failed", "baseline verify failed"} {
+		if i := strings.Index(text, marker); i >= 0 {
+			text = text[i:]
+			if j := strings.Index(text, " (type: "); j >= 0 {
+				text = text[:j]
+			}
+			return text
+		}
+	}
+	return text
+}
+
+// doctorBaselineCheckRunner is the real doctorInputs.baselineCheck: the
+// single-ticket run in this process, under the same session config and data
+// dir, with extra flags (quickstart's -verify-command) appended.
+func doctorBaselineCheckRunner(dp *deps, configPath, dataDir, temporalAddress string, extra ...string) func(string) error {
+	return func(repo string) error {
+		args := []string{"-baseline-check", "-workspace", repo}
+		if dataDir != "" {
+			args = append(args, "-data-dir", dataDir)
+		}
+		if configPath != "" {
+			args = append(args, "-config", configPath)
+		}
+		if temporalAddress != "" {
+			args = append(args, "-temporal-address", temporalAddress)
+		}
+		return dp.host.baselineCheck(append(args, extra...))
+	}
+}
+
+// doctorExplicitDataDir is doctor's -data-dir when the operator passed it,
+// for the check to use; empty lets the check resolve the session config's.
+func doctorExplicitDataDir(flags *flag.FlagSet, dataDir string) string {
+	if flagsWasVisited(flags, "data-dir") {
+		return dataDir
+	}
+	return ""
+}
+
+// baselineCheck is the real hostBoundary.baselineCheck.
+func (impl realHost) baselineCheck(args []string) error {
+	return runMain(impl.dp, args)
+}
