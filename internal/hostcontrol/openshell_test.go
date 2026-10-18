@@ -518,3 +518,18 @@ func TestOpenShellStartRecreatesTheGatewaySoItReadsTheRenderedConfig(t *testing.
 		t.Errorf("meter start should be a plain up:\n%s", strings.Join(lines, "\n"))
 	}
 }
+
+// A start for a meter that stopped while the gateway answers must not
+// recreate the gateway: builds may be running through it.
+func TestOpenShellStartLeavesAGatewayThatAnswersAlone(t *testing.T) {
+	f := newOpenShellFixture(t)
+	f.dp.meterHealthyFn = f.HealthyOnceUp("meter")
+	f.dp.gatewayHealthyFn = func(context.Context) error { return nil }
+	if err := StartOpenShell(f.dp, context.Background(), &bytes.Buffer{}, f.stack0); err != nil {
+		t.Fatalf("StartOpenShell: %v", err)
+	}
+	lines := f.LogLines()
+	if i := hostcontroltest.IndexOfLine(lines, "--force-recreate"); i >= 0 {
+		t.Errorf("a gateway that answers was recreated:\n%s", strings.Join(lines, "\n"))
+	}
+}

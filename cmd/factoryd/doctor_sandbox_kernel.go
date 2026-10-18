@@ -10,11 +10,15 @@ import (
 	"strings"
 
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/sandbox"
 )
 
 // doctorSandboxKernelName is the row of what every sandbox launch needs from
 // the Docker VM.
 const doctorSandboxKernelName = "Docker can run sandboxes (Landlock and AppArmor)"
+
+// doctorRunsSandboxesFix is the fix a VM without Landlock or AppArmor gets.
+const doctorRunsSandboxesFix = "run Docker on a Linux kernel with Landlock enabled and a daemon with AppArmor; on a Mac, colima, whose Ubuntu VM has both (USAGE.md, \"Data directory and colima\"); Docker Desktop's VM has neither"
 
 // landlockProbe asks the kernel for its Landlock ABI version
 // (landlock_create_ruleset with LANDLOCK_CREATE_RULESET_VERSION, system call
@@ -62,7 +66,7 @@ func doctorCheckSandboxKernel(ctx context.Context, dockerBinary, image string) d
 	if len(missing) > 0 {
 		return doctorCheck{Name: doctorSandboxKernelName,
 			Err: fmt.Errorf("this Docker's VM has no %s, so every sandbox launch fails although the gateway and the meter answer", strings.Join(missing, " and no ")),
-			Fix: "run Docker in colima, whose Ubuntu VM has both (USAGE.md, \"Data directory and colima\"); Docker Desktop's VM has neither"}
+			Fix: doctorRunsSandboxesFix}
 	}
 	if appArmorErr != nil {
 		return doctorCheck{Name: doctorSandboxKernelName, Advisory: true, Err: appArmorErr,
@@ -71,7 +75,7 @@ func doctorCheckSandboxKernel(ctx context.Context, dockerBinary, image string) d
 	if landlock == landlockUnknown {
 		return doctorCheck{Name: doctorSandboxKernelName, Advisory: true,
 			Err: fmt.Errorf("could not tell whether this Docker's kernel has Landlock: %s", detail),
-			Fix: "a sandbox launch that fails with \"Landlock probe child exited\" means it has none: run Docker in colima"}
+			Fix: "a sandbox launch that fails with \"Landlock probe child exited\" means it has none: " + doctorRunsSandboxesFix}
 	}
 	return doctorCheck{Name: fmt.Sprintf("%s: Landlock ABI %d, AppArmor", doctorSandboxKernelName, abi)}
 }
@@ -87,6 +91,11 @@ func dockerListsAppArmor(ctx context.Context, dockerBinary string) (bool, error)
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &options); err != nil {
 		return false, errors.New("docker info printed security options that do not parse")
 	}
+	if len(options) == 0 {
+		// Every daemon lists at least its seccomp profile: none at all is a
+		// daemon or CLI that does not report them, not a VM without AppArmor.
+		return false, errors.New("docker info lists no security options, so whether this Docker has AppArmor is unknown")
+	}
 	for _, option := range options {
 		if name, _, _ := strings.Cut(option, ","); name == "name=apparmor" {
 			return true, nil
@@ -95,11 +104,22 @@ func dockerListsAppArmor(ctx context.Context, dockerBinary string) (bool, error)
 	return false, nil
 }
 
-// probeLandlock runs landlockProbe in a container of image with no network
-// and reads its answer: the ABI version, or why it cannot say.
+// landlockProbeArgs runs landlockProbe hardened like the other doctor probes
+// (the worker's uid, no capabilities, read-only, no network), but without
+// Docker's seccomp profile: one that predates the landlock system calls
+// answers them ENOSYS, which would read as a kernel without Landlock.
+func landlockProbeArgs(image string) []string {
+	return []string{"run", "--rm",
+		"--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--security-opt", "seccomp=unconfined",
+		"--network", "none",
+		"--user", strconv.Itoa(sandbox.DefaultWorkerUID),
+		"--entrypoint", "python3", image, "-c", landlockProbe}
+}
+
+// probeLandlock runs landlockProbe in a container of image and reads its
+// answer: the ABI version, or why it cannot say.
 func probeLandlock(ctx context.Context, dockerBinary, image string) (state landlockState, abi int, detail string) {
-	out, err := exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none",
-		"--entrypoint", "python3", image, "-c", landlockProbe).CombinedOutput()
+	out, err := exec.CommandContext(ctx, dockerBinary, landlockProbeArgs(image)...).CombinedOutput()
 	got := strings.TrimSpace(string(out))
 	if err != nil {
 		return landlockUnknown, 0, fmt.Sprintf("the probe container failed: %v: %s", err, hostcontrol.LastLine(got))

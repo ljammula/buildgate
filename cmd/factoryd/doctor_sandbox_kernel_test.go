@@ -59,6 +59,8 @@ func TestDoctorCheckSandboxKernel(t *testing.T) {
 			wantErr: "the probe container failed", wantAdvisory: true},
 		{name: "docker info fails", infoExit: 1, probeOut: "4",
 			wantErr: "docker info", wantAdvisory: true},
+		{name: "docker info lists no security options", options: "null", probeOut: "4",
+			wantErr: "lists no security options", wantAdvisory: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bin := fakeKernelDocker(t, tc.options, tc.infoExit, tc.probeOut, tc.probeExit)
@@ -77,8 +79,8 @@ func TestDoctorCheckSandboxKernel(t *testing.T) {
 				t.Errorf("fix = %q, want it to name colima", c.Fix)
 			}
 			raw, _ := os.ReadFile(bin + ".args")
-			if want := "run --rm --network none --entrypoint python3 img:1 -c "; !strings.Contains(string(raw), want) {
-				t.Errorf("docker calls %q lack the networkless probe run %q", raw, want)
+			if want := "run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges --security-opt seccomp=unconfined --network none --user 65532 --entrypoint python3 img:1 -c "; !strings.Contains(string(raw), want) {
+				t.Errorf("docker calls %q lack the hardened probe run %q", raw, want)
 			}
 		})
 	}

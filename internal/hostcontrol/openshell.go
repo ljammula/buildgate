@@ -300,8 +300,14 @@ func startMeterThenGateway(dp Deps, ctx context.Context, t OpenShellTimeouts, co
 	// does not compare: without a recreate, a stopped gateway container
 	// starts again on the configuration it was created with, whatever this
 	// start rendered (its supervisor image). Its state is in the
-	// /var/lib/openshell bind mount, which a recreate keeps.
-	if err := up("gateway", "--force-recreate"); err != nil {
+	// /var/lib/openshell bind mount, which a recreate keeps. A gateway that
+	// answers (this start is for the meter) is left alone: builds may be
+	// running through it.
+	var gatewayFlags []string
+	if dp.GatewayHealthy(ctx) != nil {
+		gatewayFlags = []string{"--force-recreate"}
+	}
+	if err := up("gateway", gatewayFlags...); err != nil {
 		return withGatewayLog(dp, ctx, t, fmt.Errorf("docker compose up gateway failed: %v", err))
 	}
 	if err := waitHealthy(dp, ctx, t, dp.GatewayHealthy); err != nil {
