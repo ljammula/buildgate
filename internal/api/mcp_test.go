@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -49,9 +50,15 @@ func mcpConnect(t *testing.T, server *Server) *mcpsdk.ClientSession {
 	t.Helper()
 	listener := httptest.NewServer(server)
 	t.Cleanup(listener.Close)
+	return mcpConnectURL(t, listener.URL)
+}
+
+// mcpConnectURL connects the SDK's client to the serve at base.
+func mcpConnectURL(t *testing.T, base string) *mcpsdk.ClientSession {
+	t.Helper()
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "0"}, nil)
 	session, err := client.Connect(context.Background(), &mcpsdk.StreamableClientTransport{
-		Endpoint:             listener.URL + "/mcp",
+		Endpoint:             base + "/mcp",
 		HTTPClient:           &http.Client{Transport: mcpBearer(mcpTestToken)},
 		DisableStandaloneSSE: true,
 	}, nil)
@@ -268,7 +275,16 @@ func TestMCPReadToolsReturnTheRoutesOwnBody(t *testing.T) {
 	}
 	direct := httptest.NewRecorder()
 	server.ServeHTTP(direct, requestActionFor(t, http.MethodGet, "/requests/req-1", "read-token", ""))
-	if text != strings.TrimSpace(direct.Body.String()) {
+	var viaMCP, viaRoute map[string]any
+	if err := json.Unmarshal([]byte(text), &viaMCP); err != nil {
+		t.Fatalf("get_request text is not a JSON object: %v\n%s", err, text)
+	}
+	if err := json.Unmarshal(direct.Body.Bytes(), &viaRoute); err != nil {
+		t.Fatal(err)
+	}
+	// The route's own body, plus the console link only the MCP result adds.
+	delete(viaMCP, "console_url")
+	if !reflect.DeepEqual(viaMCP, viaRoute) {
 		t.Errorf("get_request text differs from GET /requests/req-1:\n%s\n%s", text, direct.Body.String())
 	}
 
@@ -415,5 +431,116 @@ func TestMCPLimitsSubmissions(t *testing.T) {
 	}
 	if !server.mcpSubmitAllowed(now.Add(2 * time.Minute)) {
 		t.Error("once the window has passed, a submission should be allowed again")
+	}
+}
+
+// mcpLoopbackServe starts server bound, as serve is, to its own loopback
+// listener, so its Host check is the real one, and returns its base URL.
+func mcpLoopbackServe(t *testing.T, dataDir string, opts ...Option) (*Server, string) {
+	t.Helper()
+	listener := httptest.NewUnstartedServer(nil)
+	server := mcpTestServer(dataDir, append([]Option{WithListenAddr(listener.Listener.Addr().String())}, opts...)...)
+	listener.Config.Handler = server
+	listener.Start()
+	t.Cleanup(listener.Close)
+	return server, listener.URL
+}
+
+// mcpCallAt calls one tool on the serve at base and returns its text.
+func mcpCallAt(t *testing.T, base, name, arguments string) string {
+	t.Helper()
+	result, err := mcpConnectURL(t, base).CallTool(context.Background(), &mcpsdk.CallToolParams{Name: name, Arguments: json.RawMessage(arguments)})
+	if err != nil || len(result.Content) != 1 {
+		t.Fatalf("tools/call %s: %v %+v", name, err, result)
+	}
+	return result.Content[0].(*mcpsdk.TextContent).Text
+}
+
+// TestMCPRequestToolsCarryTheirConsoleLink: every request a request tool
+// returns names its console page, on the address the call came in on, and
+// carries no token; the run tools add nothing.
+func TestMCPRequestToolsCarryTheirConsoleLink(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	seedRun(t, dataDir, run.Run{ID: "run-1", State: run.StateAccepted, ResultSHA: "abc"})
+	_, base := mcpLoopbackServe(t, dataDir)
+	want := base + "/requests/req-1"
+
+	var one struct {
+		ConsoleURL string `json:"console_url"`
+	}
+	if text := mcpCallAt(t, base, "get_request", `{"id":"req-1"}`); json.Unmarshal([]byte(text), &one) != nil || one.ConsoleURL != want {
+		t.Errorf("get_request console_url = %q, want %q: %s", one.ConsoleURL, want, text)
+	}
+	var rows []struct {
+		ConsoleURL string `json:"console_url"`
+	}
+	if text := mcpCallAt(t, base, "list_requests", `{}`); json.Unmarshal([]byte(text), &rows) != nil || len(rows) != 1 || rows[0].ConsoleURL != want {
+		t.Errorf("list_requests rows = %+v, want one with %q: %s", rows, want, text)
+	}
+	if text := mcpCallAt(t, base, "get_run", `{"id":"run-1"}`); strings.Contains(text, "console_url") {
+		t.Errorf("get_run carries a console_url: %s", text)
+	}
+	if strings.Contains(one.ConsoleURL, mcpTestToken) || strings.ContainsAny(one.ConsoleURL, "#?") {
+		t.Errorf("console_url %q carries more than the page", one.ConsoleURL)
+	}
+}
+
+// TestMCPConsoleLinkNeedsAnAcceptedHost: a serve on a wide -addr checks no
+// Host, so a Host it does not accept gets no link, and an -allowed-host one
+// does.
+func TestMCPConsoleLinkNeedsAnAcceptedHost(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	server := mcpTestServer(dataDir, WithListenAddr("0.0.0.0:8090"), WithAllowedHosts([]string{"studio.example.ts.net:8443"}))
+	call := func(host string) string {
+		r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		r.Host = host
+		base, _ := server.withMCPConsoleBase(r).Context().Value(mcpConsoleBaseKey{}).(string)
+		return base
+	}
+	for _, planted := range []string{"evil.example", "a@studio.example.ts.net:8443", ""} {
+		if got := call(planted); got != "" {
+			t.Errorf("Host %q got console base %q, want none", planted, got)
+		}
+	}
+	if got := call("studio.example.ts.net:8443"); got != "http://studio.example.ts.net:8443" {
+		t.Errorf("an -allowed-host got console base %q", got)
+	}
+}
+
+// TestMCPConsoleLinkFollowsTheProxy: through a proxy that ends TLS (as
+// `tailscale serve` does), the link is https on the name the caller used.
+func TestMCPConsoleLinkFollowsTheProxy(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{"tailscale serve", map[string]string{"X-Forwarded-For": "100.94.149.71", "Tailscale-User-Login": "someone"}, "https://studio.example.ts.net:8443"},
+		{"proxy names its scheme", map[string]string{"X-Forwarded-For": "10.0.0.2", "X-Forwarded-Proto": "http"}, "http://studio.example.ts.net:8443"},
+		{"direct", nil, "http://studio.example.ts.net:8443"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			r.Host = "studio.example.ts.net:8443"
+			for k, v := range tc.headers {
+				r.Header.Set(k, v)
+			}
+			if got := mcpConsoleBase(r); got != tc.want {
+				t.Errorf("console base = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	ctx := mcpTestServer(t.TempDir(), WithListenAddr("127.0.0.1:8090")).withMCPConsoleBase(httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8090/mcp", nil)).Context()
+	got := mcpWithConsoleURLs(ctx, "submit_request", `{"id":"a b","state":"spec_drafting"}`)
+	if got != `{"console_url":"http://127.0.0.1:8090/requests/a%20b","id":"a b","state":"spec_drafting"}` {
+		t.Errorf("submit_request result = %s", got)
+	}
+	for _, unchanged := range []string{`{"state":"x"}`, `{"id":"r","console_url":"kept"}`, `not json`, `[]`} {
+		if out := mcpWithConsoleURLs(ctx, "get_request", unchanged); out != unchanged {
+			t.Errorf("mcpWithConsoleURLs(%s) = %s, want it unchanged", unchanged, out)
+		}
 	}
 }

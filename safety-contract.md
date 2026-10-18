@@ -354,6 +354,16 @@ follow it, and no means to pass a gate.
   request (`mcpSubmitAllowed`), counted per `serve` process: text a model
   reads can tell it to submit again and again, and each request has its
   own ceiling. The session's monthly budgets are the durable bound.
+- **Console links.** Each request a request tool returns
+  (`list_requests`, `get_request`, `submit_request`) carries `console_url`,
+  its console page, built from the `Host` of the `POST /mcp` call, and only
+  when that `Host` is one `serve` accepts (`hostAllowed`: its loopback
+  address or an `-allowed-host`); on a wider `-addr`, which checks no
+  `Host`, any other gets no link (`mcpWithConsoleURLs`).
+  The scheme is https over TLS or behind a proxy unless the proxy's
+  `X-Forwarded-Proto` says otherwise. The link carries no token: from
+  another machine the console still asks for the gate token, and the MCP
+  token opens no console route.
 - **Reads.** The MCP token grants the reads above even when a read token
   is configured. Spec, ticket and diff text in a result is model-written;
   results are capped at 256 KiB (a request list keeps its newest rows).
