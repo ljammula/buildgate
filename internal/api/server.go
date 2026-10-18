@@ -775,8 +775,9 @@ type consoleConfigView struct {
 	// shipped binary ever has.
 	WritesEnabled bool `json:"writes_enabled"`
 	// Gate says whether this console needs the gate token (WithGateToken):
-	// "off" when the request that fetched this needs none (the gate is off,
-	// or the console is on this machine), "accepted" when it carried the
+	// "off" when the request that fetched this needs none (no read token,
+	// and the gate is off or the console is on this machine), "accepted"
+	// when it carried the
 	// usable token, "required" otherwise. The console sends its stored gate
 	// token on this fetch and shows where to get one on "required".
 	Gate string `json:"gate"`

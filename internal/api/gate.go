@@ -111,10 +111,13 @@ func (s *Server) gateBearer(r *http.Request) bool {
 	return s.authorize(r, s.gate().Token)
 }
 
-// gateRequired reports whether r needs the gate token to read: the gate is
-// on and r is not local.
+// gateRequired reports whether r needs a token to read, which a console is
+// given as the gate token: the gate is on and r is not local, or a read
+// token is set, which the console on this machine cannot hold either. With a
+// read token and the gate off, no console can read until `factoryd
+// gate-token` writes one; the console asks for it all the same.
 func (s *Server) gateRequired(r *http.Request) bool {
-	return !s.local(r) && s.gate().On
+	return (!s.local(r) && s.gate().On) || s.readToken != ""
 }
 
 // consoleGate is /console-config.json's "gate" for r: "off" when r needs no

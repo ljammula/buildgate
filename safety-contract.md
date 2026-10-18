@@ -142,8 +142,19 @@ cancel, create; `internal/api.Server.authorizeRequestWrite`):
   address and add nothing) makes its callers local by this test. An ssh
   tunnel needs a shell on the host, which is already the operator. Behind
   any other such forwarder the gate token guards nothing (every caller is
-  local), so `serve` needs `-override-token`, which turns the write
-  relaxation off, and `FACTORYD_API_READ_TOKEN` for the reads.
+  local), so `serve` needs an override token, which turns the write
+  relaxation off, and a read token for the reads. colima's
+  `host.docker.internal` is such a forwarder: every container on the VM
+  reaches `serve` as a local caller.
+- `serve` takes the override and read tokens from
+  `FACTORYD_API_OVERRIDE_TOKEN` and `FACTORYD_API_READ_TOKEN`, else from
+  `serve-override-token` and `serve-read-token` beside the session config
+  (`tokensFromFiles`), which `factoryd install-service -require-tokens`
+  creates (mode 0600, exclusive create, never inside a git work tree) and
+  never writes into the plist. Such a file that exists and fails the token
+  files' checks stops `serve` from starting: the protection is never
+  dropped silently. `install-service -allowed-host` puts `-allowed-host`
+  into the serve plist's arguments.
 
 A rejection or a send-back over HTTP (`POST /requests/{id}/reject`) names
 the stage it was made on: the request's `state` and `entered_at` as the
@@ -245,7 +256,7 @@ The credential of a console that is not on the machine (`internal/api`'s
 |---|---|
 | What it opens | The read routes (`authorizeRead`) and the request writes (`authorizeRequestWrite`): create, approve, reject, retry, resume, cancel, and the spec, ticket and oracle-file edits. A request created with it may carry every field `POST /requests` accepts, a verify command included: it is the operator's credential, and the same holder approves the plan |
 | What it never opens | `POST /runs/{id}/override` (`authorizeOverride` compares against the override token only), the start-class routes (`authorizeStart`), and `POST /mcp` (`serveMCP` compares against the MCP token only). The MCP token and the start token open no gate route |
-| Who needs it | While the gate is on, a request that is not local (`Server.local`, above) reads only with the gate token, or the read token when one is set. The console's own files, `/console-config.json` and `/healthz` stay open: the page has to load before it can be given the token |
+| Who needs it | While the gate is on, a request that is not local (`Server.local`, above), or any request once a read token is set, reads only with the gate token or the read token (`gateRequired`), and `/console-config.json` asks the console for the gate token. The console's own files, `/console-config.json` and `/healthz` stay open: the page has to load before it can be given the token |
 | Local use | The gate decides nothing for a local request: it reads and writes as [Console loopback writes](#console-loopback-writes) says |
 | The file | `<config name>.gate-token` beside the session config: the token and `expires <RFC 3339 time>`. Written beside and renamed into place, never through a symlink, never inside a git work tree. `serve` reads it on each request that needs it, with the start-token file's checks (not a symlink, a regular file, this user's, mode 0600) |
 | States | No file: the gate is off. A usable file: on. A file `serve` cannot use (it fails a check, is malformed, has expired, or holds `disabled`): **on with no gate token**, so no gate token opens anything and a request that is not local reads only with the read token and writes only with the override token, when those are set. A file that goes bad never reopens the reads it guarded |

@@ -73,7 +73,7 @@ func commandCatalog() []commandInfo {
 		{"use", "[<profile>]", "List the profiles, or make one active", groupMachine, newUseFlags},
 		{"upgrade", "", "Upgrade this machine to a release", groupMachine, func() *flag.FlagSet { fs, _ := newUpgradeFlags(); return fs }},
 		{"uninstall", "", "Remove what make install put on this machine", groupMachine, func() *flag.FlagSet { fs, _, _, _, _ := newUninstallFlags(); return fs }},
-		{"install-service", "", "Keep the worker and the console running under launchd (macOS)", groupMachine, func() *flag.FlagSet { fs, _, _, _, _, _ := newInstallServiceFlags(); return fs }},
+		{"install-service", "", "Keep the worker and the console running under launchd (macOS)", groupMachine, func() *flag.FlagSet { fs, _ := newInstallServiceFlags(); return fs }},
 		{"uninstall-service", "", "Remove the launchd services", groupMachine, newUninstallServiceFlags},
 		{"install-skill", "", "Install the buildgate skill for your coding agent", groupMachine, func() *flag.FlagSet { fs, _ := newInstallSkillFlags(); return fs }},
 		{"mcp", "", "Turn the console's MCP endpoint on, and print its token", groupMachine, func() *flag.FlagSet { fs, _ := newMCPFlags(); return fs }},

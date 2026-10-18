@@ -484,6 +484,9 @@ func (sv *serveRun) resolveTokens() error {
 	_ = os.Unsetenv(overrideTokenEnvironmentVariable)
 	_ = os.Unsetenv(startTokenEnvironmentVariable)
 	_ = os.Unsetenv(readTokenEnvironmentVariable)
+	if err := sv.tokensFromFiles(); err != nil {
+		return err
+	}
 	// F: serve-start-token (operator decision, 2026-09-24). PR #241 gave
 	// the embedded console a way to write override-class routes on a
 	// loopback bind with no token, but start-class routes (authorizeStart:

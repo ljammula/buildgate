@@ -529,6 +529,17 @@ workspaces:
     - /abs/path/to/app
 ```
 
+From a container on this machine (an agent such as Hermes in Docker), the
+client uses `http://host.docker.internal:<port>/mcp`. colima forwards that
+address to the host's loopback without saying so, so every container there
+reaches `serve` as a local caller: require tokens first, or any container
+can approve a gate.
+
+```sh
+factoryd install-service -force -require-tokens -allowed-host host.docker.internal:8090
+factoryd gate-token -ttl 720h   # the console on this machine now asks for it
+```
+
 From another machine, keep `serve` on loopback and put a tunnel in front
 of it. With Tailscale, one command does it:
 
@@ -577,13 +588,13 @@ things, in this order, and `-off` undoes what it set up:
 | What the token allows | Reading, and the request actions: submit, approve, reject, retry, resume, cancel, and editing a spec, ticket or oracle file |
 | What it never allows | Overriding a quarantined run, starting a single-ticket run or a daemon, the release routes, and `/mcp`. Those keep their own tokens, so the console's worker strip and release panels stay empty there |
 | Reads | While a gate token file exists, a console that is not on the host needs the token to read as well. Without it the console shows a field for the token |
-| On the host itself | `http://127.0.0.1:<port>` reads and writes with no token, gate token or not |
+| On the host itself | `http://127.0.0.1:<port>` reads and writes with no token, gate token or not, unless `serve` requires tokens (below): then the console there asks for the gate token too |
 | Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd gate-token` again and paste the new token |
 | Handing the token over | Paste it into the "Gate token" field the console shows when it holds none: the token is then never part of a URL. `https://<name>/#gate=<token>` does the same in one step, and that link can stay in the browser's history: treat it as a password |
 | In the browser | Kept for the tab only, never in the address bar. A new tab asks for the token again |
 | Who the history names | The name you give the console, followed by `(gate token)` |
 | Stop it | `factoryd remote-console -off` (listener, accepted `Host` and token all removed). The token alone: `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the remote address need no token, and the console there cannot write) |
-| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing: behind one, run `serve` with `-override-token` (for writes) and `FACTORYD_API_READ_TOKEN` (for reads) |
+| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing. colima's `host.docker.internal` is one: any container on the VM reaches `serve` as local and can approve a gate. Require tokens: `factoryd install-service -force -require-tokens`, then `factoryd gate-token` for the console |
 
 ## `.factory.yml` — commit per-repo defaults once
 
