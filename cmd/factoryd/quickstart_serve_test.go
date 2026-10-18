@@ -265,7 +265,7 @@ func TestQuickstartPrintAndOpenConsoleLinkAppendsTokenOnOwnLoopbackServe(t *test
 	t.Cleanup(func() { fakeHostOf(dp).browserCommandFn = orig })
 
 	var out bytes.Buffer
-	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", "tok-abc", true)
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", consoleLinkTokens{start: "tok-abc"}, true)
 
 	want := "http://127.0.0.1:8090/requests/req-1#t=tok-abc"
 	if !strings.Contains(out.String(), want) {
@@ -296,7 +296,7 @@ func TestQuickstartPrintAndOpenConsoleLinkOmitsTokenForAnUnverifiedListener(t *t
 	t.Cleanup(func() { fakeHostOf(dp).serveVerifiedOursFn = restoreVerified })
 
 	var out bytes.Buffer
-	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", "tok-abc", false)
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", consoleLinkTokens{start: "tok-abc"}, false)
 
 	if strings.Contains(out.String(), "tok-abc") {
 		t.Errorf("output = %q, gave the start token to a listener this data dir does not own", out.String())
@@ -388,7 +388,7 @@ func TestQuickstartPrintAndOpenConsoleLinkOmitsTokenForRemoteBase(t *testing.T) 
 	t.Setenv("FACTORYD_CONSOLE_URL", "http://example.com:9999")
 
 	var out bytes.Buffer
-	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", "tok-abc", false)
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", consoleLinkTokens{start: "tok-abc"}, false)
 
 	if strings.Contains(out.String(), "tok-abc") {
 		t.Errorf("output = %q, leaked the start token to a non-loopback console base", out.String())
@@ -414,9 +414,38 @@ func TestQuickstartPrintAndOpenConsoleLinkNoOpenSkipsBrowser(t *testing.T) {
 	t.Cleanup(func() { fakeHostOf(dp).browserCommandFn = orig })
 
 	var out bytes.Buffer
-	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", "tok-abc", false)
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", consoleLinkTokens{start: "tok-abc"}, false)
 
 	if called {
 		t.Error("openBrowserCommand was called despite autoOpen=false")
+	}
+}
+
+// TestQuickstartConsoleLinkCarriesTheConsoleTokenWithTheStartToken: once
+// serve requires tokens, the link to this data dir's own serve carries the
+// console token beside the start token, and neither when the listener is not
+// provably this data dir's serve.
+func TestQuickstartConsoleLinkCarriesTheConsoleTokenWithTheStartToken(t *testing.T) {
+	dp := newTestDeps(t)
+	t.Setenv("FACTORYD_CONSOLE_URL", "http://127.0.0.1:8090")
+	verified := true
+	restoreVerified := fakeHostOf(dp).serveVerifiedOursFn
+	fakeHostOf(dp).serveVerifiedOursFn = func(dataDir, addr string) (int, bool) {
+		return os.Getpid(), verified && addr == "127.0.0.1:8090"
+	}
+	t.Cleanup(func() { fakeHostOf(dp).serveVerifiedOursFn = restoreVerified })
+	link := consoleLinkTokens{start: "tok-abc", console: "con-xyz"}
+
+	var out bytes.Buffer
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", link, false)
+	if want := "http://127.0.0.1:8090/requests/req-1#t=tok-abc&c=con-xyz"; !strings.Contains(out.String(), want) {
+		t.Errorf("output = %q, want it to contain %q", out.String(), want)
+	}
+
+	verified = false
+	out.Reset()
+	quickstartPrintAndOpenConsoleLink(dp, &out, t.TempDir(), "req-1", link, false)
+	if strings.Contains(out.String(), "tok-abc") || strings.Contains(out.String(), "con-xyz") {
+		t.Errorf("output = %q, carries a token to a listener this data dir does not own", out.String())
 	}
 }
