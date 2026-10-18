@@ -474,6 +474,70 @@ func TestInstallServiceNoServeSkipsServeAgent(t *testing.T) {
 	}
 }
 
+// TestInstallServiceRequireTokensAndAllowedHost: -require-tokens writes the
+// override and read token files (0600, kept across a -force reinstall) and
+// never into the plist; -allowed-host reaches the serve plist's arguments.
+func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
+	dp := newTestDeps(t)
+	stubEnsureTemporal(dp, t, "localhost:7233")
+	t.Setenv("HOME", t.TempDir())
+	dataDir := filepath.Join(t.TempDir(), "data")
+	configPath := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(configPath, []byte("sandbox_image: img@sha256:"+strings.Repeat("a", 64)+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	fakeHostOf(dp).launchctlFn = func(args ...string) ([]byte, error) { return []byte("ok"), nil }
+
+	args := []string{"-config", configPath, "-data-dir", dataDir, "-require-tokens", "-allowed-host", "host.docker.internal:8090"}
+	if err := installServiceMain(dp, args); err != nil {
+		t.Fatalf("installServiceMain: %v", err)
+	}
+	servePlistP, err := hostcontrol.ServePlistPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plist, err := os.ReadFile(servePlistP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(plist), "<string>-allowed-host</string>\n\t\t<string>host.docker.internal:8090</string>") {
+		t.Errorf("serve plist lacks -allowed-host host.docker.internal:8090:\n%s", plist)
+	}
+	first := map[string]string{}
+	for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName} {
+		path := filepath.Join(filepath.Dir(configPath), name)
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: %v, mode %v; want a 0600 file", name, err, info)
+		}
+		token, ok := readServeStartTokenFile(path)
+		if !ok || strings.Contains(string(plist), token) {
+			t.Fatalf("%s: unreadable, or its token is in the plist", name)
+		}
+		first[name] = token
+	}
+	if first[serveOverrideTokenFileName] == first[serveReadTokenFileName] {
+		t.Fatal("the override and read tokens are the same value")
+	}
+	if err := installServiceMain(dp, append(args, "-force")); err != nil {
+		t.Fatalf("installServiceMain -force: %v", err)
+	}
+	for name, token := range first {
+		if again, _ := readServeStartTokenFile(filepath.Join(filepath.Dir(configPath), name)); again != token {
+			t.Errorf("%s rotated across a -force reinstall", name)
+		}
+	}
+}
+
+func TestInstallServiceRefusesServeFlagsWithNoServe(t *testing.T) {
+	for _, flag := range [][]string{{"-require-tokens"}, {"-allowed-host", "host.docker.internal:8090"}} {
+		err := installServiceMain(newTestDeps(t), append([]string{"-no-serve"}, flag...))
+		if err == nil || !strings.Contains(err.Error(), "-no-serve skips") {
+			t.Errorf("%v with -no-serve = %v, want a refusal", flag, err)
+		}
+	}
+}
+
 // TestUninstallServiceRemovesServeAgentToo proves `factoryd
 // uninstall-service` bootouts and removes BOTH LaunchAgents, not only
 // worker's.

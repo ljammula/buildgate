@@ -403,6 +403,48 @@ func TestConsoleConfigSaysWhetherTheGateTokenIsNeeded(t *testing.T) {
 	}
 }
 
+// TestLocalConsoleAsksForTheGateTokenWhenAReadTokenIsSet: with a read token,
+// a local console cannot read without a token either, so console-config asks
+// it for the gate token, which then opens its reads and request writes. It
+// asks while the gate is still off too: no read works then.
+func TestLocalConsoleAsksForTheGateTokenWhenAReadTokenIsSet(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	gate := gateState(GateToken{})
+	server := gateTestServer(t, dataDir, gate, WithReadToken("read-token"))
+	consoleGate := func(token string) string {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, gateRequest(t, http.MethodGet, "/console-config.json", token, true))
+		var v struct {
+			Gate string `json:"gate"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &v); err != nil {
+			t.Fatalf("console-config: %d %s (%v)", recorder.Code, recorder.Body.String(), err)
+		}
+		return v.Gate
+	}
+	if got := consoleGate(""); got != "required" {
+		t.Errorf("gate off, local console: gate %q, want required", got)
+	}
+	if got := gateStatus(server, gateRequest(t, http.MethodGet, "/requests", "", true)); got != http.StatusForbidden {
+		t.Errorf("gate off, local read with no token = %d, want 403", got)
+	}
+	gate.Store(&GateToken{On: true, Token: gateTestToken})
+	if got := consoleGate(""); got != "required" {
+		t.Errorf("local console, no token: gate %q, want required", got)
+	}
+	if got := consoleGate(gateTestToken); got != "accepted" {
+		t.Errorf("local console, the gate token: gate %q, want accepted", got)
+	}
+	if got := gateStatus(server, gateRequest(t, http.MethodGet, "/requests", "", true)); got != http.StatusForbidden {
+		t.Errorf("local read with no token = %d, want 403", got)
+	}
+	if got := gateStatus(server, gateRequest(t, http.MethodGet, "/requests", gateTestToken, true)); got != http.StatusOK {
+		t.Errorf("local read with the gate token = %d, want 200", got)
+	}
+}
+
 type stringBody struct{ *strings.Reader }
 
 func (stringBody) Close() error { return nil }

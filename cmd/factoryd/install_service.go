@@ -91,10 +91,11 @@ func buildWorkerPlist(cfg workerPlistConfig) []byte {
 // installServeService itself resolved, rather than each independently
 // re-deriving a default-path search that could disagree.
 type servePlistConfig struct {
-	BinaryPath string
-	ConfigPath string
-	DataDir    string
-	HomeDir    string
+	BinaryPath   string
+	ConfigPath   string
+	DataDir      string
+	HomeDir      string
+	AllowedHosts []string
 }
 
 // buildServePlist renders the serve LaunchAgent plist for cfg, mirroring
@@ -125,6 +126,9 @@ func buildServePlist(cfg servePlistConfig) []byte {
 	args := []string{cfg.BinaryPath, "serve", "-data-dir", cfg.DataDir}
 	if cfg.ConfigPath != "" {
 		args = append(args, "-config", cfg.ConfigPath)
+	}
+	for _, host := range cfg.AllowedHosts {
+		args = append(args, "-allowed-host", host)
 	}
 	for _, arg := range args {
 		fmt.Fprintf(&b, "\t\t<string>%s</string>\n", escapeXML(arg))
@@ -223,32 +227,45 @@ func resolveServiceDataDir(explicit, configPath string) (string, error) {
 // isolation from parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newInstallServiceFlags() (flags *flag.FlagSet, configPath, dataDir *string, force, print, noServe *bool) {
-	flags = flag.NewFlagSet("install-service", flag.ContinueOnError)
-	configPath = flags.String("config", "", "session config path or profile name the worker reads; default: the active session config")
-	dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the resolved session config's data dir (its data_dir, or ~/buildgate/data when it sets none)")
-	force = flags.Bool("force", false, "overwrite an already-installed plist")
-	print = flags.Bool("print", false, "print the generated worker plist to stdout and install nothing")
-	noServe = flags.Bool("no-serve", false, "install only the worker LaunchAgent; skip installing dev.factoryd.serve alongside it")
+func newInstallServiceFlags() (*flag.FlagSet, *installServiceFlags) {
+	flags := flag.NewFlagSet("install-service", flag.ContinueOnError)
+	f := &installServiceFlags{allowedHosts: &stringListFlag{}}
+	f.configPath = flags.String("config", "", "session config path or profile name the worker reads; default: the active session config")
+	f.dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the resolved session config's data dir (its data_dir, or ~/buildgate/data when it sets none)")
+	f.force = flags.Bool("force", false, "overwrite an already-installed plist")
+	f.print = flags.Bool("print", false, "print the generated worker plist to stdout and install nothing")
+	f.noServe = flags.Bool("no-serve", false, "install only the worker LaunchAgent; skip installing dev.factoryd.serve alongside it")
+	f.requireTokens = flags.Bool("require-tokens", false, "make the console require a token for every read and write, even from this machine; needed when containers can reach it (colima)")
+	flags.Var(f.allowedHosts, "allowed-host", "extra Host header values (host[:port]) the console accepts, such as host.docker.internal:8090 for containers; comma-separated, repeatable")
 	finishFlags(flags)
-	return
+	return flags, f
+}
+
+// installServiceFlags holds `factoryd install-service`'s parsed flags.
+type installServiceFlags struct {
+	configPath, dataDir                  *string
+	force, print, noServe, requireTokens *bool
+	allowedHosts                         *stringListFlag
 }
 
 func installServiceMain(dp *deps, args []string) error {
-	flags, configPath, dataDir, force, print, noServe := newInstallServiceFlags()
+	flags, f := newInstallServiceFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *f.noServe && (*f.requireTokens || len(f.allowedHosts.values) > 0) {
+		return errors.New("install-service: -require-tokens and -allowed-host set up the console agent, which -no-serve skips")
 	}
 
 	binaryPath, err := resolveServiceBinaryPath()
 	if err != nil {
 		return err
 	}
-	resolvedConfigPath, err := resolveServiceConfigPath(*configPath)
+	resolvedConfigPath, err := resolveServiceConfigPath(*f.configPath)
 	if err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveServiceDataDir(*dataDir, resolvedConfigPath)
+	resolvedDataDir, err := resolveServiceDataDir(*f.dataDir, resolvedConfigPath)
 	if err != nil {
 		return err
 	}
@@ -271,7 +288,7 @@ func installServiceMain(dp *deps, args []string) error {
 		TemporalAddress: temporalAddress,
 	})
 
-	if *print {
+	if *f.print {
 		_, err := os.Stdout.Write(plist)
 		return err
 	}
@@ -281,7 +298,7 @@ func installServiceMain(dp *deps, args []string) error {
 		return err
 	}
 	if _, statErr := os.Stat(plistPath); statErr == nil {
-		if !*force {
+		if !*f.force {
 			return fmt.Errorf("%s already exists; pass -force to overwrite (the service is bootstrapped again either way)", plistPath)
 		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
@@ -303,30 +320,39 @@ func installServiceMain(dp *deps, args []string) error {
 	}
 	fmt.Printf("installed %s and loaded it via launchctl\n", plistPath)
 
-	if *noServe {
+	if *f.noServe {
 		return nil
 	}
-	return installServeService(dp, binaryPath, resolvedConfigPath, resolvedDataDir, home, *force)
+	return installServeService(dp, servePlistConfig{
+		BinaryPath:   binaryPath,
+		ConfigPath:   resolvedConfigPath,
+		DataDir:      resolvedDataDir,
+		HomeDir:      home,
+		AllowedHosts: f.allowedHosts.values,
+	}, *f.requireTokens, *f.force)
 }
 
 // installServeService installs and bootstraps the dev.factoryd.serve
 // LaunchAgent alongside dev.factoryd.worker, generating (or reusing,
 // via ensureServeStartTokenFile) the stable start token file next to
-// configPath first -- so `factoryd console` and the plist's own first
+// cfg.ConfigPath first -- so `factoryd console` and the plist's own first
 // RunAtLoad startup agree on the same token before serve ever binds a
-// port.
-func installServeService(dp *deps, binaryPath, configPath, dataDir, home string, force bool) error {
-	tokenPath := serveStableStartTokenPathFor(configPath)
+// port. requireTokens generates (or reuses) the override and read token
+// files the same way; serve reads them at each start.
+func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bool) error {
+	tokenPath := serveStableStartTokenPathFor(cfg.ConfigPath)
 	if _, _, err := ensureServeStartTokenFile(dp, tokenPath); err != nil {
 		return fmt.Errorf("prepare stable serve start token: %w", err)
 	}
+	if requireTokens {
+		for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName} {
+			if _, _, err := ensureServeStartTokenFile(dp, serveTokenFilePathFor(cfg.ConfigPath, name)); err != nil {
+				return fmt.Errorf("prepare %s: %w", name, err)
+			}
+		}
+	}
 
-	plist := buildServePlist(servePlistConfig{
-		BinaryPath: binaryPath,
-		ConfigPath: configPath,
-		DataDir:    dataDir,
-		HomeDir:    home,
-	})
+	plist := buildServePlist(cfg)
 	plistPath, err := hostcontrol.ServePlistPath()
 	if err != nil {
 		return err
@@ -339,7 +365,7 @@ func installServeService(dp *deps, binaryPath, configPath, dataDir, home string,
 		return statErr
 	}
 
-	if err := os.MkdirAll(filepath.Join(dataDir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "logs"), 0o755); err != nil {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
@@ -352,6 +378,11 @@ func installServeService(dp *deps, binaryPath, configPath, dataDir, home string,
 		return err
 	}
 	fmt.Printf("installed %s and loaded it via launchctl (stable start token: %s)\n", plistPath, tokenPath)
+	if requireTokens {
+		fmt.Println("every read and write now needs a token; the console on this machine too: run `factoryd gate-token` and give it that token")
+	} else if len(cfg.AllowedHosts) > 0 {
+		fmt.Println("warning: a forwarder that adds no forwarding header (colima's host.docker.internal) lets its callers act as local, with no token; add -require-tokens")
+	}
 	return nil
 }
 
