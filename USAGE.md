@@ -379,6 +379,19 @@ mounts:
     writable: false
 ```
 
+Keep colima's default `mountType: sshfs` (or `virtiofs` on a `vz` VM). With
+`9p` the VM enforces the Mac's permission bits, so the sandbox's user cannot
+enter `~/buildgate` and no worker command starts. colima keeps the mount type
+an existing VM was created with: `colima delete` (it keeps the container data
+unless given `--data`) and start again to change it. colima also refuses one
+mount inside another, so when another tool needs a writable folder under
+`~/code`, list each repository read-only instead of `~/code`, and add a new
+repository to the list before building in it.
+
+Docker Desktop cannot run a sandbox: its VM's kernel has no Landlock and its
+daemon no AppArmor, both of which every sandbox runs under. `factoryd doctor`
+fails its "Docker can run sandboxes" row there.
+
 **Sizing colima.** `memory: 4` in the same file fits the default
 `max_parallel_jobs: 2`. Once builds have run, the VM holds its whole
 configured memory on the host (the VM process's `footprint`; `ps` RSS reads
@@ -1443,6 +1456,7 @@ What changes for a build:
 | Halt naming a path that "does not appear to share ... into its containers" | The macOS Docker VM doesn't share `/private/tmp` (or anything outside `$HOME`) | Use a repo path, `-data-dir` and workspace under `$HOME` |
 | A run log says `buildgate: the worker cannot write /scratch` (the step exits 95) or `permission denied` under `/scratch` | The worker image predates the per-launch scratch volume, or a custom image lacks `/scratch` owned by `65532:65532` with mode `770`; the launch fails at the worker's setup | Rebuild the image: `make install` (Pi) or `make pifork-image` (pifork). A profile that pins an image of its own (a project or toolchain image) keeps it through `make install`: rebuild that image on the new worker image and re-point its `sandbox_image`. `factoryd doctor` reports the active image as `a new scratch volume is writable by the worker`, and every other profile's as `profile <name>: its sandbox_image can run this factoryd's worker`; a baseline that halts on it says the worker image predates this factoryd, not that the verify command fails |
 | `factoryd doctor` warns `N leftover scratch volume(s) of finished runs` | A factoryd was killed before it removed a launch's `bg-scratch-<sandbox>` volume | `factoryd doctor -fix` removes the volumes of runs that are no longer in flight |
+| Every launch fails with `Landlock probe child exited with status 1` or `the worker command did not start within 2m0s of its release`, while `doctor` shows the gateway and meter healthy | Docker's VM has no Landlock or AppArmor (Docker Desktop), or colima shares `~/buildgate` over `9p`, whose permission bits keep the sandbox's user out | `factoryd doctor`'s "Docker can run sandboxes" row names the first; for either, run Docker in colima with its default `sshfs` mounts ("Data directory and colima") |
 | New flags rejected, fewer `doctor` checks, odd old behaviour | A stale `factoryd` earlier on `PATH` | `which -a factoryd`; run the fresh build by full path or fix `PATH` |
 | `factoryd doctor` reports a Copilot model-list HTTP 401/403, or `doctor -list-models` says `copilot models request: upstream returned status 401/403` | Copilot's token exchange succeeded, but its model catalog rejected the request; the configured model ID was not checked | Confirm the signed-in GitHub account has Copilot access and its organization allows model access, then retry `factoryd doctor -list-models`. If access is confirmed and the error persists, contact the organization admin or GitHub Support. Don't change the model ID based only on this error. |
 | Halt says the factoryd process running this build stopped mid-run | A `worker`'s `factoryd` process was stopped or lost | A request waits in `resume_review`: `factoryd resume <id>`; a single-ticket run is started again |

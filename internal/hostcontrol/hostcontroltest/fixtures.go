@@ -146,7 +146,7 @@ case "$*" in
 *"up -d"*)
 	echo "env $FACTORYD_METER_IMAGE $FACTORYD_METER_LEDGER_DIR $FACTORYD_HOME_DIR" >> LOG
 	case "$FACTORYD_GATEWAY_TOML" in *"[openshell.gateway.mtls_auth]"*) echo "toml-delivered" >> LOG;; esac
-	if [ -f STATE/gateway-fails ]; then case "$*" in *"up -d gateway") echo "port in use" >&2; exit 1;; esac; fi
+	if [ -f STATE/gateway-fails ]; then case "$*" in *"up -d gateway"*) echo "port in use" >&2; exit 1;; esac; fi
 	exit 0;;
 *" logs "*) echo "gateway: first line"; echo "gateway: panic: bad tls"; exit 0;;
 esac
