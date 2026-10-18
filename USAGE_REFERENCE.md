@@ -1344,7 +1344,7 @@ gpt-6-luna:
   cache_write: 0.125   # optional; absent = input (no cache-write premium)
   output: 0.50
   source: https://developers.openai.com/api/docs/pricing
-  as_of: 2026-10-14
+  as_of: 2026-10-17
 ```
 
 - To change a price (a provider updated theirs, or you're adding a new

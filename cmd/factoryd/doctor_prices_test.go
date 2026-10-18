@@ -36,7 +36,7 @@ func TestDoctorPriceChecksPassesForATableModel(t *testing.T) {
 	if c.Err != nil {
 		t.Fatalf("Err = %v, want nil for a known model id", c.Err)
 	}
-	for _, want := range []string{"models.luna", "gpt-5.6-luna", "$0.2", "$0.02", "$1.2", "2026-09-28"} {
+	for _, want := range []string{"models.luna", "gpt-5.6-luna", "$0.2", "$0.02", "$1.2", "2026-10-17"} {
 		if !strings.Contains(c.Name, want) {
 			t.Errorf("Name = %q, want it to contain %q", c.Name, want)
 		}
@@ -73,7 +73,7 @@ func TestDoctorPriceChecksWarnsForAnUnknownModelID(t *testing.T) {
 // passing or hard-failing over metadata that has no bearing on whether
 // the price itself is still correct.
 func TestDoctorPriceChecksWarnsOnStaleAsOf(t *testing.T) {
-	// gpt-5.6-luna's own compiled as_of (2026-09-28) is always fresh
+	// gpt-5.6-luna's own compiled as_of (2026-10-17) is always fresh
 	// relative to time.Now() in this test's own lifetime, so this proves
 	// the negative instead: a fresh entry never warns.
 	settings := sessionconfig.Settings{
