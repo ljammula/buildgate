@@ -56,10 +56,10 @@ func TestLookupKnownModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lookup(gpt-5.6-luna): %v", err)
 	}
-	if luna.Input != 200000 || luna.CachedInput != 20000 || luna.Output != 1200000 {
-		t.Fatalf("gpt-5.6-luna = %+v, want input=200000 cached_input=20000 output=1200000", luna)
+	if luna.Input != 200000 || luna.CachedInput != 20000 || luna.CacheWrite != 250000 || luna.Output != 1200000 {
+		t.Fatalf("gpt-5.6-luna = %+v, want input=200000 cached_input=20000 cache_write=250000 output=1200000", luna)
 	}
-	if luna.Source != "https://developers.openai.com/api/docs/pricing" || luna.AsOf != "2026-09-28" {
+	if luna.Source != "https://developers.openai.com/api/docs/pricing" || luna.AsOf != "2026-10-17" {
 		t.Fatalf("gpt-5.6-luna source/as_of = %q/%q", luna.Source, luna.AsOf)
 	}
 
