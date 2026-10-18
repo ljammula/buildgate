@@ -140,14 +140,14 @@
       "description": "Reconstructs a resumed build prompt from saved round state and may reattach handoff or prior-attempt records, or prepend the task and last-round feedback when starting a fresh session."
     },
     {
-      "id": "prompt-source:build-corrective.stuck-and-escalation",
+      "id": "prompt-source:build-corrective.stuck",
       "source_path": "agent/pi/scripts/build_app.py",
-      "fragment": "corrective_prompt / build_escalation_prompt",
+      "fragment": "corrective_prompt",
       "role": "execution",
       "stage": "build_correction",
       "kind": "inline-assembly",
-      "template_refs": ["build_corrective.stuck.prompt.md", "build_escalation.prompt.md"],
-      "description": "Adds a repeated-failure streak warning when applicable and builds the separate Sonnet fallback prompt from the spec and latest corrective prompt."
+      "template_refs": ["build_corrective.stuck.prompt.md"],
+      "description": "Adds a repeated-failure streak warning when applicable."
     },
     {
       "id": "prompt-source:build-handoff-notes",

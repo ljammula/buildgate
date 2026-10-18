@@ -253,7 +253,7 @@ func TestNextActionCoversReviewStatesHaltsAndQuarantine(t *testing.T) {
 				t.Fatal(err)
 			}
 			return r
-		}, []string{"the model provider refused the requests of the building step", "was not judged", "factoryd resume req-1", "kept worktree"}, []string{"quarantined", "factoryd retry"}},
+		}, []string{"the model provider refused the requests of the building step", "it said to try again after 2026-10-11T03:11:00Z", "was not judged", "factoryd resume req-1", "kept worktree"}, []string{"quarantined", "factoryd retry"}},
 		{"quarantined, budget_exhausted:request", func() *Request {
 			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
 			r.State = StateQuarantined

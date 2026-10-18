@@ -43,6 +43,18 @@ How each number is counted:
   belong to the ticket they follow, so they are never a first run.
   A ticket whose first run is unfinished is not in the one-shot rate. A
   ticket submitted again gets a new name and counts as a new ticket.
+- A ticket is "recovered by an automatic round" when its first run was
+  quarantined and a later run of the same ticket in a conformity or
+  corrective round (`-conformity1`, `-corrective1`, each possibly with
+  `-fix1`) was accepted with no override and no rescue; the denominator is the tickets whose first run was
+  quarantined. A PR-review round's run does not count.
+- A failed `spec_conformity` gate is listed as `spec_conformity (review
+  unavailable)` when the run's `spec_conformity_verdicts` hold an
+  `unavailable` verdict (a criterion the reviewer never answered) and no
+  verdict other than `clean` or `unavailable`: the conformity gate gave no
+  verdict on the work, so it is not a conformity loss. (The request driver
+  sends such a request to resume_review unless another review gate failed
+  for a real reason, which is then listed under its own name.)
 - A round failed when its record lists blockers (`blockers`, with
   `failure_signature`: the names build_app.py's round feedback uses). A
   round with none listed, or from a run record that predates the field, has
@@ -345,18 +357,53 @@ def first_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 	return [by_ticket[t][1] for t in sorted(by_ticket)]
 
 
+_ROUND_RUN = re.compile(r"(?<=-\d{3})-(?:conformity|corrective)\d+(?:-fix\d+)?$")
+
+
+def recovered_tickets(runs: List[Dict[str, Any]]) -> Tuple[int, int]:
+	"""(recovered, quarantined_first): of the tickets whose first run was
+	quarantined, those with a run in a conformity or corrective round that
+	was accepted with no override and no rescue (is_one_shot's test), so a
+	human's override is never counted as an automatic recovery."""
+	quarantined = {ticket_of(r) for r in first_runs(runs) if r.get("state") == "quarantined"}
+	accepted = {
+		ticket_of(r) for r in runs
+		if is_one_shot(r) and _ROUND_RUN.search(str(r.get("ticket") or r["id"]))
+	}
+	return len(quarantined & accepted), len(quarantined)
+
+
 def is_one_shot(record: Dict[str, Any]) -> bool:
 	return record.get("state") == "accepted" and not record.get("overrides") and not record.get("rescues")
 
 
+_CONFORMITY_UNAVAILABLE = "spec_conformity (review unavailable)"
+
+
+def conformity_unanswered(record: Dict[str, Any]) -> bool:
+	"""True when the conformity review left a criterion unanswered and
+	flagged nothing: the gate gave no verdict on the work. It mirrors the
+	conformity half of reviewUnavailable in
+	internal/requestdriver/request_driver.go (any "unavailable" verdict is
+	unanswered; a verdict other than "clean" or "unavailable" is flagged and
+	keeps the gate a real conformity failure)."""
+	verdicts = record.get("spec_conformity_verdicts")
+	verdicts = [v.get("verdict") for v in verdicts if isinstance(v, dict)] if isinstance(verdicts, list) else []
+	flagged = any(v not in ("clean", "unavailable") for v in verdicts)
+	return "unavailable" in verdicts and not flagged
+
+
 def failed_checks(record: Dict[str, Any]) -> List[str]:
 	"""The checks a quarantined run failed, each once; its reason code, in
-	brackets, when it recorded no failed check."""
+	brackets, when it recorded no failed check. A failed spec_conformity
+	whose review left a criterion unanswered is named for that."""
 	names: List[str] = []
 	gates = record.get("gate_results")
 	for gate in gates if isinstance(gates, list) else []:
 		if isinstance(gate, dict) and gate.get("passed") is False:
 			name = str(gate.get("check") or "")
+			if name == "spec_conformity" and conformity_unanswered(record):
+				name = _CONFORMITY_UNAVAILABLE
 			if name and name not in names:
 				names.append(name)
 	if names:
@@ -404,6 +451,8 @@ def measure(runs: List[Dict[str, Any]], beside: Optional[Dict[str, Dict[str, str
 	firsts = [r for r in first_runs(runs) if r.get("state") in TERMINAL_STATES]
 	one_shot = sum(1 for r in firsts if is_one_shot(r))
 
+	recovered, first_quarantined = recovered_tickets(runs)
+
 	rounds_to_green = sorted(len(run_rounds(r)) for r in finished if r.get("state") == "accepted" and run_rounds(r))
 
 	pairs = {"all": {"pairs": 0, "not_comparable": 0, "second_changed_nothing": 0}, SIGNATURE_RECORDED: {"same": 0, "different": 0}, SIGNATURE_DERIVED: {"same": 0, "different": 0}}
@@ -434,6 +483,9 @@ def measure(runs: List[Dict[str, Any]], beside: Optional[Dict[str, Dict[str, str
 		"tickets": len(firsts),
 		"one_shot": one_shot,
 		"one_shot_rate": ratio(one_shot, len(firsts)),
+		"first_run_quarantined": first_quarantined,
+		"recovered": recovered,
+		"recovered_rate": ratio(recovered, first_quarantined),
 		"rounds_to_green": {
 			"runs": len(rounds_to_green),
 			"mean": round(statistics.mean(rounds_to_green), 2) if rounds_to_green else None,
@@ -497,6 +549,8 @@ def render(result: Dict[str, Any], files: int, unreadable: List[str]) -> str:
 		% (overall["accepted"], overall["quarantined"], overall["halted"]),
 		"| One-shot acceptance (first run of a ticket accepted, no override or rescue) | %s |"
 		% share(overall["one_shot"], overall["tickets"]),
+		"| Recovered by an automatic round (first run quarantined, a conformity/corrective round accepted) | %s |"
+		% share(overall["recovered"], overall["first_run_quarantined"]),
 		"| Rounds to green (accepted runs with recorded rounds) | %s |" % render_rounds(green),
 		"| Finished runs with more than one round | %s |" % share(overall["multi_round_runs"], overall["finished"]),
 		"| Pairs of consecutive failed rounds | %d, %d of them not comparable |" % (pairs["pairs"], pairs["not_comparable"]),

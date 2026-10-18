@@ -76,14 +76,23 @@ type ResumeDecision struct {
 // the provider gave is said, so the operator does not resume into the same
 // refusal.
 func ResumePrompt(id string, from State, step LostStep) string {
-	what := step.Cause.What(string(from))
-	if step.RetryAt != "" {
-		what += " (it said to try again after " + step.RetryAt + ")"
-	}
+	what := lostStepWhat(step.Cause, from, step.RetryAt)
 	if from == StateBuilding && step.RunID == "" {
 		return fmt.Sprintf("%s; nothing of it was kept: `factoryd resume -from scratch %s` rebuilds the ticket (or `factoryd cancel %s`)", what, id, id)
 	}
 	return fmt.Sprintf("%s; `factoryd resume %s` continues it (or `-from scratch` / `factoryd cancel %s`)", what, id, id)
+}
+
+// lostStepWhat is the clause naming what happened to a lost step, with the
+// time the provider said to try again when it gave one, so the operator
+// does not resume into the same refusal. ResumePrompt and the waiting
+// request's NextAction both say it.
+func lostStepWhat(cause unresolved.Cause, from State, retryAt string) string {
+	what := cause.What(string(from))
+	if retryAt != "" {
+		what += " (it said to try again after " + retryAt + ")"
+	}
+	return what
 }
 
 // LostStep is what is known about a step that ended with no verdict on the
@@ -201,7 +210,7 @@ func (r *Request) resumeNextAction() string {
 		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd resume %s`, `factoryd resume -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
 	}
 	from := r.Resume.FromState
-	what := r.Resume.Cause.What(string(from))
+	what := lostStepWhat(r.Resume.Cause, from, r.Resume.RetryAt)
 	if len(r.Resume.Refused) > 0 {
 		return fmt.Sprintf("the lost %s step cannot be resumed (%s); `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", from, strings.Join(r.Resume.Refused, "; "), r.ID, r.ID)
 	}
