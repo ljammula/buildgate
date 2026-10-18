@@ -52,17 +52,9 @@ jobs:
           # module downloads normally, keyed on go.sum.
           cache: true
 
-      # S6 (CLAIMS.md Remaining gaps, closed here): every live Temporal
-      # test in this repo (RunWorkflow/RepositoryOwnerWorkflow exclusivity,
-      # daemon execution, stop-line, reclaim, heartbeat-kill,
-      # full_suite_verify's Temporal path) skips itself via t.Skipf when
-      # TEMPORAL_ADDRESS (default localhost:7233) is unreachable — true on
-      # every CI run until now, since nothing here ever started a server.
-      # Green CI never meant those guarantees held; it meant they were
-      # never checked. `temporal server start-dev` is the same lightweight,
-      # single-binary dev server used for local development (README/plan's
-      # own "one local Go daemon" shape) — sqlite-backed, no Postgres
-      # needed for test purposes.
+      # `make verify` starts its own test Temporal dev server
+      # (scripts/test-sharded.sh) from this CLI and runs every live Temporal
+      # test against it; without the CLI those tests skip.
       - name: Install Temporal CLI
         # Downloads a specific, immutable GitHub release asset and
         # verifies its checksum before extracting anything -- no `curl |
@@ -81,92 +73,26 @@ jobs:
           mkdir -p "$HOME/.temporalio/bin"
           tar -xzf /tmp/temporal_cli.tar.gz -C "$HOME/.temporalio/bin" temporal
           chmod +x "$HOME/.temporalio/bin/temporal"
-
-      - name: Start Temporal dev server
-        run: |
           echo "$HOME/.temporalio/bin" >> "$GITHUB_PATH"
-          TEMPORAL="$HOME/.temporalio/bin/temporal"
-          # nohup + disown: a backgrounded process can otherwise receive
-          # SIGHUP when this step's own shell exits, killing the server
-          # before the later `make verify` step ever reaches it — each
-          # step here is its own shell invocation within the same job.
-          nohup "$TEMPORAL" server start-dev --headless --port 7233 --log-level warn > /tmp/temporal-dev.log 2>&1 &
-          disown
-          for i in $(seq 1 30); do
-            "$TEMPORAL" operator cluster health --address localhost:7233 >/dev/null 2>&1 && exit 0
-            sleep 1
-          done
-          echo "Temporal dev server did not become healthy within 30s" >&2
-          cat /tmp/temporal-dev.log >&2
-          exit 1
 
       - name: make verify
         run: |
           set -o pipefail
           make verify 2>&1 | tee /tmp/make-verify.log
-          # Found via review (GitHub Codex App, PR #34): if the Temporal
-          # dev server dies after the one-time health check above but
-          # before make verify reaches the live tests -- fmt-check, vet,
-          # and compilation run first -- every live Temporal test
-          # silently SKIPs via its own t.Skipf fallback (meant for local
-          # dev convenience: no server running, don't fail) instead of
-          # failing, recreating exactly the false-green state this whole
-          # change exists to close, undetected by make verify's own exit
-          # code. "Temporal (Service|server) at <addr> is unreachable:" is
-          # the literal, contiguous phrase both t.Skipf call sites emit
-          # (cmd/factoryd/integration_test.go, internal/workflow/
-          # temporal_live_test.go) -- grep the captured output for it and
-          # fail explicitly if found, rather than trust an exit code a
-          # silent skip never affects.
-          #
-          # A second real finding, from a local `codex review` pass on
-          # the fix above itself (confirmed live, not just read): this
-          # grep did nothing without -v below. `go test` (no -v) only
-          # ever prints "ok  <pkg>  <time>" for a package where every
-          # test passed OR skipped -- it silently drops every "--- SKIP:"
-          # line and its skip-reason text, precisely the line this grep
-          # needs. Verified directly: the exact same unreachable-Temporal
-          # skip prints nothing beyond "ok ..." without -v, and includes
-          # it with -v.
-          #
-          # A third real finding, from live-testing the fix above against
-          # a real mid-run server kill (not just a synthetic log): a bare
-          # "is unreachable:" substring match is NOT unique to these two
-          # skip sites -- cmd/factoryd's own runtime error message ("...
-          # is unreachable: ...; builds run only on Temporal", logged by
-          # TestIntegrationIsolatedTemporalUnreachableHaltsInsteadOfFallingBack
-          # and TestIntegrationIsolateWorkspaceRequiresReachableTemporalServer,
-          # both of which deliberately probe an unreachable address as
-          # their own real, passing test case) also contains that
-          # substring, just with unrelated prose in between -- and would
-          # have failed CI on two entirely healthy, correct test runs.
-          # The two real skip messages are "Temporal Service at %s is
-          # unreachable:"/"Temporal server at %s is unreachable:" with no
-          # text in between; anchoring the regex to that exact contiguous
-          # phrase excludes the false positive while still matching the
-          # real skip (confirmed against both cases live).
+          # A live Temporal test that skips (no test server reached it)
+          # does not change make verify's exit code, so the skip message
+          # is searched for and fails the job. The phrase is anchored: a
+          # bare "is unreachable:" also appears in passing tests that
+          # probe an unreachable address on purpose.
           if grep -qE "Temporal (Service|server) at \S+ is unreachable:" /tmp/make-verify.log; then
-            echo "one or more live Temporal tests skipped (the dev server became unreachable mid-run) -- failing explicitly, see the log above" >&2
+            echo "one or more live Temporal tests skipped (no test Temporal server reached them) -- failing explicitly, see the log above" >&2
             exit 1
           fi
         env:
-          TEMPORAL_ADDRESS: localhost:7233
-          # Found via a local `codex review` pass: `actions/setup-go`'s
-          # cache: true above (enabled the same commit) persists GOCACHE
-          # across separate workflow runs keyed on go.sum, and `go test`'s
-          # own result cache is not keyed on environment variables a test
-          # reads (like TEMPORAL_ADDRESS above) — only on unchanged source
-          # and build inputs. Without this, a later run with unchanged Go
-          # sources could silently replay an old cached PASS/SKIP result
-          # for every live Temporal test instead of actually contacting
-          # the server this job just started, defeating the point of this
-          # whole change while still reporting green. -v is required for
-          # the reason explained above (skip-reason text is otherwise
-          # dropped even on a fresh, uncached run); confirmed compatible
-          # with go vet (also invoked by make verify) via `go vet -v`
-          # locally. Neither -count=1 nor -v is added to the Makefile's
-          # own `test` target -- local development keeps Go's normal
-          # caching and quieter output for fast iteration.
+          # -count=1: setup-go caches GOCACHE across runs, and go test's
+          # result cache is not keyed on the server a test dials, so a
+          # cached PASS or SKIP could be replayed. -v: without it go test
+          # prints no skip reason for the guard above to find.
           GOFLAGS: -count=1 -v
 
       # Visibility only -- never fails the job (if: always(), and the run

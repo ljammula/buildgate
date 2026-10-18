@@ -22,6 +22,30 @@ import (
 
 const promptMarker = "PROMPT-MARKER-the-earlier-attempt-record"
 
+// hostPathsOf lists the host paths req puts in front of the worker: its bind
+// mounts' sources and its guard and output directories. ReadOnlyPaths and
+// ReadWritePaths are not among them: they name paths inside the container
+// (/usr, /proc, /tmp...), and walking the host's own copies of those is both
+// meaningless and, on a CI runner, unbounded.
+func hostPathsOf(t *testing.T, req sandbox.SandboxRequest) []string {
+	t.Helper()
+	var paths []string
+	for _, m := range req.Mounts {
+		if !m.Tmpfs && m.Source != "" {
+			paths = append(paths, m.Source)
+		}
+	}
+	for _, dir := range []string{req.GuardDir, req.OutputDir} {
+		if dir != "" {
+			paths = append(paths, dir)
+		}
+	}
+	if len(paths) == 0 {
+		t.Fatal("the launch puts no host path in front of the worker: nothing to check")
+	}
+	return paths
+}
+
 // holdingMarker lists the regular files under root whose text has marker.
 func holdingMarker(t *testing.T, root, marker string) []string {
 	t.Helper()
@@ -279,15 +303,7 @@ func TestAReviewLaunchCannotSeeTheRunsSavedPrompts(t *testing.T) {
 		t.Fatalf("the run directory %s is inside the workspace %s: the mounts would carry it", routed.LogDir, input.WorkspacePath)
 	}
 	req := rt.Requests()[0]
-	paths := append([]string{}, req.ReadOnlyPaths...)
-	paths = append(paths, req.ReadWritePaths...)
-	for _, m := range req.Mounts {
-		paths = append(paths, m.Source)
-	}
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
+	for _, p := range hostPathsOf(t, req) {
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			continue

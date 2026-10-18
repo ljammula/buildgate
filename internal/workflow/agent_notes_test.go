@@ -130,15 +130,7 @@ func TestAReviewLaunchCannotSeeTheBuildAgentsNotes(t *testing.T) {
 		t.Fatalf("the run directory %s is inside the workspace %s: the mounts would carry it", routed.LogDir, input.WorkspacePath)
 	}
 	req := rt.Requests()[0]
-	paths := append([]string{}, req.ReadOnlyPaths...)
-	paths = append(paths, req.ReadWritePaths...)
-	for _, m := range req.Mounts {
-		paths = append(paths, m.Source)
-	}
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
+	for _, p := range hostPathsOf(t, req) {
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			continue

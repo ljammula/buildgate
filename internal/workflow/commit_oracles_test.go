@@ -22,10 +22,21 @@ func coGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// coInit makes ws a git repository with its own identity: the activity under
+// test commits with plain git, which must not depend on the machine's global
+// config (a CI runner has none).
+func coInit(t *testing.T, ws string) {
+	t.Helper()
+	coGit(t, ws, "init", "-q", "-b", "main")
+	coGit(t, ws, "config", "user.name", "t")
+	coGit(t, ws, "config", "user.email", "t@example.com")
+	coGit(t, ws, "config", "commit.gpgsign", "false")
+}
+
 func coFixture(t *testing.T, manifest string) (a *Activities, input CommitOraclesInput, base string) {
 	t.Helper()
 	ws := t.TempDir()
-	coGit(t, ws, "init", "-q", "-b", "main")
+	coInit(t, ws)
 	os.MkdirAll(filepath.Join(ws, "pkg"), 0o755)
 	os.WriteFile(filepath.Join(ws, "pkg", "x.go"), []byte("package pkg\n"), 0o644)
 	coGit(t, ws, "add", "-A")

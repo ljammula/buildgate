@@ -214,7 +214,9 @@ func TestLaunchRegistryProxyMountsAndTrustsEgressCABundleWhenSet(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "docker-calls")
 	docker := fakeRegistryProxyDocker(t, logPath, false)
 
-	spec := validRegistryProxySpec()
+	// The bundle is staged under the data dir, so it must exist: never the
+	// shared /tmp/data validRegistryProxySpec names.
+	spec := validRegistryProxyPolicy().Spec("run1", t.TempDir())
 	spec.CABundlePath = bundle
 	handle, err := LaunchRegistryProxy(context.Background(), docker, spec)
 	if err != nil {
