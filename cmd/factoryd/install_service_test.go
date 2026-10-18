@@ -504,7 +504,7 @@ func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
 		t.Errorf("serve plist lacks -allowed-host host.docker.internal:8090:\n%s", plist)
 	}
 	first := map[string]string{}
-	for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName} {
+	for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName, serveConsoleTokenFileName} {
 		path := filepath.Join(filepath.Dir(configPath), name)
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != 0o600 {
@@ -516,8 +516,8 @@ func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
 		}
 		first[name] = token
 	}
-	if first[serveOverrideTokenFileName] == first[serveReadTokenFileName] {
-		t.Fatal("the override and read tokens are the same value")
+	if first[serveOverrideTokenFileName] == first[serveReadTokenFileName] || first[serveConsoleTokenFileName] == first[serveReadTokenFileName] || first[serveConsoleTokenFileName] == first[serveOverrideTokenFileName] {
+		t.Fatal("two of the override, read and console tokens are the same value")
 	}
 	if err := installServiceMain(dp, append(args, "-force")); err != nil {
 		t.Fatalf("installServiceMain -force: %v", err)

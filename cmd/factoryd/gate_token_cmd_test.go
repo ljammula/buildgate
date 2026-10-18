@@ -237,7 +237,7 @@ func TestGateTokenMessagesNameTheConsoleOnThisMachineOnceAReadTokenIsSet(t *test
 	if err := os.WriteFile(filepath.Join(cfgDir, serveReadTokenFileName), []byte("read\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	const every = "every console, this machine's included"
+	const every = "every console but one this machine opened with `factoryd console`"
 	if out := runGateToken(t, dp); !strings.Contains(out, every) || strings.Contains(out, remoteOnly) {
 		t.Errorf("with a read token, output does not name every console:\n%s", out)
 	}
@@ -248,7 +248,7 @@ func TestGateTokenMessagesNameTheConsoleOnThisMachineOnceAReadTokenIsSet(t *test
 	if len(checks) != 1 || !strings.Contains(checks[0].Err.Error(), every) {
 		t.Errorf("doctor row with a disabled gate and a read token = %+v", checks)
 	}
-	if out := runGateToken(t, dp, "-remove"); !strings.Contains(out, "no console reads until") || strings.Contains(out, "reads with no token") {
+	if out := runGateToken(t, dp, "-remove"); !strings.Contains(out, "no console reads until") || !strings.Contains(out, "factoryd console") || strings.Contains(out, "reads with no token") {
 		t.Errorf("-remove with a read token:\n%s", out)
 	}
 }

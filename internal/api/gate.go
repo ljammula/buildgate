@@ -35,6 +35,19 @@ func WithGateToken(source func() GateToken) Option {
 	}
 }
 
+// WithConsoleToken sets the console token: the credential of the console on
+// this machine once a read token is set, which that console cannot hold. It
+// opens what the gate token opens, the reads and the request writes, and
+// only for a local request (Server.local), so a copy of it does not open a
+// console reached through a proxy. It never opens POST /runs/{id}/override,
+// the start-token routes or POST /mcp, and it does not expire: the operator
+// hands it over with `factoryd console`. An empty token is none.
+func WithConsoleToken(token string) Option {
+	return func(s *Server) {
+		s.consoleToken = token
+	}
+}
+
 // gateViaSuffix is appended to the name a request write is recorded under
 // when the gate token authorized it. A caller may not send a name that
 // already carries it.
@@ -89,7 +102,7 @@ func (s *Server) gate() GateToken {
 		return GateToken{}
 	}
 	if g.Token != "" {
-		others := []string{s.overrideToken, s.startToken, s.readToken}
+		others := []string{s.overrideToken, s.startToken, s.readToken, s.consoleToken}
 		if s.mcpToken != nil {
 			others = append(others, s.mcpToken())
 		}
@@ -102,20 +115,41 @@ func (s *Server) gate() GateToken {
 	return g
 }
 
-// gateBearer reports whether r carries the usable gate token.
+// gateBearer reports whether r carries the usable gate token, or is a local
+// request carrying the console token, which opens the same routes.
 func (s *Server) gateBearer(r *http.Request) bool {
 	// No file read for a request with no bearer at all.
 	if r.Header.Get("Authorization") == "" {
 		return false
 	}
-	return s.authorize(r, s.gate().Token)
+	return s.consoleBearer(r) || s.authorize(r, s.gate().Token)
+}
+
+// consoleBearer reports whether r is a local request carrying the console
+// token. A console token equal to another credential of this server opens
+// nothing: one value must never open two classes of route.
+func (s *Server) consoleBearer(r *http.Request) bool {
+	if s.consoleToken == "" || !s.local(r) {
+		return false
+	}
+	others := []string{s.overrideToken, s.startToken, s.readToken}
+	if s.mcpToken != nil {
+		others = append(others, s.mcpToken())
+	}
+	for _, other := range others {
+		if other == s.consoleToken {
+			return false
+		}
+	}
+	return s.authorize(r, s.consoleToken)
 }
 
 // gateRequired reports whether r needs a token to read, which a console is
-// given as the gate token: the gate is on and r is not local, or a read
-// token is set, which the console on this machine cannot hold either. With a
-// read token and the gate off, no console can read until `factoryd
-// gate-token` writes one; the console asks for it all the same.
+// given as the gate token or, on this machine, the console token: the gate is
+// on and r is not local, or a read token is set, which no console holds.
+// With a read token, the gate off and no console token, no console can read
+// until `factoryd gate-token` writes one; the console asks for it all the
+// same.
 func (s *Server) gateRequired(r *http.Request) bool {
 	return (!s.local(r) && s.gate().On) || s.readToken != ""
 }
@@ -157,12 +191,13 @@ func (s *Server) writePrincipal(r *http.Request, by string) (principal string, o
 }
 
 // viaGateOnly reports whether the gate token is the only thing that
-// authorizes r as a request write.
+// authorizes r as a request write. A write with the console token is the
+// operator at this machine, recorded as a local write is.
 func (s *Server) viaGateOnly(r *http.Request) bool {
 	if s.overrideToken == "" && s.loopbackSameOriginWrite(r) && loopbackWriteHasJSONContentType(r) {
 		return false
 	}
-	if s.authorize(r, s.overrideToken) {
+	if s.authorize(r, s.overrideToken) || s.consoleBearer(r) {
 		return false
 	}
 	return s.gateBearer(r)

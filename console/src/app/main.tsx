@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { httpConfigFromEnv } from "@/app/config";
 import { Console } from "@/app/Console";
 import { startSession } from "@/app/session";
+import { captureConsoleTokenFromLocation } from "@/platform/consoleToken";
 import { captureGateTokenFromLocation } from "@/platform/gateToken";
 import { captureStartTokenFromLocation, getStoredStartToken } from "@/platform/startToken";
 import { initThemeMode } from "@/platform/theme";
@@ -16,6 +17,7 @@ async function start(): Promise<void> {
   // it removes only its own component, while the start token's capture
   // removes the whole fragment.
   const candidate = captureGateTokenFromLocation();
+  const consoleCandidate = captureConsoleTokenFromLocation();
   captureStartTokenFromLocation();
   initThemeMode();
 
@@ -23,6 +25,7 @@ async function start(): Promise<void> {
   // Tolerant: a server that cannot answer yields a read-only console.
   const session = await startSession({
     candidate,
+    consoleCandidate,
     httpConfig: (gateToken) => httpConfigFromEnv(startToken, gateToken),
   });
 

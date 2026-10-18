@@ -5,10 +5,15 @@ import type { HttpConfig } from "@/api/http";
 import { Console } from "@/app/Console";
 import { resolveHttpConfig } from "@/app/config";
 import { type ConsoleSession, startSession } from "@/app/session";
+import {
+  clearStoredConsoleToken,
+  getStoredConsoleToken,
+  setStoredConsoleToken,
+} from "@/platform/consoleToken";
 import { getStoredGateToken, setStoredGateToken } from "@/platform/gateToken";
 
 const gateSentence =
-  "This console needs its gate token. On the host, run factoryd gate-token and paste the token it prints here.";
+  "This console needs its gate token. On the host, run factoryd gate-token and paste the token it prints here. For the console on the host itself, run factoryd console instead: the link it opens carries a token that does not expire.";
 const expiredSentence = "The gate token this browser was using has expired or was replaced.";
 
 interface Call {
@@ -46,7 +51,11 @@ function gatedServer(accepted: readonly string[]) {
   return { state, fetch, configCalls, otherCalls };
 }
 
-function start(server: ReturnType<typeof gatedServer>, candidate: string | null = null) {
+function start(
+  server: ReturnType<typeof gatedServer>,
+  candidate: string | null = null,
+  consoleCandidate: string | null = null,
+) {
   const httpConfig = (gateToken: string | null): HttpConfig => ({
     ...resolveHttpConfig({
       baseUrl: "",
@@ -59,7 +68,7 @@ function start(server: ReturnType<typeof gatedServer>, candidate: string | null 
     }),
     fetch: server.fetch,
   });
-  return startSession({ candidate, httpConfig });
+  return startSession({ candidate, consoleCandidate, httpConfig });
 }
 
 const refused = (session: ConsoleSession, path: string) =>
@@ -67,6 +76,7 @@ const refused = (session: ConsoleSession, path: string) =>
 
 afterEach(() => {
   window.sessionStorage.clear();
+  clearStoredConsoleToken();
   window.history.replaceState(null, "", "/");
 });
 
@@ -323,4 +333,79 @@ test("after the gate is lost mid-session, the new token can be pasted", async ()
     expect(restart).toHaveBeenCalledTimes(1);
   });
   expect(getStoredGateToken()).toBe("rotated");
+});
+
+test("a console token from the link is kept across tabs once the server accepts it", async () => {
+  const server = gatedServer(["host"]);
+  const session = await start(server, null, "host");
+  expect(session.config.gate).toBe("accepted");
+  expect(session.http.config.gateToken).toBe("host");
+  expect(getStoredConsoleToken()).toBe("host");
+  expect(window.sessionStorage.length).toBe(0);
+
+  // A new tab: nothing in the link, the stored console token is used.
+  window.sessionStorage.clear();
+  const again = await start(server);
+  expect(again.config.gate).toBe("accepted");
+  expect(again.http.config.gateToken).toBe("host");
+});
+
+test("a refused console token from the link is not kept", async () => {
+  const server = gatedServer(["host"]);
+  const session = await start(server, null, "stale");
+  expect(session.config.gate).toBe("required");
+  expect(getStoredConsoleToken()).toBeNull();
+  expect(session.http.config.gateToken).toBeNull();
+});
+
+test("a stored console token the server stopped accepting is forgotten", async () => {
+  setStoredConsoleToken("old");
+  const session = await start(gatedServer(["new"]));
+  expect(session.config.gate).toBe("required");
+  expect(session.storedTokenRefused).toBe(true);
+  expect(getStoredConsoleToken()).toBeNull();
+});
+
+test("a tab's gate token comes first, and a stale one falls back to the console token", async () => {
+  setStoredConsoleToken("host");
+  setStoredGateToken("gate");
+  const first = await start(gatedServer(["host", "gate"]));
+  expect(first.http.config.gateToken).toBe("gate");
+
+  const fallback = await start(gatedServer(["host"]));
+  expect(fallback.config.gate).toBe("accepted");
+  expect(fallback.http.config.gateToken).toBe("host");
+  expect(fallback.storedTokenRefused).toBe(false);
+  expect(getStoredGateToken()).toBeNull();
+  expect(getStoredConsoleToken()).toBe("host");
+});
+
+test("a refused gate-token link still opens with the stored console token", async () => {
+  setStoredConsoleToken("host");
+  const session = await start(gatedServer(["host"]), "wrong");
+  expect(session.config.gate).toBe("accepted");
+  expect(session.http.config.gateToken).toBe("host");
+});
+
+test("a stale gate token refused at startup never clears another tab's console token on a later 403", async () => {
+  setStoredGateToken("stale");
+  const server = gatedServer([]);
+  const session = await start(server);
+  expect(session.storedTokenRefused).toBe(true);
+  // Another tab is meanwhile given the console token by `factoryd console`.
+  setStoredConsoleToken("host");
+  server.state.refuse = () => true;
+  await refused(session, "/requests");
+  expect(session.http.config.gateToken).toBeNull();
+  expect(getStoredConsoleToken()).toBe("host");
+});
+
+test("a console-token link opens a tab whose stored gate token went stale", async () => {
+  setStoredGateToken("stale");
+  const session = await start(gatedServer(["host"]), null, "host");
+  expect(session.config.gate).toBe("accepted");
+  expect(session.http.config.gateToken).toBe("host");
+  expect(session.storedTokenRefused).toBe(false);
+  expect(getStoredGateToken()).toBeNull();
+  expect(getStoredConsoleToken()).toBe("host");
 });

@@ -63,7 +63,9 @@ export function GateScreen({ tokenRefused, offerToken, onAccepted }: GateScreenP
         <CardBody className="flex flex-col gap-3 text-sm text-fg">
           <p>
             This console needs its gate token. On the host, run{" "}
-            <TextWithCode text="`factoryd gate-token`" /> and paste the token it prints here.
+            <TextWithCode text="`factoryd gate-token`" /> and paste the token it prints here. For
+            the console on the host itself, run <TextWithCode text="`factoryd console`" /> instead:
+            the link it opens carries a token that does not expire.
           </p>
           {tokenRefused ? (
             <p className="text-fg-muted">

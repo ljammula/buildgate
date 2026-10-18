@@ -36,12 +36,13 @@ const (
 )
 
 // gateAudience names the consoles that need the gate token to read: every
-// console once serve has a read token, since the console on this machine
-// cannot hold that token either (internal/api's gateRequired); otherwise
-// only a console that is not on this machine.
+// console once serve has a read token, which no console holds
+// (internal/api's gateRequired), except that the console on this machine
+// opens with the console token `factoryd console` hands it; otherwise only a
+// console that is not on this machine.
 func gateAudience(readToken bool) string {
 	if readToken {
-		return "every console, this machine's included (serve requires a read token)"
+		return "every console but one this machine opened with `factoryd console` (serve requires a read token)"
 	}
 	return "a console that is not on this machine"
 }
@@ -154,7 +155,7 @@ func newGateTokenFlags() (flags *flag.FlagSet, f gateTokenFlags) {
 	f.ttl = flags.Duration("ttl", gateDefaultTTL, fmt.Sprintf("how long a token this command writes works, from %s to %s", gateMinTTL, gateMaxTTL))
 	f.rotate = flags.Bool("rotate", false, "replace the token; the old one stops working at once")
 	f.disable = flags.Bool("disable", false, "keep the gate on with no token: no console that needs the gate token opens until -rotate")
-	f.remove = flags.Bool("remove", false, "remove the token file, which turns the gate off; when serve requires tokens, no console reads until a new one is written")
+	f.remove = flags.Bool("remove", false, "remove the token file, which turns the gate off; when serve requires tokens, only `factoryd console` opens a console until a new one is written")
 	finishFlags(flags)
 	return
 }
@@ -200,7 +201,7 @@ func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 			return fmt.Errorf("remove %s: %w", path, err)
 		}
 		if readTokenFileExists(configPath) {
-			fmt.Fprintf(stdout, "Gate token removed: %s\nserve requires a read token, so no console reads until `factoryd gate-token` writes a new one.\n", path)
+			fmt.Fprintf(stdout, "Gate token removed: %s\nserve requires a read token, so no console reads until `factoryd gate-token` writes a new one, except one this machine opens with `factoryd console`.\n", path)
 			return nil
 		}
 		fmt.Fprintf(stdout, "Gate off: removed %s\nA console under an -allowed-host name reads with no token, and cannot write.\n", path)

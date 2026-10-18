@@ -349,6 +349,7 @@ type serveRun struct {
 	overrideToken            string
 	startToken               string
 	readToken                string
+	consoleToken             string
 	inFlightRuns             sync.WaitGroup
 	releasePolicy            release.MergePolicy
 	sandboxLimits            sandboxResourceLimits
@@ -740,6 +741,7 @@ func (sv *serveRun) listenAndServe() error {
 		api.WithOverrideToken(sv.overrideToken),
 		api.WithStartToken(sv.startToken),
 		api.WithReadToken(sv.readToken),
+		api.WithConsoleToken(sv.consoleToken),
 		api.WithRunStarter(repositoryAPIStarter(apiStartStarter(sv.dp, *sv.dataDir, &sv.inFlightRuns, sv.releasePolicy, sv.sandboxLimits, sv.sandboxPolicy))),
 		api.WithProjectChecker(apiProjectChecker()),
 		api.WithProjectStatsProvider(apiProjectStatsProvider(*sv.dataDir)),

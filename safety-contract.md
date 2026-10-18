@@ -155,6 +155,9 @@ cancel, create; `internal/api.Server.authorizeRequestWrite`):
   files' checks stops `serve` from starting: the protection is never
   dropped silently. `install-service -allowed-host` puts `-allowed-host`
   into the serve plist's arguments.
+- `-require-tokens` also creates `serve-console-token` the same way, which
+  `serve` reads with them: the credential of the console on this machine,
+  which cannot hold the read token ([Console token](#console-token)).
 
 A rejection or a send-back over HTTP (`POST /requests/{id}/reject`) names
 the stage it was made on: the request's `state` and `entered_at` as the
@@ -265,6 +268,21 @@ The credential of a console that is not on the machine (`internal/api`'s
 | Lifetime | 12 hours unless `-ttl` says otherwise (one minute to 30 days). `-rotate` replaces it: the old token is refused on the next request, and a stream opened with it ends at its next poll |
 | Who is recorded | A write the gate token alone authorized is recorded under the name the console sent (`api` when it sent none) with ` (gate token)` added by the server (`writePrincipal`). A request write or a run override whose name already carries that text is refused, so only the server writes it. The name is the caller's claim; the suffix is what the server knows. **Exception:** the oracle run-command write (`PUT /requests/{id}/oracle/RUN_COMMAND.txt`) has no entry on the request record for any caller; `serve` logs who made it |
 | In the browser | The console takes the token from a password field on its gate screen, or from `#gate=<token>`, which it removes from the address bar; either way it is stored only once the server has accepted it, in `sessionStorage`, and sent only as an `Authorization` header. The field is a masked text field, not a password field, so the browser does not offer to save it. **Residuals:** a `#gate=` link can remain in the browser's history (a pasted token is never in a URL); script running in the console's page could read `sessionStorage` (the console renders model-written text as text, never as HTML). The token's expiry, `-rotate`, and its having no override power bound both |
+
+### Console token
+
+The credential of the console on the machine once `serve` requires a token
+from every caller (`internal/api`'s `WithConsoleToken`, `cmd/factoryd`'s
+`serve_token_files.go` and `consoleTokenFragment`).
+
+| Property | Rule |
+|---|---|
+| What it opens | What the gate token opens, the reads and the request writes (`gateBearer`, `consoleBearer`), and only for a local request (`Server.local`): a copy of it opens nothing through a proxy |
+| What it never opens | `POST /runs/{id}/override`, the start-class routes and `POST /mcp`, as for the gate token |
+| The file | `serve-console-token` beside the session config, written by `install-service -require-tokens` with the other token files (mode 0600, exclusive create, never inside a git work tree, kept across a reinstall, never in the plist). `serve` reads it at start; a file that fails the token files' checks stops `serve` from starting. It has no environment variable and does not expire |
+| One value, one class | A console token equal to the override, start, read or MCP token opens nothing, and a gate token equal to it is not usable |
+| Who is recorded | A write it authorized is the operator at this machine: recorded under the name the console sent, with no suffix, as a local write without a token is |
+| In the browser | `factoryd console` appends `&c=<token>` to the start-token link it opens, only for this data dir's own loopback `serve`. The console removes it from the address bar and stores it only once `/console-config.json` answers `accepted`, in `localStorage`, like the start token, so every tab keeps it. A gate token held by the tab is used first; a stored console token the server refuses is forgotten. **Residuals:** the `#t=…&c=…` link can remain in the browser's history; script in the console's page could read `localStorage`. Its holder must also be on the machine, and it has no override power. A colima container is local too (above): like the override and read token files, this one is out of a container's reach only while the session config is outside every directory the container VM mounts |
 
 ### Notifications
 
