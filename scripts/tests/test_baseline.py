@@ -385,9 +385,13 @@ class Recovered(unittest.TestCase):
 			# A PR-review round's acceptance is not an automatic recovery.
 			run("v1", state="quarantined", ticket="req-005", created_at="2026-10-01T00:00:00Z"),
 			run("v2", state="accepted", ticket="req-005-review1", created_at="2026-10-01T01:00:00Z"),
+			# A round run accepted only through an operator's override is a
+			# human's decision, not an automatic recovery.
+			run("w1", state="quarantined", ticket="req-006", created_at="2026-10-01T00:00:00Z"),
+			run("w2", state="accepted", ticket="req-006-conformity1", created_at="2026-10-01T01:00:00Z", overrides=[{"check": "spec_conformity"}]),
 		]
 		m = baseline.measure(runs, beside={})
-		self.assertEqual((m["recovered"], m["first_run_quarantined"], m["recovered_rate"]), (2, 4, 0.5))
+		self.assertEqual((m["recovered"], m["first_run_quarantined"], m["recovered_rate"]), (2, 5, 0.4))
 
 	def test_rendered_overall_and_in_json(self):
 		runs = [

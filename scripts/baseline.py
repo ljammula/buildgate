@@ -46,14 +46,15 @@ How each number is counted:
 - A ticket is "recovered by an automatic round" when its first run was
   quarantined and a later run of the same ticket in a conformity or
   corrective round (`-conformity1`, `-corrective1`, each possibly with
-  `-fix1`) was accepted; the denominator is the tickets whose first run was
+  `-fix1`) was accepted with no override and no rescue; the denominator is the tickets whose first run was
   quarantined. A PR-review round's run does not count.
 - A failed `spec_conformity` gate is listed as `spec_conformity (review
   unavailable)` when the run's `spec_conformity_verdicts` hold an
   `unavailable` verdict (a criterion the reviewer never answered) and no
-  verdict other than `clean` or `unavailable`. The request driver treats such
-  a run as having no verdict and sends the request to resume_review, so it is
-  not a conformity loss.
+  verdict other than `clean` or `unavailable`: the conformity gate gave no
+  verdict on the work, so it is not a conformity loss. (The request driver
+  sends such a request to resume_review unless another review gate failed
+  for a real reason, which is then listed under its own name.)
 - A round failed when its record lists blockers (`blockers`, with
   `failure_signature`: the names build_app.py's round feedback uses). A
   round with none listed, or from a run record that predates the field, has
@@ -361,12 +362,13 @@ _ROUND_RUN = re.compile(r"(?<=-\d{3})-(?:conformity|corrective)\d+(?:-fix\d+)?$"
 
 def recovered_tickets(runs: List[Dict[str, Any]]) -> Tuple[int, int]:
 	"""(recovered, quarantined_first): of the tickets whose first run was
-	quarantined, those with an accepted run in a conformity or corrective
-	round."""
+	quarantined, those with a run in a conformity or corrective round that
+	was accepted with no override and no rescue (is_one_shot's test), so a
+	human's override is never counted as an automatic recovery."""
 	quarantined = {ticket_of(r) for r in first_runs(runs) if r.get("state") == "quarantined"}
 	accepted = {
 		ticket_of(r) for r in runs
-		if r.get("state") == "accepted" and _ROUND_RUN.search(str(r.get("ticket") or r["id"]))
+		if is_one_shot(r) and _ROUND_RUN.search(str(r.get("ticket") or r["id"]))
 	}
 	return len(quarantined & accepted), len(quarantined)
 
@@ -380,11 +382,11 @@ _CONFORMITY_UNAVAILABLE = "spec_conformity (review unavailable)"
 
 def conformity_unanswered(record: Dict[str, Any]) -> bool:
 	"""True when the conformity review left a criterion unanswered and
-	flagged nothing. The request driver treats that as no verdict on the
-	work (reviewUnavailable in internal/requestdriver/request_driver.go: any
-	"unavailable" verdict is unanswered; a verdict other than "clean" or
-	"unavailable" is flagged and keeps the gate a real conformity failure),
-	so it is not a conformity loss."""
+	flagged nothing: the gate gave no verdict on the work. It mirrors the
+	conformity half of reviewUnavailable in
+	internal/requestdriver/request_driver.go (any "unavailable" verdict is
+	unanswered; a verdict other than "clean" or "unavailable" is flagged and
+	keeps the gate a real conformity failure)."""
 	verdicts = record.get("spec_conformity_verdicts")
 	verdicts = [v.get("verdict") for v in verdicts if isinstance(v, dict)] if isinstance(verdicts, list) else []
 	flagged = any(v not in ("clean", "unavailable") for v in verdicts)
