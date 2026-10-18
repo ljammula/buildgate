@@ -26,6 +26,11 @@ func newRepo(t *testing.T, files map[string]string) (dir, base string) {
 	t.Helper()
 	dir = t.TempDir()
 	gitRun(t, dir, "init", "-q", "-b", "main")
+	// The repository's own identity: Apply commits with plain git, which must
+	// not depend on the machine's global config (a CI runner has none).
+	gitRun(t, dir, "config", "user.name", "t")
+	gitRun(t, dir, "config", "user.email", "t@example.com")
+	gitRun(t, dir, "config", "commit.gpgsign", "false")
 	files["README.md"] = "hello\n"
 	for p, c := range files {
 		full := filepath.Join(dir, p)
