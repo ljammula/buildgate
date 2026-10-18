@@ -324,9 +324,9 @@ own PR review comments trigger a corrective round.
 Config reuse: an existing config is reused only when it names
 `roles.execution`. An images-only config (what `make install` records on
 a fresh machine) is completed with `routes:`/`models:`/`roles:`, keeping
-its images. `-route chatgpt-codex` with the default `gpt-5.6-luna` writes
+its images. `-route chatgpt-codex` with the default `gpt-6-luna` writes
 the Luna profile: `reasoning: true`, `thinking_level_map {xhigh, max}`,
-execution `medium`, planning and review `max`.
+`max` for planning, execution and review.
 
 **Codex CLI as the coding agent, Luna as the model:**
 `factoryd quickstart -route chatgpt-codex -harness codex <repo> "<task>"`

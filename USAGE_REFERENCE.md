@@ -1094,7 +1094,7 @@ routes:
     credential_mode: chatgpt-codex
 models:
   luna:
-    id: gpt-5.6-luna
+    id: gpt-6-luna
     routes: [codex]
     context_window: 272000
 roles:
@@ -1130,7 +1130,7 @@ roles:
 | copilot | `GET <copilot host>/models` after the token exchange, with Copilot's own client headers | `max_prompt_tokens`, else `max_context_window_tokens` |
 | openai-compatible | `GET <route upstream><route worker_base_path>/models` | not reported; pass `-context-window` |
 | anthropic | none (quickstart never probes this endpoint's own listing) | default `claude-sonnet-5` / `200000`; a different `-model-id` needs `-context-window` |
-| chatgpt-codex | none (backend speaks only `POST /responses`) | default `gpt-5.6-luna` / `272000`; a different `-model-id` needs `-context-window` |
+| chatgpt-codex | none (backend speaks only `POST /responses`) | default `gpt-6-luna` / `272000`; a different `-model-id` needs `-context-window` |
 
 - `factoryd doctor -list-models` prints the list for the configured route
   and exits, tagging each entry with an `endpoints: <supported_endpoints>`
@@ -1198,7 +1198,7 @@ routes:
              credential_env: LITELLM_KEY }
 models:
   luna:
-    id: gpt-5.6-luna
+    id: gpt-6-luna
     api: openai-responses
     routes: [codex, litellm]        # ordered fallback; never another model
     context_window: 272000
@@ -1338,13 +1338,13 @@ so every session config and every alias sharing that id shares one
 price). Each entry is USD per 1,000,000 tokens:
 
 ```yaml
-gpt-5.6-luna:
-  input: 0.20
-  cached_input: 0.02   # optional; absent = input (no cache discount)
-  cache_write: 0.20    # optional; absent = input (no cache-write premium)
-  output: 1.20
+gpt-6-luna:
+  input: 0.10
+  cached_input: 0.01   # optional; absent = input (no cache discount)
+  cache_write: 0.125   # optional; absent = input (no cache-write premium)
+  output: 0.50
   source: https://developers.openai.com/api/docs/pricing
-  as_of: 2026-09-28
+  as_of: 2026-10-14
 ```
 
 - To change a price (a provider updated theirs, or you're adding a new
@@ -1410,7 +1410,7 @@ within `allowed_harnesses`:
 routes:
   codex: { credential_mode: chatgpt-codex }
 models:
-  luna: { id: gpt-5.6-luna, routes: [codex], context_window: 272000 }
+  luna: { id: gpt-6-luna, routes: [codex], context_window: 272000 }
 roles:
   planning:  { model: luna, harness: pi }
   execution: { model: luna, harness: codex, allowed_harnesses: [codex, pi] }
