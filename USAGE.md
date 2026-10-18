@@ -506,6 +506,8 @@ factoryd mcp -disable   # endpoint off
 | `list_workspaces` | The repositories `submit_request` accepts | No |
 | `submit_request` | Starts a request (`workspace`, `text`, optional `draft_oracles`; it takes no spec or plan file); it stops at `spec_review` | Yes: spends model budget |
 
+Each request `list_requests`, `get_request` and `submit_request` return carries `console_url`, its page in the console, on the address the client reached `serve` by (`https://<machine>.<tailnet>.ts.net:<port>/requests/<id>` through `factoryd remote-console`). The link carries no token: from another machine the console asks for the gate token. A client can pass it on so you can follow the request and approve it.
+
 ```text
 you (chat) -> MCP client -> POST /mcp (bearer token) -> factoryd serve
                  submit, follow                            |
