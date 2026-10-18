@@ -912,6 +912,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 				checks = append(checks, doctorCheckHarnessInImage(ctx, in.sandboxDocker, image, d))
 			}
 			checks = append(checks, doctorCheckScratchOwned(ctx, in.sandboxDocker, image))
+			checks = append(checks, doctorCheckSandboxKernel(ctx, in.sandboxDocker, image))
 			checks = append(checks, doctorCheckProfileImages(ctx, in.sandboxDocker, image, in.profileImages)...)
 			if runtime.GOOS == "darwin" {
 				checks = append(checks, doctorCheckHomeNotShared(ctx, in.sandboxDocker, image))

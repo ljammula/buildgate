@@ -283,10 +283,10 @@ func startMeterThenGateway(dp Deps, ctx context.Context, t OpenShellTimeouts, co
 		return err
 	}
 	defer logFile.Close()
-	up := func(service string) error {
+	up := func(service string, flags ...string) error {
 		upCtx, cancel := context.WithTimeout(ctx, t.ComposeUp)
 		defer cancel()
-		cmd := exec.CommandContext(upCtx, dp.DockerBinary(), "compose", "-f", composePath, "up", "-d", service)
+		cmd := exec.CommandContext(upCtx, dp.DockerBinary(), append([]string{"compose", "-f", composePath, "up", "-d", service}, flags...)...)
 		cmd.Env, cmd.Stdout, cmd.Stderr = env, logFile, logFile
 		return cmd.Run()
 	}
@@ -296,7 +296,18 @@ func startMeterThenGateway(dp Deps, ctx context.Context, t OpenShellTimeouts, co
 	if err := waitHealthy(dp, ctx, t, dp.MeterHealthy); err != nil {
 		return fmt.Errorf("meter not healthy: %v; see %s", err, logPath)
 	}
-	if err := up("gateway"); err != nil {
+	// The gateway's configuration is inline compose content, which compose
+	// does not compare: without a recreate, a stopped gateway container
+	// starts again on the configuration it was created with, whatever this
+	// start rendered (its supervisor image). Its state is in the
+	// /var/lib/openshell bind mount, which a recreate keeps. A gateway that
+	// answers (this start is for the meter) is left alone: builds may be
+	// running through it.
+	var gatewayFlags []string
+	if dp.GatewayHealthy(ctx) != nil {
+		gatewayFlags = []string{"--force-recreate"}
+	}
+	if err := up("gateway", gatewayFlags...); err != nil {
 		return withGatewayLog(dp, ctx, t, fmt.Errorf("docker compose up gateway failed: %v", err))
 	}
 	if err := waitHealthy(dp, ctx, t, dp.GatewayHealthy); err != nil {
