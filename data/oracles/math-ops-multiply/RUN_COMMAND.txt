@@ -1,7 +1,7 @@
 python3 - <<'PY'
 import glob, importlib.util, os, sys, traceback
 sys.path.insert(0, ".")
-if os.path.isdir("src"):
+if os.path.isdir("src") and not os.path.isfile("src/__init__.py"):
     sys.path.insert(1, "src")
 ran = failed = 0
 for path in sorted(glob.glob(".oracle/test_oracle_*.py")):

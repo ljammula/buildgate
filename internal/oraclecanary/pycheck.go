@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -339,15 +341,43 @@ func ModuleExistsInWorkspace(workspaceRoot, name string) bool {
 	if workspaceRoot == "" || name == "" {
 		return false
 	}
+	for _, root := range PythonImportRoots(workspaceRoot) {
+		if moduleExistsUnder(root, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// PythonImportRoots is the directories a drafted Python oracle imports the
+// repository's modules from: the repository root, and its src/ directory
+// when that is a src layout (a directory that is not itself a package, so it
+// holds packages rather than being imported as "src"). PythonStdlibCommand
+// puts the same directories on sys.path, by the same rule, so a module this
+// check finds is one the oracle can import. A src/ that is a package is left
+// to the root, where `import src.x` already resolves, and so its modules
+// never shadow the standard library's.
+func PythonImportRoots(workspaceRoot string) []string {
+	roots := []string{workspaceRoot}
+	src := filepath.Join(workspaceRoot, "src")
+	if info, err := os.Stat(src); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(src, "__init__.py")); errors.Is(err, fs.ErrNotExist) {
+			roots = append(roots, src)
+		}
+	}
+	return roots
+}
+
+func moduleExistsUnder(root, name string) bool {
 	relPath := filepath.Join(strings.Split(name, ".")...)
-	if info, err := os.Stat(filepath.Join(workspaceRoot, relPath+".py")); err == nil && !info.IsDir() {
+	if info, err := os.Stat(filepath.Join(root, relPath+".py")); err == nil && !info.IsDir() {
 		return true
 	}
-	if info, err := os.Stat(filepath.Join(workspaceRoot, relPath, "__init__.py")); err == nil && !info.IsDir() {
+	if info, err := os.Stat(filepath.Join(root, relPath, "__init__.py")); err == nil && !info.IsDir() {
 		return true
 	}
 	if top := strings.SplitN(name, ".", 2)[0]; top != name {
-		if info, err := os.Stat(filepath.Join(workspaceRoot, top)); err == nil && info.IsDir() {
+		if info, err := os.Stat(filepath.Join(root, top)); err == nil && info.IsDir() {
 			return true
 		}
 	}
