@@ -502,8 +502,8 @@ func TestOpenShellStartRefusesAnInterceptingCAFileWithNoCertificate(t *testing.T
 }
 
 // A gateway container created by an earlier start keeps the configuration it
-// was created with, so every start recreates it; the meter, whose changes
-// arrive as its image, is left to compose.
+// was created with, so a start that finds it not answering recreates it; the
+// meter, whose changes arrive as its image, is left to compose.
 func TestOpenShellStartRecreatesTheGatewaySoItReadsTheRenderedConfig(t *testing.T) {
 	f := newOpenShellFixture(t)
 	f.healthyOnceUp()
