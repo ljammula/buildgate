@@ -52,7 +52,6 @@ freely, headings only together with their validator.
 | `build_corrective.intro`, `.verify`, `.excerpt`, `.oracle`, `.reviewer` | `build_app.py` (`corrective_prompt`, one part each, joined by blank lines) | `{round_index}`, `{max_rounds}`, `{blockers}`; `{verify_command}`, `{verify_tail}`; `{verify_tail}`; `{oracle_command}`, `{oracle_tail}`; `{detail}` |
 | `build_corrective.closing` | `build_app.py` (last part of the corrective prompt) | none: literal text |
 | `build_corrective.history`, `.agent`, `.log`, `.stuck` | `build_app.py` (`corrective_prompt`: the rounds so far, a failure of the agent process, where the failing command's whole output is, the diagnose-first steps) | `{history}`; `{agent_notes}`; `{failure_log}`, `{failing}`; `{streak}` |
-| `build_escalation.prompt.md` | `build_app.py` (`build_escalation_prompt`) | `{spec_text}`, `{corrective}` |
 | `build_handoff_notes` | `build_app.py` (`run_notes_turn`: the one extra turn of a build that ends without passing) | none: literal text |
 | `build_passed_notes` | `build_app.py` (`run_notes_turn_after_pass`: the same turn for a build that passed after a round that did not; the worktree is recorded before and after it) | none: literal text |
 | `spec_conformity.recheck.prompt.md` | `conformity_review.py` (`recheck_prompt`: the lines the factory read, after the diff of a recheck) | `{facts}` |
@@ -68,7 +67,7 @@ their scripts.
 - **Round state and resume.** `build_app.py` writes
   `.pi-build-round-state.json` (workspace root, atomic, never committed) before
   round 1 and after every round: `version`, `last_completed_round`,
-  `next_prompt`, `escalation_prompt`, `rounds`, `head`, `workspace_fingerprint`.
+  `next_prompt`, `rounds`, `head`, `workspace_fingerprint`.
   `--resume-from-state <path>` continues at `last_completed_round + 1` in a
   fresh harness session with `next_prompt` (plus the `--handoff` preamble if
   given), keeping earlier round records so indexes carry on. It exits 2 when the

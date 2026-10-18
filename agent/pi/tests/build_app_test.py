@@ -863,170 +863,12 @@ class BuildAppTests(unittest.TestCase):
 		self.assertIn("fast check failed", result.stopped_reason)
 		self.assertNotIn("canonical verification failed", result.stopped_reason)
 
-	def test_opt_in_sonnet_fallback_runs_once_after_local_budget(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Fix the cache")
-			local_completions = [
-				subprocess.CompletedProcess([], 0, pi_output("flagged", "cache.go: evicts by value"), ""),
-			]
-			local_writes = [lambda: None]  # the flagged local round makes no real change
-			sonnet_completion = subprocess.CompletedProcess([], 0, json.dumps({"usage": {}, "total_cost_usd": 0.1}), "")
-			original_sh = build_app.sh
-
-			def fake_sh(args, cwd=None, timeout=None, env=None):
-				# Only "claude" (the sonnet fallback pass) still goes through
-				# sh() -- the local "pi" round is intercepted via
-				# run_agent_streaming below, and git calls hit the real workspace.
-				if args and args[0] == "claude":
-					(root / "cache.go").write_text("fixed\n")  # the sonnet pass does write
-					return sonnet_completion
-				return original_sh(args, cwd=cwd, timeout=timeout, env=env)
-
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "resolve_verify_command", return_value="make verify"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(local_completions, local_writes)),
-				mock.patch.object(build_app, "sh", side_effect=fake_sh),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
-					sonnet_fallback=True,
-				)
-		self.assertTrue(result.succeeded)
-		self.assertEqual([round.agent for round in result.rounds], ["pi", "claude-sonnet-5"])
-
-	def test_a_no_op_round_is_not_reported_as_success_and_escalates_to_sonnet(self):
-		# Regression: calc-app ticket 004 (2026-09-06) ran 3 local
-		# rounds that each reported "verify passed" against a workspace no
-		# round had actually touched (base_sha == result_sha) -- `pi`
-		# stalled/produced nothing, but the *pre-existing* code still
-		# trivially passed verification, so `round_blockers` saw no
-		# blockers and run_build declared SUCCEEDED. Because
-		# result.succeeded was already True, --sonnet-fallback's own `if
-		# not result.succeeded` guard never fired -- the one designed
-		# recovery for exactly this case never got a chance to run.
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			base_sha = init_repo_with_commit(root)
-			# Deliberately outside the workspace repo (as factoryd's real
-			# spec.snapshot.md is, under data/runs/<id>/) -- a spec file
-			# left untracked *inside* the repo would itself make
-			# workspace_unchanged_since see a dirty tree and invalidate
-			# this test.
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Add a feature")
-			# Two local rounds that touch nothing (git status/diff stay
-			# clean) but still "pass" verification against the untouched
-			# tree; the sonnet-fallback round is the one that actually
-			# writes a file and commits.
-			local_completions = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-			]
-			sonnet_completion = subprocess.CompletedProcess(
-				[], 0, json.dumps({"usage": {}, "total_cost_usd": 0.1}), "",
-			)
-			original_sh = build_app.sh
-
-			def fake_sh(args, cwd=None, timeout=None, env=None):
-				# Only "claude" (the sonnet fallback pass) still goes through
-				# sh() -- the local "pi" rounds are intercepted via
-				# run_agent_streaming below, and git calls hit the real workspace.
-				if args and args[0] == "claude":
-					(root / "feature.txt").write_text("done\n")
-					subprocess.run(["git", "add", "feature.txt"], cwd=root, check=True, capture_output=True)
-					subprocess.run(
-						["git", "-c", "commit.gpgsign=false", "commit", "-m", "add feature"],
-						cwd=root, check=True, capture_output=True,
-					)
-					return sonnet_completion
-				return original_sh(args, cwd=cwd, timeout=timeout, env=env)
-
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "resolve_verify_command", return_value="make verify"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(local_completions)),
-				mock.patch.object(build_app, "sh", side_effect=fake_sh),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=2, timeout_minutes=1,
-					sonnet_fallback=True, review_base_sha=base_sha,
-				)
-
-			self.assertEqual([r.agent for r in result.rounds], ["pi", "pi", "claude-sonnet-5"])
-			self.assertTrue(result.succeeded)
-			self.assertEqual(result.stopped_reason, "Sonnet fallback passed canonical verification")
-			self.assertNotEqual(head_of(root), base_sha)
-
-	def test_unresolvable_verify_command_still_escalates_to_sonnet_after_the_local_budget(self):
-		# Regression: notes-demo ticket 001 (2026-09-06), the walking-skeleton
-		# ticket for a brand-new repo. The local round stalled and created
-		# nothing at all -- no Makefile, no manifest -- so
-		# resolve_verify_command() returned None and the loop broke
-		# immediately via a special "no canonical verification command
-		# resolvable" branch *before* escalation_prompt was ever built --
-		# and, per a second Codex finding, that branch broke unconditionally
-		# after round 1 regardless of max_rounds, contradicting this
-		# module's own documented "Sonnet only after the local budget is
-		# exhausted" contract. Uses max_rounds=2 to prove both: two local
-		# rounds actually run (the budget is honored) before falling
-		# through to the sonnet fallback, which does create the missing
-		# Makefile and succeeds.
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Scaffold the app and its Makefile")
-
-			verify_results = iter([
-				(None, None, False, "", False, None),  # local round 1: still stalled
-				(None, None, False, "", False, None),  # local round 2: still stalled
-				("make verify", True, False, "", False, None),  # after the sonnet pass
-			])
-			real_sh = build_app.sh
-			local_completions = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-			]
-
-			def fake_sh(args, cwd=None, timeout=None, env=None):
-				# Only "claude" (the sonnet fallback pass) still goes through
-				# sh() -- the two local "pi" rounds are intercepted via
-				# run_agent_streaming below, and git calls hit the real workspace.
-				if args and args[0] == "claude":
-					(root / "Makefile").write_text("verify:\n\t@true\n")
-					return subprocess.CompletedProcess([], 0, pi_output("clean"), "")
-				return real_sh(args, cwd=cwd, timeout=timeout, env=env)
-
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", side_effect=lambda ws, **kwargs: next(verify_results)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(local_completions)),
-				mock.patch.object(build_app, "sh", side_effect=fake_sh),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=2, timeout_minutes=1,
-					sonnet_fallback=True,
-				)
-
-		self.assertEqual([r.agent for r in result.rounds], ["pi", "pi", "claude-sonnet-5"])
-		self.assertTrue(result.succeeded)
-		self.assertEqual(result.stopped_reason, "Sonnet fallback passed canonical verification")
-
-	def test_route_outage_with_no_verify_command_does_not_burn_a_sonnet_pass(self):
-		# Codex review of PR #5: a full route outage (every assistant turn
-		# errored) produces the exact same symptom as a stalled-but-live
-		# round -- no code ever got a chance to run, so verify_command is
-		# also None. That must still report "model route unreachable" and
-		# stop with no escalation, the same as before the no-verify-command
-		# branch existed -- not spend a billed Sonnet pass repeating an
-		# outage ticket_runner.py's own bounded retry is meant to recover
-		# from once the route is back.
+	def test_route_outage_with_no_verify_command_stops_after_one_round(self):
+		# A full route outage (every assistant turn errored) produces the
+		# exact same symptom as a stalled-but-live round -- no code ever got
+		# a chance to run, so verify_command is also None. That must still
+		# report "model route unreachable" and stop after one round, leaving
+		# the outage to ticket_runner.py's own bounded retry.
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			spec = Path(spec_dir) / "spec.md"
@@ -1041,7 +883,6 @@ class BuildAppTests(unittest.TestCase):
 			):
 				result = build_app.run_build(
 					root, spec, max_rounds=3, timeout_minutes=1,
-					sonnet_fallback=True,
 				)
 
 		self.assertEqual([r.agent for r in result.rounds], ["pi"])
@@ -2657,7 +2498,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 			record = Path(spec_dir) / "earlier-attempt.md"
 			record.write_text(f"- `lint`: \"{marker}\"")
 			# The state an interrupted round 1 left: its opening prompt, stored without the record.
-			build_app.write_round_state(root, last_completed_round=0, next_prompt="Fix the cache\n\n---\n\nBefore you end your turn: verify.", escalation_prompt="", rounds=[])
+			build_app.write_round_state(root, last_completed_round=0, next_prompt="Fix the cache\n\n---\n\nBefore you end your turn: verify.", rounds=[])
 			with (
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
@@ -3786,7 +3627,7 @@ class NotesTurnTests(unittest.TestCase):
 	"""The one extra turn a build that ends without passing gets, in its own
 	session, for notes to whoever attempts the ticket next."""
 
-	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, criteria=False, sonnet=False, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
+	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, criteria=False, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			init_repo_with_commit(root)
@@ -3834,11 +3675,10 @@ class NotesTurnTests(unittest.TestCase):
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
 				mock.patch.object(build_app, "_process_started", 0.0),
-				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 0, "", "")) if sonnet else contextlib.nullcontext(),
 				contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
 			):
 				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1, sonnet_fallback=sonnet,
+					root, spec, max_rounds=1, timeout_minutes=1,
 					spec_acceptance_criteria=criteria_path if criteria else None, **extra,
 				)
 				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
@@ -3902,10 +3742,6 @@ class NotesTurnTests(unittest.TestCase):
 			saved = (root / ".pi-build-session" / "prompts" / "build-round-1.md").read_text()
 			self.assertIn("EARLIER-ATTEMPT-RECORD-MARKER", saved)
 			self.assertIn("Fix the cache", saved)
-
-	def test_the_sonnet_fallback_prompt_is_saved(self):
-		ran = self._run(sonnet=True)
-		self.assertIn("Original task specification", ran["prompts"]["build-sonnet-fallback"])
 
 	def test_a_prompt_that_cannot_be_saved_does_not_change_the_turn(self):
 		with mock.patch.object(build_app.saved_prompts, "PROMPTS_DIR", "x/../.."):
@@ -3976,7 +3812,6 @@ class NotesTurnTests(unittest.TestCase):
 			"unparsable budget": (dict(budget="soon"), "no build time budget"),
 			"299 s left": (dict(budget=1000, elapsed=701), "under 300 s of the build time budget left"),
 			"spec acceptance criteria": (dict(criteria=True), "spec acceptance criteria given"),
-			"sonnet fallback": (dict(sonnet=True), "sonnet fallback enabled"),
 		}
 		for name, (kwargs, reason) in cases.items():
 			with self.subTest(name):
@@ -4212,7 +4047,6 @@ class RoundStateTests(unittest.TestCase):
 			self.assertEqual(snaps[1]["next_prompt"], argvs[1][-1])
 			self.assertEqual(snaps[2]["next_prompt"], argvs[2][-1])
 			self.assertEqual([r["index"] for r in snaps[2]["rounds"]], [1, 2])
-			self.assertTrue(snaps[1]["escalation_prompt"].startswith("The local Pi harness exhausted"))
 			self.assertRegex(snaps[1]["workspace_fingerprint"], r"^[0-9a-f]{64}$")
 			self.assertEqual(sorted(p.name for p in root.glob(".pi-build-round-state*")), [".pi-build-round-state.json"])
 
@@ -4320,8 +4154,8 @@ class RoundStateTests(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
 			init_repo_with_commit(root)
-			build_app.write_round_state(root, last_completed_round=0, next_prompt="p", escalation_prompt="", rounds=[])
-			build_app.write_round_state(root, last_completed_round=0, next_prompt="q", escalation_prompt="", rounds=[])
+			build_app.write_round_state(root, last_completed_round=0, next_prompt="p", rounds=[])
+			build_app.write_round_state(root, last_completed_round=0, next_prompt="q", rounds=[])
 			self.assertEqual(json.loads((root / build_app.ROUND_STATE_FILE).read_text())["next_prompt"], "q")
 			self.assertEqual([p.name for p in root.iterdir() if "round-state" in p.name], [build_app.ROUND_STATE_FILE])
 
@@ -4356,38 +4190,13 @@ class RoundStateTests(unittest.TestCase):
 			with self.assertRaisesRegex(build_app.RoundStateError, "next_prompt exceeds"):
 				build_app.load_round_state(path, 3)
 
-	def test_stored_escalation_prompt_is_never_used(self):
-		with contextlib.ExitStack() as stack:
-			root, spec, _ = self._setup(stack)
-			state = self._interrupted_state(root, spec)
-			data = json.loads(state.read_text())
-			data["escalation_prompt"] = "FORGED ESCALATION"
-			state.write_text(json.dumps(data))
-			errored = json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error"}})
-			sonnet_prompts = []
-
-			def fake_sonnet(prompt):
-				sonnet_prompts.append(prompt)
-				return ["true"]
-
-			with (
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", False, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, errored, ""), False)),
-				mock.patch.object(build_app, "sonnet_invocation", side_effect=fake_sonnet),
-			):
-				build_app.run_build(root, spec, max_rounds=4, timeout_minutes=1, sonnet_fallback=True, resume_from_state=state)
-			self.assertEqual(len(sonnet_prompts), 1)
-			self.assertNotIn("FORGED", sonnet_prompts[0])
-			self.assertIn("Original task specification:\n\nFix the cache", sonnet_prompts[0])
-			self.assertIn(data["next_prompt"], sonnet_prompts[0])
-
 	def test_failed_write_leaves_no_temp_file(self):
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
 			init_repo_with_commit(root)
 			with mock.patch.object(build_app.os, "replace", side_effect=OSError("boom")):
 				with self.assertRaises(OSError):
-					build_app.write_round_state(root, last_completed_round=0, next_prompt="p", escalation_prompt="", rounds=[])
+					build_app.write_round_state(root, last_completed_round=0, next_prompt="p", rounds=[])
 			self.assertEqual(list((root / ".pi-build-session").iterdir()), [])
 			self.assertFalse((root / build_app.ROUND_STATE_FILE).exists())
 
@@ -4419,7 +4228,7 @@ class PassedNotesTurnTests(unittest.TestCase):
 	"""A build that failed a round and then passed gets the notes turn too,
 	and hands back exactly the tree its checks passed on."""
 
-	def _run(self, *, verify=(False, True), during_notes=None, budget=3600, elapsed=0, reply=NOTES_REPLY, adapter=None, notes_result=None, during_round=None, sonnet=False):
+	def _run(self, *, verify=(False, True), during_notes=None, budget=3600, elapsed=0, reply=NOTES_REPLY, adapter=None, notes_result=None, during_round=None):
 		"""Runs a build whose successive verifications give `verify`: one
 		agent round per entry up to the first pass, then the notes turn, then
 		(only if the script verifies again) the entries after it."""
@@ -4488,10 +4297,9 @@ class PassedNotesTurnTests(unittest.TestCase):
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
 				mock.patch.object(build_app, "_process_started", 0.0),
-				mock.patch.object(build_app, "sh", return_value=subprocess.CompletedProcess([], 1, "", "")) if sonnet else contextlib.nullcontext(),
 				contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
 			):
-				result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1, sonnet_fallback=sonnet, **extra)
+				result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1, **extra)
 				after = tree_of(root)
 				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
 				return {
@@ -4942,8 +4750,6 @@ class PlantedNotesFileTests(unittest.TestCase):
 		"workspace too large to record: more than 3 entries": dict(patch=("MAX_ENTRIES", 3)),
 		"under 300 s of the build time budget left": dict(verify=(False, False, False), budget=1000, elapsed=701),
 		"no build time budget": dict(verify=(False, False, False), budget=None),
-		# One more verification: the fallback pass runs the checks itself.
-		"sonnet fallback enabled": dict(verify=(False, False, False, False), sonnet=True),
 	}
 
 	def test_a_planted_notes_path_is_gone_after_every_skipped_turn(self):

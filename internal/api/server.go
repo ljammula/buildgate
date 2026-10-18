@@ -2863,7 +2863,7 @@ func usageTotalTokens(usage map[string]any) (int64, bool) {
 }
 
 // costFromUsage extracts the "total_cost_usd" figure build_app.py/
-// draft_spec.py/plan_tickets.py's own parse_sonnet_usage/parse_usage
+// draft_spec.py/plan_tickets.py's own parse_usage
 // helpers write into a SpecEvidence/PlanEvidence/AgentEvidenceRound Usage
 // map, reporting ok=false when usage is nil, has no such key, or the
 // value there is null or not a number -- every case in which this usage

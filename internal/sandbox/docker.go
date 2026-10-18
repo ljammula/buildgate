@@ -2114,7 +2114,6 @@ var HarnessSiblingModules = map[string]bool{
 	"build_corrective.oracle.prompt.md":                  true,
 	"build_corrective.reviewer.prompt.md":                true,
 	"build_corrective.verify.prompt.md":                  true,
-	"build_escalation.prompt.md":                         true,
 	"build_handoff_notes.prompt.md":                      true,
 	"build_passed_notes.prompt.md":                       true,
 	"build_round_checklist.prompt.md":                    true,

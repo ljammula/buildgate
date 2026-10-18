@@ -18,16 +18,14 @@ local-model-bench (commits 8531917/dfe4620), generalized from
 
 Usage:
     python3 build_app.py --workspace /path/to/app --spec spec.md \
-        [--max-rounds 3] [--timeout-minutes 45] [--harness pi|pifork] [--sonnet-fallback]
+        [--max-rounds 3] [--timeout-minutes 45] [--harness pi|pifork]
 
 The installed Pi thinking policy is inherited by default. `--review-policy`
 defaults to advisory: the whole-diff reviewer is recorded when present, but
 only canonical verification blocks completion. factoryd never passes the
 option (the reviewer extension is not in the sandbox image, so `required`
 would fail every round as "review unavailable"); the intake scripts
-(ticket_runner.py, goal_pilot.py) always pass it explicitly. The
-`--sonnet-fallback` flag authorizes one billed Sonnet pass only after the local
-corrective-round budget is exhausted.
+(ticket_runner.py, goal_pilot.py) always pass it explicitly.
 
 `--review-policy` governs only the legacy whole-diff "reviewer" extension
 trace and is independent of `--conformity-policy`, which governs the
@@ -44,7 +42,7 @@ review -- gated on a round ever succeeding -- never even got a chance to
 run.
 
 Exit code 0 only if canonical verification and the selected review policy
-pass by the round budget (or an explicitly authorized Sonnet fallback passes).
+pass by the round budget.
 A BUILD_REPORT.md is always written to the workspace on any full run,
 whether it succeeded or the round budget ran out -- the point of
 zero-human is that the report, not a chat transcript, is the record of
@@ -80,7 +78,6 @@ import tree_guard  # noqa: E402
 DEFAULT_ADAPTER = harness_adapters.get("pi")
 PI_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PI_ROOT.parent
-SONNET_MODEL = "claude-sonnet-5"
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 VERIFY_RESOLVER = PI_ROOT / "scripts" / "resolve-verification.ts"
 TSX = PI_ROOT / "node_modules" / ".bin" / "tsx"
@@ -651,15 +648,6 @@ def baseline_failure_preamble(note_text: str) -> str:
 	)
 
 
-def sonnet_invocation(prompt: str) -> list[str]:
-	return [
-		"claude", "-p", prompt,
-		"--model", SONNET_MODEL,
-		"--permission-mode", "bypassPermissions",
-		"--output-format", "json",
-	]
-
-
 def print_progress(payload: dict) -> None:
 	"""Emits one `FACTORY_PROGRESS <json>` line to stdout -- the exact,
 	byte-for-byte contract factoryd's sandbox log scanner
@@ -856,8 +844,7 @@ def workspace_fingerprint(workspace: Path) -> tuple | None:
 	before build_app.py is invoked at all, so newly staged
 	acceptance/contract files already make a same-round no-op look
 	"changed"; and any real work a *prior* round in this same build_app.py
-	invocation did remains in the diff too, so a later no-op round (or an
-	escalated Sonnet pass that itself does nothing) inherits that earlier
+	invocation did remains in the diff too, so a later no-op round inherits that earlier
 	round's credit and reports success for work it didn't do. Comparing
 	round-start to round-end instead of ticket-start to round-end catches
 	both: it needs no review_base_sha (so ticket 1, whose review base is
@@ -1527,8 +1514,8 @@ def run_reference_oracle(workspace: Path, *, oracle_command: str, log_dir: Path 
 def maybe_run_reference_oracle(
 	workspace: Path, *, oracle_command: str | None, verify_passed: bool | None, log_dir: Path | None = None,
 ) -> tuple[str | None, bool | None, str]:
-	"""Shared gating for run_reference_oracle's two call sites (the local
-	round loop and the Sonnet-fallback escalation pass): only run once
+	"""Shared gating for run_reference_oracle's call site (the local
+	round loop): only run once
 	verify itself has passed -- an additional correctness bar on top of
 	canonical verify, not a substitute for it (see run_reference_oracle's
 	own doc comment). Returns (None, None, "") -- oracle_passed's own
@@ -1596,7 +1583,6 @@ _monotonic = time.monotonic
 _process_started: float | None = None
 CORRECTIVE_STUCK = prompt_templates.load("build_corrective.stuck", ("streak",))
 ROUND_CHECKLIST = prompt_templates.load("build_round_checklist", ("verify",))
-ESCALATION_PROMPT = prompt_templates.load("build_escalation", ("spec_text", "corrective"))
 
 
 def corrective_prompt(
@@ -2263,17 +2249,6 @@ def run_spec_conformity_turn(
 	return parse_conformity_verdicts(turn.text, criteria), turn.error
 
 
-def parse_sonnet_usage(output: str) -> dict | None:
-	try:
-		payload = json.loads(output)
-	except json.JSONDecodeError:
-		return None
-	usage = payload.get("usage")
-	if not isinstance(usage, dict):
-		return None
-	return {**usage, "total_cost_usd": payload.get("total_cost_usd")}
-
-
 def build_round_checklist(verify_command: str | None) -> str:
 	"""The definition of done appended to the first round's prompt (later
 	rounds continue the same session, so it stays in context). Always-on
@@ -2302,7 +2277,7 @@ def workspace_head(workspace: Path) -> str | None:
 
 
 def write_round_state(
-	workspace: Path, *, last_completed_round: int, next_prompt: str, escalation_prompt: str, rounds: list[Round],
+	workspace: Path, *, last_completed_round: int, next_prompt: str, rounds: list[Round],
 	fingerprint: tuple | None = None, passed: bool = False, notes_turn_started: bool = False,
 ) -> None:
 	"""Persist the round loop's resume point at the workspace root. Written
@@ -2312,7 +2287,6 @@ def write_round_state(
 		"version": ROUND_STATE_VERSION,
 		"last_completed_round": last_completed_round,
 		"next_prompt": next_prompt,
-		"escalation_prompt": escalation_prompt,
 		# Without each round's argv: it holds that round's whole prompt, a
 		# resume never reads it back (round_from_state), and this file stays
 		# in the workspace after the build, where a later review can read it.
@@ -2418,8 +2392,8 @@ def _typed_strings(item: dict, key: str, *, max_items: int = 200, cap: int = 400
 def load_round_state(path: Path, max_rounds: int) -> dict:
 	"""Read and validate a round-state file. Control flow uses only the round
 	number, next_prompt (size-capped), the type-checked earlier round records
-	and the two flags of a build that passed; the stored escalation_prompt,
-	head and fingerprint are never read back.
+	and the two flags of a build that passed; the stored head and fingerprint
+	are never read back.
 
 	A state whose last round passed ("passed", and that round recorded no
 	blocker) has no round left to run by design, so its round number may be
@@ -2455,10 +2429,6 @@ def load_round_state(path: Path, max_rounds: int) -> dict:
 		"last_completed_round": last, "next_prompt": next_prompt, "rounds": rounds,
 		"passed": passed, "notes_turn_started": passed and state.get("notes_turn_started") is True,
 	}
-
-
-def build_escalation_prompt(spec_text: str, corrective: str) -> str:
-	return ESCALATION_PROMPT.format(spec_text=spec_text, corrective=corrective).removesuffix("\n")
 
 
 # A third round in a row with the same failure signature ends the loop: a
@@ -2559,7 +2529,7 @@ def passed_notes_reserve_s(last_checks_s: float) -> int:
 
 
 def notes_turn_skip_reason(
-	*, result: "BuildResult", last_turn: dict | None, sonnet_fallback: bool, criteria_given: bool,
+	*, result: "BuildResult", last_turn: dict | None, criteria_given: bool,
 	adapter, session_dir: Path, elapsed: float, reserve_s: int = 0,
 ) -> str:
 	"""Why the notes turn does not run, or "" when it does. It runs for a
@@ -2572,8 +2542,6 @@ def notes_turn_skip_reason(
 		return "build passed with no failed round"
 	if last_turn is None:
 		return "no round ran in this process"
-	if sonnet_fallback:
-		return "sonnet fallback enabled"
 	if criteria_given:
 		return "spec acceptance criteria given"
 	if last_turn["timed_out"]:
@@ -2909,7 +2877,6 @@ def _run_build(
 	thinking: str | None = None,
 	review_policy: str = "required",
 	conformity_policy: str = "required",
-	sonnet_fallback: bool = False,
 	review_base_sha: str | None = None,
 	verify_command_override: str | None = None,
 	fast_check_command: str | None = None,
@@ -2987,7 +2954,6 @@ def _run_build(
 		# Round 1 only: later rounds' prompts are corrective_prompt()s that
 		# continue the session this round-1 prompt opened.
 		prompt = f"{handoff_preamble(handoff.read_text())}\n\n---\n\n{prompt}"
-	escalation_prompt = ""
 	first_round = 1
 	if resume is not None:
 		first_round = resume["last_completed_round"] + 1
@@ -3005,8 +2971,7 @@ def _run_build(
 		else:
 			# The recorded prompt is a corrective one, written for a session
 			# that already held the spec; the fresh session needs the task
-			# first. The escalation prompt is rebuilt, never read from the file.
-			escalation_prompt = build_escalation_prompt(spec_text, prompt)
+			# first.
 			prompt = prompt + missing_log_note(workspace, result.rounds)
 			prompt = "\n\n".join([
 				base_prompt,
@@ -3021,7 +2986,7 @@ def _run_build(
 	def persist(last_completed_round: int, next_prompt: str, fingerprint: tuple | None = None, *, passed: bool = False, notes_turn_started: bool = False) -> None:
 		write_round_state(
 			workspace, last_completed_round=last_completed_round, next_prompt=stored(next_prompt),
-			escalation_prompt=stored(escalation_prompt), rounds=result.rounds, fingerprint=fingerprint,
+			rounds=result.rounds, fingerprint=fingerprint,
 			passed=passed, notes_turn_started=notes_turn_started,
 		)
 
@@ -3269,29 +3234,19 @@ def _run_build(
 			# way before the outage was noticed). Stop immediately instead of
 			# looping to max_rounds; ticket_runner.py's own build-attempt
 			# retry is the layer that should recover once the route is back
-			# -- checked (and left with no escalation_prompt) before the
-			# verify_command-is-None branch below, since a full route
-			# outage produces that exact symptom (nothing got a chance to
-			# create anything) and must not be spent as a billed Sonnet
-			# pass that can only repeat the same outage (found via Codex
-			# review of PR #5).
+			# -- checked before the verify_command-is-None case, since a full
+			# route outage produces that exact symptom (nothing got a chance
+			# to create anything).
 			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
 			persist(round_index, state_prompt, fingerprint_after)
 			break
 		# Deliberately no special early-break for verify_command is None
 		# (a brand-new ticket 1 with nothing created yet, e.g.): unlike the
-		# route-outage case just above, this is not unrecoverable, and this
-		# module's own documented contract is that --sonnet-fallback only
-		# runs "after the local corrective-round budget is exhausted" --
-		# an unconditional break here after round 1 would spend a billed
-		# Sonnet pass before that budget was used, contradicting it (found
-		# via Codex review of PR #5). round_blockers already adds
-		# "canonical verification failed" whenever verify_passed is not
-		# True (None here, same as any other unresolvable/failing check),
-		# so this falls through to the same corrective-prompt/max_rounds
-		# flow as every other verify failure, and a Sonnet pass still gets
-		# escalation_prompt (built fresh every round below) once that
-		# budget really is exhausted.
+		# route-outage case just above, this is not unrecoverable.
+		# round_blockers already adds "canonical verification failed"
+		# whenever verify_passed is not True (None here, same as any other
+		# unresolvable/failing check), so this falls through to the same
+		# corrective-prompt/max_rounds flow as every other verify failure.
 		if not blockers:
 			result.succeeded = True
 			if reviewer.outcome == "clean":
@@ -3321,7 +3276,6 @@ def _run_build(
 		)
 		if autofix_prompt_note(autofix_record):
 			prompt += "\n\n" + autofix_prompt_note(autofix_record)
-		escalation_prompt = build_escalation_prompt(spec_text, prompt)
 		state_prompt = prompt
 		persist(round_index, prompt, fingerprint_after)
 		if review_policy == "required" and reviewer.outcome == "unavailable" and reviewer.detail in NON_RETRYABLE_REVIEW_FAILURES:
@@ -3336,7 +3290,7 @@ def _run_build(
 
 	try:
 		skipped = notes_turn_skip_reason(
-			result=result, last_turn=last_turn, sonnet_fallback=sonnet_fallback,
+			result=result, last_turn=last_turn,
 			criteria_given=spec_acceptance_criteria is not None, adapter=adapter, session_dir=session_dir,
 			elapsed=_monotonic() - started_monotonic,
 			reserve_s=passed_notes_reserve_s(last_checks_s) if result.succeeded else 0,
@@ -3360,94 +3314,6 @@ def _run_build(
 			verify_again("the notes turn changed the workspace")
 	else:
 		result.notes_turn = run_notes_turn(workspace, session_dir, adapter, env, thinking, notes)
-
-	# Deliberately does not also require resolve_verify_command(workspace)
-	# to already succeed here: that would make this unreachable in exactly
-	# the "nothing exists yet" case above, where creating the verify
-	# surface is itself part of what the Sonnet pass is being asked to do.
-	# run_verification() a few lines down re-resolves fresh against
-	# whatever this round actually produces, so a still-unresolvable
-	# command after the Sonnet pass simply fails verify_passed normally.
-	if not result.succeeded and sonnet_fallback and escalation_prompt and not resumed_after_pass:
-		saved_prompts.save_prompt(session_dir, "build-sonnet-fallback", escalation_prompt)
-		command = sonnet_invocation(escalation_prompt)
-		# Same round-scoped comparison as the local rounds above: baseline
-		# is the workspace as the sonnet round finds it (i.e. after
-		# whatever the local rounds already did or didn't do), not the
-		# ticket's overall starting commit.
-		fingerprint_before = workspace_fingerprint(workspace)
-		started = time.monotonic()
-		try:
-			completed = sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=env)
-			timed_out = False
-		except subprocess.TimeoutExpired:
-			completed = None
-			timed_out = True
-		except OSError as exc:
-			completed = subprocess.CompletedProcess(command, 127, "", str(exc))
-			timed_out = False
-		duration = time.monotonic() - started
-		fingerprint_after = workspace_fingerprint(workspace)
-		sonnet_autofix = None
-		if autofix_commands:
-			sonnet_autofix = run_autofix(
-				workspace, autofix_commands, review_base_sha, session_dir / "feedback" / f"round-{len(result.rounds) + 1}", env,
-			)
-		sonnet_setup_failed, (verify_command, verify_passed, verify_timed_out, verify_tail, fast_check_ran, fast_check_passed) = run_verification_after_setup(
-			workspace, setup_commands=setup_commands or [], verify_command_override=verify_command_override,
-			fast_check_command=fast_check_command,
-		)
-		if verify_passed is True:
-			gofmt_changed_files(workspace, review_base_sha)
-		# Same gating (maybe_run_reference_oracle) as the local round loop
-		# above -- a billed Sonnet pass must clear the oracle too, not
-		# just the local rounds it's here to rescue.
-		sonnet_recorded_oracle_command, sonnet_oracle_passed, sonnet_oracle_tail = maybe_run_reference_oracle(
-			workspace, oracle_command=oracle_command, verify_passed=verify_passed,
-		)
-		returncode = completed.returncode if completed else -1
-		result.rounds.append(Round(
-			index=len(result.rounds) + 1,
-			agent=SONNET_MODEL,
-			command=command,
-			agent_returncode=returncode,
-			agent_timed_out=timed_out,
-			usage=parse_sonnet_usage(completed.stdout if completed else ""),
-			traces=[],
-			reviewer=ReviewSignal("sonnet-fallback"),
-			verify_command=verify_command,
-			verify_passed=verify_passed,
-			verify_timed_out=verify_timed_out,
-			verify_output_tail=verify_tail,
-			duration_s=duration,
-			fast_check_ran=fast_check_ran,
-			fast_check_passed=fast_check_passed,
-			oracle_command=sonnet_recorded_oracle_command,
-			oracle_passed=sonnet_oracle_passed,
-			oracle_output_tail=sonnet_oracle_tail,
-			autofix=sonnet_autofix,
-		))
-		sonnet_no_changes = (
-			fingerprint_before is None or fingerprint_after is None or fingerprint_before == fingerprint_after
-		)
-		if not timed_out and returncode == 0 and verify_passed is True and sonnet_oracle_passed is not False and not sonnet_no_changes and not autofix_blocker(sonnet_autofix):
-			result.succeeded = True
-			result.stopped_reason = "Sonnet fallback passed canonical verification"
-		elif autofix_blocker(sonnet_autofix):
-			result.stopped_reason = f"Sonnet fallback: {autofix_blocker(sonnet_autofix)}"
-		elif sonnet_setup_failed is not None:
-			result.stopped_reason = f"Sonnet fallback's {SETUP_FAILED_BLOCKER}{sonnet_setup_failed[:200]}"
-		elif sonnet_no_changes:
-			result.stopped_reason = "Sonnet fallback made no changes to the workspace"
-		elif fast_check_ran and fast_check_passed is False:
-			# Same attribution fix as round_blockers above: canonical
-			# verification was never attempted this pass, so don't claim
-			# it failed.
-			result.stopped_reason = "Sonnet fallback's fast check failed"
-		elif sonnet_oracle_passed is False:
-			result.stopped_reason = "Sonnet fallback did not pass the reference-oracle check"
-		else:
-			result.stopped_reason = "Sonnet fallback did not pass canonical verification"
 
 	# Per-criterion spec-conformity review: only meaningful once
 	# canonical verification itself already succeeded above -- checking
@@ -3749,11 +3615,6 @@ def main() -> int:
 		"not given, since no conformity review runs at all.",
 	)
 	parser.add_argument(
-		"--sonnet-fallback",
-		action="store_true",
-		help="After local rounds are exhausted, authorize one billed claude-sonnet-5 corrective pass.",
-	)
-	parser.add_argument(
 		"--review-base-sha",
 		default=None,
 		help="Commit the independent reviewer should diff against for the whole invocation, "
@@ -3878,7 +3739,6 @@ def main() -> int:
 			max_rounds=args.max_rounds,
 			timeout_minutes=args.timeout_minutes,
 			thinking=args.thinking, review_policy=args.review_policy, conformity_policy=args.conformity_policy,
-			sonnet_fallback=args.sonnet_fallback,
 			review_base_sha=args.review_base_sha,
 			verify_command_override=args.verify_command,
 			fast_check_command=args.fast_check_command,
