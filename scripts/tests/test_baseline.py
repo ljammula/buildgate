@@ -346,6 +346,62 @@ class WhatStopsRuns(unittest.TestCase):
 		self.assertEqual(m["halt_reasons"], {"relay_ceiling_exceeded": 1, "sandbox attempts exhausted": 1, baseline.NO_HALT_REASON: 1})
 
 
+class ConformityUnavailable(unittest.TestCase):
+	def checks(self, verdicts):
+		record = run("q", state="quarantined", gate_results=[{"check": "spec_conformity", "passed": False}], spec_conformity_verdicts=verdicts)
+		return baseline.failed_checks(record)
+
+	def test_unavailable_only_is_named_for_it(self):
+		self.assertEqual(self.checks([{"verdict": "clean"}, {"verdict": "unavailable"}]), ["spec_conformity (review unavailable)"])
+
+	def test_a_flagged_verdict_keeps_it_a_conformity_failure(self):
+		self.assertEqual(self.checks([{"verdict": "unavailable"}, {"verdict": "missing"}]), ["spec_conformity"])
+
+	def test_clean_or_flagged_only_stays_spec_conformity(self):
+		self.assertEqual(self.checks([{"verdict": "clean"}, {"verdict": "clean"}]), ["spec_conformity"])
+		self.assertEqual(self.checks([{"verdict": "clean"}, {"verdict": "missing"}]), ["spec_conformity"])
+		self.assertEqual(self.checks(None), ["spec_conformity"])
+
+	def test_counted_in_what_stops_runs(self):
+		gate = [{"check": "spec_conformity", "passed": False}]
+		runs = [
+			run("a", state="quarantined", gate_results=gate, spec_conformity_verdicts=[{"verdict": "unavailable"}]),
+			run("b", state="quarantined", gate_results=gate, spec_conformity_verdicts=[{"verdict": "missing"}]),
+		]
+		self.assertEqual(baseline.measure(runs, beside={})["quarantine_checks"], {"spec_conformity (review unavailable)": 1, "spec_conformity": 1})
+
+
+class Recovered(unittest.TestCase):
+	def test_quarantined_first_run_then_accepted_round(self):
+		runs = [
+			run("r1", state="quarantined", ticket="req-001", created_at="2026-10-01T00:00:00Z"),
+			run("r2", state="accepted", ticket="req-001-conformity1", created_at="2026-10-01T01:00:00Z"),
+			run("s1", state="quarantined", ticket="req-002", created_at="2026-10-01T00:00:00Z"),
+			run("s2", state="quarantined", ticket="req-002-corrective1", created_at="2026-10-01T01:00:00Z"),
+			run("t1", state="accepted", ticket="req-003", created_at="2026-10-01T00:00:00Z"),
+			run("t2", state="accepted", ticket="req-003-conformity1", created_at="2026-10-01T01:00:00Z"),
+			run("u1", state="quarantined", ticket="req-004", created_at="2026-10-01T00:00:00Z"),
+			run("u2", state="accepted", ticket="req-004-corrective1-fix1", created_at="2026-10-01T01:00:00Z"),
+			# A PR-review round's acceptance is not an automatic recovery.
+			run("v1", state="quarantined", ticket="req-005", created_at="2026-10-01T00:00:00Z"),
+			run("v2", state="accepted", ticket="req-005-review1", created_at="2026-10-01T01:00:00Z"),
+		]
+		m = baseline.measure(runs, beside={})
+		self.assertEqual((m["recovered"], m["first_run_quarantined"], m["recovered_rate"]), (2, 4, 0.5))
+
+	def test_rendered_overall_and_in_json(self):
+		runs = [
+			run("r1", state="quarantined", ticket="req-001", created_at="2026-10-01T00:00:00Z"),
+			run("r2", state="accepted", ticket="req-001-conformity1", created_at="2026-10-01T01:00:00Z"),
+		]
+		result = baseline.baseline(runs, beside={})
+		self.assertEqual(result["projects"]["app"]["recovered"], 1)
+		self.assertIn(
+			"| Recovered by an automatic round (first run quarantined, a conformity/corrective round accepted) | 1 of 1 (100%) |",
+			baseline.render(result, 2, []),
+		)
+
+
 class Rendering(unittest.TestCase):
 	def test_per_project_rows_and_empty_data(self):
 		runs = [run("a", project="one"), run("b", state="quarantined", project="two", gate_results=[{"check": "lint", "passed": False}])]
