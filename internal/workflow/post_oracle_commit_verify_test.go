@@ -20,7 +20,7 @@ import (
 func postVerifyFixture(t *testing.T, exitFor func(cmd string) int, dirty func(workspace, cmd string)) (*Activities, RunWorkflowInput, *[]string) {
 	t.Helper()
 	ws := t.TempDir()
-	coGit(t, ws, "init", "-q", "-b", "main")
+	coInit(t, ws)
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("a\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
