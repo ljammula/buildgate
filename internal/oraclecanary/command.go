@@ -111,10 +111,16 @@ func GoMultiCommand(moduleDir string, files []GoOracleFile) (string, error) {
 // with "test" is executed and any exception it raises counts as a failure;
 // the process exits non-zero if any test failed or none ran at all (a file
 // containing no test_ functions could otherwise exit 0 having run nothing).
+// The repository root is on sys.path, and so is its src/ directory when it
+// has one: a package kept in the src layout (src/<package>/) is imported the
+// same way as one at the root, without the install step the verify command
+// may run in its own sandbox.
 func PythonStdlibCommand() string {
 	return "python3 - <<'PY'\n" +
-		"import glob, importlib.util, sys, traceback\n" +
+		"import glob, importlib.util, os, sys, traceback\n" +
 		"sys.path.insert(0, \".\")\n" +
+		"if os.path.isdir(\"src\"):\n" +
+		"    sys.path.insert(1, \"src\")\n" +
 		"ran = failed = 0\n" +
 		"for path in sorted(glob.glob(\"" + oracleMountPath + "/test_oracle_*.py\")):\n" +
 		"    spec = importlib.util.spec_from_file_location(\"oracle_mod\", path)\n" +

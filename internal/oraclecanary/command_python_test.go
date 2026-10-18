@@ -92,3 +92,31 @@ func TestPythonStdlibCommandEndToEnd(t *testing.T) {
 		t.Fatal("the canary snapshot must fail this command")
 	}
 }
+
+// TestPythonStdlibCommandImportsASrcLayoutPackage runs the real python3
+// interpreter on a repository that keeps its package under src/ (the src
+// layout): the oracle imports it by its package name, as it would after an
+// install, and the command passes on a correct implementation and fails on a
+// wrong one.
+func TestPythonStdlibCommandImportsASrcLayoutPackage(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not on PATH")
+	}
+	cmd := PythonStdlibCommand()
+	workspace := func(body string) string {
+		w := t.TempDir()
+		writeFiles(t, w, map[string]string{
+			"src/mathpkg/__init__.py":         "def multiply_numbers(a, b):\n    " + body + "\n",
+			".oracle/MANIFEST.json":           `[]`,
+			".oracle/RUN_COMMAND.txt":         cmd,
+			".oracle/test_oracle_multiply.py": "from mathpkg import multiply_numbers\n\n\ndef test_oracle_positive_product():\n    assert multiply_numbers(3, 4) == 12\n",
+		})
+		return w
+	}
+	if code := runShell(t, workspace("return a * b"), cmd); code != 0 {
+		t.Fatalf("correct src-layout implementation: exit %d, want 0", code)
+	}
+	if code := runShell(t, workspace("return a + b"), cmd); code == 0 {
+		t.Fatal("a wrong src-layout implementation must fail the command")
+	}
+}
