@@ -102,7 +102,7 @@ type servePlistConfig struct {
 // buildWorkerPlist above. Deliberately carries no start-token value in
 // EnvironmentVariables or ProgramArguments: the stable token lives only
 // in the 0600 serve-start-token file next to the session config (see
-// serve_start_token_file.go's own doc comments) -- `serveMain` reads it
+// token_file.go's own doc comments) -- `serveMain` reads it
 // back from there itself, so a `launchctl kickstart` restart or a plain
 // `cat` of this plist never discloses it (safety-contract.md's "Console
 // loopback writes" row). Sets Umask 077 (an adversarial review): the
@@ -334,19 +334,19 @@ func installServiceMain(dp *deps, args []string) error {
 
 // installServeService installs and bootstraps the dev.factoryd.serve
 // LaunchAgent alongside dev.factoryd.worker, generating (or reusing,
-// via ensureServeStartTokenFile) the stable start token file next to
+// via ensureTokenFile) the stable start token file next to
 // cfg.ConfigPath first -- so `factoryd console` and the plist's own first
 // RunAtLoad startup agree on the same token before serve ever binds a
 // port. requireTokens generates (or reuses) the override and read token
 // files the same way; serve reads them at each start.
 func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bool) error {
 	tokenPath := serveStableStartTokenPathFor(cfg.ConfigPath)
-	if _, _, err := ensureServeStartTokenFile(dp, tokenPath); err != nil {
+	if _, _, err := ensureTokenFile(dp, tokenPath); err != nil {
 		return fmt.Errorf("prepare stable serve start token: %w", err)
 	}
 	if requireTokens {
 		for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName} {
-			if _, _, err := ensureServeStartTokenFile(dp, serveTokenFilePathFor(cfg.ConfigPath, name)); err != nil {
+			if _, _, err := ensureTokenFile(dp, serveTokenFilePathFor(cfg.ConfigPath, name)); err != nil {
 				return fmt.Errorf("prepare %s: %w", name, err)
 			}
 		}

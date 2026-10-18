@@ -325,7 +325,7 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 // QuickstartEnsureServe leaves `factoryd serve` (console + API) reachable
 // for this session's own config/data-dir, at consolelink.DefaultServeAddr
 // unless another process holds it,
-// resolving (or generating, via ensureServeStartTokenFile) the same
+// resolving (or generating, via ensureTokenFile) the same
 // stable start token file `factoryd install-service`'s own serve
 // LaunchAgent uses -- so a browser that visits the printed console link
 // once keeps working across a later `factoryd install-service` or a

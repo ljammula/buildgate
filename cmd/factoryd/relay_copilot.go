@@ -120,13 +120,13 @@ func expandAuthPath(path string) (string, error) {
 
 // copilotAuthFilePermissionWarning returns a human-readable warning (or
 // "" when nothing's wrong) for path's own info, checking the two
-// conditions inspectServeStartTokenFile's own doc comment names for a
+// conditions inspectTokenFile's own doc comment names for a
 // bearer-credential file: readable beyond its owner (mode&0o077 != 0) or
 // not owned by the current user. A round-2 review found quickstart now
 // persists this exact path into relay_github_token_file, so a
 // loosely-permissioned auth.json becomes a standing config-referenced
 // risk rather than a one-off env var -- worth a warning here. Advisory
-// only, unlike inspectServeStartTokenFile's own fail-closed check on a
+// only, unlike inspectTokenFile's own fail-closed check on a
 // bearer-token file THIS process creates and fully controls: auth.json
 // belongs to pi or its fork, not this process, so a permission bit alone
 // must never block credential resolution.

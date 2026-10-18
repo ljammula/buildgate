@@ -47,9 +47,9 @@ func TestConsoleMainPrintsStableTokenLink(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yml"), []byte("data_dir: "+filepath.Join(home, "data")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := ensureServeStartTokenFile(dp, filepath.Join(cfgDir, serveStableStartTokenFileName))
+	token, _, err := ensureTokenFile(dp, filepath.Join(cfgDir, serveStableStartTokenFileName))
 	if err != nil {
-		t.Fatalf("ensureServeStartTokenFile: %v", err)
+		t.Fatalf("ensureTokenFile: %v", err)
 	}
 	t.Setenv(consolelink.EnvVar, "")
 	origListening := consolelink.Listening
@@ -165,9 +165,9 @@ func TestConsoleMainOmitsTokenForRemoteConsoleURL(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yml"), []byte("data_dir: "+filepath.Join(home, "data")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := ensureServeStartTokenFile(dp, filepath.Join(cfgDir, serveStableStartTokenFileName))
+	token, _, err := ensureTokenFile(dp, filepath.Join(cfgDir, serveStableStartTokenFileName))
 	if err != nil {
-		t.Fatalf("ensureServeStartTokenFile: %v", err)
+		t.Fatalf("ensureTokenFile: %v", err)
 	}
 	t.Setenv("FACTORYD_CONSOLE_URL", "http://example.com:9999")
 

@@ -519,7 +519,7 @@ func upgradeRestart(dp *deps, w io.Writer, binary string, running []upgradeProce
 			}
 			out = append(out, upgradeStarted(dp, p, pidPath))
 		case p.Kind == "serve":
-			if _, _, err := ensureServeStartTokenFile(dp, serveStableStartTokenPathFor(p.ConfigPath)); err != nil {
+			if _, _, err := ensureTokenFile(dp, serveStableStartTokenPathFor(p.ConfigPath)); err != nil {
 				fmt.Fprintf(w, "serve (%s): could not prepare its start token: %v\n", p.DataDir, err)
 				continue
 			}

@@ -12,25 +12,25 @@ import (
 	"buildgate/internal/consoleweb"
 )
 
-// TestEnsureServeStartTokenFileGeneratesOnceAndReusesAfter proves
+// TestEnsureTokenFileGeneratesOnceAndReusesAfter proves
 // install-service's own stable-token bootstrap never rotates a token an
-// operator's browser may already have stored (generateServeStartTokenFile's
+// operator's browser may already have stored (generateTokenFile's
 // own doc comment) -- a second call against the same path must return the
 // identical token, not mint a fresh one.
-func TestEnsureServeStartTokenFileGeneratesOnceAndReusesAfter(t *testing.T) {
+func TestEnsureTokenFileGeneratesOnceAndReusesAfter(t *testing.T) {
 	dp := newTestDeps(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "serve-start-token")
 
-	first, generated, err := ensureServeStartTokenFile(dp, path)
+	first, generated, err := ensureTokenFile(dp, path)
 	if err != nil {
-		t.Fatalf("ensureServeStartTokenFile: %v", err)
+		t.Fatalf("ensureTokenFile: %v", err)
 	}
 	if !generated {
-		t.Fatalf("first ensureServeStartTokenFile call reported generated=false")
+		t.Fatalf("first ensureTokenFile call reported generated=false")
 	}
 	if first == "" {
-		t.Fatalf("ensureServeStartTokenFile returned an empty token")
+		t.Fatalf("ensureTokenFile returned an empty token")
 	}
 
 	info, err := os.Stat(path)
@@ -41,47 +41,47 @@ func TestEnsureServeStartTokenFileGeneratesOnceAndReusesAfter(t *testing.T) {
 		t.Fatalf("serve-start-token mode = %v, want 0600", info.Mode().Perm())
 	}
 
-	second, generated, err := ensureServeStartTokenFile(dp, path)
+	second, generated, err := ensureTokenFile(dp, path)
 	if err != nil {
-		t.Fatalf("ensureServeStartTokenFile (second call): %v", err)
+		t.Fatalf("ensureTokenFile (second call): %v", err)
 	}
 	if generated {
-		t.Fatalf("second ensureServeStartTokenFile call reported generated=true, want reuse of the existing file")
+		t.Fatalf("second ensureTokenFile call reported generated=true, want reuse of the existing file")
 	}
 	if second != first {
-		t.Fatalf("ensureServeStartTokenFile rotated the token across calls: %q != %q", first, second)
+		t.Fatalf("ensureTokenFile rotated the token across calls: %q != %q", first, second)
 	}
 }
 
-// TestReadServeStartTokenFileMissingOrEmpty proves a missing or
+// TestReadTokenFileMissingOrEmpty proves a missing or
 // whitespace-only stable token file reports ("", false), the same
-// fallback-to-next-choice contract generateServeStartTokenFile's own doc
+// fallback-to-next-choice contract generateTokenFile's own doc
 // comment describes -- never an error a caller would need to handle
 // specially.
-func TestReadServeStartTokenFileMissingOrEmpty(t *testing.T) {
+func TestReadTokenFileMissingOrEmpty(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "absent")
-	if _, ok := readServeStartTokenFile(missing); ok {
-		t.Fatalf("readServeStartTokenFile(%s) reported ok=true for a nonexistent file", missing)
+	if _, ok := readTokenFile(missing); ok {
+		t.Fatalf("readTokenFile(%s) reported ok=true for a nonexistent file", missing)
 	}
 
 	empty := filepath.Join(dir, "empty")
 	if err := os.WriteFile(empty, []byte("\n\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := readServeStartTokenFile(empty); ok {
-		t.Fatalf("readServeStartTokenFile(%s) reported ok=true for a whitespace-only file", empty)
+	if _, ok := readTokenFile(empty); ok {
+		t.Fatalf("readTokenFile(%s) reported ok=true for a whitespace-only file", empty)
 	}
 }
 
-// TestInspectServeStartTokenFileRefusesSymlink is the regression test for
+// TestInspectTokenFileRefusesSymlink is the regression test for
 // an adversarial-review finding: a symlink at the token path must never be
 // followed/trusted, even if it points at a perfectly valid 0600 file.
 // Before that fix (a plain os.ReadFile with no Lstat check),
 // this reported the symlink's target content as a usable token; this test
 // fails against that old behavior and passes only once the symlink
 // refusal is in place.
-func TestInspectServeStartTokenFileRefusesSymlink(t *testing.T) {
+func TestInspectTokenFileRefusesSymlink(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real-token")
 	if err := os.WriteFile(real, []byte("real-token-value\n"), 0o600); err != nil {
@@ -92,12 +92,12 @@ func TestInspectServeStartTokenFileRefusesSymlink(t *testing.T) {
 		t.Skipf("symlinks not supported in this environment: %v", err)
 	}
 
-	token, issue, err := inspectServeStartTokenFile(link)
+	token, issue, err := inspectTokenFile(link)
 	if err != nil {
-		t.Fatalf("inspectServeStartTokenFile: %v", err)
+		t.Fatalf("inspectTokenFile: %v", err)
 	}
 	if token != "" {
-		t.Fatalf("inspectServeStartTokenFile followed a symlink and returned its content as a token: %q", token)
+		t.Fatalf("inspectTokenFile followed a symlink and returned its content as a token: %q", token)
 	}
 	if issue == nil {
 		t.Fatal("want a non-nil issue for a symlinked token path")
@@ -106,30 +106,30 @@ func TestInspectServeStartTokenFileRefusesSymlink(t *testing.T) {
 		t.Errorf("issue.Reason = %q, want it to mention symlink", issue.Reason)
 	}
 
-	if _, ok := readServeStartTokenFile(link); ok {
-		t.Fatal("readServeStartTokenFile treated a symlinked path as usable")
+	if _, ok := readTokenFile(link); ok {
+		t.Fatal("readTokenFile treated a symlinked path as usable")
 	}
 }
 
-// TestInspectServeStartTokenFileRefusesLoosePermissions is the regression
+// TestInspectTokenFileRefusesLoosePermissions is the regression
 // test for that same adversarial-review finding: a token file readable
 // beyond its owner (mode&0o077 != 0) must be refused with the exact
 // chmod fix named, not silently trusted. Fails against the pre-fix
 // plain os.ReadFile (which never checked mode at all) and passes only
 // with the Lstat-based permission check in place.
-func TestInspectServeStartTokenFileRefusesLoosePermissions(t *testing.T) {
+func TestInspectTokenFileRefusesLoosePermissions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "serve-start-token")
 	if err := os.WriteFile(path, []byte("some-token\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	token, issue, err := inspectServeStartTokenFile(path)
+	token, issue, err := inspectTokenFile(path)
 	if err != nil {
-		t.Fatalf("inspectServeStartTokenFile: %v", err)
+		t.Fatalf("inspectTokenFile: %v", err)
 	}
 	if token != "" {
-		t.Fatalf("inspectServeStartTokenFile trusted a group/other-readable file: token=%q", token)
+		t.Fatalf("inspectTokenFile trusted a group/other-readable file: token=%q", token)
 	}
 	if issue == nil {
 		t.Fatal("want a non-nil issue for a 0644 token file")
@@ -140,46 +140,46 @@ func TestInspectServeStartTokenFileRefusesLoosePermissions(t *testing.T) {
 	}
 }
 
-// TestInspectServeStartTokenFileAbsentIsNotAnIssue proves a path that
+// TestInspectTokenFileAbsentIsNotAnIssue proves a path that
 // simply doesn't exist reports (\"\", nil, nil) -- the ordinary "generate
 // a fresh one" case, not something to warn about.
-func TestInspectServeStartTokenFileAbsentIsNotAnIssue(t *testing.T) {
+func TestInspectTokenFileAbsentIsNotAnIssue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent")
-	token, issue, err := inspectServeStartTokenFile(path)
+	token, issue, err := inspectTokenFile(path)
 	if token != "" || issue != nil || err != nil {
-		t.Fatalf("inspectServeStartTokenFile(absent) = (%q, %v, %v), want (\"\", nil, nil)", token, issue, err)
+		t.Fatalf("inspectTokenFile(absent) = (%q, %v, %v), want (\"\", nil, nil)", token, issue, err)
 	}
 }
 
-// TestGenerateServeStartTokenFileUsesExclusiveCreate proves
-// generateServeStartTokenFile refuses to overwrite a file that already
+// TestGenerateTokenFileUsesExclusiveCreate proves
+// generateTokenFile refuses to overwrite a file that already
 // exists at path (O_EXCL) -- a second call against an already-populated
 // path must fail rather than silently clobber it.
-func TestGenerateServeStartTokenFileUsesExclusiveCreate(t *testing.T) {
+func TestGenerateTokenFileUsesExclusiveCreate(t *testing.T) {
 	dp := newTestDeps(t)
 	path := filepath.Join(t.TempDir(), "serve-start-token")
-	if _, err := generateServeStartTokenFile(dp, path); err != nil {
-		t.Fatalf("first generateServeStartTokenFile: %v", err)
+	if _, err := generateTokenFile(dp, path); err != nil {
+		t.Fatalf("first generateTokenFile: %v", err)
 	}
-	if _, err := generateServeStartTokenFile(dp, path); err == nil {
-		t.Fatal("second generateServeStartTokenFile against an existing path succeeded, want an error (O_EXCL)")
+	if _, err := generateTokenFile(dp, path); err == nil {
+		t.Fatal("second generateTokenFile against an existing path succeeded, want an error (O_EXCL)")
 	}
 }
 
-// TestGenerateServeStartTokenFileRefusesGitWorkTree is the regression
+// TestGenerateTokenFileRefusesGitWorkTree is the regression
 // test for an adversarial-review finding's git-worktree refusal: writing
 // the token inside a git working tree risks it being committed/pushed.
 // Stubs forge.insideGitWorkTree rather than depending on a real git
 // binary/repository.
-func TestGenerateServeStartTokenFileRefusesGitWorkTree(t *testing.T) {
+func TestGenerateTokenFileRefusesGitWorkTree(t *testing.T) {
 	dp := newTestDeps(t)
 	orig := fakeForgeOf(dp).insideGitWorkTreeFn
 	fakeForgeOf(dp).insideGitWorkTreeFn = func(dir string) bool { return true }
 	t.Cleanup(func() { fakeForgeOf(dp).insideGitWorkTreeFn = orig })
 
 	path := filepath.Join(t.TempDir(), "repo", "serve-start-token")
-	if _, err := generateServeStartTokenFile(dp, path); err == nil {
-		t.Fatal("generateServeStartTokenFile inside a (stubbed) git working tree succeeded, want a refusal")
+	if _, err := generateTokenFile(dp, path); err == nil {
+		t.Fatal("generateTokenFile inside a (stubbed) git working tree succeeded, want a refusal")
 	} else if !strings.Contains(err.Error(), "git working tree") {
 		t.Errorf("error = %v, want it to mention a git working tree", err)
 	}
@@ -295,9 +295,9 @@ func TestServeUsesStableStartTokenFileWhenPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stableToken, _, err := ensureServeStartTokenFile(dp, filepath.Join(cfgDir, serveStableStartTokenFileName))
+	stableToken, _, err := ensureTokenFile(dp, filepath.Join(cfgDir, serveStableStartTokenFileName))
 	if err != nil {
-		t.Fatalf("ensureServeStartTokenFile: %v", err)
+		t.Fatalf("ensureTokenFile: %v", err)
 	}
 
 	t.Setenv(overrideTokenEnvironmentVariable, "")

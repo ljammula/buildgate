@@ -42,9 +42,10 @@ func newConsoleFlags() (flags *flag.FlagSet, open *bool, configPath, dataDir *st
 // the link again without going and reading a log file.
 //
 // Only ever knows the STABLE token (resolveEffectiveConfigPath/
-// serveStableStartTokenPathFor/readServeStartTokenFile -- the
+// serveStableStartTokenPathFor/readTokenFile -- the
 // serve-start-token file `install-service`'s serve LaunchAgent generates
-// and `serveMain` itself prefers, see serve_start_token_file.go): a bare
+// and `serveMain` itself prefers, see serve_start_token_file.go and
+// token_file.go): a bare
 // `factoryd serve` invocation with no session config, or one launched
 // with an explicit FACTORYD_API_START_TOKEN, mints or uses a token this
 // separate, later process has no way to read back out of thin air -- see
@@ -118,7 +119,7 @@ func consoleMain(dp *deps, args []string) error {
 		fmt.Printf("console base %s is not this machine's own loopback serve address -- not attaching the start token to it; open the link directly on the machine running `factoryd serve`, or unset FACTORYD_CONSOLE_URL\n", base)
 	default:
 		tokenPath := serveStableStartTokenPathFor(effectiveConfigPath)
-		token, issue, err := inspectServeStartTokenFile(tokenPath)
+		token, issue, err := inspectTokenFile(tokenPath)
 		switch {
 		case err != nil:
 			fmt.Printf("could not read stable start token file %s (%v)\n", tokenPath, err)

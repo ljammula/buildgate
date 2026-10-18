@@ -185,7 +185,8 @@ bearer token is always a 403. The token is handled as follows:
   `serve`'s own stdout, that fragment, and that browser's storage.
 - **Stable token for a supervised `serve`.** `factoryd install-service`
   creates `<session config dir>/serve-start-token` once, so a restart does
-  not invalidate stored tokens (`cmd/factoryd/serve_start_token_file.go`).
+  not invalidate stored tokens (`cmd/factoryd/serve_start_token_file.go`;
+  the file checks are `cmd/factoryd/token_file.go`).
   - The file is mode `0600`. It is never written into the LaunchAgent plist,
     and never passed through a child's env or argv: `quickstart`'s `serve`
     child re-derives the path from `-config` and reads the file itself.
@@ -220,10 +221,10 @@ bearer token is always a 403. The token is handled as follows:
   - When the token comes from the stable file, `serve`'s startup log prints
     the link *without* the fragment, because a standing credential does not
     belong in a log.
-  - `inspectServeStartTokenFile` `Lstat`s the file and trusts it only if it
+  - `inspectTokenFile` `Lstat`s the file and trusts it only if it
     is a regular file owned by the current uid with `mode&0o077 == 0`. The
     file is created with `O_CREATE|O_EXCL|O_NOFOLLOW`, and creation is
-    refused inside a git work tree (`tokenDirInsideGitWorkTree`).
+    refused inside a git work tree (`insideGitWorkTree`).
 
 ### Console-originated request creation
 

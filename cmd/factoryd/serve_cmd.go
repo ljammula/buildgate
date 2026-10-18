@@ -519,7 +519,7 @@ func (sv *serveRun) resolveTokens() error {
 	if sv.startToken == "" {
 		if configPath, ok := resolveEffectiveConfigPath(*sv.sf.configPath); ok {
 			stablePath := serveStableStartTokenPathFor(configPath)
-			stableToken, issue, err := inspectServeStartTokenFile(stablePath)
+			stableToken, issue, err := inspectTokenFile(stablePath)
 			switch {
 			case err != nil:
 				log.Printf("could not read stable start token file %s (%v) -- falling back to a per-process token", stablePath, err)
@@ -790,9 +790,9 @@ func (sv *serveRun) listenAndServe() error {
 		gatePath := gateTokenPathFor(configPath)
 		serverOptions = append(serverOptions, api.WithGateToken(gateTokenSource(gatePath)))
 		if file := readGateFile(gatePath, time.Now()); file.present && file.token != "" {
-			log.Printf("gate token on (file %s, expires %s): a console that is not on this machine needs it to read", gatePath, file.expires.Format(time.RFC3339))
+			log.Printf("gate token on (file %s, expires %s): %s needs it to read", gatePath, file.expires.Format(time.RFC3339), gateAudience(sv.readToken != ""))
 		} else if file.present {
-			log.Printf("gate token on with no usable token (%s): no gate token opens a console that is not on this machine -- %s", file.reason, file.fix)
+			log.Printf("gate token on with no usable token (%s): no gate token opens %s -- %s", file.reason, gateAudience(sv.readToken != ""), file.fix)
 		}
 	}
 	if *sv.temporalUIURL != "" {
