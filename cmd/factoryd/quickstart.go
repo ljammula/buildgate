@@ -579,7 +579,10 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 	// runs, so a serve/console problem (a port fight with something else
 	// already using 8090, a launchd hiccup) is reported but never fails
 	// the whole invocation -- see that function's own doc comment.
-	consoleToken := hostcontrol.QuickstartEnsureServe(dp, opts.NoServe, w, binaryPath, configPath, dataDir)
+	link := consoleLinkTokens{start: hostcontrol.QuickstartEnsureServe(dp, opts.NoServe, w, binaryPath, configPath, dataDir)}
+	if link.start != "" {
+		link.console = consoleTokenFor(w, configPath)
+	}
 
 	// -non-interactive is already ruled out above (this function's own
 	// upfront check) whenever opts.Goal/Issue/RequestFile are all empty, so
@@ -602,7 +605,7 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 		}
 	}
 
-	return quickstartSubmitAndWatch(dp, w, settings, repoRoot, dataDir, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, opts.PollInterval, opts.PollTimeout, consoleToken, !opts.NoOpen)
+	return quickstartSubmitAndWatch(dp, w, settings, repoRoot, dataDir, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, opts.PollInterval, opts.PollTimeout, link, !opts.NoOpen)
 }
 
 // quickstartBaselineCheck runs the baseline check (factoryd -baseline-check)
@@ -2963,12 +2966,12 @@ func (impl realForge) fetchIssue(ctx context.Context, issueURL string) (title, b
 // "Idempotency" row). Checks quickstartFindInFlightRequest first so a
 // rerun against a repo that already has a request in flight reports that
 // request instead of submitting a second one.
-func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Settings, repoRoot, dataDir, goal, issue, requestFile, verifyCommand string, verifyCommandExplicit bool, preflightProfile string, preflightProfileExplicit bool, pollInterval, pollTimeout time.Duration, consoleToken string, autoOpen bool) error {
+func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Settings, repoRoot, dataDir, goal, issue, requestFile, verifyCommand string, verifyCommandExplicit bool, preflightProfile string, preflightProfileExplicit bool, pollInterval, pollTimeout time.Duration, link consoleLinkTokens, autoOpen bool) error {
 	if inFlight, err := quickstartFindInFlightRequest(dataDir, repoRoot); err != nil {
 		return err
 	} else if inFlight != nil {
 		fmt.Fprintf(w, "Request %s against this repo is already in flight (%s) -- not submitting a duplicate.\n", inFlight.ID, inFlight.State)
-		quickstartPrintAndOpenConsoleLink(dp, w, dataDir, inFlight.ID, consoleToken, autoOpen)
+		quickstartPrintAndOpenConsoleLink(dp, w, dataDir, inFlight.ID, link, autoOpen)
 		return quickstartWatchRequest(dp, dataDir, inFlight.ID, w, pollInterval, pollTimeout)
 	}
 
@@ -2999,29 +3002,36 @@ func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Sett
 		return err
 	}
 	fmt.Fprintf(w, "Submitted request %s (project %s).\n", result.id, result.project)
-	quickstartPrintAndOpenConsoleLink(dp, w, dataDir, result.id, consoleToken, autoOpen)
+	quickstartPrintAndOpenConsoleLink(dp, w, dataDir, result.id, link, autoOpen)
 	fmt.Fprintf(w, "Follow along: factoryd watch%s %s\n", quickstartDataDirArg(dataDir), result.id)
 	return quickstartWatchRequest(dp, dataDir, result.id, w, pollInterval, pollTimeout)
 }
 
+// consoleLinkTokens are the tokens a console link to this machine's own
+// serve carries: the stable start token (`#t=`) and, once serve requires
+// tokens, the console token (`&c=`, consoleTokenFor).
+type consoleLinkTokens struct {
+	start, console string
+}
+
 // quickstartPrintAndOpenConsoleLink prints (and, when autoOpen, opens in
 // the default browser) the console deep link to request id -- carrying
-// consoleToken's #t=<token> fragment when quickstartEnsureServe resolved
-// one, so a fresh install's very first console visit doesn't 403 on New run/
+// link.start's #t=<token> fragment (and link.console's &c=<token>) when
+// quickstartEnsureServe resolved one, so a fresh install's very first console visit doesn't 403 on New run/
 // release/stats screens (F: serve-start-token). Printing nothing at all
 // when resolveConsoleBaseURL itself has no console to link to (-no-serve,
 // or no console embedded in this binary) matches quickstartSubmitAndWatch's
 // prior behavior exactly. A browser-open failure (no `open`/
 // `xdg-open` on PATH, a headless box) is reported but never fails the
 // run -- the link itself was already printed either way.
-func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID, consoleToken string, autoOpen bool) {
+func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID string, link consoleLinkTokens, autoOpen bool) {
 	base := resolveConsoleBaseURL("", dataDir)
 	url := consoleRequestURL(base, requestID)
 	if url == "" {
 		return
 	}
 	// consoleBaseIsOwnLoopbackServe (an adversarial review,
-	// 2026-09-24): consoleToken is a permanent credential for this
+	// 2026-09-24): link.start is a permanent credential for this
 	// machine's own serve -- only ever attach it when base actually IS
 	// that same loopback serve, never a remote FACTORYD_CONSOLE_URL
 	// override.
@@ -3033,8 +3043,11 @@ func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID
 		ownServe = consolelink.DefaultServeAddr
 	}
 	_, verified := dp.ServeVerifiedOurs(dataDir, ownServe)
-	if consoleToken != "" && verified && consoleBaseIsOwnLoopbackServe(base, ownServe) {
-		url += "#t=" + consoleToken
+	if link.start != "" && verified && consoleBaseIsOwnLoopbackServe(base, ownServe) {
+		url += "#t=" + link.start
+		if link.console != "" {
+			url += "&c=" + link.console
+		}
 	}
 	fmt.Fprintln(w, "View:", url)
 	if autoOpen {

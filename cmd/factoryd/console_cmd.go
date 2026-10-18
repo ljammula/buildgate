@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,7 +127,10 @@ func consoleMain(dp *deps, args []string) error {
 		case issue != nil:
 			fmt.Printf("stable start token file %s: %s\n", tokenPath, issue.Error())
 		case token != "":
-			link = fmt.Sprintf("%s/#t=%s", base, token) + consoleTokenFragment(effectiveConfigPath)
+			link = fmt.Sprintf("%s/#t=%s", base, token)
+			if console := consoleTokenFor(os.Stdout, effectiveConfigPath); console != "" {
+				link += "&c=" + console
+			}
 		default:
 			fmt.Printf("no stable start token file yet at %s -- run `factoryd install-service` to create one, or use the link `factoryd serve` itself printed on its own startup\n", tokenPath)
 		}
@@ -141,25 +145,30 @@ func consoleMain(dp *deps, args []string) error {
 	return nil
 }
 
-// consoleTokenFragment is "&c=<console token>" when serve has a console token
-// (`install-service -require-tokens`) for configPath, else "". The console
-// keeps it once the server accepts it; it opens nothing through a proxy. A
-// file that fails the token-file checks is named, and the link goes without.
-func consoleTokenFragment(configPath string) string {
+// consoleTokenFor returns serve's console token for configPath (written by
+// `install-service -require-tokens`), or "" when there is none. A link to
+// this machine's own serve carries it beside the start token (`&c=`); the
+// console keeps it once the server accepts it, and it opens nothing through
+// a proxy. A file that fails the token-file checks, or a -require-tokens
+// install from before the console token, is noted on w.
+func consoleTokenFor(w io.Writer, configPath string) string {
+	if configPath == "" {
+		return ""
+	}
 	path := serveTokenFilePathFor(configPath, serveConsoleTokenFileName)
 	token, issue, err := inspectTokenFile(path)
 	switch {
 	case err != nil:
-		fmt.Printf("could not read console token file %s (%v)\n", path, err)
+		fmt.Fprintf(w, "could not read console token file %s (%v)\n", path, err)
 	case issue != nil:
-		fmt.Printf("console token file %s\n", issue.Error())
+		fmt.Fprintf(w, "console token file %s\n", issue.Error())
 	case token != "":
-		return "&c=" + token
+		return token
 	case readTokenFileExists(configPath):
 		// A -require-tokens install from before the console token: the
 		// console would ask for a gate token, and the gate screen points
-		// back here.
-		fmt.Printf("no console token file at %s, so this console needs the gate token -- `factoryd install-service -force -require-tokens` writes one\n", path)
+		// back to `factoryd console`.
+		fmt.Fprintf(w, "no console token file at %s, so this console needs the gate token -- `factoryd install-service -force -require-tokens` writes one\n", path)
 	}
 	return ""
 }

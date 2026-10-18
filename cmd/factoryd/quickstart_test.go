@@ -248,7 +248,7 @@ design_guide: go-service
 	dataDir := t.TempDir()
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, designGuideSettings(t), workspace, dataDir, "Reading-time endpoint", "", "", "", false, "", false, time.Millisecond, time.Millisecond, "", false)
+	err := quickstartSubmitAndWatch(dp, &buf, designGuideSettings(t), workspace, dataDir, "Reading-time endpoint", "", "", "", false, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
@@ -277,7 +277,7 @@ preflight_profile: brownfield
 	}
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "", reqFile, "", false, "", false, time.Millisecond, time.Millisecond, "", false)
+	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "", reqFile, "", false, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
@@ -319,7 +319,7 @@ preflight_profile: brownfield
 	defer func() { fakeForgeOf(dp).fetchIssueFn = orig }()
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "https://github.com/acme/widgets/issues/42", "", "", false, "", false, time.Millisecond, time.Millisecond, "", false)
+	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "https://github.com/acme/widgets/issues/42", "", "", false, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
