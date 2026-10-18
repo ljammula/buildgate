@@ -2511,14 +2511,14 @@ func (b *quickstartConfigBuild) chatGPTCodexRoute() (*sessionconfig.Config, []st
 	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
 	if modelID == chatGPTCodexDefaultModelID {
 		// The Luna profile: the default model declares its reasoning
-		// levels (Pi clamps an undeclared xhigh/max silently), builds
-		// at medium effort and plans and reviews at max. Only for the
+		// levels (Pi clamps an undeclared xhigh/max silently) and plans,
+		// builds and reviews at max. Only for the
 		// default id, whose levels are known; any other -model-id
 		// keeps Pi's defaults.
 		model.Reasoning = true
 		model.ThinkingLevelMap = map[string]string{"xhigh": "xhigh", "max": "max"}
 		b.cfg.Roles.Planning.Thinking = "max"
-		b.cfg.Roles.Execution.Thinking = "medium"
+		b.cfg.Roles.Execution.Thinking = "max"
 		b.cfg.Roles.Review.Thinking = "max"
 	}
 	b.cfg.Models = map[string]sessionconfig.Model{modelKey: model}

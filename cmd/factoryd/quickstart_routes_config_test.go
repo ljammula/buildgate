@@ -201,8 +201,8 @@ func TestQuickstartWritesRoutesConfigChatGPTCodex(t *testing.T) {
 	if sel.Policy.AuthMode != meter.CredentialModeChatGPTCodex {
 		t.Errorf("AuthMode = %q, want %q", sel.Policy.AuthMode, meter.CredentialModeChatGPTCodex)
 	}
-	if sel.Policy.WorkerModelID != "gpt-5.6-luna" {
-		t.Errorf("WorkerModelID = %q, want %q", sel.Policy.WorkerModelID, "gpt-5.6-luna")
+	if sel.Policy.WorkerModelID != chatGPTCodexDefaultModelID {
+		t.Errorf("WorkerModelID = %q, want %q", sel.Policy.WorkerModelID, chatGPTCodexDefaultModelID)
 	}
 	if sel.Policy.WorkerModelAPI != meter.RequestFormatOpenAIResponses {
 		t.Errorf("WorkerModelAPI = %q, want %q", sel.Policy.WorkerModelAPI, meter.RequestFormatOpenAIResponses)

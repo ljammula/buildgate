@@ -29,11 +29,11 @@ const codexTokenExpiryMargin = 6 * time.Hour
 // comment) -- there is no GET /models listing to discover a model id or
 // context window from the way -route openai/copilot can (see
 // quickstartFetchModelIDs / meter.ListGitHubCopilotModels) -- so this
-// falls back to the one model this route has been live-validated against:
-// USAGE.md's own route table records gpt-5.6-luna with a 272000-token
-// context window as the working configuration.
+// falls back to a model the route serves and the live smoke builds on:
+// gpt-6-luna, with the 272000-token context window the ChatGPT plan lists
+// for it (README's and USAGE_REFERENCE's route tables).
 const (
-	chatGPTCodexDefaultModelID       = "gpt-5.6-luna"
+	chatGPTCodexDefaultModelID       = "gpt-6-luna"
 	chatGPTCodexDefaultContextWindow = 272000
 )
 

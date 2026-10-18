@@ -16,18 +16,18 @@ const testPiforkImage = "localhost:5050/pifork-worker@sha256:" + "b1b2b3b4b5b6b1
 
 // TestQuickstartChatGPTCodexWritesLunaProfile: the default Luna model is
 // written with its declared reasoning levels, and the roles get the
-// profile the operator runs (planning/review max, execution medium). The
+// profile the operator runs (max for planning, execution and review). The
 // written config must still pass ValidateRouting's thinking-level checks.
 func TestQuickstartChatGPTCodexWritesLunaProfile(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("CODEX_HOME", t.TempDir())
 	cfg, settings, _ := quickstartBuildWriteReload(dp, t, &quickstartOptions{NonInteractive: true, Route: "chatgpt-codex"})
 
-	model := cfg.Models["gpt-5.6-luna"]
+	model := cfg.Models[chatGPTCodexDefaultModelID]
 	if !model.Reasoning || model.ThinkingLevelMap["max"] != "max" || model.ThinkingLevelMap["xhigh"] != "xhigh" {
 		t.Errorf("model = %+v, want reasoning: true and thinking_level_map {xhigh: xhigh, max: max}", model)
 	}
-	for role, want := range map[modelrole.Role]string{modelrole.RolePlanning: "max", modelrole.RoleExecution: "medium", modelrole.RoleReview: "max"} {
+	for role, want := range map[modelrole.Role]string{modelrole.RolePlanning: "max", modelrole.RoleExecution: "max", modelrole.RoleReview: "max"} {
 		sel, err := modelrole.SelectRoute(settings, role, "", "", "", quickstartRouteProbeAlwaysOK)
 		if err != nil {
 			t.Fatalf("SelectRoute(%s): %v", role, err)
