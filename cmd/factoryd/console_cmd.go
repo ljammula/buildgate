@@ -126,7 +126,7 @@ func consoleMain(dp *deps, args []string) error {
 		case issue != nil:
 			fmt.Printf("stable start token file %s: %s\n", tokenPath, issue.Error())
 		case token != "":
-			link = fmt.Sprintf("%s/#t=%s", base, token)
+			link = fmt.Sprintf("%s/#t=%s", base, token) + consoleTokenFragment(effectiveConfigPath)
 		default:
 			fmt.Printf("no stable start token file yet at %s -- run `factoryd install-service` to create one, or use the link `factoryd serve` itself printed on its own startup\n", tokenPath)
 		}
@@ -139,4 +139,27 @@ func consoleMain(dp *deps, args []string) error {
 		}
 	}
 	return nil
+}
+
+// consoleTokenFragment is "&c=<console token>" when serve has a console token
+// (`install-service -require-tokens`) for configPath, else "". The console
+// keeps it once the server accepts it; it opens nothing through a proxy. A
+// file that fails the token-file checks is named, and the link goes without.
+func consoleTokenFragment(configPath string) string {
+	path := serveTokenFilePathFor(configPath, serveConsoleTokenFileName)
+	token, issue, err := inspectTokenFile(path)
+	switch {
+	case err != nil:
+		fmt.Printf("could not read console token file %s (%v)\n", path, err)
+	case issue != nil:
+		fmt.Printf("console token file %s\n", issue.Error())
+	case token != "":
+		return "&c=" + token
+	case readTokenFileExists(configPath):
+		// A -require-tokens install from before the console token: the
+		// console would ask for a gate token, and the gate screen points
+		// back here.
+		fmt.Printf("no console token file at %s, so this console needs the gate token -- `factoryd install-service -force -require-tokens` writes one\n", path)
+	}
+	return ""
 }

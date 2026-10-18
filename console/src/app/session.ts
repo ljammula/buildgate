@@ -2,13 +2,22 @@
 // console config, and where the gate token stands.
 //
 // The gate token (platform/gateToken) lets a console opened through a proxy
-// read and do request writes. The server answers a refused one with a plain
+// read and do request writes. The console token (platform/consoleToken) does
+// the same for the console on the host once serve requires a token from
+// every caller; the server answers it as an accepted gate token, so the rest
+// of the console tells the two apart nowhere but here. A gate token this tab
+// holds comes first. The server answers a refused one with a plain
 // 403, the same as a start-token or run-override route answers a console
 // that holds the gate token alone, so a 403 never decides anything here:
 // GET /console-config.json does, at startup and again after any 403.
 import { type Http, type HttpConfig, createHttp } from "@/api/http";
 import { fetchConsoleConfig } from "@/api/ops";
 import type { ConsoleConfig } from "@/domain/ops";
+import {
+  clearStoredConsoleToken,
+  getStoredConsoleToken,
+  setStoredConsoleToken,
+} from "@/platform/consoleToken";
 import { clearStoredGateToken, getStoredGateToken, setStoredGateToken } from "@/platform/gateToken";
 
 export interface ConsoleSession {
@@ -41,6 +50,8 @@ export type TokenOffer = "accepted" | "refused" | "no-answer" | "not-kept";
 export interface SessionInputs {
   /** The gate token the address bar carried (captureGateTokenFromLocation), not yet trusted. */
   readonly candidate: string | null;
+  /** The console token the address bar carried (captureConsoleTokenFromLocation), not yet trusted. */
+  readonly consoleCandidate?: string | null;
   /** This bundle's HttpConfig around a gate token (app/config). */
   readonly httpConfig: (gateToken: string | null) => HttpConfig;
 }
@@ -53,6 +64,7 @@ export interface SessionInputs {
  */
 export async function startSession({
   candidate,
+  consoleCandidate = null,
   httpConfig,
 }: SessionInputs): Promise<ConsoleSession> {
   const configFor = (token: string | null) => fetchConsoleConfig(createHttp(httpConfig(token)));
@@ -70,14 +82,41 @@ export async function startSession({
       config = answer;
     }
   }
-  config ??= await configFor(gateToken);
+  let consoleToken = getStoredConsoleToken();
+  if (consoleCandidate !== null && consoleCandidate !== consoleToken) {
+    const answer = await configFor(consoleCandidate);
+    if (answer.gate === "accepted") {
+      setStoredConsoleToken(consoleCandidate);
+      consoleToken = consoleCandidate;
+      if (gateToken === null) config = answer;
+    }
+  }
+  // A refused gate-token link was answered as no token; the console token may do better.
+  if (gateToken === null && consoleToken !== null && config?.gate !== "accepted") config = null;
+
+  // Which store the token this session sends came from: a refusal clears
+  // that store and no other, since the console token is shared by every tab.
+  let source: "gate" | "console" | null =
+    gateToken !== null ? "gate" : consoleToken !== null ? "console" : null;
+  const tokenFrom = (from: typeof source) =>
+    from === "gate" ? gateToken : from === "console" ? consoleToken : null;
+  config ??= await configFor(tokenFrom(source));
+  if (config.gate === "required" && source === "gate" && consoleToken !== null) {
+    // The tab's gate token went stale; the host's console token is still here.
+    clearStoredGateToken();
+    source = "console";
+    config = await configFor(consoleToken);
+  }
 
   let storedTokenRefused = false;
-  if (config.gate === "required" && gateToken !== null) {
-    clearStoredGateToken();
+  if (config.gate === "required" && source !== null) {
+    if (source === "gate") clearStoredGateToken();
+    else clearStoredConsoleToken();
     storedTokenRefused = true;
-    gateToken = null;
+    source = null;
   }
+  const token = tokenFrom(source);
+  const sent = source;
 
   let lost = false;
   let checking = false;
@@ -92,12 +131,13 @@ export async function startSession({
       // Anything but "required" (a server that could not answer included)
       // leaves the token and the app alone.
       if (answer.gate !== "required") return;
-      clearStoredGateToken();
+      if (sent === "gate") clearStoredGateToken();
+      else if (sent === "console") clearStoredConsoleToken();
       lost = true;
       for (const listener of listeners) listener();
     });
   };
-  const http = createHttp(httpConfig(gateToken), { onForbidden: recheck });
+  const http = createHttp(httpConfig(token), { onForbidden: recheck });
 
   return {
     http,

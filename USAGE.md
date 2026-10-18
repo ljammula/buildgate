@@ -537,7 +537,7 @@ can approve a gate.
 
 ```sh
 factoryd install-service -force -require-tokens -allowed-host host.docker.internal:8090
-factoryd gate-token -ttl 720h   # the console on this machine now asks for it
+factoryd console -open   # the console on this machine: its link carries the console token
 ```
 
 From another machine, keep `serve` on loopback and put a tunnel in front
@@ -594,7 +594,7 @@ things, in this order, and `-off` undoes what it set up:
 | In the browser | Kept for the tab only, never in the address bar. A new tab asks for the token again |
 | Who the history names | The name you give the console, followed by `(gate token)` |
 | Stop it | `factoryd remote-console -off` (listener, accepted `Host` and token all removed). The token alone: `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the remote address need no token, and the console there cannot write) |
-| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing. colima's `host.docker.internal` is one: any container on the VM reaches `serve` as local and can approve a gate. Require tokens: `factoryd install-service -force -require-tokens`, then `factoryd gate-token` for the console |
+| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing. colima's `host.docker.internal` is one: any container on the VM reaches `serve` as local and can approve a gate. Require tokens: `factoryd install-service -force -require-tokens`, then open the console on this machine with `factoryd console`, whose link carries the console token |
 
 ## `.factory.yml` — commit per-repo defaults once
 

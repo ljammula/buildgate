@@ -13,9 +13,15 @@ import (
 // for being local: a forwarder that adds no forwarding header (colima's
 // host.docker.internal) makes every container look local
 // (safety-contract.md, "Console loopback writes").
+//
+// serveConsoleTokenFileName holds the console token, written beside them: the
+// credential of the console on this machine, which cannot hold the read
+// token (api.WithConsoleToken). It has no environment variable; `factoryd
+// console` hands it to the browser in the link it opens.
 const (
 	serveOverrideTokenFileName = "serve-override-token"
 	serveReadTokenFileName     = "serve-read-token"
+	serveConsoleTokenFileName  = "serve-console-token"
 )
 
 // serveTokenFilePathFor returns the path of the token file name beside
@@ -29,21 +35,26 @@ func serveTokenFilePathFor(configPath, name string) string {
 // inspectTokenFile's checks is an error, not "no token": these
 // tokens take the no-token relaxations away, so serve must not start
 // without them. Its fix keeps the protection: serve never writes these
-// files, so the start token's "remove it and rerun" would drop it.
+// files, so the start token's "remove it and rerun" would drop it. Deleting
+// the console token file drops no protection: it only locks the console on
+// this machine out until it is written again.
 func serveTokenFromFile(configPath, name string) (string, error) {
 	token, issue, err := inspectTokenFile(serveTokenFilePathFor(configPath, name))
 	if err != nil {
 		return "", err
 	}
 	if issue != nil {
-		issue.Fix = "`chmod 600` it if its mode is the reason; otherwise delete it and run `factoryd install-service -force -require-tokens` to write a new one (deleting it alone turns this protection off)"
+		issue.Fix = "`chmod 600` it if its mode is the reason; otherwise delete it and run `factoryd install-service -force -require-tokens` to write a new one"
+		if name != serveConsoleTokenFileName {
+			issue.Fix += " (deleting it alone turns this protection off)"
+		}
 		return "", issue
 	}
 	return token, nil
 }
 
 // tokensFromFiles fills in the override and read tokens the environment left
-// unset, from their files beside the session config.
+// unset, and the console token, from their files beside the session config.
 func (sv *serveRun) tokensFromFiles() error {
 	configPath, ok := resolveEffectiveConfigPath(*sv.sf.configPath)
 	if !ok {
@@ -55,6 +66,7 @@ func (sv *serveRun) tokensFromFiles() error {
 	}{
 		{&sv.overrideToken, serveOverrideTokenFileName},
 		{&sv.readToken, serveReadTokenFileName},
+		{&sv.consoleToken, serveConsoleTokenFileName},
 	} {
 		if *source.token != "" {
 			continue

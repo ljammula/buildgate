@@ -624,3 +624,105 @@ func TestAllowedHostSourceIsReadPerRequest(t *testing.T) {
 		t.Errorf("empty Host with a source reporting \"\": read = %d, want 403", got)
 	}
 }
+
+const gateTestConsole = "console-test-token"
+
+// TestConsoleTokenOpensWhatTheGateTokenOpensOnThisMachineOnly: with a read
+// token set (serve requires tokens), the console token lets the console on
+// this machine read and do request writes, with no gate token and no
+// expiry. Behind a proxy it opens nothing, and it never opens an override,
+// a start route or /mcp.
+func TestConsoleTokenOpensWhatTheGateTokenOpensOnThisMachineOnly(t *testing.T) {
+	const (
+		read     = "GET /requests"
+		write    = "POST /requests/none/approve"
+		edit     = "PUT /requests/none/spec"
+		override = "POST /runs/none/override"
+		start    = "POST /runs"
+		daemons  = "GET /daemons"
+	)
+	off, on := GateToken{}, GateToken{On: true, Token: gateTestToken}
+	cases := []struct {
+		name   string
+		gate   GateToken
+		local  bool
+		route  string
+		refuse bool
+	}{
+		{"local read, gate off", off, true, read, false},
+		{"local read, gate on", on, true, read, false},
+		{"local write", off, true, write, false},
+		{"local edit", off, true, edit, false},
+		{"local override", off, true, override, true},
+		{"local start", off, true, start, true},
+		{"local daemons", off, true, daemons, true},
+		{"remote read", on, false, read, true},
+		{"remote write", on, false, write, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := gateTestServer(t, t.TempDir(), gateState(tc.gate), WithReadToken("read-token"), WithConsoleToken(gateTestConsole))
+			method, path, _ := strings.Cut(tc.route, " ")
+			got := gateStatus(server, gateRequest(t, method, path, gateTestConsole, tc.local))
+			if tc.refuse != (got == http.StatusForbidden) {
+				t.Errorf("%s with the console token: status = %d, want refused=%v", tc.route, got, tc.refuse)
+			}
+		})
+	}
+	t.Run("POST /mcp", func(t *testing.T) {
+		server := gateTestServer(t, t.TempDir(), gateState(off), WithReadToken("read-token"), WithConsoleToken(gateTestConsole))
+		req := gateRequest(t, http.MethodPost, "/mcp", gateTestConsole, true)
+		if got := gateStatus(server, req); got != http.StatusUnauthorized && got != http.StatusForbidden {
+			t.Errorf("POST /mcp with the console token = %d, want it refused", got)
+		}
+	})
+}
+
+// TestConsoleTokenEqualToAnotherCredentialOpensNothing: one value must
+// never open two classes of route, in either direction.
+func TestConsoleTokenEqualToAnotherCredentialOpensNothing(t *testing.T) {
+	for _, other := range []string{gateTestOverride, gateTestStart, mcpTestToken, "read-token"} {
+		server := gateTestServer(t, t.TempDir(), gateState(GateToken{}), WithReadToken("read-token"), WithConsoleToken(other))
+		if got := gateStatus(server, gateRequest(t, http.MethodGet, "/requests", other, true)); got != http.StatusForbidden && other != "read-token" {
+			t.Errorf("console token equal to %q opened a read: %d", other, got)
+		}
+		if got := gateStatus(server, gateRequest(t, http.MethodPost, "/requests/none/approve", other, true)); got != http.StatusForbidden && other != gateTestOverride {
+			t.Errorf("console token equal to %q opened a request write: %d", other, got)
+		}
+	}
+	server := gateTestServer(t, t.TempDir(), gateState(GateToken{On: true, Token: gateTestConsole}), WithReadToken("read-token"), WithConsoleToken(gateTestConsole))
+	if got := gateStatus(server, gateRequest(t, http.MethodGet, "/requests", gateTestConsole, false)); got != http.StatusForbidden {
+		t.Errorf("a gate token equal to the console token opened a remote read: %d", got)
+	}
+}
+
+// TestConsoleTokenAnswersConsoleConfigAndRecordsALocalWrite: the console
+// learns from /console-config.json that the console token is accepted, and
+// a write with it is recorded as the operator at this machine, with no
+// gate-token suffix.
+func TestConsoleTokenAnswersConsoleConfigAndRecordsALocalWrite(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	server := gateTestServer(t, dataDir, gateState(GateToken{}), WithReadToken("read-token"), WithConsoleToken(gateTestConsole))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, gateRequest(t, http.MethodGet, "/console-config.json", gateTestConsole, true))
+	var v struct {
+		Gate          string `json:"gate"`
+		WritesEnabled bool   `json:"writes_enabled"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &v); err != nil || v.Gate != "accepted" || !v.WritesEnabled {
+		t.Fatalf("console-config with the console token = %s (%v), want accepted with writes", recorder.Body.String(), err)
+	}
+	req := gateRequest(t, http.MethodPost, "/requests/req-1/approve", gateTestConsole, true)
+	req.Body = readCloser(`{"by":"alice"}`)
+	if got := gateStatus(server, req); got != http.StatusOK {
+		t.Fatalf("approve with the console token = %d, want 200", got)
+	}
+	reloaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if by := reloaded.History[len(reloaded.History)-1].By; by != "alice" {
+		t.Errorf("recorded by = %q, want %q", by, "alice")
+	}
+}

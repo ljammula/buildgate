@@ -582,6 +582,8 @@ type Server struct {
 	// gateToken is WithGateToken's source; nil while the gate is off.
 	gateToken func() GateToken
 	readToken string
+	// consoleToken is WithConsoleToken's token; "" for none.
+	consoleToken string
 	// mcpToken supplies POST /mcp's bearer token (see WithMCPToken); nil or
 	// "" leaves the endpoint off.
 	mcpToken func() string

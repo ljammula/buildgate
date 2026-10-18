@@ -82,6 +82,44 @@ func TestConsoleMainPrintsStableTokenLink(t *testing.T) {
 	if !strings.Contains(out, "http://127.0.0.1:8092/#t="+token) {
 		t.Errorf("output = %q, want the recorded serve's link carrying #t=%s", out, token)
 	}
+	if strings.Contains(out, "&c=") {
+		t.Errorf("output = %q, carries a console token with no console token file", out)
+	}
+
+	// With the console token `install-service -require-tokens` writes, the
+	// link carries it beside the start token.
+	consoleToken, _, err := ensureTokenFile(dp, filepath.Join(cfgDir, serveConsoleTokenFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := consoleMain(dp, nil); err != nil {
+			t.Fatalf("consoleMain: %v", err)
+		}
+	})
+	if !strings.Contains(out, "http://127.0.0.1:8092/#t="+token+"&c="+consoleToken) {
+		t.Errorf("output = %q, want the link carrying the console token too", out)
+	}
+	if err := os.Remove(filepath.Join(cfgDir, serveConsoleTokenFileName)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A -require-tokens install from before the console token: the link goes
+	// without it, and says how to write one.
+	if err := os.WriteFile(filepath.Join(cfgDir, serveReadTokenFileName), []byte("read\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := consoleMain(dp, nil); err != nil {
+			t.Fatalf("consoleMain: %v", err)
+		}
+	})
+	if strings.Contains(out, "&c=") || !strings.Contains(out, "install-service -force -require-tokens") {
+		t.Errorf("output = %q, want no console token and the command that writes one", out)
+	}
+	if err := os.Remove(filepath.Join(cfgDir, serveReadTokenFileName)); err != nil {
+		t.Fatal(err)
+	}
 
 	// A serve on another data dir than the config's (install-service
 	// -data-dir) is found through -data-dir.

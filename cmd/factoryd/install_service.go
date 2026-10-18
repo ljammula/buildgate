@@ -337,15 +337,15 @@ func installServiceMain(dp *deps, args []string) error {
 // via ensureTokenFile) the stable start token file next to
 // cfg.ConfigPath first -- so `factoryd console` and the plist's own first
 // RunAtLoad startup agree on the same token before serve ever binds a
-// port. requireTokens generates (or reuses) the override and read token
-// files the same way; serve reads them at each start.
+// port. requireTokens generates (or reuses) the override, read and console
+// token files the same way; serve reads them at each start.
 func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bool) error {
 	tokenPath := serveStableStartTokenPathFor(cfg.ConfigPath)
 	if _, _, err := ensureTokenFile(dp, tokenPath); err != nil {
 		return fmt.Errorf("prepare stable serve start token: %w", err)
 	}
 	if requireTokens {
-		for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName} {
+		for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName, serveConsoleTokenFileName} {
 			if _, _, err := ensureTokenFile(dp, serveTokenFilePathFor(cfg.ConfigPath, name)); err != nil {
 				return fmt.Errorf("prepare %s: %w", name, err)
 			}
@@ -379,7 +379,7 @@ func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bo
 	}
 	fmt.Printf("installed %s and loaded it via launchctl (stable start token: %s)\n", plistPath, tokenPath)
 	if requireTokens {
-		fmt.Println("every read and write now needs a token; the console on this machine too: run `factoryd gate-token` and give it that token")
+		fmt.Println("every read and write now needs a token; the console on this machine too: open it with `factoryd console`, which gives it its token")
 	} else if len(cfg.AllowedHosts) > 0 {
 		fmt.Println("warning: a forwarder that adds no forwarding header (colima's host.docker.internal) lets its callers act as local, with no token; add -require-tokens")
 	}

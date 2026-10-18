@@ -71,9 +71,9 @@ func TestServeReadsTheOverrideAndReadTokenFiles(t *testing.T) {
 	}
 }
 
-func TestServeTokensFromFilesFillsBothTokens(t *testing.T) {
+func TestServeTokensFromFilesFillsEveryToken(t *testing.T) {
 	cfgDir, _ := serveTokenFilesHome(t)
-	for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName} {
+	for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName, serveConsoleTokenFileName} {
 		if err := os.WriteFile(filepath.Join(cfgDir, name), []byte("from-"+name+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -83,8 +83,8 @@ func TestServeTokensFromFilesFillsBothTokens(t *testing.T) {
 	if err := sv.tokensFromFiles(); err != nil {
 		t.Fatal(err)
 	}
-	if sv.overrideToken != "from-"+serveOverrideTokenFileName || sv.readToken != "from-"+serveReadTokenFileName {
-		t.Fatalf("override %q, read %q: want each from its own file", sv.overrideToken, sv.readToken)
+	if sv.overrideToken != "from-"+serveOverrideTokenFileName || sv.readToken != "from-"+serveReadTokenFileName || sv.consoleToken != "from-"+serveConsoleTokenFileName {
+		t.Fatalf("override %q, read %q, console %q: want each from its own file", sv.overrideToken, sv.readToken, sv.consoleToken)
 	}
 }
 
