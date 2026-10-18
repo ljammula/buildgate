@@ -378,7 +378,7 @@ $ factoryd gate-token -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd gate-token [flags]
-stderr:   Write the token a console on another machine needs
+stderr:   Write the token a remote console, or any once tokens are required, needs
 
 $ factoryd remote-console -zz-not-a-flag
 exit 1

@@ -26,12 +26,12 @@ func serveTokenFilePathFor(configPath, name string) string {
 
 // serveTokenFromFile returns the token in the file name beside configPath,
 // or "" when there is no such file. A file that exists and fails
-// inspectServeStartTokenFile's checks is an error, not "no token": these
+// inspectTokenFile's checks is an error, not "no token": these
 // tokens take the no-token relaxations away, so serve must not start
 // without them. Its fix keeps the protection: serve never writes these
 // files, so the start token's "remove it and rerun" would drop it.
 func serveTokenFromFile(configPath, name string) (string, error) {
-	token, issue, err := inspectServeStartTokenFile(serveTokenFilePathFor(configPath, name))
+	token, issue, err := inspectTokenFile(serveTokenFilePathFor(configPath, name))
 	if err != nil {
 		return "", err
 	}

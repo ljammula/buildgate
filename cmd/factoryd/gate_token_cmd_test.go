@@ -222,3 +222,33 @@ func writeFileMode(t *testing.T, path, content string, mode os.FileMode) {
 		t.Fatal(err)
 	}
 }
+
+// TestGateTokenMessagesNameTheConsoleOnThisMachineOnceAReadTokenIsSet: with
+// the read token file `install-service -require-tokens` writes, the console
+// on this machine needs the gate token too, and every message says so.
+func TestGateTokenMessagesNameTheConsoleOnThisMachineOnceAReadTokenIsSet(t *testing.T) {
+	dp := newTestDeps(t)
+	cfgDir, _ := mcpTestConfig(t)
+	configPath := filepath.Join(cfgDir, "config.yml")
+	const remoteOnly = "a console that is not on this machine needs the token"
+	if out := runGateToken(t, dp); !strings.Contains(out, remoteOnly) {
+		t.Fatalf("with no read token, output lacks %q:\n%s", remoteOnly, out)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, serveReadTokenFileName), []byte("read\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const every = "every console, this machine's included"
+	if out := runGateToken(t, dp); !strings.Contains(out, every) || strings.Contains(out, remoteOnly) {
+		t.Errorf("with a read token, output does not name every console:\n%s", out)
+	}
+	if out := runGateToken(t, dp, "-disable"); !strings.Contains(out, "No gate token opens "+every) {
+		t.Errorf("-disable with a read token:\n%s", out)
+	}
+	checks := doctorGateTokenChecks(configPath, time.Now())
+	if len(checks) != 1 || !strings.Contains(checks[0].Err.Error(), every) {
+		t.Errorf("doctor row with a disabled gate and a read token = %+v", checks)
+	}
+	if out := runGateToken(t, dp, "-remove"); !strings.Contains(out, "no console reads until") || strings.Contains(out, "reads with no token") {
+		t.Errorf("-remove with a read token:\n%s", out)
+	}
+}

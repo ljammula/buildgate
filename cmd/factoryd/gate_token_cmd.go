@@ -35,6 +35,25 @@ const (
 	gateMinTTL        = time.Minute
 )
 
+// gateAudience names the consoles that need the gate token to read: every
+// console once serve has a read token, since the console on this machine
+// cannot hold that token either (internal/api's gateRequired); otherwise
+// only a console that is not on this machine.
+func gateAudience(readToken bool) string {
+	if readToken {
+		return "every console, this machine's included (serve requires a read token)"
+	}
+	return "a console that is not on this machine"
+}
+
+// readTokenFileExists reports whether the read token file beside configPath
+// exists, which `install-service -require-tokens` writes. A command other
+// than serve cannot see serve's environment, so it asks the file only.
+func readTokenFileExists(configPath string) bool {
+	_, err := os.Lstat(serveTokenFilePathFor(configPath, serveReadTokenFileName))
+	return err == nil
+}
+
 func gateTokenPathFor(configPath string) string {
 	name := filepath.Base(configPath)
 	name = strings.TrimSuffix(name, filepath.Ext(name))
@@ -58,7 +77,7 @@ type gateFile struct {
 // readGateFile inspects the gate token file at path as of now.
 func readGateFile(path string, now time.Time) gateFile {
 	const rotate = "`factoryd gate-token -rotate` writes a new token"
-	content, issue, err := inspectServeStartTokenFile(path)
+	content, issue, err := inspectTokenFile(path)
 	switch {
 	case err != nil:
 		return gateFile{present: true, reason: err.Error(), fix: "make the file readable by its owner, or remove it", unsafe: true}
@@ -134,14 +153,15 @@ func newGateTokenFlags() (flags *flag.FlagSet, f gateTokenFlags) {
 	f.configPath = flags.String("config", "", "the running serve's config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	f.ttl = flags.Duration("ttl", gateDefaultTTL, fmt.Sprintf("how long a token this command writes works, from %s to %s", gateMinTTL, gateMaxTTL))
 	f.rotate = flags.Bool("rotate", false, "replace the token; the old one stops working at once")
-	f.disable = flags.Bool("disable", false, "keep the gate on with no token: no gate token opens a console that is not on this machine until -rotate")
-	f.remove = flags.Bool("remove", false, "remove the token file, which turns the gate off: a console under an -allowed-host name reads with no token and cannot write")
+	f.disable = flags.Bool("disable", false, "keep the gate on with no token: no console that needs the gate token opens until -rotate")
+	f.remove = flags.Bool("remove", false, "remove the token file, which turns the gate off; when serve requires tokens, no console reads until a new one is written")
 	finishFlags(flags)
 	return
 }
 
 // gateTokenMain implements `factoryd gate-token`: the credential of a console
-// that is not on this machine. It prints the token, which the operator pastes
+// that is not on this machine, and of every console once serve has a read
+// token (gateAudience). It prints the token, which the operator pastes
 // into the console's gate screen, and the fragment that hands it over in a
 // link.
 func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
@@ -172,11 +192,16 @@ func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 		return fmt.Errorf("session config %s: %w", configPath, err)
 	}
 	path := gateTokenPathFor(configPath)
+	audience := gateAudience(readTokenFileExists(configPath))
 	now := time.Now()
 	switch {
 	case *f.remove:
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		if readTokenFileExists(configPath) {
+			fmt.Fprintf(stdout, "Gate token removed: %s\nserve requires a read token, so no console reads until `factoryd gate-token` writes a new one.\n", path)
+			return nil
 		}
 		fmt.Fprintf(stdout, "Gate off: removed %s\nA console under an -allowed-host name reads with no token, and cannot write.\n", path)
 		return nil
@@ -184,7 +209,7 @@ func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 		if err := writeGateFile(dp, path, gateDisabledLine+"\n"); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "Gate token disabled: %s\nNo gate token opens a console that is not on this machine. `factoryd gate-token -rotate` writes a new token; `-remove` turns the gate off.\n", path)
+		fmt.Fprintf(stdout, "Gate token disabled: %s\nNo gate token opens %s. `factoryd gate-token -rotate` writes a new token; `-remove` turns the gate off.\n", path, audience)
 		return nil
 	}
 	var file gateFile
@@ -202,13 +227,13 @@ func gateTokenMain(dp *deps, stdout io.Writer, args []string) error {
 	fmt.Fprintf(stdout, "Token file: %s\n", path)
 	fmt.Fprintf(stdout, "\nOpen the console under its -allowed-host address and paste the token into the field it shows.\nOr open it with this fragment appended, which puts the token in a link:\n  #gate=%s\n", file.token)
 	fmt.Fprintln(stdout, "\nIt lets that console read, and approve, reject, retry, resume, cancel, edit and submit requests. It cannot override a quarantined run, start a run or use /mcp.")
-	fmt.Fprintln(stdout, "While this file exists, a console that is not on this machine needs the token to read. `-rotate` replaces it at once, `-disable` leaves no gate token working, `-remove` turns the gate off.")
+	fmt.Fprintf(stdout, "While this file exists, %s needs the token to read. `-rotate` replaces it at once, `-disable` leaves no gate token working, `-remove` turns the gate off.\n", audience)
 	return nil
 }
 
 // doctorGateTokenChecks is the row for a gate token file beside configPath
-// that `serve` cannot use: the gate is on, so a console that is not on this
-// machine is closed, and this says why. No row when the file is absent or
+// that `serve` cannot use: the gate is on, so every console that needs the
+// token (gateAudience) is closed, and this says why. No row when the file is absent or
 // usable.
 func doctorGateTokenChecks(configPath string, now time.Time) []doctorCheck {
 	configPath, found := resolveEffectiveConfigPath(configPath)
@@ -222,7 +247,7 @@ func doctorGateTokenChecks(configPath string, now time.Time) []doctorCheck {
 	return []doctorCheck{{
 		Name:     "gate token",
 		Advisory: true,
-		Err:      fmt.Errorf("%s: no gate token opens a console that is not on this machine", file.reason),
+		Err:      fmt.Errorf("%s: no gate token opens %s", file.reason, gateAudience(readTokenFileExists(configPath))),
 		Fix:      file.fix + "; `factoryd gate-token -remove` turns the gate off",
 	}}
 }

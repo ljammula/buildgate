@@ -78,7 +78,7 @@ func commandCatalog() []commandInfo {
 		{"install-skill", "", "Install the buildgate skill for your coding agent", groupMachine, func() *flag.FlagSet { fs, _ := newInstallSkillFlags(); return fs }},
 		{"mcp", "", "Turn the console's MCP endpoint on, and print its token", groupMachine, func() *flag.FlagSet { fs, _ := newMCPFlags(); return fs }},
 		{"remote-console", "", "Open this profile's console to another machine on the tailnet", groupMachine, func() *flag.FlagSet { fs, _ := newRemoteConsoleFlags(); return fs }},
-		{"gate-token", "", "Write the token a console on another machine needs", groupMachine, func() *flag.FlagSet { fs, _ := newGateTokenFlags(); return fs }},
+		{"gate-token", "", "Write the token a remote console, or any once tokens are required, needs", groupMachine, func() *flag.FlagSet { fs, _ := newGateTokenFlags(); return fs }},
 		{"version", "", "Print the version of this binary", groupMachine, noFlags("version")},
 
 		{runCommandName, "factoryd -ticket <id> -workspace <dir> -spec <file> [flags]", "Build one ticket directly, with no request (its help: factoryd help run)", groupAdvanced, func() *flag.FlagSet { fs, _ := newRunFlags(); return fs }},

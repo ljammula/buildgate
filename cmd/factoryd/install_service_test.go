@@ -420,7 +420,7 @@ func TestInstallServiceAlsoInstallsServeByDefault(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("stable start token file mode = %v, want 0600", info.Mode().Perm())
 	}
-	firstToken, ok := readServeStartTokenFile(tokenPath)
+	firstToken, ok := readTokenFile(tokenPath)
 	if !ok {
 		t.Fatal("could not read stable start token file")
 	}
@@ -429,7 +429,7 @@ func TestInstallServiceAlsoInstallsServeByDefault(t *testing.T) {
 	if err := installServiceMain(dp, []string{"-config", configPath, "-data-dir", dataDir, "-force"}); err != nil {
 		t.Fatalf("second installServiceMain -force: %v", err)
 	}
-	secondToken, ok := readServeStartTokenFile(tokenPath)
+	secondToken, ok := readTokenFile(tokenPath)
 	if !ok {
 		t.Fatal("could not read stable start token file after reinstall")
 	}
@@ -510,7 +510,7 @@ func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("%s: %v, mode %v; want a 0600 file", name, err, info)
 		}
-		token, ok := readServeStartTokenFile(path)
+		token, ok := readTokenFile(path)
 		if !ok || strings.Contains(string(plist), token) {
 			t.Fatalf("%s: unreadable, or its token is in the plist", name)
 		}
@@ -523,7 +523,7 @@ func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
 		t.Fatalf("installServiceMain -force: %v", err)
 	}
 	for name, token := range first {
-		if again, _ := readServeStartTokenFile(filepath.Join(filepath.Dir(configPath), name)); again != token {
+		if again, _ := readTokenFile(filepath.Join(filepath.Dir(configPath), name)); again != token {
 			t.Errorf("%s rotated across a -force reinstall", name)
 		}
 	}

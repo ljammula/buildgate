@@ -47,7 +47,7 @@ func (dp *deps) WorkerServiceState(ctx context.Context, plistPath string) string
 
 func (dp *deps) ServeStartToken(configPath string) (token, path string, err error) {
 	path = serveStableStartTokenPathFor(configPath)
-	token, _, err = ensureServeStartTokenFile(dp, path)
+	token, _, err = ensureTokenFile(dp, path)
 	return token, path, err
 }
 

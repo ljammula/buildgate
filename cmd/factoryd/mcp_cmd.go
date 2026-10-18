@@ -32,7 +32,7 @@ func mcpTokenPathFor(configPath string) string {
 // "" (endpoint off) when the file is absent or fails inspection.
 func mcpTokenSource(path string) func() string {
 	return func() string {
-		token, _ := readServeStartTokenFile(path)
+		token, _ := readTokenFile(path)
 		return token
 	}
 }
@@ -91,7 +91,7 @@ func mcpMain(dp *deps, stdout io.Writer, args []string) error {
 			return err
 		}
 	}
-	token, _, err := ensureServeStartTokenFile(dp, tokenPath)
+	token, _, err := ensureTokenFile(dp, tokenPath)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func rotateMCPToken(dp *deps, path string) error {
 	if err := os.Remove(next); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", next, err)
 	}
-	if _, err := generateServeStartTokenFile(dp, next); err != nil {
+	if _, err := generateTokenFile(dp, next); err != nil {
 		return err
 	}
 	if err := os.Rename(next, path); err != nil {

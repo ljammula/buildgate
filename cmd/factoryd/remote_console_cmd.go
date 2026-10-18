@@ -70,11 +70,11 @@ func (rc remoteConsole) content() string {
 }
 
 // readRemoteConsole reads the file at path. ok is false when it is absent,
-// fails a check of inspectServeStartTokenFile, or does not hold exactly its
+// fails a check of inspectTokenFile, or does not hold exactly its
 // four well-formed lines: nothing is allowed on the word of a file `serve`
 // cannot trust.
 func readRemoteConsole(path string) (rc remoteConsole, ok bool) {
-	content, issue, err := inspectServeStartTokenFile(path)
+	content, issue, err := inspectTokenFile(path)
 	if err != nil || issue != nil || content == "" {
 		return remoteConsole{}, false
 	}
