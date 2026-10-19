@@ -146,6 +146,11 @@ func (impl realSandboxRuntime) sandboxNames(ctx context.Context) ([]string, erro
 	return impl.dp.gateway.Names(ctx)
 }
 
+// sandboxLabels returns the labels the gateway stores with a sandbox.
+func (impl realSandboxRuntime) sandboxLabels(ctx context.Context, name string) (map[string]string, error) {
+	return impl.dp.gateway.Labels(ctx, name)
+}
+
 // newGatewayRuntime is the runtime over this machine's gateway. It connects
 // on first use, and before that checks the stack answers: a launch against a
 // stack that is down fails with what to run, not with a dial error.

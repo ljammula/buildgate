@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/openshell"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
@@ -45,11 +46,12 @@ type sandboxOwner struct {
 const sandboxDataDirDepth = 4
 
 // sandboxDataDirs is every data dir doctor looks in for a sandbox's run:
-// its own, each profile's, and each directory holding a runs directory at
-// most sandboxDataDirDepth levels under sessionconfig.DataRoot, where a
-// profile that was since deleted kept its records. A build can leave a
-// sandbox in a data dir that no profile names any more, and no worker then
-// starts there to reclaim it.
+// its own, each profile's, each directory holding a runs directory at most
+// sandboxDataDirDepth levels under sessionconfig.DataRoot, where a profile
+// that was since deleted kept its records, and the data dir of each baseline
+// check running inside one of those (baselineCheckDataDirs). A build can
+// leave a sandbox in a data dir that no profile names any more, and no
+// worker then starts there to reclaim it.
 func sandboxDataDirs(own string) []string {
 	var candidates []string
 	if own != "" {
@@ -60,6 +62,7 @@ func sandboxDataDirs(own string) []string {
 		candidates = append(candidates, dirs...)
 	}
 	candidates = append(candidates, dataDirsUnder(sessionconfig.DataRoot(), sandboxDataDirDepth)...)
+	candidates = append(candidates, baselineCheckDataDirs(candidates)...)
 	seen := map[string]bool{}
 	var dirs []string
 	for _, dir := range candidates {
@@ -95,6 +98,18 @@ func dataDirsUnder(root string, depth int) []string {
 			continue
 		}
 		dirs = append(dirs, dataDirsUnder(dir, depth-1)...)
+	}
+	return dirs
+}
+
+// baselineCheckDataDirs is the data dir of every baseline check under each
+// of dataDirs (prepareBaselineCheck). dataDirsUnder does not look inside a
+// data dir it found, and a check builds in a data dir of its own there.
+func baselineCheckDataDirs(dataDirs []string) []string {
+	var dirs []string
+	for _, dataDir := range dataDirs {
+		checks, _ := filepath.Glob(filepath.Join(dataDir, baselineChecksDir, "*", "data"))
+		dirs = append(dirs, checks...)
 	}
 	return dirs
 }
@@ -291,18 +306,21 @@ func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress string, 
 // ones first when fix is set, and returns the row. ok is false when the
 // gateway does not answer or cannot list: the gateway's own row says why.
 func doctorSandboxOwnersCheck(dp *deps, ctx context.Context, in doctorInputs, fix bool, w io.Writer) (check doctorCheck, ok bool) {
+	dataDirs := sandboxDataDirs(in.dataDir)
 	list := func() ([]sandboxOwner, error) {
 		names, err := dp.sandbox.sandboxNames(ctx)
 		if err != nil || len(names) == 0 {
 			return nil, err
 		}
-		return sandboxOwners(names, sandboxDataDirs(in.dataDir)), nil
+		return sandboxOwners(names, dataDirs), nil
 	}
-	if dp.sandbox.gatewayHealthy(ctx) != nil {
+	if err := dp.sandbox.gatewayHealthy(ctx); err != nil {
+		leaveNamedSandbox(in, w, "the OpenShell gateway does not answer")
 		return doctorCheck{}, false
 	}
 	owners, err := list()
 	if err != nil {
+		leaveNamedSandbox(in, w, "the gateway could not list its sandboxes")
 		return doctorCheck{}, false
 	}
 	if fix && anyLost(owners) {
@@ -313,9 +331,9 @@ func doctorSandboxOwnersCheck(dp *deps, ctx context.Context, in doctorInputs, fi
 	}
 	switch {
 	case in.removeSandbox != "" && !fix:
-		fmt.Fprintf(w, "sandboxes: left sandbox %s: -remove-sandbox deletes it only with -fix\n", sanitize.Line(in.removeSandbox))
+		leaveNamedSandbox(in, w, "-remove-sandbox deletes it only with -fix")
 	case in.removeSandbox != "":
-		removeUnownedSandbox(dp, ctx, owners, in.removeSandbox, w)
+		removeUnownedSandbox(dp, ctx, in, owners, dataDirs, w)
 		if owners, err = list(); err != nil {
 			return doctorCheck{}, false
 		}
@@ -327,28 +345,64 @@ func doctorSandboxOwnersCheck(dp *deps, ctx context.Context, in doctorInputs, fi
 // flags, as doctorRegisterYesFlag does, for a flag only
 // doctorSandboxOwnersCheck reads.
 func doctorRegisterRemoveSandboxFlag(flags *flag.FlagSet) *string {
-	return flags.String("remove-sandbox", "", "With -fix, delete this sandbox if no run in a data dir doctor knows started it: for one left by a build whose data dir was deleted.")
+	return flags.String("remove-sandbox", "", "With -fix, also delete this sandbox and its run's sidecars if no run in a data dir doctor knows started it: for one whose data dir was deleted.")
+}
+
+// leaveNamedSandbox says why -remove-sandbox did nothing, when it was given.
+func leaveNamedSandbox(in doctorInputs, w io.Writer, why string) {
+	if in.removeSandbox != "" {
+		fmt.Fprintf(w, "sandboxes: left sandbox %s: %s\n", sanitize.Line(in.removeSandbox), why)
+	}
 }
 
 // removeUnownedSandbox is -fix -remove-sandbox: it deletes the named sandbox
-// only when no run in any data dir doctor knows recorded it. Such a sandbox
-// is never lost (sandboxOwners), so reclaimLostSandboxes leaves it, and
-// nothing proves its build is gone: the operator naming it is the proof. A
-// sandbox a known run recorded is refused, whatever that run's state: the
-// lost-sandbox reclaim, under its data dir's worker lock, is its only path.
-func removeUnownedSandbox(dp *deps, ctx context.Context, owners []sandboxOwner, name string, w io.Writer) {
+// only when no run in any data dir doctor knows recorded it, then the
+// containers, networks and volumes labelled for its run. Such a sandbox is
+// never lost (sandboxOwners), so reclaimLostSandboxes leaves it, and nothing
+// on the machine proves its build is gone: the operator naming it is that
+// proof. Two checks keep the name from deleting a live build's sandbox: one
+// a known run recorded is refused, whatever that run's state (the
+// lost-sandbox reclaim, under its data dir's worker lock, is its only path),
+// and so is one whose gateway data-dir label is that of a data dir doctor
+// knows, whose records doctor could not read.
+func removeUnownedSandbox(dp *deps, ctx context.Context, in doctorInputs, owners []sandboxOwner, dataDirs []string, w io.Writer) {
+	name := in.removeSandbox
 	i := slices.IndexFunc(owners, func(o sandboxOwner) bool { return o.name == name })
-	switch {
-	case i < 0:
+	if i < 0 {
 		fmt.Fprintf(w, "sandboxes: the gateway holds no sandbox %s\n", sanitize.Line(name))
-	case owners[i].runID != "":
-		fmt.Fprintf(w, "sandboxes: left sandbox %s: it belongs to run %s in %s, and `factoryd doctor -fix` removes it once that build is gone\n", sanitize.Line(name), sanitize.Line(owners[i].runID), owners[i].dataDir)
-	default:
-		if err := deleteSandbox(dp, ctx, name); err != nil {
-			fmt.Fprintf(w, "sandboxes: could not delete sandbox %s: %v\n", sanitize.Line(name), err)
+		return
+	}
+	if o := owners[i]; o.runID != "" {
+		fmt.Fprintf(w, "sandboxes: left sandbox %s: it belongs to run %s in %s; `factoryd doctor -data-dir %s -fix` reclaims it once that build is gone\n", sanitize.Line(name), sanitize.Line(o.runID), o.dataDir, o.dataDir)
+		return
+	}
+	labels, err := dp.sandbox.sandboxLabels(ctx, name)
+	if err != nil {
+		leaveNamedSandbox(in, w, fmt.Sprintf("could not read its labels: %v", err))
+		return
+	}
+	runLabel, dataDirLabel := labels[openshell.LabelRun], labels[openshell.LabelDataDir]
+	if runLabel == "" || dataDirLabel == "" {
+		leaveNamedSandbox(in, w, "it carries no buildgate run or data-dir label, so factoryd did not start it")
+		return
+	}
+	for _, dataDir := range dataDirs {
+		if label, err := sandbox.DataDirLabel(dataDir); err == nil && strings.HasPrefix(label, dataDirLabel) {
+			leaveNamedSandbox(in, w, fmt.Sprintf("its data dir %s still exists, but doctor could not read the record of its run; `factoryd doctor -data-dir %s -fix` reclaims it once its build is gone", dataDir, dataDir))
 			return
 		}
-		fmt.Fprintf(w, "sandboxes: deleted sandbox %s, which no run in a data dir doctor knows started\n", sanitize.Line(name))
+	}
+	if err := deleteSandbox(dp, ctx, name); err != nil {
+		fmt.Fprintf(w, "sandboxes: could not delete sandbox %s: %v\n", sanitize.Line(name), err)
+		return
+	}
+	fmt.Fprintf(w, "sandboxes: deleted sandbox %s of run %s, which no run in a data dir doctor knows started\n", sanitize.Line(name), sanitize.Line(runLabel))
+	removed, err := sandbox.RemoveLostRunResources(ctx, in.sandboxDocker, dataDirLabel, runLabel)
+	if len(removed) > 0 {
+		fmt.Fprintf(w, "sandboxes: removed its run's %s\n", strings.Join(removed, ", "))
+	}
+	if err != nil {
+		fmt.Fprintf(w, "sandboxes: could not remove all of its run's containers, networks and volumes: %v\n", err)
 	}
 }
 

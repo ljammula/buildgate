@@ -305,13 +305,20 @@ func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	held := []string{"sb-stray", "sb-other"}
 	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
 	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return held, nil }
+	fakeSandboxOf(dp).sandboxLabelsFn = func(context.Context, string) (map[string]string, error) {
+		return map[string]string{"buildgate.run": "run-gone", "buildgate.data-dir": strings.Repeat("ab", 31) + "c"}, nil
+	}
 	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime {
 		return &fakeSandboxes{deleteFn: func(_ context.Context, name string) error {
 			held = slices.DeleteFunc(held, func(n string) bool { return n == name })
 			return nil
 		}}
 	}
-	in := doctorInputs{dataDir: t.TempDir(), removeSandbox: "sb-stray"}
+	docker := filepath.Join(t.TempDir(), "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	in := doctorInputs{dataDir: t.TempDir(), removeSandbox: "sb-stray", sandboxDocker: docker}
 
 	var out bytes.Buffer
 	before, _ := doctorSandboxOwnersCheck(dp, context.Background(), in, false, &out)
@@ -320,7 +327,7 @@ func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	}
 	out.Reset()
 	after, _ := doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
-	if !slices.Equal(held, []string{"sb-other"}) || !strings.Contains(out.String(), "deleted sandbox sb-stray") {
+	if !slices.Equal(held, []string{"sb-other"}) || !strings.Contains(out.String(), "deleted sandbox sb-stray of run run-gone") {
 		t.Errorf("-fix must delete sb-stray and only it: held %v, out %q", held, out.String())
 	}
 	if after.Err == nil || strings.Contains(after.Err.Error(), "sb-stray") {
@@ -332,5 +339,56 @@ func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
 	if !strings.Contains(out.String(), "holds no sandbox sb-gone") {
 		t.Errorf("a name the gateway does not hold must be said: %q", out.String())
+	}
+}
+
+// -fix -remove-sandbox leaves a sandbox whose labels tie it to a data dir
+// doctor can see (its run's record could not be read there), and one that
+// carries no buildgate labels at all.
+func TestDoctorFixRemoveSandboxRefusesOneTiedToAKnownDataDir(t *testing.T) {
+	dp := newTestDeps(t)
+	sandboxOwnerHome(t)
+	dataDir := t.TempDir()
+	label, err := sandbox.DataDirLabel(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := map[string]string{"buildgate.run": "run-torn", "buildgate.data-dir": label[:63]}
+	deleted := []string{}
+	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
+	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return []string{"sb-torn"}, nil }
+	fakeSandboxOf(dp).sandboxLabelsFn = func(context.Context, string) (map[string]string, error) { return labels, nil }
+	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime {
+		return &fakeSandboxes{deleteFn: func(_ context.Context, name string) error { deleted = append(deleted, name); return nil }}
+	}
+	in := doctorInputs{dataDir: dataDir, removeSandbox: "sb-torn"}
+
+	var out bytes.Buffer
+	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
+	if len(deleted) != 0 || !strings.Contains(out.String(), "its data dir "+dataDir+" still exists") {
+		t.Errorf("a sandbox of a data dir doctor knows must be left: deleted %v, out %q", deleted, out.String())
+	}
+
+	labels = map[string]string{}
+	out.Reset()
+	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
+	if len(deleted) != 0 || !strings.Contains(out.String(), "carries no buildgate run or data-dir label") {
+		t.Errorf("a sandbox factoryd did not label must be left: deleted %v, out %q", deleted, out.String())
+	}
+}
+
+// A baseline check builds in a data dir of its own inside another data dir,
+// where dataDirsUnder does not look; its sandbox is found there.
+func TestSandboxDataDirsIncludeABaselineChecksDataDir(t *testing.T) {
+	home := sandboxOwnerHome(t)
+	check := filepath.Join(home, "buildgate", "data", baselineChecksDir, "check-20261018-120000.000", "data")
+	if err := os.MkdirAll(filepath.Join(check, "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "buildgate", "data", "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if dirs := sandboxDataDirs(""); !slices.Contains(dirs, check) {
+		t.Errorf("sandboxDataDirs = %v, want it to include the baseline check's %s", dirs, check)
 	}
 }

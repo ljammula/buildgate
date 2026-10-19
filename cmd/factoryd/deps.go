@@ -160,6 +160,8 @@ type sandboxRuntimeBoundary interface {
 	// startStack starts the meter, then the gateway, and waits for both.
 	startStack(ctx context.Context, w io.Writer, meterImage string) error
 	sandboxNames(ctx context.Context) ([]string, error)
+	// sandboxLabels are the labels the gateway stores with a sandbox.
+	sandboxLabels(ctx context.Context, name string) (map[string]string, error)
 }
 
 type temporalBoundary interface {

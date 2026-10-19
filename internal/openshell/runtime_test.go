@@ -277,8 +277,12 @@ func TestCreateStoresTheSandboxWithItsRunLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	// sha256("/data"), cut to the gateway's 63-character label limit.
-	if want := map[string]string{"buildgate.run": "run1", "buildgate.data-dir": "bd47413b5c03dfc6e4b5b8143fe205eae10ecaf0c28b426be98d74cff48c745"}; !reflect.DeepEqual(stored.Labels, want) {
+	want := map[string]string{"buildgate.run": "run1", "buildgate.data-dir": "bd47413b5c03dfc6e4b5b8143fe205eae10ecaf0c28b426be98d74cff48c745"}
+	if !reflect.DeepEqual(stored.Labels, want) {
 		t.Errorf("labels = %v, want %v", stored.Labels, want)
+	}
+	if labels, err := rt.Labels(ctx, ref.Name); err != nil || !reflect.DeepEqual(labels, want) {
+		t.Errorf("Labels = %v, %v, want %v", labels, err, want)
 	}
 	// The template is removed as soon as the sandbox exists.
 	if _, err := client.SandboxTemplates().Get(ctx, DefaultWorkspace, ref.Name); !v1.IsNotFound(err) {

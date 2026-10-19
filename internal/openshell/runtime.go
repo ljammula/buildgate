@@ -524,6 +524,16 @@ func diagnostics(list []v1.ProfileDiagnostic) string {
 }
 
 // Names lists every sandbox the gateway holds, whichever run made it.
+// Labels returns the labels the gateway stores with a sandbox: LabelRun and
+// LabelDataDir, each cut to the gateway's length limit.
+func (r *Runtime) Labels(ctx context.Context, name string) (map[string]string, error) {
+	sb, err := r.Client.Sandboxes().Get(ctx, r.workspace(), name)
+	if err != nil {
+		return nil, fmt.Errorf("openshell: read sandbox %s: %w", name, err)
+	}
+	return sb.Labels, nil
+}
+
 func (r *Runtime) Names(ctx context.Context) ([]string, error) {
 	all, err := r.Client.Sandboxes().ListAll(ctx, r.workspace())
 	if err != nil {

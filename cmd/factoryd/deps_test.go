@@ -199,6 +199,7 @@ type fakeSandboxRuntime struct {
 	portHoldersFn    func(ctx context.Context, addrs ...string) []string
 	runtimeFn        func() sandbox.Runtime
 	sandboxNamesFn   func(ctx context.Context) ([]string, error)
+	sandboxLabelsFn  func(ctx context.Context, name string) (map[string]string, error)
 	startStackFn     func(ctx context.Context, w io.Writer, meterImage string) error
 }
 
@@ -212,6 +213,10 @@ func (f *fakeSandboxRuntime) portHolders(ctx context.Context, addrs ...string) [
 func (f *fakeSandboxRuntime) runtime() sandbox.Runtime { return f.runtimeFn() }
 func (f *fakeSandboxRuntime) sandboxNames(ctx context.Context) ([]string, error) {
 	return f.sandboxNamesFn(ctx)
+}
+
+func (f *fakeSandboxRuntime) sandboxLabels(ctx context.Context, name string) (map[string]string, error) {
+	return f.sandboxLabelsFn(ctx, name)
 }
 
 func (f *fakeSandboxRuntime) startStack(ctx context.Context, w io.Writer, meterImage string) error {
@@ -350,6 +355,7 @@ func newTestDeps(t testing.TB) *deps {
 		portHoldersFn:    func(context.Context, ...string) []string { return nil },
 		runtimeFn:        realSandbox.runtime,
 		sandboxNamesFn:   realSandbox.sandboxNames,
+		sandboxLabelsFn:  realSandbox.sandboxLabels,
 		startStackFn:     realSandbox.startStack,
 	}
 	realTemporal := realTemporal{dp: dp}
@@ -374,6 +380,9 @@ func newTestDeps(t testing.TB) *deps {
 	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return errors.New("stubbed in tests") }
 	fakeSandboxOf(dp).meterHealthyFn = func(context.Context) error { return errors.New("stubbed in tests") }
 	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return nil, nil }
+	fakeSandboxOf(dp).sandboxLabelsFn = func(context.Context, string) (map[string]string, error) {
+		return nil, errors.New("stubbed in tests")
+	}
 	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime { return nil }
 	fakeSandboxOf(dp).startStackFn = func(context.Context, io.Writer, string) error {
 		return errors.New("tests start no real OpenShell stack")

@@ -107,6 +107,15 @@ func (l *Lazy) PushCredential(ctx context.Context, cred sandbox.RouteCredential)
 	return rt.PushCredential(ctx, cred)
 }
 
+// Labels returns the labels the gateway stores with a sandbox.
+func (l *Lazy) Labels(ctx context.Context, name string) (map[string]string, error) {
+	rt, err := l.runtime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return rt.Labels(ctx, name)
+}
+
 // Names lists every sandbox the gateway holds, whichever run made it.
 func (l *Lazy) Names(ctx context.Context) ([]string, error) {
 	rt, err := l.runtime(ctx)
