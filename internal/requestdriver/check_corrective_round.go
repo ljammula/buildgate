@@ -186,7 +186,7 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	if !ok {
 		return args, "", false
 	}
-	diffBase := diffBaseOf(previous)
+	diffBase := previous.DiffBase()
 	// Nothing to continue from when the attempt committed nothing or its
 	// branch is not recorded: the rebuild starts from the base as before.
 	continues = continues && previous.Branch != "" && previous.ResultSHA != "" && previous.ResultSHA != diffBase
@@ -205,15 +205,6 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 		args = append(args, "-on-branch", previous.Branch, "-diff-base", diffBase)
 	}
 	return args, previous.ID, continues
-}
-
-// diffBaseOf is the commit a run's whole change is measured from: its
-// recorded diff base when it ran on an existing branch, else its own base.
-func diffBaseOf(r *run.Run) string {
-	if r.DiffBaseSHA != "" {
-		return r.DiffBaseSHA
-	}
-	return r.BaseSHA
 }
 
 // The sentence a record opens with, saying where the build that reads it

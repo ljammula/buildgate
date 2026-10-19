@@ -1449,7 +1449,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			return true, quarantineRequestWithCheck(dataDir, r, reason, check, now)
 		}
 
-		diffBase := diffBaseOf(current)
+		diffBase := current.DiffBase()
 		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
 		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
 		if err != nil {
@@ -2323,7 +2323,7 @@ func requestInstructionBase(dataDir string, r *request.Request, ticket request.T
 	if err != nil {
 		return "", cannot(fmt.Sprintf("cannot be loaded: %v", err))
 	}
-	for _, sha := range []string{earlier.InstructionBaseSHA, diffBaseOf(earlier)} {
+	for _, sha := range []string{earlier.InstructionBaseSHA, earlier.DiffBase()} {
 		if sha != "" {
 			return sha, nil
 		}
