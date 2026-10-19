@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -104,7 +102,7 @@ func (r *Runtime) Create(ctx context.Context, req sandbox.SandboxRequest) (sandb
 	if err != nil {
 		return sandbox.SandboxRef{}, err
 	}
-	labels := map[string]string{LabelRun: labelValue(req.RunID), LabelDataDir: labelValue(dataDirLabel)}
+	labels := map[string]string{LabelRun: sandbox.GatewayLabelValue(req.RunID), LabelDataDir: sandbox.GatewayLabelValue(dataDirLabel)}
 	var removeVolume func() error
 	if req.Scratch {
 		if removeVolume, err = r.createScratch(ctx, req.Name, labels); err != nil {
@@ -488,25 +486,6 @@ func Connect(address, bundleDir string) (*v1.Client, error) {
 		return nil, fmt.Errorf("openshell: connect to the gateway at %s: %w", address, err)
 	}
 	return client, nil
-}
-
-// maxLabelValueLength is the gateway's limit on a label value.
-const maxLabelValueLength = 63
-
-var labelValueDisallowed = regexp.MustCompile(`[^A-Za-z0-9._-]`)
-
-// labelValue fits s to what the gateway accepts as a label value: letters,
-// digits, '-', '_' and '.', at most maxLabelValueLength long, beginning and
-// ending with a letter or a digit. The ends are trimmed after the cut: a run
-// id cut at the limit can end on a '-', and the gateway then refuses the
-// sandbox. Labels are for a person listing sandboxes; the run's own record
-// is what the factory reads.
-func labelValue(s string) string {
-	s = labelValueDisallowed.ReplaceAllString(s, "-")
-	if len(s) > maxLabelValueLength {
-		s = s[:maxLabelValueLength]
-	}
-	return strings.Trim(s, "-_.")
 }
 
 func diagnostics(list []v1.ProfileDiagnostic) string {

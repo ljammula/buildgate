@@ -15,6 +15,7 @@ import (
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/workflow"
+	"buildgate/internal/workspace"
 )
 
 // sandboxOwnerHome points HOME and the config dir at an empty directory, so
@@ -298,25 +299,38 @@ func TestDoctorFixLeavesALiveBarRunsSandbox(t *testing.T) {
 }
 
 // -fix -remove-sandbox deletes a sandbox no known run recorded, the one a
-// build whose data dir was deleted leaves, and only the one named.
+// build whose data dir was deleted leaves, and only the one named: its run's
+// containers first, then the sandbox, then its run's networks and volumes.
 func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	dp := newTestDeps(t)
 	sandboxOwnerHome(t)
+	gone := strings.Repeat("ab", 32)
+	logFile := filepath.Join(t.TempDir(), "docker.log")
+	docker := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\necho \"$*\" >> " + logFile + "\ncase \"$1 $2\" in\n" +
+		"\"ps -a\") case \"$*\" in *compose.project*) ;; *) printf 'proxy-gone\\t" + gone + "\\trun-gone\\n' ;; esac ;;\n" +
+		"\"network ls\") printf 'net-gone\\t" + gone + "\\trun-gone\\n' ;;\nesac\nexit 0\n"
+	if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	held := []string{"sb-stray", "sb-other"}
 	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
 	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return held, nil }
-	fakeSandboxOf(dp).sandboxLabelsFn = func(context.Context, string) (map[string]string, error) {
-		return map[string]string{"buildgate.run": "run-gone", "buildgate.data-dir": strings.Repeat("ab", 31) + "c"}, nil
+	fakeSandboxOf(dp).sandboxLabelsFn = func(_ context.Context, name string) (map[string]string, error) {
+		run := "run-gone"
+		if name != "sb-stray" {
+			run = "run-other"
+		}
+		return map[string]string{"buildgate.run": run, "buildgate.data-dir": gone[:63]}, nil
 	}
 	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime {
 		return &fakeSandboxes{deleteFn: func(_ context.Context, name string) error {
+			f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o600)
+			defer f.Close()
+			f.WriteString("gateway delete " + name + "\n")
 			held = slices.DeleteFunc(held, func(n string) bool { return n == name })
 			return nil
 		}}
-	}
-	docker := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
 	}
 	in := doctorInputs{dataDir: t.TempDir(), removeSandbox: "sb-stray", sandboxDocker: docker}
 
@@ -327,8 +341,13 @@ func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	}
 	out.Reset()
 	after, _ := doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
-	if !slices.Equal(held, []string{"sb-other"}) || !strings.Contains(out.String(), "deleted sandbox sb-stray of run run-gone") {
-		t.Errorf("-fix must delete sb-stray and only it: held %v, out %q", held, out.String())
+	if !slices.Equal(held, []string{"sb-other"}) || !strings.Contains(out.String(), "deleted sandbox sb-stray of run run-gone") || !strings.Contains(out.String(), "removed its run's proxy-gone, net-gone") {
+		t.Errorf("-fix must delete sb-stray, only it, and its run's resources: held %v, out %q", held, out.String())
+	}
+	log, _ := os.ReadFile(logFile)
+	container, sandboxAt, network := strings.Index(string(log), "rm -f proxy-gone"), strings.Index(string(log), "gateway delete sb-stray"), strings.Index(string(log), "network rm net-gone")
+	if container < 0 || sandboxAt < container || network < sandboxAt {
+		t.Errorf("want the container removed, then the sandbox, then the network:\n%s", log)
 	}
 	if after.Err == nil || strings.Contains(after.Err.Error(), "sb-stray") {
 		t.Errorf("the row must still warn, for sb-other only: %+v", after)
@@ -337,43 +356,64 @@ func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	out.Reset()
 	in.removeSandbox = "sb-gone"
 	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
-	if !strings.Contains(out.String(), "holds no sandbox sb-gone") {
+	if !strings.Contains(out.String(), "left sandbox sb-gone: the gateway holds no sandbox of that name") {
 		t.Errorf("a name the gateway does not hold must be said: %q", out.String())
 	}
 }
 
 // -fix -remove-sandbox leaves a sandbox whose labels tie it to a data dir
-// doctor can see (its run's record could not be read there), and one that
-// carries no buildgate labels at all.
-func TestDoctorFixRemoveSandboxRefusesOneTiedToAKnownDataDir(t *testing.T) {
+// doctor can see (its run's record could not be read there), also when a
+// launch labelled that data dir by its symlink-resolved path; one that
+// carries no buildgate labels; and one whose labels another held sandbox
+// shares.
+func TestDoctorFixRemoveSandboxRefusesOneThatCouldBeALiveBuilds(t *testing.T) {
 	dp := newTestDeps(t)
 	sandboxOwnerHome(t)
-	dataDir := t.TempDir()
-	label, err := sandbox.DataDirLabel(dataDir)
+	real := t.TempDir()
+	linked := filepath.Join(t.TempDir(), "data")
+	if err := os.Symlink(real, linked); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := workspace.CanonicalPath(linked)
 	if err != nil {
 		t.Fatal(err)
 	}
-	labels := map[string]string{"buildgate.run": "run-torn", "buildgate.data-dir": label[:63]}
+	label, err := sandbox.DataDirLabel(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := map[string]map[string]string{"sb-torn": {"buildgate.run": "run-torn", "buildgate.data-dir": sandbox.GatewayLabelValue(label)}}
+	held := []string{"sb-torn"}
 	deleted := []string{}
 	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
-	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return []string{"sb-torn"}, nil }
-	fakeSandboxOf(dp).sandboxLabelsFn = func(context.Context, string) (map[string]string, error) { return labels, nil }
+	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return held, nil }
+	fakeSandboxOf(dp).sandboxLabelsFn = func(_ context.Context, name string) (map[string]string, error) { return labels[name], nil }
 	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime {
 		return &fakeSandboxes{deleteFn: func(_ context.Context, name string) error { deleted = append(deleted, name); return nil }}
 	}
-	in := doctorInputs{dataDir: dataDir, removeSandbox: "sb-torn"}
+	in := doctorInputs{dataDir: linked, removeSandbox: "sb-torn", sandboxDocker: "/nonexistent/docker"}
 
 	var out bytes.Buffer
 	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
-	if len(deleted) != 0 || !strings.Contains(out.String(), "its data dir "+dataDir+" still exists") {
-		t.Errorf("a sandbox of a data dir doctor knows must be left: deleted %v, out %q", deleted, out.String())
+	if len(deleted) != 0 || !strings.Contains(out.String(), "still exists") {
+		t.Errorf("a sandbox of a data dir doctor knows, labelled by its resolved path, must be left: deleted %v, out %q", deleted, out.String())
 	}
 
-	labels = map[string]string{}
+	in.dataDir = t.TempDir()
+	labels["sb-torn"] = map[string]string{}
 	out.Reset()
 	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
 	if len(deleted) != 0 || !strings.Contains(out.String(), "carries no buildgate run or data-dir label") {
-		t.Errorf("a sandbox factoryd did not label must be left: deleted %v, out %q", deleted, out.String())
+		t.Errorf("a sandbox with no buildgate labels must be left: deleted %v, out %q", deleted, out.String())
+	}
+
+	twin := map[string]string{"buildgate.run": "req-001-20261018-2", "buildgate.data-dir": strings.Repeat("ef", 31) + "e"}
+	labels["sb-torn"], labels["sb-twin"] = twin, twin
+	held = []string{"sb-torn", "sb-twin"}
+	out.Reset()
+	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
+	if len(deleted) != 0 || !strings.Contains(out.String(), "sandbox sb-twin carries the same run and data-dir labels") {
+		t.Errorf("a sandbox whose labels another held sandbox shares must be left: deleted %v, out %q", deleted, out.String())
 	}
 }
 

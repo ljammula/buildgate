@@ -19,6 +19,7 @@ import (
 	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/workflow"
+	"buildgate/internal/workspace"
 )
 
 // sandboxOwner is the run a sandbox the gateway lists belongs to. The run is
@@ -356,53 +357,107 @@ func leaveNamedSandbox(in doctorInputs, w io.Writer, why string) {
 }
 
 // removeUnownedSandbox is -fix -remove-sandbox: it deletes the named sandbox
-// only when no run in any data dir doctor knows recorded it, then the
+// only when no run in any data dir doctor knows recorded it, with the
 // containers, networks and volumes labelled for its run. Such a sandbox is
 // never lost (sandboxOwners), so reclaimLostSandboxes leaves it, and nothing
 // on the machine proves its build is gone: the operator naming it is that
-// proof. Two checks keep the name from deleting a live build's sandbox: one
-// a known run recorded is refused, whatever that run's state (the
-// lost-sandbox reclaim, under its data dir's worker lock, is its only path),
-// and so is one whose gateway data-dir label is that of a data dir doctor
-// knows, whose records doctor could not read.
+// proof. lostRunOfSandbox refuses the cases where the name could reach a
+// live build. The run's containers go before its sandbox and its networks
+// after, and a container that cannot be removed keeps the sandbox, so
+// running the command again finds both.
 func removeUnownedSandbox(dp *deps, ctx context.Context, in doctorInputs, owners []sandboxOwner, dataDirs []string, w io.Writer) {
 	name := in.removeSandbox
-	i := slices.IndexFunc(owners, func(o sandboxOwner) bool { return o.name == name })
-	if i < 0 {
-		fmt.Fprintf(w, "sandboxes: the gateway holds no sandbox %s\n", sanitize.Line(name))
+	lost, why := lostRunOfSandbox(dp, ctx, name, owners, dataDirs)
+	if why != "" {
+		leaveNamedSandbox(in, w, why)
 		return
 	}
-	if o := owners[i]; o.runID != "" {
-		fmt.Fprintf(w, "sandboxes: left sandbox %s: it belongs to run %s in %s; `factoryd doctor -data-dir %s -fix` reclaims it once that build is gone\n", sanitize.Line(name), sanitize.Line(o.runID), o.dataDir, o.dataDir)
-		return
-	}
-	labels, err := dp.sandbox.sandboxLabels(ctx, name)
+	removed, err := sandbox.RemoveLostRunContainers(ctx, in.sandboxDocker, lost)
 	if err != nil {
-		leaveNamedSandbox(in, w, fmt.Sprintf("could not read its labels: %v", err))
+		reportLostRunRemoval(w, removed)
+		leaveNamedSandbox(in, w, fmt.Sprintf("not every container of its run could be removed (%v); run this again once Docker answers", err))
 		return
-	}
-	runLabel, dataDirLabel := labels[openshell.LabelRun], labels[openshell.LabelDataDir]
-	if runLabel == "" || dataDirLabel == "" {
-		leaveNamedSandbox(in, w, "it carries no buildgate run or data-dir label, so factoryd did not start it")
-		return
-	}
-	for _, dataDir := range dataDirs {
-		if label, err := sandbox.DataDirLabel(dataDir); err == nil && strings.HasPrefix(label, dataDirLabel) {
-			leaveNamedSandbox(in, w, fmt.Sprintf("its data dir %s still exists, but doctor could not read the record of its run; `factoryd doctor -data-dir %s -fix` reclaims it once its build is gone", dataDir, dataDir))
-			return
-		}
 	}
 	if err := deleteSandbox(dp, ctx, name); err != nil {
+		reportLostRunRemoval(w, removed)
 		fmt.Fprintf(w, "sandboxes: could not delete sandbox %s: %v\n", sanitize.Line(name), err)
 		return
 	}
-	fmt.Fprintf(w, "sandboxes: deleted sandbox %s of run %s, which no run in a data dir doctor knows started\n", sanitize.Line(name), sanitize.Line(runLabel))
-	removed, err := sandbox.RemoveLostRunResources(ctx, in.sandboxDocker, dataDirLabel, runLabel)
+	fmt.Fprintf(w, "sandboxes: deleted sandbox %s of run %s, which no run in a data dir doctor knows started\n", sanitize.Line(name), sanitize.Line(lost.Run))
+	more, err := sandbox.RemoveLostRunNetworksAndVolumes(ctx, in.sandboxDocker, lost)
+	reportLostRunRemoval(w, append(removed, more...))
+	if err != nil {
+		fmt.Fprintf(w, "sandboxes: left some of its run's networks or volumes: %v\n", err)
+	}
+}
+
+// lostRunOfSandbox is the run the named sandbox's gateway labels name, or
+// why the sandbox must be left: the gateway does not hold it; a known run
+// recorded it, whatever that run's state (the lost-sandbox reclaim, under
+// its data dir's worker lock, is its only path); it carries no buildgate
+// labels; its data-dir label is that of a data dir doctor knows, in either
+// the path doctor reads or the symlink-resolved one a launch labels, so its
+// run's record was there but could not be read; or another sandbox the
+// gateway holds carries the same labels, so the two runs' resources cannot
+// be told apart.
+func lostRunOfSandbox(dp *deps, ctx context.Context, name string, owners []sandboxOwner, dataDirs []string) (sandbox.LostRun, string) {
+	i := slices.IndexFunc(owners, func(o sandboxOwner) bool { return o.name == name })
+	if i < 0 {
+		return sandbox.LostRun{}, "the gateway holds no sandbox of that name"
+	}
+	if o := owners[i]; o.runID != "" {
+		return sandbox.LostRun{}, fmt.Sprintf("it belongs to run %s in %s; `factoryd doctor -data-dir %s -fix` reclaims it once that build is gone", sanitize.Line(o.runID), o.dataDir, o.dataDir)
+	}
+	lost, err := gatewayLostRun(dp, ctx, name)
+	if err != nil {
+		return sandbox.LostRun{}, err.Error()
+	}
+	if dataDir, known := knownDataDirOfLabel(lost.DataDir, dataDirs); known {
+		return sandbox.LostRun{}, fmt.Sprintf("its data dir %s still exists, but doctor could not read the record of its run; `factoryd doctor -data-dir %s -fix` reclaims it once its build is gone", dataDir, dataDir)
+	}
+	for _, o := range owners {
+		if other, err := gatewayLostRun(dp, ctx, o.name); o.name != name && err == nil && other == lost {
+			return sandbox.LostRun{}, fmt.Sprintf("sandbox %s carries the same run and data-dir labels, so the resources of the two runs cannot be told apart", sanitize.Line(o.name))
+		}
+	}
+	return lost, ""
+}
+
+// gatewayLostRun reads the run and data-dir labels the gateway keeps for a
+// sandbox.
+func gatewayLostRun(dp *deps, ctx context.Context, name string) (sandbox.LostRun, error) {
+	labels, err := dp.sandbox.sandboxLabels(ctx, name)
+	if err != nil {
+		return sandbox.LostRun{}, fmt.Errorf("could not read its labels: %v", err)
+	}
+	lost := sandbox.LostRun{Run: labels[openshell.LabelRun], DataDir: labels[openshell.LabelDataDir]}
+	if lost.Run == "" || lost.DataDir == "" {
+		return sandbox.LostRun{}, errors.New("it carries no buildgate run or data-dir label")
+	}
+	return lost, nil
+}
+
+// knownDataDirOfLabel returns the data dir among dataDirs whose label, as
+// the gateway keeps it, is label.
+func knownDataDirOfLabel(label string, dataDirs []string) (string, bool) {
+	for _, dataDir := range dataDirs {
+		forms := []string{dataDir}
+		if canonical, err := workspace.CanonicalPath(dataDir); err == nil {
+			forms = append(forms, canonical)
+		}
+		for _, form := range forms {
+			if full, err := sandbox.DataDirLabel(form); err == nil && sandbox.GatewayLabelValue(full) == label {
+				return dataDir, true
+			}
+		}
+	}
+	return "", false
+}
+
+// reportLostRunRemoval says what of a lost run's resources was removed.
+func reportLostRunRemoval(w io.Writer, removed []string) {
 	if len(removed) > 0 {
 		fmt.Fprintf(w, "sandboxes: removed its run's %s\n", strings.Join(removed, ", "))
-	}
-	if err != nil {
-		fmt.Fprintf(w, "sandboxes: could not remove all of its run's containers, networks and volumes: %v\n", err)
 	}
 }
 

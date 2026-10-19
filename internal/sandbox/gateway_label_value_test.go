@@ -1,4 +1,4 @@
-package openshell
+package sandbox
 
 import (
 	"regexp"
@@ -6,15 +6,15 @@ import (
 	"testing"
 )
 
-// gatewayLabelValue is the gateway's rule for a label value: empty, or
+// gatewayAccepts is the gateway's rule for a label value: empty, or
 // letters, digits, '-', '_' and '.', beginning and ending with a letter or a
 // digit, at most 63 characters.
-var gatewayLabelValue = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)?$`)
+var gatewayAccepts = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)?$`)
 
 // Every label value the factory sends must be one the gateway accepts,
 // whatever the run id: a refused label is a sandbox that never starts. The
 // first case is a run id whose cut at the limit falls right after a '-'.
-func TestLabelValueIsAlwaysOneTheGatewayAccepts(t *testing.T) {
+func TestGatewayLabelValueIsAlwaysOneTheGatewayAccepts(t *testing.T) {
 	cases := []string{
 		"retry-strategies-in-tenacity-retry-py-co-20261011-113459-2-001-20261011-113512-77894",
 		"", "-", "---", "a", "a-", "-a", ".a_", "run 1/with spaces", "ünïcödé-run", "/Users/kanna/buildgate/walk3/data",
@@ -27,16 +27,16 @@ func TestLabelValueIsAlwaysOneTheGatewayAccepts(t *testing.T) {
 		}
 	}
 	for _, in := range cases {
-		got := labelValue(in)
-		if !gatewayLabelValue.MatchString(got) {
-			t.Errorf("labelValue(%q) = %q, which the gateway refuses", in, got)
+		got := GatewayLabelValue(in)
+		if !gatewayAccepts.MatchString(got) {
+			t.Errorf("GatewayLabelValue(%q) = %q, which the gateway refuses", in, got)
 		}
 	}
-	if got := labelValue("plain-run-1"); got != "plain-run-1" {
+	if got := GatewayLabelValue("plain-run-1"); got != "plain-run-1" {
 		t.Errorf("a value already valid changed: %q", got)
 	}
 	// Only the ends go: the cut value keeps everything else.
-	if got, want := labelValue(cases[0]), "retry-strategies-in-tenacity-retry-py-co-20261011-113459-2-001"; got != want {
+	if got, want := GatewayLabelValue(cases[0]), "retry-strategies-in-tenacity-retry-py-co-20261011-113459-2-001"; got != want {
 		t.Errorf("labelValue of a run id cut after a '-' = %q, want %q", got, want)
 	}
 }

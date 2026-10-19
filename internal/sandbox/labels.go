@@ -1,6 +1,9 @@
 package sandbox
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Docker label keys this package stamps on every container/network it
 // creates are "<labelPrefix><name>" (e.g. "buildgate.run").
@@ -31,4 +34,23 @@ func dedupeLines(lines []string, seen map[string]bool, out string) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// maxGatewayLabelValueLength is the sandbox gateway's limit on a label value.
+const maxGatewayLabelValueLength = 63
+
+var gatewayLabelValueDisallowed = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// GatewayLabelValue fits s to what the sandbox gateway accepts as a label
+// value: letters, digits, '-', '_' and '.', at most 63 long, beginning and
+// ending with a letter or a digit. The ends are trimmed after the cut: a run
+// id cut at the limit can end on a '-', and the gateway then refuses the
+// sandbox. The gateway keeps a sandbox's run id and data-dir label in this
+// form; the run's own record is what the factory reads.
+func GatewayLabelValue(s string) string {
+	s = gatewayLabelValueDisallowed.ReplaceAllString(s, "-")
+	if len(s) > maxGatewayLabelValueLength {
+		s = s[:maxGatewayLabelValueLength]
+	}
+	return strings.Trim(s, "-_.")
 }
