@@ -415,6 +415,18 @@ func TestDoctorFixRemoveSandboxRefusesOneThatCouldBeALiveBuilds(t *testing.T) {
 	if len(deleted) != 0 || !strings.Contains(out.String(), "sandbox sb-twin carries the same run and data-dir labels") {
 		t.Errorf("a sandbox whose labels another held sandbox shares must be left: deleted %v, out %q", deleted, out.String())
 	}
+
+	fakeSandboxOf(dp).sandboxLabelsFn = func(_ context.Context, name string) (map[string]string, error) {
+		if name == "sb-twin" {
+			return nil, errors.New("gateway timed out")
+		}
+		return twin, nil
+	}
+	out.Reset()
+	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
+	if len(deleted) != 0 || !strings.Contains(out.String(), "could not read the labels of sandbox sb-twin") {
+		t.Errorf("a sandbox must be left while another held sandbox's labels cannot be read: deleted %v, out %q", deleted, out.String())
+	}
 }
 
 // A baseline check builds in a data dir of its own inside another data dir,
