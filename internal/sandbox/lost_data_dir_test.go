@@ -38,7 +38,7 @@ func TestRemoveLostRunResourcesRemovesOnlyThatRunsResources(t *testing.T) {
 	short := LostRun{Run: "req-001", DataDir: lost.DataDir}
 	other := strings.Repeat("cd", 32)
 	docker, logFile := fakeLostRunDocker(t, map[string]string{
-		"--filter label=com.docker.compose.project": "bg-lost-a1\\t" + dataDir + "\\t" + longRun + "\\nbg-round-a1\\t" + dataDir + "\\treq-001-corrective1\\n",
+		"--filter label=com.docker.compose.project":        "bg-lost-a1\\t" + dataDir + "\\t" + longRun + "\\nbg-round-a1\\t" + dataDir + "\\treq-001-corrective1\\n",
 		"ps -a --filter label=buildgate.data-dir --format": "proxy-lost\\t" + dataDir + "\\t" + longRun + "\\nproxy-round\\t" + dataDir + "\\treq-001-corrective1\\nproxy-other-dir\\t" + other + "\\t" + longRun + "\\n",
 		"network ls --filter label=buildgate.data-dir":     "net-lost\\t" + dataDir + "\\t" + longRun + "\\n",
 		"volume ls --filter label=buildgate.data-dir":      "vol-lost\\t" + dataDir + "\\t" + longRun + "\\nvol-round\\t" + dataDir + "\\treq-001-corrective1\\n",
