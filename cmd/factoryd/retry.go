@@ -94,7 +94,9 @@ func retryRequestFrom(dp *deps, dataDir string, r *request.Request, reason strin
 	if fromScratch {
 		retry = request.RetryFromScratch
 	}
-	updated, err := retry(dataDir, r.ID, currentOSUser(), reason, now, func(a0 string, a1 string) request.PROpenOutcome { return retryPullRequestOpener(dp, a0, a1) })
+	updated, err := retry(dataDir, r.ID, currentOSUser(), reason, now, func(dataDir, runID, stackBase string) request.PROpenOutcome {
+		return retryPullRequestOpener(dp, dataDir, runID, stackBase)
+	})
 	if err != nil {
 		return true, err
 	}

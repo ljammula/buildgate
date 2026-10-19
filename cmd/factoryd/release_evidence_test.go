@@ -41,10 +41,11 @@ type fakePullRequestOpener struct {
 	unpushed        []string
 	unpushedErr     error
 	unpushedBaseSHA string
+	unpushedBase    string
 }
 
-func (f *fakePullRequestOpener) UnpushedBaseCommits(_ context.Context, _, _, baseSHA string) ([]string, error) {
-	f.unpushedBaseSHA = baseSHA
+func (f *fakePullRequestOpener) UnpushedBaseCommits(_ context.Context, _, base, baseSHA string) ([]string, error) {
+	f.unpushedBase, f.unpushedBaseSHA = base, baseSHA
 	return f.unpushed, f.unpushedErr
 }
 

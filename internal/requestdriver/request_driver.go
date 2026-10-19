@@ -2197,16 +2197,8 @@ func RequestSpecPath(dataDir, id string) string {
 func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string) (*QueueEntry, error) {
 	// prBase: ticket N (N>1) stacks its draft PR on ticket N-1's own
 	// branch while that PR is still open and unmerged -- see
-	// QueueEntry.PRBase's own doc comment for why. TicketAt's own bounds
-	// check makes idx-1 == 0 (ticket.Index == 1) a no-op here rather than
-	// an error: a request's first ticket never has a predecessor to stack
-	// on.
-	var prBase string
-	if ticket.Index > 1 {
-		if prev, err := TicketAt(r, ticket.Index-1); err == nil && prev.PRURL != "" && prev.PRState != "merged" && prev.Branch != "" {
-			prBase = prev.Branch
-		}
-	}
+	// QueueEntry.PRBase's own doc comment for why.
+	prBase := r.StackBase(ticket.Index)
 	verifyCommand, err := ticketspec.ParseVerifyCommand(ticket.SpecPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve verify command for request %s ticket %d: %w", r.ID, ticket.Index, err)
