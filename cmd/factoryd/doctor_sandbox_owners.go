@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"buildgate/internal/hostcontrol"
@@ -36,9 +38,11 @@ type sandboxOwner struct {
 }
 
 // sandboxDataDirDepth is how far under sessionconfig.DataRoot doctor looks
-// for a data dir: DataRoot/data, DataRoot/<name>/data and the scratch data
-// dirs the live scripts keep one level further down.
-const sandboxDataDirDepth = 3
+// for a data dir: DataRoot/data, DataRoot/<name>/data, the scratch data dirs
+// the live scripts keep one level further down, and the deepest of them,
+// scripts/bar.sh's DataRoot/bar/run.<id>/<fixture>/data. A data dir deeper
+// than this hides a live build's sandbox from doctor.
+const sandboxDataDirDepth = 4
 
 // sandboxDataDirs is every data dir doctor looks in for a sandbox's run:
 // its own, each profile's, and each directory holding a runs directory at
@@ -192,7 +196,7 @@ func doctorCheckSandboxOwners(owners []sandboxOwner) doctorCheck {
 		check.Fix = "run `factoryd doctor -fix`: it halts the run, puts its request in resume_review and removes the sandbox"
 	case len(unknown) > 0:
 		check.Err = fmt.Errorf("%s: no run in a data dir doctor knows (each profile's, and those within %d levels under %s) started it", strings.Join(unknown, "; "), sandboxDataDirDepth, sessionconfig.DataRoot())
-		check.Fix = "if a build is running from another data dir, leave it; otherwise run `factoryd doctor -data-dir <that data dir> -fix`"
+		check.Fix = "if a build is running from another data dir, leave it; otherwise run `factoryd doctor -data-dir <that data dir> -fix`, or, when that data dir was deleted, `factoryd doctor -fix -remove-sandbox <name>`"
 	case len(building) > 0:
 		check.Detail = strings.Join(building, "; ")
 	}
@@ -307,7 +311,45 @@ func doctorSandboxOwnersCheck(dp *deps, ctx context.Context, in doctorInputs, fi
 			return doctorCheck{}, false
 		}
 	}
+	switch {
+	case in.removeSandbox != "" && !fix:
+		fmt.Fprintf(w, "sandboxes: left sandbox %s: -remove-sandbox deletes it only with -fix\n", sanitize.Line(in.removeSandbox))
+	case in.removeSandbox != "":
+		removeUnownedSandbox(dp, ctx, owners, in.removeSandbox, w)
+		if owners, err = list(); err != nil {
+			return doctorCheck{}, false
+		}
+	}
 	return doctorCheckSandboxOwners(owners), true
+}
+
+// doctorRegisterRemoveSandboxFlag registers -remove-sandbox directly on
+// flags, as doctorRegisterYesFlag does, for a flag only
+// doctorSandboxOwnersCheck reads.
+func doctorRegisterRemoveSandboxFlag(flags *flag.FlagSet) *string {
+	return flags.String("remove-sandbox", "", "With -fix, delete this sandbox if no run in a data dir doctor knows started it: for one left by a build whose data dir was deleted.")
+}
+
+// removeUnownedSandbox is -fix -remove-sandbox: it deletes the named sandbox
+// only when no run in any data dir doctor knows recorded it. Such a sandbox
+// is never lost (sandboxOwners), so reclaimLostSandboxes leaves it, and
+// nothing proves its build is gone: the operator naming it is the proof. A
+// sandbox a known run recorded is refused, whatever that run's state: the
+// lost-sandbox reclaim, under its data dir's worker lock, is its only path.
+func removeUnownedSandbox(dp *deps, ctx context.Context, owners []sandboxOwner, name string, w io.Writer) {
+	i := slices.IndexFunc(owners, func(o sandboxOwner) bool { return o.name == name })
+	switch {
+	case i < 0:
+		fmt.Fprintf(w, "sandboxes: the gateway holds no sandbox %s\n", sanitize.Line(name))
+	case owners[i].runID != "":
+		fmt.Fprintf(w, "sandboxes: left sandbox %s: it belongs to run %s in %s, and `factoryd doctor -fix` removes it once that build is gone\n", sanitize.Line(name), sanitize.Line(owners[i].runID), owners[i].dataDir)
+	default:
+		if err := deleteSandbox(dp, ctx, name); err != nil {
+			fmt.Fprintf(w, "sandboxes: could not delete sandbox %s: %v\n", sanitize.Line(name), err)
+			return
+		}
+		fmt.Fprintf(w, "sandboxes: deleted sandbox %s, which no run in a data dir doctor knows started\n", sanitize.Line(name))
+	}
 }
 
 func anyLost(owners []sandboxOwner) bool {

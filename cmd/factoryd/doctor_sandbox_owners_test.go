@@ -230,17 +230,17 @@ func TestEndRequestWorkflowsEndsEachOrSaysHow(t *testing.T) {
 	}
 }
 
-// A data dir is found up to three levels under the data root, and doctor
-// does not look inside one it found.
+// A data dir is found up to four levels under the data root, as deep as the
+// bar keeps its runs, and doctor does not look inside one it found.
 func TestDataDirsUnderFindsADataDirAtEachDepthAndStopsThere(t *testing.T) {
 	root := t.TempDir()
-	for _, dir := range []string{"data/runs", "walk/data/runs", "smoke/failed-1/data/runs", "walk/data/workspaces/repo/runs", "a/b/c/d/runs"} {
+	for _, dir := range []string{"data/runs", "walk/data/runs", "smoke/failed-1/data/runs", "bar/run.Ab12Cd/cov-mux-off/data/runs", "walk/data/workspaces/repo/runs", "a/b/c/d/e/runs"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got := dataDirsUnder(root, sandboxDataDirDepth)
-	want := []string{filepath.Join(root, "data"), filepath.Join(root, "smoke", "failed-1", "data"), filepath.Join(root, "walk", "data")}
+	want := []string{filepath.Join(root, "bar", "run.Ab12Cd", "cov-mux-off", "data"), filepath.Join(root, "data"), filepath.Join(root, "smoke", "failed-1", "data"), filepath.Join(root, "walk", "data")}
 	if !slices.Equal(got, want) {
 		t.Errorf("dataDirsUnder = %v, want %v", got, want)
 	}
@@ -269,5 +269,68 @@ func TestDoctorFixLeavesADataDirWhoseWorkerIsRunning(t *testing.T) {
 	}
 	if r, _ := run.Load(dataDir, "run-dead"); r.State != run.StateSliceRunning {
 		t.Errorf("the run = %s, want untouched while a worker holds the lock", r.State)
+	}
+}
+
+// The sandbox of a live bar run, four levels under the data root, is found
+// and left alone by -fix: it is never taken for one whose build is gone.
+func TestDoctorFixLeavesALiveBarRunsSandbox(t *testing.T) {
+	dp := newTestDeps(t)
+	home := sandboxOwnerHome(t)
+	barData := filepath.Join(home, "buildgate", "bar", "run.Ab12Cd", "cov-mux-off", "data")
+	seedOwnedRun(t, barData, "run-bar", run.StateSliceRunning, os.Getpid(), "")
+	recordSandbox(t, barData, "run-bar", "sb-bar")
+	deleted := []string{}
+	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
+	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return []string{"sb-bar"}, nil }
+	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime {
+		return &fakeSandboxes{deleteFn: func(_ context.Context, name string) error { deleted = append(deleted, name); return nil }}
+	}
+
+	var out bytes.Buffer
+	check, ok := doctorSandboxOwnersCheck(dp, context.Background(), doctorInputs{dataDir: t.TempDir(), removeSandbox: "sb-bar"}, true, &out)
+	if !ok || check.Err != nil || !strings.Contains(check.Detail, "run run-bar in "+barData) {
+		t.Errorf("the bar run's sandbox must be named as a running build's: ok=%v %+v", ok, check)
+	}
+	if len(deleted) != 0 || !strings.Contains(out.String(), "left sandbox sb-bar: it belongs to run run-bar") {
+		t.Errorf("-fix -remove-sandbox must refuse a sandbox a known run started: deleted %v, out %q", deleted, out.String())
+	}
+}
+
+// -fix -remove-sandbox deletes a sandbox no known run recorded, the one a
+// build whose data dir was deleted leaves, and only the one named.
+func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
+	dp := newTestDeps(t)
+	sandboxOwnerHome(t)
+	held := []string{"sb-stray", "sb-other"}
+	fakeSandboxOf(dp).gatewayHealthyFn = func(context.Context) error { return nil }
+	fakeSandboxOf(dp).sandboxNamesFn = func(context.Context) ([]string, error) { return held, nil }
+	fakeSandboxOf(dp).runtimeFn = func() sandbox.Runtime {
+		return &fakeSandboxes{deleteFn: func(_ context.Context, name string) error {
+			held = slices.DeleteFunc(held, func(n string) bool { return n == name })
+			return nil
+		}}
+	}
+	in := doctorInputs{dataDir: t.TempDir(), removeSandbox: "sb-stray"}
+
+	var out bytes.Buffer
+	before, _ := doctorSandboxOwnersCheck(dp, context.Background(), in, false, &out)
+	if len(held) != 2 || before.Err == nil || !strings.Contains(before.Fix, "-remove-sandbox") || !strings.Contains(out.String(), "only with -fix") {
+		t.Fatalf("without -fix nothing is deleted, doctor says why, and the row names -remove-sandbox: held %v, %+v, out %q", held, before, out.String())
+	}
+	out.Reset()
+	after, _ := doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
+	if !slices.Equal(held, []string{"sb-other"}) || !strings.Contains(out.String(), "deleted sandbox sb-stray") {
+		t.Errorf("-fix must delete sb-stray and only it: held %v, out %q", held, out.String())
+	}
+	if after.Err == nil || strings.Contains(after.Err.Error(), "sb-stray") {
+		t.Errorf("the row must still warn, for sb-other only: %+v", after)
+	}
+
+	out.Reset()
+	in.removeSandbox = "sb-gone"
+	doctorSandboxOwnersCheck(dp, context.Background(), in, true, &out)
+	if !strings.Contains(out.String(), "holds no sandbox sb-gone") {
+		t.Errorf("a name the gateway does not hold must be said: %q", out.String())
 	}
 }

@@ -140,6 +140,7 @@ func doctorMain(dp *deps, args []string) error {
 	yes := doctorRegisterYesFlag(flags)
 	listModels := doctorRegisterListModelsFlag(flags)
 	targetRepo := doctorRegisterTargetRepoFlag(flags)
+	removeSandbox := doctorRegisterRemoveSandboxFlag(flags)
 	finishFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -267,6 +268,7 @@ func doctorMain(dp *deps, args []string) error {
 		referenceOracleDir:     *referenceOracleDir,
 		composeServices:        *composeServices,
 		targetRepo:             *targetRepo,
+		removeSandbox:          *removeSandbox,
 		releaseMaxFilesChanged: settings.ReleaseMaxFilesChanged,
 		releaseMaxInsertions:   settings.ReleaseMaxInsertions,
 		releaseRollbackPlan:    settings.ReleaseRollbackPlan,
@@ -785,6 +787,8 @@ type doctorInputs struct {
 	composeServices             bool
 	// targetRepo is -target-repo: see doctorTargetRepoChecks.
 	targetRepo string
+	// removeSandbox is -remove-sandbox: see removeUnownedSandbox.
+	removeSandbox string
 	// baselineCheck runs `factoryd -baseline-check` on a repository (see
 	// doctorCheckBaseline); nil skips the check.
 	baselineCheck func(repo string) error
