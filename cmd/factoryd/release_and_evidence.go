@@ -450,7 +450,7 @@ func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *re
 func uncheckedBaseCommitsRefusal(ctx context.Context, opener forge.PullRequestOpener, execDir string, r *run.Run) string {
 	commits, err := opener.UnpushedBaseCommits(ctx, execDir, r.PRBase, r.DiffBase())
 	if err != nil {
-		return "could not check that the run's base commit is on origin, so no pull request was opened: " + err.Error()
+		return "could not check that the commit the run's change is measured from is on origin, so no pull request was opened: " + err.Error()
 	}
 	if len(commits) == 0 {
 		return ""
@@ -459,7 +459,7 @@ func uncheckedBaseCommitsRefusal(ctx context.Context, opener forge.PullRequestOp
 	if len(shown) > 5 {
 		shown = shown[:5]
 	}
-	return fmt.Sprintf("no pull request was opened: the run's base commit has %d commit(s) that are not on origin (%s), and the pull request would carry them although no gate checked them; push or drop them, then factoryd retry", len(commits), strings.Join(shown, "; "))
+	return fmt.Sprintf("no pull request was opened: the commit the run's change is measured from has %d commit(s) that are not on origin (%s), and the pull request would carry them although no gate checked them; push or drop them, then factoryd retry", len(commits), strings.Join(shown, "; "))
 }
 
 // retryPullRequestOpener is request.PROpener's one real implementation.
@@ -874,7 +874,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	b.WriteString(renderRiskHeader(r, policy))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "Opened automatically by `factoryd -open-pull-request` for run `%s`.\n\n", r.ID)
-	fmt.Fprintf(&b, "**Base:** `%s`  **Result:** `%s`\n\n", r.BaseSHA, r.ResultSHA)
+	fmt.Fprintf(&b, "**Base:** `%s`  **Result:** `%s`\n\n", r.DiffBase(), r.ResultSHA)
 	if r.DiffStat != nil {
 		fmt.Fprintf(&b, "**Diff:** %d file(s), +%d/-%d\n\n", r.DiffStat.FilesChanged, r.DiffStat.Insertions, r.DiffStat.Deletions)
 	}

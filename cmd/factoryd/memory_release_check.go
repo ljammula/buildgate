@@ -385,10 +385,7 @@ func computeMemoryEdit(ctx context.Context, dp *deps, r *run.Run, dataDir, repoD
 		}
 		edit.SwitchedOff = off
 	}
-	base := r.DiffBaseSHA
-	if base == "" {
-		base = r.BaseSHA
-	}
+	base := r.DiffBase()
 	if base == "" {
 		edit.Error = "run has no base commit"
 		return edit

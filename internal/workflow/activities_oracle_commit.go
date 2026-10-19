@@ -67,7 +67,14 @@ func (a *Activities) CommitOraclesActivity(ctx context.Context, input CommitOrac
 	if err != nil {
 		return fail("capture result SHA after oracle commit", err)
 	}
-	committedChanged, err := runner.GitDiffNameOnly(input.WorkspacePath, input.BaseSHA, resultSHA)
+	// The evidence of the new result is measured from the run's diff base,
+	// as CollectEvidenceActivity measured it: a corrective round's own base
+	// is the ticket's earlier build, and measuring from it would drop that
+	// build's changes from the files the gates and the release decision read.
+	// Apply and Validate stay on BaseSHA, whose index must hold oracles an
+	// earlier round committed.
+	diffBase := input.effectiveDiffBase()
+	committedChanged, err := runner.GitDiffNameOnly(input.WorkspacePath, diffBase, resultSHA)
 	if err != nil {
 		return fail("collect committed changed files after oracle commit", err)
 	}
@@ -76,11 +83,11 @@ func (a *Activities) CommitOraclesActivity(ctx context.Context, input CommitOrac
 		return fail("collect uncommitted changed files after oracle commit", err)
 	}
 	changed := evidence.UnionSorted(committedChanged, uncommittedChanged)
-	ev, err := oraclecommit.CollectEvidence(input.WorkspacePath, input.BaseSHA, resultSHA, changed, applied.Authored, applied.Deleted)
+	ev, err := oraclecommit.CollectEvidence(input.WorkspacePath, diffBase, resultSHA, changed, applied.Authored, applied.Deleted)
 	if err != nil {
 		return fail("collect committed-oracle evidence", err)
 	}
-	filesChanged, insertions, deletions, err := runner.GitDiffShortStatIncludingWorktree(input.WorkspacePath, input.BaseSHA)
+	filesChanged, insertions, deletions, err := runner.GitDiffShortStatIncludingWorktree(input.WorkspacePath, diffBase)
 	if err != nil {
 		return fail("compute diff stat after oracle commit", err)
 	}
@@ -107,7 +114,7 @@ func (a *Activities) CommitOraclesActivity(ctx context.Context, input CommitOrac
 	}
 
 	if logDir != "" {
-		truncated, err := runner.GitDiffIncludingWorktreeToFile(input.WorkspacePath, input.BaseSHA, filepath.Join(logDir, run.DiffFileName), runner.MaxStoredDiffBytes)
+		truncated, err := runner.GitDiffIncludingWorktreeToFile(input.WorkspacePath, diffBase, filepath.Join(logDir, run.DiffFileName), runner.MaxStoredDiffBytes)
 		if err != nil {
 			return fail("compute diff text after oracle commit", err)
 		}
