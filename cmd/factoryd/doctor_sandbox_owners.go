@@ -398,8 +398,8 @@ func removeUnownedSandbox(dp *deps, ctx context.Context, in doctorInputs, owners
 // labels; its data-dir label is that of a data dir doctor knows, in either
 // the path doctor reads or the symlink-resolved one a launch labels, so its
 // run's record was there but could not be read; or another sandbox the
-// gateway holds carries the same labels, so the two runs' resources cannot
-// be told apart.
+// gateway holds carries the same labels, or has labels doctor cannot read,
+// so the two runs' resources might not be told apart.
 func lostRunOfSandbox(dp *deps, ctx context.Context, name string, owners []sandboxOwner, dataDirs []string) (sandbox.LostRun, string) {
 	i := slices.IndexFunc(owners, func(o sandboxOwner) bool { return o.name == name })
 	if i < 0 {
@@ -416,7 +416,14 @@ func lostRunOfSandbox(dp *deps, ctx context.Context, name string, owners []sandb
 		return sandbox.LostRun{}, fmt.Sprintf("its data dir %s still exists, but doctor could not read the record of its run; `factoryd doctor -data-dir %s -fix` reclaims it once its build is gone", dataDir, dataDir)
 	}
 	for _, o := range owners {
-		if other, err := gatewayLostRun(dp, ctx, o.name); o.name != name && err == nil && other == lost {
+		if o.name == name {
+			continue
+		}
+		labels, err := dp.sandbox.sandboxLabels(ctx, o.name)
+		switch {
+		case err != nil:
+			return sandbox.LostRun{}, fmt.Sprintf("could not read the labels of sandbox %s to tell its run apart (%v)", sanitize.Line(o.name), err)
+		case labels[openshell.LabelRun] == lost.Run && labels[openshell.LabelDataDir] == lost.DataDir:
 			return sandbox.LostRun{}, fmt.Sprintf("sandbox %s carries the same run and data-dir labels, so the resources of the two runs cannot be told apart", sanitize.Line(o.name))
 		}
 	}
