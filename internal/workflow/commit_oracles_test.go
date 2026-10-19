@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"buildgate/internal/progress"
+	"buildgate/internal/run"
 	"testing"
 
 	"buildgate/internal/sandbox"
@@ -97,6 +98,31 @@ func TestCommitOraclesActivityCommitsAndReturnsFreshEvidence(t *testing.T) {
 	again, err := a.CommitOraclesActivity(context.Background(), in)
 	if err != nil || !again.Active || again.ResultSHA != head || !again.Committed {
 		t.Fatalf("retry: %+v %v", again, err)
+	}
+}
+
+// A corrective round starts from the ticket's earlier build: the evidence
+// of its new result is measured from the ticket's base (DiffBaseSHA), so the
+// earlier build's files stay in the changed files the gates and the release
+// decision read, and in the diff.
+func TestCommitOraclesActivityMeasuresFromTheDiffBase(t *testing.T) {
+	a, in, base := coFixture(t, `[{"criterion":"c","oracle_file":"o_test.go","target_path":"pkg/x_oracle_test.go"}]`)
+	os.WriteFile(filepath.Join(in.WorkspacePath, "pkg", "first_build.go"), []byte("package pkg\n\nvar firstBuild = 1\n"), 0o644)
+	coGit(t, in.WorkspacePath, "add", "-A")
+	coGit(t, in.WorkspacePath, "commit", "-q", "-m", "first build")
+	in.BaseSHA, in.DiffBaseSHA = coGit(t, in.WorkspacePath, "rev-parse", "HEAD"), base
+	out, err := a.CommitOraclesActivity(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(out.ChangedFiles, ","); got != ".buildgate/oracles.json,pkg/first_build.go,pkg/x_oracle_test.go" {
+		t.Fatalf("ChangedFiles = %s, want the whole change since the ticket's base", got)
+	}
+	if out.DiffStat == nil || out.DiffStat.FilesChanged != 3 {
+		t.Fatalf("DiffStat = %+v, want 3 files", out.DiffStat)
+	}
+	if diff, err := os.ReadFile(filepath.Join(in.LogDir, run.DiffFileName)); err != nil || !strings.Contains(string(diff), "pkg/first_build.go") {
+		t.Fatalf("stored diff misses the earlier build's file: %v\n%s", err, diff)
 	}
 }
 

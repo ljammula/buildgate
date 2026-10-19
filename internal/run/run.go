@@ -2168,3 +2168,13 @@ func ListByRequestID(dataDir string) (map[string][]*Run, error) {
 	}
 	return out, nil
 }
+
+// DiffBase is the commit the run's whole change is measured from: its
+// DiffBaseSHA when -diff-base set one (a corrective round, which starts from
+// the ticket's earlier build), else its BaseSHA.
+func (r *Run) DiffBase() string {
+	if r.DiffBaseSHA != "" {
+		return r.DiffBaseSHA
+	}
+	return r.BaseSHA
+}

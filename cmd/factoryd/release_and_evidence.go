@@ -440,14 +440,17 @@ func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *re
 }
 
 // uncheckedBaseCommitsRefusal is why no pull request may open for r, or ""
-// when one may: its base commit has commits the PR's base branch on origin
-// lacks (local commits never pushed), which the PR would carry although no
-// gate checked them. Failing to tell is a refusal too: the PR would only be
-// opened blind.
+// when one may: the commit its change is measured from (run.Run.DiffBase)
+// has commits the PR's base branch on origin lacks (local commits never
+// pushed), which the PR would carry although no gate checked them. A
+// corrective round starts from the ticket's earlier build, whose commits are
+// not on origin but are part of the change the round's gates checked from
+// the ticket's base, so the ticket's base is what must be on origin. Failing
+// to tell is a refusal too: the PR would only be opened blind.
 func uncheckedBaseCommitsRefusal(ctx context.Context, opener forge.PullRequestOpener, execDir string, r *run.Run) string {
-	commits, err := opener.UnpushedBaseCommits(ctx, execDir, r.PRBase, r.BaseSHA)
+	commits, err := opener.UnpushedBaseCommits(ctx, execDir, r.PRBase, r.DiffBase())
 	if err != nil {
-		return "could not check that the run's base commit is on origin, so no pull request was opened: " + err.Error()
+		return "could not check that the commit the run's change is measured from is on origin, so no pull request was opened: " + err.Error()
 	}
 	if len(commits) == 0 {
 		return ""
@@ -456,7 +459,7 @@ func uncheckedBaseCommitsRefusal(ctx context.Context, opener forge.PullRequestOp
 	if len(shown) > 5 {
 		shown = shown[:5]
 	}
-	return fmt.Sprintf("no pull request was opened: the run's base commit has %d commit(s) that are not on origin (%s), and the pull request would carry them although no gate checked them; push or drop them, then factoryd retry", len(commits), strings.Join(shown, "; "))
+	return fmt.Sprintf("no pull request was opened: the commit the run's change is measured from has %d commit(s) that are not on origin (%s), and the pull request would carry them although no gate checked them; push or drop them, then factoryd retry", len(commits), strings.Join(shown, "; "))
 }
 
 // retryPullRequestOpener is request.PROpener's one real implementation.
@@ -871,7 +874,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	b.WriteString(renderRiskHeader(r, policy))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "Opened automatically by `factoryd -open-pull-request` for run `%s`.\n\n", r.ID)
-	fmt.Fprintf(&b, "**Base:** `%s`  **Result:** `%s`\n\n", r.BaseSHA, r.ResultSHA)
+	fmt.Fprintf(&b, "**Base:** `%s`  **Result:** `%s`\n\n", r.DiffBase(), r.ResultSHA)
 	if r.DiffStat != nil {
 		fmt.Fprintf(&b, "**Diff:** %d file(s), +%d/-%d\n\n", r.DiffStat.FilesChanged, r.DiffStat.Insertions, r.DiffStat.Deletions)
 	}

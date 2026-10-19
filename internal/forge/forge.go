@@ -61,12 +61,12 @@ type PullRequestOpener interface {
 	// against the default branch exactly as before this parameter existed,
 	// with no extra origin check at all.
 	OpenDraftPullRequest(ctx context.Context, workspaceDir, branch, base, headSHA, title, body string) (url string, err error)
-	// UnpushedBaseCommits lists the commits a pull request for a run based
-	// on baseSHA would carry that the run never made: those reachable from
-	// baseSHA but not from base on "origin" (the default branch when base
-	// is empty or gone), newest first as "<short sha> <subject>". No gate
-	// checked them, so the caller opens no PR while any exist. Empty when
-	// baseSHA is already on origin.
+	// UnpushedBaseCommits lists the commits a pull request for a run whose
+	// change is measured from baseSHA would carry outside that change: those
+	// reachable from baseSHA but not from base on "origin" (the default
+	// branch when base is empty or gone), newest first as "<short sha>
+	// <subject>". No gate checked them, so the caller opens no PR while any
+	// exist. Empty when baseSHA is already on origin.
 	UnpushedBaseCommits(ctx context.Context, workspaceDir, base, baseSHA string) ([]string, error)
 	// VerifyExistingPullRequest reads url's own current state -- a
 	// finding from that same review: cmd/factoryd's retryPullRequestOpener

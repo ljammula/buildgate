@@ -150,17 +150,10 @@ func inspectTicket(dataDir string, t Ticket, onPR bool) (InspectTicket, bool) {
 	if latest == nil {
 		return InspectTicket{}, false
 	}
-	base := ticketBase(first)
+	base := first.DiffBase()
 	ticket := inspectRunFrom(dataDir, latest, base)
 	ticket.Ticket = t.Index
 	return ticket, len(ticket.Commands) > 0
-}
-
-func ticketBase(r *run.Run) string {
-	if r.DiffBaseSHA != "" {
-		return r.DiffBaseSHA
-	}
-	return r.BaseSHA
 }
 
 func draftCommands(dataDir string, r *Request) []InspectCommand {
@@ -186,7 +179,7 @@ func InspectRun(dataDir string, r *run.Run) InspectTicket {
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
-	return inspectRunFrom(dataDir, r, ticketBase(r))
+	return inspectRunFrom(dataDir, r, r.DiffBase())
 }
 
 func inspectRunFrom(dataDir string, r *run.Run, base string) InspectTicket {

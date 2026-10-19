@@ -36,12 +36,15 @@ type fakePullRequestOpener struct {
 	verifyHeadRefOid        string
 	verifyIsCrossRepository bool
 	verifyErr               error
-	// unpushed/unpushedErr script UnpushedBaseCommits.
-	unpushed    []string
-	unpushedErr error
+	// unpushed/unpushedErr script UnpushedBaseCommits; unpushedBaseSHA is
+	// the base commit it was asked about.
+	unpushed        []string
+	unpushedErr     error
+	unpushedBaseSHA string
 }
 
-func (f *fakePullRequestOpener) UnpushedBaseCommits(context.Context, string, string, string) ([]string, error) {
+func (f *fakePullRequestOpener) UnpushedBaseCommits(_ context.Context, _, _, baseSHA string) ([]string, error) {
+	f.unpushedBaseSHA = baseSHA
 	return f.unpushed, f.unpushedErr
 }
 
@@ -1437,7 +1440,18 @@ func TestOpenEvidencePullRequestRefusesUncheckedBaseCommits(t *testing.T) {
 	}
 	r3 := &run.Run{ID: "r3", Branch: "factoryd/r3", BaseSHA: "base", ResultSHA: "head"}
 	clean := &fakePullRequestOpener{url: "https://example/pr/3"}
-	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "r3", r3, nil, clean); url != "https://example/pr/3" || !clean.called {
-		t.Fatalf("clean base: url %q opened %v, want the pull request", url, clean.called)
+	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), "r3", r3, nil, clean); url != "https://example/pr/3" || !clean.called || clean.unpushedBaseSHA != "base" {
+		t.Fatalf("clean base: url %q opened %v checked %q, want the pull request after checking base", url, clean.called, clean.unpushedBaseSHA)
+	}
+}
+
+// A run measured from a diff base (a corrective round, whose own base is the
+// ticket's earlier build, unpushed) is checked from that diff base: the
+// earlier build's commits are part of the change its gates checked.
+func TestOpenEvidencePullRequestChecksFromTheRunsDiffBase(t *testing.T) {
+	r := &run.Run{ID: "r1-corrective1", Branch: "factoryd/r1", BaseSHA: "first-build-result", DiffBaseSHA: "ticket-base", ResultSHA: "head"}
+	opener := &fakePullRequestOpener{url: "https://example/pr/1"}
+	if url := openEvidencePullRequest(t.TempDir(), t.TempDir(), r.ID, r, nil, opener); url != "https://example/pr/1" || opener.unpushedBaseSHA != "ticket-base" {
+		t.Fatalf("url %q, checked %q: want the pull request, checked from the ticket's base", url, opener.unpushedBaseSHA)
 	}
 }
