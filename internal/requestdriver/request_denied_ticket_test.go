@@ -128,7 +128,7 @@ func TestRetryAfterADeniedTicketOpensItsPullRequestAndBuildsTheNextTicket(t *tes
 	if loaded, err := request.Load(dataDir, id); err != nil || !loaded.AwaitingPullRequest() {
 		t.Fatalf("request = %+v, %v, want halted awaiting ticket 1's pull request", loaded, err)
 	}
-	openPR := func(_, runID string) request.PROpenOutcome {
+	openPR := func(_, runID, _ string) request.PROpenOutcome {
 		return request.PROpenOutcome{PRURL: "https://github.com/acme/app/pull/" + runID}
 	}
 	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), openPR); err != nil {

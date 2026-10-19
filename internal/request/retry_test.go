@@ -125,7 +125,7 @@ func TestRetryAcceptedNoPRReopensWithoutRebuilding(t *testing.T) {
 	}
 
 	var calledWithRunID string
-	opener := func(gotDataDir, runID string) PROpenOutcome {
+	opener := func(gotDataDir, runID, _ string) PROpenOutcome {
 		calledWithRunID = runID
 		if gotDataDir != dataDir {
 			t.Errorf("opener dataDir = %q, want %q", gotDataDir, dataDir)
@@ -168,7 +168,7 @@ func TestRetryAcceptedNoPRFallsBackToRebuildWhenReleaseDenies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opener := func(string, string) PROpenOutcome {
+	opener := func(string, string, string) PROpenOutcome {
 		return PROpenOutcome{WithheldReason: "protected path touched"}
 	}
 
@@ -204,7 +204,7 @@ func TestRetryAcceptedNoPRPropagatesOpenerError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opener := func(string, string) PROpenOutcome {
+	opener := func(string, string, string) PROpenOutcome {
 		return PROpenOutcome{Err: errors.New("record release decision: disk full")}
 	}
 
@@ -250,7 +250,7 @@ func TestRetryAcceptedNoPRTargetsTheAwaitingTicketNotTicketIndex(t *testing.T) {
 	}
 
 	var calledWithRunID string
-	opener := func(_ string, runID string) PROpenOutcome {
+	opener := func(_, runID, _ string) PROpenOutcome {
 		calledWithRunID = runID
 		return PROpenOutcome{PRURL: "https://github.com/acme/widgets/pull/1"}
 	}
@@ -294,7 +294,7 @@ func TestRetryHaltAcceptedNoPRTakesPriorityOverTicketWithPR(t *testing.T) {
 	}
 
 	var calledWithRunID string
-	opener := func(_ string, runID string) PROpenOutcome {
+	opener := func(_, runID, _ string) PROpenOutcome {
 		calledWithRunID = runID
 		return PROpenOutcome{PRURL: "https://github.com/acme/widgets/pull/1"}
 	}
@@ -335,7 +335,7 @@ func TestRetryAcceptedNoPRRefusesRebuildForDifferentDeniedTicket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opener := func(string, string) PROpenOutcome {
+	opener := func(string, string, string) PROpenOutcome {
 		return PROpenOutcome{WithheldReason: "protected path touched"}
 	}
 
@@ -379,7 +379,7 @@ func TestRetryAcceptedNoPRTicketWithNoRunRebuildsWhenSameTicket(t *testing.T) {
 	}
 
 	openerCalled := false
-	opener := func(string, string) PROpenOutcome {
+	opener := func(string, string, string) PROpenOutcome {
 		openerCalled = true
 		return PROpenOutcome{}
 	}
@@ -417,7 +417,7 @@ func TestRetryAcceptedNoPRTicketWithNoRunRefusesForDifferentTicket(t *testing.T)
 	}
 
 	openerCalled := false
-	opener := func(string, string) PROpenOutcome {
+	opener := func(string, string, string) PROpenOutcome {
 		openerCalled = true
 		return PROpenOutcome{}
 	}
@@ -558,4 +558,54 @@ func TestRetryFromScratchMarksTheRebuildAndNoLaterOne(t *testing.T) {
 			t.Fatalf("state %s, from scratch %v, err %v; want spec_drafting, false", got.State, got.RetryFromScratch, err)
 		}
 	})
+}
+
+// A later ticket whose run was built while the ticket under it had no pull
+// request is retried stacked on that ticket's branch once its pull request
+// is open; it stacks on nothing once that pull request merged.
+func TestRetryAcceptedNoPRPassesTheStackBaseOfTheTicketUnderIt(t *testing.T) {
+	dataDir := t.TempDir()
+	r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+	r.State = StateHalted
+	r.HaltKind = HaltAcceptedNoPR
+	r.TicketCount = 2
+	r.TicketIndex = 2
+	r.Tickets = []Ticket{
+		{Index: 1, RunID: "run-1", Branch: "factoryd/one", PRURL: "https://example.com/1", PRState: "open"},
+		{Index: 2, RunID: "run-2", Branch: "factoryd/two"},
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var gotStack string
+	opener := func(_, _, stackBase string) PROpenOutcome {
+		gotStack = stackBase
+		return PROpenOutcome{PRURL: "https://example.com/2"}
+	}
+	if _, err := Retry(dataDir, "req-1", "alice", "", fixedNow.Add(time.Minute), opener); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if gotStack != "factoryd/one" {
+		t.Errorf("stack base = %q, want ticket 1's branch", gotStack)
+	}
+}
+
+func TestStackBaseIsThePreviousTicketsBranchWhileItsPullRequestIsOpen(t *testing.T) {
+	r := &Request{Tickets: []Ticket{
+		{Index: 1, Branch: "factoryd/one", PRURL: "https://example.com/1", PRState: "open"},
+		{Index: 2, Branch: "factoryd/two"},
+		{Index: 3, Branch: "factoryd/three"},
+	}}
+	for _, c := range []struct {
+		index int
+		want  string
+	}{{1, ""}, {2, "factoryd/one"}, {3, ""}, {4, ""}, {0, ""}} {
+		if got := r.StackBase(c.index); got != c.want {
+			t.Errorf("StackBase(%d) = %q, want %q", c.index, got, c.want)
+		}
+	}
+	r.Tickets[0].PRState = "merged"
+	if got := r.StackBase(2); got != "" {
+		t.Errorf("StackBase after the PR under it merged = %q, want the default branch", got)
+	}
 }

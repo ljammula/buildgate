@@ -750,7 +750,9 @@ func (sv *serveRun) listenAndServe() error {
 		// POST /requests/{id}/retry gets the same real PR-open-only retry
 		// path `factoryd retry` already wires (retryPullRequestOpener),
 		// not just the CLI.
-		api.WithPROpener(func(a0 string, a1 string) request.PROpenOutcome { return retryPullRequestOpener(sv.dp, a0, a1) }),
+		api.WithPROpener(func(dataDir, runID, stackBase string) request.PROpenOutcome {
+			return retryPullRequestOpener(sv.dp, dataDir, runID, stackBase)
+		}),
 		// POST /requests/{id}/resume refuses "round" for a lost build whose
 		// kept worktree cannot be continued, the same check the CLI makes.
 		api.WithResumePreflight(func(r *request.Request) ([]string, error) {

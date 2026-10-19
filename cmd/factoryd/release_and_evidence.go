@@ -529,7 +529,7 @@ func (impl realForge) branchTip(ctx context.Context, workspaceDir, branch string
 	return strings.TrimSpace(string(out)), nil
 }
 
-func retryPullRequestOpener(dp *deps, dataDir, runID string) request.PROpenOutcome {
+func retryPullRequestOpener(dp *deps, dataDir, runID, stackBase string) request.PROpenOutcome {
 	loaded, err := run.Load(dataDir, runID)
 	if err != nil {
 		return request.PROpenOutcome{Err: fmt.Errorf("load run %s: %w", runID, err)}
@@ -564,6 +564,9 @@ func retryPullRequestOpener(dp *deps, dataDir, runID string) request.PROpenOutco
 	policy, ok := mergePolicyFromRun(loaded)
 	if !ok {
 		return request.PROpenOutcome{Err: fmt.Errorf("run %s predates recorded release policy; retry cannot re-evaluate a release decision for it", runID)}
+	}
+	if err := stackRunWithNoBase(dataDir, runID, loaded, stackBase); err != nil {
+		return request.PROpenOutcome{Err: err}
 	}
 	ensureMemoryEdit(dp, dataDir, runID, loaded)
 	decision, recErr := release.RecordDecision(dataDir, release.ProjectOf(loaded), *loaded, policy)
@@ -625,6 +628,27 @@ func retryPullRequestOpener(dp *deps, dataDir, runID string) request.PROpenOutco
 	n := notifyAcceptedRun(dataDir, runID, loaded.Ticket, loaded.RequestID, prURL, "")
 	recordAcceptedRunSideEffects(dataDir, loaded, prURL, n, false)
 	return request.PROpenOutcome{PRURL: prURL}
+}
+
+// stackRunWithNoBase records stackBase as the run's PR base when the run
+// has none: a run built while the ticket under it had no pull request yet
+// was given no -pr-base, and its pull request, measured against the default
+// branch, would carry that ticket's commits. A base the run already
+// recorded is kept. uncheckedBaseCommitsRefusal still checks the run's
+// diff base against the branch on origin, so a wrong stack base refuses.
+func stackRunWithNoBase(dataDir, runID string, loaded *run.Run, stackBase string) error {
+	if loaded.PRBase != "" || stackBase == "" {
+		return nil
+	}
+	loaded.PRBase = stackBase
+	return run.WithLock(dataDir, runID, func() error {
+		fresh, err := run.Load(dataDir, runID)
+		if err != nil {
+			return fmt.Errorf("record the pull request base of run %s: %w", runID, err)
+		}
+		fresh.PRBase = stackBase
+		return fresh.Persist(dataDir)
+	})
 }
 
 // recoverExistingPullRequest is retryPullRequestOpener's own "gh says

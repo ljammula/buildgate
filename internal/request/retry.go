@@ -25,14 +25,16 @@ type PROpenOutcome struct {
 }
 
 // PROpener attempts to open a pull request for the already-accepted run
-// runID, whose branch exists but has no PR yet. Injected (may be nil --
+// runID, whose branch exists but has no PR yet. stackBase is the branch the
+// PR stacks on now (Request.StackBase), for a run that recorded none: one
+// built while the ticket under it had no pull request yet. Injected (may be nil --
 // see Retry) so this package never needs run.Load/release.LoadDecision/
 // forge.GHPullRequestOpener itself: cmd/factoryd's retryPullRequestOpener
 // is the one real implementation, reusing openEvidencePullRequest exactly
 // the way the original accept-time open path does (same
 // recordReleaseDecision re-check, same forge.GHPullRequestOpener); a test
 // supplies a fake instead.
-type PROpener func(dataDir, runID string) PROpenOutcome
+type PROpener func(dataDir, runID, stackBase string) PROpenOutcome
 
 // retryAcceptedNoPR is Retry's own HaltAcceptedNoPR case: for a ticket
 // halted with HaltAcceptedNoPR (its run was accepted but no pull request
@@ -77,7 +79,7 @@ func retryAcceptedNoPR(dataDir, id, by, reason string, r *Request, now time.Time
 		}
 		return rebuild()
 	}
-	outcome := openPR(dataDir, awaiting.RunID)
+	outcome := openPR(dataDir, awaiting.RunID, r.StackBase(awaiting.Index))
 	switch {
 	case outcome.WithheldReason != "":
 		if awaiting.Index != r.TicketIndex {
@@ -250,4 +252,19 @@ func (r *Request) retryRebuild(by, reason string, fromScratch bool, now time.Tim
 	}
 	r.RetryFromScratch = fromScratch
 	return nil
+}
+
+// StackBase is the branch ticket index's pull request stacks on: the
+// previous ticket's branch while that ticket's pull request is open and
+// unmerged, else "" (the default branch). A request's first ticket has no
+// predecessor to stack on.
+func (r *Request) StackBase(index int) string {
+	if index <= 1 || index > len(r.Tickets) {
+		return ""
+	}
+	prev := r.Tickets[index-2]
+	if prev.PRURL != "" && prev.PRState != "merged" && prev.Branch != "" {
+		return prev.Branch
+	}
+	return ""
 }

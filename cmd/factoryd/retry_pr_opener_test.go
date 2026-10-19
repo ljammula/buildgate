@@ -75,7 +75,7 @@ func TestRetryPullRequestOpenerOpensWithoutRebuilding(t *testing.T) {
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err != nil || outcome.WithheldReason != "" {
 		t.Fatalf("outcome = %+v, want a clean success", outcome)
 	}
@@ -121,7 +121,7 @@ func TestRetryPullRequestOpenerRefusesWhenReleaseDenies(t *testing.T) {
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.WithheldReason == "" {
 		t.Fatal("WithheldReason is empty, want a denial reason")
 	}
@@ -139,7 +139,7 @@ func TestRetryPullRequestOpenerRefusesNonAcceptedRun(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "not accepted") {
 		t.Errorf("outcome.Err = %v, want a not-accepted error", outcome.Err)
 	}
@@ -167,7 +167,7 @@ func TestRetryPullRequestOpenerIsIdempotentWhenAlreadyRecorded(t *testing.T) {
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err != nil || outcome.WithheldReason != "" {
 		t.Fatalf("outcome = %+v, want a clean success", outcome)
 	}
@@ -204,7 +204,7 @@ func TestRetryPullRequestOpenerLinksExistingPRWhenGHReportsAlreadyExists(t *test
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err != nil || outcome.WithheldReason != "" {
 		t.Fatalf("outcome = %+v, want a clean success recovering the existing PR", outcome)
 	}
@@ -260,7 +260,7 @@ func TestRetryPullRequestOpenerRefusesRecoveredPRWithNoURLInError(t *testing.T) 
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err == nil {
 		t.Fatal("outcome.Err is nil, want the original opener error since no URL could be recovered")
 	}
@@ -288,7 +288,7 @@ func TestRetryPullRequestOpenerRefusesRecoveredPRThatIsClosed(t *testing.T) {
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "CLOSED") {
 		t.Errorf("outcome.Err = %v, want a refusal naming the closed state", outcome.Err)
 	}
@@ -314,7 +314,7 @@ func TestRetryPullRequestOpenerRefusesRecoveredPRThatIsCrossRepository(t *testin
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "cross-repository") {
 		t.Errorf("outcome.Err = %v, want a refusal naming cross-repository", outcome.Err)
 	}
@@ -339,7 +339,7 @@ func TestRetryPullRequestOpenerRefusesRecoveredPRWithWrongHeadSHA(t *testing.T) 
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "somethingelse") || !strings.Contains(outcome.Err.Error(), "result") {
 		t.Errorf("outcome.Err = %v, want a refusal naming both SHAs", outcome.Err)
 	}
@@ -369,7 +369,7 @@ func TestRetryPullRequestOpenerRefusesWhenBranchTipMovedPastResultSHA(t *testing
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.Err == nil {
 		t.Fatal("outcome.Err is nil, want a refusal naming the branch/ResultSHA mismatch")
 	}
@@ -404,11 +404,45 @@ func TestRetryPullRequestOpenerRefusesEmptyResultSHA(t *testing.T) {
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
 	defer func() { fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return old } }()
 
-	outcome := retryPullRequestOpener(dp, dataDir, "run-1")
+	outcome := retryPullRequestOpener(dp, dataDir, "run-1", "")
 	if outcome.WithheldReason == "" {
 		t.Fatalf("outcome = %+v, want WithheldReason for a run with no recorded ResultSHA", outcome)
 	}
 	if opener.called {
 		t.Error("opener was called, want no push/PR-open attempt with no ResultSHA to verify against")
+	}
+}
+
+// A run built while the ticket under it had no pull request recorded no PR
+// base: the retry opens its pull request stacked on the stack base it is
+// given, and records it on the run. A base the run recorded is kept.
+func TestRetryPullRequestOpenerStacksARunThatRecordedNoBase(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	acceptedRunFixture(t, dataDir, "run-1")
+	stubBranchTip(dp, t, "result", nil)
+	opener := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/9"}
+	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return opener }
+
+	if outcome := retryPullRequestOpener(dp, dataDir, "run-1", "factoryd/ticket-1"); outcome.Err != nil || outcome.PRURL == "" {
+		t.Fatalf("outcome = %+v, want the pull request", outcome)
+	}
+	if opener.calledBase != "factoryd/ticket-1" {
+		t.Errorf("opened against %q, want the stack base", opener.calledBase)
+	}
+	if reloaded, err := run.Load(dataDir, "run-1"); err != nil || reloaded.PRBase != "factoryd/ticket-1" {
+		t.Errorf("run PRBase = %q (%v), want the stack base recorded", reloaded.PRBase, err)
+	}
+
+	recorded := acceptedRunFixture(t, dataDir, "run-2")
+	recorded.PRBase = "factoryd/earlier"
+	if err := recorded.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	second := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/10"}
+	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return second }
+	retryPullRequestOpener(dp, dataDir, "run-2", "factoryd/ticket-1")
+	if second.calledBase != "factoryd/earlier" {
+		t.Errorf("opened against %q, want the base the run recorded", second.calledBase)
 	}
 }
