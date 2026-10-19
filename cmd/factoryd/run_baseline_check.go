@@ -32,6 +32,10 @@ None.
 Everything.
 `
 
+// baselineChecksDir is the directory, inside a data dir, that holds each
+// baseline check's own directory and data dir.
+const baselineChecksDir = "baseline-checks"
+
 // prepareBaselineCheck turns a -baseline-check run into a run of the real
 // path with nothing to build: a fixed ticket id, baselineCheckSpec, and a
 // data directory of its own, <data dir>/baseline-checks/<id>/data (inside the
@@ -59,7 +63,7 @@ func (tr *ticketRun) prepareBaselineCheck() error {
 	if err != nil {
 		return fmt.Errorf("-baseline-check: resolve -data-dir: %w", err)
 	}
-	checkDir := filepath.Join(dataDir, "baseline-checks", "check-"+time.Now().UTC().Format("20060102-150405.000"))
+	checkDir := filepath.Join(dataDir, baselineChecksDir, "check-"+time.Now().UTC().Format("20060102-150405.000"))
 	if err := os.MkdirAll(checkDir, 0o750); err != nil {
 		return fmt.Errorf("-baseline-check: create %s: %w", checkDir, err)
 	}

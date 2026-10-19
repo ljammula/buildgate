@@ -168,6 +168,10 @@ func runAtAttemptTwo(t *testing.T, first func(ctx context.Context) error, second
 	}
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
+	// The test suite's own 3 s limit counts the real activity work of both
+	// attempts (a sandbox launch through a fake docker, git), which takes
+	// longer when several shards run at once; the activity's own limit holds.
+	env.SetTestTimeout(time.Minute)
 	env.RegisterActivityWithOptions(probe, activity.RegisterOptions{Name: "probe"})
 	env.ExecuteWorkflow(func(ctx temporalworkflow.Context) error {
 		ctx = temporalworkflow.WithActivityOptions(ctx, temporalworkflow.ActivityOptions{

@@ -102,13 +102,14 @@ func commandCatalog() []commandInfo {
 }
 
 // doctorFlagSet is doctor's FlagSet as doctorMain builds it: the flags of
-// newDoctorFlags and the four it registers on the set afterwards.
+// newDoctorFlags and the five it registers on the set afterwards.
 func doctorFlagSet() *flag.FlagSet {
 	fs, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ := newDoctorFlags()
 	doctorRegisterNotifyTestFlag(fs)
 	doctorRegisterYesFlag(fs)
 	doctorRegisterListModelsFlag(fs)
 	doctorRegisterTargetRepoFlag(fs)
+	doctorRegisterRemoveSandboxFlag(fs)
 	finishFlags(fs)
 	return fs
 }

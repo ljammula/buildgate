@@ -25,6 +25,7 @@ import (
 // before that, unless a build is using it.
 func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix bool, w io.Writer) []doctorCheck {
 	if in.meterImage == "" {
+		leaveNamedSandbox(in, w, "meter_image is not set, so doctor does not ask the gateway")
 		return []doctorCheck{{
 			Name:     "OpenShell gateway and meter configured",
 			Err:      errors.New("meter_image is not set, so the gateway and meter cannot be started and no build can launch"),
