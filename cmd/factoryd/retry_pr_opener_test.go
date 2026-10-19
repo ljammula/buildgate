@@ -427,8 +427,8 @@ func TestRetryPullRequestOpenerStacksARunThatRecordedNoBase(t *testing.T) {
 	if outcome := retryPullRequestOpener(dp, dataDir, "run-1", "factoryd/ticket-1"); outcome.Err != nil || outcome.PRURL == "" {
 		t.Fatalf("outcome = %+v, want the pull request", outcome)
 	}
-	if opener.calledBase != "factoryd/ticket-1" {
-		t.Errorf("opened against %q, want the stack base", opener.calledBase)
+	if opener.calledBase != "factoryd/ticket-1" || opener.unpushedBase != "factoryd/ticket-1" {
+		t.Errorf("opened against %q, checked for unpushed commits against %q: want the stack base for both", opener.calledBase, opener.unpushedBase)
 	}
 	if reloaded, err := run.Load(dataDir, "run-1"); err != nil || reloaded.PRBase != "factoryd/ticket-1" {
 		t.Errorf("run PRBase = %q (%v), want the stack base recorded", reloaded.PRBase, err)
@@ -441,8 +441,13 @@ func TestRetryPullRequestOpenerStacksARunThatRecordedNoBase(t *testing.T) {
 	}
 	second := &fakePullRequestOpener{url: "https://github.com/acme/widgets/pull/10"}
 	fakeForgeOf(dp).pullRequestOpenerFn = func() forge.PullRequestOpener { return second }
-	retryPullRequestOpener(dp, dataDir, "run-2", "factoryd/ticket-1")
-	if second.calledBase != "factoryd/earlier" {
-		t.Errorf("opened against %q, want the base the run recorded", second.calledBase)
+	if outcome := retryPullRequestOpener(dp, dataDir, "run-2", "factoryd/ticket-1"); outcome.Err != nil || outcome.PRURL == "" {
+		t.Fatalf("outcome = %+v, want the pull request", outcome)
+	}
+	if second.calledBase != "factoryd/earlier" || second.unpushedBase != "factoryd/earlier" {
+		t.Errorf("opened against %q, checked against %q: want the base the run recorded", second.calledBase, second.unpushedBase)
+	}
+	if reloaded, err := run.Load(dataDir, "run-2"); err != nil || reloaded.PRBase != "factoryd/earlier" {
+		t.Errorf("run-2 PRBase = %q (%v), want it unchanged", reloaded.PRBase, err)
 	}
 }

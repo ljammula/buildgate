@@ -634,20 +634,28 @@ func retryPullRequestOpener(dp *deps, dataDir, runID, stackBase string) request.
 // has none: a run built while the ticket under it had no pull request yet
 // was given no -pr-base, and its pull request, measured against the default
 // branch, would carry that ticket's commits. A base the run already
-// recorded is kept. uncheckedBaseCommitsRefusal still checks the run's
-// diff base against the branch on origin, so a wrong stack base refuses.
+// recorded is kept, and once recorded the base stays for later retries.
+// uncheckedBaseCommitsRefusal checks the run's diff base against that branch
+// on origin; a branch gone from origin (merged and deleted) is the factory's
+// own earlier work, and the pull request then opens against the default
+// branch, as it does for a base the driver recorded.
 func stackRunWithNoBase(dataDir, runID string, loaded *run.Run, stackBase string) error {
 	if loaded.PRBase != "" || stackBase == "" {
 		return nil
 	}
-	loaded.PRBase = stackBase
 	return run.WithLock(dataDir, runID, func() error {
 		fresh, err := run.Load(dataDir, runID)
 		if err != nil {
 			return fmt.Errorf("record the pull request base of run %s: %w", runID, err)
 		}
-		fresh.PRBase = stackBase
-		return fresh.Persist(dataDir)
+		if fresh.PRBase == "" {
+			fresh.PRBase = stackBase
+			if err := fresh.Persist(dataDir); err != nil {
+				return err
+			}
+		}
+		loaded.PRBase = fresh.PRBase
+		return nil
 	})
 }
 
