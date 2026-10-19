@@ -92,3 +92,69 @@ func TestPythonStdlibCommandEndToEnd(t *testing.T) {
 		t.Fatal("the canary snapshot must fail this command")
 	}
 }
+
+// TestPythonStdlibCommandImportsASrcLayoutPackage runs the real python3
+// interpreter on a repository that keeps its package under src/ (the src
+// layout): the oracle imports it by its package name, as it would after an
+// install, and the command passes on a correct implementation and fails on a
+// wrong one.
+func TestPythonStdlibCommandImportsASrcLayoutPackage(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not on PATH")
+	}
+	cmd := PythonStdlibCommand()
+	workspace := func(body string) string {
+		w := t.TempDir()
+		writeFiles(t, w, map[string]string{
+			"src/mathpkg/__init__.py":         "def multiply_numbers(a, b):\n    " + body + "\n",
+			".oracle/MANIFEST.json":           `[]`,
+			".oracle/RUN_COMMAND.txt":         cmd,
+			".oracle/test_oracle_multiply.py": "from mathpkg import multiply_numbers\n\n\ndef test_oracle_positive_product():\n    assert multiply_numbers(3, 4) == 12\n",
+		})
+		return w
+	}
+	if code := runShell(t, workspace("return a * b"), cmd); code != 0 {
+		t.Fatalf("correct src-layout implementation: exit %d, want 0", code)
+	}
+	if code := runShell(t, workspace("return a + b"), cmd); code == 0 {
+		t.Fatal("a wrong src-layout implementation must fail the command")
+	}
+}
+
+// TestPythonImportRootsAgreeWithTheRunner ties the approval-time import check
+// (ModuleExistsInWorkspace, over PythonImportRoots) to the runner
+// (PythonStdlibCommand) on the layouts that differ: for each, the check finds
+// mathpkg exactly when the runner can import it, and a src/ that is itself a
+// package never puts its modules ahead of the standard library's.
+func TestPythonImportRootsAgreeWithTheRunner(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not on PATH")
+	}
+	cmd := PythonStdlibCommand()
+	oracle := "import json\nfrom mathpkg import multiply_numbers\n\n\ndef test_oracle_positive_product():\n    assert multiply_numbers(3, 4) == 12\n    assert json.dumps([1]) == \"[1]\"\n"
+	impl := "def multiply_numbers(a, b):\n    return a * b\n"
+	for _, tc := range []struct {
+		name   string
+		files  map[string]string
+		finds  bool
+		passes bool
+	}{
+		{"package at the root", map[string]string{"mathpkg/__init__.py": impl}, true, true},
+		{"src layout", map[string]string{"src/mathpkg/__init__.py": impl}, true, true},
+		{"src is a package: its modules do not shadow the standard library", map[string]string{"src/__init__.py": "", "src/json.py": "raise ImportError('shadowed')\n", "mathpkg/__init__.py": impl}, true, true},
+		{"src is a package: a package inside it is not a top-level import", map[string]string{"src/__init__.py": "", "src/mathpkg/__init__.py": impl}, false, false},
+		{"no such package", map[string]string{"other/__init__.py": ""}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := t.TempDir()
+			tc.files[".oracle/test_oracle_multiply.py"] = oracle
+			writeFiles(t, w, tc.files)
+			if got := ModuleExistsInWorkspace(w, "mathpkg"); got != tc.finds {
+				t.Errorf("ModuleExistsInWorkspace(mathpkg) = %v, want %v", got, tc.finds)
+			}
+			if code := runShell(t, w, cmd); (code == 0) != tc.passes {
+				t.Errorf("runner exit %d, want pass=%v", code, tc.passes)
+			}
+		})
+	}
+}
