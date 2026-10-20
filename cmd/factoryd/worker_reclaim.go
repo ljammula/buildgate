@@ -47,8 +47,8 @@ func keptLostRun(dataDir, runID string) string {
 // haltRequestsOfLostRuns moves each request whose step was running one of
 // runs, the runs reclaimDeadOwnerRuns just halted, to resume_review and
 // returns their ids: a request still building that run as its current ticket,
-// or in pr_review (the run was a corrective round). A request that has moved
-// on is left alone. Best-effort, like the reclaim itself: failures are logged.
+// or in pr_review when the run started after the request entered it (the run
+// was a corrective round). A request that has moved on is left alone. Best-effort, like the reclaim itself: failures are logged.
 func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
 	var halted []string
 	for _, lost := range runs {
@@ -73,6 +73,9 @@ func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
 					return nil
 				}
 			case request.StatePRReview:
+				if runPredatesState(r, lost) {
+					return nil
+				}
 			default:
 				return nil
 			}
@@ -87,6 +90,21 @@ func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
 		}
 	}
 	return halted
+}
+
+// runPredatesState reports whether run was created before r entered its
+// current state: a pr_review request's round runs all start after it entered
+// pr_review, so an earlier run is a superseded attempt of a step it has moved
+// past (a build halted before the ticket was rebuilt), not its lost round.
+// A time that does not parse reads as not earlier: the request then waits for
+// a human, as it would without this check.
+func runPredatesState(r *request.Request, lost *run.Run) bool {
+	since, ok := r.InStateSince()
+	if !ok {
+		return false
+	}
+	created, err := time.Parse(time.RFC3339Nano, lost.CreatedAt)
+	return err == nil && created.Before(since)
 }
 
 // requestWorkflowTerminator is the slice of client.Client
