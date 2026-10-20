@@ -65,6 +65,33 @@ func TestHaltRequestsOfLostRunsEntersResumeReviewForAPRReviewRequest(t *testing.
 	}
 }
 
+// A run created before its request entered pr_review is a superseded attempt
+// (a build halted before the ticket was rebuilt), not a lost round: reclaiming
+// it at worker start leaves the request polling its pull request.
+func TestHaltRequestsOfLostRunsLeavesAPRReviewRequestForARunFromBeforeIt(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-pr", request.StatePRReview)
+	r, err := request.Load(dataDir, "req-pr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.EnteredAt = "2026-10-20T03:50:00Z"
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	old := &run.Run{ID: "run-old", RequestID: "req-pr", CreatedAt: "2026-10-20T03:42:04Z"}
+	if halted := haltRequestsOfLostRuns(dataDir, []*run.Run{old}); len(halted) != 0 {
+		t.Fatalf("halted = %v, want none for a run from before pr_review", halted)
+	}
+	if got, _ := request.Load(dataDir, "req-pr"); got.State != request.StatePRReview {
+		t.Fatalf("state = %s, want pr_review", got.State)
+	}
+	round := &run.Run{ID: "run-round", RequestID: "req-pr", CreatedAt: "2026-10-20T04:10:00Z"}
+	if halted := haltRequestsOfLostRuns(dataDir, []*run.Run{round}); len(halted) != 1 {
+		t.Fatalf("halted = %v, want [req-pr] for a round started in pr_review", halted)
+	}
+}
+
 type recordingTerminator struct {
 	ids []string
 	err error

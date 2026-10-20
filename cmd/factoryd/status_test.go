@@ -458,7 +458,7 @@ func TestBuildRequestStatusEntriesOldestFirstReversedToNewestFirst(t *testing.T)
 		{ID: "older", Project: "app", State: request.StateSubmitted, SubmittedAt: "2026-09-01T00:00:00Z"},
 		{ID: "newer", Project: "app", State: request.StateSpecReview, SubmittedAt: "2026-09-05T00:00:00Z"},
 	}
-	entries := buildRequestStatusEntries(requests, nil, 1, "", time.Now())
+	entries := buildRequestStatusEntries(requests, nil, 1, nil, "", time.Now())
 	if len(entries) != 2 || entries[0].ID != "newer" || entries[1].ID != "older" {
 		t.Fatalf("entries = %v, want [newer, older]", entries)
 	}
@@ -472,7 +472,7 @@ func TestBuildRequestStatusEntriesFiltersByProject(t *testing.T) {
 		{ID: "a", Project: "appa", State: request.StateSubmitted, SubmittedAt: "2026-09-01T00:00:00Z"},
 		{ID: "b", Project: "appb", State: request.StateSubmitted, SubmittedAt: "2026-09-02T00:00:00Z"},
 	}
-	entries := buildRequestStatusEntries(requests, nil, 1, "appa", time.Now())
+	entries := buildRequestStatusEntries(requests, nil, 1, nil, "appa", time.Now())
 	if len(entries) != 1 || entries[0].ID != "a" {
 		t.Fatalf("entries = %v, want only the appa request", entries)
 	}
@@ -511,7 +511,7 @@ preflight_profile: brownfield
 		t.Fatalf("statusMain -json: %v", err)
 	}
 
-	entries := buildRequestStatusEntries(requests, nil, 1, "", time.Now())
+	entries := buildRequestStatusEntries(requests, nil, 1, nil, "", time.Now())
 	if len(entries) != 1 {
 		t.Fatalf("buildRequestStatusEntries = %v, want 1 entry", entries)
 	}
@@ -691,7 +691,7 @@ func TestBuildRequestStatusEntriesSetsWaitingOnForARequestQueuedBehindAnother(t 
 		},
 	}
 
-	entries := buildRequestStatusEntries(requests, nil, 1, "", time.Now())
+	entries := buildRequestStatusEntries(requests, nil, 1, nil, "", time.Now())
 	byID := map[string]requestStatusEntry{}
 	for _, e := range entries {
 		byID[e.ID] = e

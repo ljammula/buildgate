@@ -62,7 +62,7 @@ func PathInDir(runDir string) string {
 // (JSON + trailing newline).
 func Append(path string, e Event) error {
 	if e.Ts == "" {
-		e.Ts = time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		e.Ts = time.Now().UTC().Format(tsLayout)
 	}
 	e.Detail = truncateDetail(e.Detail)
 
@@ -243,6 +243,23 @@ type RunSummary struct {
 	CurrentRound  int
 	MaxRounds     int
 	WaitingReason string
+	// LongestVerify is the longest completed (start to end) verify-family
+	// factory stage in the window (see VerifyStage); 0 when none completed.
+	LongestVerify time.Duration
+}
+
+// tsLayout is the layout of Event.Ts as Append stamps it.
+const tsLayout = "2006-01-02T15:04:05.000Z07:00"
+
+// VerifyStage reports whether stage is a verify-family stage: one that writes
+// a single start and a single end line and nothing between them while its
+// sandbox runs a command of unknown length.
+func VerifyStage(stage string) bool {
+	switch stage {
+	case "baseline_verify", "verify", "full_suite", "post_oracle_commit_verify", "gate":
+		return true
+	}
+	return false
 }
 
 // Summary computes a run's current-activity summary from the tail of its
@@ -327,6 +344,7 @@ func Summarize(events []Event) RunSummary {
 	var sum RunSummary
 	var stageOpen string
 	var waiting string
+	var verifyStart time.Time
 	for _, e := range events {
 		sum.LastAt = e.Ts
 
@@ -336,9 +354,15 @@ func Summarize(events []Event) RunSummary {
 			case "start":
 				stageOpen = e.Stage
 				waiting = ""
+				verifyStart = time.Time{}
+				if VerifyStage(e.Stage) {
+					verifyStart, _ = time.Parse(tsLayout, e.Ts)
+				}
 			case "end":
 				if e.Stage == stageOpen {
 					stageOpen = ""
+					sum.LongestVerify = max(sum.LongestVerify, verifyDuration(verifyStart, e.Ts))
+					verifyStart = time.Time{}
 				}
 			case "note":
 				if e.Stage == "queued" {
@@ -375,6 +399,19 @@ func Summarize(events []Event) RunSummary {
 	sum.CurrentStage = stageOpen
 	sum.WaitingReason = waiting
 	return sum
+}
+
+// verifyDuration is how long a verify-family stage that started at start ran
+// before the end line stamped endTs; 0 when either is unknown.
+func verifyDuration(start time.Time, endTs string) time.Duration {
+	if start.IsZero() {
+		return 0
+	}
+	end, err := time.Parse(tsLayout, endTs)
+	if err != nil {
+		return 0
+	}
+	return max(end.Sub(start), 0)
 }
 
 // readTail returns the last budget bytes of path, dropping a leading
@@ -443,17 +480,23 @@ func truncateDetail(s string) string {
 // /runs{,/{id}}) -- "silence is a bug": a run that has written no progress
 // line in this long, or never wrote its first one this long after being
 // created, needs to be visibly flagged rather than left looking like
-// ordinary in-progress elapsed time.
+// ordinary in-progress elapsed time. A verify-family stage after a completed
+// one waits longer (see Stalled).
 const StallAfter = 5 * time.Minute
 
-// Stalled reports whether a run has gone quiet for longer than StallAfter,
-// and for how long: measured from summary.LastAt when its progress feed has
+// Stalled reports whether a run has gone quiet for longer than its threshold,
+// and for how long. The threshold is StallAfter, except while a verify-family
+// stage is open (it writes no line between its start and end) and an earlier
+// one completed in the window: then it is the longer of StallAfter and one and
+// a half times the longest completed one (summary.LongestVerify), so a verify
+// as long as the baseline before it is not flagged. A run's first
+// verify-family stage has no such reference and keeps StallAfter. Measured from summary.LastAt when its progress feed has
 // at least one line, else from createdAt for a run that hasn't written its
 // first line yet. An unparseable timestamp reports not-stalled rather than
 // guessing. The single implementation of this rule: the console shows the
 // server's verdict (console/src/domain/elapsed.ts) rather than re-deriving it.
 func Stalled(summary RunSummary, createdAt string, now time.Time) (stalled bool, since time.Duration) {
-	ts, layout := summary.LastAt, "2006-01-02T15:04:05.000Z07:00"
+	ts, layout := summary.LastAt, tsLayout
 	if ts == "" {
 		ts, layout = createdAt, time.RFC3339
 	}
@@ -462,7 +505,11 @@ func Stalled(summary RunSummary, createdAt string, now time.Time) (stalled bool,
 		return false, 0
 	}
 	since = now.Sub(last)
-	return since > StallAfter, since
+	threshold := StallAfter
+	if VerifyStage(summary.CurrentStage) && summary.LongestVerify > 0 {
+		threshold = max(threshold, summary.LongestVerify*3/2)
+	}
+	return since > threshold, since
 }
 
 // HasFinished reports whether path's tail already carries the factory's

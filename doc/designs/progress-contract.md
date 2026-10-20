@@ -141,7 +141,11 @@ computed from the tail of the feed (`internal/progress.Summary`):
 `compose_services_lock` `waiting` event's detail, cleared when a stage
 starts or the lock is `acquired`). Consumers flag a non-terminal run as **stalled** when
 `now − last_progress_at` exceeds 5 minutes (or, with no lines, `now −
-created_at`).
+created_at`). While a verify-family stage (`baseline_verify`, `verify`,
+`full_suite`, `post_oracle_commit_verify`, `gate`) is open, which writes only its start and end
+lines, the threshold is the longer of 5 minutes and 1.5 times the longest
+verify-family stage the window shows completed; a run's first has no such
+reference and keeps 5 minutes.
 
 ## Related surfaces
 

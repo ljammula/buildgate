@@ -132,6 +132,9 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 	if err != nil {
 		return "", fmt.Errorf("load request %s: %w", id, err)
 	}
+	if r.State != request.StateBuilding {
+		repositoryWaits.clear(id)
+	}
 	if requestdriver.RequestDriverOwnsState(r.State) {
 		onJobs := a.runsOnJobsQueue(ctx)
 		if onJobs {
@@ -153,6 +156,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// would be refused at release: it is halted before a build is
 			// spent on it.
 			if reason := staleMemoryRequest(ctx, a.dp, a.dataDir, r); reason != "" {
+				repositoryWaits.clear(id)
 				if err := requestdriver.HaltRequest(a.dataDir, r, reason, time.Now()); err != nil {
 					return "", err
 				}
@@ -164,12 +168,18 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// process lived on is still building this ticket: a second
 			// build of it would run beside the first.
 			if live, why := a.ticketRunStillLive(r, ownSteps); live {
+				// Its own run, not another build, holds it.
+				repositoryWaits.clear(id)
 				log.Printf("request %s: not starting another build step: %s", r.ID, why)
 				return "", temporal.NewApplicationError("the ticket's run is still being built by a live process", repositoryBusyErrorType)
 			}
 			if repoBusy(r.Workspace, a.dataDir) {
+				// status says the request waits for the repository, from the
+				// first time it was found busy.
+				repositoryWaits.markBusy(id, time.Now())
 				return "", temporal.NewApplicationError("repository busy: another build holds it", repositoryBusyErrorType)
 			}
+			repositoryWaits.clear(id)
 		}
 		if stepWaitsForRepoLock(r.State, onJobs) {
 			ctx = withWaitForRepoLock(ctx)
