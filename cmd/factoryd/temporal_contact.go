@@ -23,8 +23,8 @@ import (
 // worktree is kept and its request waits for a human.
 
 // waitContactBudget is how long a wait on a run's workflow goes on after the
-// server stopped answering it; a var so tests need not wait it out.
-var waitContactBudget = 2 * time.Minute
+// server stopped answering it.
+const waitContactBudget = 2 * time.Minute
 
 // terminateContactBudget is how long a terminate of a run's workflow is
 // retried while the server does not answer.
@@ -39,12 +39,12 @@ func transportFailure(err error) bool {
 }
 
 // contactWithinBudget reports whether the server has been silent for less
-// than waitContactBudget, starting the clock at the first call.
-func contactWithinBudget(since *time.Time) bool {
+// than budget, starting the clock at the first call.
+func contactWithinBudget(since *time.Time, budget time.Duration) bool {
 	if since.IsZero() {
 		*since = time.Now()
 	}
-	return time.Since(*since) < waitContactBudget
+	return time.Since(*since) < budget
 }
 
 // lostTemporalContact returns the error that shows a run's wait ended

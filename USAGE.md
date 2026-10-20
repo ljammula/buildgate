@@ -1359,8 +1359,9 @@ state of its own.
 
 Temporal never reruns a lost step on its own. A step lost because its
 `factoryd` process stopped or went quiet (laptop sleep, a crash, a lost
-worker), or that heard nothing from the Temporal server for a whole heartbeat
-timeout (a shorter stall of the connection is ridden out and loses nothing),
+worker), or that lost the Temporal server (a stall of up to about 90 s loses
+nothing; a longer one parks the request once as `temporal_unreachable`, or as
+`worker_lost` when the server timed the step out first),
 or whose sandbox never started its command (it could not be
 created, or came up with no worker container), halts its run, and a build
 keeps its worktree. A command that started and then hung or was cut off

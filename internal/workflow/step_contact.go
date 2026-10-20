@@ -7,11 +7,14 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 	temporalworker "go.temporal.io/sdk/worker"
 	"google.golang.org/grpc/codes"
@@ -109,8 +112,55 @@ func serverAnswered(err error) bool {
 }
 
 // guardedKey marks a context GuardStep made, which a step called inside
-// another guarded step does not guard again.
+// another guarded step does not guard again. Its value is the stepState.
 type guardedKey struct{}
+
+// HeartbeatThrottle is the longest the SDK holds a heartbeat back
+// (worker.Options.MaxHeartbeatThrottleInterval) on every worker factoryd
+// builds: it sends one at least this often and gives each this long, so a
+// stall cancels the SDK's context after about twice this, well inside the
+// heartbeat timeout, and the guard's own heartbeats start from there.
+const HeartbeatThrottle = 15 * time.Second
+
+// stepState is the last details a guarded step recorded with its heartbeat,
+// which the guard's own heartbeats send again so the Temporal UI's progress
+// readout survives.
+type stepState struct {
+	mu      sync.Mutex
+	details []any
+}
+
+func (s *stepState) set(details []any) {
+	s.mu.Lock()
+	s.details = details
+	s.mu.Unlock()
+}
+
+func (s *stepState) get() []any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.details
+}
+
+// recordStepHeartbeat is activity.RecordHeartbeat for a guarded step: it also
+// keeps details for the guard's own heartbeats.
+func recordStepHeartbeat(ctx context.Context, details ...any) {
+	if st, ok := ctx.Value(guardedKey{}).(*stepState); ok {
+		st.set(details)
+	}
+	activity.RecordHeartbeat(ctx, details...)
+}
+
+// stepErr is err as a guarded step's launch returned it, joined with the
+// ContactLostError the step's context was cancelled with, when that is why:
+// the launch wraps ctx.Err(), which has lost the cause.
+func stepErr(ctx context.Context, err error) error {
+	var lost *ContactLostError
+	if err != nil && errors.As(context.Cause(ctx), &lost) {
+		return errors.Join(err, lost)
+	}
+	return err
+}
 
 // heartbeatAnswer is what a heartbeat's response asks of the step.
 type heartbeatAnswer struct {
@@ -144,8 +194,16 @@ type stepGuard struct {
 	// interval is how often a heartbeat is sent once the SDK's context is
 	// cancelled.
 	interval time.Duration
-	// heartbeat sends one heartbeat to the server by itself.
-	heartbeat func(ctx context.Context) (heartbeatAnswer, error)
+	// throttle is the SDK's heartbeat throttle for the Activity: its context
+	// is cancelled after about two of them without a heartbeat getting
+	// through, so the silence began that long before.
+	throttle time.Duration
+	// workerStop is closed when the worker begins to stop.
+	workerStop <-chan struct{}
+	// state holds the last heartbeat details of the step.
+	state *stepState
+	// heartbeat sends one heartbeat, with details, to the server by itself.
+	heartbeat func(ctx context.Context, details []any) (heartbeatAnswer, error)
 }
 
 // GuardStep returns the context a long Activity step runs under, and the
@@ -157,14 +215,24 @@ func GuardStep(activityCtx context.Context) (context.Context, context.CancelFunc
 	}
 	info := activity.GetInfo(activityCtx)
 	return guardStep(activityCtx, stepGuard{
-		name:     info.ActivityType.Name,
-		timeout:  info.HeartbeatTimeout,
-		interval: stepContactInterval,
-		heartbeat: func(ctx context.Context) (heartbeatAnswer, error) {
+		name:       info.ActivityType.Name,
+		timeout:    info.HeartbeatTimeout,
+		interval:   stepContactInterval,
+		throttle:   min(time.Duration(0.8*float64(info.HeartbeatTimeout)), HeartbeatThrottle),
+		workerStop: activity.GetWorkerStopChannel(activityCtx),
+		heartbeat: func(ctx context.Context, details []any) (heartbeatAnswer, error) {
+			var payloads *commonpb.Payloads
+			if len(details) > 0 {
+				var err error
+				if payloads, err = converter.GetDefaultDataConverter().ToPayloads(details...); err != nil {
+					payloads = nil
+				}
+			}
 			resp, err := activity.GetClient(activityCtx).WorkflowService().RecordActivityTaskHeartbeat(ctx, &workflowservice.RecordActivityTaskHeartbeatRequest{
 				TaskToken: info.TaskToken,
 				Namespace: info.Namespace,
 				Identity:  "factoryd step guard",
+				Details:   payloads,
 			})
 			if err != nil {
 				return heartbeatAnswer{}, err
@@ -180,7 +248,10 @@ func guardStep(activityCtx context.Context, g stepGuard) (context.Context, conte
 	if deadline, ok := activityCtx.Deadline(); ok {
 		base, cancelDeadline = context.WithDeadline(base, deadline)
 	}
-	stepCtx, cancel := context.WithCancelCause(context.WithValue(base, guardedKey{}, true))
+	if g.state == nil {
+		g.state = &stepState{}
+	}
+	stepCtx, cancel := context.WithCancelCause(context.WithValue(base, guardedKey{}, g.state))
 	go g.watch(activityCtx, stepCtx, cancel)
 	return stepCtx, func() {
 		cancel(context.Canceled)
@@ -209,13 +280,25 @@ func (g stepGuard) watch(activityCtx, stepCtx context.Context, cancel context.Ca
 // the clock; a server answer that asks the step to stop stops it; a whole
 // timeout without a success stops it with a ContactLostError.
 func (g stepGuard) rideOut(stepCtx context.Context, cancel context.CancelCauseFunc, lastErr error) {
-	lastContact := time.Now()
+	// The SDK cancelled its context after about two throttles without a
+	// heartbeat getting through: the silence began that long ago.
+	// (At most half the timeout: a throttle that is not small beside the
+	// timeout says little about when contact was last had.)
+	lastContact := time.Now().Add(-min(2*g.throttle, g.timeout/2))
 	lost := true
 	ticker := time.NewTicker(g.interval)
 	defer ticker.Stop()
 	for {
+		select {
+		case <-g.workerStop:
+			// The worker is stopping (a SIGTERM, a restart): the step stops
+			// with it, as the SDK would have stopped it.
+			cancel(temporalworker.ErrWorkerShutdown)
+			return
+		default:
+		}
 		beatCtx, cancelBeat := context.WithTimeout(stepCtx, g.interval)
-		answer, err := g.heartbeat(beatCtx)
+		answer, err := g.heartbeat(beatCtx, g.state.get())
 		cancelBeat()
 		switch {
 		case stepCtx.Err() != nil:
@@ -242,6 +325,9 @@ func (g stepGuard) rideOut(stepCtx context.Context, cancel context.CancelCauseFu
 		}
 		select {
 		case <-stepCtx.Done():
+			return
+		case <-g.workerStop:
+			cancel(temporalworker.ErrWorkerShutdown)
 			return
 		case <-ticker.C:
 		}

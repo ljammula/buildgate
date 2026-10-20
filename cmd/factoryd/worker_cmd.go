@@ -89,12 +89,9 @@ func workerMain(dp *deps, args []string) error {
 			return runMainWithReady(dp, a0, a1, a2)
 		},
 	}
-	jobs := temporalworker.New(temporalClient, jobsQueue, temporalworker.Options{
-		MaxConcurrentActivityExecutionSize: cfg.Settings.MaxParallelJobs,
-		WorkerStopTimeout:                  requestWorkerStopTimeout,
-	})
+	jobs := temporalworker.New(temporalClient, jobsQueue, jobsWorkerOptions(cfg.Settings.MaxParallelJobs))
 	jobs.RegisterActivityWithOptions(acts.AdvanceRequest, activity.RegisterOptions{Name: workflow.AdvanceRequestActivityName})
-	light := temporalworker.New(temporalClient, lightQueue, temporalworker.Options{WorkerStopTimeout: requestWorkerStopTimeout})
+	light := temporalworker.New(temporalClient, lightQueue, lightWorkerOptions())
 	acts.registerLight(light)
 
 	if err := jobs.Start(); err != nil {
@@ -118,6 +115,24 @@ func workerMain(dp *deps, args []string) error {
 	<-ctx.Done()
 	log.Printf("factoryd worker: stopping")
 	return nil
+}
+
+// jobsWorkerOptions are the jobs-queue worker's options: at most maxJobs
+// steps at once, the SDK's heartbeat throttle bounded (workflow.HeartbeatThrottle).
+func jobsWorkerOptions(maxJobs int) temporalworker.Options {
+	return temporalworker.Options{
+		MaxConcurrentActivityExecutionSize: maxJobs,
+		WorkerStopTimeout:                  requestWorkerStopTimeout,
+		MaxHeartbeatThrottleInterval:       workflow.HeartbeatThrottle,
+	}
+}
+
+// lightWorkerOptions are the light-queue worker's options.
+func lightWorkerOptions() temporalworker.Options {
+	return temporalworker.Options{
+		WorkerStopTimeout:            requestWorkerStopTimeout,
+		MaxHeartbeatThrottleInterval: workflow.HeartbeatThrottle,
+	}
 }
 
 // requestWorkerStopTimeout is how long Stop waits for running activities. A

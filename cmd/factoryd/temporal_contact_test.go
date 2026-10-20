@@ -161,13 +161,10 @@ func TestAWaitThatFailedOnTheConnectionIsALostContactButAFailedWorkflowIsNot(t *
 func TestAWaitOnAServerThatDoesNotAnswerIsWaitedOutWithinItsBudget(t *testing.T) {
 	dp := newTestDeps(t)
 	stubWorkflowStillRunning(dp, t, false)
-	old := waitContactBudget
-	waitContactBudget = time.Minute
-	t.Cleanup(func() { waitContactBudget = old })
 	down := status.Error(codes.Unavailable, "connection refused")
 	wf := &fakeWorkflowRun{errs: []error{down, down, context.DeadlineExceeded}}
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, wf, "r", &result); err != nil {
+	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, wf, "r", &result, time.Minute); err != nil {
 		t.Fatalf("wait = %v, want nil once the server answers", err)
 	}
 	if wf.calls != 4 {
@@ -178,9 +175,6 @@ func TestAWaitOnAServerThatDoesNotAnswerIsWaitedOutWithinItsBudget(t *testing.T)
 func TestAWaitOnAServerThatNeverAnswersEndsWithItsError(t *testing.T) {
 	dp := newTestDeps(t)
 	stubWorkflowStillRunning(dp, t, false)
-	old := waitContactBudget
-	waitContactBudget = 30 * time.Millisecond
-	t.Cleanup(func() { waitContactBudget = old })
 	down := status.Error(codes.Unavailable, "connection refused")
 	errs := make([]error, 100000)
 	for i := range errs {
@@ -188,7 +182,7 @@ func TestAWaitOnAServerThatNeverAnswersEndsWithItsError(t *testing.T) {
 	}
 	wf := &fakeWorkflowRun{errs: errs}
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, wf, "r", &result); !errors.Is(err, down) {
+	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, wf, "r", &result, 30*time.Millisecond); !errors.Is(err, down) {
 		t.Fatalf("wait = %v, want the connection error after the budget", err)
 	}
 }

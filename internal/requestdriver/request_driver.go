@@ -28,6 +28,7 @@ import (
 	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/ticketspec"
+	"buildgate/internal/unresolved"
 )
 
 // Deps is what the request driver needs from outside: the pull-request
@@ -765,7 +766,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		return err
 	} else if !ok {
 		log.Printf("request %s: ticket %d/%d build finished but the request left building while it ran (e.g. cancelled) -- discarding the result", r.ID, idx, r.TicketCount)
-		return nil
+		return noteLostCause(dataDir, r.ID, ticket.RunID)
 	}
 	if runErr != nil {
 		if stoppedMidRun(ctx, dataDir, ticket, started) {
@@ -858,6 +859,38 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// expected to actually reach this branch.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
+}
+
+// noteLostCause names the cause of a lost build correctly when the request
+// was moved to resume_review while the build was still running (its step's
+// heartbeat timed out on the server, so the move read as a lost worker) and
+// the run then halted for losing Temporal: the request keeps its place, and
+// its cause, prompt and kept run are the run's own.
+func noteLostCause(dataDir, requestID, runID string) error {
+	unlock, err := request.Lock(dataDir, requestID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cur, err := request.Load(dataDir, requestID)
+	if err != nil {
+		return err
+	}
+	if cur.State != request.StateResumeReview || cur.Resume == nil || cur.Resume.FromState != request.StateBuilding ||
+		cur.Resume.Cause == unresolved.TemporalUnreachable || (cur.Resume.LostRunID != "" && cur.Resume.LostRunID != runID) {
+		return nil
+	}
+	rec, err := run.Load(dataDir, runID)
+	if err != nil || run.UnresolvedCauseOf(rec) != unresolved.TemporalUnreachable {
+		return nil
+	}
+	cur.Resume.Cause = unresolved.TemporalUnreachable
+	if rec.KeptForResume {
+		cur.Resume.LostRunID = runID
+	}
+	cur.Error = request.ResumePrompt(cur.ID, cur.Resume.FromState, request.LostStep{RunID: cur.Resume.LostRunID, Cause: cur.Resume.Cause})
+	log.Printf("request %s: resume_review cause is now %s (run %s lost its Temporal connection)", cur.ID, cur.Resume.Cause, runID)
+	return cur.Save(dataDir)
 }
 
 // settlePriorRun decides what the ticket's earlier run, if any, means for the

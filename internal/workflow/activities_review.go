@@ -294,7 +294,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// comment.
 	heartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(heartbeatStart)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(heartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(ctx, input.WorkspacePath, logPath, 1, beforeAttempt, afterAttempt, buildAppInterpreter, args...)
@@ -428,7 +428,7 @@ func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInp
 			}
 		}
 	}
-	errType := launchErrorType(runErr)
+	errType := launchErrorType(stepErr(ctx, runErr))
 	if runErr != nil {
 		checkpoint.Error = fmt.Sprintf("%s subprocess infrastructure failure: %v", step.Label, runErr)
 		checkpoint.ErrorType = checkpointErrorType(runErr)

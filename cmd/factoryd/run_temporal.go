@@ -249,8 +249,8 @@ type composeServicesOptions struct {
 //
 // A Get that fails on the connection itself (the server does not answer,
 // and neither does the check above) is waited out again for up to
-// waitContactBudget: a stall of the server is not an outcome of the run.
-func waitForRunWorkflowWithProgress(dp *deps, ctx context.Context, temporalClient client.Client, execution client.WorkflowRun, id string, result *workflow.RunWorkflowResult) error {
+// contactBudget: a stall of the server is not an outcome of the run.
+func waitForRunWorkflowWithProgress(dp *deps, ctx context.Context, temporalClient client.Client, execution client.WorkflowRun, id string, result *workflow.RunWorkflowResult, contactBudget time.Duration) error {
 	resultCh := make(chan error, 1)
 	get := func(delay time.Duration) {
 		select {
@@ -275,8 +275,8 @@ func waitForRunWorkflowWithProgress(dp *deps, ctx context.Context, temporalClien
 					go get(waitRetryDelay)
 					continue
 				}
-				if transportFailure(err) && contactWithinBudget(&silentSince) {
-					log.Printf("run %s: no answer from the Temporal server (%v); waiting again for up to %s", id, err, waitContactBudget)
+				if transportFailure(err) && contactWithinBudget(&silentSince, contactBudget) {
+					log.Printf("run %s: no answer from the Temporal server (%v); waiting again for up to %s", id, err, contactBudget)
 					go get(waitRetryDelay)
 					continue
 				}
@@ -552,7 +552,7 @@ func startRunWorkflow(runCtx context.Context, temporalClient client.Client, r *r
 func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Client, execution client.WorkflowRun, r *run.Run, opts runOptions, taskQueue string, cancelActivities context.CancelFunc) error {
 	checkpointDir := opts.checkpointDir()
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, runCtx, temporalClient, execution, opts.ID, &result); err != nil {
+	if err := waitForRunWorkflowWithProgress(dp, runCtx, temporalClient, execution, opts.ID, &result, waitContactBudget); err != nil {
 		// Not confirmed by default — proven true only below. Found via
 		// two review rounds: a first version inferred confirmation from
 		// runCtx.Err() alone (nil meaning "Get failed for its own

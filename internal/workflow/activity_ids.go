@@ -61,6 +61,8 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	MeterDeniedFailureType:      unresolved.MeterDenied,
 	// A command that ran and failed, twice, with a registry unreachable.
 	DependencyFetchFailureType: unresolved.DependencyFetch,
+	// A step whose heartbeats got no answer for a whole heartbeat timeout.
+	TemporalUnreachableFailureType: unresolved.TemporalUnreachable,
 }
 
 // modelRouteFailureTypes is the failure type of each cause
@@ -156,6 +158,7 @@ var nonRetryableActivityFailureTypes = []string{
 	FactoryDirFailureType,
 	AmbiguousPriorAttemptType,
 	ActivitySupersededType,
+	TemporalUnreachableFailureType,
 }
 
 // retriedActivityOptions is options with the retrying policy: the second

@@ -127,6 +127,8 @@ func launchErrorType(runErr error) string {
 		return SandboxLaunchFailureType
 	case errors.Is(runErr, errDependencyFetch):
 		return DependencyFetchFailureType
+	case errors.As(runErr, new(*ContactLostError)):
+		return TemporalUnreachableFailureType
 	}
 	return InfrastructureFailureType
 }

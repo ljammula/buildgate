@@ -144,7 +144,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	}
 	verifyHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: v.kind, Elapsed: time.Since(verifyHeartbeatStart)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: v.kind, Elapsed: time.Since(verifyHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
@@ -182,11 +182,11 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	// failure return below — see RunBuildActivity's matching comment for
 	// why.
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return verifyResult, temporal.NewApplicationErrorWithCause("save "+v.label+" Activity checkpoint", errType, saveErr, verifyResult.Attempts)
 	}
 	if runErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return verifyResult, temporal.NewApplicationErrorWithCause(v.label+" subprocess infrastructure failure", errType, runErr, verifyResult.Attempts)
 	}
 	if err != nil {
@@ -326,7 +326,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	}
 	fullSuiteHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: "full_suite_verify", Elapsed: time.Since(fullSuiteHeartbeatStart)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: "full_suite_verify", Elapsed: time.Since(fullSuiteHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
@@ -359,11 +359,11 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	}
 	checkpoint.Result = fullSuiteResult
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("save full-suite verify Activity checkpoint", errType, saveErr, fullSuiteResult.Attempts)
 	}
 	if runErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("full-suite verify subprocess infrastructure failure", errType, runErr, fullSuiteResult.Attempts)
 	}
 	if err != nil {
@@ -576,7 +576,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	}
 	namedGateHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: input.Check, Elapsed: time.Since(namedGateHeartbeatStart)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: input.Check, Elapsed: time.Since(namedGateHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
@@ -631,11 +631,11 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	gateResult.BaseCheck = pendingGateBaseCheck(input, result, runErr, err)
 	checkpoint.Result = gateResult
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return gateResult, temporal.NewApplicationErrorWithCause("save "+input.Check+" gate Activity checkpoint", errType, saveErr, gateResult.Attempts)
 	}
 	if runErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return gateResult, temporal.NewApplicationErrorWithCause(input.Check+" gate subprocess infrastructure failure", errType, runErr, gateResult.Attempts)
 	}
 	if err != nil {

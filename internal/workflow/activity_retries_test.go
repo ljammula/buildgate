@@ -135,8 +135,8 @@ func TestRetriedActivityOptionsListsEveryNonInfrastructureType(t *testing.T) {
 			t.Error("InfrastructureFailure is listed non-retryable")
 		}
 	}
-	if len(opts.RetryPolicy.NonRetryableErrorTypes) != 18 {
-		t.Errorf("non-retryable types = %v, want the 18 listed failure types", opts.RetryPolicy.NonRetryableErrorTypes)
+	if len(opts.RetryPolicy.NonRetryableErrorTypes) != 19 {
+		t.Errorf("non-retryable types = %v, want the 19 listed failure types", opts.RetryPolicy.NonRetryableErrorTypes)
 	}
 }
 

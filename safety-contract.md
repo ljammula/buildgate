@@ -491,8 +491,17 @@ requires a new contract review and an updated machine-checkable test.
   succeeded for the Activity's whole heartbeat timeout. The last is the
   cause `temporal_unreachable`: the run halts with it and its worktree
   kept (found from the isolation marker when the halt cannot be confirmed
-  against the server), never as an operator's cancellation or a lost
-  worker; a stall shorter than the heartbeat timeout loses nothing. A resume runs only after that decision,
+  against the server), never as an operator's cancellation. Every Temporal
+  worker factoryd builds sets the SDK's heartbeat throttle to 15 s
+  (`workflow.HeartbeatThrottle`), so the SDK gives up on a stalled heartbeat
+  after about 30 s and the guard heartbeats on its own every 10 s, counting
+  its silence from the last heartbeat that could have got through: a stall of
+  up to about 90 s loses nothing, and a longer one parks the request once as
+  `temporal_unreachable`, or as `worker_lost` when the server timed the step
+  out first. A step the server timed out while its owner process and sandbox
+  are alive is not parked by `HaltLostRequestStep`: no second build starts
+  beside it, and when its run later halts as `temporal_unreachable` the
+  request's cause becomes that. A resume runs only after that decision,
   only when the gateway, which must be reachable, reports no sandbox under
   the name the run recorded before launch, and no worker or supervisor
   container carrying that `openshell.ai/sandbox-name` is alive, and only when the worktree is on the run's own branch with HEAD equal to,
@@ -618,8 +627,9 @@ requires a new contract review and an updated machine-checkable test.
   verify (`-verify-max-attempts`) launch again after any launch error
   except an unconfirmed removal, a command started twice or a reached
   ceiling. Temporal's `MaximumAttempts: 1` stands. A run that halts for any
-  of these causes but `worker_lost` and `temporal_unreachable` counts toward a repository's stop line
-  as an infrastructure failure does. An
+  of these causes counts toward a repository's stop line as an infrastructure
+  failure does, except `worker_lost` and `temporal_unreachable`, which do not
+  count. An
   unresolved step accepts nothing: every gate still runs on what a resume
   produces.
 - **SC-018 — only a build is told about an earlier attempt, and only from

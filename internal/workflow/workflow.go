@@ -201,6 +201,12 @@ const (
 	// (unresolved.DependencyFetch). No history recorded before the type
 	// existed holds it.
 	DependencyFetchFailureType = "DependencyFetch"
+	// TemporalUnreachableFailureType marks a step cancelled because no
+	// heartbeat reached the Temporal server for a whole heartbeat timeout
+	// (ContactLostError): it says nothing about the work, so it is not
+	// retried by Temporal and the worktree is kept for a resume decision
+	// (unresolved.TemporalUnreachable).
+	TemporalUnreachableFailureType = "TemporalUnreachable"
 	// ComposeServicesRejectedFailureType marks a build whose target repo's
 	// compose file was rejected before any attempt ran (see
 	// sandbox.ErrComposeServicesRejected), kept distinct for the same

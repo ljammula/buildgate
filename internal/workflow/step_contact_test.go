@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func sdkCancelled(cause error) context.Context {
 func TestAHeartbeatTransportFailureDoesNotCancelTheStep(t *testing.T) {
 	var beats atomic.Int32
 	g := stepGuard{name: "RunBuildActivity", timeout: time.Minute, interval: 5 * time.Millisecond,
-		heartbeat: func(context.Context) (heartbeatAnswer, error) { beats.Add(1); return heartbeatAnswer{}, nil }}
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) { beats.Add(1); return heartbeatAnswer{}, nil }}
 	step, end := guardStep(sdkCancelled(status.Error(codes.Unavailable, "connection refused")), g)
 	defer end()
 
@@ -74,7 +75,7 @@ func TestAHeartbeatTransportFailureDoesNotCancelTheStep(t *testing.T) {
 func TestAStepSurvivesTheServerFailingTheHeartbeatsForLessThanTheTimeout(t *testing.T) {
 	var beats atomic.Int32
 	g := stepGuard{name: "RunBuildActivity", timeout: 2 * time.Second, interval: 5 * time.Millisecond,
-		heartbeat: func(context.Context) (heartbeatAnswer, error) {
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) {
 			if beats.Add(1) <= 5 {
 				return heartbeatAnswer{}, status.Error(codes.Unavailable, "down")
 			}
@@ -93,7 +94,7 @@ func TestAStepSurvivesTheServerFailingTheHeartbeatsForLessThanTheTimeout(t *test
 func TestNoSuccessfulHeartbeatForTheTimeoutCancelsTheStep(t *testing.T) {
 	unavailable := status.Error(codes.Unavailable, "connection refused")
 	g := stepGuard{name: "RunBuildActivity", timeout: 60 * time.Millisecond, interval: 5 * time.Millisecond,
-		heartbeat: func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{}, unavailable }}
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) { return heartbeatAnswer{}, unavailable }}
 	step, end := guardStep(sdkCancelled(unavailable), g)
 	defer end()
 
@@ -115,10 +116,10 @@ func TestNoSuccessfulHeartbeatForTheTimeoutCancelsTheStep(t *testing.T) {
 }
 
 func TestAServerAnswerThatEndsTheStepEndsItAtOnce(t *testing.T) {
-	alive := func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }
+	alive := func(context.Context, []any) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }
 	for name, tc := range map[string]struct {
 		sdkCause  error
-		heartbeat func(context.Context) (heartbeatAnswer, error)
+		heartbeat func(context.Context, []any) (heartbeatAnswer, error)
 		check     func(error) bool
 	}{
 		"a cancel the SDK heard": {temporal.NewCanceledError(), alive, temporal.IsCanceledError},
@@ -129,12 +130,14 @@ func TestAServerAnswerThatEndsTheStepEndsItAtOnce(t *testing.T) {
 		"the worker shutting down": {temporalworker.ErrWorkerShutdown, alive, func(err error) bool { return errors.Is(err, temporalworker.ErrWorkerShutdown) }},
 		"a cancel from the root":   {context.Canceled, alive, func(err error) bool { return errors.Is(err, context.Canceled) }},
 		"a cancel in a heartbeat answer after a stall": {status.Error(codes.Unavailable, "down"),
-			func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{CancelRequested: true}, nil }, temporal.IsCanceledError},
+			func(context.Context, []any) (heartbeatAnswer, error) {
+				return heartbeatAnswer{CancelRequested: true}, nil
+			}, temporal.IsCanceledError},
 		"a pause in a heartbeat answer after a stall": {status.Error(codes.Unavailable, "down"),
-			func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{Paused: true}, nil },
+			func(context.Context, []any) (heartbeatAnswer, error) { return heartbeatAnswer{Paused: true}, nil },
 			func(err error) bool { return errors.Is(err, activity.ErrActivityPaused) }},
 		"the activity gone after a stall": {status.Error(codes.Unavailable, "down"),
-			func(context.Context) (heartbeatAnswer, error) {
+			func(context.Context, []any) (heartbeatAnswer, error) {
 				return heartbeatAnswer{}, serviceerror.NewNotFound("a")
 			},
 			func(err error) bool {
@@ -158,7 +161,7 @@ func TestAServerAnswerThatEndsTheStepEndsItAtOnce(t *testing.T) {
 
 func TestAStepWithoutAHeartbeatTimeoutIsCancelledLikeBefore(t *testing.T) {
 	g := stepGuard{name: "x", timeout: 0, interval: 5 * time.Millisecond,
-		heartbeat: func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }}
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }}
 	step, end := guardStep(sdkCancelled(status.Error(codes.Unavailable, "down")), g)
 	defer end()
 	select {
@@ -175,7 +178,7 @@ func TestAStepKeepsTheActivitysValuesAndDeadlineButNotItsCancellation(t *testing
 	parent, cancelDeadline := context.WithDeadline(parent, deadline)
 	defer cancelDeadline()
 	g := stepGuard{name: "x", timeout: time.Minute, interval: time.Hour,
-		heartbeat: func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }}
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }}
 	step, end := guardStep(parent, g)
 	defer end()
 	cancelParent(status.Error(codes.Unavailable, "down"))
@@ -194,7 +197,7 @@ func TestAStepKeepsTheActivitysValuesAndDeadlineButNotItsCancellation(t *testing
 
 func TestEndingTheGuardStopsItsWatcher(t *testing.T) {
 	g := stepGuard{name: "x", timeout: time.Minute, interval: 5 * time.Millisecond,
-		heartbeat: func(context.Context) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }}
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) { return heartbeatAnswer{}, nil }}
 	step, end := guardStep(context.Background(), g)
 	end()
 	if step.Err() == nil {
@@ -209,5 +212,120 @@ func TestGuardStepOutsideAnActivityReturnsTheContext(t *testing.T) {
 	defer end()
 	if got != ctx {
 		t.Fatal("GuardStep changed a context that is not an activity's")
+	}
+}
+
+// The bound the guard gives, at a scale a test can run: the SDK's context is
+// cancelled after two throttles of silence, the guard counts the silence from
+// then minus those two throttles, and heartbeats of its own every interval.
+// A stall that ends three intervals before the timeout loses nothing; one
+// that outlasts the timeout stops the step with a ContactLostError. With the
+// production numbers (timeout 2 min, interval 10 s) that is a stall of about
+// 90 s.
+func TestAStallShorterThanTheTimeoutLessThreeBeatsLosesNothingAndALongerOneParks(t *testing.T) {
+	const timeout, interval, throttle = 600 * time.Millisecond, 20 * time.Millisecond, 50 * time.Millisecond
+	run := func(stall time.Duration) (context.Context, context.CancelFunc) {
+		start := time.Now()
+		g := stepGuard{name: "RunBuildActivity", timeout: timeout, interval: interval, throttle: throttle,
+			heartbeat: func(context.Context, []any) (heartbeatAnswer, error) {
+				if time.Since(start) < stall {
+					return heartbeatAnswer{}, status.Error(codes.Unavailable, "down")
+				}
+				return heartbeatAnswer{}, nil
+			}}
+		// The SDK notices after two throttles.
+		sdk, cancel := context.WithCancelCause(context.Background())
+		time.AfterFunc(2*throttle, func() { cancel(status.Error(codes.Unavailable, "down")) })
+		return guardStep(sdk, g)
+	}
+
+	short, endShort := run(timeout - 3*interval)
+	defer endShort()
+	time.Sleep(timeout + 200*time.Millisecond)
+	if short.Err() != nil {
+		t.Errorf("a stall of timeout - 3 intervals stopped the step: %v", context.Cause(short))
+	}
+
+	long, endLong := run(timeout + 300*time.Millisecond)
+	defer endLong()
+	select {
+	case <-long.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stall longer than the timeout never stopped the step")
+	}
+	var lost *ContactLostError
+	if !errors.As(context.Cause(long), &lost) || lost.Silent < timeout {
+		t.Errorf("cause = %v, want a ContactLostError of at least the timeout", context.Cause(long))
+	}
+}
+
+func TestAWorkerThatBeginsToStopStopsAStepThatIsRidingOutAStall(t *testing.T) {
+	stop := make(chan struct{})
+	g := stepGuard{name: "x", timeout: time.Minute, interval: 5 * time.Millisecond, workerStop: stop,
+		heartbeat: func(context.Context, []any) (heartbeatAnswer, error) {
+			return heartbeatAnswer{}, status.Error(codes.Unavailable, "down")
+		}}
+	step, end := guardStep(sdkCancelled(status.Error(codes.Unavailable, "down")), g)
+	defer end()
+	time.Sleep(30 * time.Millisecond)
+	if step.Err() != nil {
+		t.Fatalf("the step ended before the worker began to stop: %v", context.Cause(step))
+	}
+	close(stop)
+	select {
+	case <-step.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("a worker that began to stop did not stop the step")
+	}
+	if cause := context.Cause(step); !errors.Is(cause, temporalworker.ErrWorkerShutdown) {
+		t.Errorf("cause = %v, want the worker-shutdown error", cause)
+	}
+}
+
+func TestTheGuardsOwnHeartbeatsCarryTheStepsLastDetails(t *testing.T) {
+	var got atomic.Value
+	g := stepGuard{name: "x", timeout: time.Minute, interval: 5 * time.Millisecond,
+		heartbeat: func(_ context.Context, details []any) (heartbeatAnswer, error) {
+			got.Store(details)
+			return heartbeatAnswer{}, nil
+		}}
+	// Details recorded before the stall are the ones sent after it.
+	g.state = &stepState{}
+	g.state.set([]any{"build", 42})
+	step, end := guardStep(sdkCancelled(status.Error(codes.Unavailable, "down")), g)
+	defer end()
+	deadline := time.Now().Add(10 * time.Second)
+	for got.Load() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	details, _ := got.Load().([]any)
+	if len(details) != 2 || details[0] != "build" {
+		t.Fatalf("heartbeat details = %v, want the step's last", details)
+	}
+	if step.Value(guardedKey{}) != g.state {
+		t.Error("the step's context does not carry its state")
+	}
+}
+
+// A step cancelled for a lost Temporal is an Activity failure of its own
+// type, which Temporal does not retry and which names the cause.
+func TestAContactLostStepFailsWithItsOwnNonRetryableType(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(&ContactLostError{Cause: context.DeadlineExceeded, Silent: time.Minute})
+	err := stepErr(ctx, errors.New("run build: context canceled"))
+	if got := launchErrorType(err); got != TemporalUnreachableFailureType {
+		t.Fatalf("type = %q, want %q", got, TemporalUnreachableFailureType)
+	}
+	if got := UnresolvedCauseFromError(temporal.NewApplicationError("x", launchErrorType(err))); got != "temporal_unreachable" {
+		t.Errorf("cause = %q, want temporal_unreachable", got)
+	}
+	if countsTowardStopLine(temporal.NewApplicationError("x", TemporalUnreachableFailureType)) {
+		t.Error("a lost Temporal counts toward the stop line")
+	}
+	if !slices.Contains(nonRetryableActivityFailureTypes, TemporalUnreachableFailureType) {
+		t.Error("the type is retried")
+	}
+	if got := stepErr(context.Background(), errors.New("x")); got.Error() != "x" {
+		t.Errorf("an uncancelled step's error changed: %v", got)
 	}
 }
