@@ -20,6 +20,9 @@ func TestDeleteReportsAScratchVolumeItCouldNotRemove(t *testing.T) {
 	if !rt.ScratchVolumeLeft(ref.Name) {
 		t.Error("the volume Delete could not remove was not reported to the caller")
 	}
+	if rt.ScratchVolumeLeft(ref.Name) {
+		t.Error("the answer was kept after it was read")
+	}
 	if rt.ScratchVolumeLeft("bg-another") {
 		t.Error("another sandbox's volume reported left")
 	}

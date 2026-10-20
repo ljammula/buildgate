@@ -148,7 +148,10 @@ type ComposeServicesHooks struct {
 	// network, for a worker that reaches them by address; nil asks Docker.
 	ServiceAddresses         func(ctx context.Context, dockerBinary, project, network string) (map[string]string, error)
 	ProjectContainersPresent func(ctx context.Context, dockerBinary, project string) (bool, error)
-	NetworkPresent           func(ctx context.Context, dockerBinary, networkName string) (bool, error)
+	// ProjectVolumesPresent confirms that `down -v` removed the project's
+	// volumes, which `down`'s own exit status is not trusted to say.
+	ProjectVolumesPresent func(ctx context.Context, dockerBinary, project string) (bool, error)
+	NetworkPresent        func(ctx context.Context, dockerBinary, networkName string) (bool, error)
 }
 
 // ComposeServicesSpec configures one run's compose-services lifecycle.
@@ -286,6 +289,10 @@ type ComposeServicesLifecycle struct {
 
 	disabled       bool
 	disabledReason string
+
+	// volumesLeft holds, per project torn down, whether its volumes could not
+	// be confirmed gone after `down -v`.
+	volumesLeft map[string]bool
 
 	networkName       string
 	composeDir        string
@@ -1022,6 +1029,7 @@ func (l *ComposeServicesLifecycle) TeardownAttempt(ctx context.Context, attempt 
 	}
 	started := time.Now()
 	downErr := down(ctx, l.dockerBinary, project, l.composeFilePath, l.composeDir)
+	l.confirmVolumesGone(ctx, project)
 	record := &ComposeAttemptRecord{DownDuration: time.Since(started).String()}
 	if downErr != nil {
 		record.DownError = downErr.Error()
@@ -1030,6 +1038,35 @@ func (l *ComposeServicesLifecycle) TeardownAttempt(ctx context.Context, attempt 
 		return errors.Join(downErr, err)
 	}
 	return downErr
+}
+
+// confirmVolumesGone lists the project's volumes after its `down -v` and
+// records whether any remain or the list could not be made.
+func (l *ComposeServicesLifecycle) confirmVolumesGone(ctx context.Context, project string) {
+	present := l.hooks.ProjectVolumesPresent
+	if present == nil {
+		present = composeProjectVolumesPresent
+	}
+	left, err := present(ctx, l.dockerBinary, project)
+	if l.volumesLeft == nil {
+		l.volumesLeft = map[string]bool{}
+	}
+	l.volumesLeft[project] = err != nil || left
+}
+
+// VolumesConfirmedGone reports that every project this lifecycle tore down
+// was confirmed to have no volume left. A lifecycle that tore nothing down,
+// a nil one and a disabled one have none to leave.
+func (l *ComposeServicesLifecycle) VolumesConfirmedGone() bool {
+	if l == nil {
+		return true
+	}
+	for _, left := range l.volumesLeft {
+		if left {
+			return false
+		}
+	}
+	return true
 }
 
 // recordAttempt merges fields into services.json's Attempts[attempt] entry
@@ -1105,6 +1142,7 @@ func (l *ComposeServicesLifecycle) Cleanup(ctx context.Context) error {
 	for _, attempt := range attemptNums {
 		project := composeServicesProjectName(l.runID, attempt)
 		_ = down(boundedCtx, l.dockerBinary, project, l.composeFilePath, l.composeDir)
+		l.confirmVolumesGone(boundedCtx, project)
 		present, checkErr := containersPresent(boundedCtx, l.dockerBinary, project)
 		if checkErr != nil {
 			return fmt.Errorf("%w: confirm compose project %q removal: %v", ErrCleanupUnconfirmed, project, checkErr)
@@ -1324,6 +1362,18 @@ func composeProjectContainersPresent(ctx context.Context, dockerBinary, project 
 			return false, fmt.Errorf("list compose project containers timed out: %w", boundedCtx.Err())
 		}
 		return false, fmt.Errorf("list compose project containers failed: %w", err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+func composeProjectVolumesPresent(ctx context.Context, dockerBinary, project string) (bool, error) {
+	boundedCtx, cancel := context.WithTimeout(ctx, relayDockerCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(boundedCtx, dockerBinary, "volume", "ls", "-q", "--filter", "label=com.docker.compose.project="+project)
+	cmd.Env = dockerClientEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("list compose project volumes failed: %w", err)
 	}
 	return strings.TrimSpace(string(out)) != "", nil
 }

@@ -163,11 +163,11 @@ func (s *sidecarDisk) DockerDiskFree(context.Context) (sandbox.DiskSpace, error)
 	s.reads++
 	free := uint64(30 << 30)
 	switch {
-	case s.reads == 3:
-		free = 512 << 20
-	case s.reads == 4 && *s.cleaned:
-		free = 29 << 30
 	case s.reads == 4:
+		free = 512 << 20
+	case s.reads == 5 && *s.cleaned:
+		free = 29 << 30
+	case s.reads == 5:
 		free = 600 << 20
 	}
 	return sandbox.DiskSpace{FreeBytes: free, TotalBytes: 1 << 40}, nil

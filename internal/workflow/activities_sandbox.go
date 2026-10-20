@@ -446,12 +446,16 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	// address.
 	// registryProxy: one per Activity, reused across attempts,
 	// explicit-then-deferred-backstop cleanup.
-	var registryProxy *sandbox.RegistryProxyLifecycle
-	if registrySpec != nil {
-		registryProxy, err = sandbox.BeginRegistryProxyLifecycleFor(a.Sandboxes, *registrySpec, a.sandboxDockerFor(input), a.runIDFor(input), a.dataDirFor(input), a.registryProxyHooks)
-		if err != nil {
-			return last, err
-		}
+	// compose mirrors registryProxy's own one-per-Activity
+	// construction (nil composeSpec == not configured for this run),
+	// but unlike them is torn down and relaunched fresh on EVERY attempt,
+	// not reused across retries -- see ComposeServicesLifecycle's own doc
+	// comment for why. The lifecycles are begun once here, outside the
+	// attempt loop below: what happens per attempt is
+	// EnsureForAttempt/TeardownAttempt, not a fresh Begin. A lifecycle begun
+	// before a later failure is still cleaned up.
+	registryProxy, compose, refused, err := a.beginSidecars(ctx, input, registrySpec, composeSpec, afterAttempt, command, last)
+	if registryProxy != nil {
 		defer func() {
 			if cleanupErr := registryProxy.Cleanup(); cleanupErr != nil {
 				err = errors.Join(err, cleanupErr)
@@ -459,25 +463,15 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 		}()
 	}
-	// compose mirrors registryProxy's own one-per-Activity
-	// construction above (nil composeSpec == not configured for this run),
-	// but unlike them is torn down and relaunched fresh on EVERY attempt,
-	// not reused across retries -- see ComposeServicesLifecycle's own doc
-	// comment for why. BeginComposeServicesLifecycle itself is still only
-	// called once here, outside the attempt loop below, exactly like
-	// BeginRegistryProxyLifecycle is: what happens
-	// per attempt is EnsureForAttempt/TeardownAttempt, not a fresh Begin.
-	var compose *sandbox.ComposeServicesLifecycle
-	if composeSpec != nil {
-		compose, err = sandbox.BeginComposeServicesLifecycleFor(a.Sandboxes, *composeSpec, a.sandboxDockerFor(input), a.runIDFor(input), a.dataDirFor(input), a.composeServicesHooks)
-		if err != nil {
-			return last, err
-		}
+	if compose != nil {
 		defer func() {
 			if cleanupErr := compose.Cleanup(ctx); cleanupErr != nil {
 				err = errors.Join(err, cleanupErr)
 			}
 		}()
+	}
+	if err != nil {
+		return refused, err
 	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if beforeAttempt != nil {
@@ -679,6 +673,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// compose services and its registry proxy (the teardowns above). A
 		// non-terminal attempt leaves the proxy up for the next, so it is
 		// not read.
+		res.Resources.SidecarVolumesLeft = !compose.VolumesConfirmedGone()
 		a.readReleased(ctx, terminalAttempt, &res.Resources)
 		watchSandboxResources(ctx, res.Resources)
 		last = runner.Result{Command: res.Command, ExitCode: res.ExitCode, StartedAt: res.StartedAt, FinishedAt: res.FinishedAt, LogPath: res.LogPath, ImageDigest: res.ImageDigest,
@@ -730,6 +725,40 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 // disk has the room a launch needs, so a registry proxy or compose services
 // are never brought up onto a full disk. A refused disk is an attempt that
 // never ran (sandbox.ErrSandboxDiskLow); a retry would find the same disk.
+// beginSidecars refuses the launch when Docker's disk is below the launch
+// floor, then begins the registry proxy's and the compose services'
+// lifecycles, in that order: neither's image is pulled onto a nearly full
+// disk. A lifecycle begun before a later failure is returned with the error
+// so the caller still cleans it up; last is returned unchanged on a failed
+// Begin, and the unlaunched attempt on a refused disk.
+func (a *Activities) beginSidecars(ctx context.Context, input RunWorkflowInput, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, afterAttempt func(int, runner.Result, error) error, command []string, last runner.Result) (*sandbox.RegistryProxyLifecycle, *sandbox.ComposeServicesLifecycle, runner.Result, error) {
+	if _, _, diskErr := a.refuseLowDisk(ctx); diskErr != nil {
+		refused, hookErr := unlaunchedAttempt(afterAttempt, 1, command, diskErr)
+		return nil, nil, refused, errors.Join(diskErr, hookErr)
+	}
+	var proxy *sandbox.RegistryProxyLifecycle
+	var compose *sandbox.ComposeServicesLifecycle
+	var err error
+	if registrySpec != nil {
+		if proxy, err = sandbox.BeginRegistryProxyLifecycleFor(a.Sandboxes, *registrySpec, a.sandboxDockerFor(input), a.runIDFor(input), a.dataDirFor(input), a.registryProxyHooks); err != nil {
+			return nil, nil, last, err
+		}
+	}
+	if composeSpec != nil {
+		if compose, err = sandbox.BeginComposeServicesLifecycleFor(a.Sandboxes, *composeSpec, a.sandboxDockerFor(input), a.runIDFor(input), a.dataDirFor(input), a.composeServicesHooks); err != nil {
+			return proxy, nil, last, err
+		}
+	}
+	return proxy, compose, last, nil
+}
+
+func (a *Activities) refuseLowDisk(ctx context.Context) (uint64, bool, error) {
+	if a.Sandboxes == nil {
+		return 0, false, nil
+	}
+	return sandbox.RefuseLowDisk(ctx, a.Sandboxes)
+}
+
 func (a *Activities) checkBeforeAttempt(ctx context.Context, last runner.Result, checkDaemon func() error, afterAttempt func(int, runner.Result, error) error, attempt int, command []string) (runner.Result, error) {
 	if err := checkDaemon(); err != nil {
 		return last, err

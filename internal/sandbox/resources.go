@@ -35,10 +35,15 @@ type Resources struct {
 	// caller once everything the launch started is gone: the sandbox, its
 	// scratch volume, its compose sidecars and its registry proxy.
 	// ScratchLeft is true when the runtime could not remove the scratch
-	// volume, so a later reading would not show the launch's space released.
+	// volume, and SidecarVolumesLeft when its compose volumes could not be
+	// confirmed gone, so a later reading would not show the launch's space
+	// released.
 	DiskFree0, DiskFree1, DiskFree2 uint64
 	DiskKnown, ReleasedKnown        bool
 	ScratchLeft                     bool
+	// SidecarVolumesLeft is true when the launch's compose project volumes
+	// could not be confirmed gone.
+	SidecarVolumesLeft bool
 	// OOMKilled is the worker container's OOM flag after the exit; OOMKnown
 	// is false when it could not be read.
 	OOMKilled, OOMKnown bool
@@ -54,7 +59,7 @@ type ScratchReporter interface {
 // gone; it reads nothing when the launch's own readings are unknown or its
 // scratch volume is still there.
 func (r *Resources) ReadReleased(ctx context.Context, rt Runtime) {
-	if rt == nil || !r.DiskKnown || r.ScratchLeft {
+	if rt == nil || !r.DiskKnown || r.ScratchLeft || r.SidecarVolumesLeft {
 		return
 	}
 	r.DiskFree2, r.ReleasedKnown = readDiskFree(ctx, rt)

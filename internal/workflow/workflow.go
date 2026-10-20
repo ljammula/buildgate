@@ -205,10 +205,11 @@ const (
 	// had too little room (sandbox.ErrSandboxDiskLow: nothing ran), or a
 	// verify, baseline verify, full-suite or named-gate command that failed
 	// in a launch that left Docker's disk nearly full without having filled
-	// it (errSandboxDisk). SandboxMemoryFailureType marks such a command
+	// it (errSandboxDisk). SandboxMemoryFailureType marks a baseline verify
 	// that failed in a launch whose worker container Docker reports as
-	// OOM-killed, again on a second run (errSandboxMemory). Neither failure
-	// says anything about the work, so the attempt is not retried by
+	// OOM-killed (errSandboxMemory); a later step so killed is a judged
+	// failure and has no type. Neither failure says anything about the
+	// work, so the attempt is not retried by
 	// Temporal and the worktree is kept for a resume decision
 	// (unresolved.SandboxDisk, unresolved.SandboxMemory). No history
 	// recorded before the types existed holds them.

@@ -58,7 +58,7 @@
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 35 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
-88 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
+87 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
 38 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
 43 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
 56 internal/workflow/repository_owner_workflow.go RepositoryOwnerWorkflow

@@ -328,11 +328,14 @@ func (r *Runtime) noteScratchLeft(sandboxName string) {
 }
 
 // ScratchVolumeLeft reports whether this process's Delete of the sandbox left
-// its scratch volume behind.
+// its scratch volume behind, and forgets the answer: it is read once, right
+// after the delete.
 func (r *Runtime) ScratchVolumeLeft(sandboxName string) bool {
 	r.scratchMu.Lock()
 	defer r.scratchMu.Unlock()
-	return r.scratchLeft[sandboxName]
+	left := r.scratchLeft[sandboxName]
+	delete(r.scratchLeft, sandboxName)
+	return left
 }
 
 // ListByRun returns the run's recorded sandboxes that still exist.

@@ -32,6 +32,7 @@ func noopHooks() ComposeServicesHooks {
 			return []byte("log output"), nil
 		},
 		ProjectContainersPresent: func(context.Context, string, string) (bool, error) { return false, nil },
+		ProjectVolumesPresent:    func(context.Context, string, string) (bool, error) { return false, nil },
 		NetworkPresent:           func(context.Context, string, string) (bool, error) { return false, nil },
 	}
 }

@@ -115,8 +115,8 @@ func refusedFactoryDirAttempt(afterAttempt func(int, runner.Result, error) error
 // command that failed twice while the registry proxy could not reach a
 // registry (errDependencyFetch) is DependencyFetchFailureType. A launch
 // refused for want of disk, or a command that failed with Docker's disk
-// exhausted or its worker OOM-killed, is SandboxDiskFailureType or
-// SandboxMemoryFailureType. A command
+// exhausted, is SandboxDiskFailureType; a baseline verify that failed with
+// its worker OOM-killed is SandboxMemoryFailureType. A command
 // the runtime started twice is a lost step for the build only
 // (buildActivityErrorType): one of its signs is an exit code, which a
 // repository's own verify or gate command could return.

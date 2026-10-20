@@ -544,9 +544,10 @@ requires a new contract review and an updated machine-checkable test.
   verify after an oracle commit are judged without it. A baseline that
   ends so halts with this cause, never `baseline_verify_failed`.
   `sandbox_disk` and `sandbox_memory` are the next two, read from Docker
-  and never from a command's output. Before anything is started for a
-  launch (a registry proxy or compose services included) and again before
-  its command is released, the factory reads the free space of Docker's data
+  and never from a command's output. Before anything is begun for a
+  launch (its registry proxy and compose services, whose images are pulled
+  at the first attempt, on both launch paths) and again before its command
+  is released, the factory reads the free space of Docker's data
   filesystem (the `statfs` of `/` inside the always-running meter container,
   whose overlay root is on it; `factoryd-meter statfs`) and refuses the
   launch with `sandbox_disk` below 2 GiB free, for every step, the build and
@@ -555,8 +556,9 @@ requires a new contract review and an updated machine-checkable test.
   sandbox is deleted, and once more when everything the launch started is
   gone: its sandbox and scratch volume, its compose services and its
   registry proxy (a reading is not taken when the runtime could not remove
-  the scratch volume, and not between the attempts of one step, which share
-  a proxy). A canonical verify, full-suite or named-gate command that
+  the scratch volume or the compose project's volumes could not be
+  confirmed gone, and not between the attempts of one step, which share a
+  proxy). A canonical verify, full-suite or named-gate command that
   exited non-zero with under 1 GiB free after its exit, and whose launch
   released, in all that, less than half of what was free before it (so the
   launch did not fill the disk itself), is `sandbox_disk` with no second

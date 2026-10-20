@@ -135,11 +135,16 @@ func runSandboxWithRetries(ctx context.Context, workspace, specPath, extraRunInp
 // the job's own role); nil for a job with no model-backed harness (verify,
 // gates).
 func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
-	if maxAttempts < 1 {
-		maxAttempts = 1
-	}
+	maxAttempts = max(maxAttempts, 1)
 	var last runner.Result
 	var lastErr error
+	// The launch floor is read before anything is staged, locked for or
+	// started: a registry proxy's or compose service's image is never pulled
+	// onto a nearly full disk, and nothing waits for the model host's lock to
+	// find that out. The launch itself checks again before its command.
+	if diskErr := refuseLowDisk(ctx, rt); diskErr != nil {
+		return last, diskErr
+	}
 	// See sandbox.ResolveDefaultWorkerIdentity's own doc comment for the
 	// full reasoning (shared with internal/workflow.Activities' own
 	// equivalent call, so this identity/umask defaulting logic cannot
@@ -827,5 +832,15 @@ func withStageDetail(dataDir, id, stage, startDetail string, fn func() (outcome,
 	progressMark(dataDir, id, stage, "start", "", startDetail)
 	outcome, detail, err := fn()
 	progressMark(dataDir, id, stage, "end", outcome, detail)
+	return err
+}
+
+// refuseLowDisk is sandbox.RefuseLowDisk for a launch that may have no
+// sandbox runtime (the integration tests' stand-in launches through none).
+func refuseLowDisk(ctx context.Context, rt sandbox.Runtime) error {
+	if rt == nil {
+		return nil
+	}
+	_, _, err := sandbox.RefuseLowDisk(ctx, rt)
 	return err
 }
