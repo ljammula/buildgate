@@ -281,7 +281,7 @@ func buildRequestStatusEntries(requests []*request.Request, active []string, slo
 		}
 		entry := buildRequestStatusEntry(r, waiting[r.ID], now)
 		if r.State == request.StateBuilding {
-			entry.RepositoryWaitSince = repositoryWaits[r.ID]
+			entry.RepositoryWaitSince = currentRepositoryWait(r, repositoryWaits[r.ID])
 		}
 		if entry.WaitingOn != "" {
 			entry.QueuePosition = positions[r.ID]
@@ -708,6 +708,19 @@ func requestWaitingText(r requestStatusEntry) string {
 		text += fmt.Sprintf(", #%d in line", r.QueuePosition)
 	}
 	return text
+}
+
+// currentRepositoryWait is since, the time r's build step first found its
+// repository busy, unless that was before r entered its current state: a wait
+// recorded before a halt and a retry is not this build's, and the step clears
+// it only when it runs again.
+func currentRepositoryWait(r *request.Request, since string) string {
+	at, err := time.Parse(time.RFC3339, since)
+	entered, ok := r.InStateSince()
+	if err == nil && ok && at.Before(entered.Truncate(time.Second)) {
+		return ""
+	}
+	return since
 }
 
 // requestRepositoryWaitText is the reason column of a building request whose

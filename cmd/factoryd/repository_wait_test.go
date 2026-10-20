@@ -120,3 +120,19 @@ func TestHeartbeatCarriesRepositoryWaits(t *testing.T) {
 		t.Errorf("WorkerRepositoryWaits = %v, want req-1 at 10:03", got)
 	}
 }
+
+// A wait recorded before the request entered its current state (before a halt
+// and a retry) is not shown; one from the same second or later is.
+func TestCurrentRepositoryWaitDropsAWaitFromBeforeTheState(t *testing.T) {
+	r := &request.Request{EnteredAt: "2026-10-20T10:00:00.400Z"}
+	for _, c := range []struct{ since, want string }{
+		{"2026-10-20T09:30:00Z", ""},
+		{"2026-10-20T10:00:00Z", "2026-10-20T10:00:00Z"},
+		{"2026-10-20T10:05:00Z", "2026-10-20T10:05:00Z"},
+		{"not a time", "not a time"},
+	} {
+		if got := currentRepositoryWait(r, c.since); got != c.want {
+			t.Errorf("currentRepositoryWait(%q) = %q, want %q", c.since, got, c.want)
+		}
+	}
+}

@@ -168,6 +168,8 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// process lived on is still building this ticket: a second
 			// build of it would run beside the first.
 			if live, why := a.ticketRunStillLive(r, ownSteps); live {
+				// Its own run, not another build, holds it.
+				repositoryWaits.clear(id)
 				log.Printf("request %s: not starting another build step: %s", r.ID, why)
 				return "", temporal.NewApplicationError("the ticket's run is still being built by a live process", repositoryBusyErrorType)
 			}

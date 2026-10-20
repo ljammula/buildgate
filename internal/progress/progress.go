@@ -256,7 +256,7 @@ const tsLayout = "2006-01-02T15:04:05.000Z07:00"
 // sandbox runs a command of unknown length.
 func VerifyStage(stage string) bool {
 	switch stage {
-	case "baseline_verify", "verify", "full_suite", "full_suite_verify":
+	case "baseline_verify", "verify", "full_suite", "post_oracle_commit_verify", "gate":
 		return true
 	}
 	return false
