@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
+	"buildgate/internal/handoff"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
@@ -108,44 +110,84 @@ func TestADiskTheLaunchFilledItselfIsAnOrdinaryFailure(t *testing.T) {
 	})
 }
 
-func TestACommandThatFailsTwiceWithAnOOMKillIsUnresolved(t *testing.T) {
+// A build can cause its own OOM kill, so a step after it that fails with the
+// worker OOM-killed is a judged failure: it is not run again, is not
+// unresolved, and the next build is told the fact from the factory's reading.
+func TestAPostBuildOOMIsAJudgedFailureNamedToTheNextBuild(t *testing.T) {
 	for _, step := range fetchSteps {
 		t.Run(step.name, func(t *testing.T) {
-			f := newFetchFixture(t, fetchLaunch{exit: 137, oom: true}, fetchLaunch{exit: 2, oom: true})
+			f := newFetchFixture(t, fetchLaunch{exit: 137, oom: true})
 			res, err := step.run(f)
-			unresolvedAs(t, err, SandboxMemoryFailureType, unresolved.SandboxMemory)
-			if f.launches != 2 {
-				t.Errorf("launches = %d, want 2: the command is run again once, never more", f.launches)
+			if err != nil || res.Result.ExitCode != 137 {
+				t.Fatalf("= exit %d, %v; want the command's own failure", res.Result.ExitCode, err)
 			}
-			if got := exitCodes(res.Attempts); !slices.Equal(got, []int{137, 2}) {
-				t.Errorf("attempt exit codes on the error = %v, want [137 2]", got)
+			if f.launches != 1 {
+				t.Errorf("launches = %d, want 1: an OOM-killed command is never run again", f.launches)
 			}
-			if res.Attempts[0].LogPath == res.Attempts[1].LogPath {
-				t.Error("both runs share a log")
+			if len(res.Attempts) != 1 || res.Attempts[0].Resources == nil || !res.Attempts[0].Resources.OOMKilled {
+				t.Fatalf("attempts = %+v, want the OOM fact recorded", res.Attempts)
 			}
-			_, again := step.run(f)
-			if !hasApplicationErrorType(again, SandboxMemoryFailureType) || f.launches != 2 {
-				t.Errorf("replayed checkpoint: err = %v, launches %d; want type %q and no new launch", again, f.launches, SandboxMemoryFailureType)
+			// The record the next build is handed.
+			check := map[string]string{"canonical verify": "canonical_verify", "full suite": "full_suite_verify", "named gate": "lint"}[step.name]
+			r := &run.Run{ID: "r", State: run.StateQuarantined, BaseSHA: "1111111", ResultSHA: "2222222", Attempts: res.Attempts,
+				GateResults: []run.GateResult{{Check: check, Passed: false, ExitCode: 137}}}
+			doc := handoff.Build(r, t.TempDir())
+			if len(doc.Checks) != 1 || !strings.Contains(doc.Checks[0].Environment, "for want of memory") {
+				t.Fatalf("checks = %+v, want the factory's OOM sentence on %s", doc.Checks, check)
+			}
+			if md := doc.Markdown(); !strings.Contains(md, "The factory observed that the kernel killed a process of this step for want of memory") {
+				t.Errorf("the next build's record lacks the OOM line:\n%s", md)
 			}
 		})
 	}
-	for _, tc := range []struct {
-		name     string
-		script   []fetchLaunch
-		wantExit int
-		launches int
-	}{
-		{"the second run passes", []fetchLaunch{{exit: 137, oom: true}, {exit: 0}}, 0, 2},
-		{"the second run fails without an OOM kill", []fetchLaunch{{exit: 137, oom: true}, {exit: 2}}, 2, 2},
-		{"a failure with no OOM kill is not run again", []fetchLaunch{{exit: 137}}, 137, 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newFetchFixture(t, tc.script...)
-			res, err := fetchSteps[0].run(f)
-			if err != nil || res.Result.ExitCode != tc.wantExit || f.launches != tc.launches {
-				t.Fatalf("= exit %d, %v, launches %d; want exit %d with %d launches", res.Result.ExitCode, err, f.launches, tc.wantExit, tc.launches)
-			}
-		})
+	t.Run("a failure that was not OOM-killed says nothing of memory", func(t *testing.T) {
+		f := newFetchFixture(t, fetchLaunch{exit: 1})
+		res, _ := fetchSteps[0].run(f)
+		r := &run.Run{ID: "r", State: run.StateQuarantined, Attempts: res.Attempts, GateResults: []run.GateResult{{Check: "canonical_verify", Passed: false, ExitCode: 1}}}
+		if doc := handoff.Build(r, t.TempDir()); len(doc.Checks) != 1 || doc.Checks[0].Environment != "" || strings.Contains(doc.Markdown(), "memory") {
+			t.Errorf("checks = %+v", doc.Checks)
+		}
+	})
+}
+
+// sidecarDisk reads Docker's free space as a launch whose sidecar filled a
+// volume leaves it: nearly none after the command exits, the space coming
+// back only when the registry proxy is cleaned up.
+type sidecarDisk struct {
+	*inspectRuntime
+	reads   int
+	cleaned *bool
+}
+
+func (s *sidecarDisk) DockerDiskFree(context.Context) (sandbox.DiskSpace, error) {
+	s.reads++
+	free := uint64(30 << 30)
+	switch {
+	case s.reads == 3:
+		free = 512 << 20
+	case s.reads == 4 && *s.cleaned:
+		free = 29 << 30
+	case s.reads == 4:
+		free = 600 << 20
+	}
+	return sandbox.DiskSpace{FreeBytes: free, TotalBytes: 1 << 40}, nil
+}
+
+func TestADiskASidecarFilledIsAnOrdinaryFailure(t *testing.T) {
+	f := newFetchFixture(t, fetchLaunch{exit: 1})
+	cleaned := false
+	f.acts.Sandboxes = &sidecarDisk{inspectRuntime: f.rt, cleaned: &cleaned}
+	cleanup := f.acts.registryProxyHooks.CleanupRegistryProxy
+	f.acts.registryProxyHooks.CleanupRegistryProxy = func(ctx context.Context, h *sandbox.RegistryProxyHandle) error {
+		cleaned = true
+		return cleanup(ctx, h)
+	}
+	res, err := fetchSteps[0].run(f)
+	if err != nil || res.Result.ExitCode != 1 {
+		t.Fatalf("= exit %d, %v; want the command's own failure: the space the proxy gave back counts as the launch's own", res.Result.ExitCode, err)
+	}
+	if got := res.Attempts[0].Resources; got == nil || got.DockerDiskFreeAfterDelete != 29<<30 {
+		t.Errorf("recorded readings = %+v, want the release read after the proxy's cleanup", got)
 	}
 }
 
@@ -220,6 +262,9 @@ func TestAStepLaunchRefusedForWantOfDiskIsUnresolved(t *testing.T) {
 			unresolvedAs(t, err, SandboxDiskFailureType, unresolved.SandboxDisk)
 			if f.launches != 0 {
 				t.Errorf("launches = %d: the command must never be released", f.launches)
+			}
+			if f.proxies != 0 {
+				t.Errorf("registry proxies started = %d: nothing may be pulled onto a full disk", f.proxies)
 			}
 		})
 	}

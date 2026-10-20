@@ -50,9 +50,10 @@ const (
 	// gone before the launch started (read by the factory from outside the
 	// sandbox), or a launch was refused for want of room.
 	SandboxDisk Cause = "sandbox_disk"
-	// SandboxMemory: a repository command failed in a launch whose worker
-	// container Docker reports as having had a process killed for want of
-	// memory (State.OOMKilled), twice in a row.
+	// SandboxMemory: the baseline verify, run on the base commit before any
+	// work is built, failed in a launch whose worker container Docker
+	// reports as having had a process killed for want of memory
+	// (State.OOMKilled). A later step's OOM is a judged failure, not this.
 	SandboxMemory Cause = "sandbox_memory"
 	// DraftingJob: a drafting step's job ended before its script reached a
 	// result of its own (the launch returned no exit code, or the script
@@ -73,7 +74,7 @@ var causes = map[Cause]string{
 	NoVerdict:        "the review of the %s step gave no verdict the factory could read, and the meter's record names no failed model route",
 	DependencyFetch:  "a package registry could not be reached while the %s step ran, so its command's failure says nothing about the work",
 	SandboxDisk:      "Docker's disk had no room left while the %s step ran, so its command's failure says nothing about the work",
-	SandboxMemory:    "the kernel killed a process of the %s step for want of memory, so its command's failure says nothing about the work",
+	SandboxMemory:    "the kernel killed a process of the %s step for want of memory before any work was built on it, so its command's failure says nothing about the work",
 	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
 }
 

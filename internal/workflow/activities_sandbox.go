@@ -495,8 +495,8 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		// retry, the same TOCTOU the finding described, just narrower).
 		// See checkDaemonHeartbeatDivergence's own doc comment above for
 		// why this needs to run in both places, not just one.
-		if err := checkDaemonHeartbeatDivergence(); err != nil {
-			return last, err
+		if checked, err := a.checkBeforeAttempt(ctx, last, checkDaemonHeartbeatDivergence, afterAttempt, attempt, command); err != nil {
+			return checked, err
 		}
 		// margin reserves not just this attempt's own container teardown
 		// (sandboxAttemptTeardownMargin) but also, whenever a registry proxy
@@ -639,7 +639,6 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			Relay: relaySpec, ModelBinaries: harness.ModelBinaries(), MeterLedgerRoot: a.MeterLedgerRoot,
 		})
 		fetches.done(ctx)
-		watchSandboxResources(ctx, res.Resources)
 		// The snapshot lives for one launch; the next takes its own.
 		runErr = joinCleanup(runErr, factoryDir.Remove())
 		if compose != nil {
@@ -675,6 +674,13 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 				runErr = errors.Join(runErr, cleanupErr)
 			}
 		}
+		// The space the launch released is read once everything it started is
+		// gone: its sandbox and scratch volume (the runtime's delete), its
+		// compose services and its registry proxy (the teardowns above). A
+		// non-terminal attempt leaves the proxy up for the next, so it is
+		// not read.
+		a.readReleased(ctx, terminalAttempt, &res.Resources)
+		watchSandboxResources(ctx, res.Resources)
 		last = runner.Result{Command: res.Command, ExitCode: res.ExitCode, StartedAt: res.StartedAt, FinishedAt: res.FinishedAt, LogPath: res.LogPath, ImageDigest: res.ImageDigest,
 			Resources:        res.Resources,
 			ScriptsSHA256:    scriptsSHA256,
@@ -717,6 +723,35 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		}
 	}
 	return attemptsExhausted(last, lastErr, commandRan)
+}
+
+// checkBeforeAttempt is what an attempt checks before anything is pulled or
+// started for it: the daemon the run belongs to has not changed, and Docker's
+// disk has the room a launch needs, so a registry proxy or compose services
+// are never brought up onto a full disk. A refused disk is an attempt that
+// never ran (sandbox.ErrSandboxDiskLow); a retry would find the same disk.
+func (a *Activities) checkBeforeAttempt(ctx context.Context, last runner.Result, checkDaemon func() error, afterAttempt func(int, runner.Result, error) error, attempt int, command []string) (runner.Result, error) {
+	if err := checkDaemon(); err != nil {
+		return last, err
+	}
+	if a.Sandboxes == nil {
+		return last, nil
+	}
+	if _, _, diskErr := sandbox.RefuseLowDisk(ctx, a.Sandboxes); diskErr != nil {
+		refused, hookErr := unlaunchedAttempt(afterAttempt, attempt, command, diskErr)
+		return refused, errors.Join(diskErr, hookErr)
+	}
+	return last, nil
+}
+
+// readReleased takes the reading of the space a launch released, once what it
+// started is gone: its sandbox and scratch volume, its compose services and
+// its registry proxy. A non-terminal attempt leaves the proxy up for the next,
+// so it reads nothing.
+func (a *Activities) readReleased(ctx context.Context, terminal bool, r *sandbox.Resources) {
+	if terminal {
+		r.ReadReleased(ctx, a.Sandboxes)
+	}
 }
 
 // unlaunchedAttempt records an attempt that never got far enough to start a

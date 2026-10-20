@@ -42,6 +42,7 @@ func TestAnOracleDraftLaunchErrorIsAJobFailureWithItsCause(t *testing.T) {
 		want unresolved.Cause
 	}{
 		"sandbox never started":         {fmt.Errorf("sandbox attempts exhausted: %w", fmt.Errorf("%w: create refused", sandbox.ErrSandboxNotStarted)), unresolved.SandboxLaunch},
+		"refused below the disk floor":  {fmt.Errorf("sandbox attempts exhausted: %w", fmt.Errorf("%w: %w", sandbox.ErrSandboxNotStarted, sandbox.ErrSandboxDiskLow)), unresolved.SandboxDisk},
 		"never started, not removed":    {errors.Join(fmt.Errorf("%w: create refused", sandbox.ErrSandboxNotStarted), sandbox.ErrCleanupUnconfirmed), unresolved.DraftingJob},
 		"command started twice":         {fmt.Errorf("sandbox x: %w", sandbox.ErrSandboxRerun), unresolved.DraftingJob},
 		"an error that only says so":    {errors.New("the sandbox did not start the worker command"), unresolved.DraftingJob},

@@ -87,6 +87,8 @@ func TestLiveWritingToScratchLowersTheMetersStatfs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunThroughRuntime: %v", err)
 	}
+	// The release is read by the caller once the launch is gone.
+	result.Resources.ReadReleased(ctx, rt)
 	r := result.Resources
 	t.Logf("resources %+v", r)
 	if !r.DiskKnown || !r.ReleasedKnown {
@@ -98,7 +100,16 @@ func TestLiveWritingToScratchLowersTheMetersStatfs(t *testing.T) {
 	if r.DiskFree2 < r.DiskFree1+written/2 {
 		t.Errorf("free space after the delete (%d) did not recover by %d from %d: the scratch volume's space was not released", r.DiskFree2, written/2, r.DiskFree1)
 	}
-	if r.NotFilledByItself() {
-		t.Errorf("a launch that wrote its own way through the disk read as not having filled it: %+v", r)
+	// The rule a failing step is judged by: a machine with this much room is
+	// not read as out of disk, whatever the launch wrote.
+	if r.DiskLow() || diskRanOutLikeTheWorkflow(r) {
+		t.Errorf("a disk with room left read as exhausted: %+v", r)
 	}
+}
+
+// diskRanOutLikeTheWorkflow is the workflow's rule for a non-baseline step
+// (internal/workflow diskRanOut): low free space after the exit, and the
+// launch's own release under half of what was free before it.
+func diskRanOutLikeTheWorkflow(r sandbox.Resources) bool {
+	return r.DiskLow() && r.NotFilledByItself()
 }

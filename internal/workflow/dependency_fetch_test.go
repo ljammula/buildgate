@@ -97,7 +97,8 @@ func newFetchFixture(t *testing.T, script ...fetchLaunch) *fetchFixture {
 }
 
 // scriptedDisk is the free bytes Docker reports across the whole script,
-// three readings a launch; nil when no launch scripts any (the disk then
+// four readings a launch (the Activity's floor check, the launch's own
+// before, after the exit, and once everything the launch started is gone); nil when no launch scripts any (the disk then
 // cannot be read). A launch that scripts none reads as roomy.
 func scriptedDisk(script []fetchLaunch) []uint64 {
 	var readings []uint64
@@ -107,7 +108,7 @@ func scriptedDisk(script []fetchLaunch) []uint64 {
 		if l.disk != nil {
 			disk, scripted = *l.disk, true
 		}
-		readings = append(readings, disk[:]...)
+		readings = append(readings, disk[0], disk[0], disk[1], disk[2])
 	}
 	if !scripted {
 		return nil

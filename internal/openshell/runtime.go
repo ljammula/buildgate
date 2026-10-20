@@ -72,6 +72,11 @@ type Runtime struct {
 	// (waitFirstSettingsPoll); nil is a timer.
 	Sleep func(ctx context.Context, d time.Duration) error
 
+	// scratchLeft holds the sandboxes whose scratch volume Delete could not
+	// remove.
+	scratchMu   sync.Mutex
+	scratchLeft map[string]bool
+
 	// pushed is what PushCredential last stored in each provider.
 	pushLocksMu sync.Mutex
 	pushLocks   map[string]chan struct{}
@@ -298,14 +303,36 @@ func (r *Runtime) Delete(ctx context.Context, name string) error {
 	}
 	if r.Volumes != nil {
 		volume := sandbox.ScratchVolumeName(name)
-		if err := r.Volumes.Remove(ctx, volume); err != nil && r.Warn != nil {
-			r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the daemon's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
+		if err := r.Volumes.Remove(ctx, volume); err != nil {
+			r.noteScratchLeft(name)
+			if r.Warn != nil {
+				r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the daemon's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
+			}
 		}
 	}
 	if gatewayErr != nil {
 		return fmt.Errorf("%w: sandbox %s: the gateway did not confirm the delete: %v", sandbox.ErrCleanupUnconfirmed, name, gatewayErr)
 	}
 	return nil
+}
+
+// noteScratchLeft records that Delete could not remove the sandbox's scratch
+// volume.
+func (r *Runtime) noteScratchLeft(sandboxName string) {
+	r.scratchMu.Lock()
+	defer r.scratchMu.Unlock()
+	if r.scratchLeft == nil {
+		r.scratchLeft = map[string]bool{}
+	}
+	r.scratchLeft[sandboxName] = true
+}
+
+// ScratchVolumeLeft reports whether this process's Delete of the sandbox left
+// its scratch volume behind.
+func (r *Runtime) ScratchVolumeLeft(sandboxName string) bool {
+	r.scratchMu.Lock()
+	defer r.scratchMu.Unlock()
+	return r.scratchLeft[sandboxName]
 }
 
 // ListByRun returns the run's recorded sandboxes that still exist.

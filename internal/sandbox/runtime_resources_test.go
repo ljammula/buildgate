@@ -17,15 +17,36 @@ func TestRunThroughRuntimeReadsResourcesBeforeAndAfterDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	name, _ := SandboxName(spec.DataDir, spec.RunID, "attempt-1")
-	// The disk is read before anything is created, after the exit and before
-	// the delete, and after the delete.
-	want := []string{"disk", "create", "status", "wait", "disk", "status", "delete " + name, "disk"}
+	// The disk is read before anything is created, and after the exit and
+	// before the delete. The reading after the delete is the caller's, once
+	// what else the launch started is gone too.
+	want := []string{"disk", "create", "status", "wait", "disk", "status", "delete " + name}
 	if !reflect.DeepEqual(rt.calls, want) {
 		t.Errorf("calls = %v, want %v", rt.calls, want)
 	}
-	wantResources := Resources{DiskFree0: 50 * gib, DiskFree1: 9 * gib, DiskFree2: 10 * gib, DiskKnown: true, ReleasedKnown: true, OOMKilled: true, OOMKnown: true}
+	wantResources := Resources{DiskFree0: 50 * gib, DiskFree1: 9 * gib, DiskKnown: true, OOMKilled: true, OOMKnown: true}
 	if result.Resources != wantResources {
 		t.Errorf("resources = %+v, want %+v", result.Resources, wantResources)
+	}
+	result.Resources.ReadReleased(context.Background(), rt)
+	if !result.Resources.ReleasedKnown || result.Resources.DiskFree2 != 10*gib {
+		t.Errorf("after ReadReleased: %+v, want the third reading", result.Resources)
+	}
+}
+
+func TestAScratchVolumeThatWasNotRemovedLeavesTheReleaseUnread(t *testing.T) {
+	spec := runtimeSpec(t)
+	rt := &workerRuntime{lines: []string{"x"}, startedAt: "t0", disk: []uint64{50 * gib, 9 * gib, 10 * gib}, scratchLeft: true}
+	result, _, err := RunThroughRuntime(context.Background(), rt, spec, fastLaunch())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Resources.ScratchLeft {
+		t.Fatalf("resources = %+v, want the leftover scratch volume reported", result.Resources)
+	}
+	result.Resources.ReadReleased(context.Background(), rt)
+	if result.Resources.ReleasedKnown || result.Resources.NotFilledByItself() {
+		t.Errorf("a release that never happened was read: %+v", result.Resources)
 	}
 }
 

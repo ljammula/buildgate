@@ -29,6 +29,7 @@ type workerRuntime struct {
 	createErr   error
 	deleteErr   error
 	oomKilled   bool
+	scratchLeft bool
 	// disk is the free bytes DockerDiskFree reports on successive calls (the
 	// last repeats); empty means unreadable.
 	disk     []uint64
@@ -118,6 +119,8 @@ func (w *workerRuntime) Status(context.Context, string) (SandboxState, error) {
 	}
 	return SandboxState{Present: true, StartedAt: startedAt, OOMKilled: w.oomKilled}, nil
 }
+
+func (w *workerRuntime) ScratchVolumeLeft(string) bool { return w.scratchLeft }
 
 func (w *workerRuntime) DockerDiskFree(context.Context) (DiskSpace, error) {
 	w.mu.Lock()

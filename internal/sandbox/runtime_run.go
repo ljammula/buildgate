@@ -86,7 +86,7 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	}
 	defer startOwnerHeartbeat(s.DataDir, s.RunID)()
 
-	free0, free0Known, err := refuseLowDisk(ctx, rt)
+	free0, free0Known, err := RefuseLowDisk(ctx, rt)
 	if err != nil {
 		return Result{}, SandboxRef{}, err
 	}
@@ -98,8 +98,8 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), runtimeCleanupTimeout)
 		defer cancel()
 		cleanupErr := rt.Delete(cleanupCtx, name)
-		if cleanupErr == nil && result.Resources.DiskKnown {
-			result.Resources.DiskFree2, result.Resources.ReleasedKnown = readDiskFree(cleanupCtx, rt)
+		if reporter, ok := rt.(ScratchReporter); ok && cleanupErr == nil {
+			result.Resources.ScratchLeft = reporter.ScratchVolumeLeft(name)
 		}
 		if cleanupErr != nil {
 			if err != nil {

@@ -156,7 +156,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 				command[0], command[1:]...,
 			)
 		}
-		return rerunAfterEnvironmentFailure(ctx, logPath, beforeAttempt, afterAttempt, v.kind == run.BaselineVerifyAttemptKind, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+		return failOnEnvironment(ctx, logPath, beforeAttempt, afterAttempt, v.kind == run.BaselineVerifyAttemptKind, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
 			return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), before, after,
 				// nil: canonical verification never calls a model, so it
 				// never gets the relay's network -- it launches with
@@ -337,7 +337,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 				command[0], command[1:]...,
 			)
 		}
-		return rerunAfterEnvironmentFailure(relaunchUnstartedOnly(ctx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+		return failOnEnvironment(relaunchUnstartedOnly(ctx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
 			return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), before, after,
 				// nil, for the same reason canonical verification passes
 				// nil: the full-suite gate never calls a model.
@@ -586,7 +586,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 				command[0], command[1:]...,
 			)
 		}
-		return rerunAfterEnvironmentFailure(relaunchUnstartedOnly(gateCtx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+		return failOnEnvironment(relaunchUnstartedOnly(gateCtx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
 			return a.runSandboxWithRetries(ctx, input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after,
 				// nil, for the same reason canonical verification passes
 				// nil: a named gate never calls a model.

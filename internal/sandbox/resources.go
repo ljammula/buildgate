@@ -31,12 +31,33 @@ type Resources struct {
 	// DiskFree0 is Docker's free bytes before the sandbox was created,
 	// DiskFree1 after the command exited and before the sandbox was deleted,
 	// DiskFree2 after the delete. DiskKnown is true when the first two were
-	// read; ReleasedKnown when DiskFree2 was too.
+	// read; ReleasedKnown when DiskFree2 was too. DiskFree2 is read by the
+	// caller once everything the launch started is gone: the sandbox, its
+	// scratch volume, its compose sidecars and its registry proxy.
+	// ScratchLeft is true when the runtime could not remove the scratch
+	// volume, so a later reading would not show the launch's space released.
 	DiskFree0, DiskFree1, DiskFree2 uint64
 	DiskKnown, ReleasedKnown        bool
+	ScratchLeft                     bool
 	// OOMKilled is the worker container's OOM flag after the exit; OOMKnown
 	// is false when it could not be read.
 	OOMKilled, OOMKnown bool
+}
+
+// ScratchReporter is implemented by a Runtime that can say whether the last
+// delete of a sandbox left its scratch volume behind.
+type ScratchReporter interface {
+	ScratchVolumeLeft(sandboxName string) bool
+}
+
+// ReadReleased sets the reading taken after everything a launch started is
+// gone; it reads nothing when the launch's own readings are unknown or its
+// scratch volume is still there.
+func (r *Resources) ReadReleased(ctx context.Context, rt Runtime) {
+	if rt == nil || !r.DiskKnown || r.ScratchLeft {
+		return
+	}
+	r.DiskFree2, r.ReleasedKnown = readDiskFree(ctx, rt)
 }
 
 // DiskLow reports a launch that left Docker's filesystem under
@@ -46,8 +67,8 @@ func (r Resources) DiskLow() bool {
 }
 
 // NotFilledByItself reports that the space the delete released
-// (DiskFree2 - DiskFree1: the launch's own container layer and scratch
-// volume) is under half of what was free before the launch started, so most
+// (DiskFree2 - DiskFree1: the launch's own container layer, scratch volume,
+// compose sidecars and registry proxy) is under half of what was free before the launch started, so most
 // of the space was already gone. A launch that wrote its own way to a full
 // disk releases at least that much; false when the delete's reading is
 // unknown.
@@ -71,9 +92,9 @@ func readDiskFree(ctx context.Context, rt Runtime) (uint64, bool) {
 	return space.FreeBytes, true
 }
 
-// refuseLowDisk is the pre-launch floor: it returns the reading and, when it
+// RefuseLowDisk is the pre-launch floor: it returns the reading and, when it
 // is under LaunchDiskFloor, ErrSandboxDiskLow.
-func refuseLowDisk(ctx context.Context, rt Runtime) (uint64, bool, error) {
+func RefuseLowDisk(ctx context.Context, rt Runtime) (uint64, bool, error) {
 	free, ok := readDiskFree(ctx, rt)
 	if ok && free < LaunchDiskFloor {
 		return free, ok, fmt.Errorf("%w: %w (%d bytes free, %d needed)", ErrSandboxNotStarted, ErrSandboxDiskLow, free, LaunchDiskFloor)
