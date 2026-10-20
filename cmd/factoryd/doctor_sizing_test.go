@@ -55,7 +55,10 @@ func readArgv(t *testing.T, path string) string {
 	return string(b)
 }
 
-var quickTimeouts = sizingTimeouts{info: 2 * time.Second, run: 2 * time.Second}
+// quickTimeouts are for a fake that answers: generous, since a process start
+// is slow under a loaded test run (2 s failed in a full make verify). The
+// hanging-docker cases test the timeout itself with their own short ones.
+var quickTimeouts = sizingTimeouts{info: 30 * time.Second, run: 30 * time.Second}
 
 func TestDoctorCheckParallelMemory(t *testing.T) {
 	tests := []struct {
