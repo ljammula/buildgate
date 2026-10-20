@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
 	"buildgate/internal/oraclecanary"
@@ -87,7 +86,7 @@ func (a *Activities) runReferenceOracleCanary(ctx context.Context, budget time.D
 	}
 	start := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: oraclecanary.AttemptKind, Elapsed: time.Since(start)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: oraclecanary.AttemptKind, Elapsed: time.Since(start)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(runCtx, input.WorkspacePath, logPath, 1, beforeAttempt, afterAttempt, command[0], command[1:]...)

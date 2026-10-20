@@ -302,20 +302,19 @@ func TestIntegrationReconcileReclaimedRunPreservesCleanupUnconfirmed(t *testing.
 // heartbeating, standing in for a factoryd process that died mid-build --
 // so the triage classification is checked against Temporal's own error
 // text, not a hand-written copy of it.
-// Takes RunWorkflow's full heartbeat timeout (~30s).
+// Takes RunWorkflow's full heartbeat timeout (2 min).
 func TestIntegrationReconcileReclaimedRunNamesStoppedWorker(t *testing.T) {
-	// The build Activity is retried once, so its heartbeat timeout fires
-	// twice before the run halts. Each fake attempt never heartbeats and
-	// gives up after 40 s, past the 30 s heartbeat timeout, the way a real
-	// stale attempt is cancelled by its first refused heartbeat: the Worker
-	// runs one Activity at a time, so the retry starts only once the stale
-	// attempt has let go of the slot.
-	reconciled := reconcileAfterFailedBuild(t, "worker-stopped", 180*time.Second,
+	// The fake attempt never heartbeats and gives up after 125 s, past the
+	// 2 min heartbeat timeout, the way a real stale attempt is cancelled by
+	// its first refused heartbeat: the Worker runs one Activity at a time,
+	// so a retry would start only once the stale attempt has let go of the
+	// slot.
+	reconciled := reconcileAfterFailedBuild(t, "worker-stopped", 300*time.Second,
 		func(ctx context.Context, _ workflow.RunWorkflowInput) (workflow.BuildActivityResult, error) {
 			select {
 			case <-ctx.Done():
 				return workflow.BuildActivityResult{}, ctx.Err()
-			case <-time.After(40 * time.Second):
+			case <-time.After(125 * time.Second):
 				return workflow.BuildActivityResult{}, errors.New("stale attempt gave up")
 			}
 		})

@@ -74,7 +74,7 @@ func (a *Activities) prepareReviewLaunch(ctx context.Context, input ReviewStepIn
 func (a *Activities) prepareReviewLaunchHeartbeating(ctx context.Context, input ReviewStepInput, step reviewstep.Step, dst string) (reviewInstructions, error) {
 	start := time.Now()
 	heartbeat := func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(start)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(start)})
 	}
 	var prep reviewInstructions
 	_, err := heartbeatWhileRunning(activityHeartbeatInterval, heartbeat, func() (runner.Result, error) {

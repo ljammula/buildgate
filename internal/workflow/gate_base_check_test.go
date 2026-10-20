@@ -497,7 +497,7 @@ func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *test
 	f := newGateBaseFixture(t, 1, 1)
 	release := holdGitMetadataLock(t, f.repo)
 	// Longer than one heartbeat interval, so a wait with no heartbeat shows.
-	wait := activityHeartbeatInterval + 3*time.Second
+	wait := sandboxAttemptTeardownMargin + activityHeartbeatInterval + 3*time.Second
 
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestActivityEnvironment()

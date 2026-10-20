@@ -22,6 +22,7 @@ import (
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/ticketspec"
+	"buildgate/internal/unresolved"
 )
 
 // maxTriageLogTailBytes bounds how much of a gate's log Run reads
@@ -988,6 +989,8 @@ func triageHalt(r *run.Run) string {
 		return reviewInstructionsSentence(r)
 	case run.HaltReasonFactoryDirFailed:
 		return factoryDirSentence(r)
+	case string(unresolved.TemporalUnreachable):
+		return temporalUnreachableTriage
 	case run.HaltReasonBaselineVerifyFailed:
 		// No model call was made: the verify command failed on the base
 		// commit with a failure the ticket does not name.
@@ -1092,6 +1095,12 @@ func classifyHaltError(haltErr string) string {
 // lost Temporal; its next heartbeat round-trip cancels it, and the run's
 // kept worktree is what a resume continues from.
 const workerStoppedTriage = "halted: the factoryd process running this build stopped mid-run (restarted, crashed, slept, or lost Temporal); resume the request (factoryd resume <id>) or start a single-ticket run again"
+
+// temporalUnreachableTriage is triageHalt's sentence for a run that lost the
+// Temporal server for longer than its heartbeat timeout. Unlike a lost
+// worker, the process is alive; what the build did is in the kept worktree,
+// and nothing judged it. A request waits in resume_review.
+const temporalUnreachableTriage = "halted: factoryd lost contact with the Temporal server mid-run, so the work was not judged; once Temporal answers, resume the request (factoryd resume <id>)"
 
 // truncateTriage caps s at maxTriageSentenceLen bytes -- Run.Triage's own
 // doc comment promises callers a short sentence, not an unbounded one.

@@ -139,6 +139,8 @@ func attemptKindFitsJournal(journalKind, attemptKind string) bool {
 // than reference_oracle (lint, security_audit, unit_tests, integration_tests)
 // re-run after the full suite, matching cmd/factoryd.
 func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, input RunWorkflowInput) (progressResult PostOracleCommitVerifyResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	progressStarted := false
 	defer func() {
 		if !progressStarted {
@@ -269,7 +271,7 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 		}
 		heartbeatStart := time.Now()
 		result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-			activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: kind, Elapsed: time.Since(heartbeatStart)})
+			recordStepHeartbeat(ctx, HeartbeatDetails{Stage: kind, Elapsed: time.Since(heartbeatStart)})
 		}, func() (runner.Result, error) {
 			if a.hasFakeRunner() {
 				return a.runWithRetriesFn()(phaseCtx, input.WorkspacePath, logPath, maxAttempts, beforeAttempt, afterAttempt, command[0], command[1:]...)
@@ -337,11 +339,11 @@ func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, inpu
 	}
 	checkpoint.Result = out
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return out, temporal.NewApplicationErrorWithCause("save post-oracle-commit verify Activity checkpoint", errType, saveErr, out.Attempts)
 	}
 	if runErr != nil {
-		errType := launchErrorType(runErr)
+		errType := launchErrorType(stepErr(ctx, runErr))
 		return out, temporal.NewApplicationErrorWithCause(stage+" subprocess infrastructure failure", errType, runErr, out.Attempts)
 	}
 	if evidenceErr != nil {

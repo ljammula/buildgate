@@ -11,7 +11,6 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	temporalworker "go.temporal.io/sdk/worker"
@@ -247,7 +246,11 @@ type composeServicesOptions struct {
 // Get came back "context deadline exceeded" with ctx nowhere near its
 // deadline. Returning that halted the run with no reason and stopped the
 // only Worker on its task queue, stranding a still-running workflow.
-func waitForRunWorkflowWithProgress(dp *deps, ctx context.Context, temporalClient client.Client, execution client.WorkflowRun, id string, result *workflow.RunWorkflowResult) error {
+//
+// A Get that fails on the connection itself (the server does not answer,
+// and neither does the check above) is waited out again for up to
+// contactBudget: a stall of the server is not an outcome of the run.
+func waitForRunWorkflowWithProgress(dp *deps, ctx context.Context, temporalClient client.Client, execution client.WorkflowRun, id string, result *workflow.RunWorkflowResult, contactBudget time.Duration) error {
 	resultCh := make(chan error, 1)
 	get := func(delay time.Duration) {
 		select {
@@ -261,13 +264,22 @@ func waitForRunWorkflowWithProgress(dp *deps, ctx context.Context, temporalClien
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	lastStage := ""
+	var silentSince time.Time
 	for {
 		select {
 		case err := <-resultCh:
-			if err != nil && ctx.Err() == nil && dp.temporal.stillRunning(temporalClient, execution) {
-				log.Printf("run %s: lost the wait on its Temporal workflow (%v); it is still running, waiting again", id, err)
-				go get(waitRetryDelay)
-				continue
+			if err != nil && ctx.Err() == nil {
+				if dp.temporal.stillRunning(temporalClient, execution) {
+					log.Printf("run %s: lost the wait on its Temporal workflow (%v); it is still running, waiting again", id, err)
+					silentSince = time.Time{}
+					go get(waitRetryDelay)
+					continue
+				}
+				if transportFailure(err) && contactWithinBudget(&silentSince, contactBudget) {
+					log.Printf("run %s: no answer from the Temporal server (%v); waiting again for up to %s", id, err, contactBudget)
+					go get(waitRetryDelay)
+					continue
+				}
 			}
 			return err
 		case <-ticker.C:
@@ -540,7 +552,7 @@ func startRunWorkflow(runCtx context.Context, temporalClient client.Client, r *r
 func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Client, execution client.WorkflowRun, r *run.Run, opts runOptions, taskQueue string, cancelActivities context.CancelFunc) error {
 	checkpointDir := opts.checkpointDir()
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, runCtx, temporalClient, execution, opts.ID, &result); err != nil {
+	if err := waitForRunWorkflowWithProgress(dp, runCtx, temporalClient, execution, opts.ID, &result, waitContactBudget); err != nil {
 		// Not confirmed by default — proven true only below. Found via
 		// two review rounds: a first version inferred confirmation from
 		// runCtx.Err() alone (nil meaning "Get failed for its own
@@ -577,6 +589,9 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		// apart by the context error: runCtx is WithTimeout(lifecycleCtx),
 		// so it reports Canceled only when the parent was canceled.
 		processLost := buildLostWithProcess(ctxErr, waitTimedOut)
+		// contactLost: it was Temporal that went away, not the operator or
+		// the worker. The cause of the cancelled context says which.
+		contactLost := lostTemporalContact(runCtx, processLost, ctxErr, err)
 		keptForResume := false
 		// Rule R: a run that adopted a halted run's worktree never rolls it
 		// back. Keeping is only offered to runs a human can decide about: a
@@ -585,6 +600,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		// run keeps today's reap.
 		resumed := opts.Slice.ResumeFrom != nil
 		keepEligible := keepEligibleRun(r, resumed)
+		keepWanted := keepEligible && (processLost || resumed || contactLost != nil)
 		if ctxErr != nil || waitTimedOut {
 			// Our own wait was canceled or timed out — not the Workflow
 			// Execution itself, which is still running server-side with
@@ -603,15 +619,11 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 			// execution immediately, server-side, without needing any
 			// worker involvement. Uses a fresh context since runCtx is
 			// already done.
-			if processLost {
-				log.Printf("run %s: operator cancelled this run (SIGINT/SIGTERM)", opts.ID)
-			}
-			terminateCtx, cancelTerminate := context.WithTimeout(context.Background(), 5*time.Second)
-			terminateErr := temporalClient.TerminateWorkflow(terminateCtx, execution.GetID(), execution.GetRunID(),
-				"factoryd: supervisor timeout or operator cancellation; this run is halting regardless of workflow outcome")
-			cancelTerminate()
-			var notFound *serviceerror.NotFound
-			if terminateErr == nil || errors.As(terminateErr, &notFound) {
+			logRunLost(opts.ID, processLost, contactLost, context.Cause(runCtx))
+			terminateErr := terminateRunWorkflow(temporalClient, execution.GetID(), execution.GetRunID(),
+				"factoryd: supervisor timeout or operator cancellation; this run is halting regardless of workflow outcome",
+				terminateBudget(processLost, contactLost), time.Second)
+			if terminateErr == nil {
 				// Only with the workflow confirmed stopped: a still-running
 				// workflow that saw its build Activity fail would run its
 				// rollback and delete a worktree that must be kept for
@@ -635,8 +647,8 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 				// accepts no new Activity dispatch. This caller-side
 				// rollback is the only place guaranteed to still run
 				// after a hard termination.
-				recoveredWorktreePath, recoveredBranch = rollbackIsolatedWorkspaceIfTerminated(temporalClient, execution.GetID(), execution.GetRunID(), checkpointDir, keepEligible && (processLost || resumed))
-				keptForResume = keepEligible && (processLost || resumed) && recoveredWorktreePath != ""
+				recoveredWorktreePath, recoveredBranch = rollbackIsolatedWorkspaceIfTerminated(temporalClient, execution.GetID(), execution.GetRunID(), checkpointDir, keepWanted)
+				keptForResume = keepWanted && recoveredWorktreePath != ""
 			} else {
 				log.Printf("run %s: additionally failed to terminate orphaned Temporal workflow %s: %v", opts.ID, execution.GetID(), terminateErr)
 			}
@@ -667,6 +679,9 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 				haltConfirmed = !workflow.CleanupUnconfirmedFromError(err)
 			}
 		}
+		// The halt could not be confirmed against the server (it was down):
+		// the worktree of a lost run is still found on disk and kept.
+		recoveredWorktreePath, recoveredBranch, keptForResume = keptWorktreeIfUnconfirmed(checkpointDir, keepWanted, haltConfirmed, recoveredWorktreePath, recoveredBranch, keptForResume)
 		// Found via review: execution.Get above never populates result on a
 		// failed Workflow Execution, only the error — so any per-attempt
 		// build/verify evidence RunWorkflow's Activities had already
@@ -750,6 +765,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		if code := workflow.HaltReasonCodeFromError(err); code != "" {
 			r.HaltReasonCode = code
 		}
+		recordContactLoss(r, contactLost)
 		// Always, not only with a reason code: without it a halted run
 		// carried no reason at all and triage had nothing to classify.
 		if r.HaltError == "" {

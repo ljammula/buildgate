@@ -157,6 +157,8 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 // runBuild invokes build_app.py through runner.RunWithRetries. A completed
 // invocation is returned from its durable checkpoint on redispatch.
 func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (progressResult BuildActivityResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.
@@ -431,7 +433,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 	}
 	buildHeartbeatStart := time.Now()
 	subResult, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: "build", Elapsed: time.Since(buildHeartbeatStart)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: "build", Elapsed: time.Since(buildHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
@@ -457,7 +459,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 	checkpoint.Result = result
 	if runErr != nil {
 		checkpoint.Error = "build subprocess infrastructure failure: " + runErr.Error()
-		checkpoint.ErrorType = buildActivityErrorType(runErr)
+		checkpoint.ErrorType = buildActivityErrorType(stepErr(ctx, runErr))
 	}
 	// result.Attempts is attached as this error's Details on every failure
 	// return below (found via review): Temporal does not deliver an
@@ -468,10 +470,10 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 	// carrying structured data across that boundary specifically when an
 	// Activity fails; RunWorkflow recovers it via AttemptsFromError.
 	if err := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); err != nil {
-		return result, temporal.NewApplicationErrorWithCause("save build Activity checkpoint", buildActivityErrorType(runErr), err, result.Attempts)
+		return result, temporal.NewApplicationErrorWithCause("save build Activity checkpoint", buildActivityErrorType(stepErr(ctx, runErr)), err, result.Attempts)
 	}
 	if runErr != nil {
-		return result, temporal.NewApplicationErrorWithCause("build subprocess infrastructure failure", buildActivityErrorType(runErr), runErr, result.Attempts)
+		return result, temporal.NewApplicationErrorWithCause("build subprocess infrastructure failure", buildActivityErrorType(stepErr(ctx, runErr)), runErr, result.Attempts)
 	}
 	return result, nil
 }

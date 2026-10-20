@@ -1989,6 +1989,14 @@ func ownerHeartbeatStale(dataDir, runID string) bool {
 	return time.Since(info.ModTime()) > ownerStaleAfter
 }
 
+// OwnerHeartbeatFresh reports whether the run's owner marker was refreshed
+// within ownerStaleAfter: its owner process is still supervising it. A
+// missing marker is not fresh.
+func OwnerHeartbeatFresh(dataDir, runID string) bool {
+	info, err := os.Stat(ownerPIDPath(dataDir, runID))
+	return err == nil && time.Since(info.ModTime()) <= ownerStaleAfter
+}
+
 // quarantineAbandonedRun marks runID quarantined after ReconcileOrphans has
 // already confirmed both its owner heartbeat is stale and its abandoned
 // container has been removed. Locked the same way every other run.json
