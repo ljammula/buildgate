@@ -172,10 +172,45 @@ func TestARequestParkedAsALostWorkerEndsWithTheCauseOfItsRun(t *testing.T) {
 	if got.State != request.StateResumeReview || got.Resume == nil || got.Resume.Cause != unresolved.TemporalUnreachable {
 		t.Fatalf("state %s resume %+v, want resume_review with cause temporal_unreachable", got.State, got.Resume)
 	}
-	if got.Resume.LostRunID != requestdrivertest.TicketRunID(id, 1) || got.Resume.Generation != 1 {
+	if got.Resume.LostRunID != requestdrivertest.TicketRunID(id, 1) || got.Resume.Generation != 2 {
 		t.Errorf("resume %+v, want the kept run and the same generation", got.Resume)
 	}
 	if want := request.ResumePrompt(id, request.StateBuilding, request.LostStep{RunID: got.Resume.LostRunID, Cause: unresolved.TemporalUnreachable}); got.Error != want {
 		t.Errorf("prompt %q, want %q", got.Error, want)
+	}
+}
+
+// A decision already pending on the entry is never rewritten under the human:
+// the cause, the kept run and the generation stay as the decision saw them.
+func TestAParkedRequestWithAPendingDecisionKeepsItsEntryWhenItsRunHalts(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runner := func(_ context.Context, args []string, onReady func(*run.Run)) error {
+		rid := requestdrivertest.ArgValue(args, "-ticket")
+		onReady(&run.Run{ID: rid, State: run.StateReady})
+		r, err := request.Load(dataDir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.EnterResumeReview(request.StateBuilding, request.LostStep{Cause: unresolved.WorkerLost}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		r.ResumeDecision = &request.ResumeDecision{Verb: request.ResumeScratch, Generation: r.Resume.Generation, By: "alice"}
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&run.Run{ID: rid, State: run.StateHalted, KeptForResume: true, RequestID: id,
+			HaltReasonCode: string(unresolved.TemporalUnreachable)}).Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+		return errors.New("lost contact with the Temporal server")
+	}
+
+	got := requestdrivertest.AdvanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{}, runner)
+	if got.Resume == nil || got.Resume.Cause != unresolved.WorkerLost || got.Resume.LostRunID != "" || got.Resume.Generation != 1 {
+		t.Errorf("resume %+v, want the entry the decision answers, untouched", got.Resume)
+	}
+	if got.PendingResumeVerb() != request.ResumeScratch {
+		t.Errorf("the pending decision was lost: %+v", got.ResumeDecision)
 	}
 }

@@ -115,7 +115,7 @@ func stepWaitsForRepoLock(state request.State, onJobs bool) bool {
 
 // requestHeartbeatInterval is how often AdvanceRequest heartbeats; well
 // inside RequestWorkflow's heartbeat timeout.
-const requestHeartbeatInterval = 20 * time.Second
+const requestHeartbeatInterval = 5 * time.Second
 
 // AdvanceRequest runs one step of request id (advanceRequest), saves its
 // outcome and returns the state the request is in afterwards. It heartbeats
@@ -141,8 +141,10 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			slotRequests.add(id)
 			defer slotRequests.remove(id)
 		}
+		ownSteps := 0
 		if onJobs && r.State.RunsJob() {
 			// A pr_review poll is not a job, as in worker's driver.
+			ownSteps = 1
 			addActiveRequest(id)
 			defer removeActiveRequest(id)
 		}
@@ -161,7 +163,8 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// A step whose heartbeat timed out on the server while its
 			// process lived on is still building this ticket: a second
 			// build of it would run beside the first.
-			if a.ticketRunStillLive(ctx, r) {
+			if live, why := a.ticketRunStillLive(r, ownSteps); live {
+				log.Printf("request %s: not starting another build step: %s", r.ID, why)
 				return "", temporal.NewApplicationError("the ticket's run is still being built by a live process", repositoryBusyErrorType)
 			}
 			if repoBusy(r.Workspace, a.dataDir) {
@@ -244,32 +247,32 @@ func (a *requestActivities) ensureConsole() {
 }
 
 // ticketRunStillLive reports whether the run of r's current ticket is being
-// built right now: a building request, a run record that has not finished,
-// its owner process alive (the pid in its owner marker) and the sandbox
-// runtime still holding a sandbox of it. Anything not shown is "not live": a
-// run with no marker, a dead owner or no sandbox is lost.
-func (a *requestActivities) ticketRunStillLive(ctx context.Context, r *request.Request) bool {
+// built right now, and why it says so ("" when not): a building request and a
+// run record that has not finished, and either a step of this process in
+// flight for the request beyond the self steps counted for the caller (the
+// build runs in this process, so its owner pid is always alive and says
+// nothing), or, for a run another process owns, that process alive with a
+// fresh owner heartbeat. Anything not shown is "not live": the run is lost.
+func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bool, string) {
 	if r.State != request.StateBuilding {
-		return false
+		return false, ""
 	}
 	ticket, err := requestdriver.TicketAt(r, max(r.TicketIndex, 1))
 	if err != nil || ticket.RunID == "" {
-		return false
+		return false, ""
 	}
 	rec, err := run.Load(a.dataDir, ticket.RunID)
 	if err != nil || rec.State == run.StateAccepted || rec.State == run.StateQuarantined || rec.State == run.StateHalted {
-		return false
+		return false, ""
+	}
+	if n := countOf(currentActiveRequests(), r.ID); n > self {
+		return true, fmt.Sprintf("a step of this process is still running run %s", ticket.RunID)
 	}
 	pid, ok := sandbox.OwnerPID(a.dataDir, ticket.RunID)
-	if !ok || runOwnerDead(a.dataDir, ticket.RunID) || pid <= 0 {
-		return false
+	if ok && pid != os.Getpid() && !runOwnerDead(a.dataDir, ticket.RunID) && sandbox.OwnerHeartbeatFresh(a.dataDir, ticket.RunID) {
+		return true, fmt.Sprintf("process %d is supervising run %s (fresh owner heartbeat)", pid, ticket.RunID)
 	}
-	runtime := a.dp.sandbox.runtime()
-	if runtime == nil {
-		return true
-	}
-	names, err := runtime.ListByRun(ctx, a.dataDir, ticket.RunID)
-	return err == nil && len(names) > 0
+	return false, ""
 }
 
 // RemindRequest sends request id's review reminder when one is due.
@@ -285,7 +288,7 @@ func (a *requestActivities) RemindRequest(_ context.Context, id string) error {
 // pr_review request is left to poll again: most passes only read the PR, and a
 // lost corrective round's run is reclaimed, with its request, at the next
 // worker start (haltRequestsOfLostRuns).
-func (a *requestActivities) HaltLostRequestStep(ctx context.Context, in workflow.HaltLostRequestStepInput) error {
+func (a *requestActivities) HaltLostRequestStep(_ context.Context, in workflow.HaltLostRequestStepInput) error {
 	if in.State == string(request.StatePRReview) {
 		return nil
 	}
@@ -301,12 +304,23 @@ func (a *requestActivities) HaltLostRequestStep(ctx context.Context, in workflow
 	if string(r.State) != in.State {
 		return nil
 	}
-	if a.ticketRunStillLive(ctx, r) {
+	if live, why := a.ticketRunStillLive(r, 0); live {
 		// The server timed the step out, but its run is not lost: its owner
 		// process is alive and its sandbox is there. The step moves the
 		// request itself when the run ends, and a new step waits for it.
-		log.Printf("request %s: its step's heartbeat timed out, but the ticket's run is still live; not moving it to resume_review", r.ID)
+		log.Printf("request %s: its step's heartbeat timed out, but the ticket's run is still live (%s); not moving it to resume_review", r.ID, why)
 		return nil
 	}
 	return requestdriver.EnterResumeReview(a.dataDir, r, request.LostStep{RunID: lostRunOf(a.dataDir, r), Cause: unresolved.WorkerLost}, time.Now())
+}
+
+// countOf is how many entries of ids are id.
+func countOf(ids []string, id string) int {
+	n := 0
+	for _, x := range ids {
+		if x == id {
+			n++
+		}
+	}
+	return n
 }

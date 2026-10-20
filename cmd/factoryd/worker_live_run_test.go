@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver/requestdrivertest"
@@ -39,29 +40,59 @@ func liveRunFixture(t *testing.T, dp *deps, state run.State, pid int) (*requestA
 }
 
 // A step whose heartbeat the server timed out, but whose run is still being
-// built by a live process, is not moved to resume_review: the step moves the
-// request itself when the run ends. Any other lost run is.
-func TestAHeartbeatTimeoutDoesNotParkARunItsLiveOwnerStillBuilds(t *testing.T) {
+// built, is not moved to resume_review: the step moves the request itself
+// when the run ends. "Being built" is a fact of this process (a step of it in
+// flight for the request) or a fresh owner heartbeat of another process; the
+// owner pid of a worker's own run is its own and says nothing, so a run with
+// no step in flight in this process is parked, never declined for good.
+func TestAHeartbeatTimeoutDoesNotParkARunThatIsStillBeingBuilt(t *testing.T) {
+	self := func(*testing.T) int { return os.Getpid() }
+	parent := func(*testing.T) int { return os.Getppid() }
+	none := func(*testing.T) int { return 0 }
 	for name, tc := range map[string]struct {
-		state run.State
-		pid   func(*testing.T) int
-		moved bool
+		state    run.State
+		pid      func(*testing.T) int
+		inFlight bool
+		stale    bool
+		moved    bool
 	}{
-		"live owner, run in flight": {run.StateSliceRunning, func(*testing.T) int { return os.Getpid() }, false},
-		"dead owner":                {run.StateSliceRunning, deadPID, true},
-		"no owner marker":           {run.StateSliceRunning, func(*testing.T) int { return 0 }, true},
-		"run finished":              {run.StateHalted, func(*testing.T) int { return os.Getpid() }, true},
+		"a step of this process is in flight":         {run.StateSliceRunning, self, true, false, false},
+		"no step in flight, own pid":                  {run.StateSliceRunning, self, false, false, true},
+		"another live process with a fresh heartbeat": {run.StateSliceRunning, parent, false, false, false},
+		"another live process with a stale heartbeat": {run.StateSliceRunning, parent, false, true, true},
+		"dead owner":      {run.StateSliceRunning, deadPID, false, false, true},
+		"no owner marker": {run.StateSliceRunning, none, false, false, true},
+		"run finished, a step still counted in flight": {run.StateHalted, self, true, false, true},
 	} {
 		dp := newTestDeps(t)
 		acts, id := liveRunFixture(t, dp, tc.state, tc.pid(t))
+		if tc.stale {
+			old := time.Now().Add(-time.Hour)
+			if err := os.Chtimes(filepath.Join(run.Dir(acts.dataDir, "building-run"), "sandbox-owner.pid"), old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if tc.inFlight {
+			addActiveRequest(id)
+		}
 		before, err := request.Load(acts.dataDir, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if live := acts.ticketRunStillLive(context.Background(), before); live == tc.moved {
-			t.Errorf("%s: ticketRunStillLive = %v, want %v", name, live, !tc.moved)
+		live, why := acts.ticketRunStillLive(before, 0)
+		if live == tc.moved || (live && why == "") {
+			t.Errorf("%s: ticketRunStillLive = %v (%q), want %v with a reason", name, live, why, !tc.moved)
 		}
-		if err := acts.HaltLostRequestStep(context.Background(), workflow.HaltLostRequestStepInput{RequestID: id, State: string(request.StateBuilding)}); err != nil {
+		if tc.inFlight {
+			if own, _ := acts.ticketRunStillLive(before, 1); own {
+				t.Errorf("%s: the step's own entry counted as another build", name)
+			}
+		}
+		err = acts.HaltLostRequestStep(context.Background(), workflow.HaltLostRequestStepInput{RequestID: id, State: string(request.StateBuilding)})
+		if tc.inFlight {
+			removeActiveRequest(id)
+		}
+		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		got, err := request.Load(acts.dataDir, id)

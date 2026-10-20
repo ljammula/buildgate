@@ -498,8 +498,8 @@ requires a new contract review and an updated machine-checkable test.
   its silence from the last heartbeat that could have got through: a stall of
   up to about 90 s loses nothing, and a longer one parks the request once as
   `temporal_unreachable`, or as `worker_lost` when the server timed the step
-  out first. A step the server timed out while its owner process and sandbox
-  are alive is not parked by `HaltLostRequestStep`: no second build starts
+  out first. A step the server timed out while a step of the same process is
+  still running its run (or another process holds a fresh owner heartbeat) is not parked by `HaltLostRequestStep`: no second build starts
   beside it, and when its run later halts as `temporal_unreachable` the
   request's cause becomes that. A resume runs only after that decision,
   only when the gateway, which must be reachable, reports no sandbox under

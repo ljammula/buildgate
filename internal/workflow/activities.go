@@ -732,7 +732,12 @@ func (a *Activities) EvaluateRunActivity(ctx context.Context, input EvaluateRunI
 // subprocess doesn't block a genuine cancellation anywhere near that long
 // — see cmd/factoryd's workerStopTimeout, now bounded by this instead of
 // by a subprocess's own unbounded runtime.
-const activityHeartbeatInterval = 15 * time.Second
+//
+// 5 s, a third of the SDK's heartbeat throttle (HeartbeatThrottle): the call
+// that starts each throttle window is never more than 5 s late, so the SDK
+// gives up on a stalled connection within about three throttles of the last
+// heartbeat that got through.
+const activityHeartbeatInterval = 5 * time.Second
 
 // stepHeartbeatTimeout is how long a build or verify step may go without a
 // heartbeat before Temporal declares it lost: long enough that a stall of the

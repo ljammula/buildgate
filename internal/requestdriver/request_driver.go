@@ -876,7 +876,7 @@ func noteLostCause(dataDir, requestID, runID string) error {
 	if err != nil {
 		return err
 	}
-	if cur.State != request.StateResumeReview || cur.Resume == nil || cur.Resume.FromState != request.StateBuilding ||
+	if cur.State != request.StateResumeReview || cur.Resume == nil || cur.Resume.FromState != request.StateBuilding || cur.PendingResumeVerb() != "" ||
 		cur.Resume.Cause == unresolved.TemporalUnreachable || (cur.Resume.LostRunID != "" && cur.Resume.LostRunID != runID) {
 		return nil
 	}
@@ -885,8 +885,11 @@ func noteLostCause(dataDir, requestID, runID string) error {
 		return nil
 	}
 	cur.Resume.Cause = unresolved.TemporalUnreachable
-	if rec.KeptForResume {
+	if rec.KeptForResume && cur.Resume.LostRunID != runID {
+		// What a decision would continue has changed: a decision made for
+		// the entry as it was no longer applies to it.
 		cur.Resume.LostRunID = runID
+		cur.Resume.Generation++
 	}
 	cur.Error = request.ResumePrompt(cur.ID, cur.Resume.FromState, request.LostStep{RunID: cur.Resume.LostRunID, Cause: cur.Resume.Cause})
 	log.Printf("request %s: resume_review cause is now %s (run %s lost its Temporal connection)", cur.ID, cur.Resume.Cause, runID)
