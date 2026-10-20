@@ -225,33 +225,27 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 				// answer for a cache cleaned up by something other than
 				// `go clean` (the stand-in Run removes a host directory).
 				"GOFLAGS="+withModCacheRW(workerSpec.Environment),
-				// sum.golang.org (Go's own default GOSUMDB), not "off":
-				// goSumDBRoutePrefix registers a route serving exactly
-				// "<this GOPROXY value>/sumdb/sum.golang.org/...", which is
-				// the Go module proxy protocol's own documented passthrough
-				// (https://go.dev/ref/mod#goproxy-protocol) -- the go
-				// command automatically requests checksum data there
-				// instead of dialing sum.golang.org directly whenever
-				// GOSUMDB names a real database and GOPROXY points at an
-				// actual proxy, so checksum verification stays enabled with
-				// no other env var needed. Real per-token-manager
-				// misconfiguration this replaces: an earlier version set
-				// GOSUMDB=off here because this route did not exist yet,
-				// silently disabling checksum verification entirely rather
-				// than actually proxying it.
-				"GOSUMDB=sum.golang.org",
+				// Checksums are verified against sum.golang.org's own key,
+				// fetched through goSumDBRoutePrefix. The URL is named
+				// explicitly: given only a GOPROXY, the go command first asks
+				// "<GOPROXY>/sumdb/sum.golang.org/supported", and on the 404
+				// the database itself returns for that path it dials
+				// sum.golang.org directly, which a worker cannot reach. With
+				// "<name> <url>" it uses the URL as the database and still
+				// checks every signed tree head with the named database's
+				// built-in key, so the proxy relays data it cannot forge.
+				"GOSUMDB=sum.golang.org "+goSumDBURL(base),
 				// Every module through the proxy, a private one included:
 				// a Makefile that exports GOPRIVATE would otherwise send
 				// the go command straight to the module's host, which a
-				// worker cannot reach and has no credential for. GOPRIVATE
-				// still keeps such a module out of the checksum database.
+				// worker cannot reach and has no credential for. The
+				// modules the proxy holds locally are kept out of the
+				// checksum database by GONOSUMDB, below.
 				"GONOPROXY=none",
 			)
 		case goSumDBRoutePrefix:
-			// No env var of its own: this route exists purely so the
-			// passthrough request GOSUMDB=sum.golang.org/GOPROXY together
-			// trigger (see the goProxyRoutePrefix case above) has
-			// somewhere real to land. Explicitly listed (not left to
+			// No env var of its own: the goProxyRoutePrefix case names
+			// this route's URL in GOSUMDB. Explicitly listed (not left to
 			// default, matching this switch's own doc comment) so a
 			// reader doesn't have to wonder why this prefix is silently
 			// skipped.
@@ -260,6 +254,19 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 			// directly by name -- it's only ever reached via a link the
 			// pypiRoutePrefix route's own response rewriting (internal/
 			// registryproxy.Route.RewriteHrefHosts) already pointed here.
+		}
+	}
+	if forbidden["GOPROXY"] {
+		// The modules the proxy serves from GoModuleDir are this machine's
+		// own: none of their names goes to the checksum database either.
+		// go.sum holds their hashes, as on the host.
+		private, err := goModuleViewPaths(l.spec.GoModuleDir)
+		if err != nil {
+			return LaunchSpec{}, fmt.Errorf("read the registry proxy's Go module directory: %w", err)
+		}
+		if len(private) > 0 {
+			forbidden["GONOSUMDB"] = true
+			additions = append(additions, "GONOSUMDB="+strings.Join(private, ","))
 		}
 	}
 	environment := make([]string, 0, len(workerSpec.Environment)+len(additions))

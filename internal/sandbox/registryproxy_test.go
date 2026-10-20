@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -422,8 +423,8 @@ func TestRegistryProxyLifecyclePrepareWorkerSetsNetworkAndEnv(t *testing.T) {
 	if !strings.Contains(joined, "GOPROXY=http://registry-proxy:8092/gomodproxy") {
 		t.Errorf("environment missing GOPROXY, got %v", worker.Environment)
 	}
-	if !strings.Contains(joined, "GOSUMDB=sum.golang.org") {
-		t.Errorf("environment missing GOSUMDB=sum.golang.org, got %v", worker.Environment)
+	if !slices.Contains(worker.Environment, "GOSUMDB=sum.golang.org http://registry-proxy:8092/gomodproxy/sumdb/sum.golang.org") {
+		t.Errorf("environment missing GOSUMDB naming the proxy's checksum database route, got %v", worker.Environment)
 	}
 	// Every module goes through the proxy, whatever GOPRIVATE a Makefile sets.
 	if !strings.Contains(joined, "GONOPROXY=none") {
@@ -689,5 +690,45 @@ func TestRegistryProxyOlderThanFactorydIsReadFromItsLog(t *testing.T) {
 	}
 	if err := registryProxyOlderThanFactoryd("registry proxy listening on :8092\n"); err != nil {
 		t.Errorf("a proxy that started: %v", err)
+	}
+}
+
+// The modules the proxy serves from the Go module directory are named in the
+// worker's GONOSUMDB, unescaped, so the go command never asks the checksum
+// database about them; without such a directory the worker has no GONOSUMDB
+// of the factory's.
+func TestRegistryProxyWorkerKeepsTheLocalModulesOutOfTheChecksumDatabase(t *testing.T) {
+	view := t.TempDir()
+	for _, dir := range []string{"example.com/!acme/lib/@v", "corp.internal/tools/@v", "corp.internal/tools/@v/nested"} {
+		if err := os.MkdirAll(filepath.Join(view, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := goModuleViewPaths(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"corp.internal/tools", "example.com/Acme/lib"}; !slices.Equal(paths, want) {
+		t.Fatalf("goModuleViewPaths = %v, want %v", paths, want)
+	}
+
+	l := &RegistryProxyLifecycle{spec: RegistryProxySpec{RegistryProxyPolicy: RegistryProxyPolicy{Routes: DefaultRegistryProxyRoutes()}, GoModuleDir: view}}
+	worker, err := l.withRegistryEnvironment(LaunchSpec{Environment: []string{"GONOSUMDB=stale"}}, "http://registry-proxy:8092")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(worker.Environment, "GONOSUMDB=corp.internal/tools,example.com/Acme/lib") || slices.Contains(worker.Environment, "GONOSUMDB=stale") {
+		t.Errorf("Environment = %v, want GONOSUMDB naming exactly the local modules", worker.Environment)
+	}
+
+	l.spec.GoModuleDir = ""
+	worker, err = l.withRegistryEnvironment(LaunchSpec{}, "http://registry-proxy:8092")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range worker.Environment {
+		if strings.HasPrefix(value, "GONOSUMDB=") {
+			t.Errorf("Environment has %s without a Go module directory", value)
+		}
 	}
 }

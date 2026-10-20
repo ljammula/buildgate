@@ -6,16 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"buildgate/internal/run"
-	"os"
-	"path/filepath"
-
 	"buildgate/internal/sanitize"
 )
 
@@ -55,24 +56,21 @@ const (
 	// follows them stays inside this proxy.
 	pypiFilesRoutePrefix = "/pypi-files/"
 	goProxyRoutePrefix   = "/gomodproxy/"
-	// goSumDBRoutePrefix implements the Go module proxy protocol's own
-	// checksum-database passthrough (https://go.dev/ref/mod#goproxy-protocol):
-	// when GOSUMDB names a real database (its default, "sum.golang.org") and
-	// GOPROXY points at an actual proxy URL, the go command itself requests
-	// sumdb data at "<GOPROXY>/sumdb/<sumdb-name>/<rest>" instead of dialing
-	// the database directly -- no separate env var is needed to enable this,
-	// only a route that actually serves it. Deliberately a MORE specific
-	// prefix than goProxyRoutePrefix and listed before it in
-	// DefaultRegistryProxyRoutes (internal/registryproxy.Server.matchRoute
-	// returns the first configured route whose prefix matches, so order is
-	// what lets this narrower prefix win over the general module-proxy one
-	// it's nested under). Found via review: an earlier version of this
-	// package set GOSUMDB=off instead, disabling checksum verification
-	// entirely rather than actually proxying it -- this route is what makes
-	// GOSUMDB=sum.golang.org (RegistryProxyLifecycle.PrepareWorker's actual
-	// default) work through a worker with no other route to the internet.
+	// goSumDBRoutePrefix fronts the Go checksum database. A worker's
+	// GOSUMDB names it explicitly ("sum.golang.org <its URL>", see
+	// goSumDBURL), so the go command reads the database through this proxy
+	// and verifies what it reads with sum.golang.org's built-in key. It is
+	// nested under goProxyRoutePrefix and listed before it in
+	// DefaultRegistryProxyRoutes: internal/registryproxy.Server.matchRoute
+	// takes the first route whose prefix matches.
 	goSumDBRoutePrefix = "/gomodproxy/sumdb/sum.golang.org/"
 )
+
+// goSumDBURL is the checksum database's URL on the registry proxy whose Go
+// module route is at goProxyBase.
+func goSumDBURL(goProxyBase string) string {
+	return strings.TrimRight(goProxyBase, "/") + "/" + strings.TrimSuffix(strings.TrimPrefix(goSumDBRoutePrefix, goProxyRoutePrefix), "/")
+}
 
 // RegistryProxyRoute is the credential-free, plain-data description of one
 // proxied route -- a CLI-flag-friendly counterpart to
@@ -262,6 +260,47 @@ type RegistryProxySpec struct {
 	// operator's own credentials, which enter no container. Like
 	// CABundlePath, a host-side fact of the Worker, never in Workflow input.
 	GoModuleDir string
+}
+
+// goModuleViewPaths lists the module paths a GoModuleDir holds, sorted: each
+// directory with an "@v" directory in it is one module, its path escaped as
+// the Go module proxy protocol escapes it. None for an empty dir argument.
+func goModuleViewPaths(dir string) ([]string, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() || d.Name() != "@v" {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		paths = append(paths, unescapeGoModulePath(filepath.ToSlash(rel)))
+		return filepath.SkipDir
+	})
+	slices.Sort(paths)
+	return paths, err
+}
+
+// unescapeGoModulePath undoes the Go module proxy protocol's escaping: "!"
+// and a lower-case letter is that letter in upper case.
+func unescapeGoModulePath(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '!' && i+1 < len(s) && s[i+1] >= 'a' && s[i+1] <= 'z' {
+			i++
+			b.WriteByte(s[i] - 'a' + 'A')
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // GoModuleContainerDir is where GoModuleDir is mounted in the proxy container.
