@@ -238,8 +238,9 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 				// Every module through the proxy, a private one included:
 				// a Makefile that exports GOPRIVATE would otherwise send
 				// the go command straight to the module's host, which a
-				// worker cannot reach and has no credential for. GOPRIVATE
-				// still keeps such a module out of the checksum database.
+				// worker cannot reach and has no credential for. The
+				// modules the proxy holds locally are kept out of the
+				// checksum database by GONOSUMDB, below.
 				"GONOPROXY=none",
 			)
 		case goSumDBRoutePrefix:
@@ -253,6 +254,19 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 			// directly by name -- it's only ever reached via a link the
 			// pypiRoutePrefix route's own response rewriting (internal/
 			// registryproxy.Route.RewriteHrefHosts) already pointed here.
+		}
+	}
+	if forbidden["GOPROXY"] {
+		// The modules the proxy serves from GoModuleDir are this machine's
+		// own: none of their names goes to the checksum database either.
+		// go.sum holds their hashes, as on the host.
+		private, err := goModuleViewPaths(l.spec.GoModuleDir)
+		if err != nil {
+			return LaunchSpec{}, fmt.Errorf("read the registry proxy's Go module directory: %w", err)
+		}
+		if len(private) > 0 {
+			forbidden["GONOSUMDB"] = true
+			additions = append(additions, "GONOSUMDB="+strings.Join(private, ","))
 		}
 	}
 	environment := make([]string, 0, len(workerSpec.Environment)+len(additions))

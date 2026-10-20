@@ -6,16 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"buildgate/internal/run"
-	"os"
-	"path/filepath"
-
 	"buildgate/internal/sanitize"
 )
 
@@ -259,6 +260,47 @@ type RegistryProxySpec struct {
 	// operator's own credentials, which enter no container. Like
 	// CABundlePath, a host-side fact of the Worker, never in Workflow input.
 	GoModuleDir string
+}
+
+// goModuleViewPaths lists the module paths a GoModuleDir holds, sorted: each
+// directory with an "@v" directory in it is one module, its path escaped as
+// the Go module proxy protocol escapes it. None for an empty dir argument.
+func goModuleViewPaths(dir string) ([]string, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() || d.Name() != "@v" {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		paths = append(paths, unescapeGoModulePath(filepath.ToSlash(rel)))
+		return filepath.SkipDir
+	})
+	slices.Sort(paths)
+	return paths, err
+}
+
+// unescapeGoModulePath undoes the Go module proxy protocol's escaping: "!"
+// and a lower-case letter is that letter in upper case.
+func unescapeGoModulePath(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '!' && i+1 < len(s) && s[i+1] >= 'a' && s[i+1] <= 'z' {
+			i++
+			b.WriteByte(s[i] - 'a' + 'A')
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // GoModuleContainerDir is where GoModuleDir is mounted in the proxy container.
