@@ -543,6 +543,12 @@
           "refused_at_end_by": "every-field refused_at_end_by",
           "legacy": true
         },
+        "sandbox_resources": {
+          "docker_disk_free_before": 3,
+          "docker_disk_free_after_exit": 3,
+          "docker_disk_free_after_delete": 3,
+          "oom_killed": true
+        },
         "reference_oracle_sha256": "every-field reference_oracle_sha256",
         "role": "every-field role",
         "harness": "every-field harness",
