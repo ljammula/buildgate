@@ -3,6 +3,7 @@ package openshell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -30,6 +31,9 @@ var containerNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9]
 type DockerContainers struct {
 	// Binary defaults to "docker".
 	Binary string
+	// MeterProject is the compose project of the OpenShell stack whose meter
+	// container DiskFree runs in; empty makes DiskFree unavailable.
+	MeterProject string
 	// run executes the CLI and returns its stdout; tests replace it.
 	run func(ctx context.Context, args ...string) ([]byte, error)
 }
@@ -78,36 +82,76 @@ func (d *DockerContainers) Present(ctx context.Context, sandboxName string) (boo
 	return len(ids) > 0, err
 }
 
-// WorkerStartedAt inspects the sandbox's containers and returns the start
-// time of the one that is not the supervisor. More than one worker is an
-// error: the answer would not identify a single start.
-func (d *DockerContainers) WorkerStartedAt(ctx context.Context, sandboxName string) (string, error) {
+// WorkerState inspects the sandbox's containers and returns the start time
+// and OOM flag of the one that is not the supervisor. More than one worker is
+// an error: the answer would not identify a single start. State.OOMKilled is
+// Docker's: the daemon sets it on any out-of-memory event of the container's
+// cgroup, a child process's included, and clears it only on a restart.
+func (d *DockerContainers) WorkerState(ctx context.Context, sandboxName string) (WorkerState, error) {
 	ids, err := d.ids(ctx, sandboxName)
 	if err != nil || len(ids) == 0 {
-		return "", err
+		return WorkerState{}, err
 	}
-	format := `{{index .Config.Labels "` + labelRole + `"}}|{{.State.StartedAt}}`
+	format := `{{index .Config.Labels "` + labelRole + `"}}|{{.State.StartedAt}}|{{.State.OOMKilled}}`
 	out, err := d.docker(ctx, append([]string{"inspect", "--type", "container", "--format", format}, ids...)...)
 	if err != nil {
-		return "", err
+		return WorkerState{}, err
 	}
-	var started []string
+	var workers []WorkerState
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		role, startedAt, found := strings.Cut(strings.TrimSpace(line), "|")
-		if !found {
-			return "", fmt.Errorf("docker inspect of sandbox %s: unreadable line %q", sandboxName, line)
+		role, rest, found := strings.Cut(strings.TrimSpace(line), "|")
+		startedAt, oom, foundOOM := strings.Cut(rest, "|")
+		if !found || !foundOOM || (oom != "true" && oom != "false") {
+			return WorkerState{}, fmt.Errorf("docker inspect of sandbox %s: unreadable line %q", sandboxName, line)
 		}
 		if role != roleSupervisor {
-			started = append(started, startedAt)
+			workers = append(workers, WorkerState{StartedAt: startedAt, OOMKilled: oom == "true"})
 		}
 	}
-	switch len(started) {
+	switch len(workers) {
 	case 0:
-		return "", nil
+		return WorkerState{}, nil
 	case 1:
-		return started[0], nil
+		return workers[0], nil
 	}
-	return "", fmt.Errorf("sandbox %s has %d worker containers", sandboxName, len(started))
+	return WorkerState{}, fmt.Errorf("sandbox %s has %d worker containers", sandboxName, len(workers))
+}
+
+// Compose labels of the OpenShell stack's meter container, the one factory
+// container that is always running, whose root filesystem is on Docker's
+// data filesystem.
+const (
+	labelComposeProject = "com.docker.compose.project"
+	labelComposeService = "com.docker.compose.service"
+	meterService        = "meter"
+	meterBinary         = "/factoryd-meter"
+)
+
+// DiskFree runs the meter's statfs subcommand in the meter container and
+// parses the free and total bytes of its root filesystem, which is the
+// overlay on Docker's data filesystem. MeterProject names the stack's
+// compose project.
+func (d *DockerContainers) DiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+	if d.MeterProject == "" {
+		return sandbox.DiskSpace{}, errors.New("no OpenShell stack project named to find the meter container")
+	}
+	out, err := d.docker(ctx, "ps", "-q", "--no-trunc", "--filter", "label="+labelComposeProject+"="+d.MeterProject, "--filter", "label="+labelComposeService+"="+meterService)
+	if err != nil {
+		return sandbox.DiskSpace{}, err
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) != 1 {
+		return sandbox.DiskSpace{}, fmt.Errorf("found %d running meter containers, want 1", len(ids))
+	}
+	out, err = d.docker(ctx, "exec", ids[0], meterBinary, "statfs")
+	if err != nil {
+		return sandbox.DiskSpace{}, err
+	}
+	var space sandbox.DiskSpace
+	if n, scanErr := fmt.Sscanf(strings.TrimSpace(string(out)), "free=%d total=%d", &space.FreeBytes, &space.TotalBytes); scanErr != nil || n != 2 || space.TotalBytes == 0 || space.FreeBytes > space.TotalBytes {
+		return sandbox.DiskSpace{}, fmt.Errorf("unreadable statfs answer %q", strings.TrimSpace(string(out)))
+	}
+	return space, nil
 }
 
 // Remove force-removes the sandbox's containers. A container that vanished

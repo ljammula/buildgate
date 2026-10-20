@@ -72,6 +72,11 @@ type Check struct {
 	// like every other value here. Present for a failed command gate; never
 	// for the reference oracle.
 	Output []string `json:"output,omitempty"`
+	// Environment is a sentence the factory writes from a reading taken
+	// outside the sandbox (never from the check's log): the step's worker was
+	// killed for want of memory, so a later build can allow for it. Empty
+	// when the reading says nothing.
+	Environment string `json:"environment,omitempty"`
 	// NotJudged marks a check on the attempt's diff (DiffChecks) that
 	// failed only because the attempt committed nothing: canonical
 	// verification never passed, so the build's work was left uncommitted
@@ -181,9 +186,10 @@ func Build(r *run.Run, dataDir string) Document {
 	for _, finding := range findings {
 		doc.Checks = append(doc.Checks, Check{
 			Check: clean(finding.Check, maxNameLen), Bin: binFor(r, finding), ExitCode: finding.ExitCode,
-			Finding:   clean(finding.Sentence, maxSentenceLen),
-			Output:    outputLines(finding.LogTail),
-			NotJudged: uncommitted && DiffChecks[finding.Check],
+			Finding:     clean(finding.Sentence, maxSentenceLen),
+			Environment: environmentSentence(r, finding.Check),
+			Output:      outputLines(finding.LogTail),
+			NotJudged:   uncommitted && DiffChecks[finding.Check],
 		})
 	}
 	if failed["spec_conformity"] {
@@ -211,6 +217,29 @@ func Build(r *run.Run, dataDir string) Document {
 		doc.AgentNotes = parseNotes(text)
 	}
 	return doc
+}
+
+// oomSentence is what a later build is told of a step whose worker Docker
+// reported OOM-killed (run.AttemptResources.OOMKilled).
+const oomSentence = "the kernel killed a process of this step for want of memory (sandbox_memory)"
+
+// environmentSentence is oomSentence for a check whose latest recorded
+// attempt had its worker OOM-killed, "" otherwise. A canonical_verify check
+// is the attempts of kind verify; every other check is its attempts' kind.
+func environmentSentence(r *run.Run, check string) string {
+	kind := check
+	if check == "canonical_verify" {
+		kind = "verify"
+	}
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if r.Attempts[i].Kind == kind {
+			if res := r.Attempts[i].Resources; res != nil && res.OOMKilled {
+				return oomSentence
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 // binFor is BinOf with what only the run record shows:
@@ -468,6 +497,9 @@ func (d Document) Markdown() string {
 				fmt.Fprintf(&b, "- `%s`: %s\n", c.Check, quote(c.Finding))
 			} else {
 				fmt.Fprintf(&b, "- `%s` failed (exit %d)\n", c.Check, c.ExitCode)
+			}
+			if c.Environment != "" {
+				fmt.Fprintf(&b, "  The factory observed that %s.\n", c.Environment)
 			}
 			// An indented block inside the list item: each line is one
 			// cleaned value, so none can start a heading or close a fence.

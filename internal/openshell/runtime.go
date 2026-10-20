@@ -21,13 +21,24 @@ import (
 // created for a sandbox: the gateway labels the worker and its supervisor
 // with the sandbox's name.
 type Containers interface {
-	// WorkerStartedAt is the worker container's State.StartedAt, "" when the
-	// sandbox has no worker container.
-	WorkerStartedAt(ctx context.Context, sandboxName string) (string, error)
+	// WorkerState is the worker container's State.StartedAt ("" when the
+	// sandbox has no worker container) and State.OOMKilled.
+	WorkerState(ctx context.Context, sandboxName string) (WorkerState, error)
+	// DiskFree is the free and total bytes of the filesystem Docker keeps
+	// its containers and volumes on.
+	DiskFree(ctx context.Context) (sandbox.DiskSpace, error)
 	// Present reports whether any container of the sandbox exists.
 	Present(ctx context.Context, sandboxName string) (bool, error)
 	// Remove force-removes every container of the sandbox.
 	Remove(ctx context.Context, sandboxName string) error
+}
+
+// WorkerState is what Docker reports about a sandbox's worker container.
+type WorkerState struct {
+	// StartedAt is State.StartedAt, verbatim.
+	StartedAt string
+	// OOMKilled is State.OOMKilled.
+	OOMKilled bool
 }
 
 // Volumes is what the runtime asks Docker about the per-launch scratch volume.
@@ -60,6 +71,11 @@ type Runtime struct {
 	// Sleep waits out the supervisor's first settings poll
 	// (waitFirstSettingsPoll); nil is a timer.
 	Sleep func(ctx context.Context, d time.Duration) error
+
+	// scratchLeft holds the sandboxes whose scratch volume Delete could not
+	// remove.
+	scratchMu   sync.Mutex
+	scratchLeft map[string]bool
 
 	// pushed is what PushCredential last stored in each provider.
 	pushLocksMu sync.Mutex
@@ -226,11 +242,20 @@ func (r *Runtime) Status(ctx context.Context, name string) (sandbox.SandboxState
 	if err != nil || !present {
 		return sandbox.SandboxState{}, err
 	}
-	startedAt, err := r.Containers.WorkerStartedAt(ctx, name)
+	worker, err := r.Containers.WorkerState(ctx, name)
 	if err != nil {
 		return sandbox.SandboxState{}, fmt.Errorf("openshell: read worker start of sandbox %s: %w", name, err)
 	}
-	return sandbox.SandboxState{Present: true, StartedAt: startedAt}, nil
+	return sandbox.SandboxState{Present: true, StartedAt: worker.StartedAt, OOMKilled: worker.OOMKilled}, nil
+}
+
+// DockerDiskFree reads Docker's free space through its containers.
+func (r *Runtime) DockerDiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+	space, err := r.Containers.DiskFree(ctx)
+	if err != nil {
+		return sandbox.DiskSpace{}, fmt.Errorf("openshell: read Docker's free disk: %w", err)
+	}
+	return space, nil
 }
 
 // present reports whether the gateway knows the sandbox or Docker still has
@@ -278,14 +303,39 @@ func (r *Runtime) Delete(ctx context.Context, name string) error {
 	}
 	if r.Volumes != nil {
 		volume := sandbox.ScratchVolumeName(name)
-		if err := r.Volumes.Remove(ctx, volume); err != nil && r.Warn != nil {
-			r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the daemon's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
+		if err := r.Volumes.Remove(ctx, volume); err != nil {
+			r.noteScratchLeft(name)
+			if r.Warn != nil {
+				r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the daemon's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
+			}
 		}
 	}
 	if gatewayErr != nil {
 		return fmt.Errorf("%w: sandbox %s: the gateway did not confirm the delete: %v", sandbox.ErrCleanupUnconfirmed, name, gatewayErr)
 	}
 	return nil
+}
+
+// noteScratchLeft records that Delete could not remove the sandbox's scratch
+// volume.
+func (r *Runtime) noteScratchLeft(sandboxName string) {
+	r.scratchMu.Lock()
+	defer r.scratchMu.Unlock()
+	if r.scratchLeft == nil {
+		r.scratchLeft = map[string]bool{}
+	}
+	r.scratchLeft[sandboxName] = true
+}
+
+// ScratchVolumeLeft reports whether this process's Delete of the sandbox left
+// its scratch volume behind, and forgets the answer: it is read once, right
+// after the delete.
+func (r *Runtime) ScratchVolumeLeft(sandboxName string) bool {
+	r.scratchMu.Lock()
+	defer r.scratchMu.Unlock()
+	left := r.scratchLeft[sandboxName]
+	delete(r.scratchLeft, sandboxName)
+	return left
 }
 
 // ListByRun returns the run's recorded sandboxes that still exist.

@@ -543,6 +543,51 @@ requires a new contract review and an updated machine-checkable test.
   counted; the oracle canary, a gate's rerun on the base commit and the
   verify after an oracle commit are judged without it. A baseline that
   ends so halts with this cause, never `baseline_verify_failed`.
+  `sandbox_disk` and `sandbox_memory` are the next two, read from Docker
+  and never from a command's output. Before anything is begun for a
+  launch (its registry proxy and compose services, whose images are pulled
+  at the first attempt, on both launch paths) and again before its command
+  is released, the factory reads the free space of Docker's data
+  filesystem (the `statfs` of `/` inside the always-running meter container,
+  whose overlay root is on it; `factoryd-meter statfs`) and refuses the
+  launch with `sandbox_disk` below 2 GiB free, for every step, the build and
+  the model jobs included: nothing ran, and the refusal ends the launch
+  loop. It reads the space again after the command exits and before the
+  sandbox is deleted, and once more when everything the launch started is
+  gone: its sandbox and scratch volume, its compose services and its
+  registry proxy (a reading is not taken when the runtime could not remove
+  the scratch volume or the compose project's volumes could not be
+  confirmed gone, and not between the attempts of one step, which share a
+  proxy). A canonical verify, full-suite or named-gate command that
+  exited non-zero with under 1 GiB free after its exit, and whose launch
+  released, in all that, less than half of what was free before it (so the
+  launch did not fill the disk itself), is `sandbox_disk` with no second
+  run; a baseline verify needs only the low free space. The limit of that
+  reading: it counts what the launch's own sandbox, scratch volume, compose
+  services and proxy held, not the worktree, which is the host's, and not
+  anything else another process wrote to Docker's disk meanwhile, so a
+  worker that fills the disk through the worktree (native Linux, where it
+  is on Docker's filesystem) can read as not having filled it itself. The
+  rule only ever hands a failed step to a human.
+  `sandbox_memory` is the baseline verify's alone: a baseline verify that
+  exited non-zero in a sandbox whose worker container Docker reports
+  `State.OOMKilled` (the daemon sets it on any out-of-memory kill in the
+  container's cgroup, not only of its first process, and only a restart
+  clears it) ends the Activity unresolved, since it ran on the base commit
+  before any work was built. For any later step (verify, full suite, named
+  gate, setup) an OOM-killed failure is a judged failure, because a build
+  can cause its own OOM: the command is not run again, the step fails as it
+  would without the reading, and the attempt records the fact. The handoff
+  to the next build then carries one factory-written sentence for that check
+  ("the kernel killed a process of this step for want of memory"), built from
+  the recorded reading and never from the log. A pass is a pass whatever the
+  readings; a reading that could not be taken is judged as if the rule did
+  not exist; the build records its readings as evidence on its attempt and
+  is never made unresolved by them. A worker can provoke both causes (it
+  can write until the disk is low, or allocate until the kernel kills it),
+  so they only ever hand a failed step to a human and never accept
+  anything: an unresolved step accepts nothing, and every gate still runs
+  on what a resume produces.
   `model_unavailable`, `provider_quota` and `meter_denied` are read from
   the spend meter's ledger of the step's last launch, which the meter
   writes outside the sandbox from each response's head: the model route

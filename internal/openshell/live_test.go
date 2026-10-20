@@ -45,7 +45,7 @@ func liveRuntime(t *testing.T) (*Runtime, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = readiness.Close() })
-	return &Runtime{Client: client, Containers: &DockerContainers{}, Volumes: &DockerVolumes{}, Readiness: readiness, PollEvery: 500 * time.Millisecond}, image
+	return &Runtime{Client: client, Containers: &DockerContainers{MeterProject: hostcontrol.OpenShellProject}, Volumes: &DockerVolumes{}, Readiness: readiness, PollEvery: 500 * time.Millisecond}, image
 }
 
 // liveLaunch builds one launch's directories under the data root (the only

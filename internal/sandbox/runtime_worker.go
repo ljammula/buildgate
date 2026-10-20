@@ -222,7 +222,8 @@ func LaunchLeftNothingToRetryOn(err error) bool {
 }
 
 // RetryStops reports a launch error that ends an attempt loop: the two of
-// LaunchLeftNothingToRetryOn, and a run that reached its ceiling.
+// LaunchLeftNothingToRetryOn, a run that reached its ceiling, and a launch
+// refused for want of disk (the next would find the same disk).
 func RetryStops(err error) bool {
-	return LaunchLeftNothingToRetryOn(err) || errors.Is(err, ErrRelayCeilingExceeded)
+	return LaunchLeftNothingToRetryOn(err) || errors.Is(err, ErrRelayCeilingExceeded) || errors.Is(err, ErrSandboxDiskLow)
 }

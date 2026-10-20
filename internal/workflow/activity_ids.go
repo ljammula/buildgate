@@ -61,6 +61,11 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	MeterDeniedFailureType:      unresolved.MeterDenied,
 	// A command that ran and failed, twice, with a registry unreachable.
 	DependencyFetchFailureType: unresolved.DependencyFetch,
+	// A launch refused for want of disk, or a command that failed with
+	// Docker's disk exhausted; and a baseline verify that failed with its
+	// worker OOM-killed.
+	SandboxDiskFailureType:   unresolved.SandboxDisk,
+	SandboxMemoryFailureType: unresolved.SandboxMemory,
 }
 
 // modelRouteFailureTypes is the failure type of each cause
@@ -151,6 +156,8 @@ var nonRetryableActivityFailureTypes = []string{
 	ProviderQuotaFailureType,
 	MeterDeniedFailureType,
 	DependencyFetchFailureType,
+	SandboxDiskFailureType,
+	SandboxMemoryFailureType,
 	ComposeServicesRejectedFailureType,
 	ReviewInstructionsFailureType,
 	FactoryDirFailureType,

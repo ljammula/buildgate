@@ -237,6 +237,9 @@ type Result struct {
 	// RelayFacts contains audit-safe metadata about the model route the
 	// worker was launched with. It is empty for a worker with none.
 	RelayFacts RouteLaunchFacts
+	// Resources is what the factory read about Docker's disk and the
+	// worker's memory around a launch through a Runtime.
+	Resources Resources
 }
 
 // ReferenceOracleSourceContained reports whether dir is equal to or

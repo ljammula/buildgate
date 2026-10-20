@@ -4,6 +4,7 @@ package sandboxtest
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -29,11 +30,18 @@ type WorkerRuntime struct {
 	WaitErr error
 	// Live is what ListByRun returns.
 	Live []string
+	// OOMKilled is the OOM flag Status reports.
+	OOMKilled bool
+	// DiskFree is the free bytes DockerDiskFree reports on its successive
+	// calls (the last repeats once the list is used); empty means Docker's
+	// disk cannot be read.
+	DiskFree []uint64
 
 	mu       sync.Mutex
 	requests []sandbox.SandboxRequest
 	pushed   []sandbox.RouteCredential
 	deleted  []string
+	diskRead int
 	exited   chan struct{}
 	exit     sandbox.SandboxExit
 }
@@ -133,7 +141,22 @@ func (w *WorkerRuntime) Status(context.Context, string) (sandbox.SandboxState, e
 	if startedAt == "" {
 		startedAt = "t"
 	}
-	return sandbox.SandboxState{Present: true, StartedAt: startedAt}, nil
+	return sandbox.SandboxState{Present: true, StartedAt: startedAt, OOMKilled: w.OOMKilled}, nil
+}
+
+// DiskTotal is the total bytes DockerDiskFree reports.
+const DiskTotal uint64 = 1 << 40
+
+// DockerDiskFree reports the next of DiskFree.
+func (w *WorkerRuntime) DockerDiskFree(context.Context) (sandbox.DiskSpace, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.DiskFree) == 0 {
+		return sandbox.DiskSpace{}, errors.New("sandboxtest: Docker's disk is not readable")
+	}
+	free := w.DiskFree[min(w.diskRead, len(w.DiskFree)-1)]
+	w.diskRead++
+	return sandbox.DiskSpace{FreeBytes: free, TotalBytes: DiskTotal}, nil
 }
 
 func (w *WorkerRuntime) Delete(_ context.Context, name string) error {

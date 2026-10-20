@@ -304,6 +304,8 @@ func fillEveryField(v reflect.Value, jsonName string) {
 		v.SetBool(true)
 	case reflect.Int, reflect.Int64:
 		v.SetInt(3)
+	case reflect.Uint64:
+		v.SetUint(3)
 	case reflect.Float64:
 		v.SetFloat(1.5)
 	case reflect.Pointer:

@@ -21,14 +21,21 @@ import (
 // fakeContainers is Docker's view of sandboxes, held in memory.
 type fakeContainers struct {
 	startedAt map[string]string // sandbox name -> worker start; presence means a container exists
+	oomKilled map[string]bool
+	disk      sandbox.DiskSpace
+	diskErr   error
 	removeErr error
 	listErr   error
 	sticky    bool // Remove leaves the container
 	removed   []string
 }
 
-func (f *fakeContainers) WorkerStartedAt(_ context.Context, name string) (string, error) {
-	return f.startedAt[name], f.listErr
+func (f *fakeContainers) WorkerState(_ context.Context, name string) (WorkerState, error) {
+	return WorkerState{StartedAt: f.startedAt[name], OOMKilled: f.oomKilled[name]}, f.listErr
+}
+
+func (f *fakeContainers) DiskFree(context.Context) (sandbox.DiskSpace, error) {
+	return f.disk, f.diskErr
 }
 
 func (f *fakeContainers) Present(_ context.Context, name string) (bool, error) {

@@ -366,13 +366,20 @@ func ecosystemSkipDraft(requestID, skipEco, logPath, oracleDir string, prev []st
 }
 
 // launchFailureCause is why a launch that returned no exit code gave no
-// verdict: unresolved.SandboxLaunch when the sandbox never released the
+// verdict: unresolved.SandboxDisk when the launch was refused for want of
+// Docker's disk (sandbox.ErrSandboxDiskLow, also ErrSandboxNotStarted, so
+// read first); unresolved.SandboxLaunch when the sandbox never released the
 // script (sandbox.ErrSandboxNotStarted in the error's chain) and its removal
 // was confirmed, as a run step's launch is read (workflow's launchErrorType);
 // otherwise unresolved.DraftingJob (the launch could not be prepared, the
 // script started and its wait was lost or cut off, or the sandbox may still
 // exist).
 func launchFailureCause(err error) unresolved.Cause {
+	// Checked first: a launch refused for want of disk is also
+	// sandbox.ErrSandboxNotStarted.
+	if errors.Is(err, sandbox.ErrSandboxDiskLow) && !errors.Is(err, sandbox.ErrCleanupUnconfirmed) {
+		return unresolved.SandboxDisk
+	}
 	if errors.Is(err, sandbox.ErrSandboxNotStarted) && !errors.Is(err, sandbox.ErrCleanupUnconfirmed) {
 		return unresolved.SandboxLaunch
 	}
