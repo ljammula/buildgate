@@ -571,7 +571,7 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	// never heartbeat and were never meant to be bound by it.
 	buildVerifyActivityOptions := activityOptions
 	buildVerifyActivityOptions = widenForTimeoutMinutes(buildVerifyActivityOptions, input.TimeoutMinutes)
-	buildVerifyActivityOptions.HeartbeatTimeout = 2 * activityHeartbeatInterval
+	buildVerifyActivityOptions.HeartbeatTimeout = stepHeartbeatTimeout
 	buildVerifyCtx := temporalworkflow.WithActivityOptions(ctx, buildVerifyActivityOptions)
 
 	result = RunWorkflowResult{State: run.StateSliceRunning}

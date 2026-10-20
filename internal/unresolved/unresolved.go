@@ -51,6 +51,11 @@ const (
 	// is known. A draft the script or the factory's checks refused is not
 	// one: that is a result.
 	DraftingJob Cause = "drafting_job"
+	// TemporalUnreachable: factoryd lost contact with the Temporal server
+	// for longer than the step's heartbeat timeout (no heartbeat succeeded
+	// in that time), so nothing could be learned of the step's workflow.
+	// A shorter stall is ridden out and is not one.
+	TemporalUnreachable Cause = "temporal_unreachable"
 )
 
 // causes holds, for each cause, the operator's clause about what
@@ -64,6 +69,8 @@ var causes = map[Cause]string{
 	NoVerdict:        "the review of the %s step gave no verdict the factory could read, and the meter's record names no failed model route",
 	DependencyFetch:  "a package registry could not be reached while the %s step ran, so its command's failure says nothing about the work",
 	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
+
+	TemporalUnreachable: "factoryd lost contact with the Temporal server while the %s step ran",
 }
 
 // Known reports whether c is a member of the closed set.

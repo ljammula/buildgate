@@ -46,6 +46,8 @@ type verifyRun struct {
 // runVerifyCommand runs the verify command once in a fresh sandbox, as v
 // describes.
 func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInput, v verifyRun) (progressResult VerifyActivityResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.
@@ -227,6 +229,8 @@ func (v verifyRun) what() string {
 // ActivityID so it cannot collide with RunVerifyActivity's checkpoint for
 // the same execution.
 func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWorkflowInput) (progressResult VerifyActivityResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.
@@ -398,6 +402,8 @@ type NamedGateActivityInput struct {
 // it cannot collide with any sibling gate's checkpoint for the same
 // execution.
 func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateActivityInput) (progressResult VerifyActivityResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.

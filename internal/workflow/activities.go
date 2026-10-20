@@ -734,6 +734,11 @@ func (a *Activities) EvaluateRunActivity(ctx context.Context, input EvaluateRunI
 // by a subprocess's own unbounded runtime.
 const activityHeartbeatInterval = 15 * time.Second
 
+// stepHeartbeatTimeout is how long a build or verify step may go without a
+// heartbeat before Temporal declares it lost: long enough that a stall of the
+// connection to the server (GuardStep) is ridden out, as AdvanceRequest's is.
+const stepHeartbeatTimeout = 2 * time.Minute
+
 // HeartbeatDetails is the payload RunBuildActivity/RunVerifyActivity/
 // RunFullSuiteVerifyActivity/RunNamedGateActivity/
 // RunSpecConformityReviewActivity attach to each heartbeat (see

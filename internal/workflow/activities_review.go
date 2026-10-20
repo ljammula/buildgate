@@ -54,6 +54,8 @@ func reviewStepPassed(stepName string, exitCode int) bool {
 // output shape (a subprocess result, duration, log hash, attempts) is
 // identical to RunVerifyActivity's.
 func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStepInput) (progressResult VerifyActivityResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	// reviewstep.CombinedStep is deliberately not in reviewstep.Steps
 	// (ByName never finds it -- see that function's own doc comment), so
 	// it is checked for explicitly here before falling back to ByName for

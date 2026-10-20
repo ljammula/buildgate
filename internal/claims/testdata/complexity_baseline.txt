@@ -23,7 +23,7 @@
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
-29 cmd/factoryd/run_temporal.go awaitRunWorkflow
+26 cmd/factoryd/run_temporal.go awaitRunWorkflow
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
@@ -46,7 +46,7 @@
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
 29 internal/request/retry.go retry
-29 internal/requestdriver/request_driver.go AdvanceBuilding
+27 internal/requestdriver/request_driver.go AdvanceBuilding
 26 internal/requestdriver/request_driver.go AdvancePlanning
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource

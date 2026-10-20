@@ -689,31 +689,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
-	// A human chose to continue the lost build in its kept worktree
-	// (`factoryd resume`, verb round): check it still can be, then adopt that
-	// worktree. A decision answering an earlier resume_review (a stale
-	// Generation) is no decision at all (PendingResumeVerb).
-	resumeRunID := ""
-	if r.PendingResumeVerb() == request.ResumeRound {
-		reasons, err := cfg.Resume.RequestResumeRefusals(ctx, dataDir, cfg.Settings.SandboxDocker, r)
-		if err != nil {
-			// A check that cannot be made (unreadable record, Docker down)
-			// must not loop here every poll with no notice: back to
-			// resume_review with the reason, where `-from scratch` or cancel
-			// (or a later resume, once fixed) are possible.
-			return refuseResume(dataDir, r, []string{fmt.Sprintf("could not check whether the lost build can be resumed: %v", err)}, now)
-		}
-		if len(reasons) > 0 {
-			return refuseResume(dataDir, r, reasons, now)
-		}
-		resumeRunID = r.Resume.LostRunID
-	} else if err := ClearKeptRunsOfRequest(dataDir, r.ID); err != nil {
-		// A fresh build of this ticket (a retry, a resume from scratch, or
-		// worker's rebuild of a halted one) ends the wait of the lost build
-		// whose worktree was kept for a resume decision: reap it, so it does
-		// not outlive the decision. Every kept run of the request: a resumed
-		// run that was kept in turn is no longer the ticket's recorded run.
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d: could not discard a kept worktree before rebuilding: %v", ticket.Index, err), now)
+	resumeRunID, moved, err := settlePriorRun(ctx, dataDir, r, ticket, cfg, now)
+	if moved || err != nil {
+		return err
 	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
 	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
@@ -790,7 +768,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		return nil
 	}
 	if runErr != nil {
-		if ctx.Err() != nil {
+		if stoppedMidRun(ctx, dataDir, ticket, started) {
 			// Stop requested mid-run (SIGINT/SIGTERM) -- leave r exactly as
 			// it is (still building, ticket's RunID already saved by
 			// onReady above if the run got that far) so the next
@@ -880,6 +858,83 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// expected to actually reach this branch.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
+}
+
+// settlePriorRun decides what the ticket's earlier run, if any, means for the
+// build about to start. moved is true when the request was moved on instead
+// (err is then that move's result and no build starts). Otherwise
+// resumeRunID is the run whose kept worktree the build continues, "" for a
+// build from scratch, and any kept run of the request has been reaped.
+func settlePriorRun(ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (resumeRunID string, moved bool, err error) {
+	// A human chose to continue the lost build in its kept worktree
+	// (`factoryd resume`, verb round): check it still can be, then adopt that
+	// worktree. A decision answering an earlier resume_review (a stale
+	// Generation) is no decision at all (PendingResumeVerb).
+	if r.PendingResumeVerb() == request.ResumeRound {
+		reasons, err := cfg.Resume.RequestResumeRefusals(ctx, dataDir, cfg.Settings.SandboxDocker, r)
+		if err != nil {
+			// A check that cannot be made (unreadable record, Docker down)
+			// must not loop here every poll with no notice: back to
+			// resume_review with the reason, where `-from scratch` or cancel
+			// (or a later resume, once fixed) are possible.
+			return "", true, refuseResume(dataDir, r, []string{fmt.Sprintf("could not check whether the lost build can be resumed: %v", err)}, now)
+		}
+		if len(reasons) > 0 {
+			return "", true, refuseResume(dataDir, r, reasons, now)
+		}
+		return r.Resume.LostRunID, false, nil
+	}
+	// The ticket's last run ended with no verdict on the work and no human
+	// has decided what to do about it (a build lost to Temporal whose step
+	// then failed or was retried): reap and rebuild nothing.
+	if lost := unresolvedRunAwaitingDecision(dataDir, r, ticket); lost != nil {
+		return "", true, afterHaltedTicketRun(dataDir, r, lost, fmt.Sprintf("ticket %d/%d halted: %s", ticket.Index, r.TicketCount, StatusReason(lost)), now)
+	}
+	if err := ClearKeptRunsOfRequest(dataDir, r.ID); err != nil {
+		// A fresh build of this ticket (a retry, a resume from scratch, or
+		// worker's rebuild of a halted one) ends the wait of the lost build
+		// whose worktree was kept for a resume decision: reap it, so it does
+		// not outlive the decision. Every kept run of the request: a resumed
+		// run that was kept in turn is no longer the ticket's recorded run.
+		return "", true, HaltRequest(dataDir, r, fmt.Sprintf("ticket %d: could not discard a kept worktree before rebuilding: %v", ticket.Index, err), now)
+	}
+	return "", false, nil
+}
+
+// stoppedMidRun reports whether ctx ended while the ticket's run was in
+// flight, so the request is left exactly as it is: a run that did start and
+// left a finished record (a build lost with its worker or its Temporal
+// connection is saved halted, its worktree kept) is read like any other, so
+// that it waits for a decision in resume_review and is not built again from
+// scratch.
+func stoppedMidRun(ctx context.Context, dataDir string, ticket *request.Ticket, started bool) bool {
+	return ctx.Err() != nil && !finishedRunRecorded(dataDir, ticket, started)
+}
+
+// finishedRunRecorded reports whether this invocation's run left a record in
+// a terminal state: accepted, quarantined or halted. A run still in flight is
+// not one.
+func finishedRunRecorded(dataDir string, ticket *request.Ticket, started bool) bool {
+	if !started {
+		return false
+	}
+	rec, err := run.Load(dataDir, ticket.RunID)
+	return err == nil && (rec.State == run.StateAccepted || rec.State == run.StateQuarantined || rec.State == run.StateHalted)
+}
+
+// unresolvedRunAwaitingDecision is the ticket's recorded run when it halted
+// with no verdict on the work (run.UnresolvedCauseOf) and r holds no
+// decision about it (PendingResumeVerb), nil otherwise. Such a run is waiting
+// for a human; a build started now would take its place.
+func unresolvedRunAwaitingDecision(dataDir string, r *request.Request, ticket *request.Ticket) *run.Run {
+	if ticket.RunID == "" || r.PendingResumeVerb() != "" {
+		return nil
+	}
+	rec, err := run.Load(dataDir, ticket.RunID)
+	if err != nil || run.UnresolvedCauseOf(rec) == "" {
+		return nil
+	}
+	return rec
 }
 
 // afterHaltedTicketRun moves r on after its ticket's run halted. A run whose

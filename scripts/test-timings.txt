@@ -11,7 +11,7 @@
 # Written by TEST_SHARDS_RECORD=1 make test; rerun it when the per-shard
 # times it prints drift well apart.
 143 cmd/factoryd rest
-41 cmd/factoryd TestIntegrationReconcileReclaimedRunNamesStoppedWorker
+126 cmd/factoryd TestIntegrationReconcileReclaimedRunNamesStoppedWorker
 35 cmd/factoryd TestIntegrationDaemonReclaimWaitsForComposeServicesSlot
 34 cmd/factoryd TestIntegrationDaemonReclaimHoldsRepositoryOwnershipAfterSubmitterCrash
 32 cmd/factoryd TestIntegrationServeDrainsAPIStartedRunBeforeExiting

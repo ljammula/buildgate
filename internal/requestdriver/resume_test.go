@@ -206,7 +206,8 @@ func TestAdvanceBuildingResumeScratchClearsKeptRunsAndBuildsFresh(t *testing.T) 
 }
 
 // A decision that answers an earlier resume_review (stale Generation) is
-// ignored: the build is a fresh one and checks nothing.
+// ignored: it checks nothing, and the lost run it was not made about is not
+// built over. The request goes back to resume_review with the worktree kept.
 func TestAdvanceBuildingIgnoresAResumeDecisionOfAStaleGeneration(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id, marker := requestdrivertest.LostBuildFixture(dp, t, request.ResumeRound)
@@ -221,13 +222,16 @@ func TestAdvanceBuildingIgnoresAResumeDecisionOfAStaleGeneration(t *testing.T) {
 	pre := &requestdrivertest.FakeResumePreconditions{T: t, OK: true}
 	var calls [][]string
 
-	requestdrivertest.AdvanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, capturingBuildRunner(t, dataDir, &calls))
+	got := requestdrivertest.AdvanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{Preconditions: pre}, capturingBuildRunner(t, dataDir, &calls))
 
-	if len(calls) != 1 || requestdrivertest.HasFlag(calls[0], "-resume-worktree-of") || len(pre.Asked) != 0 {
-		t.Errorf("calls %v, preconditions asked %v; want a fresh build for a stale decision", calls, pre.Asked)
+	if len(calls) != 0 || len(pre.Asked) != 0 {
+		t.Errorf("calls %v, preconditions asked %v; want no build and no check for a stale decision", calls, pre.Asked)
 	}
-	if _, err := os.Stat(marker.WorktreePath); !os.IsNotExist(err) {
-		t.Errorf("a stale decision kept the old worktree (stat err = %v)", err)
+	if got.State != request.StateResumeReview {
+		t.Errorf("state %s, want resume_review for a lost run no decision answers", got.State)
+	}
+	if _, err := os.Stat(marker.WorktreePath); err != nil {
+		t.Errorf("a stale decision reaped the lost run's worktree (stat err = %v)", err)
 	}
 }
 

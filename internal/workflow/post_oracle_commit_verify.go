@@ -139,6 +139,8 @@ func attemptKindFitsJournal(journalKind, attemptKind string) bool {
 // than reference_oracle (lint, security_audit, unit_tests, integration_tests)
 // re-run after the full suite, matching cmd/factoryd.
 func (a *Activities) RunPostOracleCommitVerifyActivity(ctx context.Context, input RunWorkflowInput) (progressResult PostOracleCommitVerifyResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	progressStarted := false
 	defer func() {
 		if !progressStarted {

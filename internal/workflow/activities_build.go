@@ -157,6 +157,8 @@ func (a *Activities) RunBuildActivity(ctx context.Context, input RunWorkflowInpu
 // runBuild invokes build_app.py through runner.RunWithRetries. A completed
 // invocation is returned from its durable checkpoint on redispatch.
 func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (progressResult BuildActivityResult, err error) {
+	ctx, endGuard := GuardStep(ctx)
+	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
 	// must not add a spurious near-zero start/end pair to the feed.
