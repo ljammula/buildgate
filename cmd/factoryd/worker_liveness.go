@@ -84,6 +84,68 @@ var (
 	activeRequestChanged = make(chan struct{}, 1)
 )
 
+// repositoryWaitTracker maps a request id to when its build step first found
+// the repository held by another build, published through the heartbeat's
+// RepositoryWaits.
+type repositoryWaitTracker struct {
+	mu    sync.Mutex
+	since map[string]time.Time
+}
+
+// markBusy records that id found its repository busy at now, keeping the
+// earliest time when it already waits.
+func (t *repositoryWaitTracker) markBusy(id string, now time.Time) {
+	t.mu.Lock()
+	_, waiting := t.since[id]
+	if !waiting {
+		if t.since == nil {
+			t.since = map[string]time.Time{}
+		}
+		t.since[id] = now
+	}
+	t.mu.Unlock()
+	if !waiting {
+		notifyActiveRequestsChanged()
+	}
+}
+
+// clear drops id's wait, if any.
+func (t *repositoryWaitTracker) clear(id string) {
+	t.mu.Lock()
+	_, waiting := t.since[id]
+	delete(t.since, id)
+	t.mu.Unlock()
+	if waiting {
+		notifyActiveRequestsChanged()
+	}
+}
+
+// reset drops every wait.
+func (t *repositoryWaitTracker) reset() {
+	t.mu.Lock()
+	t.since = nil
+	t.mu.Unlock()
+}
+
+// snapshot is the waits as the heartbeat records them (id to RFC3339 time);
+// nil when none.
+func (t *repositoryWaitTracker) snapshot() map[string]string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.since) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(t.since))
+	for id, at := range t.since {
+		out[id] = at.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+// repositoryWaits are the building requests whose step found the repository
+// held by another build.
+var repositoryWaits repositoryWaitTracker
+
 // addActiveRequest records id as a request whose job is in flight and asks
 // the heartbeat writer to publish it now.
 func addActiveRequest(id string) { activeRequests.add(id) }
@@ -105,6 +167,7 @@ func notifyActiveRequestsChanged() {
 func clearActiveRequests() {
 	activeRequests.clear()
 	slotRequests.clear()
+	repositoryWaits.reset()
 }
 
 // currentActiveRequests returns a copy of the requests in flight, oldest
@@ -166,6 +229,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			GitHubLogin:         githubLogin,
 			ActiveRequests:      currentActiveRequests(),
 			SlotRequests:        slotHolders(),
+			RepositoryWaits:     repositoryWaits.snapshot(),
 			JobSlots:            slots,
 			TemporalAddress:     temporalAddress,
 		})

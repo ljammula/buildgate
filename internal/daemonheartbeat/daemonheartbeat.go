@@ -156,6 +156,12 @@ type Heartbeat struct {
 	// one runs. With every slot held, status and the console say a job-state
 	// request that holds none is waiting for one.
 	SlotRequests []string `json:"slot_requests,omitempty"`
+	// RepositoryWaits maps a request id to the RFC3339 time its build step
+	// first found its repository held by another build and gave its slot
+	// back; an entry is dropped once the step gets past that check. It lets
+	// status say a building request is waiting for the repository rather than
+	// running.
+	RepositoryWaits map[string]string `json:"repository_waits,omitempty"`
 	// JobSlots is how many jobs the daemon runs at once: max_parallel_jobs
 	// for `factoryd worker`. 0 (no heartbeat) reads as 1.
 	JobSlots int `json:"job_slots,omitempty"`
@@ -194,6 +200,16 @@ func WorkerSlotRequests(dataDir string, now time.Time) (ids []string, slots int)
 		return nil, 1
 	}
 	return hb.SlotRequests, max(hb.JobSlots, 1)
+}
+
+// WorkerRepositoryWaits returns the RepositoryWaits of dataDir's worker
+// heartbeat, or nil when there is no heartbeat or it is stale.
+func WorkerRepositoryWaits(dataDir string, now time.Time) map[string]string {
+	hb, err := Read(WorkerPath(dataDir))
+	if err != nil || Stale(hb, now, WorkerStaleAfter) {
+		return nil
+	}
+	return hb.RepositoryWaits
 }
 
 // Write persists hb to path atomically (write to a temp file, then
