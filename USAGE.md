@@ -89,6 +89,7 @@ requests, never from what the worker printed:
 | Reason says | Cause | Before `factoryd resume <id>` |
 |---|---|---|
 | "the factoryd worker stopped while the ... step ran" | `worker_lost` | Nothing to fix first |
+| "factoryd lost contact with the Temporal server while the ... step ran" | `temporal_unreachable` | Make sure Temporal answers (`factoryd doctor`); the work is in the kept worktree |
 | "the sandbox of the ... step could not be started, so the step never ran" | `sandbox_launch` | Fix what the run's halt reason names (`factoryd doctor -fix`): [Troubleshooting](#troubleshooting) |
 | "a package registry could not be reached while the ... step ran" | `dependency_fetch` | Wait until the registry, or your mirror, answers again: [Troubleshooting](#troubleshooting) |
 | "Docker's disk had no room left while the ... step ran" | `sandbox_disk` | Free Docker's disk (`docker system prune`, or grow the VM's disk), then resume: [Troubleshooting](#troubleshooting) |
@@ -1360,7 +1361,10 @@ state of its own.
 
 Temporal never reruns a lost step on its own. A step lost because its
 `factoryd` process stopped or went quiet (laptop sleep, a crash, a lost
-worker), or whose sandbox never started its command (it could not be
+worker), or that lost the Temporal server (a stall of up to about 90 s loses
+nothing; a longer one parks the request once as `temporal_unreachable`, or as
+`worker_lost` when the server timed the step out first),
+or whose sandbox never started its command (it could not be
 created, or came up with no worker container), halts its run, and a build
 keeps its worktree. A command that started and then hung or was cut off
 ran: that is an ordinary halt. Neither is a verdict on the work, so a corrective or

@@ -215,6 +215,12 @@ const (
 	// recorded before the types existed holds them.
 	SandboxDiskFailureType   = "SandboxDisk"
 	SandboxMemoryFailureType = "SandboxMemory"
+	// TemporalUnreachableFailureType marks a step cancelled because no
+	// heartbeat reached the Temporal server for a whole heartbeat timeout
+	// (ContactLostError): it says nothing about the work, so it is not
+	// retried by Temporal and the worktree is kept for a resume decision
+	// (unresolved.TemporalUnreachable).
+	TemporalUnreachableFailureType = "TemporalUnreachable"
 	// ComposeServicesRejectedFailureType marks a build whose target repo's
 	// compose file was rejected before any attempt ran (see
 	// sandbox.ErrComposeServicesRejected), kept distinct for the same
@@ -585,7 +591,7 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	// never heartbeat and were never meant to be bound by it.
 	buildVerifyActivityOptions := activityOptions
 	buildVerifyActivityOptions = widenForTimeoutMinutes(buildVerifyActivityOptions, input.TimeoutMinutes)
-	buildVerifyActivityOptions.HeartbeatTimeout = 2 * activityHeartbeatInterval
+	buildVerifyActivityOptions.HeartbeatTimeout = stepHeartbeatTimeout
 	buildVerifyCtx := temporalworkflow.WithActivityOptions(ctx, buildVerifyActivityOptions)
 
 	result = RunWorkflowResult{State: run.StateSliceRunning}

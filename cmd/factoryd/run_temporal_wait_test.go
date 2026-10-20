@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.temporal.io/sdk/client"
 
@@ -45,7 +46,7 @@ func TestWaitForRunWorkflowWaitsAgainWhileTheWorkflowIsStillRunning(t *testing.T
 	stubWorkflowStillRunning(dp, t, true)
 	run := &fakeWorkflowRun{errs: []error{context.DeadlineExceeded}}
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, run, "r", &result); err != nil {
+	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, run, "r", &result, time.Minute); err != nil {
 		t.Fatalf("wait = %v, want nil after the second Get", err)
 	}
 	if run.calls != 2 {
@@ -59,7 +60,7 @@ func TestWaitForRunWorkflowReturnsTheErrorOnceTheWorkflowIsNotRunning(t *testing
 	want := errors.New("workflow failed")
 	run := &fakeWorkflowRun{errs: []error{want}}
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, run, "r", &result); !errors.Is(err, want) {
+	if err := waitForRunWorkflowWithProgress(dp, context.Background(), nil, run, "r", &result, time.Minute); !errors.Is(err, want) {
 		t.Fatalf("wait = %v, want %v", err, want)
 	}
 	if run.calls != 1 {
@@ -74,7 +75,7 @@ func TestWaitForRunWorkflowStopsWhenItsOwnContextEnds(t *testing.T) {
 	cancel()
 	run := &fakeWorkflowRun{errs: []error{context.Canceled}}
 	var result workflow.RunWorkflowResult
-	if err := waitForRunWorkflowWithProgress(dp, ctx, nil, run, "r", &result); !errors.Is(err, context.Canceled) {
+	if err := waitForRunWorkflowWithProgress(dp, ctx, nil, run, "r", &result, time.Minute); !errors.Is(err, context.Canceled) {
 		t.Fatalf("wait = %v, want context.Canceled", err)
 	}
 	if run.calls != 1 || *describes != 0 {

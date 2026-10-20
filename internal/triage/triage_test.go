@@ -418,6 +418,17 @@ func TestTriageRun(t *testing.T) {
 			want: workerStoppedTriage,
 		},
 		{
+			// Temporal went away while the process stayed up: its own
+			// sentence, whatever the error text says (it also contains the
+			// word "timeout"-class wording a text match would take for the
+			// sandbox).
+			name: "halted for a lost Temporal connection",
+			setup: func(t *testing.T, dataDir string) *run.Run {
+				return &run.Run{ID: id, State: run.StateHalted, HaltReasonCode: "temporal_unreachable", HaltError: "lost contact with the Temporal server: context deadline exceeded"}
+			},
+			want: temporalUnreachableTriage,
+		},
+		{
 			name: "halted unclassified falls back to first line",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{ID: id, State: run.StateHalted, HaltError: "context canceled\nmore detail on a second line"}

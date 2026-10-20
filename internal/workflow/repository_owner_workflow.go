@@ -824,11 +824,13 @@ func compactRepositoryOwnerResultKeepingMax(result RepositoryOwnerResult, max in
 // sandbox that could not be started, a route that did not serve the build).
 // A lost worker is not: the next run has a worker. A history recorded before
 // those types existed cannot hold them, so its streak replays unchanged.
+// Nor is a lost Temporal connection: it says nothing about the machine or the
+// route.
 func countsTowardStopLine(err error) bool {
 	t := applicationErrorType(err)
 	if t == InfrastructureFailureType {
 		return true
 	}
 	cause := unresolvedFailureTypes[t]
-	return cause != "" && cause != unresolved.WorkerLost
+	return cause != "" && cause != unresolved.WorkerLost && cause != unresolved.TemporalUnreachable
 }

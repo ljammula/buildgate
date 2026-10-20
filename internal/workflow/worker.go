@@ -25,6 +25,7 @@ const (
 func BoundedWorkerOptions(stopTimeout time.Duration) temporalworker.Options {
 	return temporalworker.Options{
 		WorkerStopTimeout:                      stopTimeout,
+		MaxHeartbeatThrottleInterval:           HeartbeatThrottle,
 		MaxConcurrentActivityExecutionSize:     DefaultMaxConcurrentActivityExecutionSize,
 		MaxConcurrentWorkflowTaskExecutionSize: DefaultMaxConcurrentWorkflowTaskExecutionSize,
 	}

@@ -218,7 +218,7 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 			case <-stop:
 				return
 			case <-ticker.C:
-				activity.RecordHeartbeat(ctx, HeartbeatDetails{Stage: input.Check + "_base", Elapsed: time.Since(started)})
+				recordStepHeartbeat(ctx, HeartbeatDetails{Stage: input.Check + "_base", Elapsed: time.Since(started)})
 			}
 		}
 	}()

@@ -483,7 +483,25 @@ requires a new contract review and an updated machine-checkable test.
   last completed round, or rerun a lost drafting or planning step),
   `factoryd resume -from scratch` (rebuild the ticket) or `factoryd cancel`.
   A lost build keeps its worktree, never its harness session, and every
-  gate reruns on the final commit. A resume runs only after that decision,
+  gate reruns on the final commit. A heartbeat RPC that fails on the
+  connection to the Temporal server does not cancel a step: a long step
+  runs under `workflow.GuardStep`, which ends it only on the server's own
+  answer (a cancel request, a pause or reset, an Activity it no longer
+  knows), on its worker stopping, or when no heartbeat of its own has
+  succeeded for the Activity's whole heartbeat timeout. The last is the
+  cause `temporal_unreachable`: the run halts with it and its worktree
+  kept (found from the isolation marker when the halt cannot be confirmed
+  against the server), never as an operator's cancellation. Every Temporal
+  worker factoryd builds sets the SDK's heartbeat throttle to 15 s
+  (`workflow.HeartbeatThrottle`), so the SDK gives up on a stalled heartbeat
+  after about 30 s and the guard heartbeats on its own every 10 s, counting
+  its silence from the last heartbeat that could have got through: a stall of
+  up to about 90 s loses nothing, and a longer one parks the request once as
+  `temporal_unreachable`, or as `worker_lost` when the server timed the step
+  out first. A step the server timed out while a step of the same process is
+  still running its run (or another process holds a fresh owner heartbeat) is not parked by `HaltLostRequestStep`: no second build starts
+  beside it, and when its run later halts as `temporal_unreachable` the
+  request's cause becomes that. A resume runs only after that decision,
   only when the gateway, which must be reachable, reports no sandbox under
   the name the run recorded before launch, and no worker or supervisor
   container carrying that `openshell.ai/sandbox-name` is alive, and only when the worktree is on the run's own branch with HEAD equal to,
@@ -507,7 +525,9 @@ requires a new contract review and an updated machine-checkable test.
   The same holds for any step that ended with no verdict on the work, a
   closed set of causes each read from a fact the factory observed and never
   from a worker's or a provider's wording: `worker_lost` (the cases above,
-  and a build whose command the sandbox runtime started twice) and
+  and a build whose command the sandbox runtime started twice),
+  `temporal_unreachable` (factoryd heard nothing from the Temporal server for
+  a whole heartbeat timeout while the step ran) and
   `sandbox_launch` (no launch of the step released its command: the route
   credential could not be stored, the sandbox could not be created, or it
   had no worker container; and the sandbox's removal was confirmed). A
@@ -652,8 +672,9 @@ requires a new contract review and an updated machine-checkable test.
   verify (`-verify-max-attempts`) launch again after any launch error
   except an unconfirmed removal, a command started twice or a reached
   ceiling. Temporal's `MaximumAttempts: 1` stands. A run that halts for any
-  of these causes but `worker_lost` counts toward a repository's stop line
-  as an infrastructure failure does. An
+  of these causes counts toward a repository's stop line as an infrastructure
+  failure does, except `worker_lost` and `temporal_unreachable`, which do not
+  count. An
   unresolved step accepts nothing: every gate still runs on what a resume
   produces.
 - **SC-018 — only a build is told about an earlier attempt, and only from
@@ -970,7 +991,12 @@ A request step (a drafting or planning step, a ticket build, a corrective
 or PR-review round) whose worker stopped, or a ticket build or round that
 ended with no verdict on the work for another of SC-017's causes, or whose
 only failed gates are reviews that gave no verdict, is never
-rerun on its own.
+rerun on its own. A ticket whose recorded run halted with such a cause,
+and about which no decision of the current `Generation` exists, is moved to
+`resume_review` by the step that finds it, also when the request is still
+`building`: its kept worktree is not reaped and no build starts. A run that
+started and left a finished record is read even when its step's context was
+cancelled.
 `internal/request.EnterResumeReview` moves the request into `resume_review`,
 a human wait with reminders, recording the lost state, the lost run, the
 cause and a `Generation`:
