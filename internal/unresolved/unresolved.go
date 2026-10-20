@@ -45,6 +45,15 @@ const (
 	// DependencyFetch: a repository command failed in an attempt during
 	// which the registry proxy could not reach a package registry.
 	DependencyFetch Cause = "dependency_fetch"
+	// SandboxDisk: a repository command failed in a launch that left
+	// Docker's disk with almost no room free, most of the space having been
+	// gone before the launch started (read by the factory from outside the
+	// sandbox), or a launch was refused for want of room.
+	SandboxDisk Cause = "sandbox_disk"
+	// SandboxMemory: a repository command failed in a launch whose worker
+	// container Docker reports as having had a process killed for want of
+	// memory (State.OOMKilled), twice in a row.
+	SandboxMemory Cause = "sandbox_memory"
 	// DraftingJob: a drafting step's job ended before its script reached a
 	// result of its own (the launch returned no exit code, or the script
 	// exited non-zero leaving no evidence file), and nothing more specific
@@ -63,6 +72,8 @@ var causes = map[Cause]string{
 	MeterDenied:      "the spend meter refused the model requests of the %s step (a ceiling, a window budget or the request rate in the session config; `factoryd cost` shows the spend), so the work was not judged",
 	NoVerdict:        "the review of the %s step gave no verdict the factory could read, and the meter's record names no failed model route",
 	DependencyFetch:  "a package registry could not be reached while the %s step ran, so its command's failure says nothing about the work",
+	SandboxDisk:      "Docker's disk had no room left while the %s step ran, so its command's failure says nothing about the work",
+	SandboxMemory:    "the kernel killed a process of the %s step for want of memory, so its command's failure says nothing about the work",
 	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
 }
 

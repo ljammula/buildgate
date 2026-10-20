@@ -107,6 +107,14 @@ func (l *Lazy) PushCredential(ctx context.Context, cred sandbox.RouteCredential)
 	return rt.PushCredential(ctx, cred)
 }
 
+func (l *Lazy) DockerDiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+	// Docker alone answers: no gateway connection is made for it.
+	if l.Containers == nil {
+		return sandbox.DiskSpace{}, fmt.Errorf("openshell: no Docker containers to read the disk through")
+	}
+	return l.Containers.DiskFree(ctx)
+}
+
 // Labels returns the labels the gateway stores with a sandbox.
 func (l *Lazy) Labels(ctx context.Context, name string) (map[string]string, error) {
 	rt, err := l.runtime(ctx)

@@ -23,49 +23,49 @@ func (s *scriptedDocker) run(_ context.Context, args ...string) ([]byte, error) 
 
 func containersOver(s *scriptedDocker) *DockerContainers { return &DockerContainers{run: s.run} }
 
-func TestWorkerStartedAtSkipsTheSupervisor(t *testing.T) {
+func TestWorkerStateSkipsTheSupervisor(t *testing.T) {
 	docker := &scriptedDocker{answers: map[string]string{
 		"ps":      "aaa\nbbb\n",
-		"inspect": "supervisor|2026-10-04T10:00:00.1Z\n|2026-10-04T10:00:01.2Z\n",
+		"inspect": "supervisor|2026-10-04T10:00:00.1Z|true\n|2026-10-04T10:00:01.2Z|false\n",
 	}}
-	got, err := containersOver(docker).WorkerStartedAt(context.Background(), "bg-0123456789abcdef")
-	if err != nil || got != "2026-10-04T10:00:01.2Z" {
-		t.Fatalf("WorkerStartedAt = %q, %v", got, err)
+	got, err := containersOver(docker).WorkerState(context.Background(), "bg-0123456789abcdef")
+	if err != nil || got != (WorkerState{StartedAt: "2026-10-04T10:00:01.2Z"}) {
+		t.Fatalf("WorkerState = %v, %v", got, err)
 	}
 	wantCalls := [][]string{
 		{"ps", "-a", "-q", "--no-trunc", "--filter", "label=openshell.ai/sandbox-name=bg-0123456789abcdef"},
-		{"inspect", "--type", "container", "--format", `{{index .Config.Labels "openshell.ai/isolation-role"}}|{{.State.StartedAt}}`, "aaa", "bbb"},
+		{"inspect", "--type", "container", "--format", `{{index .Config.Labels "openshell.ai/isolation-role"}}|{{.State.StartedAt}}|{{.State.OOMKilled}}`, "aaa", "bbb"},
 	}
 	if !reflect.DeepEqual(docker.calls, wantCalls) {
 		t.Errorf("docker calls =\n%q\nwant\n%q", docker.calls, wantCalls)
 	}
 }
 
-func TestWorkerStartedAtWithNoWorker(t *testing.T) {
+func TestWorkerStateWithNoWorker(t *testing.T) {
 	for name, answers := range map[string]map[string]string{
 		"no container":    {"ps": ""},
-		"supervisor only": {"ps": "aaa\n", "inspect": "supervisor|2026-10-04T10:00:00Z\n"},
+		"supervisor only": {"ps": "aaa\n", "inspect": "supervisor|2026-10-04T10:00:00Z|false\n"},
 	} {
-		got, err := containersOver(&scriptedDocker{answers: answers}).WorkerStartedAt(context.Background(), "bg-a")
-		if err != nil || got != "" {
-			t.Errorf("%s: WorkerStartedAt = %q, %v; want empty", name, got, err)
+		got, err := containersOver(&scriptedDocker{answers: answers}).WorkerState(context.Background(), "bg-a")
+		if err != nil || got != (WorkerState{}) {
+			t.Errorf("%s: WorkerState = %v, %v; want empty", name, got, err)
 		}
 	}
 }
 
-func TestWorkerStartedAtFails(t *testing.T) {
+func TestWorkerStateFails(t *testing.T) {
 	ctx := context.Background()
-	two := &scriptedDocker{answers: map[string]string{"ps": "a\nb\n", "inspect": "|t1\n|t2\n"}}
-	if got, err := containersOver(two).WorkerStartedAt(ctx, "bg-a"); err == nil || !strings.Contains(err.Error(), "2 worker containers") {
-		t.Errorf("two workers: %q, %v", got, err)
+	two := &scriptedDocker{answers: map[string]string{"ps": "a\nb\n", "inspect": "|t1|false\n|t2|false\n"}}
+	if got, err := containersOver(two).WorkerState(ctx, "bg-a"); err == nil || !strings.Contains(err.Error(), "2 worker containers") {
+		t.Errorf("two workers: %v, %v", got, err)
 	}
-	garbled := &scriptedDocker{answers: map[string]string{"ps": "a\n", "inspect": "no separator\n"}}
-	if got, err := containersOver(garbled).WorkerStartedAt(ctx, "bg-a"); err == nil {
-		t.Errorf("an unreadable inspect line: %q, nil", got)
+	garbled := &scriptedDocker{answers: map[string]string{"ps": "a\n", "inspect": "no separator|x\n"}}
+	if got, err := containersOver(garbled).WorkerState(ctx, "bg-a"); err == nil {
+		t.Errorf("an unreadable inspect line: %v, nil", got)
 	}
 	down := &scriptedDocker{errs: map[string]error{"ps": errors.New("cannot connect")}}
-	if got, err := containersOver(down).WorkerStartedAt(ctx, "bg-a"); err == nil {
-		t.Errorf("Docker unreachable: %q, nil", got)
+	if got, err := containersOver(down).WorkerState(ctx, "bg-a"); err == nil {
+		t.Errorf("Docker unreachable: %v, nil", got)
 	}
 }
 

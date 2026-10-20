@@ -639,6 +639,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			Relay: relaySpec, ModelBinaries: harness.ModelBinaries(), MeterLedgerRoot: a.MeterLedgerRoot,
 		})
 		fetches.done(ctx)
+		watchSandboxResources(ctx, res.Resources)
 		// The snapshot lives for one launch; the next takes its own.
 		runErr = joinCleanup(runErr, factoryDir.Remove())
 		if compose != nil {
@@ -675,6 +676,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 		}
 		last = runner.Result{Command: res.Command, ExitCode: res.ExitCode, StartedAt: res.StartedAt, FinishedAt: res.FinishedAt, LogPath: res.LogPath, ImageDigest: res.ImageDigest,
+			Resources:        res.Resources,
 			ScriptsSHA256:    scriptsSHA256,
 			FactoryDirSHA256: factoryDir.SHA256, FactoryDirCommit: factoryDir.Commit,
 			// RepoSkills is scanned host-side from the worktree: for a review

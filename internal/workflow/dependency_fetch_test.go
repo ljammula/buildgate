@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"buildgate/internal/run"
@@ -25,6 +23,11 @@ import (
 type fetchLaunch struct {
 	exit     int
 	failures int
+	// oom makes Docker report the launch's worker OOM-killed; disk, when
+	// set, is Docker's free bytes before the launch, after its exit and
+	// after its delete.
+	oom  bool
+	disk *[3]uint64
 }
 
 // fetchFixture runs the real verify, baseline, full-suite and gate
@@ -52,6 +55,7 @@ func newFetchFixture(t *testing.T, script ...fetchLaunch) *fetchFixture {
 	acts, input, _ := runtimeActivities(t, rt.WorkerRuntime)
 	acts.Sandboxes = rt
 	f := &fetchFixture{t: t, rt: rt, acts: acts, script: script}
+	rt.DiskFree = scriptedDisk(script)
 	input.RunID = "fetch-run"
 	input.BaseSHA = ""
 	input.SandboxUser = fmt.Sprintf("65532:%d", os.Getgid())
@@ -65,6 +69,7 @@ func newFetchFixture(t *testing.T, script ...fetchLaunch) *fetchFixture {
 			return
 		}
 		rt.ExitCode = f.script[f.launches].exit
+		rt.OOMKilled = f.script[f.launches].oom
 		f.total += f.script[f.launches].failures
 		f.launches++
 	}
@@ -89,6 +94,25 @@ func newFetchFixture(t *testing.T, script ...fetchLaunch) *fetchFixture {
 		},
 	}
 	return f
+}
+
+// scriptedDisk is the free bytes Docker reports across the whole script,
+// three readings a launch; nil when no launch scripts any (the disk then
+// cannot be read). A launch that scripts none reads as roomy.
+func scriptedDisk(script []fetchLaunch) []uint64 {
+	var readings []uint64
+	scripted := false
+	for _, l := range script {
+		disk := [3]uint64{100 << 30, 100 << 30, 100 << 30}
+		if l.disk != nil {
+			disk, scripted = *l.disk, true
+		}
+		readings = append(readings, disk[:]...)
+	}
+	if !scripted {
+		return nil
+	}
+	return readings
 }
 
 // fetchSteps are the Activities that rerun a command after a fetch failure.
@@ -295,65 +319,6 @@ func TestABaselineThatFailsWithEveryRegistryReachableStillHaltsAsAFailedBaseline
 	}
 	if f.launches != 1 {
 		t.Errorf("launches = %d, want 1", f.launches)
-	}
-}
-
-func TestDependencyFetchIsItsOwnNonRetryableUnresolvedType(t *testing.T) {
-	failed := fmt.Errorf("%w (exit code 1)", errDependencyFetch)
-	if got := launchErrorType(failed); got != DependencyFetchFailureType {
-		t.Errorf("launchErrorType = %q, want %q", got, DependencyFetchFailureType)
-	}
-	if got := checkpointErrorType(failed); got != DependencyFetchFailureType {
-		t.Errorf("checkpointErrorType = %q: a replayed checkpoint must carry the type", got)
-	}
-	// A sandbox that may still exist is a safety stop whatever else is true.
-	if got := launchErrorType(errors.Join(failed, sandbox.ErrCleanupUnconfirmed)); got != CleanupUnconfirmedFailureType {
-		t.Errorf("with an unconfirmed teardown: type = %q, want %q", got, CleanupUnconfirmedFailureType)
-	}
-	if !slices.Contains(nonRetryableActivityFailureTypes, DependencyFetchFailureType) {
-		t.Error("Temporal would retry a step that has already run its command twice")
-	}
-	crossed := wrapActivityFailure("run verify activity", temporal.NewApplicationErrorWithCause("verify subprocess infrastructure failure", DependencyFetchFailureType, failed), nil, "base", false, "/wt", "branch")
-	if !StepLostFromError(crossed) || UnresolvedCauseFromError(crossed) != unresolved.DependencyFetch {
-		t.Errorf("cause across the Temporal boundary = %q, want %q and a kept worktree", UnresolvedCauseFromError(crossed), unresolved.DependencyFetch)
-	}
-	if got := UnresolvedCauseFromError(errors.New("DependencyFetch: the registry proxy could not reach a package registry")); got != "" {
-		t.Errorf("a message that only says so read as cause %q", got)
-	}
-}
-
-func TestRunWorkflowKeepsTheWorktreeOfAVerifyThatFailedOnADependencyFetch(t *testing.T) {
-	rollbacks := 0
-	env := newWorkflowEnvironment(t,
-		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
-			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
-		},
-		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{}, temporal.NewApplicationError("verify subprocess infrastructure failure", DependencyFetchFailureType)
-		},
-		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
-			t.Error("the gate was evaluated for a verify that gave no verdict")
-			return run.GateResult{}, nil
-		},
-	)
-	env.RegisterActivityWithOptions(func(context.Context, PrepareIsolatedWorkspaceInput) (PrepareIsolatedWorkspaceResult, error) {
-		return PrepareIsolatedWorkspaceResult{WorktreePath: "/fixture/data/workspaces/wt", Branch: "factoryd/wt"}, nil
-	}, activity.RegisterOptions{Name: PrepareIsolatedWorkspaceActivityName})
-	env.RegisterActivityWithOptions(func(context.Context, RollbackIsolatedWorkspaceInput) error {
-		rollbacks++
-		return nil
-	}, activity.RegisterOptions{Name: RollbackIsolatedWorkspaceActivityName})
-	env.RegisterActivityWithOptions(func(context.Context, DisableWorkerGroupWriteInput) error { return nil }, activity.RegisterOptions{Name: DisableWorkerGroupWriteActivityName})
-	env.ExecuteWorkflow(RunWorkflow, isolatedFixtureInput())
-	err := env.GetWorkflowError()
-	if got := HaltReasonCodeFromError(err); got != string(unresolved.DependencyFetch) {
-		t.Fatalf("halt reason code = %q (err %v), want %q", got, err, unresolved.DependencyFetch)
-	}
-	if rollbacks != 0 {
-		t.Errorf("rollback ran %d time(s): the worktree is kept for a resume decision", rollbacks)
-	}
-	if wp, br := IsolatedWorkspaceFromError(err); wp == "" || br == "" {
-		t.Errorf("IsolatedWorkspaceFromError = (%q, %q); the caller needs the kept worktree on the error", wp, br)
 	}
 }
 

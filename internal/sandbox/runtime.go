@@ -45,6 +45,16 @@ type Runtime interface {
 	// already holds is not stored again: a stored value reaches every
 	// running sandbox on the route, which drops its requests in flight.
 	PushCredential(ctx context.Context, cred RouteCredential) error
+	// DockerDiskFree reports the free and total bytes of the filesystem
+	// Docker keeps its containers and volumes on, read from outside any
+	// sandbox. An error means the reading is unknown, never "full".
+	DockerDiskFree(ctx context.Context) (DiskSpace, error)
+}
+
+// DiskSpace is the free and total bytes of one filesystem.
+type DiskSpace struct {
+	FreeBytes  uint64
+	TotalBytes uint64
 }
 
 // SandboxRequest is one worker launch, built by LaunchSpec.SandboxRequest.
@@ -134,6 +144,12 @@ type SandboxState struct {
 	// StartedAt is the worker container's Docker State.StartedAt, verbatim.
 	// It changes when the runtime starts the command again.
 	StartedAt string
+	// OOMKilled is the worker container's Docker State.OOMKilled: the kernel
+	// killed a process of the container's cgroup (not only its first) for
+	// want of memory. Docker sets it from the kernel's event, so no
+	// command's output can set or clear it; it is false for an absent
+	// sandbox.
+	OOMKilled bool
 }
 
 // RouteCredential is the secret values of one route's provider, built by

@@ -119,6 +119,17 @@ type RouteSkip struct {
 	Reason string `json:"reason"`
 }
 
+// AttemptResources is the evidence of one launch's disk and memory readings
+// (sandbox.Resources): Docker's free bytes before the sandbox was created,
+// after its command exited and after it was deleted (each omitted when not
+// read), and whether Docker reported the worker container OOM-killed.
+type AttemptResources struct {
+	DockerDiskFreeBefore      uint64 `json:"docker_disk_free_before,omitempty"`
+	DockerDiskFreeAfterExit   uint64 `json:"docker_disk_free_after_exit,omitempty"`
+	DockerDiskFreeAfterDelete uint64 `json:"docker_disk_free_after_delete,omitempty"`
+	OOMKilled                 bool   `json:"oom_killed,omitempty"`
+}
+
 // Attempt is the record of one build or canonical-verification invocation.
 type Attempt struct {
 	Kind       string   `json:"kind"`
@@ -263,6 +274,11 @@ type Attempt struct {
 	// never from the worker's output. Nil for an attempt that called no
 	// model, and for one recorded before the field existed.
 	RelayCalls *meter.Calls `json:"relay_calls,omitempty"`
+	// Resources is what the factory read from outside the sandbox about
+	// Docker's disk and the worker's memory around this attempt's launch.
+	// Nil for an attempt with no sandbox launch, and when nothing could be
+	// read.
+	Resources *AttemptResources `json:"sandbox_resources,omitempty"`
 	// ReferenceOracleSHA256 mirrors GateResult.ReferenceOracleSHA256 (see
 	// its own doc comment), recorded on the attempt itself too -- found
 	// via review, PR #152 round 2: the gate's own hash computation runs

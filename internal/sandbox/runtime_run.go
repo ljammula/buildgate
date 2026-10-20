@@ -86,6 +86,10 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	}
 	defer startOwnerHeartbeat(s.DataDir, s.RunID)()
 
+	free0, free0Known, err := refuseLowDisk(ctx, rt)
+	if err != nil {
+		return Result{}, SandboxRef{}, err
+	}
 	if err := RecordSandbox(s.DataDir, s.RunID, SandboxRecord{Name: name}); err != nil {
 		return Result{}, SandboxRef{}, err
 	}
@@ -93,7 +97,11 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), runtimeCleanupTimeout)
 		defer cancel()
-		if cleanupErr := rt.Delete(cleanupCtx, name); cleanupErr != nil {
+		cleanupErr := rt.Delete(cleanupCtx, name)
+		if cleanupErr == nil && result.Resources.DiskKnown {
+			result.Resources.DiskFree2, result.Resources.ReleasedKnown = readDiskFree(cleanupCtx, rt)
+		}
+		if cleanupErr != nil {
 			if err != nil {
 				err = fmt.Errorf("%v; cleanup: %w", err, cleanupErr)
 			} else {
@@ -124,10 +132,16 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 		return result, ref, err
 	}
 	result.ExitCode = exit.ExitCode
+	// Read after the exit and before the delete: the container, its scratch
+	// volume and what they wrote still exist.
+	result.Resources.DiskFree1, result.Resources.DiskKnown = readDiskFree(runCtx, rt)
+	result.Resources.DiskKnown = result.Resources.DiskKnown && free0Known
+	result.Resources.DiskFree0 = free0
 	ended, err := rt.Status(runCtx, name)
 	if err != nil {
 		return result, ref, err
 	}
+	result.Resources.OOMKilled, result.Resources.OOMKnown = ended.OOMKilled, ended.Present
 	if exit.ExitCode == WorkerExitRerun || (ended.StartedAt != "" && ended.StartedAt != started.StartedAt) {
 		return result, ref, fmt.Errorf("sandbox %s: %w (worker start %s, now %s, exit code %d)", name, ErrSandboxRerun, started.StartedAt, ended.StartedAt, exit.ExitCode)
 	}

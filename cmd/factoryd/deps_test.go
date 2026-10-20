@@ -400,6 +400,7 @@ type fakeSandboxes struct {
 	deleteFn         func(ctx context.Context, name string) error
 	listByRunFn      func(ctx context.Context, dataDir, runID string) ([]string, error)
 	pushCredentialFn func(ctx context.Context, cred sandbox.RouteCredential) error
+	diskFreeFn       func(ctx context.Context) (sandbox.DiskSpace, error)
 }
 
 var errFakeSandboxesUnset = errors.New("fake sandbox runtime: method not set by this test")
@@ -433,6 +434,12 @@ func (f *fakeSandboxes) ListByRun(ctx context.Context, dataDir, runID string) ([
 		return nil, errFakeSandboxesUnset
 	}
 	return f.listByRunFn(ctx, dataDir, runID)
+}
+func (f *fakeSandboxes) DockerDiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+	if f.diskFreeFn == nil {
+		return sandbox.DiskSpace{}, errFakeSandboxesUnset
+	}
+	return f.diskFreeFn(ctx)
 }
 func (f *fakeSandboxes) PushCredential(ctx context.Context, cred sandbox.RouteCredential) error {
 	if f.pushCredentialFn == nil {

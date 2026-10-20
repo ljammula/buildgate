@@ -21,13 +21,24 @@ import (
 // created for a sandbox: the gateway labels the worker and its supervisor
 // with the sandbox's name.
 type Containers interface {
-	// WorkerStartedAt is the worker container's State.StartedAt, "" when the
-	// sandbox has no worker container.
-	WorkerStartedAt(ctx context.Context, sandboxName string) (string, error)
+	// WorkerState is the worker container's State.StartedAt ("" when the
+	// sandbox has no worker container) and State.OOMKilled.
+	WorkerState(ctx context.Context, sandboxName string) (WorkerState, error)
+	// DiskFree is the free and total bytes of the filesystem Docker keeps
+	// its containers and volumes on.
+	DiskFree(ctx context.Context) (sandbox.DiskSpace, error)
 	// Present reports whether any container of the sandbox exists.
 	Present(ctx context.Context, sandboxName string) (bool, error)
 	// Remove force-removes every container of the sandbox.
 	Remove(ctx context.Context, sandboxName string) error
+}
+
+// WorkerState is what Docker reports about a sandbox's worker container.
+type WorkerState struct {
+	// StartedAt is State.StartedAt, verbatim.
+	StartedAt string
+	// OOMKilled is State.OOMKilled.
+	OOMKilled bool
 }
 
 // Volumes is what the runtime asks Docker about the per-launch scratch volume.
@@ -226,11 +237,20 @@ func (r *Runtime) Status(ctx context.Context, name string) (sandbox.SandboxState
 	if err != nil || !present {
 		return sandbox.SandboxState{}, err
 	}
-	startedAt, err := r.Containers.WorkerStartedAt(ctx, name)
+	worker, err := r.Containers.WorkerState(ctx, name)
 	if err != nil {
 		return sandbox.SandboxState{}, fmt.Errorf("openshell: read worker start of sandbox %s: %w", name, err)
 	}
-	return sandbox.SandboxState{Present: true, StartedAt: startedAt}, nil
+	return sandbox.SandboxState{Present: true, StartedAt: worker.StartedAt, OOMKilled: worker.OOMKilled}, nil
+}
+
+// DockerDiskFree reads Docker's free space through its containers.
+func (r *Runtime) DockerDiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+	space, err := r.Containers.DiskFree(ctx)
+	if err != nil {
+		return sandbox.DiskSpace{}, fmt.Errorf("openshell: read Docker's free disk: %w", err)
+	}
+	return space, nil
 }
 
 // present reports whether the gateway knows the sandbox or Docker still has

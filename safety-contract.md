@@ -543,6 +543,35 @@ requires a new contract review and an updated machine-checkable test.
   counted; the oracle canary, a gate's rerun on the base commit and the
   verify after an oracle commit are judged without it. A baseline that
   ends so halts with this cause, never `baseline_verify_failed`.
+  `sandbox_disk` and `sandbox_memory` are the next two, read from Docker
+  and never from a command's output. Before a launch's command is released
+  the factory reads the free space of Docker's data filesystem (the
+  `statfs` of `/` inside the always-running meter container, whose overlay
+  root is on it; `factoryd-meter statfs`) and refuses the launch with
+  `sandbox_disk` below 2 GiB free, for every step, the build included:
+  nothing ran, and the refusal ends the launch loop. It reads the space
+  again after the command exits and before the sandbox is deleted, and
+  once more after the delete. A canonical verify, full-suite or named-gate
+  command that exited non-zero with under 1 GiB free after its exit, and
+  whose own container layer and scratch volume released less than half of
+  what was free before the launch (so the launch did not fill the disk
+  itself), is `sandbox_disk` with no second run; a baseline verify needs
+  only the low free space. A command that exited non-zero in a sandbox
+  whose worker container Docker reports `State.OOMKilled` (the daemon sets
+  it on any out-of-memory kill in the container's cgroup, not only of its
+  first process, and only a restart clears it) is run once more as
+  `dependency_fetch` does, and is `sandbox_memory` when the second run
+  fails and is flagged again; a baseline verify is `sandbox_memory` on the
+  first. A pass is a pass whatever the readings; a reading that could not
+  be taken is judged as if the rule did not exist; the build records its
+  readings as evidence on its attempt and is never made unresolved by
+  them. A worker can provoke both (it can write until the disk is low, or
+  allocate until the kernel kills it), so these causes too only hand a
+  failed step to a human and never accept anything. Limit: where the
+  worktree is on Docker's own filesystem (native Linux) its writes are not
+  in the space the launch released, so a launch that filled the disk
+  through the worktree can read as not having filled it itself; the rule
+  still only hands a failed step to a human.
   `model_unavailable`, `provider_quota` and `meter_denied` are read from
   the spend meter's ledger of the step's last launch, which the meter
   writes outside the sandbox from each response's head: the model route
@@ -602,8 +631,8 @@ requires a new contract review and an updated machine-checkable test.
   again inside the same Activity, up to `-verify-max-attempts` launches in
   all, for the review, full-suite and named-gate steps: nothing ran, so
   nothing is spent twice. On those steps a command that started is never
-  launched again, but for the one `dependency_fetch` rerun of a full-suite
-  or named-gate command. The build (`-build-app-max-attempts`) and canonical
+  launched again, but for the one `dependency_fetch` or `sandbox_memory`
+  rerun of a full-suite or named-gate command. The build (`-build-app-max-attempts`) and canonical
   verify (`-verify-max-attempts`) launch again after any launch error
   except an unconfirmed removal, a command started twice or a reached
   ceiling. Temporal's `MaximumAttempts: 1` stands. A run that halts for any

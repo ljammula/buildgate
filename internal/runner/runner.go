@@ -126,6 +126,10 @@ type Result struct {
 	// RelayCalls carries internal/sandbox.RouteLaunchFacts.Calls: the
 	// launch's model requests by how each ended, from the meter's ledger.
 	RelayCalls meter.Calls
+	// Resources carries internal/sandbox.Result.Resources: what the factory
+	// read about Docker's disk and the worker's memory around the launch,
+	// from outside the sandbox. Zero for a launch that read nothing.
+	Resources sandbox.Resources
 }
 
 // Run executes name/args with dir as its working directory, tees combined

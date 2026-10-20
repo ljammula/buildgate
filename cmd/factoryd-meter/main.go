@@ -27,6 +27,9 @@ func main() {
 }
 
 func run(args []string, logger *log.Logger) error {
+	if len(args) == 1 && args[0] == statfsCommand {
+		return writeStatfs(os.Stdout, "/")
+	}
 	flags := flag.NewFlagSet("factoryd-meter", flag.ContinueOnError)
 	listen := flags.String("listen", "127.0.0.1:50051", "address to serve gRPC on")
 	ledgerRoot := flags.String("ledger-root", "", "directory holding <run>/<sandbox_id>.jsonl ledgers (required)")

@@ -28,9 +28,14 @@ type workerRuntime struct {
 	restartedAt string
 	createErr   error
 	deleteErr   error
-	req         SandboxRequest
-	exited      chan struct{}
-	exit        SandboxExit
+	oomKilled   bool
+	// disk is the free bytes DockerDiskFree reports on successive calls (the
+	// last repeats); empty means unreadable.
+	disk     []uint64
+	diskRead int
+	req      SandboxRequest
+	exited   chan struct{}
+	exit     SandboxExit
 	// sawStartedBeforeExit records whether the factory wrote "started" while
 	// the command was still running.
 	sawStartedBeforeExit bool
@@ -111,7 +116,19 @@ func (w *workerRuntime) Status(context.Context, string) (SandboxState, error) {
 		}
 	default:
 	}
-	return SandboxState{Present: true, StartedAt: startedAt}, nil
+	return SandboxState{Present: true, StartedAt: startedAt, OOMKilled: w.oomKilled}, nil
+}
+
+func (w *workerRuntime) DockerDiskFree(context.Context) (DiskSpace, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.disk) == 0 {
+		return DiskSpace{}, errors.New("disk unreadable")
+	}
+	free := w.disk[min(w.diskRead, len(w.disk)-1)]
+	w.diskRead++
+	w.calls = append(w.calls, "disk")
+	return DiskSpace{FreeBytes: free, TotalBytes: 1 << 40}, nil
 }
 
 func (w *workerRuntime) Delete(_ context.Context, name string) error {

@@ -378,6 +378,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 			ExitCode:             res.ExitCode,
 			LogPath:              logPath(attempt),
 			ImageDigest:          res.ImageDigest,
+			Resources:            attemptResources(res),
 			HarnessScriptsSHA256: res.ScriptsSHA256,
 			Skills:               res.Skills,
 			SkillsSHA256:         res.SkillsSHA256,
