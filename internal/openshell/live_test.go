@@ -718,8 +718,9 @@ PY`, sidecarIP)
 
 // TestLiveWorkerFetchesPackagesThroughTheRegistryProxy starts the real
 // registry proxy for a run and launches a worker that is given it by
-// address. The worker must download a Go module through it; npm and pip are
-// reported. Needs OPENSHELL_LIVE_REGISTRY_PROXY_IMAGE (a digest-pinned
+// address. The worker must download a Go module through it, its checksum
+// verified against the checksum database through it, an npm package's
+// metadata and a pip package. Needs OPENSHELL_LIVE_REGISTRY_PROXY_IMAGE (a digest-pinned
 // registry proxy image) and reaches the public registries.
 func TestLiveWorkerFetchesPackagesThroughTheRegistryProxy(t *testing.T) {
 	rt, image := liveRuntime(t)
@@ -729,13 +730,8 @@ func TestLiveWorkerFetchesPackagesThroughTheRegistryProxy(t *testing.T) {
 	}
 	spec, _ := liveLaunch(t, image, `echo "GOPROXY=$GOPROXY"
 mkdir -p /scratch/m && cd /scratch/m && go mod init example.com/m >/dev/null 2>&1
-GONOSUMDB=golang.org go get golang.org/x/text@v0.14.0 2>&1 | tail -2; test -d /scratch/gomodcache/golang.org/x/text@v0.14.0 && echo go-ok
-python3 -c 'import os,urllib.request
-for path in ("/sumdb/sum.golang.org/supported", "/sumdb/sum.golang.org/lookup/golang.org/x/text@v0.14.0"):
-    try:
-        r = urllib.request.urlopen(os.environ["GOPROXY"] + path, timeout=20); print("sumdb", path, r.status)
-    except Exception as e:
-        print("sumdb", path, "ERR", getattr(e, "code", ""), str(e)[:120])'
+echo "GOSUMDB=$GOSUMDB"
+go get golang.org/x/text@v0.14.0 2>&1 | tail -2; test -d /scratch/gomodcache/golang.org/x/text@v0.14.0 && grep -q '^golang.org/x/text v0.14.0 h1:' go.sum && echo go-ok
 npm view left-pad version 2>&1 | tail -1 | sed 's/^/npm: /'
 pip download --no-deps -d /tmp/p idna==3.6 2>&1 | tail -4 | sed 's/^/pip: /'; ls /tmp/p 2>/dev/null | sed 's/^/pip-file: /'`)
 	policy := sandbox.RegistryProxyPolicy{
@@ -767,9 +763,8 @@ pip download --no-deps -d /tmp/p idna==3.6 2>&1 | tail -4 | sed 's/^/pip: /'; ls
 	}
 	logged, _ := os.ReadFile(spec.LogPath)
 	t.Logf("output:\n%s", logged)
-	// The Go download skips the checksum database: the proxy does not
-	// answer Go's "supported" probe for it, on either launcher, so a module
-	// with no go.sum entry cannot be verified from a worker.
+	// The Go module has no go.sum entry beforehand, so go-ok means its
+	// checksum was verified against sum.golang.org through the proxy.
 	for want, what := range map[string]string{"go-ok": "download a Go module", "npm: 1.3.0": "query npm", "pip-file: idna-3.6": "download a pip package"} {
 		if !strings.Contains(string(logged), want) {
 			t.Errorf("the worker did not %s through the registry proxy", what)

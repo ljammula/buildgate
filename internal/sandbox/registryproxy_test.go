@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -422,8 +423,8 @@ func TestRegistryProxyLifecyclePrepareWorkerSetsNetworkAndEnv(t *testing.T) {
 	if !strings.Contains(joined, "GOPROXY=http://registry-proxy:8092/gomodproxy") {
 		t.Errorf("environment missing GOPROXY, got %v", worker.Environment)
 	}
-	if !strings.Contains(joined, "GOSUMDB=sum.golang.org") {
-		t.Errorf("environment missing GOSUMDB=sum.golang.org, got %v", worker.Environment)
+	if !slices.Contains(worker.Environment, "GOSUMDB=sum.golang.org http://registry-proxy:8092/gomodproxy/sumdb/sum.golang.org") {
+		t.Errorf("environment missing GOSUMDB naming the proxy's checksum database route, got %v", worker.Environment)
 	}
 	// Every module goes through the proxy, whatever GOPRIVATE a Makefile sets.
 	if !strings.Contains(joined, "GONOPROXY=none") {
