@@ -279,11 +279,11 @@ func TestDoctorTargetRepoReportsSandboxApproval(t *testing.T) {
 	if !strings.HasPrefix(checks[0].Name, "sandbox block "+cfg.Sandbox.SHA256()[:12]) || !strings.HasPrefix(checks[1].Name, "sandbox registries: npm") || checks[1].Err != nil {
 		t.Errorf("names = %q, %q; registries error = %v", checks[0].Name, checks[1].Name, checks[1].Err)
 	}
-	if err := projectconfig.OpenApprovals(in.dataDir).Approve(repoKeyOf(repo), projectconfig.Approval{SandboxSHA256: cfg.Sandbox.SHA256(), ApprovedBy: "kanna", ApprovedAt: "2026-10-20T10:00:00Z"}); err != nil {
+	if err := projectconfig.OpenApprovals(in.dataDir).Approve(repoKeyOf(repo), projectconfig.Approval{SandboxSHA256: cfg.Sandbox.SHA256(), ApprovedBy: "alice", ApprovedAt: "2026-10-20T10:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	checks = doctorCheckSandboxBlock(in)
-	if len(checks) != 2 || checks[0].Err != nil || !strings.Contains(checks[0].Name, "approved by kanna at 2026-10-20T10:00:00Z") {
+	if len(checks) != 2 || checks[0].Err != nil || !strings.Contains(checks[0].Name, "approved by alice at 2026-10-20T10:00:00Z") {
 		t.Errorf("approved: checks = %#v", checks)
 	}
 	in.settings.RegistryProxyConfigured, in.settings.RegistryProxy = true, false
