@@ -27,7 +27,7 @@ Nothing else changes.
 
 ## Acceptance criteria
 
-1. content.txt has one more line than before.
+1. AC-1: content.txt has one more line than before.
 
 ## Risks
 
