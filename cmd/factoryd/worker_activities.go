@@ -65,7 +65,27 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 	if err != nil {
 		return workflow.RequestStep{}, fmt.Errorf("load request %s: %w", id, err)
 	}
-	return requestStepFor(r.State, a.cfg), nil
+	step := requestStepFor(r.State, a.cfg)
+	if step.Remind {
+		step.Wait = reviewWait(r, a.cfg.HitlReminderInterval, a.cfg.Settings.ReviewGateExpiry, time.Now())
+	}
+	return step, nil
+}
+
+// minReviewWait is the shortest timer a review step sets: a Wait of 0 means
+// wait for a signal only, so a gate about to expire (or already past its
+// deadline) still wakes the workflow.
+const minReviewWait = time.Second
+
+// reviewWait is how long a request at a review gate waits before the workflow
+// looks again: the reminder interval, cut short to the time left before the
+// gate expires (review_gate_expiry), and never below minReviewWait.
+func reviewWait(r *request.Request, reminder, expiry time.Duration, now time.Time) time.Duration {
+	wait := reminder
+	if deadline, ok := r.GateDeadline(expiry); ok {
+		wait = min(wait, deadline.Sub(now))
+	}
+	return max(wait, minReviewWait)
 }
 
 // requestStepFor maps a request state to its RequestWorkflow step.
@@ -285,9 +305,14 @@ func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bo
 	return false, ""
 }
 
-// RemindRequest sends request id's review reminder when one is due.
+// RemindRequest sends request id's review reminder when one is due, after
+// halting the request if its gate has expired.
 func (a *requestActivities) RemindRequest(_ context.Context, id string) error {
 	a.ensureConsole()
+	// A gate past its review_gate_expiry halts instead of reminding.
+	if expired, err := requestdriver.ExpireIfDue(a.dataDir, id, a.cfg.Settings.ReviewGateExpiry, time.Now()); err != nil || expired {
+		return err
+	}
 	return requestdriver.RemindIfDue(a.dataDir, id, a.cfg.HitlReminderInterval, time.Now)
 }
 

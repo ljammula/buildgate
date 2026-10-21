@@ -207,6 +207,13 @@ type Config struct {
 	// flag directly from this field), not a daemon-wide Tier-2 setting.
 	HITLReminderInterval *string `yaml:"hitl_reminder_interval,omitempty"`
 
+	// ReviewGateExpiry is how long a request may wait in spec_review,
+	// oracle_review, plan_review or resume_review for a decision before it
+	// is halted with halt kind gate_expired (`factoryd retry` reopens the
+	// same review). 0 or absent: a gate never expires. pr_review has no
+	// expiry: merging is a human act and a long-open pull request is normal.
+	ReviewGateExpiry *string `yaml:"review_gate_expiry,omitempty"`
+
 	// AdvanceOn mirrors worker's own -advance-on flag: whether
 	// a request's ticket build advances to the next ticket as soon as a
 	// ticket's run is accepted ("accepted", the default) or only once its
@@ -492,6 +499,9 @@ type Settings struct {
 	MonthlyTokenBudget        int
 	MonthlyCostBudgetMicroUSD int64
 
+	// ReviewGateExpiry mirrors Config.ReviewGateExpiry; 0 is off.
+	ReviewGateExpiry time.Duration
+
 	RegistryProxy                      bool
 	RegistryProxyConfigured            bool
 	RegistryProxyNPMUpstream           string
@@ -636,6 +646,61 @@ func DefaultSettings() Settings {
 	}
 }
 
+// applyLimits applies the keys that bound spend or waiting, each refused when
+// negative: the request and monthly budgets and review_gate_expiry.
+func (c *Config) applyLimits(s *Settings) error {
+	// nonNegativeInteger/nonNegativeInteger64 back the four
+	// request/monthly budget keys below: unlike every other *int/*int64
+	// key in this function (which silently accepts a negative value that
+	// then just behaves like 0 downstream), a negative budget has no
+	// sane reading -- 0/absent already means "unlimited" -- so it is
+	// refused here rather than silently coerced into either meaning.
+	nonNegativeInteger := func(dst *int, name string, v *int) error {
+		if v == nil {
+			return nil
+		}
+		if *v < 0 {
+			return fmt.Errorf("%s: must not be negative, got %d", name, *v)
+		}
+		*dst = *v
+		return nil
+	}
+	nonNegativeInteger64 := func(dst *int64, name string, v *int64) error {
+		if v == nil {
+			return nil
+		}
+		if *v < 0 {
+			return fmt.Errorf("%s: must not be negative, got %d", name, *v)
+		}
+		*dst = *v
+		return nil
+	}
+	if err := nonNegativeInteger(&s.RequestTokenBudget, "request_token_budget", c.RequestTokenBudget); err != nil {
+		return err
+	}
+	if err := nonNegativeInteger64(&s.RequestCostBudgetMicroUSD, "request_cost_budget_micro_usd", c.RequestCostBudgetMicroUSD); err != nil {
+		return err
+	}
+	if err := nonNegativeInteger(&s.MonthlyTokenBudget, "monthly_token_budget", c.MonthlyTokenBudget); err != nil {
+		return err
+	}
+	if err := nonNegativeInteger64(&s.MonthlyCostBudgetMicroUSD, "monthly_cost_budget_micro_usd", c.MonthlyCostBudgetMicroUSD); err != nil {
+		return err
+	}
+	if c.ReviewGateExpiry == nil {
+		return nil
+	}
+	d, err := time.ParseDuration(*c.ReviewGateExpiry)
+	if err != nil {
+		return fmt.Errorf("review_gate_expiry: %w", err)
+	}
+	if d < 0 {
+		return fmt.Errorf("review_gate_expiry: must not be negative, got %s", d)
+	}
+	s.ReviewGateExpiry = d
+	return nil
+}
+
 // ApplySettings overlays c's present fields onto s, returning the result.
 // An absent Config field (nil pointer) leaves the corresponding s field
 // untouched -- the same "only present keys apply" rule Load's KnownFields
@@ -673,32 +738,6 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 		*dst = d
 		return nil
 	}
-	// nonNegativeInteger/nonNegativeInteger64 back the four
-	// request/monthly budget keys below: unlike every other *int/*int64
-	// key in this function (which silently accepts a negative value that
-	// then just behaves like 0 downstream), a negative budget has no
-	// sane reading -- 0/absent already means "unlimited" -- so it is
-	// refused here rather than silently coerced into either meaning.
-	nonNegativeInteger := func(dst *int, name string, v *int) error {
-		if v == nil {
-			return nil
-		}
-		if *v < 0 {
-			return fmt.Errorf("%s: must not be negative, got %d", name, *v)
-		}
-		*dst = *v
-		return nil
-	}
-	nonNegativeInteger64 := func(dst *int64, name string, v *int64) error {
-		if v == nil {
-			return nil
-		}
-		if *v < 0 {
-			return fmt.Errorf("%s: must not be negative, got %d", name, *v)
-		}
-		*dst = *v
-		return nil
-	}
 
 	str(&s.SandboxImage, c.SandboxImage)
 	str(&s.MeterImage, c.MeterImage)
@@ -733,16 +772,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	}
 	integer(&s.MeterTokenCeiling, c.MeterTokenCeiling)
 	integer64(&s.MeterCostCeilingMicroUSD, c.MeterCostCeilingMicroUSD)
-	if err := nonNegativeInteger(&s.RequestTokenBudget, "request_token_budget", c.RequestTokenBudget); err != nil {
-		return s, err
-	}
-	if err := nonNegativeInteger64(&s.RequestCostBudgetMicroUSD, "request_cost_budget_micro_usd", c.RequestCostBudgetMicroUSD); err != nil {
-		return s, err
-	}
-	if err := nonNegativeInteger(&s.MonthlyTokenBudget, "monthly_token_budget", c.MonthlyTokenBudget); err != nil {
-		return s, err
-	}
-	if err := nonNegativeInteger64(&s.MonthlyCostBudgetMicroUSD, "monthly_cost_budget_micro_usd", c.MonthlyCostBudgetMicroUSD); err != nil {
+	if err := c.applyLimits(&s); err != nil {
 		return s, err
 	}
 

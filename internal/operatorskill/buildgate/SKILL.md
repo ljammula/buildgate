@@ -216,7 +216,7 @@ request sits in a queue nobody drains.
 | `plan_review` | Summarize the ticket list; approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |
 | `resume_review` | A step ended with no verdict on the work (the worker stopped, its sandbox could not be started, the model route did not serve it, a review gave no verdict, a package registry could not be reached, or the oracle-drafting job ended before a draft; `reason:` says which, and the time the model provider said to try again when it gave one); nothing reruns on its own. Quote `reason:` and `next:` from `watch`, then name the choices: `factoryd resume <id>` (continue the build from its last completed round, review a kept build again without building, or rerun a lost drafting or planning step), `factoryd resume -from scratch <id>` (rebuild the ticket), `factoryd cancel <id>`. The operator chooses; if `resume` is refused, only `-from scratch` or `cancel` remain |
-| `halted`, `quarantined` | Quote `reason:` and `next:` from `watch`, then explain them |
+| `halted`, `quarantined` | Quote `reason:` and `next:` from `watch`, then explain them. A halt reading `<state> expired: no decision in <duration>` (`gate_expired`) means no one decided the review in time and nothing failed: offer `factoryd retry <id>`, which reopens that same review |
 | `done`, `closed`, `cancelled` | Final state and PR URL(s); `closed`: a PR was closed without merging, name any PR still open |
 
 ## Explain a failure

@@ -1616,6 +1616,8 @@ func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
 	case HaltOracleMaterialize:
 		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
+	case HaltGateExpired:
+		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltAcceptedNoPR:
 		branch := r.ID
 		if b := r.awaitingPRBranch(); b != "" {

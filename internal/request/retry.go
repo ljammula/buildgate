@@ -181,6 +181,8 @@ func (r *Request) reopensAReview() func(by, reason string, now time.Time) error 
 	switch r.HaltKind {
 	case HaltOracleMaterialize:
 		return r.ReturnToOracleReview
+	case HaltGateExpired:
+		return r.ReopenReview
 	}
 	return nil
 }

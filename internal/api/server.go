@@ -609,6 +609,8 @@ type Server struct {
 	// resumePreflight checks a "round" resume of a lost build (see
 	// WithResumePreflight); nil skips it.
 	resumePreflight request.ResumePreflight
+	// reviewGateExpiry is review_gate_expiry (WithReviewGateExpiry); 0 is off.
+	reviewGateExpiry time.Duration
 	// requestWaker wakes a request's worker after a write (see WithRequestWaker); nil is safe.
 	requestWaker RequestWaker
 	// releasePolicy is used only to record a release decision (evaluate +
@@ -2553,6 +2555,27 @@ type retryOrCancelRequestBody struct {
 	From string `json:"from,omitempty"`
 }
 
+// refuseExpiredGate halts request id when its review gate has waited longer
+// than review_gate_expiry and refuses the decision, so a late approve or reject
+// never lands whatever the worker's timing. nil when the gate is open, the
+// request is not at one, or expiry is off.
+func (s *Server) refuseExpiredGate(id string) error {
+	r, expired, err := request.ExpireIfDue(s.dataDir, id, s.reviewGateExpiry, time.Now())
+	if err != nil || !expired {
+		return nil
+	}
+	return r.ExpiredRefusal()
+}
+
+// WithReviewGateExpiry sets review_gate_expiry for approve and reject: a
+// decision on a gate that has waited this long is refused and halts the request
+// (gate_expired). 0, the default, is off.
+func WithReviewGateExpiry(d time.Duration) Option {
+	return func(s *Server) {
+		s.reviewGateExpiry = d
+	}
+}
+
 // retryFor is the shared retry a body's "from" names: "" or "attempt", "scratch",
 // or a round number of the ticket's ledger (request.RetryFromRound). ok is false
 // for anything else.
@@ -3802,6 +3825,10 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
+	if err := s.refuseExpiredGate(id); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	// ApproveShown, not Approve: the API must not pin oracle files the
 	// client never displayed (the CLI path stays unconditional).
 	loaded, err := request.ApproveShown(s.dataDir, id, by, time.Now(), body.ExpectedSHA256)
@@ -3902,6 +3929,10 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seen := request.Seen{State: request.State(body.ExpectedState), EnteredAt: body.ExpectedEnteredAt}
+	if err := s.refuseExpiredGate(id); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if body.To != "" {
 		target := request.SendBackTarget(body.To)
 		if !target.Valid() {

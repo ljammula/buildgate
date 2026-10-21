@@ -51,6 +51,9 @@ func approveMain(dp *deps, args []string) error {
 		return err
 	}
 
+	if err := refuseExpiredGate(*dataDir, *configPath, positional[0]); err != nil {
+		return fmt.Errorf("approve request %q: %w", positional[0], err)
+	}
 	// nil expectedSHA256: this CLI has no prior fetch of its own to bind
 	// the approval to (unlike the console, see Approve's own doc
 	// comment), so it keeps the unconditional behavior.
@@ -146,6 +149,9 @@ func rejectMain(dp *deps, args []string) error {
 		return nil
 	}
 
+	if err := refuseExpiredGate(*dataDir, *configPath, id); err != nil {
+		return fmt.Errorf("reject request %q: %w", id, err)
+	}
 	var anchors []request.RejectionAnchor
 	if *commentsFile != "" {
 		var err error
@@ -206,4 +212,21 @@ func currentOSUser() string {
 		return v
 	}
 	return "unknown"
+}
+
+// refuseExpiredGate halts request id when its review gate has waited longer
+// than the session config's review_gate_expiry and refuses the decision with
+// the reason, so a late approve or reject never lands whatever the worker's
+// timing. nil when the gate is open, the request is not at one, or expiry is
+// off.
+func refuseExpiredGate(dataDir, configPath, id string) error {
+	settings, err := loadSettingsForConfig(configPath)
+	if err != nil {
+		return nil // a config that does not load leaves expiry off; the decision itself still runs
+	}
+	r, expired, err := request.ExpireIfDue(dataDir, id, settings.ReviewGateExpiry, time.Now())
+	if err != nil || !expired {
+		return nil
+	}
+	return r.ExpiredRefusal()
 }

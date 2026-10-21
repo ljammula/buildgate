@@ -1100,7 +1100,7 @@ carries a token.
 | reaches `oracle_review` | Acceptance tests ready for your review | Same |
 | reaches `plan_review` | Plan ready for your review | Same |
 | reaches `resume_review` | A step gave no verdict on the work: choose how to continue | Same |
-| is halted | Halted: needs you | Once, with the reason |
+| is halted | Halted: needs you | Once, with the reason (a review gate that waited longer than `review_gate_expiry` is halted with `<state> expired: no decision in <duration>`) |
 | is quarantined | Quarantined: needs you | Once, with the reason. A quarantined build the factory follows with a corrective round of its own sends nothing |
 | has a pull request ready to merge | Pull request ready to merge | Once per pull request head |
 | has a pull request the factory marked ready that is not yet ready to merge | Pull request ready for your review | Once per head, and never after "ready to merge" for that head |
@@ -1482,6 +1482,8 @@ What changes for a build:
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| A request is `halted` with `<state> expired: no decision in <duration> (review_gate_expiry)` | No one approved or rejected the spec, oracle, plan or lost step within the session config's `review_gate_expiry`; nothing failed | `factoryd retry <id>` returns it to the same review with a fresh clock (the draft is not redone). `approve` and `reject` refuse until then. Set `review_gate_expiry: 0` (the default) for gates that wait for ever |
+| A ticket quarantined after several rounds, and an earlier round was the better one | Each round's commit is kept under `refs/buildgate/rounds/<id>/t<ticket>/r<n>` in the target repository | `factoryd rounds <id>` lists them; `factoryd retry -from <n> <id>` rebuilds on a new branch at that round (refused once the ticket's branch was pushed: close the pull request first) |
 | The console on this machine shows **Gate token needed** | `serve` requires tokens (`install-service -require-tokens`) and this browser holds no console token yet | `factoryd console -open`. If it prints `no console token file`, the install predates the console token: `factoryd install-service -force -require-tokens` writes one, then rerun `factoryd console -open` |
 | Halt naming a path that "does not appear to share ... into its containers" | The macOS Docker VM doesn't share `/private/tmp` (or anything outside `$HOME`) | Use a repo path, `-data-dir` and workspace under `$HOME` |
 | A run log says `buildgate: the worker cannot write /scratch` (the step exits 95) or `permission denied` under `/scratch` | The worker image predates the per-launch scratch volume, or a custom image lacks `/scratch` owned by `65532:65532` with mode `770`; the launch fails at the worker's setup | Rebuild the image: `make install` (Pi) or `make pifork-image` (pifork). A profile that pins an image of its own (a project or toolchain image) keeps it through `make install`: rebuild that image on the new worker image and re-point its `sandbox_image`. `factoryd doctor` reports the active image as `a new scratch volume is writable by the worker`, and every other profile's as `profile <name>: its sandbox_image can run this factoryd's worker`; a baseline that halts on it says the worker image predates this factoryd, not that the verify command fails |

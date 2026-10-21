@@ -167,6 +167,14 @@ reminders immediately; a `worker` restart never re-sends one already
 current (`request.json`'s `last_notified_at` is the source of truth, not
 memory).
 
+**Expiring gates.** With `review_gate_expiry` set, a request at `spec_review`,
+`oracle_review`, `plan_review` or `resume_review` that no one decides within
+that time (counted from entering the state) is halted, not cancelled: the worker's
+review wait never sleeps past the deadline (the reminder interval, cut to the time
+left, at least 1s), `approve` and `reject` on the CLI and the API check it first
+and refuse a late decision, and `factoryd retry <id>` (or the console's Retry)
+reopens the same review. `pr_review` has no expiry.
+
 **Ticket sequencing (`building`).** Tickets build one at a time, chained
 with `-prior-run <previous run id>`. A ticket's actual `-spec` is not
 `tickets/NNN.spec.md` itself but a derived `tickets/NNN.build.md`: that
@@ -1894,6 +1902,7 @@ limits for API-started runs.
 | `request_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `request_token_budget`, in micro-USD |
 | `monthly_token_budget` | `0` (unlimited) -- total spend across every request in the data dir during the current calendar month (UTC) |
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
+| `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review` |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
 | `registry_proxy_pypi_upstream` | `https://pypi.org/simple` |
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |

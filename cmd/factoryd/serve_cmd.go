@@ -755,6 +755,7 @@ func (sv *serveRun) listenAndServe() error {
 		}),
 		// POST /requests/{id}/resume refuses "round" for a lost build whose
 		// kept worktree cannot be continued, the same check the CLI makes.
+		api.WithReviewGateExpiry(sv.baseSettings.ReviewGateExpiry),
 		api.WithResumePreflight(func(r *request.Request) ([]string, error) {
 			return requestdriver.ResumeGate{Sandboxes: sv.dp.sandbox.runtime()}.RequestResumeRefusals(context.Background(), *sv.dataDir, sv.baseSettings.SandboxDocker, r)
 		}),

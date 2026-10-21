@@ -1022,6 +1022,36 @@ moves the request out of `cancelled` again. `done` and `closed` are excluded
 from `Cancel`'s allowed states: each is a final outcome, not a dead end, and
 stays immutable.
 
+### Request lifecycle: a review gate expires
+
+A request waiting at `spec_review`, `oracle_review`, `plan_review` or
+`resume_review` is waiting on a person. With the session-config key
+`review_gate_expiry` set (a duration; the default `0` is off), a gate that has
+waited that long since the request entered it (`EnteredAt`) is moved to `halted`
+with halt kind `gate_expired` and the error `<state> expired: no decision in
+<duration> (review_gate_expiry)`, and the operator is notified like any halt
+(`internal/requestdriver.ExpireIfDue`, run by the worker's review wait and, under the
+request's lock on a fresh read, before every `approve` and `reject` on the CLI and
+the API, which refuse a decision on a gate that has just expired). `pr_review` has no expiry: merging is a
+human act and a long-open pull request is normal. Expiry grants nothing: it
+approves, redrafts and builds nothing, and it never reaches `cancelled`, which
+stays the operator's own decision.
+
+- `spec_review -> halted`
+- `oracle_review -> halted`
+- `plan_review -> halted`
+- `resume_review -> halted`
+
+`factoryd retry` / `POST /requests/{id}/retry` on a `gate_expired` halt
+(`internal/request.ReopenReview`) returns the request to the review it expired
+at, with a fresh `EnteredAt` and reminder state and nothing redrafted; a
+`resume_review` needs the lost step it waited on (`Resume`):
+
+- `halted -> spec_review`
+- `halted -> oracle_review`
+- `halted -> plan_review`
+- `halted -> resume_review`
+
 ### Request lifecycle: a pull request closed without merging
 
 The factory never merges and never re-opens a pull request a person closed.

@@ -2898,6 +2898,35 @@ func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 	r.NotifyCount++
 }
 
+// ExpireIfDue halts the request id when it waits at an expiring review gate
+// (request.ExpiringGate) that has waited expiry or longer at now, with halt
+// kind gate_expired, and tells the operator through the same notification a
+// halt sends. It runs under the request's lock on a fresh read, so a decision
+// made meanwhile wins. An expiry of 0 is off. It reports whether it halted.
+func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (bool, error) {
+	if expiry <= 0 {
+		return false, nil
+	}
+	unlock, err := request.Lock(dataDir, id)
+	if err != nil {
+		return false, fmt.Errorf("request %s: %w", id, err)
+	}
+	defer unlock()
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		return false, fmt.Errorf("request %s: %w", id, err)
+	}
+	if !r.GateExpired(expiry, now) {
+		return false, nil
+	}
+	from := r.State
+	if err := r.HaltGateExpired(expiry, now); err != nil {
+		return false, err
+	}
+	log.Printf("request %s: %s -> halted (%s)", r.ID, from, r.Error)
+	return true, notifyTerminalRequest(dataDir, r, r.Error, now)
+}
+
 // ReviewState reports whether s is one of the states a request waits on the
 // operator in (approve/reject, or resume for a lost step) -- the only states
 // RemindIfDue reminds for. oracle_review is one: it blocks on a human
