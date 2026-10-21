@@ -83,7 +83,10 @@ export function FileContentSection({
 }: FileContentSectionProps) {
   const [raw, setRaw] = useState(true);
   const rawBox = useRef<HTMLDivElement>(null);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState<{ text: string; offset: number | null }>({
+    text: "",
+    offset: null,
+  });
   // The passage last selected in the raw view. Moving to the comment field
   // collapses the selection, so only a new non-empty selection inside the
   // text replaces it.
@@ -94,7 +97,19 @@ export function FileContentSection({
       const box = rawBox.current;
       if (selection === null || box === null || selection.isCollapsed) return;
       if (!box.contains(selection.anchorNode) || !box.contains(selection.focusNode)) return;
-      setSelected(selection.toString());
+      // Where the selection starts in the shown text, so a passage that occurs
+      // twice is the one the reader chose. Null when it cannot be told.
+      let offset: number | null;
+      try {
+        const before = document.createRange();
+        before.selectNodeContents(box);
+        const range = selection.getRangeAt(0);
+        before.setEnd(range.startContainer, range.startOffset);
+        offset = before.toString().length;
+      } catch {
+        offset = null;
+      }
+      setSelected({ text: selection.toString(), offset });
     }
     document.addEventListener("selectionchange", onSelectionChange);
     return () => {
@@ -182,10 +197,11 @@ export function FileContentSection({
         <PassageComposer
           path={commentPath}
           content={content}
-          selected={selected}
+          selected={selected.text}
+          offset={selected.offset}
           onAdd={onComment}
           onDone={() => {
-            setSelected("");
+            setSelected({ text: "", offset: null });
           }}
         />
       ) : null}

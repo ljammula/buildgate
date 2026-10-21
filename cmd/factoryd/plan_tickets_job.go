@@ -137,7 +137,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	if err != nil {
 		return nil, nil, err
 	}
-	hostRewritePath, err := stageRewriteSections(r.RedraftScope(request.StatePlanReview), scratchDir, sandboxUser)
+	hostRewritePath, err := stageRewriteSections(redraftScopeOf(r, request.StatePlanReview), scratchDir, sandboxUser)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -379,7 +379,10 @@ func stagePreviousPlan(dataDir string, r *request.Request, scratchDir, sandboxUs
 	if !r.PlanImported && r.RedraftScope(request.StatePlanReview) == nil {
 		return "", nil
 	}
-	tickets, err := requestdriver.ReadTicketFiles(filepath.Join(request.Dir(dataDir, r.ID), "tickets"))
+	tickets, err := requestdriver.ReviewedTickets(dataDir, r)
+	if tickets == nil && err == nil {
+		tickets, err = requestdriver.ReadTicketFiles(filepath.Join(request.Dir(dataDir, r.ID), "tickets"))
+	}
 	if os.IsNotExist(err) || (err == nil && len(tickets) == 0) {
 		tickets, err = requestdriver.ReadTicketFiles(request.ImportedTicketsDir(dataDir, r.ID))
 	}

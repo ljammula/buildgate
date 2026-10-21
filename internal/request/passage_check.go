@@ -1,15 +1,22 @@
 package request
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 // ticketAnchorPathRE is the shape of a ticket file a comment can be on.
 var ticketAnchorPathRE = regexp.MustCompile(`^tickets/[A-Za-z0-9_-]+\.spec\.md$`)
+
+// ErrBadAnchor is the refusal for a comment that names a place the document
+// under review cannot have: another file, or a section the skeleton lacks. It
+// is the caller's mistake (400), not text that moved (ErrPassageMoved, 409).
+var ErrBadAnchor = errors.New("a comment names a place that is not part of the document")
 
 // checkAnchorsAgainstFiles refuses a rejection whose comments are about text
 // that is not in the file now: at spec_review each anchor must name spec.md,
@@ -19,7 +26,8 @@ var ticketAnchorPathRE = regexp.MustCompile(`^tickets/[A-Za-z0-9_-]+\.spec\.md$`
 // (of the file when no section is named). A comment bound to text that has
 // since been edited or redrafted would otherwise scope a redraft to the wrong
 // place. Other states (oracle_review) have no such passages and pass. The
-// failure wraps ErrPassageMoved and names the comment by its number.
+// failure wraps ErrBadAnchor (a place the document cannot have) or
+// ErrPassageMoved (text that is gone) and names the comment by its number.
 func checkAnchorsAgainstFiles(dataDir string, r *Request, anchors []RejectionAnchor) error {
 	if r.State != StateSpecReview && r.State != StatePlanReview {
 		return nil
@@ -38,6 +46,9 @@ func checkAnchorsAgainstFiles(dataDir string, r *Request, anchors []RejectionAnc
 	}
 	for i, a := range anchors {
 		if err := checkAnchor(r, a, read); err != nil {
+			if errors.Is(err, ErrBadAnchor) {
+				return fmt.Errorf("request %s: comment %d (%s): %w", r.ID, i+1, a.Path, err)
+			}
 			return fmt.Errorf("request %s: comment %d (%s): %v: read it again %w", r.ID, i+1, a.Path, err, ErrPassageMoved)
 		}
 	}
@@ -47,10 +58,13 @@ func checkAnchorsAgainstFiles(dataDir string, r *Request, anchors []RejectionAnc
 func checkAnchor(r *Request, a RejectionAnchor, read func(string) (string, error)) error {
 	isSpec := r.State == StateSpecReview
 	if isSpec && a.Path != specFileName {
-		return fmt.Errorf("a spec review comment is on spec.md")
+		return fmt.Errorf("a spec review comment is on spec.md: %w", ErrBadAnchor)
 	}
 	if !isSpec && !ticketAnchorPathRE.MatchString(a.Path) {
-		return fmt.Errorf("a plan review comment is on a ticket file")
+		return fmt.Errorf("a plan review comment is on a ticket file: %w", ErrBadAnchor)
+	}
+	if a.Section != "" && !slices.Contains(skeletonFor(a.Path), a.Section) {
+		return fmt.Errorf("%q is not a section of %s: %w", a.Section, a.Path, ErrBadAnchor)
 	}
 	content, err := read(a.Path)
 	if err != nil {

@@ -159,6 +159,16 @@ type rewriteSection struct {
 	Section string `json:"section"`
 }
 
+// redraftScopeOf is the scope a drafting job is told about: none while the
+// document is the operator's own hand-over, which the driver takes whole with
+// no model call and never splices.
+func redraftScopeOf(r *request.Request, stage request.State) *request.RedraftScope {
+	if (stage == request.StateSpecReview && r.SpecAsHandedOver()) || (stage == request.StatePlanReview && r.PlanAsHandedOver()) {
+		return nil
+	}
+	return r.RedraftScope(stage)
+}
+
 // stageRewriteSections writes scope as the JSON list a drafting script reads
 // for --rewrite-sections-file, and returns its host path; "" when scope is
 // nil (a full redraft). The script only tells the model which sections the

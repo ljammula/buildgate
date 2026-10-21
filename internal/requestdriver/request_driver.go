@@ -420,7 +420,10 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 
 	runner = withPlanImport(runner)
-	reviewedTickets := readReviewedTickets(ticketsDir, r)
+	reviewedTickets, reviewErr := ReviewedTickets(dataDir, r)
+	if reviewErr != nil {
+		return HaltRequest(dataDir, r, reviewErr.Error(), now)
+	}
 	var (
 		requestTickets []request.Ticket
 		evidence       *request.PlanEvidence
@@ -463,10 +466,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		// separate accumulation below folds in spend from an earlier,
 		// plan_review-rejected pass -- an automatic re-plan must not
 		// silently drop the first attempt's own relay cost.
-		if evidence != nil && attemptEvidence != nil {
-			attemptEvidence.Spend = evidence.Spend.Add(attemptEvidence.Spend)
-		}
-		evidence = attemptEvidence
+		evidence = withEarlierAttemptSpend(evidence, attemptEvidence)
 
 		if err := clearTicketArtifacts(ticketsDir); err != nil {
 			return fmt.Errorf("clear previous plan's tickets: %w", err)
@@ -485,7 +485,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 			recordPlanEvidence(r, evidence)
 			return haltDraftInvalid(dataDir, r, request.StatePlanning, importsPlan(r), validateErr, validateErr.Error(), now)
 		}
-		resetTicketsDir(ticketsDir, reviewedTickets)
+		_ = os.RemoveAll(ticketsDir)
 		r.Rejections = append(r.Rejections, request.Rejection{
 			By:        request.FactoryActor,
 			At:        now.UTC().Format(time.RFC3339Nano),
@@ -3045,4 +3045,13 @@ func CapFeedback(feedback string, max int, sectionHeading string) string {
 		tail = tail[i:]
 	}
 	return note + strings.ToValidUTF8(tail, "")
+}
+
+// withEarlierAttemptSpend is attempt with the Spend of the earlier attempts of
+// the same planning pass added to it.
+func withEarlierAttemptSpend(earlier, attempt *request.PlanEvidence) *request.PlanEvidence {
+	if earlier != nil && attempt != nil {
+		attempt.Spend = earlier.Spend.Add(attempt.Spend)
+	}
+	return attempt
 }

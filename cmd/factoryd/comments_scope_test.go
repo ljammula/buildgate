@@ -71,6 +71,7 @@ func TestRejectMainCommentsFileRefusals(t *testing.T) {
 	for name, args := range map[string][]string{
 		"with -to":          {"-comments-file", good, "-to", "plan", "-data-dir", dataDir, "req-1"},
 		"unknown field":     {"-comments-file", write("typo.json", `[{"path":"spec.md","qoute":"x","note":"n"}]`), "-data-dir", dataDir, "req-1"},
+		"trailing data":     {"-comments-file", write("trail.json", `[{"path":"spec.md","note":"n"}] []`), "-data-dir", dataDir, "req-1"},
 		"empty list":        {"-comments-file", write("empty.json", `[]`), "-data-dir", dataDir, "req-1"},
 		"missing file":      {"-comments-file", filepath.Join(dir, "none.json"), "-data-dir", dataDir, "req-1"},
 		"passage not there": {"-comments-file", write("moved.json", `[{"path":"spec.md","section":"## Risks","quote":"The /refunds endpoint only.","note":"n"}]`), "-data-dir", dataDir, "req-1"},

@@ -98,7 +98,7 @@ func approveMain(dp *deps, args []string) error {
 func newRejectFlags() (flags *flag.FlagSet, dataDir, reason, to, configPath, commentsFile *string) {
 	flags = flag.NewFlagSet("reject", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
-	reason = flags.String("reason", "", "why the request is being rejected (required); the next redraft is given it")
+	reason = flags.String("reason", "", "why the request is being rejected; the next redraft is given it")
 	to = flags.String("to", "", "Send a quarantined or halted request back to \"plan\" or \"spec\" to be redrafted. Refused in a review state and once any ticket is accepted. Empty rejects the document at the current review gate.")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	commentsFile = flags.String("comments-file", "", "JSON list of comments on passages of the spec or tickets; only the commented sections are redrafted. A -reason given too asks for a whole redraft. - reads standard input.")
@@ -184,6 +184,9 @@ func readCommentsFile(name string, stdin io.Reader) ([]request.RejectionAnchor, 
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&anchors); err != nil {
 		return nil, fmt.Errorf("-comments-file must be a JSON list of {path, section, item, quote, note}: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("-comments-file must hold one JSON list and nothing after it")
 	}
 	if len(anchors) == 0 {
 		return nil, fmt.Errorf("-comments-file holds no comments")

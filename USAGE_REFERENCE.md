@@ -65,7 +65,7 @@ it explains what the flag changes. Flags come before positional arguments.
 | `-model role=model` | `submit` | The model for the `planning` or `execution` role of this request, within `roles.<role>.allowed`. Repeatable |
 | `-harness role=name` | `submit` | The coding agent for a role of this request, within `roles.<role>.allowed_harnesses`. Repeatable |
 | `-watch` | `submit` | Follows the request after submitting, as `factoryd watch` does |
-| `-reason "<text>"` | `reject`, `amend-scope`, `override` (required); `kill-switch` (required with `-state`); `retry`, `cancel` | Why. A rejection's reason reaches the next draft |
+| `-reason "<text>"` | `reject` (required unless `-comments-file` is given), `amend-scope`, `override` (required); `kill-switch` (required with `-state`); `retry`, `cancel` | Why. A rejection's reason reaches the next draft |
 | `-to plan\|spec` | `reject` | Sends a `quarantined` or `halted` request back to `planning` or `spec_drafting` |
 | `-from attempt\|scratch` (`retry`), `-from round\|scratch` (`resume`) | `retry`, `resume` | Continue from the failed attempt's commit or the last completed round (the defaults), or rebuild the ticket from the base |
 | `-workspace <repository>` | `memory`, `reconcile` (both required) | The repository the command acts on |
@@ -420,7 +420,7 @@ The same two verbs are on HTTP: `POST
 | `by` | Who rejected; recorded on the rejection |
 | `to` | `plan` or `spec`: send a quarantined or halted request back instead |
 | `expected_state`, `expected_entered_at` | Required: the request's `state` and `entered_at` as you read them before deciding. The call is refused with 409, changing nothing, when the request has left that stage or entered it again since, so a rejection written for a spec cannot land on the plan that followed. Missing: 400. `factoryd reject` on the host takes no such field |
-| `anchors` | Notes tied to places in the reviewed files: `[{"path": "spec.md", "section": "## Acceptance criteria", "item": 2, "quote": "...", "note": "..."}]`. `section`, `item` and `quote` are optional (`quote` is text copied from the section, at most 2000 bytes; a comment whose `section` or `quote` is no longer in the file is refused with 409, changing nothing, and a redraft after comments with no free `reason` changes only the commented sections); each field is put on one line; at most 50. The rejection's reason becomes one line per anchor (`- spec.md, ## Acceptance criteria, number 2: ...`) followed by `reason`, and that text is what the redraft reads. Not accepted with `to` |
+| `anchors` | Notes tied to places in the reviewed files: `[{"path": "spec.md", "section": "## Acceptance criteria", "item": 2, "quote": "...", "note": "..."}]`. `section`, `item` and `quote` are optional (`quote` is text copied from the section, at most 2000 bytes; a comment whose `section` or `quote` is no longer in the file is refused with 409, changing nothing (a `section` the document cannot have, or another file, is 400), and a redraft after comments with no free `reason` changes only the commented sections); each field is put on one line; at most 50. The rejection's reason becomes one line per anchor (`- spec.md, ## Acceptance criteria, number 2: ...`) followed by `reason`, and that text is what the redraft reads. Not accepted with `to` |
 
 ## A retried draft
 

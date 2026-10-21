@@ -245,7 +245,7 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	if err != nil {
 		return "", nil, err
 	}
-	hostRewritePath, err := stageRewriteSections(r.RedraftScope(request.StateSpecReview), scratchDir, sandboxUser)
+	hostRewritePath, err := stageRewriteSections(redraftScopeOf(r, request.StateSpecReview), scratchDir, sandboxUser)
 	if err != nil {
 		return "", nil, err
 	}

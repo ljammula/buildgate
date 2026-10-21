@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
+	"sort"
+	"strings"
 
 	"buildgate/internal/request"
 )
@@ -77,19 +78,26 @@ func spliceScopedTickets(r *request.Request, current, drafted []DraftedTicket) (
 	return out, nil
 }
 
-// readReviewedTickets returns the tickets on disk as they were reviewed, when
-// the redraft they are about to get is scoped to the review's comments, and
-// nil for a full redraft. It reads before the planning job runs and before
-// the tickets directory is cleared.
-func readReviewedTickets(ticketsDir string, r *request.Request) []DraftedTicket {
+// ReviewedTickets returns the tickets a scoped plan redraft revises: the
+// plan_review rejection's snapshot of them, which stays whatever happens to
+// tickets/ during the redraft. Nil, nil when the redraft is not scoped (or
+// the plan was handed over). A scoped redraft with no reviewed tickets to keep
+// is an error: it must not quietly become a full redraft.
+func ReviewedTickets(dataDir string, r *request.Request) ([]DraftedTicket, error) {
 	if r.RedraftScope(request.StatePlanReview) == nil || importsPlan(r) {
-		return nil
+		return nil, nil
 	}
-	tickets, err := ReadTicketFiles(ticketsDir)
-	if err != nil {
-		return nil
+	var tickets []DraftedTicket
+	for path, content := range request.ReviewedFiles(dataDir, r, request.StatePlanReview) {
+		if name, ok := strings.CutPrefix(path, "tickets/"); ok && strings.HasSuffix(name, ".spec.md") && !strings.Contains(name, "/") {
+			tickets = append(tickets, DraftedTicket{Filename: name, Content: content})
+		}
 	}
-	return tickets
+	if len(tickets) == 0 {
+		return nil, fmt.Errorf("the plan review commented on passages, but the tickets it reviewed are not kept with the request: send the plan back for a whole redraft with `factoryd reject -to plan -reason \"...\" %s`", r.ID)
+	}
+	sort.Slice(tickets, func(i, j int) bool { return tickets[i].Filename < tickets[j].Filename })
+	return tickets, nil
 }
 
 // writeAndValidateScopedTickets is writeAndValidateDraftedTickets over the
@@ -102,17 +110,4 @@ func writeAndValidateScopedTickets(ticketsDir string, r *request.Request, review
 		return nil, err
 	}
 	return writeAndValidateDraftedTickets(ticketsDir, spliced, criteriaCount, verifyCommand, testPatterns)
-}
-
-// resetTicketsDir empties the tickets directory after a refused plan and, for
-// a scoped redraft, puts the reviewed tickets back, so the next planning
-// launch of the same pass is given them again to revise.
-func resetTicketsDir(ticketsDir string, reviewed []DraftedTicket) {
-	_ = os.RemoveAll(ticketsDir)
-	if len(reviewed) == 0 || os.MkdirAll(ticketsDir, 0o750) != nil {
-		return
-	}
-	for _, t := range reviewed {
-		_ = os.WriteFile(filepath.Join(ticketsDir, t.Filename), []byte(t.Content), 0o600)
-	}
 }

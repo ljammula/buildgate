@@ -4,6 +4,7 @@ import type { RejectionAnchor, RequestSummary } from "@/domain/request";
 import {
   addPendingComment,
   clearPendingComments,
+  freshPendingComments,
   getPendingComments,
   pendingKey,
   removePendingComment,
@@ -15,6 +16,8 @@ export interface PendingComments {
   readonly add: (comment: RejectionAnchor) => void;
   readonly remove: (index: number) => void;
   readonly clear: () => void;
+  /** The batch as storage holds it now (another tab may have changed it). */
+  readonly fresh: () => readonly RejectionAnchor[];
 }
 
 /**
@@ -38,5 +41,6 @@ export function usePendingComments(
     clear: () => {
       clearPendingComments(key);
     },
+    fresh: () => freshPendingComments(key),
   };
 }

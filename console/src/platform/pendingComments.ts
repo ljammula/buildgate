@@ -62,15 +62,52 @@ export function getPendingComments(key: string): readonly RejectionAnchor[] {
   return batch;
 }
 
+/** The batch for `key` read again from storage, replacing what is held in memory. */
+export function freshPendingComments(key: string): readonly RejectionAnchor[] {
+  batches.set(key, load(key));
+  return getPendingComments(key);
+}
+
+/** Drops the batches of the same request written for an earlier stage entry: their passages are gone. */
+function pruneOlder(key: string): void {
+  const at = key.lastIndexOf("@");
+  const own = key.slice(0, at + 1);
+  try {
+    const store = storage();
+    if (store === null) return;
+    for (const stored of Object.keys(store)) {
+      if (stored.startsWith(prefix + own) && stored !== prefix + key) store.removeItem(stored);
+    }
+  } catch {
+    // Nothing readable to prune.
+  }
+  for (const held of [...batches.keys()]) {
+    if (held.startsWith(own) && held !== key) batches.delete(held);
+  }
+}
+
 function setPendingComments(key: string, comments: readonly RejectionAnchor[]): void {
   batches.set(key, comments.length === 0 ? none : comments);
   try {
     if (comments.length === 0) storage()?.removeItem(prefix + key);
-    else storage()?.setItem(prefix + key, JSON.stringify(comments));
+    else {
+      pruneOlder(key);
+      storage()?.setItem(prefix + key, JSON.stringify(comments));
+    }
   } catch {
     // Storage may throw in private browsing mode; the batch stays in memory.
   }
   for (const listener of [...listeners]) listener();
+}
+
+// Another tab changed a batch: forget what this one holds and tell its readers.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== null && !event.key.startsWith(prefix)) return;
+    if (event.key === null) batches.clear();
+    else batches.delete(event.key.slice(prefix.length));
+    for (const listener of [...listeners]) listener();
+  });
 }
 
 export function addPendingComment(key: string, comment: RejectionAnchor): void {

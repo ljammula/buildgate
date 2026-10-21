@@ -114,3 +114,39 @@ test("a pending comment can be removed before sending", async () => {
   expect(screen.queryByRole("region", { name: /Comments to send/ })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Request changes" })).toBeEnabled();
 });
+
+test("a passage that occurs twice is placed where it was selected", async () => {
+  const dup = SPEC.replace("Refunds double-process.", "The refund path.").replace(
+    "The refund path.\n\n## Non-goals",
+    "The refund path.\n\n## Non-goals",
+  );
+  const opened = openRequest(requestWire({ state: "spec_review", title: "Calc", spec: dup }), {
+    extra: [{ on: "POST /requests/req-1/reject", reply: json(specReview()) }],
+  });
+  await screen.findByRole("heading", { level: 1, name: "Calc" });
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+  const user = userEvent.setup();
+  // The second occurrence, the one under Scope.
+  const box = within(panel()).getByTestId("markdown-raw-content");
+  const node = [...box.querySelectorAll("span")]
+    .map((e) => e.firstChild)
+    .find((n) => n?.textContent?.includes("The refund path.")) as Text;
+  const second = node.textContent.lastIndexOf("The refund path.");
+  const range = document.createRange();
+  range.setStart(node, second);
+  range.setEnd(node, second + "The refund path.".length);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(range);
+  act(() => {
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await user.click(await within(panel()).findByRole("button", { name: "Comment on selection" }));
+  await user.type(within(panel()).getByLabelText("Comment on this passage"), "which endpoint?");
+  await user.click(within(panel()).getByRole("button", { name: "Add comment" }));
+  expect(screen.getByRole("region", { name: "Comments to send (1)" })).toHaveTextContent(
+    "spec.md · Scope",
+  );
+  expect(opened.server).toBeDefined();
+});

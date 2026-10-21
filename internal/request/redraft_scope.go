@@ -45,6 +45,56 @@ func (s *RedraftScope) Sections(path string) ([]string, bool) {
 	return headings, ok
 }
 
+// scopingRejection is the rejection whose comments the redraft of stage is
+// scoped by: the newest one a person made for that stage, or nil when there is
+// none, when it is a send-back (its feedback names no passage), or when a
+// send-back to the spec came after it (the plan it commented on is gone, the
+// same reset stageFeedback applies to downstream feedback). The factory's own
+// rejections neither widen nor narrow it.
+func (r *Request) scopingRejection(stage State) *Rejection {
+	var newest *Rejection
+	for i := range r.Rejections {
+		rej := &r.Rejections[i]
+		if stage != StateSpecReview && rej.ForStage == StateSpecReview {
+			newest = nil
+			continue
+		}
+		if rej.Stage() == stage && rej.By != FactoryActor {
+			newest = rej
+		}
+	}
+	if newest == nil || newest.ForStage != "" {
+		return nil
+	}
+	return newest
+}
+
+// ReviewedFiles returns the files the review of stage rejected, as the
+// rejection's revision snapshot kept them (request-relative path to content):
+// the stable copy a scoped redraft revises, which a failed attempt cannot
+// remove. Nil when the stage has no scoping rejection or no snapshot of it.
+func ReviewedFiles(dataDir string, r *Request, stage State) map[string]string {
+	rej := r.scopingRejection(stage)
+	if rej == nil {
+		return nil
+	}
+	revisions, err := ListRevisions(dataDir, r.ID)
+	if err != nil {
+		return nil
+	}
+	for i := len(revisions) - 1; i >= 0; i-- {
+		rev := revisions[i]
+		if rev.Kind == "" && rev.By == rej.By && rev.Reason == rej.Reason && rev.FromState == rej.FromState {
+			_, files, err := LoadRevision(dataDir, r.ID, rev.Index)
+			if err != nil {
+				return nil
+			}
+			return files
+		}
+	}
+	return nil
+}
+
 // RedraftScope returns what the redraft that follows the newest review
 // rejection of stage (StateSpecReview or StatePlanReview) may change, or nil
 // when it is a full redraft. The newest rejection is the newest one a person
@@ -55,14 +105,8 @@ func (s *RedraftScope) Sections(path string) ([]string, bool) {
 // on the whole document asks for a whole-document redraft), and no anchor on
 // the whole of spec.md or on a heading the skeleton lacks.
 func (r *Request) RedraftScope(stage State) *RedraftScope {
-	var newest *Rejection
-	for i := range r.Rejections {
-		rej := &r.Rejections[i]
-		if rej.Stage() == stage && rej.By != FactoryActor {
-			newest = rej
-		}
-	}
-	if newest == nil || newest.ForStage != "" || len(newest.Anchors) == 0 || newest.Note != "" {
+	newest := r.scopingRejection(stage)
+	if newest == nil || len(newest.Anchors) == 0 || newest.Note != "" {
 		return nil
 	}
 	want := map[string]map[string]bool{}

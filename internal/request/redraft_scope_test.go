@@ -140,20 +140,22 @@ func TestRejectRefusesACommentOnAMissingHeadingOrTicket(t *testing.T) {
 		"a ticket at spec": {Path: "tickets/001.spec.md", Note: "n"},
 		"other file":       {Path: "README.md", Note: "n"},
 	} {
-		if _, err := RejectAnchored(dataDir, "req-1", "bob", "", []RejectionAnchor{anchor}, fixedNow); !errors.Is(err, ErrPassageMoved) {
-			t.Errorf("%s: err = %v, want ErrPassageMoved", name, err)
+		if _, err := RejectAnchored(dataDir, "req-1", "bob", "", []RejectionAnchor{anchor}, fixedNow); !errors.Is(err, ErrBadAnchor) || errors.Is(err, ErrPassageMoved) {
+			t.Errorf("%s: err = %v, want ErrBadAnchor and not ErrPassageMoved", name, err)
 		}
 	}
 	planDir := t.TempDir()
 	newApprovableRequest(t, planDir, "req-2", StatePlanReview, true)
+	if _, err := RejectAnchored(planDir, "req-2", "bob", "", []RejectionAnchor{{Path: "tickets/009.spec.md", Note: "n"}}, fixedNow); !errors.Is(err, ErrPassageMoved) {
+		t.Errorf("missing ticket: err = %v, want ErrPassageMoved", err)
+	}
 	for name, anchor := range map[string]RejectionAnchor{
-		"missing ticket":  {Path: "tickets/009.spec.md", Note: "n"},
-		"missing section": {Path: "tickets/001.spec.md", Section: "### Rollback", Note: "n"},
-		"spec at plan":    {Path: "spec.md", Note: "n"},
-		"escaping path":   {Path: "tickets/../spec.md", Note: "n"},
+		"a section the skeleton lacks": {Path: "tickets/001.spec.md", Section: "### Rollback", Note: "n"},
+		"spec at plan":                 {Path: "spec.md", Note: "n"},
+		"escaping path":                {Path: "tickets/../spec.md", Note: "n"},
 	} {
-		if _, err := RejectAnchored(planDir, "req-2", "bob", "", []RejectionAnchor{anchor}, fixedNow); !errors.Is(err, ErrPassageMoved) {
-			t.Errorf("%s: err = %v, want ErrPassageMoved", name, err)
+		if _, err := RejectAnchored(planDir, "req-2", "bob", "", []RejectionAnchor{anchor}, fixedNow); !errors.Is(err, ErrBadAnchor) {
+			t.Errorf("%s: err = %v, want ErrBadAnchor", name, err)
 		}
 	}
 	good := RejectionAnchor{Path: "tickets/001.spec.md", Section: "### Steps", Note: "n"}
@@ -193,6 +195,25 @@ func TestRedraftScopeIgnoresFactoryRejectionsAndSendBacks(t *testing.T) {
 	}
 	if (&Request{}).RedraftScope(StateSpecReview) != nil {
 		t.Error("no rejection: want a full redraft")
+	}
+}
+
+// TestSendBackToSpecEndsAPlanScope: a plan review's comments scope only the
+// redraft that follows them. After the plan was approved, quarantined and sent
+// back to the spec, the next plan is a whole one.
+func TestSendBackToSpecEndsAPlanScope(t *testing.T) {
+	r := &Request{Rejections: []Rejection{
+		{By: "bob", FromState: StatePlanReview, Reason: "x", Anchors: []RejectionAnchor{{Path: "tickets/001.spec.md", Section: "### Steps", Note: "n"}}},
+	}}
+	if r.RedraftScope(StatePlanReview) == nil {
+		t.Fatal("the plan review's comments must scope the redraft that follows them")
+	}
+	r.Rejections = append(r.Rejections, Rejection{By: "bob", FromState: StateQuarantined, ForStage: StateSpecReview, Reason: "back to spec"})
+	if r.RedraftScope(StatePlanReview) != nil {
+		t.Error("a send-back to spec must end the plan scope: the next plan is a full re-plan")
+	}
+	if got := ReviewedFiles(t.TempDir(), r, StatePlanReview); got != nil {
+		t.Errorf("reviewed files after the send-back = %v, want none", got)
 	}
 }
 

@@ -280,3 +280,16 @@ function itemAt(path: string, section: string, lines: readonly string[], line: n
   }
   return item;
 }
+
+/**
+ * Whether the redraft that follows a rejection with these notes and this
+ * reason changes only the commented sections: the server's rule
+ * (`RedraftScope`). Any free reason, a note on the whole of spec.md, or a note
+ * on a file that is neither spec.md nor a ticket asks for the whole document.
+ */
+export function redraftIsScoped(notes: readonly RejectionAnchor[], reason: string): boolean {
+  if (notes.length === 0 || reason.trim() !== "") return false;
+  return notes.every(
+    (n) => headingsFor(n.path) !== null && !(n.path === "spec.md" && n.section === ""),
+  );
+}

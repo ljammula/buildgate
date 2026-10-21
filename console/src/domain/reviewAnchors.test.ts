@@ -5,6 +5,7 @@ import { requestJson } from "@/test/requestFixtures";
 import {
   anchorExcerpt,
   anchorForSelection,
+  redraftIsScoped,
   anchorPlace,
   anchoredChanges,
   anchorTargets,
@@ -231,4 +232,15 @@ describe("anchorForSelection", () => {
     const anchor = anchorForSelection("spec.md", long, 0, long.length);
     expect(new TextEncoder().encode(anchor?.quote ?? "").length).toBeLessThanOrEqual(2000);
   });
+});
+
+test("a redraft is scoped only by comments with no reason and none on the whole spec", () => {
+  const scope = { ...anchor("spec.md", "## Scope", 0) };
+  expect(redraftIsScoped([scope], "")).toBe(true);
+  expect(redraftIsScoped([scope], "  ")).toBe(true);
+  expect(redraftIsScoped([scope], "also the tone")).toBe(false);
+  expect(redraftIsScoped([], "")).toBe(false);
+  expect(redraftIsScoped([scope, anchor("spec.md", "", 0)], "")).toBe(false);
+  expect(redraftIsScoped([anchor("tickets/001.spec.md", "", 0)], "")).toBe(true);
+  expect(redraftIsScoped([anchor("oracle/RUN_COMMAND.txt", "", 0)], "")).toBe(false);
 });

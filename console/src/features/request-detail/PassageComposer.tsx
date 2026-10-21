@@ -13,6 +13,8 @@ export interface PassageComposerProps {
   readonly content: string;
   /** The text the reader selected in the raw view. */
   readonly selected: string;
+  /** Where the selection starts in `content`, when the page could tell; null otherwise. */
+  readonly offset: number | null;
   readonly onAdd: (comment: RejectionAnchor) => void;
   /** The comment was added or dropped: forget the selection. */
   readonly onDone: () => void;
@@ -25,7 +27,14 @@ export interface PassageComposerProps {
  * passage itself, which the server checks is still there when the batch is
  * sent.
  */
-export function PassageComposer({ path, content, selected, onAdd, onDone }: PassageComposerProps) {
+export function PassageComposer({
+  path,
+  content,
+  selected,
+  offset,
+  onAdd,
+  onDone,
+}: PassageComposerProps) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState("");
@@ -34,7 +43,18 @@ export function PassageComposer({ path, content, selected, onAdd, onDone }: Pass
     const text = note.trim();
     if (text === "") return;
     const trimmed = selected.trim();
-    const start = content.indexOf(trimmed);
+    const lead = selected.length - selected.trimStart().length;
+    let start: number;
+    if (offset !== null && content.startsWith(trimmed, offset + lead)) {
+      start = offset + lead;
+    } else {
+      const first = content.indexOf(trimmed);
+      if (first !== -1 && first !== content.lastIndexOf(trimmed)) {
+        setProblem("That passage occurs more than once in the file. Select a longer passage.");
+        return;
+      }
+      start = first;
+    }
     const anchor =
       start === -1 ? null : anchorForSelection(path, content, start, start + trimmed.length);
     if (anchor === null) {

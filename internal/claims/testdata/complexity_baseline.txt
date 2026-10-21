@@ -46,7 +46,6 @@
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
 27 internal/requestdriver/request_driver.go AdvanceBuilding
-26 internal/requestdriver/request_driver.go AdvancePlanning
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch

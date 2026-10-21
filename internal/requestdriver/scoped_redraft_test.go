@@ -201,3 +201,71 @@ func TestScopedPlanRedraftMissingACommentedTicketGetsOneReplan(t *testing.T) {
 		t.Errorf("State = %q (%s), want plan_review", loaded.State, loaded.Error)
 	}
 }
+
+// TestScopedPlanRetryAfterAHaltedScopedReplanStillKeepsTheReviewedTickets: a
+// scoped re-plan that halts leaves no tickets/ behind, but the tickets it
+// revised are the rejection's snapshot, so the retry is still scoped and the
+// uncommented ticket is still the reviewed bytes.
+func TestScopedPlanRetryAfterAHaltedScopedReplanStillKeepsTheReviewedTickets(t *testing.T) {
+	dataDir, r, originals := plannedAndRejected(t, request.RejectionAnchor{Path: "tickets/001.spec.md", Section: "### Steps", Note: "split the check"})
+	emptied := strings.Replace(originals[0].Content, "1. Add an idempotency check.\n", "", 1)
+	bad := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: emptied}, originals[1]}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	halted := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	if halted.State == request.StatePlanReview {
+		t.Fatalf("a plan with an empty Steps section reached plan_review")
+	}
+	if _, err := os.Stat(request.Dir(dataDir, "req-1") + "/tickets"); err == nil {
+		t.Fatal("the failed attempt should have removed tickets/")
+	}
+	if halted.State == request.StateHalted {
+		// What a retry of a halted drafting stage does (request.retry's
+		// drafting branch): back to planning.
+		if err := halted.ResumeDrafting(request.StatePlanning, "bob", "again", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := halted.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if halted.State != request.StatePlanning {
+		t.Fatalf("State = %q, want planning to retry", halted.State)
+	}
+	good := []requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: scopedTicket(1, "1. Add the check.\n2. Add the retry test.")},
+		{Filename: "002.spec.md", Content: "REWRITTEN " + originals[1].Content},
+	}
+	runner, _ = requestdrivertest.StubPlanTicketsRunner(good, &request.PlanEvidence{}, nil)
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, halted, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1"); loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q (%s), want plan_review", loaded.State, loaded.Error)
+	}
+	if got := mustReadFile(t, request.Dir(dataDir, "req-1")+"/tickets/002.spec.md"); string(got) != originals[1].Content {
+		t.Errorf("the uncommented ticket changed on the retry: %q", got)
+	}
+}
+
+// TestScopedPlanWithNoReviewedTicketsHaltsInsteadOfBecomingAFullRedraft.
+func TestScopedPlanWithNoReviewedTicketsHaltsInsteadOfBecomingAFullRedraft(t *testing.T) {
+	dataDir, r, originals := plannedAndRejected(t, request.RejectionAnchor{Path: "tickets/001.spec.md", Section: "### Steps", Note: "n"})
+	if err := os.RemoveAll(request.Dir(dataDir, "req-1") + "/revisions"); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runner := func(ctx context.Context, dd string, r *request.Request, cfg requestdriver.WorkerConfig, verifyCommand string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+		calls++
+		return originals, &request.PlanEvidence{}, nil
+	}
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	if calls != 0 || loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "reject -to plan") {
+		t.Errorf("calls = %d, state = %q, error = %q; want a halt naming the way out before any model call", calls, loaded.State, loaded.Error)
+	}
+}
