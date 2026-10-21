@@ -47,6 +47,8 @@ type fakeDeps struct {
 	retargetPullRequestBaseFn     func(ctx context.Context, prURL string, base string) error
 	roundResultDescendsFromHeadFn func(dir string, ancestor string, descendant string) (bool, error)
 	undoMarkPullRequestReadyFn    func(ctx context.Context, prURL string) error
+	updateRefFn                   func(dir string, ref string, sha string) error
+	createBranchAtFn              func(dir string, branch string, sha string) error
 	runTicketFn                   func(ctx context.Context, args []string, onReady func(*run.Run)) error
 }
 
@@ -79,6 +81,12 @@ func (f *fakeDeps) RoundResultDescendsFromHead(dir string, ancestor string, desc
 func (f *fakeDeps) UndoMarkPullRequestReady(ctx context.Context, prURL string) error {
 	return f.undoMarkPullRequestReadyFn(ctx, prURL)
 }
+func (f *fakeDeps) UpdateRef(dir string, ref string, sha string) error {
+	return f.updateRefFn(dir, ref, sha)
+}
+func (f *fakeDeps) CreateBranchAt(dir string, branch string, sha string) error {
+	return f.createBranchAtFn(dir, branch, sha)
+}
 func (f *fakeDeps) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {
 	return f.runTicketFn(ctx, args, onReady)
 }
@@ -109,6 +117,8 @@ func newFakeDeps(testing.TB) *fakeDeps {
 			return false, refused("RoundResultDescendsFromHead")
 		},
 		undoMarkPullRequestReadyFn: func(context.Context, string) error { return refused("UndoMarkPullRequestReady") },
+		updateRefFn:                func(string, string, string) error { return refused("UpdateRef") },
+		createBranchAtFn:           func(string, string, string) error { return refused("CreateBranchAt") },
 		runTicketFn: func(context.Context, []string, func(*run.Run)) error {
 			return refused("RunTicket")
 		},

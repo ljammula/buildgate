@@ -2546,9 +2546,30 @@ type retryOrCancelRequestBody struct {
 	By     string `json:"by,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// From is retry's only: "scratch" rebuilds a ticket from the base
-	// commit (request.RetryFromScratch); "" or "attempt" is the default.
-	// Any other value is refused. Cancel ignores it.
+	// commit (request.RetryFromScratch); a round number such as "2"
+	// rebuilds it on a new branch at that round's commit
+	// (request.RetryFromRound); "" or "attempt" is the default. Any other
+	// value is refused. Cancel ignores it.
 	From string `json:"from,omitempty"`
+}
+
+// retryFor is the shared retry a body's "from" names: "" or "attempt", "scratch",
+// or a round number of the ticket's ledger (request.RetryFromRound). ok is false
+// for anything else.
+func retryFor(from string) (retry func(dataDir, id, by, reason string, now time.Time, openPR request.PROpener) (*request.Request, error), ok bool) {
+	switch from {
+	case "", "attempt":
+		return request.Retry, true
+	case "scratch":
+		return request.RetryFromScratch, true
+	}
+	n, err := strconv.Atoi(from)
+	if err != nil || n < 1 {
+		return nil, false
+	}
+	return func(dataDir, id, by, reason string, now time.Time, openPR request.PROpener) (*request.Request, error) {
+		return request.RetryFromRound(dataDir, id, by, reason, n, now, openPR)
+	}, true
 }
 
 // resumeRequestBody is POST /requests/{id}/resume's JSON body. From is
@@ -3952,13 +3973,9 @@ func (s *Server) retryRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
-	retry := request.Retry
-	switch body.From {
-	case "", "attempt":
-	case "scratch":
-		retry = request.RetryFromScratch
-	default:
-		writeError(w, http.StatusBadRequest, `"from" must be "attempt" or "scratch"`)
+	retry, ok := retryFor(body.From)
+	if !ok {
+		writeError(w, http.StatusBadRequest, `"from" must be "attempt", "scratch" or a round number`)
 		return
 	}
 	loaded, err := retry(s.dataDir, id, by, body.Reason, time.Now(), s.prOpener)

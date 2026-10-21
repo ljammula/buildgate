@@ -27,6 +27,9 @@ another profile:
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
   getting better, per repository and per week (read-only; counts, no model call)
+- `factoryd rounds <request-id>`: the round ledger of a request, one line per
+  build round that ended in a commit, with its outcome and failed checks
+  (read-only)
 - `factoryd content [-config <profile>] [-show <selector>]`: list built-in prompts, team skills, selected roles, design guides, and compiled language profiles with source and hash; `-show` prints one source or full profile metadata (read-only; displayed text is sanitized)
 - `factoryd inbox [-config <profile>] [-project <name>] [-json]`: everything
   waiting on the operator across every profile, oldest first (it ignores the
@@ -56,7 +59,9 @@ another profile:
   `-plan-dir <dir>` with it only when the operator also hands over the
   tickets (`001.spec.md`, `002.spec.md`, ...)
   in this request
-- `factoryd retry [-from scratch] <id>`, `factoryd resume [-from scratch] <id>` and
+- `factoryd retry [-from scratch|<round>] <id>` (a round number from
+  `factoryd rounds <id>` rebuilds the ticket on a new branch at that round's
+  commit; it is refused once the ticket's branch was pushed), `factoryd resume [-from scratch] <id>` and
   `factoryd cancel <id>`, when the operator asks for that request by id
 
 Every other `factoryd` command, every flag not shown in this skill, and every

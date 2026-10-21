@@ -44,6 +44,11 @@ type Deps interface {
 	RetargetPullRequestBase(ctx context.Context, prURL string, base string) error
 	RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error)
 	UndoMarkPullRequestReady(ctx context.Context, prURL string) error
+	// UpdateRef points a full ref at a commit in the target repository's local
+	// .git (the round refs; nothing is pushed). CreateBranchAt creates a local
+	// branch at a commit, workspace.ErrBranchExists when it is elsewhere.
+	UpdateRef(dir string, ref string, sha string) error
+	CreateBranchAt(dir string, branch string, sha string) error
 	// RunTicket builds one ticket: the command's single-ticket run.
 	RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error
 }
@@ -706,8 +711,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
-	args, recordOf, onBranch := withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
-	args, err = withEarlierTicketsWork(r, idx, args, resumeRunID, onBranch)
+	args, recordOf, onBranch, err := startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -813,6 +817,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return fmt.Errorf("load run %q for request %s ticket %d: %w", ticket.RunID, r.ID, idx, err)
 	}
+	tagTicketRound(dp, r, ticket, runRecord, request.RoundTagBuild, now)
 	// reason prefers the run's own durably recorded HaltError/HaltReasonCode/
 	// gate result (StatusReason), falling back to runErr's text only when
 	// the record itself carries none -- found in review (Codex, PR #135):
@@ -1583,6 +1588,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			At:           now.UTC().Format(time.RFC3339Nano),
 			Error:        errText,
 		})
+		tagRoundByID(dp, dataDir, r, ticket, loadID, plan.kind, now)
 		// ticket.RunID now names the run that actually decided this
 		// ticket's outcome -- retry/PR logic and the console follow
 		// ticket.RunID, not the original quarantined run, once a

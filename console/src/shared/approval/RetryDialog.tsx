@@ -15,13 +15,28 @@ import { ReasonFlow } from "./ReasonFlow";
  * (`factoryd retry -from scratch`). Renders nothing when closed or when the
  * console cannot write.
  */
-export function RetryDialog({ request, open, onOpenChange, onDone }: FlowProps) {
+export function RetryDialog({
+  request,
+  open,
+  onOpenChange,
+  onDone,
+  round,
+}: FlowProps & {
+  /** Retry from this round of the ticket's ledger (`factoryd retry -from <n>`) instead. */
+  readonly round?: number | undefined;
+}) {
   const { canWrite } = useApi();
   if (!open || !canWrite) return null;
   return (
     <OperatorGate onOpenChange={onOpenChange}>
       {(by) => (
-        <RetryBody requestId={request.id} by={by} onOpenChange={onOpenChange} onDone={onDone} />
+        <RetryBody
+          requestId={request.id}
+          by={by}
+          round={round}
+          onOpenChange={onOpenChange}
+          onDone={onDone}
+        />
       )}
     </OperatorGate>
   );
@@ -30,13 +45,32 @@ export function RetryDialog({ request, open, onOpenChange, onDone }: FlowProps) 
 interface BodyProps {
   readonly requestId: string;
   readonly by: string;
+  readonly round: number | undefined;
   readonly onOpenChange: (open: boolean) => void;
   readonly onDone: FlowProps["onDone"];
 }
 
-function RetryBody({ requestId, by, onOpenChange, onDone }: BodyProps) {
+function RetryBody({ requestId, by, round, onOpenChange, onDone }: BodyProps) {
   const retry = useRetryRequest(requestId);
   const [fromScratch, setFromScratch] = useState(false);
+  if (round !== undefined) {
+    return (
+      <ReasonFlow
+        title={`Retry from round ${round}`}
+        confirmLabel="Retry"
+        pending={retry.isPending}
+        error={retry.error}
+        onOpenChange={onOpenChange}
+        write={(reason) => retry.mutateAsync({ reason, by, fromRound: round })}
+        onDone={onDone}
+      >
+        <p className="text-sm text-fg-muted">
+          Rebuild the ticket on a new branch at round {round}&apos;s commit. The branch it has now
+          stays where it is.
+        </p>
+      </ReasonFlow>
+    );
+  }
   return (
     <ReasonFlow
       title="Retry this request"

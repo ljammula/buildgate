@@ -10,7 +10,7 @@ import (
 
 // retryRequest is `factoryd retry <request-id>` without `-from scratch`.
 func retryRequest(dp *deps, dataDir string, r *request.Request, reason string, now time.Time) (handled bool, err error) {
-	return retryRequestFrom(dp, dataDir, r, reason, false, now)
+	return retryRequestFrom(dp, dataDir, r, reason, retryChoice{}, now)
 }
 
 // saveRetryTestRequest saves a request in state under dataDir.

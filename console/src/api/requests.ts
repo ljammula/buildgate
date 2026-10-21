@@ -297,6 +297,12 @@ export interface RetryRequestOptions extends RequestReasonOptions {
    * left out, the server's default (`attempt`) applies.
    */
   readonly fromScratch?: boolean;
+  /**
+   * `factoryd retry -from <n>`: a rebuilt ticket starts on a new branch at
+   * the commit of round n of its ledger. Sent as `from: "<n>"`; wins over
+   * `fromScratch`.
+   */
+  readonly fromRound?: number;
 }
 
 /**
@@ -315,6 +321,7 @@ export async function retryRequest(
     reason: options.reason,
     ...(options.by ? { by: options.by } : {}),
     ...(options.fromScratch === true ? { from: "scratch" } : {}),
+    ...(options.fromRound !== undefined ? { from: String(options.fromRound) } : {}),
   };
   return decodeRequestSummary(
     asObject(await http.sendJson("POST", `${requestPath(id)}/retry`, "gate", body, signal), at),

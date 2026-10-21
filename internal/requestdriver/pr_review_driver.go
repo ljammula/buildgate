@@ -1103,6 +1103,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		At:           now.UTC().Format(time.RFC3339Nano),
 		Error:        errText,
 	})
+	tagRoundByID(dp, dataDir, r, ticket, loadID, request.RoundTagPRReview, now)
 
 	if attempt.unresolved != "" {
 		// No verdict on the round's work: it used no round, and unlike a
