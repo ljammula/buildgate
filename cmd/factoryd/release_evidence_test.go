@@ -380,6 +380,36 @@ func TestRenderEvidenceMarkdownSanitizesAgentControlledFields(t *testing.T) {
 	}
 }
 
+// A check that passed only on its rerun is named in the risk header, with the
+// tests that failed the first time as code spans, and keeps the run off LOW.
+func TestRenderEvidenceMarkdownRiskHeaderNamesAPassOnARerun(t *testing.T) {
+	t.Parallel()
+	passed := &run.VerifyRerun{Outcome: run.VerifyRerunPassed, FailingTests: []string{"TestBufferWithTimeout`\n## Gates"}, FirstExitCode: 1}
+	r := &run.Run{
+		ID: "run-1", BaseSHA: "aaa111", ResultSHA: "bbb222",
+		DiffStat:                   &run.DiffStat{FilesChanged: 2, Insertions: 10, Deletions: 1},
+		ChangedFiles:               []string{"find.go"},
+		DependencyLockfilesTouched: []string{},
+		GateResults: []run.GateResult{
+			{Check: "canonical_verify", Passed: true, Rerun: passed},
+			{Check: "full_suite_verify", Passed: true, Rerun: &run.VerifyRerun{Outcome: run.VerifyRerunFailed, FailingTests: []string{"TestX"}}},
+		},
+		BaselineVerify: &run.BaselineVerify{Passed: true, Rerun: &run.VerifyRerun{Outcome: run.VerifyRerunPassed, FailingTests: []string{"TestWaitFor"}}},
+	}
+	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
+	for _, want := range []string{"**Risk: MEDIUM**", "- Passed on a rerun: baseline verify (`TestWaitFor` failed the first time)", "- Passed on a rerun: canonical_verify (`TestBufferWithTimeout' ## Gates` failed the first time)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body does not contain %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "full_suite_verify (`TestX`") {
+		t.Errorf("a rerun that did not pass is named as a pass:\n%s", body)
+	}
+	if strings.Count(body, "\n## Gates") != 1 {
+		t.Errorf("a test name forged a heading:\n%s", body)
+	}
+}
+
 func TestRenderEvidenceMarkdownRiskHeaderLow(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{

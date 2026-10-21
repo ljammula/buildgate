@@ -586,6 +586,12 @@ type VerifyActivityResult struct {
 	// for a gate that passed, for the reference oracle and for every other
 	// Activity.
 	BaseCheck *run.GateBaseCheck `json:"base_check,omitempty"`
+	// Rerun is the second run of RunVerifyActivity's, RunFullSuiteVerify-
+	// Activity's or the baseline's command after a first run whose failure
+	// qualified (verify_rerun.go); when it reached an exit code, Result,
+	// DurationMs and LogSHA256 are the rerun's. nil for every other
+	// Activity and when the command was not rerun.
+	Rerun *run.VerifyRerun `json:"rerun,omitempty"`
 }
 
 // ReviewStepInput is RunReviewStepActivity's input. Embeds RunWorkflowInput

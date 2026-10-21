@@ -162,11 +162,36 @@ export function baselineVerifySummary(b: BaselineVerify): string {
   return baselineVerifyFailureSummary(b);
 }
 
+// The cause in factory words (run.BaselineVerify.causeText); "" when none.
+function baselineCauseText(b: BaselineVerify): string {
+  const d = JSON.stringify(b.causeDetail);
+  const named = b.causeDetail !== "";
+  switch (b.cause) {
+    case "missing_module":
+      return named
+        ? `the sandbox image lacks the Python module ${d}`
+        : "the sandbox image lacks a Python module the command imports";
+    case "missing_program":
+      return named
+        ? `the sandbox image lacks the program ${d}`
+        : "the sandbox image lacks a program the command runs";
+    case "dependency_unavailable":
+      return named
+        ? `cannot get the dependency ${d} (no network or cache for it)`
+        : "cannot get a dependency (no network or cache for it)";
+    case "missing_path":
+      return named ? `the command cannot find ${d}` : "the command cannot find a file it needs";
+  }
+  return "";
+}
+
 function baselineVerifyFailureSummary(b: BaselineVerify): string {
   if (b.needsCreated !== "")
     return `failed as the ticket expects: the command needs ${b.needsCreated}, which the ticket creates`;
   if (b.failingCount === 0) {
     const s = `failed: exit ${b.exitCode}`;
+    const cause = baselineCauseText(b);
+    if (cause !== "") return `${s}; ${cause}`;
     return b.firstError === "" ? s : `${s}; first error in log: ${JSON.stringify(b.firstError)}`;
   }
   const failing = namedAndMore(b.failingTests, b.failingCount);

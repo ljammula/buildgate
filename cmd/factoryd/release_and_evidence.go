@@ -1188,9 +1188,19 @@ func renderRiskHeader(r *run.Run, policy *release.MergePolicy) string {
 		costLine = relaySpendLine(totalCostMicroUSD, totalTokens, partial, run.SubscriptionBilled(r.Attempts))
 	}
 
+	// A check that passed only when run again cannot be shown to be
+	// favorable: the change may have made an untouched test flaky.
+	reruns := passedOnRerunLines(r)
+	label := riskLabel(haveDiffStat, insertions, protectedCount > 0, protectedKnown, dependencyCount, dependencyKnown, len(r.ComposeFilesChanged) > 0)
+	if label == "LOW" && len(reruns) > 0 {
+		label = "MEDIUM"
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "**Risk: %s**\n", riskLabel(haveDiffStat, insertions, protectedCount > 0, protectedKnown, dependencyCount, dependencyKnown, len(r.ComposeFilesChanged) > 0))
+	fmt.Fprintf(&b, "**Risk: %s**\n", label)
 	fmt.Fprintf(&b, "- Diff: %s\n", diffLine)
+	for _, line := range reruns {
+		fmt.Fprintf(&b, "- Passed on a rerun: %s\n", line)
+	}
 	fmt.Fprintf(&b, "- Protected paths: %s\n", protectedLine)
 	fmt.Fprintf(&b, "- Dependency changes: %s\n", dependencyLine)
 	// Compose lines are omitted for a run with neither, like most runs.
@@ -1213,6 +1223,31 @@ func renderRiskHeader(r *run.Run, policy *release.MergePolicy) string {
 	}
 	fmt.Fprintf(&b, "- Cost: %s\n", costLine)
 	return b.String()
+}
+
+// passedOnRerunLines names each check of r that failed and then passed when
+// its command was run again (run.VerifyRerun), with the tests that failed the
+// first time: the baseline verify, canonical verification, the full suite.
+// The test names come from the repository's output, so each is a cleaned,
+// bounded code span.
+func passedOnRerunLines(r *run.Run) []string {
+	line := func(check string, rerun *run.VerifyRerun) string {
+		tests := make([]string, len(rerun.FailingTests))
+		for i, t := range rerun.FailingTests {
+			tests[i] = "`" + sanitizePRField(t) + "`"
+		}
+		return fmt.Sprintf("%s (%s failed the first time)", check, strings.Join(tests, ", "))
+	}
+	var lines []string
+	if r.BaselineVerify != nil && r.BaselineVerify.Rerun.PassedOnRerun() {
+		lines = append(lines, line("baseline verify", r.BaselineVerify.Rerun))
+	}
+	for _, g := range r.GateResults {
+		if g.Passed && g.Rerun.PassedOnRerun() {
+			lines = append(lines, line(g.Check, g.Rerun))
+		}
+	}
+	return lines
 }
 
 // recordComposeEvidence sets r.ComposeServices from the build phase's

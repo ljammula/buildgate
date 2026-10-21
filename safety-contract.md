@@ -442,7 +442,9 @@ requires a new contract review and an updated machine-checkable test.
   read from, mounted read-only in each of those sandboxes (its snapshot
   SHA-256 on each attempt). A failed gate's rerun on the base commit is one
   of those gate sandboxes: the same launch path, setup commands and
-  `.factory/` mount, on a scratch worktree, never on the host.
+  `.factory/` mount, on a scratch worktree, never on the host. A failed
+  verify, full-suite or baseline command's flaky-test rerun (SC-017) is one
+  too, on the run's own worktree.
 - **SC-013 — asynchronous quarantine:** every failed or ambiguous policy check
   transitions to halt/quarantine and emits an out-of-band notification without
   waiting for a human response.
@@ -668,7 +670,7 @@ requires a new contract review and an updated machine-checkable test.
   all, for the review, full-suite and named-gate steps: nothing ran, so
   nothing is spent twice. On those steps a command that started is never
   launched again, but for the one `dependency_fetch` rerun of a full-suite
-  or named-gate command. The build (`-build-app-max-attempts`) and canonical
+  or named-gate command and the one flaky-test rerun below. The build (`-build-app-max-attempts`) and canonical
   verify (`-verify-max-attempts`) launch again after any launch error
   except an unconfirmed removal, a command started twice or a reached
   ceiling. Temporal's `MaximumAttempts: 1` stands. A run that halts for any
@@ -677,6 +679,39 @@ requires a new contract review and an updated machine-checkable test.
   count. An
   unresolved step accepts nothing: every gate still runs on what a resume
   produces.
+  A canonical verify, full-suite or baseline verify command that exits
+  non-zero with a failure that looks like a flaky test is run once more in
+  the same Activity, and that second run's exit code is the step's result,
+  pass or fail. The failure qualifies only when its log names between one
+  and three failing tests (go test or pytest) and nothing else (no file
+  that did not compile or import), and holds no race-detector report,
+  `panic:` or `fatal error:`; for canonical verify and the full suite, only
+  when the run's record proves the commit the ticket's work started from
+  (as for a gate's rerun on the base commit) and the change mentions no
+  failing test: neither the test's name nor the name it tests (the part
+  after `Test`, `Example`, `Benchmark` or `Fuzz`; a pytest function's name
+  without `test_`) is a word, in any letter case, of the path or of either
+  version of any file that differs from that commit (committed,
+  uncommitted or untracked), no failing pytest file is one of them, and no
+  changed path is a submodule; for the baseline verify, only when the
+  failure would halt the run. The worktree is put back to exactly what it
+  held before the first run, or the rerun is not made: every path the first
+  run added is removed, ignored files included, every tracked file it
+  changed is restored, and no file the build left uncommitted may have been
+  changed by it. The launch path, setup commands, `.factory/` mount and
+  limits are the first run's, its one `dependency_fetch` rerun included,
+  and no model is called. The first run's result is checkpointed before the
+  rerun with the rerun recorded as not run, so a worker lost mid-rerun
+  leaves the first failure; a rerun whose launch fails fails the step as a
+  first run's launch error does. The rerun is not made when less than twice
+  the first run's duration, plus a minute, is left of the Activity's time.
+  Both logs are kept, the rerun is the step's last attempt, the run records
+  it on the check's result (`rerun`) or on the baseline record, and a pull
+  request's risk header names every check that passed on its rerun, with
+  the tests that failed the first time, and is never LOW. Limit: a change
+  that makes a test it does not mention fail only sometimes (a race the
+  detector did not report, in code the test reaches) can pass on its
+  rerun; the person who merges sees that it did.
 - **SC-018 — only a build is told about an earlier attempt, and only from
   the factory's record:** a ticket run saved quarantined or halted leaves a
   handoff (`handoff.json` in its run directory, its SHA-256 on the run

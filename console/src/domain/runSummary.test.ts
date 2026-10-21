@@ -197,6 +197,21 @@ describe("baselineVerifySummary", () => {
       'failed: exit 127; first error in log: "sh: 1: pytest: not found"',
     ],
     [
+      "a cause with its detail",
+      {
+        exit_code: 1,
+        cause: "missing_program",
+        cause_detail: "mvn",
+        first_error: "sh: 1: mvn: not found",
+      },
+      'failed: exit 1; the sandbox image lacks the program "mvn"',
+    ],
+    [
+      "a cause without a detail",
+      { exit_code: 1, cause: "missing_path" },
+      "failed: exit 1; the command cannot find a file it needs",
+    ],
+    [
       "needs a path the ticket creates",
       { exit_code: 1, expected: true, needs_created: "tests", first_error: "ImportError: x" },
       "failed as the ticket expects: the command needs tests, which the ticket creates",

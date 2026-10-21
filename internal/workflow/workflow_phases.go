@@ -573,6 +573,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		VerifyExitCode:            result.Verify.ExitCode,
 		VerifyDurationMs:          verify.DurationMs,
 		VerifyLogSHA256:           verify.LogSHA256,
+		VerifyRerun:               verify.Rerun,
 		ChangedFiles:              evidenceResult.ChangedFiles,
 		AllowedFiles:              input.AllowedFiles,
 		RequiredChangedFiles:      input.RequiredChangedFiles,
@@ -589,6 +590,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		policyInput.FullSuiteExitCode = gates.fullSuite.Result.ExitCode
 		policyInput.FullSuiteDurationMs = gates.fullSuite.DurationMs
 		policyInput.FullSuiteLogSHA256 = gates.fullSuite.LogSHA256
+		policyInput.FullSuiteRerun = gates.fullSuite.Rerun
 	}
 	if reviews.ranSpecConformityReview {
 		policyInput.SpecConformityCommand = reviews.specConformity.Result.Command

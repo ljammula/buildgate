@@ -410,6 +410,10 @@ type EvaluateRunInput struct {
 	VerifyExitCode   int
 	VerifyDurationMs int64
 	VerifyLogSHA256  string
+	// VerifyRerun is canonical verification's rerun, copied through to its
+	// GateResult.Rerun. The exit code and hash above are already the
+	// rerun's when it ran; it never decides Passed itself.
+	VerifyRerun *run.VerifyRerun
 
 	ChangedFiles         []string
 	AllowedFiles         []string
@@ -430,6 +434,9 @@ type EvaluateRunInput struct {
 	FullSuiteExitCode   int
 	FullSuiteDurationMs int64
 	FullSuiteLogSHA256  string
+	// FullSuiteRerun is the full suite's rerun, as VerifyRerun is
+	// canonical verification's.
+	FullSuiteRerun *run.VerifyRerun
 
 	// NamedGates is the lint/security_audit/unit_tests/
 	// integration_tests named gates, one entry per gate the project
@@ -486,6 +493,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	var result EvaluateRunResult
 
 	gate := CanonicalVerify(input.VerifyCommand, input.BuildExitCode, input.VerifyExitCode, input.VerifyDurationMs, input.VerifyLogSHA256)
+	gate.Rerun = input.VerifyRerun
 	result.GateResults = append(result.GateResults, gate)
 	accepted := gate.Passed
 	if !gate.Passed {
@@ -541,6 +549,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 
 	if input.FullSuiteCommand != nil {
 		suiteGate := FullSuiteVerify(input.FullSuiteCommand, input.FullSuiteExitCode, input.FullSuiteDurationMs, input.FullSuiteLogSHA256)
+		suiteGate.Rerun = input.FullSuiteRerun
 		result.GateResults = append(result.GateResults, suiteGate)
 		if !suiteGate.Passed {
 			accepted = false

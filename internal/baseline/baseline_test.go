@@ -100,11 +100,11 @@ func TestAnOverlongFailureBesideANamedOneHalts(t *testing.T) {
 }
 
 func TestAFailureThatNamesNoTestHaltsWithTheFirstError(t *testing.T) {
-	b := Evaluate("pytest -q", 127, "sh: 1: pytest: not found\n", "sh: 1: pytest: not found", "Make test_sign pass.", nil)
+	b := Evaluate("pytest -q", 127, "sh: 1: pytest: Permission denied\n", "sh: 1: pytest: Permission denied", "Make test_sign pass.", nil)
 	if !b.Halts() || b.FailingCount != 0 {
 		t.Fatalf("halts=%v failing=%d, want a halt with no test named", b.Halts(), b.FailingCount)
 	}
-	if want := `failed: exit 127; first error in log: "sh: 1: pytest: not found"`; b.Summary() != want {
+	if want := `failed: exit 127; first error in log: "sh: 1: pytest: Permission denied"`; b.Summary() != want {
 		t.Errorf("summary = %q, want %q", b.Summary(), want)
 	}
 }

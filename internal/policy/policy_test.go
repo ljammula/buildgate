@@ -344,6 +344,34 @@ func TestEvaluateRunAcceptsWhenOnlyCanonicalVerifyDeclared(t *testing.T) {
 	}
 }
 
+// The reruns of canonical verification and the full suite reach their
+// gates' results as evidence; the exit codes alone decide Passed.
+func TestEvaluateRunCopiesVerifyRerunsToTheirGates(t *testing.T) {
+	verifyRerun := &run.VerifyRerun{Outcome: run.VerifyRerunPassed, FailingTests: []string{"TestA"}, FirstExitCode: 1}
+	suiteRerun := &run.VerifyRerun{Outcome: run.VerifyRerunFailed, FailingTests: []string{"TestB"}, FirstExitCode: 1, ExitCode: 1}
+	result := EvaluateRun(EvaluateRunInput{
+		VerifyCommand:       []string{"sh", "-c", "make verify"},
+		VerifyRerun:         verifyRerun,
+		FullSuiteCommand:    []string{"sh", "-c", "make test"},
+		FullSuiteExitCode:   1,
+		FullSuiteRerun:      suiteRerun,
+		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+	})
+	byCheck := map[string]run.GateResult{}
+	for _, g := range result.GateResults {
+		byCheck[g.Check] = g
+	}
+	if g := byCheck["canonical_verify"]; !g.Passed || g.Rerun != verifyRerun {
+		t.Errorf("canonical_verify = %+v, want passed with its rerun", g)
+	}
+	if g := byCheck["full_suite_verify"]; g.Passed || g.Rerun != suiteRerun {
+		t.Errorf("full_suite_verify = %+v, want failed with its rerun", g)
+	}
+	if result.Accepted {
+		t.Error("accepted with a failed full suite")
+	}
+}
+
 func TestEvaluateRunRejectsOnFailingCanonicalVerify(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:       []string{"sh", "-c", "make verify"},
