@@ -100,7 +100,7 @@ Two factory `note` lines exist:
   build waits for the lock inside its job slot (a corrective round beside
   builds that hold it shared) and when an isolated run waits for the shared
   lock behind an exclusive holder. A wait that ends without the lock writes
-  `acquired` with outcome `fail`, so it no longer reads as waiting. A run that finds the repository held
+  `acquired` with outcome `fail`, which closes the wait. A run that finds the repository held
   before it starts gives its slot back instead; that wait is the worker
   heartbeat's `repository_waits`.
 - `build` note — written once after evidence is loaded, `detail` = a
