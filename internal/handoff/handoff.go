@@ -299,7 +299,7 @@ func failsOnBase(r *run.Run, check string) bool {
 // reclaimed result that could not be checked for it.
 func setupNotRun(r *run.Run) bool {
 	for _, g := range r.GateResults {
-		if g.SetupNotRun() || g.ReclaimNotChecked() {
+		if g.SetupNotRun() || g.InstallNotRun() || g.ReclaimNotChecked() {
 			return true
 		}
 	}

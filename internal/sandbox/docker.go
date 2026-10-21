@@ -179,6 +179,11 @@ type LaunchSpec struct {
 	// default), which bypasses ResolveDefaultWorkerIdentity's separated-
 	// identity default entirely and never sets WorkerUmask at all.
 	WorkerUmask string
+	// RestoreInstall, set only on a repository-command launch (build,
+	// verify, gates; never a review) from an install image, has the worker
+	// wrapper restore the image's install tree into /workspace before the
+	// command (installRestorePrelude). The Docker path does not restore.
+	RestoreInstall bool
 	// ProgressPath, when non-empty, is the run's progress.jsonl sidecar
 	// (progress.Path/PathInDir) that the stdout-scanning loop below
 	// appends to whenever a line matches the FACTORY_PROGRESS worker

@@ -6,6 +6,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
+	"buildgate/internal/workflow"
 	"context"
 	"crypto/x509"
 	"io"
@@ -70,6 +71,10 @@ type dockerBoundary interface {
 	// toolchainImage builds, or finds already built, the image that is base
 	// with the toolchains buildArgs name, and returns it by digest.
 	toolchainImage(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
+	// installImages is the store of repositories' install images: what a
+	// run's worker finds, builds and removes them through, and what
+	// `factoryd sandbox evict` removes.
+	installImages() workflow.InstallImages
 	// requiredBinaries checks that the image has the requested executables on
 	// PATH as the worker identity.
 	requiredBinaries(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)

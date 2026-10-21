@@ -99,7 +99,7 @@ func initMain(dp *deps, args []string) error {
 	var detectedVerifyCommand string
 	if *writeFactoryYML {
 		detectedVerifyCommand = detectInitVerifyCommand(*root)
-		contents[filepath.Join(*root, projectconfig.FileName)] = factoryYMLContent(detectedVerifyCommand, projectconfig.PreflightProfileBrownfield)
+		contents[filepath.Join(*root, projectconfig.FileName)] = factoryYMLWithSandbox(*root, detectedVerifyCommand, projectconfig.PreflightProfileBrownfield)
 	}
 	if err := writeScaffoldFiles(*root, contents); err != nil {
 		return err
@@ -110,7 +110,7 @@ func initMain(dp *deps, args []string) error {
 		} else {
 			fmt.Printf("Could not detect a real verify command (no Makefile verify target, go.mod, package.json, or pyproject.toml/requirements.txt found) -- %s's verify_command still needs filling in by hand.\n", projectconfig.FileName)
 		}
-		fmt.Println(factoryYMLCommitReminder())
+		printFactoryYMLNotes(*root)
 	}
 	fmt.Println("Next: replace the placeholder prose, then flip spec/spec.md's STATUS line to FROZEN once reviewed. `factoryd check-project` (and factoryd <run>'s own mandatory preflight, unless -skip-project-check) validate the result.")
 	return nil

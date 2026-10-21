@@ -47,6 +47,15 @@ another profile:
   `memory add`, `drop`, `propose`, `on` or `off`: each is the operator's
   decision, like approving a gate. Relay a candidate's id and line and let
   the operator choose.
+- `factoryd sandbox show -repo <repo-path>`: the repository's committed
+  `sandbox:` block (its install commands), its hash and whether the operator
+  approved it (read-only). `factoryd sandbox approve` is the operator's
+  decision, like approving a gate: never run it, and never pass its `-sha256`
+  on the operator's behalf. When a submit or a run is refused with `the sandbox
+  block <hash> ... is not approved`, show the operator the block from `sandbox
+  show`, give them the `factoryd sandbox approve -repo <repo-path>` command
+  and let them run it. `factoryd sandbox evict` is the operator's too: never
+  run it.
 - `factoryd console`
 - `factoryd submit [-verify-command '<cmd>'] -request-file <file> <repo-path>`,
   after the operator confirms the request text. Add

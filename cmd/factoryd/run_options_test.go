@@ -35,6 +35,8 @@ func TestRunOptionsActivitiesCarriesEveryWorkerSetting(t *testing.T) {
 		SandboxCPUs:            "1.5",
 		SandboxTmpfsSize:       "3g",
 		ModelHostConcurrency:   2,
+		ApprovalDataDir:        "/operator-data",
+		InstallCacheImages:     5,
 		Relay:                  modelRouteOptions{CABundlePath: "/ca.pem"},
 		ComposeServices:        composeServicesOptions{WorkerEnvironment: map[string]string{"K": "V"}},
 	}
@@ -62,6 +64,9 @@ func TestRunOptionsActivitiesCarriesEveryWorkerSetting(t *testing.T) {
 		DataDir:                  "/data",
 		LogDir:                   filepath.Join("/data", "runs", "run-1"),
 		CheckpointDir:            filepath.Join("/data", "temporal-checkpoints", "run-1"),
+		SandboxApprovalsDataDir:  "/operator-data",
+		InstallCacheImages:       5,
+		InstallLockDir:           installLockDir(),
 	}
 	if got := opts.activities(); !reflect.DeepEqual(got, want) {
 		t.Errorf("activities() =\n%+v\nwant\n%+v", got, want)

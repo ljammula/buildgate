@@ -33,7 +33,7 @@ This repo enforces its own safety properties on itself. Two files are
 **normative**, not descriptive, and are checked mechanically:
 
 - [`safety-contract.md`](safety-contract.md) — trust boundaries, threat
-  model, invariants SC-001–SC-020, the full run state graph. A change
+  model, invariants SC-001–SC-021, the full run state graph. A change
   that weakens an invariant needs a new contract review, not a quiet
   code edit.
 - [`CLAIMS.md`](CLAIMS.md) — every normative claim mapped to the test
@@ -314,6 +314,13 @@ or the worker's Go environment also runs `make live-private-module`: one real
 ticket on `testdata/fixtures/private-module-go`, whose dependency is a module
 only a file `GOPROXY` on the host has. It needs the registry proxy image built
 from the same checkout (`make registry-proxy-image`, or `make install`).
+
+A change to the install image or the `sandbox:` block (`internal/sandbox`'s
+`install_*.go`, `internal/workflow/activities_install.go`, the restore in the
+worker wrapper) also runs `make live-install-cache`: one real ticket four times
+on `testdata/fixtures/install-cache-node`, which proves the image is built
+once, reused, rebuilt on a lockfile change, and that an unapproved block is
+refused before any sandbox.
 
 A change to the PR-review pipeline (`internal/requestdriver/pr_review_driver.go`,
 `internal/forge`'s review state, the round's addendum or replies) also runs

@@ -603,6 +603,7 @@ func subcommands() map[string]subcommand {
 			return gateTokenMain(dp, os.Stdout, args)
 		},
 		"memory":  memoryMain,
+		"sandbox": sandboxMain,
 		"content": contentMain,
 		"help": func(_ *deps, args []string) error {
 			return helpMain(os.Stdout, args)

@@ -63,6 +63,7 @@ func (tr *ticketRun) prepareBaselineCheck() error {
 	if err != nil {
 		return fmt.Errorf("-baseline-check: resolve -data-dir: %w", err)
 	}
+	tr.approvalDataDir = dataDir
 	checkDir := filepath.Join(dataDir, baselineChecksDir, "check-"+time.Now().UTC().Format("20060102-150405.000"))
 	if err := os.MkdirAll(checkDir, 0o750); err != nil {
 		return fmt.Errorf("-baseline-check: create %s: %w", checkDir, err)

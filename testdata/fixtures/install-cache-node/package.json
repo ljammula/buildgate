@@ -1,0 +1,11 @@
+{
+  "name": "install-cache-node",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "is-number": "7.0.0"
+  }
+}

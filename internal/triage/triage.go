@@ -160,6 +160,9 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		if g.SetupNotRun() {
 			return "canonical_verify: " + run.SetupNotRunMessage
 		}
+		if g.InstallNotRun() {
+			return "canonical_verify: " + run.InstallNotRunMessage
+		}
 		if g.ReclaimNotChecked() {
 			// The factory's own sentence, whole: it is built to fit
 			// (run.ReclaimNotCheckedMessage).

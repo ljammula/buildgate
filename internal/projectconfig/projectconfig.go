@@ -119,9 +119,13 @@ type Config struct {
 	Gates []RepoGate `yaml:"gates"`
 	// Setup and Autofix are lists of shell commands, one per entry, from
 	// the committed .factory.yml. They are validated and carried to the
-	// run; nothing runs them yet.
+	// run. Setup runs at the start of every repository-command step (build,
+	// verify, gates), after Sandbox.Install; Autofix is carried only.
 	Setup   []string `yaml:"setup"`
 	Autofix []string `yaml:"autofix"`
+	// Sandbox is the optional install recipe. It binds only after the
+	// operator approved its SHA-256 (ApprovalStore).
+	Sandbox *Sandbox `yaml:"sandbox"`
 	// SHA256 is the hex SHA-256 of the committed file's bytes this config
 	// was parsed from. Set by Load, never read from the file.
 	SHA256 string `yaml:"-"`
@@ -310,6 +314,11 @@ func (c *Config) Validate() error {
 	}
 	if err := validateRequiredBinaries(c.RequiredBinaries); err != nil {
 		return err
+	}
+	if c.Sandbox != nil {
+		if err := c.Sandbox.validate(); err != nil {
+			return err
+		}
 	}
 	return c.validateGates()
 }

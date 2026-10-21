@@ -1003,6 +1003,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorCheckUnpushedCommits(ctx, in.targetRepo))
 		checks = append(checks, doctorCheckProjectToolchains(ctx, in)...)
 		checks = append(checks, doctorCheckRequiredBinaries(ctx, in)...)
+		checks = append(checks, doctorCheckSandboxBlock(in)...)
 		checks = append(checks, doctorCheckBaseline(in, doctorChecksFailed(checks)))
 	}
 	for _, gate := range []struct{ label, command string }{

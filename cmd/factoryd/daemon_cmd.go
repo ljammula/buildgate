@@ -390,6 +390,7 @@ func (d *daemonRun) startHeartbeat() error {
 		// crash, and on every reclaim tick for a run reconciled terminal
 		// after its submitter stopped waiting (see scratchRunInFlight).
 		removeScratchDirs(ctx, *d.sandboxDocker, d.absDataDir)
+		sweepRunLocalInstallImages(ctx, d.dp, *d.sandboxDocker, d.absDataDir)
 	}
 	d.reconcileSandboxOrphans(d.signalCtx)
 
@@ -465,10 +466,16 @@ func (d *daemonRun) startWorker() error {
 		// own doc comment.
 		EgressCABundlePath: *d.egressCABundle,
 		Sandboxes:          d.dp.sandbox.runtime(),
-		MeterLedgerRoot:    meterLedgerRoot(),
-		DataDir:            d.absDataDir,
-		LogDir:             filepath.Join(d.absDataDir, "logs"),
-		CheckpointDir:      filepath.Join(d.absDataDir, "temporal-checkpoints"),
+		InstallImages:      d.dp.docker.installImages(),
+		// The daemon's data dir is the operator's: its sandbox approvals
+		// are the ones a run is checked against again.
+		SandboxApprovalsDataDir: d.absDataDir,
+		InstallCacheImages:      d.settings.SandboxInstallCacheImages,
+		InstallLockDir:          installLockDir(),
+		MeterLedgerRoot:         meterLedgerRoot(),
+		DataDir:                 d.absDataDir,
+		LogDir:                  filepath.Join(d.absDataDir, "logs"),
+		CheckpointDir:           filepath.Join(d.absDataDir, "temporal-checkpoints"),
 	}
 	// This daemon binds every routes:-named RoutePolicy through
 	// modelrole.CheckRouteBinding (checkRouteFunc) then resolves that

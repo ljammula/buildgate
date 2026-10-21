@@ -584,7 +584,8 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		if factoryDirErr != nil {
 			return refusedFactoryDirAttempt(afterAttempt, attempt, command, factoryDirErr)
 		}
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...)}
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...),
+			RestoreInstall: restoresInstall(ctx, input, image)}
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.
 			prepared, prepareErr := registryProxy.PrepareWorker(s)
@@ -816,4 +817,11 @@ func (a *Activities) runWithRetriesFn() runWithRetriesCheckedFunc {
 		}
 	}
 	return runner.RunWithRetriesChecked
+}
+
+// restoresInstall reports whether a launch of image restores the run's
+// install before its command: a repository-command launch (never a review's)
+// from the install image PrepareInstallImageActivity returned.
+func restoresInstall(ctx context.Context, input RunWorkflowInput, image string) bool {
+	return input.InstallImage != "" && image == input.InstallImage && !isReviewLaunch(ctx)
 }

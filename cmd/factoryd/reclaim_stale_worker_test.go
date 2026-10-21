@@ -136,7 +136,7 @@ func TestReclaimRefusesAnAcceptedResultMissingARepositoryGate(t *testing.T) {
 
 	// The submitter's own path, for the same result: same state, same gate
 	// results.
-	normal := requireCurrentWorker(map[string]string{"repo-no_todo": "! grep -rn TODO src"}, nil, allowingRunWorkflowResultForTest(run.StateAccepted, "deadbeef"))
+	normal := requireCurrentWorker(map[string]string{"repo-no_todo": "! grep -rn TODO src"}, nil, "", allowingRunWorkflowResultForTest(run.StateAccepted, "deadbeef"))
 	if normal.State != got.State || len(normal.GateResults) != len(got.GateResults) {
 		t.Errorf("reclaim recorded %s with %d gate results, the submitter's path %s with %d", got.State, len(got.GateResults), normal.State, len(normal.GateResults))
 	}

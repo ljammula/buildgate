@@ -629,9 +629,26 @@ optional named gate commented out). Full key reference, named-gate
 semantics, and the restrictions on `sandbox_image`/ceiling keys:
 [USAGE_REFERENCE.md § `.factory.yml` reference](USAGE_REFERENCE.md#factoryyml-reference).
 
-A `setup:` list in the file (code generation, an install) runs before the
+A `setup:` list in the file (code generation) runs before the
 command of every build, verify and gate sandbox, so each sees the same
 prepared tree.
+
+A `sandbox:` block (the dependency install; `onboard -write-factory-yml`
+drafts one for Node and Python repositories) takes effect only after you
+approve it. After committing the file:
+
+```sh
+factoryd sandbox show -repo <repo>      # read the install commands and the hash
+factoryd sandbox approve -repo <repo>   # y/N on a terminal, or -sha256 <hash> without one
+```
+
+Until then `submit` and every run against the repository are refused with
+`sandbox: the sandbox block ... is not approved`. Change the block later and
+approve it again; `factoryd doctor -target-repo <repo>` shows the state.
+The first run after an approval runs the install once and keeps its result
+as an install image; later runs with the same lockfiles start from it
+(`buildgate: install restored <key>` in a step's log).
+`factoryd sandbox evict -repo <repo>` removes those images.
 
 ## New app from scratch
 

@@ -21,6 +21,7 @@
   "compose_services_memory": "3g",
   "compose_services_ready_timeout": 150000000000,
   "compose_services_require_digest": true,
+  "configured_sandbox_image": "example.test/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "conformity_policy": "advisory",
   "data_dir": "<DATA_DIR>",
   "earlier_attempt_path": "<INPUTS>/earlier-attempt.md",

@@ -4,9 +4,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"buildgate/internal/projectconfig"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sessionconfig"
 	"buildgate/internal/workflow"
 )
 
@@ -47,6 +49,19 @@ type runOptions struct {
 	// the RunWorkflowInput field of the same name.
 	ProjectConfigCommitSHA string
 	Skills                 roleSkillSet
+	// Sandbox is the committed .factory.yml sandbox block the operator
+	// approved, nil when the repository has none; SandboxRepoKey names the
+	// repository its approval and install image belong to.
+	Sandbox        *projectconfig.Sandbox
+	SandboxRepoKey string
+	// ConfiguredSandboxImage is the operator's sandbox_image before a
+	// derived toolchain image replaced SandboxImage.
+	ConfiguredSandboxImage string
+	// ApprovalDataDir is the operator's data dir, whose sandbox approvals
+	// this process's worker checks again; "" means DataDir.
+	ApprovalDataDir string
+	// InstallCacheImages is sandbox_install_cache_images.
+	InstallCacheImages int
 
 	ReferenceOracleDir       string
 	ReferenceOracleMountPath string
@@ -141,7 +156,41 @@ func (o runOptions) activities() *workflow.Activities {
 		DataDir:                  o.DataDir,
 		LogDir:                   run.Dir(o.DataDir, o.ID),
 		CheckpointDir:            o.checkpointDir(),
+		SandboxApprovalsDataDir:  firstNonEmptyString(o.ApprovalDataDir, o.DataDir),
+		InstallCacheImages:       o.InstallCacheImages,
+		InstallLockDir:           installLockDir(),
 	}
 	applyRelayOptsToActivities(activities, o.Relay)
 	return activities
+}
+
+// sandboxSHA256 is the approved sandbox block's hash, "" without one.
+func (o runOptions) sandboxSHA256() string {
+	if o.Sandbox == nil {
+		return ""
+	}
+	return o.Sandbox.SHA256()
+}
+
+// sandboxBlock is the approved sandbox block, the zero block without one.
+func (o runOptions) sandboxBlock() projectconfig.Sandbox {
+	if o.Sandbox == nil {
+		return projectconfig.Sandbox{}
+	}
+	return *o.Sandbox
+}
+
+// sandboxRepoKey is SandboxRepoKey when the run has a sandbox block.
+func (o runOptions) sandboxRepoKey() string {
+	if o.Sandbox == nil {
+		return ""
+	}
+	return o.SandboxRepoKey
+}
+
+// installLockDir is the machine-wide directory of the install image build
+// locks, under the root every profile's data dir is in, as the local
+// registry the images go to is one per machine.
+func installLockDir() string {
+	return filepath.Join(sessionconfig.DataRoot(), "install-images")
 }

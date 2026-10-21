@@ -295,7 +295,7 @@ func doOnboard(dp *deps, opts onboardOptions) (onboardResult, error) {
 	// same contents map so a conflict here continues to block whichever
 	// docs above are still missing, too (TestOnboardWriteFactoryYMLConflictIsAllOrNothing).
 	if writeFactoryYML {
-		contents[filepath.Join(repoRoot, projectconfig.FileName)] = factoryYMLContent(verifyCommand, projectconfig.PreflightProfileBrownfield)
+		contents[filepath.Join(repoRoot, projectconfig.FileName)] = factoryYMLWithSandbox(repoRoot, verifyCommand, projectconfig.PreflightProfileBrownfield)
 	}
 	if err := writeScaffoldFiles(repoRoot, contents); err != nil {
 		rollback()
@@ -335,7 +335,7 @@ func doOnboard(dp *deps, opts onboardOptions) (onboardResult, error) {
 		} else {
 			fmt.Printf("Could not detect a real verify command -- %s's verify_command still needs filling in by hand.\n", projectconfig.FileName)
 		}
-		fmt.Println(factoryYMLCommitReminder())
+		printFactoryYMLNotes(repoRoot)
 	}
 	fmt.Println("Next: replace the remaining placeholder prose, then flip spec/spec.md's STATUS line to FROZEN once reviewed. `factoryd check-project` (and factoryd <run>'s own mandatory preflight, unless -skip-project-check or -preflight-profile=brownfield) validate the result.")
 	return onboardResult{

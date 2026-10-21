@@ -421,9 +421,41 @@ func AddDetachedWorktree(repoDir, worktreePath, rev string) error {
 // which its configuration could point into a directory a sandbox wrote.
 func scratchGit(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
 	return retryOnGitLock(func() ([]byte, error) {
-		argv := append([]string{"-C", repoDir, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
-		return exec.CommandContext(ctx, "git", argv...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, "git", HardenedGitArgs(repoDir, args...)...)
+		cmd.Env = HardenedGitEnv()
+		return cmd.CombinedOutput()
 	})
+}
+
+// HardenedGitEnv is the environment of a host git call on a repository a
+// sandbox has had, or on a commit read as trusted: no pathspec magic (a name
+// is a literal), no lock, prompt, system or user configuration, no replace
+// refs and no lazy fetch. Every GIT_ variable of the caller's environment is
+// dropped first (GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY, GIT_CONFIG_*,
+// GIT_REPLACE_REF_BASE and the rest redirect or alter a read), so only what
+// is set here reaches git.
+func HardenedGitEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "GIT_LITERAL_PATHSPECS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1")
+}
+
+// HardenedGitArgs is the argv after "git" for running git in dir with
+// nothing from any configuration that executes a program or changes what is
+// read. Use it with HardenedGitEnv.
+func HardenedGitArgs(dir string, args ...string) []string {
+	return append([]string{
+		"--no-pager",
+		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+		"-c", "core.pager=cat", "-c", "diff.external=",
+		"-c", "core.attributesFile=/dev/null",
+		"-c", "protocol.allow=never",
+		"-C", dir,
+	}, args...)
 }
 
 // AddScratchWorktree is AddDetachedWorktree for a checkout made while a run's
