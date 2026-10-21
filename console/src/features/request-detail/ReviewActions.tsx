@@ -6,6 +6,7 @@ import { Button } from "@/ui/Button";
 import { REQUEST_VERBS } from "@/domain/status";
 
 import { isReviewState } from "./requestDetailLogic";
+import { usePendingComments } from "@/shared/request/usePendingComments";
 import { type RequestDialogs, awaitsTicketOracle } from "./useRequestDialogs";
 
 /** The id of the element wrapping the plan_review ticket oracle panel. */
@@ -40,6 +41,7 @@ export function ReviewActions({
   anyEditorOpen,
 }: ReviewActionsProps) {
   const { canWrite } = useApi();
+  const pending = usePendingComments(request).comments.length;
   if (!isReviewState(request.state)) return null;
   const blocked = dialogs.acting || !canWrite || !detailLoaded || anyEditorOpen;
   const ticketOracleIncomplete =
@@ -78,7 +80,9 @@ export function ReviewActions({
         }}
       >
         <CircleX aria-hidden="true" />
-        {REQUEST_VERBS.requestChanges}
+        {pending > 0
+          ? `${REQUEST_VERBS.requestChanges} (${pending})`
+          : REQUEST_VERBS.requestChanges}
       </Button>
     </>
   );

@@ -5,6 +5,12 @@ import { useState } from "react";
 import { type RequestSummary, decodeRequestSummary } from "@/domain/request";
 import { sha256Hex } from "@/domain/contentHash";
 import { getOperatorName, setOperatorName } from "@/platform/operatorIdentity";
+import {
+  addPendingComment,
+  getPendingComments,
+  pendingKey,
+  clearAllPendingCommentsForTest,
+} from "@/platform/pendingComments";
 import { readFixtureJson } from "@/test/fixtures";
 import { apiErrorResponse, json, renderApp } from "@/test/render";
 
@@ -19,6 +25,10 @@ import { SendBackDialog } from "./SendBackDialog";
 
 beforeEach(() => {
   setOperatorName("operator");
+});
+
+afterEach(() => {
+  clearAllPendingCommentsForTest();
 });
 
 function fixture(name: string, patch: Record<string, unknown> = {}): RequestSummary {
@@ -602,6 +612,44 @@ describe("Request changes with notes on specific places", () => {
         { path: "spec.md", section: "## Problem", note: "say who is charged" },
       ],
     });
+  });
+
+  test("comments written on passages are the dialog's first notes, are sent with their quotes, and are then forgotten", async () => {
+    setOperatorName("jane");
+    const request = specReview();
+    const key = pendingKey(request.id, request.enteredAt);
+    addPendingComment(key, {
+      path: "spec.md",
+      section: "## Problem",
+      item: 0,
+      quote: "double-processed",
+      note: "say who is charged",
+    });
+    const { server } = renderApp(
+      <Host request={request} render={(props) => <RejectDialog {...props} />} />,
+      { server: [rejectRoute] },
+    );
+    const user = userEvent.setup();
+    const confirm = await screen.findByRole("button", { name: "Request changes" });
+    expect(confirm).toBeEnabled();
+    expect(screen.getByText(/Only the commented sections will be redrafted/)).toBeInTheDocument();
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(server.sent("POST /requests/req-spec-review/reject")).toHaveLength(1);
+    });
+    expect(server.sent("POST /requests/req-spec-review/reject")[0]?.body).toMatchObject({
+      reason: "",
+      anchors: [
+        {
+          path: "spec.md",
+          section: "## Problem",
+          quote: "double-processed",
+          note: "say who is charged",
+        },
+      ],
+    });
+    expect(getPendingComments(key)).toEqual([]);
   });
 
   test("a removed note is not sent, and the reason is required again", async () => {

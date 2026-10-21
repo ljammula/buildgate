@@ -116,6 +116,19 @@ notification carries text and that one click, never an action or a token.
 | The switch        | `shared/shell/NotificationToggle.tsx`, in the sidebar footer                                                                                            | Absent without the API; "Turn on notifications", "Notifications on", or a note that the browser blocks them                                                                                                                                                                               |
 | Opening a request | `requestPath` in `routes/paths.ts`, through the router                                                                                                  | The click handler runs `window.focus()`, navigates, then closes the notification                                                                                                                                                                                                          |
 
+## Comments on passages
+
+At `spec_review` and `plan_review` a reader selects text in a spec or ticket
+file's raw view and comments on it; the comments are sent together by
+"Request changes", and the redraft changes only the sections they are on.
+
+| Part              | Source                                                                                                | Rule                                                                                                                                                                                                     |
+| ----------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The selection     | `features/request-detail/FileContentSection.tsx`, `PassageComposer.tsx`                               | Only in the raw view, where the shown text is the file's text; a selection that is not plain text of the file cannot be placed and says so                                                               |
+| Where it lands    | `anchorForSelection` in `domain/reviewAnchors.ts`                                                     | The nearest required heading above it, the numbered criterion it starts in, and the selected text as the quote (cut at its section, 2000 bytes)                                                          |
+| The pending batch | `platform/pendingComments.ts`, `features/request-detail/usePendingComments.ts`, `PendingComments.tsx` | Per browser, keyed by request id and the time it entered the stage, so a redraft starts with none; listed under the oracle warning, removable one by one                                                 |
+| Sending it        | `shared/approval/RejectDialog.tsx`                                                                    | "Request changes (N)" opens the dialog with the batch as its notes. A reason written too asks the server for a whole redraft; the server refuses (409) a comment whose quote is no longer in its section |
+
 ## Module layout
 
 ```text

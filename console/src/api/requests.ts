@@ -198,6 +198,7 @@ export async function rejectRequest(
             path: a.path,
             ...(a.section === "" ? {} : { section: a.section }),
             ...(a.item === 0 ? {} : { item: a.item }),
+            ...(a.quote === "" ? {} : { quote: a.quote }),
             note: a.note,
           })),
         }

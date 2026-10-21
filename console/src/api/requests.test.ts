@@ -204,7 +204,15 @@ describe("writes", () => {
         reason: "",
         by: "jane",
         seen: { state: "plan_review", enteredAt: "2026-09-10T09:30:00.5Z" },
-        anchors: [{ path: "tickets/001.spec.md", section: "Steps", item: 2, note: "split it" }],
+        anchors: [
+          {
+            path: "tickets/001.spec.md",
+            section: "Steps",
+            item: 2,
+            note: "split it",
+            quote: "1. do it all",
+          },
+        ],
       }),
     );
     expect(JSON.parse(rejection.body as string)).toEqual({
@@ -212,7 +220,15 @@ describe("writes", () => {
       expected_state: "plan_review",
       expected_entered_at: "2026-09-10T09:30:00.5Z",
       by: "jane",
-      anchors: [{ path: "tickets/001.spec.md", section: "Steps", item: 2, note: "split it" }],
+      anchors: [
+        {
+          path: "tickets/001.spec.md",
+          section: "Steps",
+          item: 2,
+          note: "split it",
+          quote: "1. do it all",
+        },
+      ],
     });
 
     const sendBack = await sentBy((http) =>

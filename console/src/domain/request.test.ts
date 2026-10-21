@@ -320,6 +320,7 @@ test("request-plan-review decodes", () => {
           section: "### Steps",
           item: 0,
           note: "split the migration out",
+          quote: "",
         },
       ],
       note: "Otherwise fine.",
@@ -408,6 +409,7 @@ test("request-every-field decodes with every optional field populated", () => {
           section: "every-field section",
           item: 3,
           note: "every-field note",
+          quote: "every-field quote",
         },
       ],
       note: "every-field note",
@@ -578,7 +580,7 @@ test("a rejection's anchored notes are decoded; a plain rejection has none", () 
         from_state: "spec_review",
         note: "Otherwise fine.",
         anchors: [
-          { path: "spec.md", section: "## Scope", note: "too wide" },
+          { path: "spec.md", section: "## Scope", note: "too wide", quote: "two much" },
           { path: "spec.md", section: "## Acceptance criteria", item: 2, note: "which account?" },
         ],
       },
@@ -586,8 +588,14 @@ test("a rejection's anchored notes are decoded; a plain rejection has none", () 
     ],
   });
   expect(withAnchors.rejections[0]?.anchors).toEqual([
-    { path: "spec.md", section: "## Scope", item: 0, note: "too wide" },
-    { path: "spec.md", section: "## Acceptance criteria", item: 2, note: "which account?" },
+    { path: "spec.md", section: "## Scope", item: 0, note: "too wide", quote: "two much" },
+    {
+      path: "spec.md",
+      section: "## Acceptance criteria",
+      item: 2,
+      note: "which account?",
+      quote: "",
+    },
   ]);
   expect(withAnchors.rejections[0]?.note).toBe("Otherwise fine.");
   expect(withAnchors.rejections[1]).toMatchObject({ anchors: [], note: "" });
