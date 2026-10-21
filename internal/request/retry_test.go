@@ -2,6 +2,8 @@ package request
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -607,5 +609,38 @@ func TestStackBaseIsThePreviousTicketsBranchWhileItsPullRequestIsOpen(t *testing
 	r.Tickets[0].PRState = "merged"
 	if got := r.StackBase(2); got != "" {
 		t.Errorf("StackBase after the PR under it merged = %q, want the default branch", got)
+	}
+}
+
+// TestRetryOfAHaltedReplanResumesPlanning covers a re-plan that halted
+// after a plan_review rejection: the rejected plan's TicketCount is still
+// set, but its tickets are gone, so a retry must plan again rather than
+// start building ticket 1.
+func TestRetryOfAHaltedReplanResumesPlanning(t *testing.T) {
+	dataDir := t.TempDir()
+	r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+	r.State = StatePlanning
+	r.TicketCount = 3
+	r.ApprovedSHA256 = map[string]string{specFileName: "abc"}
+	if err := os.MkdirAll(filepath.Dir(SpecPath(dataDir, r.ID)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(SpecPath(dataDir, r.ID), []byte("# Spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r.State = StateHalted
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Retry(dataDir, "req-1", "alice", "", fixedNow.Add(time.Minute), nil)
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if got.State != StatePlanning {
+		t.Fatalf("State = %q, want %q: a halted re-plan must plan again, not build a plan nobody approved", got.State, StatePlanning)
 	}
 }

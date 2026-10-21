@@ -45,7 +45,6 @@
 26 internal/registryproxy/server.go NewServer
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
-29 internal/request/retry.go retry
 27 internal/requestdriver/request_driver.go AdvanceBuilding
 26 internal/requestdriver/request_driver.go AdvancePlanning
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults

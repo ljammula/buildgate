@@ -110,7 +110,8 @@ func retryAcceptedNoPR(dataDir, id, by, reason string, r *Request, now time.Time
 //     request-level oracle (HaltOracleMaterialize) returns to
 //     oracle_review with the pins dropped, so the operator can edit
 //     oracle/ and approve again;
-//   - a halt/quarantine before any ticket existed (TicketCount == 0)
+//   - a halt/quarantine before any ticket existed (TicketCount == 0),
+//     or a halt in planning (a re-plan after a plan_review rejection),
 //     resumes the drafting stage the artifacts on disk show it reached --
 //     planning if an approved spec.md exists, the oracle stage if it
 //     halted there, otherwise spec drafting;
@@ -173,29 +174,12 @@ func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, open
 		}
 		return r, nil
 	}
-	if r.TicketCount == 0 {
+	if r.TicketCount == 0 || r.HaltedFrom() == StatePlanning {
 		// Halted before any ticket existed (a spec-drafting or planning
-		// failure): resume the drafting stage the artifacts on disk show
-		// it reached -- planning once an approved spec.md exists,
-		// otherwise spec drafting.
-		target := StateSpecDrafting
-		if _, err := os.Stat(SpecPath(dataDir, r.ID)); err == nil && r.ApprovedSHA256[specFileName] != "" {
-			target = StatePlanning
-		}
-		// A request that halted inside the oracle stage has an approved
-		// spec too, so the artifact check above would send it straight
-		// to planning and silently skip the stage it was opted into:
-		// resume where it actually halted.
-		if from := r.HaltedFrom(); from == StateOracleDrafting || from == StateOracleReview {
-			target = StateOracleDrafting
-		}
-		if err := r.ResumeDrafting(target, by, reason, now); err != nil {
-			return nil, err
-		}
-		if err := r.Save(dataDir); err != nil {
-			return nil, err
-		}
-		return r, nil
+		// failure), or halted in a re-plan after a plan_review rejection,
+		// which keeps the rejected plan's TicketCount but none of its
+		// tickets.
+		return resumeDraftingAfterHalt(dataDir, r, by, reason, now)
 	}
 	// TicketIndex 0 is valid here: a request halted at the very start of
 	// building (e.g. an approved-oracle hash mismatch, which is refused
@@ -267,4 +251,28 @@ func (r *Request) StackBase(index int) string {
 		return prev.Branch
 	}
 	return ""
+}
+
+// resumeDraftingAfterHalt resumes the drafting stage the artifacts on disk
+// show r reached: planning once an approved spec.md exists, otherwise spec
+// drafting, and the oracle stage when r halted there.
+func resumeDraftingAfterHalt(dataDir string, r *Request, by, reason string, now time.Time) (*Request, error) {
+	target := StateSpecDrafting
+	if _, err := os.Stat(SpecPath(dataDir, r.ID)); err == nil && r.ApprovedSHA256[specFileName] != "" {
+		target = StatePlanning
+	}
+	// A request that halted inside the oracle stage has an approved
+	// spec too, so the artifact check above would send it straight
+	// to planning and silently skip the stage it was opted into:
+	// resume where it actually halted.
+	if from := r.HaltedFrom(); from == StateOracleDrafting || from == StateOracleReview {
+		target = StateOracleDrafting
+	}
+	if err := r.ResumeDrafting(target, by, reason, now); err != nil {
+		return nil, err
+	}
+	if err := r.Save(dataDir); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
