@@ -235,6 +235,9 @@ export interface BaselineVerify {
   /** A path the ticket creates that the command needed; "" when that was not the failure. */
   readonly needsCreated: string;
   readonly firstError: string;
+  /** What the log shows as the reason when no test was named (missing_module, missing_program, dependency_unavailable, missing_path), and the name it gives; "" when it shows none. */
+  readonly cause: string;
+  readonly causeDetail: string;
   readonly expected: boolean;
   /** Paths the command left that diff_scope would flag (at most 20), and how many there were. */
   readonly leftOutOfScope: readonly string[];
@@ -256,6 +259,8 @@ function decodeBaselineVerify(o: JsonObject, at: string): BaselineVerify {
     unnamedCount: numberOr(o, "unnamed_count", at, 0),
     needsCreated: optString(o, "needs_created", at),
     firstError: optString(o, "first_error", at),
+    cause: optString(o, "cause", at),
+    causeDetail: optString(o, "cause_detail", at),
     expected: optBoolean(o, "expected", at),
     leftOutOfScope: o.left_out_of_scope == null ? [] : stringList(o, "left_out_of_scope", at),
     leftOutOfScopeCount: numberOr(o, "left_out_of_scope_count", at, 0),

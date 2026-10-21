@@ -22,8 +22,9 @@ func TestIntegrationBaselineVerifyHaltsBeforeTheBuild(t *testing.T) {
 	if r.State != run.StateHalted || r.HaltReasonCode != run.HaltReasonBaselineVerifyFailed {
 		t.Fatalf("state = %q, halt reason = %q; want halted with %q", r.State, r.HaltReasonCode, run.HaltReasonBaselineVerifyFailed)
 	}
-	if len(r.Attempts) != 1 || r.Attempts[0].Kind != run.BaselineVerifyAttemptKind || r.Attempts[0].ExitCode != 1 {
-		t.Errorf("Attempts = %+v, want only the failed baseline verify: no build ran", r.Attempts)
+	// The baseline and its rerun (one failing test the ticket does not name).
+	if len(r.Attempts) != 2 || r.Attempts[0].Kind != run.BaselineVerifyAttemptKind || r.Attempts[0].ExitCode != 1 || r.Attempts[1].Kind != run.BaselineVerifyAttemptKind || r.Attempts[1].ExitCode != 1 {
+		t.Errorf("Attempts = %+v, want only the failed baseline verify and its rerun: no build ran", r.Attempts)
 	}
 	const summary = "failed: TestPager; the ticket does not name it"
 	if r.BaselineVerify == nil || r.BaselineVerify.Summary() != summary || r.BaselineVerify.BaseSHA != r.BaseSHA {

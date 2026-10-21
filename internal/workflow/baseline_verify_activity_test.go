@@ -131,8 +131,10 @@ func TestBaselineVerifyFailureTheTicketDoesNotNameHaltsAndIsRecorded(t *testing.
 			t.Errorf("halt message %q lacks %q", appErr.Message(), want)
 		}
 	}
-	if attempts := AttemptsFromError(err); len(attempts) != 1 || attempts[0].Kind != run.BaselineVerifyAttemptKind || attempts[0].ExitCode != 1 {
-		t.Errorf("attempts on the error = %+v, want the baseline's", attempts)
+	// The baseline and its rerun (one failing test the ticket does not name),
+	// both failing.
+	if attempts := AttemptsFromError(err); len(attempts) != 2 || attempts[0].Kind != run.BaselineVerifyAttemptKind || attempts[0].ExitCode != 1 || attempts[1].Kind != run.BaselineVerifyAttemptKind || attempts[1].ExitCode != 1 {
+		t.Errorf("attempts on the error = %+v, want the baseline's and its rerun's", attempts)
 	}
 	record := loadBaselineRecord(t, logDir)
 	if !record.Halts() || record.Summary() != "failed: TestPager; the ticket does not name it" {
@@ -287,10 +289,12 @@ func TestAResumedRunWhoseHaltedRunNeverFinishedItsBaselineRunsIt(t *testing.T) {
 	input := resumedInput(t, dataDir, &run.Run{State: run.StateHalted})
 	_, err, logDir, launches := runBaselineActivity(t, input, "x", "--- FAIL: TestPager (0.00s)\n", 1, nil)
 	var appErr *temporal.ApplicationError
-	if launches != 1 || !errors.As(err, &appErr) || appErr.Type() != BaselineVerifyFailureType {
-		t.Fatalf("launches=%d err=%v, want the baseline run and its failure halting the resumed run", launches, err)
+	// Two launches: the baseline, and its rerun (one failing test the ticket
+	// does not name), which fails too.
+	if launches != 2 || !errors.As(err, &appErr) || appErr.Type() != BaselineVerifyFailureType {
+		t.Fatalf("launches=%d err=%v, want the baseline run, its rerun and their failure halting the resumed run", launches, err)
 	}
-	if record := loadBaselineRecord(t, logDir); record.InheritedFrom != "" || !record.Halts() {
+	if record := loadBaselineRecord(t, logDir); record.InheritedFrom != "" || !record.Halts() || record.Rerun == nil || record.Rerun.Outcome != run.VerifyRerunFailed {
 		t.Errorf("record = %+v, want this run's own", record)
 	}
 }

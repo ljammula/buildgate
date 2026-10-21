@@ -162,6 +162,13 @@ type BaselineVerify struct {
 	// FirstError is the log's first recognised error line, for a failure
 	// that named no test (a missing program, a failed install).
 	FirstError string `json:"first_error,omitempty"`
+	// Cause is what the log shows as the reason, for a failure that named no
+	// test: one of the BaselineCause constants. CauseDetail is the module,
+	// program, artifact or path it names, bounded and limited to path and
+	// identifier characters. Both are set only when the failure is not the
+	// ticket's own work and no special case below applies.
+	Cause       string `json:"cause,omitempty"`
+	CauseDetail string `json:"cause_detail,omitempty"`
 	// SetupFailed is the repository setup command that failed on the base
 	// commit (exit SetupFailedExitCode): the verify command never ran, and
 	// no change the build makes could pass it.
@@ -188,7 +195,26 @@ type BaselineVerify struct {
 	InheritedFrom string `json:"inherited_from,omitempty"`
 	LogPath       string `json:"log_path,omitempty"`
 	DurationMs    int64  `json:"duration_ms,omitempty"`
+	// Rerun is the command's second run after a first run whose failure
+	// qualified (see VerifyRerun); when it ran, the fields above are the
+	// rerun's. nil when the command was not rerun.
+	Rerun *VerifyRerun `json:"rerun,omitempty"`
 }
+
+// The causes a baseline failure that named no test can show
+// (BaselineVerify.Cause), a closed set.
+const (
+	// BaselineCauseMissingModule: a Python module the image lacks.
+	BaselineCauseMissingModule = "missing_module"
+	// BaselineCauseMissingProgram: a program the image lacks.
+	BaselineCauseMissingProgram = "missing_program"
+	// BaselineCauseDependencyUnavailable: a package or artifact the sandbox
+	// can neither download nor find in a cache.
+	BaselineCauseDependencyUnavailable = "dependency_unavailable"
+	// BaselineCauseMissingPath: a file or directory the command needs and
+	// cannot find (not in the base commit, or not where the command looks).
+	BaselineCauseMissingPath = "missing_path"
+)
 
 // BaselineVerifyMaxNamed bounds BaselineVerify.FailingTests and Unnamed.
 const BaselineVerifyMaxNamed = 20
@@ -240,6 +266,9 @@ func (b *BaselineVerify) expectedSummary() string {
 	}
 	if b.FailingCount == 0 {
 		s := fmt.Sprintf("failed: exit %d", b.ExitCode)
+		if c := b.causeText(); c != "" {
+			return s + "; " + c
+		}
 		if b.FirstError != "" {
 			s += fmt.Sprintf("; first error in log: %q", b.FirstError)
 		}
@@ -258,6 +287,28 @@ func (b *BaselineVerify) expectedSummary() string {
 		s += "; the ticket does not name " + namedAndMore(b.Unnamed, b.UnnamedCount)
 	}
 	return s
+}
+
+// causeText is the cause in factory words, with its detail quoted as data;
+// "" when the result has none.
+func (b *BaselineVerify) causeText() string {
+	with := func(format, fallback string) string {
+		if b.CauseDetail == "" {
+			return fallback
+		}
+		return fmt.Sprintf(format, b.CauseDetail)
+	}
+	switch b.Cause {
+	case BaselineCauseMissingModule:
+		return with("the sandbox image lacks the Python module %q", "the sandbox image lacks a Python module the command imports")
+	case BaselineCauseMissingProgram:
+		return with("the sandbox image lacks the program %q", "the sandbox image lacks a program the command runs")
+	case BaselineCauseDependencyUnavailable:
+		return with("cannot get the dependency %q (no network or cache for it)", "cannot get a dependency (no network or cache for it)")
+	case BaselineCauseMissingPath:
+		return with("the command cannot find %q", "the command cannot find a file it needs")
+	}
+	return ""
 }
 
 // namedAndMore is the first name and how many others there were.
@@ -294,6 +345,14 @@ func (b *BaselineVerify) HaltAdvice() string {
 	if b.SetupFailed != "" {
 		return "No model call was made: a setup: command of the repository's .factory.yml fails on the untouched repository, so no build could pass verification. " +
 			"Fix the command or the sandbox image it runs in."
+	}
+	switch b.Cause {
+	case BaselineCauseMissingModule, BaselineCauseMissingProgram, BaselineCauseDependencyUnavailable:
+		return "No model call was made: " + b.causeText() + ", so no build could pass verification. " +
+			"Add it to the sandbox image the project runs in, or install it with a setup: command in .factory.yml."
+	case BaselineCauseMissingPath:
+		return "No model call was made: " + b.causeText() + ", so no build could pass verification. " +
+			"Fix verify_command in .factory.yml, or have the ticket create the path (list it in its Allowed-Files)."
 	}
 	base := b.BaseSHA
 	if len(base) > 12 {

@@ -289,6 +289,17 @@
         "log_path": "every-field log_path",
         "log_sha256": "every-field log_sha256",
         "reason": "every-field reason"
+      },
+      "rerun": {
+        "outcome": "every-field outcome",
+        "failing_tests": [
+          "every-field failing_tests"
+        ],
+        "first_exit_code": 3,
+        "first_log_path": "every-field first_log_path",
+        "first_log_sha256": "every-field first_log_sha256",
+        "exit_code": 3,
+        "reason": "every-field reason"
       }
     }
   ],
@@ -397,6 +408,8 @@
     ],
     "needs_created": "every-field needs_created",
     "first_error": "every-field first_error",
+    "cause": "every-field cause",
+    "cause_detail": "every-field cause_detail",
     "setup_failed": "every-field setup_failed",
     "worker_image_stale": "every-field worker_image_stale",
     "expected": true,
@@ -406,7 +419,18 @@
     "left_out_of_scope_count": 3,
     "inherited_from": "every-field inherited_from",
     "log_path": "every-field log_path",
-    "duration_ms": 3
+    "duration_ms": 3,
+    "rerun": {
+      "outcome": "every-field outcome",
+      "failing_tests": [
+        "every-field failing_tests"
+      ],
+      "first_exit_code": 3,
+      "first_log_path": "every-field first_log_path",
+      "first_log_sha256": "every-field first_log_sha256",
+      "exit_code": 3,
+      "reason": "every-field reason"
+    }
   },
   "triage": "every-field triage",
   "handoff_sha256": "every-field handoff_sha256",

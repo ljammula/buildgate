@@ -223,7 +223,9 @@ func Evaluate(command string, exitCode int, log, firstError, ticket string, crea
 			b.NeedsCreated = path
 			b.NamedAs = []string{path}
 			b.Expected = true
+			return b
 		}
+		b.Cause, b.CauseDetail = Cause(log)
 		return b
 	}
 	b.Expected = b.UnnamedCount == 0

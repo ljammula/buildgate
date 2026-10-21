@@ -523,6 +523,11 @@ type GateResult struct {
 	// that passed, for a check that is not a named or repository command
 	// gate, and for a result recorded before the rerun existed.
 	BaseCheck *GateBaseCheck `json:"base_check,omitempty"`
+	// Rerun is the canonical_verify or full_suite_verify command's second
+	// run after a first run whose failure qualified (see VerifyRerun); when
+	// it is set, ExitCode, Passed and LogSHA256 are the rerun's. nil for
+	// every other check, and for a run that was not rerun.
+	Rerun *VerifyRerun `json:"rerun,omitempty"`
 }
 
 // The outcomes of a GateBaseCheck.

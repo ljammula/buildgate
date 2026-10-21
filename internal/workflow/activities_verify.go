@@ -26,7 +26,7 @@ import (
 // runner.RunWithRetries. Verification can rewrite files, so redispatch also
 // returns its completed durable checkpoint instead of running it again.
 func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInput) (VerifyActivityResult, error) {
-	return a.runVerifyCommand(ctx, input, verifyRun{kind: "verify", label: "verify"})
+	return a.runVerifyCommand(ctx, input, verifyRun{kind: "verify", label: "verify", rerun: verifyRerunOfChange})
 }
 
 // verifyRun says which of the verify command's two runs runVerifyCommand
@@ -41,6 +41,9 @@ type verifyRun struct {
 	// endDetail is the detail of the progress feed's end mark, from the
 	// run's result; nil for none.
 	endDetail func(VerifyActivityResult) string
+	// rerun is the rule that says whether a failed run is made once more
+	// (verify_rerun.go), and with which failing tests; nil for never.
+	rerun verifyRerunRule
 }
 
 // runVerifyCommand runs the verify command once in a fresh sandbox, as v
@@ -143,6 +146,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 		})
 		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input), v.kind, attempts)
 	}
+	rerun := a.verifyRerunFor(ctx, input, v.rerun)
 	verifyHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
 		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: v.kind, Elapsed: time.Since(verifyHeartbeatStart)})
@@ -193,7 +197,11 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	if err != nil {
 		return verifyResult, temporal.NewApplicationErrorWithCause(v.label+" evidence infrastructure failure", InfrastructureFailureType, err, verifyResult.Attempts)
 	}
-	return verifyResult, nil
+	rerunResult, rerunErr := a.maybeRerunVerify(ctx, input, rerun, verifyRerunStep{kind: v.kind, baseline: v.kind == run.BaselineVerifyAttemptKind, command: command, registrySpec: registrySpec, path: path, checkpoint: checkpoint}, verifyResult)
+	if rerunErr != nil {
+		return rerunResult, temporal.NewApplicationErrorWithCause(v.label+" rerun subprocess infrastructure failure", launchErrorType(rerunErr), rerunErr, rerunResult.Attempts)
+	}
+	return rerunResult, nil
 }
 
 // markEnd writes the run's end mark to the progress feed.
@@ -326,6 +334,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 		})
 		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input), "full_suite_verify", attempts)
 	}
+	rerun := a.verifyRerunFor(ctx, input, verifyRerunOfChange)
 	fullSuiteHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
 		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: "full_suite_verify", Elapsed: time.Since(fullSuiteHeartbeatStart)})
@@ -371,7 +380,11 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	if err != nil {
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("full-suite verify evidence infrastructure failure", InfrastructureFailureType, err, fullSuiteResult.Attempts)
 	}
-	return fullSuiteResult, nil
+	rerunResult, rerunErr := a.maybeRerunVerify(ctx, input, rerun, verifyRerunStep{kind: "full_suite_verify", command: command, registrySpec: registrySpec, path: path, checkpoint: checkpoint}, fullSuiteResult)
+	if rerunErr != nil {
+		return rerunResult, temporal.NewApplicationErrorWithCause("full-suite verify rerun subprocess infrastructure failure", launchErrorType(rerunErr), rerunErr, rerunResult.Attempts)
+	}
+	return rerunResult, nil
 }
 
 // NamedGateActivityInput is RunNamedGateActivity's input: the whole
@@ -735,6 +748,12 @@ func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWor
 		kind:      run.BaselineVerifyAttemptKind,
 		label:     "baseline verify",
 		endDetail: func(res VerifyActivityResult) string { return judge(res).Summary() },
+		// A failure that would halt the run, and names only a few tests, is
+		// made once more: the base commit holds no build work to mention them.
+		rerun: func(_ context.Context, _ RunWorkflowInput, first VerifyActivityResult) ([]string, bool) {
+			tests, ok := rerunnableFailures(readFileTail(first.Result.LogPath, baselineLogTailBytes))
+			return tests, ok && a.judgeBaseline(input, first, created).Halts()
+		},
 	})
 	if errors.Is(err, sandbox.ErrComposeServicesRejected) {
 		// A rejected compose file halts a run with its own reason code
@@ -801,6 +820,7 @@ func (a *Activities) judgeBaseline(input RunWorkflowInput, res VerifyActivityRes
 	record.BaseSHA = input.BaseSHA
 	record.LogPath = res.Result.LogPath
 	record.DurationMs = res.DurationMs
+	record.Rerun = res.Rerun
 	return record
 }
 
@@ -947,7 +967,7 @@ func pathsAddedSince(ctx context.Context, dir string, before []string) ([]string
 	return added, nil
 }
 
-// restoreBaseCommit removes what the baseline's command left in dir: every
+// restoreBaseCommit removes what a command left in dir: every
 // path that is dirty now and was not in before (gitStatusAllPaths before
 // the launch) is put back to HEAD, or deleted if HEAD does not have it.
 // Files git ignores are left, as canonical verification leaves them. Each
@@ -973,7 +993,7 @@ func restoreBaseCommit(ctx context.Context, dir string, before []string) error {
 		return err
 	}
 	if len(added) > 0 {
-		return fmt.Errorf("the baseline verify left %d path(s) that could not be removed, first %q", len(added), added[0])
+		return fmt.Errorf("the command left %d path(s) that could not be removed, first %q", len(added), added[0])
 	}
 	return nil
 }
