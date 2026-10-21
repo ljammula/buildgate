@@ -11,11 +11,11 @@ import (
 
 // ensureSidecars starts the registry proxy and the compose services an
 // attempt of a sandboxed step needs, in that order. The first attempt of a
-// step that has either is the run's "install" start-up step (progress
+// build launch that has either is the run's "install" start-up step (progress
 // contract): step_start before, step_end after, naming what started.
 // A later attempt starts the same sidecars without marking the step again.
 func (a *Activities) ensureSidecars(ctx context.Context, input RunWorkflowInput, attempt int, registryProxy *sandbox.RegistryProxyLifecycle, compose *sandbox.ComposeServicesLifecycle) error {
-	mark := attempt == 1 && (registryProxy != nil || !compose.Disabled())
+	mark := attempt == 1 && ctx.Value(buildLaunchKey{}) != nil && (registryProxy != nil || !compose.Disabled())
 	logDir := a.logDirFor(input)
 	if mark {
 		progressMarkLog(ctx, logDir, "install", "step_start", "", "", "")

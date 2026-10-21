@@ -40,7 +40,7 @@ func TestInstallStepMarkedOnFirstAttemptOnly(t *testing.T) {
 	}
 	defer func() { _ = proxy.Cleanup() }()
 
-	ctx := context.Background()
+	ctx := forBuildLaunch(context.Background())
 	if err := activities.ensureSidecars(ctx, input, 1, proxy, nil); err != nil {
 		t.Fatalf("attempt 1: %v", err)
 	}

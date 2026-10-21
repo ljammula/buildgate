@@ -1,10 +1,12 @@
 package request
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/progress"
 )
 
@@ -93,9 +95,17 @@ func TestWaitForComposeSlot(t *testing.T) {
 func TestWaitForNoWorker(t *testing.T) {
 	for _, state := range []State{StateSubmitted, StateSpecDrafting, StatePlanning, StateBuilding} {
 		w := WaitFor(waitReq("x", state, "2026-10-20T10:00:00Z"), WaitFacts{})
-		if w == nil || w.Kind != WaitNoWorker {
-			t.Errorf("%s without a worker: %+v, want no_worker", state, w)
+		if w == nil || w.Kind != WaitNoWorker || w.Since != "" {
+			t.Errorf("%s without a worker: %+v, want no_worker with no start time", state, w)
 		}
+	}
+	// Since is when the worker was last seen, when a heartbeat was read.
+	if w := WaitFor(waitReq("x", StateBuilding, "2026-10-20T10:00:00Z"), WaitFacts{WorkerLastSeen: "2026-10-20T09:59:00Z"}); w.Since != "2026-10-20T09:59:00Z" {
+		t.Errorf("Since = %q, want the last heartbeat", w.Since)
+	}
+	// A heartbeat that could not be read says nothing about the worker.
+	if w := WaitFor(waitReq("x", StateBuilding, ""), WaitFacts{WorkerUnknown: true, WaitingOn: "a", Slots: 1}); w != nil {
+		t.Errorf("unreadable heartbeat: %+v, want no wait", w)
 	}
 	// A human gate waits on a person, not a worker.
 	if w := WaitFor(waitReq("x", StateSpecReview, ""), WaitFacts{}); w != nil {
@@ -175,5 +185,28 @@ func TestWaitForIgnoresWorkerLines(t *testing.T) {
 	}
 	if w := c.For(r); w == nil || w.Kind != WaitModelHost || w.On != "queued behind real" {
 		t.Errorf("wait = %+v from a factory line, want model_host", w)
+	}
+}
+
+// TestWaitContextTellsAMissingHeartbeatFromAnUnreadableOne: only a missing or
+// stale heartbeat means no worker; one that cannot be parsed is unknown.
+func TestWaitContextTellsAMissingHeartbeatFromAnUnreadableOne(t *testing.T) {
+	r := &Request{ID: "r", State: StateBuilding}
+	dir := t.TempDir()
+	if w := NewWaitContext(dir, []*Request{r}, time.Now()).For(r); w == nil || w.Kind != WaitNoWorker {
+		t.Errorf("missing heartbeat: %+v, want no_worker", w)
+	}
+	if err := os.WriteFile(daemonheartbeat.WorkerPath(dir), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w := NewWaitContext(dir, []*Request{r}, time.Now()).For(r); w != nil {
+		t.Errorf("unparseable heartbeat: %+v, want no wait", w)
+	}
+	old := time.Now().Add(-time.Hour).Format(time.RFC3339Nano)
+	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dir), daemonheartbeat.Heartbeat{UpdatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if w := NewWaitContext(dir, []*Request{r}, time.Now()).For(r); w == nil || w.Kind != WaitNoWorker || w.Since != old {
+		t.Errorf("stale heartbeat: %+v, want no_worker since its last beat", w)
 	}
 }

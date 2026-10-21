@@ -43,8 +43,13 @@ type Wait struct {
 
 // WaitFacts is what WaitFor decides from, gathered by the caller.
 type WaitFacts struct {
-	// WorkerLive is whether a worker heartbeat is fresh.
-	WorkerLive bool
+	// WorkerLive is whether a worker heartbeat is fresh. WorkerUnknown is
+	// set instead when the heartbeat could not be read (not that it is
+	// missing or stale): no wait that depends on the worker is named then.
+	// WorkerLastSeen is the last heartbeat's time, when one was read.
+	WorkerLive     bool
+	WorkerUnknown  bool
+	WorkerLastSeen string
 	// WaitingOn, Position and Slots are request.WaitingOn's and
 	// QueuePositions' answers for the request, and the heartbeat's slot count.
 	WaitingOn string
@@ -67,8 +72,8 @@ func WaitFor(r *Request, f WaitFacts) *Wait {
 	if r == nil {
 		return nil
 	}
-	if r.State.RunsJob() && !f.WorkerLive {
-		return &Wait{Kind: WaitNoWorker, Since: r.EnteredAt}
+	if r.State.RunsJob() && !f.WorkerLive && !f.WorkerUnknown {
+		return &Wait{Kind: WaitNoWorker, Since: f.WorkerLastSeen}
 	}
 	if r.State.RunsJob() {
 		if kind, ok := WaitKindForStage(f.RunWaitStage); ok && !r.waitIsStale(f.RunWaitSince) {
@@ -78,7 +83,7 @@ func WaitFor(r *Request, f WaitFacts) *Wait {
 	if (r.State == StateBuilding || r.State == StatePRReview) && f.RepositoryWaitSince != "" && !r.waitIsStale(f.RepositoryWaitSince) {
 		return &Wait{Kind: WaitRepository, Since: f.RepositoryWaitSince}
 	}
-	if r.State.RunsJob() && f.WaitingOn != "" {
+	if r.State.RunsJob() && f.WaitingOn != "" && !f.WorkerUnknown {
 		return &Wait{Kind: WaitJobSlot, On: f.WaitingOn, Position: f.Position, Slots: f.Slots}
 	}
 	return nil

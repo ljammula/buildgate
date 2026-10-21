@@ -19,7 +19,7 @@ type sandboxStep struct {
 }
 
 func beginSandboxStep(s LaunchSpec) *sandboxStep {
-	if s.ProgressPath == "" {
+	if s.ProgressPath == "" || !s.StartupSteps {
 		return &sandboxStep{ended: true}
 	}
 	st := &sandboxStep{path: s.ProgressPath, log: relativeToRunDir(s)}
@@ -35,6 +35,11 @@ func (st *sandboxStep) end(outcome, detail string) {
 	}
 	st.ended = true
 	_ = progress.MarkLog(st.path, "sandbox", progress.StepEnd, outcome, detail, st.log)
+	if outcome == "pass" {
+		// The command has begun: from here the worker's round lines are the
+		// agent's, and a round start is the agent step's end.
+		_ = progress.MarkLog(st.path, "agent", progress.StepStart, "", "", "")
+	}
 }
 
 // relativeToRunDir is s.LogPath relative to the run's directory, "" when the

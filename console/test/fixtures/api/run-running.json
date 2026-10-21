@@ -25,32 +25,6 @@
   "updated_at": "2026-09-10T09:46:00Z",
   "last_progress_at": "2026-09-10T09:46:00.000Z",
   "current_stage": "build",
-  "startup_steps": [
-    {
-      "name": "image",
-      "status": "pending"
-    },
-    {
-      "name": "workspace",
-      "status": "pending"
-    },
-    {
-      "name": "install",
-      "status": "pending"
-    },
-    {
-      "name": "sandbox",
-      "status": "pending"
-    },
-    {
-      "name": "verify",
-      "status": "pending"
-    },
-    {
-      "name": "agent",
-      "status": "pending"
-    }
-  ],
   "stalled": true,
   "stalled_since_seconds": 86400,
   "tokens_complete": false

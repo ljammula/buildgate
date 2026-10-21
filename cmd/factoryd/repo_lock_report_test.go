@@ -83,3 +83,32 @@ func TestIsolatedRunLockWaitIsReported(t *testing.T) {
 		t.Errorf("feed = %+v, want waiting then acquired", events)
 	}
 }
+
+// TestAFailedLockWaitIsClosedInTheFeed: a wait that ends without the lock (the
+// context ended) writes a closing acquired line with outcome fail, so the feed
+// no longer reads as waiting, and tells the hook the wait is over.
+func TestAFailedLockWaitIsClosedInTheFeed(t *testing.T) {
+	ws := newFixtureRepo(t)
+	dataDir := t.TempDir()
+	holder, err := wsisolation.AcquireDirectLock(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	var hooked []bool
+	ctx, cancel := context.WithCancel(withRepoLockWaitHook(withWaitForRepoLock(context.Background()), func(waiting bool) { hooked = append(hooked, waiting) }))
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := acquireDirectRunLock(ctx, ws, repoLockReport{dataDir: dataDir, runID: "run-4"}); err == nil {
+		t.Fatal("acquired a held lock")
+	}
+	sum, err := progress.Summary(progress.Path(dataDir, "run-4"))
+	if err != nil || sum.WaitingStage != "" || sum.WaitingReason != "" {
+		t.Errorf("summary after a failed wait = %+v, %v, want no wait", sum, err)
+	}
+	if len(hooked) != 2 || !hooked[0] || hooked[1] {
+		t.Errorf("hook calls = %v, want [true false]", hooked)
+	}
+}

@@ -2297,11 +2297,8 @@ func (s *Server) serveStartupStepLog(w http.ResponseWriter, r *http.Request, ste
 		writeError(w, http.StatusInternalServerError, "load run")
 		return
 	}
-	steps, err := progress.StartupSteps(progress.Path(s.dataDir, loaded.ID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "read progress")
-		return
-	}
+	// An unreadable feed has no recorded step log.
+	steps, _ := progress.StartupSteps(progress.Path(s.dataDir, loaded.ID))
 	var rel string
 	for _, candidate := range steps {
 		if candidate.Name == step {

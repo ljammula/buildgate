@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"buildgate/internal/sanitize"
 )
 
 // FileName is the progress file's name within a run's directory.
@@ -114,7 +116,7 @@ func Mark(path string, stage, event, outcome, detail string) error {
 		Stage:   stage,
 		Event:   event,
 		Outcome: outcome,
-		Detail:  detail,
+		Detail:  sanitize.Line(detail),
 	})
 }
 
@@ -126,7 +128,7 @@ func MarkLog(path string, stage, event, outcome, detail, log string) error {
 		Stage:   stage,
 		Event:   event,
 		Outcome: outcome,
-		Detail:  detail,
+		Detail:  sanitize.Line(detail),
 		Log:     log,
 	})
 }
@@ -318,7 +320,7 @@ func Summary(path string) (RunSummary, error) {
 	if tail == nil {
 		return RunSummary{}, nil
 	}
-	sum, sawFactory, err := summarize(tail)
+	sum, sawFactory, firstTs, err := summarize(tail)
 	if err != nil {
 		return RunSummary{}, err
 	}
@@ -332,19 +334,37 @@ func Summary(path string) (RunSummary, error) {
 		if err != nil {
 			return RunSummary{}, err
 		}
-		sum, _, err = summarize(whole)
+		sum, _, _, err = summarize(whole)
+		return sum, err
+	}
+	if truncated && sum.WaitingStage != "" && sum.WaitingSince == firstTs {
+		// The wait's first line may lie before the window: look further
+		// back, and report no start time rather than a shortened wait.
+		wide, wideTruncated, err := readTail(path, waitBudget)
 		if err != nil {
 			return RunSummary{}, err
+		}
+		var wideFirst string
+		sum, _, wideFirst, err = summarize(wide)
+		if err != nil {
+			return RunSummary{}, err
+		}
+		if wideTruncated && sum.WaitingStage != "" && sum.WaitingSince == wideFirst {
+			sum.WaitingSince = ""
 		}
 	}
 	return sum, nil
 }
 
+// waitBudget is how far back Summary looks for the first line of a wait
+// that began before its usual window.
+const waitBudget = 4 * 1024 * 1024
+
 // summarize parses a window of progress lines and folds them into a
 // RunSummary; sawFactory reports whether any source=factory line was in
 // the window at all, which Summary uses to decide whether a truncated tail
 // was representative.
-func summarize(tail []byte) (sum RunSummary, sawFactory bool, err error) {
+func summarize(tail []byte) (sum RunSummary, sawFactory bool, firstFactoryTs string, err error) {
 	var events []Event
 	scanner := bufio.NewScanner(bytes.NewReader(tail))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -358,14 +378,17 @@ func summarize(tail []byte) (sum RunSummary, sawFactory bool, err error) {
 			continue
 		}
 		if e.Source == "factory" {
+			if !sawFactory {
+				firstFactoryTs = e.Ts
+			}
 			sawFactory = true
 		}
 		events = append(events, e)
 	}
 	if err := scanner.Err(); err != nil {
-		return RunSummary{}, false, err
+		return RunSummary{}, false, "", err
 	}
-	return Summarize(events), sawFactory, nil
+	return Summarize(events), sawFactory, firstFactoryTs, nil
 }
 
 // Summarize is Summary's shared core: it computes a RunSummary from an

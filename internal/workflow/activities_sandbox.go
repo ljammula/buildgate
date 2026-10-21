@@ -593,6 +593,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 			s = prepared
 		}
+		s.StartupSteps = ctx.Value(buildLaunchKey{}) != nil
 		s = sandbox.PrepareWorkerScratch(s)
 		// compose.ApplyToWorkerLaunch, not a PrepareWorker call: compose
 		// services add ComposeNetwork (which sandbox.Run makes the primary

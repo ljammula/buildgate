@@ -5,9 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
+
+// startupReadBudget bounds how much of a feed StartupSteps reads: the start-up
+// lines are at the front, and a feed past this size is chatty worker output.
+const startupReadBudget = 4 * 1024 * 1024
+
+// startupMaxLine is the longest line StartupSteps parses; a longer one is
+// skipped, not an error.
+const startupMaxLine = 256 * 1024
 
 // The statuses of a StartupStep.
 const (
@@ -61,37 +70,65 @@ func startupStepOf(stage string) (string, bool) {
 		return StepSandbox, true
 	case "baseline_verify":
 		return StepVerify, true
+	case "agent":
+		return StepAgent, true
 	}
 	return "", false
 }
 
 // StartupSteps reads path's feed from its start, up to the agent's first
-// round, and returns the six start-up steps (see StartupStepsFrom). A missing
-// feed is not an error: every step is pending.
+// round (and at most startupReadBudget bytes), and returns the six start-up
+// steps (see StartupStepsFrom). A missing feed, or one with no start-up line
+// (a run recorded before the steps existed), gives nil and no error. A line
+// too long to parse is skipped.
 func StartupSteps(path string) ([]StartupStep, error) {
 	b := newStartupBuilder()
 	f, err := os.Open(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
 	}
-	if err == nil {
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
+	defer f.Close()
+	r := bufio.NewReaderSize(io.LimitReader(f, startupReadBudget), 64*1024)
+	for {
+		line, readErr := readBoundedLine(r, startupMaxLine)
+		if len(line) > 0 {
 			var e Event
-			if json.Unmarshal(scanner.Bytes(), &e) != nil {
-				continue
-			}
-			if b.add(e) {
+			if json.Unmarshal(line, &e) == nil && b.add(e) {
 				break
 			}
 		}
-		if err := scanner.Err(); err != nil {
-			return nil, err
+		if readErr != nil {
+			break
 		}
 	}
 	return b.steps(), nil
+}
+
+// readBoundedLine reads one line, dropping what is past max bytes of it; an
+// over-long line comes back nil. The error is io.EOF at the end.
+func readBoundedLine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	tooLong := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > max {
+				tooLong, line = true, nil
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if tooLong {
+			return nil, err
+		}
+		return line, err
+	}
 }
 
 // StartupStepsFrom is StartupSteps over events already read, in order.
@@ -120,6 +157,8 @@ type startupBuilder struct {
 	started, ended map[string]bool
 	waiting        string
 	finished       bool
+	// any is whether a factory line began or ended a start-up step.
+	any bool
 }
 
 func newStartupBuilder() *startupBuilder {
@@ -131,10 +170,15 @@ func newStartupBuilder() *startupBuilder {
 func (b *startupBuilder) add(e Event) (done bool) {
 	switch e.Source {
 	case "worker":
-		if e.Stage == "round" && e.Event == "start" {
-			b.step(StepAgent).StartedAt, b.step(StepAgent).EndedAt = e.Ts, e.Ts
-			b.step(StepAgent).Detail = fmt.Sprintf("round %d", max(e.Round, 1))
-			b.started[StepAgent], b.ended[StepAgent] = true, true
+		// A line the worker (or any program in the sandbox, a repository's
+		// baseline command included) printed counts only once the factory
+		// has started the build launch, and then only as the agent's first
+		// round.
+		if e.Stage == "round" && e.Event == "start" && b.started[StepAgent] {
+			s := b.step(StepAgent)
+			s.EndedAt = e.Ts
+			s.Detail = fmt.Sprintf("round %d", max(e.Round, 1))
+			b.ended[StepAgent] = true
 			return true
 		}
 	case "factory":
@@ -153,6 +197,7 @@ func (b *startupBuilder) addFactory(e Event) bool {
 	if !ok {
 		return false
 	}
+	b.any = true
 	switch e.Event {
 	case "start", StepStart:
 		if b.started[name] {
@@ -162,7 +207,7 @@ func (b *startupBuilder) addFactory(e Event) bool {
 		s.StartedAt, s.Detail, s.Log = e.Ts, e.Detail, e.Log
 		b.started[name] = true
 	case "end", StepEnd:
-		if !b.started[name] || b.ended[name] {
+		if name == StepAgent || !b.started[name] || b.ended[name] {
 			return false
 		}
 		s := b.step(name)
@@ -212,6 +257,9 @@ func (b *startupBuilder) step(name string) *StartupStep {
 
 // steps settles each step's status and places the current wait.
 func (b *startupBuilder) steps() []StartupStep {
+	if !b.any {
+		return nil
+	}
 	out := make([]StartupStep, len(startupOrder))
 	laterStarted := false
 	for i := len(startupOrder) - 1; i >= 0; i-- {
@@ -221,12 +269,12 @@ func (b *startupBuilder) steps() []StartupStep {
 		case b.ended[name] && s.Status == StepFailed:
 		case b.ended[name]:
 			s.Status = StepDone
+		case name == StepAgent && b.finished:
+			s.Status, s.Detail = StepFailed, "the run finished before the agent's first round"
 		case b.started[name]:
 			s.Status = StepRunning
 		case laterStarted:
 			s.Status = StepSkipped
-		case name == StepAgent && b.finished:
-			s.Status, s.Detail = StepFailed, "the run finished before the agent started"
 		default:
 			s.Status = StepPending
 		}
@@ -252,10 +300,13 @@ func placeWait(steps []StartupStep, wait string) {
 }
 
 // StartupFooter is the one-line start-up position for `factoryd watch`'s
-// footer, "start-up 3/6: install (running 42s)", or "" once the agent has
-// started or the run finished before it.
+// footer, "start-up 3/6: install (running 42s)", or "" once the agent's first
+// round has started or the run finished before it.
 func StartupFooter(steps []StartupStep, now time.Time) string {
-	if len(steps) == 0 || steps[len(steps)-1].Status != StepPending {
+	if len(steps) == 0 {
+		return ""
+	}
+	if last := steps[len(steps)-1].Status; last != StepPending && last != StepRunning {
 		return ""
 	}
 	for i, s := range steps {

@@ -47,6 +47,18 @@ func (p repoLockReport) waiting(ctx context.Context) {
 	}
 }
 
+// failed closes a wait that ended without the lock (the context ended, or the
+// bound passed): an acquired line with outcome fail, so the feed no longer
+// reads as waiting.
+func (p repoLockReport) failed(ctx context.Context, err error) {
+	if p.runID != "" {
+		progressMark(p.dataDir, p.runID, "repository_lock", "acquired", "fail", err.Error())
+	}
+	if hook, ok := ctx.Value(repoLockWaitHookKey{}).(func(bool)); ok {
+		hook(false)
+	}
+}
+
 // acquired records that the lock is taken after a wait.
 func (p repoLockReport) acquired(ctx context.Context) {
 	if p.runID != "" {
@@ -97,9 +109,11 @@ func acquireDirectRunLock(ctx context.Context, workspace string, report repoLock
 	log.Printf("waiting for the repository lock held by another build: %s", workspace)
 	report.waiting(ctx)
 	lock, err = wsisolation.AcquireDirectLockContext(ctx, workspace)
-	if err == nil {
-		report.acquired(ctx)
+	if err != nil {
+		report.failed(ctx, err)
+		return lock, err
 	}
+	report.acquired(ctx)
 	return lock, err
 }
 
@@ -135,6 +149,8 @@ func acquireIsolatedRunLock(ctx context.Context, workspace string, reconcile fun
 		lock, err = wsisolation.AcquireDirectLockSharedContext(waitCtx, workspace)
 		if err == nil {
 			report.acquired(ctx)
+		} else {
+			report.failed(ctx, err)
 		}
 	}
 	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {

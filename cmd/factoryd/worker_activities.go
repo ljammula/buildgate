@@ -225,12 +225,12 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 				}
 			})
 		}
+		// Whatever the outcome (a panic included), the step no longer waits
+		// inside its slot.
+		defer repositoryWaits.clear(id)
 		stopHeartbeat := heartbeatUntilDone(ctx, requestHeartbeatInterval)
 		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.oracleRunner, a.buildRunner)
 		stopHeartbeat()
-		if r.State == request.StatePRReview {
-			repositoryWaits.clear(id)
-		}
 		if err != nil && !errors.Is(err, request.ErrCancelledOnDisk) {
 			return "", err
 		}

@@ -1,6 +1,8 @@
 package request
 
 import (
+	"errors"
+	"os"
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
@@ -16,7 +18,12 @@ type WaitContext struct {
 	DataDir string
 	// Live, Holders, Slots and RepositoryWaits come from the worker
 	// heartbeat (Holders: its SlotRequests).
-	Live            bool
+	Live bool
+	// Unknown: the heartbeat exists but could not be read or parsed. A
+	// missing or stale heartbeat is Live false, not Unknown.
+	Unknown bool
+	// LastSeen is the heartbeat's UpdatedAt, when one was read.
+	LastSeen        string
 	Holders         []string
 	Slots           int
 	RepositoryWaits map[string]string
@@ -29,11 +36,19 @@ type WaitContext struct {
 // requests, which must be in List's order.
 func NewWaitContext(dataDir string, requests []*Request, now time.Time) *WaitContext {
 	c := &WaitContext{DataDir: dataDir, Slots: 1}
-	if hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dataDir)); err == nil && !daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
-		c.Live = true
-		c.Holders = hb.SlotRequests
-		c.Slots = max(hb.JobSlots, 1)
-		c.RepositoryWaits = hb.RepositoryWaits
+	hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dataDir))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		c.Unknown = true
+	default:
+		c.LastSeen = hb.UpdatedAt
+		if !daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
+			c.Live = true
+			c.Holders = hb.SlotRequests
+			c.Slots = max(hb.JobSlots, 1)
+			c.RepositoryWaits = hb.RepositoryWaits
+		}
 	}
 	return c.Number(requests)
 }
@@ -50,6 +65,8 @@ func (c *WaitContext) Number(requests []*Request) *WaitContext {
 func (c *WaitContext) For(r *Request) *Wait {
 	f := WaitFacts{
 		WorkerLive:          c.Live,
+		WorkerUnknown:       c.Unknown,
+		WorkerLastSeen:      c.LastSeen,
 		WaitingOn:           c.waitingOn[r.ID],
 		Position:            c.positions[r.ID],
 		Slots:               c.Slots,

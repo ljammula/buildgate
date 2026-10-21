@@ -470,32 +470,6 @@
     "allow_skipped_project_check": true
   },
   "factoryd_version": "every-field factoryd_version",
-  "startup_steps": [
-    {
-      "name": "image",
-      "status": "pending"
-    },
-    {
-      "name": "workspace",
-      "status": "pending"
-    },
-    {
-      "name": "install",
-      "status": "pending"
-    },
-    {
-      "name": "sandbox",
-      "status": "pending"
-    },
-    {
-      "name": "verify",
-      "status": "pending"
-    },
-    {
-      "name": "agent",
-      "status": "pending"
-    }
-  ],
   "by_model": [
     {
       "role": "every-field role",

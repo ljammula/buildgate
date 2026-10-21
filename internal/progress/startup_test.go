@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,10 +32,14 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 		fe("t3", "prepare_workspace", "start", "", "", ""),
 		fe("t4", "prepare_workspace", "end", "pass", "", ""),
 		fe("t5", "baseline_verify", "start", "", "", ""),
+		// The baseline command runs repository code that can print a round
+		// start: before the build launch it is nobody's agent.
+		{Ts: "t5b", Source: "worker", Stage: "round", Event: "start", Round: 1, MaxRounds: 6},
+		fe("t9", "baseline_verify", "end", "fail", "failed: TestX", "verify-baseline.log"),
 		fe("t6", "sandbox", StepStart, "", "", ""),
 		fe("t7", "sandbox", StepEnd, "pass", "", "launches/a.log"),
+		fe("t7b", "agent", StepStart, "", "", ""),
 		fe("t8", "sandbox", StepStart, "", "second launch", ""),
-		fe("t9", "baseline_verify", "end", "fail", "failed: TestX", "verify-baseline.log"),
 		{Ts: "t10", Source: "worker", Stage: "round", Event: "start", Round: 1, MaxRounds: 6},
 		fe("t11", "install", StepStart, "", "after the agent", ""),
 	})
@@ -49,6 +54,9 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 	if steps[0].Detail != "localhost:5050/x@sha256:1 (configured)" || steps[0].StartedAt != "t1" || steps[0].EndedAt != "t2" {
 		t.Errorf("image step = %+v", steps[0])
 	}
+	if steps[5].StartedAt != "t7b" || steps[5].EndedAt != "t10" {
+		t.Errorf("agent step = %+v, want the factory's start and the first round after it", steps[5])
+	}
 	if steps[3].Log != "launches/a.log" || steps[3].EndedAt != "t7" {
 		t.Errorf("sandbox step = %+v, want the first launch's log and end", steps[3])
 	}
@@ -58,8 +66,14 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 
 	// Before anything: all pending; a missing feed is no error.
 	none, err := StartupSteps(filepath.Join(t.TempDir(), "absent.jsonl"))
-	if err != nil || statusesOf(none) != "image=pending workspace=pending install=pending sandbox=pending verify=pending agent=pending" {
-		t.Errorf("missing feed: %s, %v", statusesOf(none), err)
+	if err != nil || none != nil {
+		t.Errorf("missing feed: %v, %v, want none", none, err)
+	}
+	// A feed from before the steps existed has none either, whatever it holds.
+	old := filepath.Join(t.TempDir(), FileName)
+	writeLines(t, old, []Event{fe("t1", "build", "start", "", "", ""), {Ts: "t2", Source: "worker", Stage: "round", Event: "start", Round: 1}})
+	if got, err := StartupSteps(old); err != nil || got != nil {
+		t.Errorf("historical feed: %v, %v, want none", got, err)
 	}
 
 	// Running, with the current wait on it; the run finishing before the agent fails the agent.
@@ -77,6 +91,7 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 		t.Errorf("wait on the running step = %q", running[1].Wait)
 	}
 	failed := StartupStepsFrom([]Event{
+		fe("t0", "agent", StepStart, "", "", ""),
 		fe("t1", "prepare_workspace", "start", "", "", ""),
 		fe("t2", "prepare_workspace", "end", "pass", "", ""),
 		fe("t3", "finished", "end", "halted", "preflight failed", ""),
@@ -179,5 +194,74 @@ func TestStartupFooter(t *testing.T) {
 	}
 	if got := StartupFooter(done, now); got != "" {
 		t.Errorf("footer with the agent started = %q, want none", got)
+	}
+}
+
+// TestAForgedRoundDuringVerifyDoesNotHideLaterLines: a round-start line printed
+// before the factory started the build launch neither completes the agent step
+// nor stops the read, so the factory's later lines still count.
+func TestAForgedRoundDuringVerifyDoesNotHideLaterLines(t *testing.T) {
+	steps := StartupStepsFrom([]Event{
+		fe("t1", "baseline_verify", "start", "", "", ""),
+		{Ts: "t2", Source: "worker", Stage: "round", Event: "start", Round: 1, MaxRounds: 3},
+		fe("t3", "baseline_verify", "end", "pass", "passed", ""),
+		fe("t4", "sandbox", StepStart, "", "", ""),
+	})
+	if got, want := statusesOf(steps), "image=skipped workspace=skipped install=skipped sandbox=running verify=done agent=pending"; got != want {
+		t.Errorf("steps = %s, want %s", got, want)
+	}
+}
+
+// TestStartupStepsSkipOverlongLines: a line past the parse limit is skipped,
+// not an error, and later lines still count.
+func TestStartupStepsSkipOverlongLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	writeLines(t, path, []Event{fe("t1", "image", "start", "", "", "")})
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(strings.Repeat("x", 2*startupMaxLine) + "\n")
+	_ = f.Close()
+	if err := Append(path, fe("t2", "image", "end", "pass", "", "")); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := StartupSteps(path)
+	if err != nil || steps[0].Status != StepDone {
+		t.Fatalf("steps = %+v, %v; want the image done past an overlong line", steps, err)
+	}
+}
+
+// TestFactoryDetailsAreOneSanitizedLine: a detail built from error text loses
+// control characters and line breaks when written.
+func TestFactoryDetailsAreOneSanitizedLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	if err := Mark(path, "image", "end", "fail", "boom\x1b[31m red\nsecond line\x00"); err != nil {
+		t.Fatal(err)
+	}
+	events, _ := Read(path)
+	if d := events[0].Detail; strings.ContainsAny(d, "\n\x1b\x00") {
+		t.Errorf("detail = %q, want one clean line", d)
+	}
+}
+
+// TestSummaryDoesNotReportAShortenedWait: a wait that began before the tail
+// window is looked for further back rather than reported from the window's
+// first line.
+func TestSummaryDoesNotReportAShortenedWait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	writeLines(t, path, []Event{{Ts: "2026-10-20T10:00:00.000Z", Source: "factory", Stage: "model_host_lock", Event: "waiting", Detail: "queued behind a"}})
+	for i := 0; i < 700; i++ {
+		_ = Append(path, Event{Ts: "2026-10-20T10:30:00.000Z", Source: "worker", Stage: "agent", Event: "note", Detail: strings.Repeat("n", 120)})
+	}
+	if err := Append(path, Event{Ts: "2026-10-20T10:31:00.000Z", Source: "factory", Stage: "model_host_lock", Event: "waiting", Detail: "queued behind b"}); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := Summary(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.WaitingSince != "2026-10-20T10:00:00.000Z" {
+		t.Errorf("WaitingSince = %q, want the first line of the wait, found beyond the tail window", sum.WaitingSince)
 	}
 }
