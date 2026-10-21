@@ -33,7 +33,7 @@ Allowed-Files: index.js, triple.test.js
 
 Required-Changed-Files: index.js, triple.test.js
 
-Required-Content: isNumber
+Required-Content: triple(
 
 ## Acceptance / verification
 
