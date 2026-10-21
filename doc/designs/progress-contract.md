@@ -40,10 +40,11 @@ One JSON object per line, never rewritten.
 | `ts` | RFC3339 UTC with milliseconds, stamped by factoryd. Never taken from the worker. |
 | `source` | `factory` (written by factoryd Go code) or `worker` (relayed from sandbox stdout). |
 | `stage` | Fixed vocabulary below. |
-| `event` | `start`, `end`, or `note`. |
+| `event` | `start`, `end`, `note`, `waiting`, `acquired` (a lock wait, below), or `step_start`, `step_end` (a start-up step, below). A worker line is only ever `start`, `end` or `note`. |
 | `round`, `max_rounds` | Integers, omitted when 0. |
 | `outcome` | `""`, `pass`, `fail`, or for `stage=finished` the terminal run state (`accepted`/`quarantined`/`halted`). |
 | `detail` | Free text, truncated to 500 characters. |
+| `log` | A path relative to the run's directory, on a start-up step's end line when the factory recorded a log for it. Only a factory line carries one: `ParseWorkerLine` never sets it and `Append` drops it from any other source. |
 
 ## Factory stages (`source: factory`)
 
@@ -51,7 +52,7 @@ Emitted by `cmd/factoryd/run_ticket.go` (before the workflow starts) and by
 the Activities in `internal/workflow/activities_*.go`, via the
 `progressMark` helpers:
 
-`prepare_workspace`, `preflight`, `baseline_verify` (the `end` event's
+`image` (the sandbox image the run launches in; the `end` event's `detail` names the image and whether it is the configured one or one derived for the repository's toolchains), `prepare_workspace`, `preflight`, `baseline_verify` (the `end` event's
 `detail` is the result: `passed`, or `failed` with the failing test named),
 `build` (one `start`/`end` per attempt,
 `detail` = `attempt N/M`), `post_build`, `verify`, `full_suite`, `gate`
@@ -106,6 +107,30 @@ Two factory `note` lines exist:
   e.g. `3 rounds · r1 fail (verify) · r2 fail (verify) · r3 pass · 41.2k
   tokens · $0.12` (`cmd/factoryd/round_summary.go`). Derived from
   agent-reported evidence, so informational, like `AgentEvidence` itself.
+
+## Start-up steps
+
+A run's start-up is six steps in a fixed order, derived from the feed by
+`progress.StartupSteps` and sent as `startup_steps` on `GET /runs/{id}`:
+
+| Step | From |
+|---|---|
+| `image` | the `image` stage |
+| `workspace` | the `prepare_workspace` stage |
+| `install` | `step_start`/`step_end` in stage `install`, around the registry proxy and compose services a step's first attempt starts; `detail` names them |
+| `sandbox` | `step_start`/`step_end` in stage `sandbox`, from the credential push and the sandbox's creation until the command's output file appears; `log` is the launch's log |
+| `verify` | the `baseline_verify` stage; `log` is the baseline attempt's log |
+| `agent` | done at the worker's first `round` `start` line; failed when `finished` comes first |
+
+`step_start` and `step_end` nest inside whatever stage is open: `Summarize`
+ignores them, so a step never closes the open `build` stage. The first
+occurrence of a step wins, and the feed is read only up to the agent's first
+round. A step with no line is `skipped` once a later step began (no sidecars,
+a non-isolated run), else `pending`. The lock wait the run is in is shown on
+the step that is running, else the first one pending. A step's `log` is served
+by `GET /runs/{id}/log?step=<name>` only when it is a local path inside the
+run's directory (`withinEvidenceDir`); a worker line cannot start a step or
+name a log.
 
 ## Worker stages (`source: worker`)
 

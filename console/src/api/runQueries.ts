@@ -32,6 +32,7 @@ import {
   getRunDiff,
   getRunHandoff,
   getRunPromptText,
+  getRunStepLog,
   getRunPrompts,
   listRuns,
   overrideRun,
@@ -181,6 +182,17 @@ export function useRunPromptText(
     enabled,
     retry: false,
     staleTime: Infinity,
+  });
+}
+
+/** One start-up step's log, read when the operator opens it. */
+export function useRunStepLog(id: string, step: string, enabled: boolean): UseQueryResult<string> {
+  const { http } = useApi();
+  return useQuery({
+    queryKey: queryKeys.runs.stepLog(id, step),
+    queryFn: ({ signal }) => getRunStepLog(http, id, step, signal),
+    enabled,
+    retry: false,
   });
 }
 

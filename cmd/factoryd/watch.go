@@ -76,6 +76,9 @@ func eventIndentAndLabel(e progress.Event) (indent int, label string) {
 		return 2, fmt.Sprintf("round %d/%d", e.Round, e.MaxRounds)
 	case e.Source == "worker" && e.Stage == "agent":
 		return 4, "agent"
+	case e.Source == "factory" && (e.Event == progress.StepStart || e.Event == progress.StepEnd):
+		// A start-up step nested in whatever stage is open.
+		return 2, e.Stage
 	case e.Stage == "gate" && e.Detail != "":
 		return 0, "gate " + e.Detail
 	default:
@@ -126,7 +129,7 @@ func displayDetail(detail string) string {
 func eventText(e progress.Event, dur time.Duration, haveDur bool) string {
 	e.Detail = displayDetail(e.Detail)
 	switch e.Event {
-	case "start":
+	case "start", progress.StepStart:
 		if e.Detail != "" && !(e.Source == "worker" && e.Stage == "round") && e.Stage != "gate" {
 			return "started (" + e.Detail + ")"
 		}
@@ -136,7 +139,7 @@ func eventText(e progress.Event, dur time.Duration, haveDur bool) string {
 			return e.Detail
 		}
 		return "note"
-	case "end":
+	case "end", progress.StepEnd:
 		text := e.Outcome
 		if text == "" {
 			text = "done"
@@ -182,7 +185,7 @@ func renderRunEvents(events []progress.Event, t0 time.Time) []string {
 		key := durKey(e)
 		var dur time.Duration
 		haveDur := false
-		if e.Event == "start" {
+		if e.Event == "start" || e.Event == progress.StepStart {
 			starts[key] = ts
 		} else if start, ok := starts[key]; ok {
 			dur = ts.Sub(start)
@@ -658,14 +661,24 @@ func watchRun(out *os.File, dataDir, runID string, noFollow bool) error {
 		stage, round, maxRound := currentStageAndRound(parsed)
 		summary := progress.Summarize(parsed)
 		stalled, stalledSince := progress.Stalled(summary, r.CreatedAt, time.Now())
+		startup := progress.StartupFooter(progress.StartupStepsFrom(parsed), time.Now())
 		if terminal {
-			sp.Start(renderFooterFacts(stage, summary.WaitingReason, round, maxRound, stalled, stalledSince, string(r.State)))
+			sp.Start(withStartup(renderFooterFacts(stage, summary.WaitingReason, round, maxRound, stalled, stalledSince, string(r.State)), startup))
 			sp.SetStart(created)
-		} else if footer := renderFooter(time.Since(created), stage, summary.WaitingReason, round, maxRound, stalled, stalledSince, string(r.State)); footer != lastFooter {
+		} else if footer := withStartup(renderFooter(time.Since(created), stage, summary.WaitingReason, round, maxRound, stalled, stalledSince, string(r.State)), startup); footer != lastFooter {
 			fmt.Fprintln(out, footer)
 			lastFooter = footer
 		}
 	}
+}
+
+// withStartup puts the start-up position ("start-up 3/6: install (running
+// 42s)", empty once the agent has started) before a footer's facts.
+func withStartup(footer, startup string) string {
+	if startup == "" {
+		return footer
+	}
+	return startup + "  ·  " + footer
 }
 
 // parseProgressLines decodes each raw progress.jsonl line (as returned by

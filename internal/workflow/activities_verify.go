@@ -214,7 +214,7 @@ func (v verifyRun) markEnd(ctx context.Context, logDir string, result VerifyActi
 	if v.endDetail != nil && err == nil {
 		detail = v.endDetail(result)
 	}
-	progressMark(ctx, logDir, v.kind, "end", outcome, detail)
+	progressMarkLog(ctx, logDir, v.kind, "end", outcome, detail, relativeLog(logDir, result.Result.LogPath))
 }
 
 // what names the command v runs, for the ambiguous-prior-attempt message.

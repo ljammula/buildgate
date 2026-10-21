@@ -113,6 +113,8 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	result = Result{Command: req.Command, Container: name, ExitCode: -1, LogPath: s.LogPath, StartedAt: time.Now(), ImageDigest: imageDigest(s.Image)}
 	runCtx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
+	step := beginSandboxStep(s)
+	defer step.end("fail", "the worker's command did not start")
 	ref, started, err := startSandbox(runCtx, rt, s, l, req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -123,7 +125,7 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 		return result, ref, fmt.Errorf("%w: %w", ErrSandboxNotStarted, err)
 	}
 
-	exit, err := superviseCommand(runCtx, rt, s, launch, l.PollEvery, io.MultiWriter(os.Stdout, logFile))
+	exit, err := superviseCommand(runCtx, rt, s, launch, l.PollEvery, io.MultiWriter(os.Stdout, logFile), step)
 	result.FinishedAt = time.Now()
 	if err != nil {
 		if runCtx.Err() != nil {
@@ -203,7 +205,7 @@ func startSandbox(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeLaunch
 
 // superviseCommand releases the worker's command, marks it started once its
 // output file appears, relays the output to dst and waits for the exit.
-func superviseCommand(ctx context.Context, rt Runtime, s LaunchSpec, launch SandboxLaunch, pollEvery time.Duration, dst io.Writer) (SandboxExit, error) {
+func superviseCommand(ctx context.Context, rt Runtime, s LaunchSpec, launch SandboxLaunch, pollEvery time.Duration, dst io.Writer, step *sandboxStep) (SandboxExit, error) {
 	if pollEvery <= 0 {
 		pollEvery = 200 * time.Millisecond
 	}
@@ -236,6 +238,7 @@ func superviseCommand(ctx context.Context, rt Runtime, s LaunchSpec, launch Sand
 		return SandboxExit{}, err
 	}
 	defer output.Close()
+	step.end("pass", launch.Name)
 	if err := os.WriteFile(filepath.Join(launch.GuardDir, WorkerGuardStartedFile), nil, 0o640); err != nil {
 		return SandboxExit{}, fmt.Errorf("mark sandbox command started: %w", err)
 	}

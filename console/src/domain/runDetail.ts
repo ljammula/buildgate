@@ -82,6 +82,7 @@ export function attemptModelLine(
  * `gateRow`, which fans those out into that one row's sub-rows.
  */
 const stageOrder: readonly string[] = [
+  "image",
   "prepare_workspace",
   "preflight",
   "baseline_verify",
@@ -109,6 +110,7 @@ const stageOrder: readonly string[] = [
 ];
 
 export const stageLabels: Readonly<Record<string, string>> = {
+  image: "Sandbox image",
   prepare_workspace: "Prepare workspace",
   preflight: "Preflight",
   baseline_verify: "Baseline verify",

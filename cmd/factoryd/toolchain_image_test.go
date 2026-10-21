@@ -211,8 +211,10 @@ func TestFitSandboxToRepositoryChecksRequiredBinariesInFinalImage(t *testing.T) 
 				return tc.missing, nil
 			}
 			image, docker, user, uid := base, "docker", "65532:65532", sandbox.DefaultWorkerUID
+			dataDir, runID, ticket := t.TempDir(), "", "001"
 			tr := &ticketRun{
 				dp: dp, lifecycleCtx: context.Background(), resolvedWorkspace: repo,
+				dataDir: &dataDir, runID: &runID, ticket: &ticket,
 				sandboxImage: &image, sandboxDocker: &docker, sandboxUser: &user, sandboxWorkerUID: &uid,
 				requiredBinaries: []string{"cargo", "rustc"},
 			}

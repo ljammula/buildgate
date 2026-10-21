@@ -20,6 +20,36 @@ import {
 } from "@/domain/decode";
 import { type ModelUsage, decodeModelUsage, decodeUsage, usageTotalTokens } from "@/domain/usage";
 
+/**
+ * One start-up step of a run (Go's progress.StartupStep), derived by the
+ * server from the run's progress feed: image, workspace, install, sandbox,
+ * verify, agent. `status` is a server-owned set (pending, running, done,
+ * failed, skipped) that can grow, so it stays a string.
+ */
+export interface StartupStep {
+  readonly name: string;
+  readonly status: string;
+  readonly startedAt: string;
+  readonly endedAt: string;
+  readonly detail: string;
+  /** The step has a log GET /runs/{id}/log?step=<name> serves. */
+  readonly hasLog: boolean;
+  /** The lock or queue wait the run is in, on the step that waits for it. */
+  readonly wait: string;
+}
+
+function decodeStartupStep(o: JsonObject, at: string): StartupStep {
+  return {
+    name: reqString(o, "name", at),
+    status: reqString(o, "status", at),
+    startedAt: optString(o, "started_at", at),
+    endedAt: optString(o, "ended_at", at),
+    detail: optString(o, "detail", at),
+    hasLog: optString(o, "log", at) !== "",
+    wait: optString(o, "wait", at),
+  };
+}
+
 export interface Attempt {
   readonly command: readonly string[];
   readonly startedAt: string;
@@ -466,6 +496,10 @@ export interface Run {
   readonly currentRound: number;
   readonly maxRounds: number;
   readonly waitingReason: string | null;
+  /** The kind of wait waitingReason states (model_host, compose_slot, repository_queue, repository); null when none. */
+  readonly waitingKind: string | null;
+  /** The six start-up steps, from GET /runs/{id} only; empty on a list row. */
+  readonly startupSteps: readonly StartupStep[];
   /**
    * The server-computed "silence is a bug" verdict (internal/progress.
    * Stalled), the single shared rule `factoryd status`, `factoryd watch` and
@@ -539,6 +573,8 @@ export function decodeRun(o: JsonObject, at: string): Run {
     currentRound: numberOr(o, "current_round", at, 0),
     maxRounds: numberOr(o, "max_rounds", at, 0),
     waitingReason: stringOrNull(o, "waiting_reason", at),
+    waitingKind: stringOrNull(o, "waiting_kind", at),
+    startupSteps: objectList(o, "startup_steps", at, decodeStartupStep),
     stalled: optBoolean(o, "stalled", at),
     stalledSinceSeconds: optNumber(o, "stalled_since_seconds", at),
     requestId: optString(o, "request_id", at),

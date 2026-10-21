@@ -1420,7 +1420,14 @@ func (tr *ticketRun) checkProject() error {
 // repository's declared toolchains need, when the configured one lacks them,
 // which may be built here on first use.
 func (tr *ticketRun) fitSandboxToRepository() error {
-	image, err := toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
+	// The image is the run's first start-up step; its feed needs the run id.
+	tr.mintRunID()
+	var image string
+	err := withStage(*tr.dataDir, tr.id, "image", func() (string, string, error) {
+		var imageErr error
+		image, imageErr = toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
+		return imageStageOutcome(image, *tr.sandboxImage, imageErr)
+	})
 	if err != nil {
 		return err
 	}
@@ -1537,6 +1544,19 @@ func (tr *ticketRun) lockRepository() error {
 		}
 	}
 	return nil
+}
+
+// imageStageOutcome is the image start-up step's end: its outcome and a
+// detail naming the image the run uses and whether it is the configured one
+// or one derived for the repository's toolchains.
+func imageStageOutcome(image, configured string, err error) (outcome, detail string, _ error) {
+	if err != nil {
+		return "fail", err.Error(), err
+	}
+	if image == configured {
+		return "pass", image + " (configured)", nil
+	}
+	return "pass", image + " (derived for the repository's toolchains)", nil
 }
 
 // mintRunID fixes this run's id (the -run-id serve passed, else one made from

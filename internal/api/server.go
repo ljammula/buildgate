@@ -716,7 +716,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs/{id}", s.getRun)
 	s.mux.HandleFunc("GET /runs/{id}/events", s.streamRunEvents)
 	s.mux.HandleFunc("GET /runs/{id}/progress", s.streamRunProgress)
-	s.mux.HandleFunc("GET /runs/{id}/log", s.streamRunLog)
+	s.mux.HandleFunc("GET /runs/{id}/log", s.runLog)
 	s.mux.HandleFunc("GET /runs/{id}/diff", s.getRunDiff)
 	s.mux.HandleFunc("GET /runs/{id}/release", s.getRunRelease)
 	s.mux.HandleFunc("GET /runs/{id}/handoff", s.getRunHandoff)
@@ -1247,6 +1247,10 @@ type runView struct {
 	// (model_host, compose_slot, repository_queue, repository), so the
 	// console can word it without parsing the reason.
 	WaitingKind string `json:"waiting_kind,omitempty"`
+	// StartupSteps are the run's start-up steps (progress.StartupSteps),
+	// read from its progress feed. Only GET /runs/{id} computes them: a list
+	// would read every run's feed from its start on every poll.
+	StartupSteps []progress.StartupStep `json:"startup_steps,omitempty"`
 	// Stalled/StalledSinceSeconds are internal/progress.Stalled's verdict
 	// (see its own doc comment) -- the single shared "silence is a bug"
 	// rule, computed here so `factoryd status`, `factoryd watch`, and this
@@ -1592,6 +1596,9 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	// Only a single run's view carries its compose phases: GET /runs
 	// would otherwise read every run's reports on every poll.
 	view.ComposePhases = readComposePhases(s.dataDir, loaded.ID)
+	if steps, err := progress.StartupSteps(progress.Path(s.dataDir, loaded.ID)); err == nil {
+		view.StartupSteps = steps
+	}
 	writeJSON(w, http.StatusOK, view)
 }
 
@@ -2258,6 +2265,71 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// runLog serves GET /runs/{id}/log: one start-up step's log with ?step=<name>,
+// else the run's build-loop log (streamRunLog).
+func (s *Server) runLog(w http.ResponseWriter, r *http.Request) {
+	if step := r.URL.Query().Get("step"); step != "" {
+		s.serveStartupStepLog(w, r, step)
+		return
+	}
+	s.streamRunLog(w, r)
+}
+
+// serveStartupStepLog serves GET /runs/{id}/log?step=<name>: the log the
+// factory recorded for one start-up step, a path relative to the run's
+// directory in its progress feed. The path is data read back from a file, so
+// it must be local, and withinEvidenceDir must accept what it resolves to,
+// before anything is opened. A step with no recorded log, or no such step, is
+// a 404; the log is not followed. Read-token gated, like streamRunLog.
+func (s *Server) serveStartupStepLog(w http.ResponseWriter, r *http.Request, step string) {
+	if !s.authorizeRead(r) {
+		writeError(w, http.StatusForbidden, "log endpoint is not authorized")
+		return
+	}
+	loaded, err := s.loadRun(r.PathValue("id"))
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "load run")
+		return
+	}
+	steps, err := progress.StartupSteps(progress.Path(s.dataDir, loaded.ID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "read progress")
+		return
+	}
+	var rel string
+	for _, candidate := range steps {
+		if candidate.Name == step {
+			rel = candidate.Log
+		}
+	}
+	if rel == "" {
+		writeError(w, http.StatusNotFound, "no log recorded for that start-up step")
+		return
+	}
+	logPath := filepath.Join(run.Dir(s.dataDir, loaded.ID), rel)
+	if !filepath.IsLocal(rel) || !withinEvidenceDir(s.dataDir, loaded.ID, logPath) {
+		writeError(w, http.StatusInternalServerError, "log path outside evidence directory")
+		return
+	}
+	f, err := os.Open(logPath)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusNotFound, "the step's log is not written")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "open log")
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.Copy(w, f)
 }
 
 // overrideRequest is the JSON body POST /runs/{id}/override expects.

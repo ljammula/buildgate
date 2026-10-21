@@ -45,7 +45,19 @@ type Event struct {
 	MaxRounds int    `json:"max_rounds,omitempty"`
 	Outcome   string `json:"outcome,omitempty"`
 	Detail    string `json:"detail,omitempty"`
+	// Log is the path, relative to the run's directory, of the log a
+	// start-up step wrote (StartupStep.Log). Only a factory line carries it:
+	// ParseWorkerLine never sets it and Append drops it from any other
+	// source, so a sandboxed worker cannot point a reader at a file.
+	Log string `json:"log,omitempty"`
 }
+
+// The events of a start-up step: nested inside whatever stage is open, so
+// Summarize does not take them for a stage boundary.
+const (
+	StepStart = "step_start"
+	StepEnd   = "step_end"
+)
 
 // PathInDir returns the progress file path within an already-resolved
 // run directory, for callers (e.g. the Temporal activities'
@@ -65,6 +77,9 @@ func Append(path string, e Event) error {
 		e.Ts = time.Now().UTC().Format(tsLayout)
 	}
 	e.Detail = truncateDetail(e.Detail)
+	if e.Source != "factory" {
+		e.Log = ""
+	}
 
 	b, err := json.Marshal(e)
 	if err != nil {
@@ -100,6 +115,19 @@ func Mark(path string, stage, event, outcome, detail string) error {
 		Event:   event,
 		Outcome: outcome,
 		Detail:  detail,
+	})
+}
+
+// MarkLog is Mark for a line that names a log file, a path relative to the
+// run's directory. Only the factory writes one (see Event.Log).
+func MarkLog(path string, stage, event, outcome, detail, log string) error {
+	return Append(path, Event{
+		Source:  "factory",
+		Stage:   stage,
+		Event:   event,
+		Outcome: outcome,
+		Detail:  detail,
+		Log:     log,
 	})
 }
 
