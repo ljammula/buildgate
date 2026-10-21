@@ -63,7 +63,7 @@ function StepLog({ runId, step }: { readonly runId: string; readonly step: strin
 
 /**
  * How the run got to its first agent round, as the six steps the server
- * derives from its progress feed: image, workspace, install, sandbox, verify,
+ * derives from its progress feed: image, workspace, verify, install, sandbox,
  * agent. Each shows its status, what it did, the wait it is in when it is the
  * step waiting, and a log when the factory recorded one. The detail is
  * factory-written (an image reference, the services started) but may quote an

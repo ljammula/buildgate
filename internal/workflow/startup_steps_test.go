@@ -55,8 +55,8 @@ func TestInstallStepMarkedOnFirstAttemptOnly(t *testing.T) {
 		t.Fatalf("feed after two attempts = %+v, want one install pair naming the registry proxy", events)
 	}
 	steps := progress.StartupStepsFrom(events)
-	if steps[2].Name != "install" || steps[2].Status != progress.StepDone {
-		t.Errorf("install step = %+v, want done", steps[2])
+	if steps[3].Name != "install" || steps[3].Status != progress.StepDone {
+		t.Errorf("install step = %+v, want done", steps[3])
 	}
 
 	// No sidecars at all: nothing to install, nothing marked.

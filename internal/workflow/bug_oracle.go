@@ -110,12 +110,25 @@ func bugOracleRedOnBase(ctx temporalworkflow.Context, ids *activityIDs, buildVer
 	}
 	attempts = append(attempts, gate.Attempts...)
 	if gate.NotRun || oracleNotRunExit(gate.Result.ExitCode) {
-		msg := fmt.Sprintf("the acceptance oracle did not run its tests on the base commit (`%s` exited %d or ran no test), so it says nothing about the bug; no model call was made. Fix the oracle's RUN_COMMAND.txt so the command runs the oracle, then approve it again", input.GateCommands[policy.ReferenceOracleGateID], gate.Result.ExitCode)
+		// The command is the oracle's whole RUN_COMMAND.txt, often a
+		// multi-line script: the sentence names its exit and log instead.
+		msg := fmt.Sprintf("the acceptance oracle did not run its tests on the base commit (its run command exited %d or ran no test%s), so it says nothing about the bug; no model call was made. Fix the oracle's RUN_COMMAND.txt so the command runs the oracle, then approve it again", gate.Result.ExitCode, oracleLogClause(gate.Attempts))
 		return nil, wrapActivityFailure("oracle not run on base", temporal.NewNonRetryableApplicationError(msg, OracleNotRunOnBaseFailureType, nil), attempts, baseSHA, committed, worktreePath, branch)
 	}
 	if gate.Result.ExitCode != 0 {
 		return attempts, nil
 	}
-	msg := fmt.Sprintf("the acceptance oracle passes on the base commit (`%s` exits 0), so it does not reproduce the bug; no model call was made. Send the request back to spec drafting and hand-write an oracle that fails on the current code", input.GateCommands[policy.ReferenceOracleGateID])
+	msg := fmt.Sprintf("the acceptance oracle passes on the base commit (its run command exits 0%s), so it does not reproduce the bug; no model call was made. Send the request back to spec drafting and hand-write an oracle that fails on the current code", oracleLogClause(gate.Attempts))
 	return nil, wrapActivityFailure("oracle red on base", temporal.NewNonRetryableApplicationError(msg, OraclePassesOnBaseFailureType, nil), attempts, baseSHA, committed, worktreePath, branch)
+}
+
+// oracleLogClause names the log of the check's last attempt, for the halt
+// sentence: ", log <path>", or "" when the check recorded none.
+func oracleLogClause(attempts []run.Attempt) string {
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if attempts[i].LogPath != "" {
+			return ", log " + attempts[i].LogPath
+		}
+	}
+	return ""
 }

@@ -672,7 +672,7 @@ func watchRun(out *os.File, dataDir, runID string, noFollow bool) error {
 	}
 }
 
-// withStartup puts the start-up position ("start-up 3/6: install (running
+// withStartup puts the start-up position ("start-up 4/6: install (running
 // 42s)", empty once the agent has started) before a footer's facts.
 func withStartup(footer, startup string) string {
 	if startup == "" {

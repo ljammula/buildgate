@@ -45,7 +45,8 @@ type StartupStep struct {
 	Wait string `json:"wait,omitempty"`
 }
 
-// The start-up steps, in the order an operator reads them.
+// The start-up steps, in the order a run takes them: the baseline verify
+// runs before the build launch starts its sidecars and sandbox.
 const (
 	StepImage     = "image"
 	StepWorkspace = "workspace"
@@ -55,7 +56,7 @@ const (
 	StepAgent     = "agent"
 )
 
-var startupOrder = []string{StepImage, StepWorkspace, StepInstall, StepSandbox, StepVerify, StepAgent}
+var startupOrder = []string{StepImage, StepWorkspace, StepVerify, StepInstall, StepSandbox, StepAgent}
 
 // startupStepOf maps a factory stage to the start-up step it begins or ends.
 func startupStepOf(stage string) (string, bool) {
@@ -300,7 +301,7 @@ func placeWait(steps []StartupStep, wait string) {
 }
 
 // StartupFooter is the one-line start-up position for `factoryd watch`'s
-// footer, "start-up 3/6: install (running 42s)", or "" once the agent's first
+// footer, "start-up 4/6: install (running 42s)", or "" once the agent's first
 // round has started or the run finished before it.
 func StartupFooter(steps []StartupStep, now time.Time) string {
 	if len(steps) == 0 {

@@ -47,7 +47,7 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "image=done workspace=done install=skipped sandbox=done verify=failed agent=done"
+	want := "image=done workspace=done verify=failed install=skipped sandbox=done agent=done"
 	if got := statusesOf(steps); got != want {
 		t.Fatalf("steps = %s, want %s", got, want)
 	}
@@ -57,11 +57,11 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 	if steps[5].StartedAt != "t7b" || steps[5].EndedAt != "t10" {
 		t.Errorf("agent step = %+v, want the factory's start and the first round after it", steps[5])
 	}
-	if steps[3].Log != "launches/a.log" || steps[3].EndedAt != "t7" {
-		t.Errorf("sandbox step = %+v, want the first launch's log and end", steps[3])
+	if steps[4].Log != "launches/a.log" || steps[4].EndedAt != "t7" {
+		t.Errorf("sandbox step = %+v, want the first launch's log and end", steps[4])
 	}
-	if steps[4].Log != "verify-baseline.log" || steps[4].Detail != "failed: TestX" {
-		t.Errorf("verify step = %+v", steps[4])
+	if steps[2].Log != "verify-baseline.log" || steps[2].Detail != "failed: TestX" {
+		t.Errorf("verify step = %+v", steps[2])
 	}
 
 	// Before anything: all pending; a missing feed is no error.
@@ -84,7 +84,7 @@ func TestStartupStepsInOrderWithSkippedAndFailed(t *testing.T) {
 		fe("t4", "prepare_workspace", "start", "", "", ""),
 		fe("t5", "model_host_lock", "waiting", "", "queued behind run-b", ""),
 	})
-	if got, want := statusesOf(running), "image=done workspace=running install=pending sandbox=pending verify=pending agent=pending"; got != want {
+	if got, want := statusesOf(running), "image=done workspace=running verify=pending install=pending sandbox=pending agent=pending"; got != want {
 		t.Errorf("running = %s, want %s", got, want)
 	}
 	if running[1].Wait != "queued behind run-b" {
@@ -185,7 +185,7 @@ func TestStartupFooter(t *testing.T) {
 		fe("2026-10-20T10:00:03.000Z", "prepare_workspace", "end", "pass", "", ""),
 		fe("2026-10-20T10:00:00.000Z", "install", StepStart, "", "", ""),
 	})
-	if got, want := StartupFooter(steps, now), "start-up 3/6: install (running 42s)"; got != want {
+	if got, want := StartupFooter(steps, now), "start-up 4/6: install (running 42s)"; got != want {
 		t.Errorf("footer = %q, want %q", got, want)
 	}
 	done := append(steps[:0:0], steps...)
@@ -207,7 +207,7 @@ func TestAForgedRoundDuringVerifyDoesNotHideLaterLines(t *testing.T) {
 		fe("t3", "baseline_verify", "end", "pass", "passed", ""),
 		fe("t4", "sandbox", StepStart, "", "", ""),
 	})
-	if got, want := statusesOf(steps), "image=skipped workspace=skipped install=skipped sandbox=running verify=done agent=pending"; got != want {
+	if got, want := statusesOf(steps), "image=skipped workspace=skipped verify=done install=skipped sandbox=running agent=pending"; got != want {
 		t.Errorf("steps = %s, want %s", got, want)
 	}
 }
