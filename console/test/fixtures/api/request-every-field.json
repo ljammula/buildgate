@@ -43,6 +43,8 @@
     "at": "2026-09-10T09:00:00Z"
   },
   "retry_from_scratch": true,
+  "retry_from_round": 3,
+  "retry_ticket": 3,
   "quarantine_check": "every-field quarantine_check",
   "approved_by": "every-field approved_by",
   "approved_at": "2026-09-10T09:00:00Z",
@@ -262,6 +264,23 @@
           "error": "every-field error",
           "start_failure": true,
           "pushed": true
+        }
+      ],
+      "round_tags": [
+        {
+          "n": 3,
+          "run_id": "every-field run_id",
+          "kind": "every-field kind",
+          "sha": "every-field sha",
+          "base_sha": "every-field base_sha",
+          "diff_base_sha": "every-field diff_base_sha",
+          "ref": "every-field ref",
+          "repo": "every-field repo",
+          "outcome": "every-field outcome",
+          "failed_checks": [
+            "every-field failed_checks"
+          ],
+          "at": "2026-09-10T09:00:00Z"
         }
       ],
       "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",

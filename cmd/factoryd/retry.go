@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"buildgate/internal/release"
@@ -29,7 +30,7 @@ func newRetryFlags() (flags *flag.FlagSet, dataDir, reason, from, configPath *st
 	// (newRejectFlags): recorded on the request's appended History entry
 	// via request.Retry, not dropped.
 	reason = flags.String("reason", "", "why this request is being retried, recorded on its history")
-	from = flags.String("from", retryFromAttempt, "Where a rebuilt ticket starts. \"attempt\" continues from the failed attempt's commit when it made one and the build may be told what failed. \"scratch\" drops that work and starts from the base commit.")
+	from = flags.String("from", retryFromAttempt, "Where a rebuilt ticket starts: \"attempt\" (default) on the failed attempt's commit, \"scratch\" on the base commit, or a round number from `factoryd rounds` on a new branch at that round.")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
 	return
@@ -50,10 +51,11 @@ func retryMain(dp *deps, args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return fmt.Errorf("usage: factoryd retry [-config <path>] [-data-dir <dir>] [-reason ...] [-from attempt|scratch] <id>")
+		return fmt.Errorf("usage: factoryd retry [-config <path>] [-data-dir <dir>] [-reason ...] [-from attempt|scratch|<round>] <id>")
 	}
-	if *from != retryFromAttempt && *from != retryFromScratch {
-		return fmt.Errorf("-from must be %q or %q, got %q", retryFromAttempt, retryFromScratch, *from)
+	choice, err := parseRetryFrom(*from)
+	if err != nil {
+		return err
 	}
 	id := flags.Arg(0)
 	// The id is joined beneath <data-dir>/requests; a path-shaped one could
@@ -69,11 +71,45 @@ func retryMain(dp *deps, args []string) error {
 		}
 		return err
 	}
-	handled, err := retryRequestFrom(dp, *dataDir, req, *reason, *from == retryFromScratch, time.Now())
+	handled, err := retryRequestFrom(dp, *dataDir, req, *reason, choice, time.Now())
 	if !handled {
 		return fmt.Errorf("request %q is %s; only a quarantined, halted or resume_review request can be retried", id, req.State)
 	}
 	return err
+}
+
+// retryChoice is `-from`'s value: scratch, a ledger round, or neither.
+type retryChoice struct {
+	scratch bool
+	round   int
+}
+
+// parseRetryFrom reads `-from`: attempt, scratch or a round number.
+func parseRetryFrom(from string) (retryChoice, error) {
+	switch from {
+	case retryFromAttempt:
+		return retryChoice{}, nil
+	case retryFromScratch:
+		return retryChoice{scratch: true}, nil
+	}
+	n, err := strconv.Atoi(from)
+	if err != nil || n < 1 {
+		return retryChoice{}, fmt.Errorf("-from must be %q, %q or a round number (see `factoryd rounds <id>`), got %q", retryFromAttempt, retryFromScratch, from)
+	}
+	return retryChoice{round: n}, nil
+}
+
+// retryFunc picks the shared retry for the choice.
+func (c retryChoice) retryFunc() func(dataDir, id, by, reason string, now time.Time, openPR request.PROpener) (*request.Request, error) {
+	switch {
+	case c.round > 0:
+		return func(dataDir, id, by, reason string, now time.Time, openPR request.PROpener) (*request.Request, error) {
+			return request.RetryFromRound(dataDir, id, by, reason, c.round, now, openPR)
+		}
+	case c.scratch:
+		return request.RetryFromScratch
+	}
+	return request.Retry
 }
 
 // retryRequestFrom handles `factoryd retry <request-id>` for a request:
@@ -84,17 +120,13 @@ func retryMain(dp *deps, args []string) error {
 // handled=true. Otherwise reports handled=false so retryMain refuses the
 // request with its state. fromScratch is `-from scratch`'s choice: a rebuilt
 // ticket starts from the base commit whatever the quarantined attempt left.
-func retryRequestFrom(dp *deps, dataDir string, r *request.Request, reason string, fromScratch bool, now time.Time) (handled bool, err error) {
+func retryRequestFrom(dp *deps, dataDir string, r *request.Request, reason string, choice retryChoice, now time.Time) (handled bool, err error) {
 	// resume_review is handled too, so request.Retry refuses it with the hint
 	// to use `factoryd resume`, rather than a refusal that names nothing.
 	if r.State != request.StateQuarantined && r.State != request.StateHalted && r.State != request.StateResumeReview {
 		return false, nil
 	}
-	retry := request.Retry
-	if fromScratch {
-		retry = request.RetryFromScratch
-	}
-	updated, err := retry(dataDir, r.ID, currentOSUser(), reason, now, func(dataDir, runID, stackBase string) request.PROpenOutcome {
+	updated, err := choice.retryFunc()(dataDir, r.ID, currentOSUser(), reason, now, func(dataDir, runID, stackBase string) request.PROpenOutcome {
 		return retryPullRequestOpener(dp, dataDir, runID, stackBase)
 	})
 	if err != nil {

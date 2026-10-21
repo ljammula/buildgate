@@ -559,6 +559,7 @@ func subcommands() map[string]subcommand {
 		"status":            withoutDeps(statusMain),
 		"inbox":             withoutDeps(inboxMain),
 		"inspect":           withoutDeps(inspectMain),
+		"rounds":            withoutDeps(roundsMain),
 		"stop":              stopMain,
 		"uninstall":         uninstallMain,
 		"upgrade":           upgradeMain,

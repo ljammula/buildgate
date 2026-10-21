@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -37,6 +38,9 @@ type requestActivities struct {
 	planRunner   requestdriver.PlanTicketsRunner
 	oracleRunner requestdriver.OracleDraftRunner
 	buildRunner  requestdriver.TicketRunner
+	// cancelPoll is how often a running step looks for its request being
+	// cancelled; 0 is requestHeartbeatInterval.
+	cancelPoll time.Duration
 
 	// consoleStart guards consoleStartedAt, when ensureConsole last tried.
 	consoleStart     sync.Mutex
@@ -65,7 +69,31 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 	if err != nil {
 		return workflow.RequestStep{}, fmt.Errorf("load request %s: %w", id, err)
 	}
-	return requestStepFor(r.State, a.cfg), nil
+	if r.State.Finished() {
+		// Nothing can retry from a round of a request that is over.
+		requestdriver.PruneRoundRefs(a.dp, r)
+	}
+	step := requestStepFor(r.State, a.cfg)
+	if step.Remind {
+		step.Wait = reviewWait(r, a.cfg.HitlReminderInterval, a.cfg.Settings.ReviewGateExpiry, time.Now())
+	}
+	return step, nil
+}
+
+// minReviewWait is the shortest timer a review step sets: a Wait of 0 means
+// wait for a signal only, so a gate about to expire (or already past its
+// deadline) still wakes the workflow.
+const minReviewWait = time.Second
+
+// reviewWait is how long a request at a review gate waits before the workflow
+// looks again: the reminder interval, cut short to the time left before the
+// gate expires (review_gate_expiry), and never below minReviewWait.
+func reviewWait(r *request.Request, reminder, expiry time.Duration, now time.Time) time.Duration {
+	wait := reminder
+	if deadline, ok := r.GateDeadline(expiry); ok {
+		wait = min(wait, deadline.Sub(now))
+	}
+	return max(wait, minReviewWait)
 }
 
 // requestStepFor maps a request state to its RequestWorkflow step.
@@ -120,13 +148,17 @@ const requestHeartbeatInterval = 5 * time.Second
 // AdvanceRequest runs one step of request id (advanceRequest), saves its
 // outcome and returns the state the request is in afterwards. It heartbeats
 // for as long as the step runs, so a worker that dies mid-step is noticed,
-// and a cancel of the activity cancels the step. A stall of the connection to
+// and a cancel of the activity, or of the request, cancels the step. A stall of the connection to
 // Temporal shorter than the heartbeat timeout does not.
 func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (string, error) {
 	// The step runs under a context a stalled connection to Temporal cannot
 	// cancel (workflow.GuardStep): a build that lost nothing is not killed.
 	ctx, endGuard := workflow.GuardStep(ctx)
 	defer endGuard()
+	// A cancel of the request stops the step (cause request.ErrCancelled): a
+	// build in its sandbox included, whose worktree is rolled back.
+	ctx, endWatch := cancelWhenRequestCancelled(ctx, a.dataDir, id, cmp.Or(a.cancelPoll, requestHeartbeatInterval))
+	defer endWatch()
 	a.ensureConsole()
 	r, err := request.Load(a.dataDir, id)
 	if err != nil {
@@ -187,7 +219,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 		stopHeartbeat := heartbeatUntilDone(ctx, requestHeartbeatInterval)
 		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.oracleRunner, a.buildRunner)
 		stopHeartbeat()
-		if err != nil {
+		if err != nil && !errors.Is(err, request.ErrCancelledOnDisk) {
 			return "", err
 		}
 	}
@@ -285,9 +317,14 @@ func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bo
 	return false, ""
 }
 
-// RemindRequest sends request id's review reminder when one is due.
+// RemindRequest sends request id's review reminder when one is due, after
+// halting the request if its gate has expired.
 func (a *requestActivities) RemindRequest(_ context.Context, id string) error {
 	a.ensureConsole()
+	// A gate past its review_gate_expiry halts instead of reminding.
+	if expired, err := requestdriver.ExpireIfDue(a.dataDir, id, a.cfg.Settings.ReviewGateExpiry, time.Now()); err != nil || expired {
+		return err
+	}
 	return requestdriver.RemindIfDue(a.dataDir, id, a.cfg.HitlReminderInterval, time.Now)
 }
 

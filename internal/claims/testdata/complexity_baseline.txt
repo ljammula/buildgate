@@ -23,7 +23,6 @@
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
-26 cmd/factoryd/run_temporal.go awaitRunWorkflow
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
@@ -51,7 +50,6 @@
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch
 29 internal/sandbox/composeservices_orphans.go ReconcileComposeServicesOrphans
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
-28 internal/sessionconfig/sessionconfig.go (*Config).ApplySettings
 39 internal/workflow/activities_build.go (*Activities).runBuild
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity

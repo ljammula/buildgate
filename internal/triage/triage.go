@@ -985,6 +985,8 @@ func triageHalt(r *run.Run) string {
 		return "halted: relay budget ceiling exceeded"
 	case run.HaltReasonComposeServicesRejected:
 		return "halted: the target repo's compose file was rejected before the build; fix the named services or compose_services_* config and retry"
+	case run.HaltReasonRequestCancelled:
+		return "halted: the request was cancelled while this run was building (an operator's decision; nothing failed)"
 	case run.HaltReasonReviewInstructionsFailed:
 		return reviewInstructionsSentence(r)
 	case run.HaltReasonFactoryDirFailed:

@@ -44,6 +44,14 @@ type Deps interface {
 	RetargetPullRequestBase(ctx context.Context, prURL string, base string) error
 	RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error)
 	UndoMarkPullRequestReady(ctx context.Context, prURL string) error
+	// CreateRef points a full ref at a commit in the target repository's local
+	// .git (the round refs; nothing is pushed). CreateBranchAt creates a local
+	// branch at a commit, workspace.ErrBranchExists when it is elsewhere.
+	CreateRef(dir string, ref string, sha string) error
+	CreateBranchAt(dir string, branch string, sha string) error
+	// PruneRoundRefs deletes request id's round refs, and its retry-from
+	// branches that start with none of keepPrefixes, from the repository.
+	PruneRoundRefs(dir string, id string, keepPrefixes []string) error
 	// RunTicket builds one ticket: the command's single-ticket run.
 	RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error
 }
@@ -83,12 +91,11 @@ func RequestDriverOwnsState(state request.State) bool {
 // job had never run; the next driveRequests pass reads the cancelled
 // state fresh and, per RequestDriverOwnsState above, leaves it alone.
 //
-// This does not reach into a build already launched for the ticket the
-// job was building (run_ticket.go's own context is not plumbed through
-// cancelRequest) -- a cancel during AdvanceBuilding stops the *request*
-// from being resurrected into building/pr_review, but the underlying run
-// itself keeps executing to its own conclusion in the sandbox. Cancelling
-// the in-flight run is not implemented; see cancelRequest's doc comment.
+// The cancel also stops the job itself: the worker's step ends its context,
+// with cause request.ErrCancelled, as soon as it finds the request cancelled
+// (cmd/factoryd's cancelWhenRequestCancelled), which removes a build's sandbox
+// and rolls its worktree back. This check is what keeps the stopped job's
+// result from being saved.
 func stillInState(dataDir string, id string, expected request.State) (bool, error) {
 	unlock, err := request.Lock(dataDir, id)
 	if err != nil {
@@ -706,8 +713,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
-	args, recordOf, onBranch := withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
-	args, err = withEarlierTicketsWork(r, idx, args, resumeRunID, onBranch)
+	args, recordOf, onBranch, err := startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -739,6 +745,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// later rebuild of this ticket never reuses it. Until here a crash
 		// leaves it in place and the next pass applies it again.
 		r.ConsumeResumeDecision()
+		r.ClearRetryChoice()
 		log.Printf("request %s: building -> building (ticket %d/%d started as run %s)", r.ID, idx, r.TicketCount, startedRun.ID)
 		// Recorded on the run's own durable record too, not just this
 		// ticket's RunID back-reference -- see run.Run.RequestID's own
@@ -767,8 +774,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// any of runErr/runRecord's outcome is persisted below -- a cancel that
 	// landed while the ticket built must not be resurrected by
 	// startNextTicketOrFinish/HaltRequest/quarantineRequest's own r.Save.
-	// This does not stop or unwind the run itself; see stillInState's doc
-	// comment for that gap.
 	if ok, err := stillInState(dataDir, r.ID, request.StateBuilding); err != nil {
 		return err
 	} else if !ok {
@@ -813,6 +818,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return fmt.Errorf("load run %q for request %s ticket %d: %w", ticket.RunID, r.ID, idx, err)
 	}
+	tagTicketRound(dp, r, ticket, runRecord, request.RoundTagBuild, now)
 	// reason prefers the run's own durably recorded HaltError/HaltReasonCode/
 	// gate result (StatusReason), falling back to runErr's text only when
 	// the record itself carries none -- found in review (Codex, PR #135):
@@ -1583,6 +1589,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			At:           now.UTC().Format(time.RFC3339Nano),
 			Error:        errText,
 		})
+		tagRoundByID(dp, dataDir, r, ticket, loadID, plan.kind, now)
 		// ticket.RunID now names the run that actually decided this
 		// ticket's outcome -- retry/PR logic and the console follow
 		// ticket.RunID, not the original quarantined run, once a
@@ -2890,6 +2897,47 @@ func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 	n := prepareRequestNotification(dataDir, r, reviewNotice(dataDir, r, waited), now)
 	notify.DispatchExternal(dataDir, n)
 	r.NotifyCount++
+}
+
+// ExpireIfDue halts the request id when it waits at an expiring review gate
+// (request.ExpireIfDue, the one implementation) and tells the operator. An
+// expiry of 0 is off. It reports whether it halted.
+func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (bool, error) {
+	if expiry <= 0 {
+		return false, nil
+	}
+	_, expired, err := request.ExpireIfDue(dataDir, id, expiry, now)
+	if err != nil || !expired {
+		return false, err
+	}
+	return true, NotifyGateExpired(dataDir, id, now)
+}
+
+// NotifyGateExpired tells the operator that request id was halted by an expired
+// review gate: the halt's notification, sent once (a request already notified
+// since it entered halted is left alone). Whoever finds a gate expired calls
+// it after request.ExpireIfDue or a refused decision (request.ErrGateExpired):
+// the worker's review wait, the CLI, and the API's notifier option.
+func NotifyGateExpired(dataDir, id string, now time.Time) error {
+	unlock, err := request.Lock(dataDir, id)
+	if err != nil {
+		return fmt.Errorf("request %s: %w", id, err)
+	}
+	defer unlock()
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		return fmt.Errorf("request %s: %w", id, err)
+	}
+	if r.State != request.StateHalted || r.HaltKind != request.HaltGateExpired {
+		return nil
+	}
+	if sent, ok := time.Parse(time.RFC3339Nano, r.LastNotifiedAt); ok == nil {
+		if entered, ok := r.InStateSince(); ok && !sent.Before(entered) {
+			return nil
+		}
+	}
+	log.Printf("request %s: halted (%s)", r.ID, r.Error)
+	return notifyTerminalRequest(dataDir, r, r.Error, now)
 }
 
 // ReviewState reports whether s is one of the states a request waits on the

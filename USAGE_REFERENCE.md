@@ -22,9 +22,11 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd approve <request-id>` | Releases a request from `spec_review` (to `planning`, or `oracle_drafting` if submitted with draft oracles), `oracle_review` (to `planning`) or `plan_review` (to `building`). Refuses any other state. The CLI does not show oracle files; the console does and pins their hash into the approval. Refused from `spec_review` while the spec has a `[NEEDS DECISION]` item under Open questions: the items are listed, and the answers go in `reject -reason`. |
 | `factoryd reject -reason "<text>" \| -comments-file <file> <request-id>` | Sends `spec_review`/`oracle_review`/`plan_review` back to `spec_drafting`/`oracle_drafting`/`planning`, appending the reason to `request.md` (an oracle rejection also feeds it to the next drafting pass). `-comments-file <file>` (`-` reads standard input) replaces or accompanies `-reason` for `spec_review` and `plan_review`: a JSON list of comments on passages, `[{"path": "spec.md", "section": "## Scope", "item": 0, "quote": "text copied from that section", "note": "..."}]` (`section`, `item` and `quote` optional; `path` is `spec.md` or `tickets/NNN.spec.md`). `section` must be a required heading of that file, `item` at most the spec's criteria count, and `quote` text still in the section, else the rejection is refused and nothing changes. The redraft is then given the reviewed file and changes only the commented sections (a ticket comment with no `section` redrafts that ticket whole); every other byte is kept, hand edits included. A `-reason` beside the comments, or a comment with no `section` on `spec.md`, asks for a whole redraft; `-to` with `-comments-file` is refused. With `-to plan\|spec` on a `quarantined`/`halted` request instead: sends it back to `planning` or `spec_drafting` -- refused once any ticket is accepted, or for `plan` with no approved `spec.md`; every ticket (and, for `spec`, `spec.md` itself) must be re-approved before any build. |
 | `factoryd retry <id>` | A `quarantined`/`halted` request mid-`building`: back to `building` at the same ticket with a fresh run, which continues from the quarantined attempt's commit when a build may be told what it failed on (see "A retry's rebuild"). Same rules as `POST /requests/{id}/retry`. A ticket whose last run halted with no verdict on the work (a lost worker, a lost Temporal connection, a sandbox that never started) is not rebuilt by a retry: the request goes to `resume_review`, and you choose `factoryd resume <id>` or `factoryd resume -from scratch <id>`. |
+| `factoryd retry -from <n> <id>` | The same for a ticket that has not been pushed: the rebuild starts on a new branch `buildgate/<id>/t<ticket>-from-r<n>` at the commit of round `n` of the ticket's round ledger (`factoryd rounds <id>`), with that round's gates measured from its own diff base. The old branch stays where it is, and every round stays reachable through its ref. Refused for a ticket whose branch has been pushed (its pull request is open: a reset would need a force-push; close the pull request first), for a round the ledger lacks, and for a request that rebuilds nothing. Body of `POST /requests/{id}/retry`: `{"from":"<n>"}`. |
+| `factoryd rounds <request-id>` | Prints the round ledger, read-only: one line per build round that ended in a commit of its own (`ticket`, `round`, `kind`, `sha`, `outcome`, `failed checks`, `ref`, `pushed`). The same list is each ticket's `round_tags` in `GET /requests/{id}` and, on the request page, the ticket's Rounds list with a "Retry from this round" button. |
 | `factoryd resume [-from round\|scratch] <request-id>` | The decision for a request in `resume_review` (its step ended with no verdict on the work: the `worker` stopped or lost contact with the Temporal server, the step's sandbox could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, Docker's disk had no room left while one ran, or a baseline verify's sandbox process was killed for want of memory, or the oracle-drafting job ended before it produced a draft): `-from round` (default) continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again, or reruns a lost drafting or planning step; `-from scratch` rebuilds the ticket from a fresh worktree (a drafting or planning step simply reruns). For a lost build, `round` first checks that no sandbox container of the lost run is alive and the worktree HEAD equals or descends from the HEAD its round state recorded, and refuses otherwise, naming `-from scratch` and `factoryd cancel`; the check is made again when the build launches. A lost drafting or planning step is refused (either verb) while a container its job launched is still alive; `worker` start removes those of a dead process first. Cancel with `factoryd cancel`. `factoryd retry` refuses a request in `resume_review`. Same rules as `POST /requests/{id}/resume` (body `{"from":"round"\|"scratch","by":"<name>"}`; 409 for another state or a refused check). |
 | `factoryd amend-scope -reason "<text>" <request-id> <file>...` | A human operator widens ONE `quarantined` ticket's approved `Allowed-Files:` scope by hand, re-pinning that ticket spec's approval hash, so `factoryd retry` can rebuild it -- the recovery for a build `diff_scope` quarantined over a file that is a legitimate part of the ticket but that the plan never listed. Refused unless the ticket has no PR yet, every existing approval hash still verifies, and each file is a new, valid, not-already-allowed workspace-relative path. Only that one `Allowed-Files:` line is rewritten; state stays `quarantined`. |
-| `factoryd cancel <request-id>` | Moves a non-terminal request, or one already `quarantined`/`halted` (dismisses it instead of retrying), to `cancelled`. Refuses `done` and `closed`. Same rules as `POST /requests/{id}/cancel`. |
+| `factoryd cancel <request-id>` | Moves a non-terminal request, or one already `quarantined`/`halted` (dismisses it instead of retrying), to `cancelled`. Refuses `done` and `closed`. Same rules as `POST /requests/{id}/cancel`. A step already running for the request stops: the worker finds the cancel within about 5 s, ends the step, removes a build's sandbox, rolls its worktree back (nothing is kept for a resume) and halts the build's run with `halt_reason_code: request_cancelled`, an operator's end that `stats` and the run's triage sentence count apart from a failure. A pull request already opened stays open. |
 | `factoryd install-service` | macOS: installs and bootstraps launchd agents `dev.factoryd.worker` (`factoryd worker -temporal-address <addr>`, the address resolved as `submit` does; refuses with one line when no Temporal is available) and `dev.factoryd.serve` (`KeepAlive`, logs under `<data-dir>/logs/`). Creates or reuses a stable start token at `<config dir>/serve-start-token` (0600); the plist never embeds it. `-force` overwrites existing plists, `-print` prints the worker plist only, and `-no-serve` installs the worker alone. `-require-tokens` also creates or reuses `<config dir>/serve-override-token`, `serve-read-token` and `serve-console-token` (0600), which `serve` reads at each start, so no caller reads or writes without a token (the console on this machine gets the console token from `factoryd console`'s link, which does not expire and works only on this machine; deleting the files and restarting `serve` turns this off); `-allowed-host <host[:port]>` is passed to the serve agent. Neither goes with `-no-serve`. Without `-data-dir` the config's `data_dir` is used. |
 | `factoryd uninstall-service` | macOS: boots out and removes both agents. Leaves the token files for reuse. |
 | `factoryd console` | Prints the tokenized console link (`<addr>/#t=<token>`) from the stable token file, for the running `serve` of this data dir (the address it recorded), with `&c=<console token>` added when `install-service -require-tokens` wrote one (`quickstart`'s console link carries it the same way), or a line naming the command that writes one when an install requires tokens and has none; a plain link if no token or no such serve is found. Starts a `serve` for the data dir first when none is running (unless `FACTORYD_AUTOSTART=0`). |
@@ -67,7 +69,7 @@ it explains what the flag changes. Flags come before positional arguments.
 | `-watch` | `submit` | Follows the request after submitting, as `factoryd watch` does |
 | `-reason "<text>"` | `reject` (required unless `-comments-file` is given), `amend-scope`, `override` (required); `kill-switch` (required with `-state`); `retry`, `cancel` | Why. A rejection's reason reaches the next draft |
 | `-to plan\|spec` | `reject` | Sends a `quarantined` or `halted` request back to `planning` or `spec_drafting` |
-| `-from attempt\|scratch` (`retry`), `-from round\|scratch` (`resume`) | `retry`, `resume` | Continue from the failed attempt's commit or the last completed round (the defaults), or rebuild the ticket from the base |
+| `-from attempt\|scratch\|<round>` (`retry`), `-from round\|scratch` (`resume`) | `retry`, `resume` | Continue from the failed attempt's commit or the last completed round (the defaults), or rebuild the ticket from the base; `retry` also takes a round number of the ledger (`factoryd rounds`) |
 | `-workspace <repository>` | `memory`, `reconcile` (both required) | The repository the command acts on |
 | `-project <name>` | `kill-switch` (required), `status`, `stats` | The project: the basename of the repository |
 | `-state engaged\|disengaged` | `kill-switch` | Engages or disengages the project's release kill switch, and then needs `-by <who>` and `-reason`; without it the state and history are printed |
@@ -164,6 +166,14 @@ same channels a halted run's alert uses. Approving/rejecting stops
 reminders immediately; a `worker` restart never re-sends one already
 current (`request.json`'s `last_notified_at` is the source of truth, not
 memory).
+
+**Expiring gates.** With `review_gate_expiry` set, a request at `spec_review`,
+`oracle_review`, `plan_review` or `resume_review` that no one decides within
+that time (counted from entering the state) is halted, not cancelled: the worker's
+review wait never sleeps past the deadline (the reminder interval, cut to the time
+left, at least 1s), `approve` and `reject` on the CLI and the API check it first
+and refuse a late decision, and `factoryd retry <id>` (or the console's Retry)
+reopens the same review. `pr_review` has no expiry.
 
 **Ticket sequencing (`building`).** Tickets build one at a time, chained
 with `-prior-run <previous run id>`. A ticket's actual `-spec` is not
@@ -294,6 +304,25 @@ ticket's whole change, measured from the diff base, so nothing in the commit
 it continues from escapes them. A build started by `factoryd resume -from
 scratch` always starts from the base. A lost rebuild that was continuing on a
 branch cannot be resumed in its worktree (only `resume -from scratch`).
+
+**The round ledger.** Each build round that ends in a commit of its own (the
+ticket's first build, a rebuild, an automatic corrective or conformity round, a
+PR-review round) is recorded on its ticket (`round_tags`: round number per
+ticket, kind `build`, `corrective`, `conformity` or `pr_review`, run, commit,
+base and diff base, outcome `accepted`, `quarantined` or `halted`, and the
+checks that failed) and kept under a local ref
+`refs/buildgate/rounds/<request-id>/t<ticket>/r<n>` in the target repository, so
+the commit stays reachable after a halted run's branch is deleted. The host
+writes the refs; they are never pushed. A round that committed nothing (its
+result equals its starting commit) has no entry, and a ref that cannot be
+written is logged and leaves no entry. A ref is created and never moved: a
+ticket's ledger starts again after a send-back re-plans it, and a name already
+taken moves the new round to the next free number, so the earlier plan's commits
+stay reachable. Each entry records its repository. When the request reaches
+`done`, `closed` or `cancelled` its round refs and its unpushed
+`buildgate/<request-id>/t<ticket>-from-r<n>` branches are deleted from the
+repository (a pushed ticket's branches stay); until then they are the only way
+back to a round.
 
 A retry is not a corrective round: it uses none of that budget and records no
 round. If the rebuild cannot start on the quarantined run's branch (the branch
@@ -1880,6 +1909,7 @@ limits for API-started runs.
 | `request_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `request_token_budget`, in micro-USD |
 | `monthly_token_budget` | `0` (unlimited) -- total spend across every request in the data dir during the current calendar month (UTC) |
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
+| `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, the oracle run-command edit and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
 | `registry_proxy_pypi_upstream` | `https://pypi.org/simple` |
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |

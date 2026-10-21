@@ -437,6 +437,18 @@ test("request-every-field decodes with every optional field populated", () => {
       // not a review round.
       reviewRounds: [],
       activeRoundRunId: "",
+      roundTags: [
+        {
+          n: 3,
+          runId: "every-field run_id",
+          kind: "every-field kind",
+          sha: "every-field sha",
+          ref: "every-field ref",
+          outcome: "every-field outcome",
+          failedChecks: ["every-field failed_checks"],
+          at: "2026-09-10T09:00:00Z",
+        },
+      ],
       mergeReadiness: {
         ready: true,
         checkedAt: "2026-09-10T09:00:00Z",
@@ -657,6 +669,43 @@ test("a ticket's PR-review rounds are decoded; conformity rounds are left out", 
     activeRoundRunId: "",
     mergeReadiness: null,
   });
+});
+
+test("a ticket's round ledger is decoded, and a ticket without one has none", () => {
+  const r = request({
+    state: "quarantined",
+    tickets: [
+      {
+        index: 1,
+        round_tags: [
+          {
+            n: 1,
+            run_id: "r1",
+            kind: "build",
+            sha: "a".repeat(40),
+            ref: "refs/buildgate/rounds/req-1/t1/r1",
+            outcome: "quarantined",
+            failed_checks: ["spec_conformity"],
+            at: "2026-10-20T10:00:00Z",
+          },
+        ],
+      },
+      { index: 2 },
+    ],
+  });
+  expect(r.tickets[0]?.roundTags).toEqual([
+    {
+      n: 1,
+      runId: "r1",
+      kind: "build",
+      sha: "a".repeat(40),
+      ref: "refs/buildgate/rounds/req-1/t1/r1",
+      outcome: "quarantined",
+      failedChecks: ["spec_conformity"],
+      at: "2026-10-20T10:00:00Z",
+    },
+  ]);
+  expect(r.tickets[1]?.roundTags).toEqual([]);
 });
 
 test("a request's in-place edits decode, and an edit is handed over by the next rejection of its stage", () => {

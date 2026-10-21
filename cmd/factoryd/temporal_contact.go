@@ -11,6 +11,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/unresolved"
 	"buildgate/internal/workflow"
@@ -72,6 +73,8 @@ func lostTemporalContact(runCtx context.Context, processLost bool, ctxErr, waitE
 // is quoted.
 func logRunLost(id string, processLost bool, contactLost, cause error) {
 	switch {
+	case errors.Is(cause, request.ErrCancelled):
+		log.Printf("run %s: its request was cancelled; stopping the build and rolling its worktree back", id)
 	case contactLost != nil:
 		log.Printf("run %s: lost contact with the Temporal server (%v); the run is halted and its worktree kept for a decision", id, contactLost)
 	case processLost && workflow.StoppedByTemporal(cause):

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver"
 )
 
 // approveMain implements `factoryd approve [-data-dir <path>]
@@ -51,11 +53,16 @@ func approveMain(dp *deps, args []string) error {
 		return err
 	}
 
+	opts, err := gateExpiryOptions(*configPath)
+	if err != nil {
+		return fmt.Errorf("approve request %q: %w", positional[0], err)
+	}
 	// nil expectedSHA256: this CLI has no prior fetch of its own to bind
 	// the approval to (unlike the console, see Approve's own doc
 	// comment), so it keeps the unconditional behavior.
-	r, err := request.Approve(*dataDir, positional[0], currentOSUser(), time.Now(), nil)
+	r, err := request.Approve(*dataDir, positional[0], currentOSUser(), time.Now(), nil, opts...)
 	if err != nil {
+		notifyIfGateExpired(*dataDir, positional[0], err)
 		return fmt.Errorf("approve request %q: %w", positional[0], err)
 	}
 	wakeAfterSave(dp, context.Background(), os.Stderr, *dataDir, r.ID)
@@ -146,6 +153,10 @@ func rejectMain(dp *deps, args []string) error {
 		return nil
 	}
 
+	opts, err := gateExpiryOptions(*configPath)
+	if err != nil {
+		return fmt.Errorf("reject request %q: %w", id, err)
+	}
 	var anchors []request.RejectionAnchor
 	if *commentsFile != "" {
 		var err error
@@ -153,8 +164,9 @@ func rejectMain(dp *deps, args []string) error {
 			return err
 		}
 	}
-	r, err := request.RejectAnchored(*dataDir, id, by, *reason, anchors, time.Now())
+	r, err := request.RejectAnchored(*dataDir, id, by, *reason, anchors, time.Now(), opts...)
 	if err != nil {
+		notifyIfGateExpired(*dataDir, id, err)
 		return fmt.Errorf("reject request %q: %w", id, err)
 	}
 	wakeAfterSave(dp, context.Background(), os.Stderr, *dataDir, r.ID)
@@ -206,4 +218,27 @@ func currentOSUser() string {
 		return v
 	}
 	return "unknown"
+}
+
+// gateExpiryOptions makes a decision refuse a review gate past the session
+// config's review_gate_expiry, atomically under the request's lock
+// (request.WithGateExpiry). A config that does not load refuses the decision:
+// a gate's expiry is not guessed.
+func gateExpiryOptions(configPath string) ([]request.DecisionOption, error) {
+	settings, err := loadSettingsForConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("the session config cannot be read, so review_gate_expiry is unknown and the decision is refused: %w", err)
+	}
+	return []request.DecisionOption{request.WithGateExpiry(settings.ReviewGateExpiry)}, nil
+}
+
+// notifyIfGateExpired tells the operator when a refused decision halted its
+// request because the review gate had expired.
+func notifyIfGateExpired(dataDir, id string, err error) {
+	if !errors.Is(err, request.ErrGateExpired) {
+		return
+	}
+	if nerr := requestdriver.NotifyGateExpired(dataDir, id, time.Now()); nerr != nil {
+		fmt.Fprintf(os.Stderr, "request %s: could not send the expiry notification: %v\n", id, nerr)
+	}
 }

@@ -137,7 +137,54 @@ func retryAcceptedNoPR(dataDir, id, by, reason string, r *Request, now time.Time
 // never passed it anywhere -- this function took no reason parameter at
 // all).
 func Retry(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Request, error) {
-	return retry(dataDir, id, by, reason, false, now, openPR)
+	return retry(dataDir, id, by, reason, retryChoice{}, now, openPR)
+}
+
+// retryChoice is where the operator wants a rebuild to start: scratch drops the
+// failed attempt's work (`-from scratch`), round names a ledger round
+// (`-from <N>`); neither is the default.
+type retryChoice struct {
+	scratch bool
+	round   int
+}
+
+// RetryFromRound is Retry for an operator who wants the ticket rebuilt on a new
+// branch at the commit of round n of its ledger (`factoryd retry -from <N>`).
+// It refuses a ticket whose branch has been pushed, and a retry that rebuilds
+// no ticket.
+func RetryFromRound(dataDir, id, by, reason string, n int, now time.Time, openPR PROpener) (*Request, error) {
+	if n < 1 {
+		return nil, fmt.Errorf("request %s: round %d is not a round number %w", id, n, ErrIllegalTransition)
+	}
+	return retry(dataDir, id, by, reason, retryChoice{round: n}, now, openPR)
+}
+
+// recoveryWithoutBuild checks the operator's choice against the request, then
+// returns the recovery of a halt that rebuilds nothing (reopensAReview), nil
+// for a retry that rebuilds.
+func (r *Request) recoveryWithoutBuild(choice retryChoice) (func(by, reason string, now time.Time) error, error) {
+	if choice.round > 0 {
+		if err := r.retryFromRoundCheck(choice.round); err != nil {
+			return nil, err
+		}
+	}
+	return r.reopensAReview(), nil
+}
+
+// reopensAReview is the recovery of a halt that returns the request to a stage
+// without rebuilding anything: the transition to run, or nil when the halt is
+// retried the ordinary way.
+func (r *Request) reopensAReview() func(by, reason string, now time.Time) error {
+	if r.State != StateHalted {
+		return nil
+	}
+	switch r.HaltKind {
+	case HaltOracleMaterialize:
+		return r.ReturnToOracleReview
+	case HaltGateExpired:
+		return r.ReopenReview
+	}
+	return nil
 }
 
 // RetryFromScratch is Retry for an operator who wants the ticket rebuilt
@@ -146,10 +193,10 @@ func Retry(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Req
 // that attempt's branch (Request.RetryFromScratch). It changes nothing for a
 // retry that rebuilds no ticket.
 func RetryFromScratch(dataDir, id, by, reason string, now time.Time, openPR PROpener) (*Request, error) {
-	return retry(dataDir, id, by, reason, true, now, openPR)
+	return retry(dataDir, id, by, reason, retryChoice{scratch: true}, now, openPR)
 }
 
-func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, openPR PROpener) (*Request, error) {
+func retry(dataDir, id, by, reason string, choice retryChoice, now time.Time, openPR PROpener) (*Request, error) {
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
 		return nil, err
@@ -165,8 +212,10 @@ func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, open
 	if r.State != StateQuarantined && r.State != StateHalted {
 		return nil, fmt.Errorf("request %s: cannot retry from state %q (must be %q or %q) %w", id, r.State, StateQuarantined, StateHalted, ErrIllegalTransition)
 	}
-	if r.State == StateHalted && r.HaltKind == HaltOracleMaterialize {
-		if err := r.ReturnToOracleReview(by, reason, now); err != nil {
+	if reopen, err := r.recoveryWithoutBuild(choice); err != nil {
+		return nil, err
+	} else if reopen != nil {
+		if err := reopen(by, reason, now); err != nil {
 			return nil, err
 		}
 		if err := r.Save(dataDir); err != nil {
@@ -196,7 +245,7 @@ func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, open
 	if r.TicketIndex >= 1 && r.TicketIndex-1 < len(r.Tickets) {
 		ticket = &r.Tickets[r.TicketIndex-1]
 	}
-	rebuild := func() error { return r.retryRebuild(by, reason, fromScratch, now) }
+	rebuild := func() error { return r.retryRebuild(by, reason, choice, now) }
 	switch {
 	case r.HaltKind == HaltAcceptedNoPR && openPR != nil:
 		// Found via review: this case must be checked BEFORE "ticket has
@@ -230,11 +279,15 @@ func retry(dataDir, id, by, reason string, fromScratch bool, now time.Time, open
 // retryRebuild is Request.Retry plus the operator's choice of where the
 // rebuild starts, recorded after the transition (which drops an earlier
 // retry's choice).
-func (r *Request) retryRebuild(by, reason string, fromScratch bool, now time.Time) error {
+func (r *Request) retryRebuild(by, reason string, choice retryChoice, now time.Time) error {
 	if err := r.Retry(by, reason, now); err != nil {
 		return err
 	}
-	r.RetryFromScratch = fromScratch
+	r.RetryFromScratch = choice.scratch
+	r.RetryFromRound = choice.round
+	if choice.scratch || choice.round > 0 {
+		r.RetryTicket = max(r.TicketIndex, 1)
+	}
 	return nil
 }
 

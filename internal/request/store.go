@@ -2,6 +2,7 @@ package request
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,6 +142,13 @@ func SaveText(dataDir, id, text string) error {
 // on the ordinary path, and a plain re-save with no state change at all
 // never appends anything.
 func (r *Request) Save(dataDir string) error {
+	release := lockIfFree(dataDir, r.ID)
+	defer release()
+	if r.State != StateCancelled {
+		if cur, err := Load(dataDir, r.ID); err == nil && cur.State == StateCancelled {
+			return fmt.Errorf("request %s was cancelled: %s not saved over it %w", r.ID, r.State, ErrCancelledOnDisk)
+		}
+	}
 	if r.State != r.prevState {
 		r.History = append(r.History, Transition{
 			From:   r.prevState,
@@ -165,6 +173,31 @@ func (r *Request) Save(dataDir string) error {
 		return fmt.Errorf("write request: %w", err)
 	}
 	return os.Rename(tmp, path)
+}
+
+// ErrCancelledOnDisk is Save's refusal to overwrite a cancelled request with
+// any other state: cancelled is final, and a step that held the request in
+// memory while the operator cancelled it must not bring it back.
+var ErrCancelledOnDisk = errors.New("the request was cancelled meanwhile")
+
+// lockIfFree takes the request's lock for the length of a Save when nobody
+// holds it (so the cancelled check and the write are one step against a
+// concurrent cancel), and does nothing when the lock is held: by the caller,
+// who then excludes a cancel itself, or by another process, whose write the
+// check right before the rename still sees unless it lands in between.
+func lockIfFree(dataDir, id string) func() {
+	file, err := os.OpenFile(filepath.Join(Dir(dataDir, id), ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return func() {}
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		return func() {}
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}
 }
 
 // Load reads one request by id.

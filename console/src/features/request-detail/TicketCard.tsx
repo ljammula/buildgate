@@ -2,7 +2,7 @@ import { ArrowRight, CircleAlert, ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 
 import { useRunRecord } from "@/api/runQueries";
-import type { RequestTicket } from "@/domain/request";
+import type { RequestSummary, RequestTicket } from "@/domain/request";
 import { type Run, runIsTerminalForDisplay } from "@/domain/run";
 import { runStop } from "@/domain/runStop";
 import { safeHttpUrl } from "@/domain/safeUrl";
@@ -17,6 +17,7 @@ import { StatusChip, StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
 import { ReviewRounds } from "./ReviewRounds";
+import { RoundLedger } from "./RoundLedger";
 
 const runPollMs = 10_000;
 
@@ -44,9 +45,11 @@ function RunActivity({ run }: { readonly run: Run }) {
 export function TicketCard({
   ticket,
   live,
+  request,
 }: {
   readonly ticket: RequestTicket;
   readonly live: boolean;
+  readonly request?: RequestSummary;
 }) {
   // The ticket's own run: the server's ticket JSON carries no run state. Keyed
   // by run id, so a retry landing a new run under the same ticket fetches the
@@ -124,6 +127,7 @@ export function TicketCard({
       )}
       <MergeReadinessLine ticket={ticket} />
       <ReviewRounds ticket={ticket} />
+      {request === undefined ? null : <RoundLedger request={request} ticket={ticket} />}
       {ticket.runId === "" ? null : (
         <div>
           <Button asChild size="sm">

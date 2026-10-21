@@ -92,6 +92,41 @@ export interface RequestTicket {
   readonly activeRoundRunId: string;
   /** The PR-review poll's last ready-to-merge check; null until one has run. */
   readonly mergeReadiness: MergeReadiness | null;
+  /** The round ledger: every build round that ended in a commit, oldest first. */
+  readonly roundTags: readonly RoundTag[];
+}
+
+/**
+ * One entry of a ticket's round ledger (Go's request.RoundTag): a build round
+ * that ended in a commit of its own, kept reachable under `ref` in the target
+ * repository, which `factoryd retry -from <n>` rebuilds from.
+ */
+export interface RoundTag {
+  /** The round number, per ticket, from 1. */
+  readonly n: number;
+  readonly runId: string;
+  /** "build", "corrective", "conformity" or "pr_review"; server-owned, so a string. */
+  readonly kind: string;
+  readonly sha: string;
+  readonly ref: string;
+  /** "accepted", "quarantined" or "halted". */
+  readonly outcome: string;
+  /** The gates that did not pass in that round. */
+  readonly failedChecks: readonly string[];
+  readonly at: string;
+}
+
+function decodeRoundTag(o: JsonObject, at: string): RoundTag {
+  return {
+    n: numberOr(o, "n", at, 0),
+    runId: optString(o, "run_id", at),
+    kind: optString(o, "kind", at),
+    sha: optString(o, "sha", at),
+    ref: optString(o, "ref", at),
+    outcome: optString(o, "outcome", at),
+    failedChecks: stringList(o, "failed_checks", at),
+    at: optString(o, "at", at),
+  };
 }
 
 /**
@@ -151,6 +186,7 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
       .filter((entry) => entry.kind === "")
       .map((entry) => entry.round),
     activeRoundRunId: optString(o, "active_round_run_id", at),
+    roundTags: objectList(o, "round_tags", at, decodeRoundTag),
     mergeReadiness: optObject(o, "merge_readiness", at, (m, mAt) => ({
       ready: optBoolean(m, "ready", mAt),
       checkedAt: optString(m, "checked_at", mAt),

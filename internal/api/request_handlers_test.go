@@ -2630,7 +2630,7 @@ func TestRetryRequestHandlerFrom(t *testing.T) {
 			t.Fatal(err)
 		}
 		r.TicketCount, r.TicketIndex = 1, 1
-		r.Tickets = []request.Ticket{{Index: 1, RunID: "run-1"}}
+		r.Tickets = []request.Ticket{{Index: 1, RunID: "run-1", RoundTags: []request.RoundTag{{N: 1, RunID: "run-1", SHA: "c1"}, {N: 2, RunID: "run-2", SHA: "c2"}}}}
 		if err := r.Save(dataDir); err != nil {
 			t.Fatal(err)
 		}
@@ -2640,11 +2640,15 @@ func TestRetryRequestHandlerFrom(t *testing.T) {
 		status      int
 		fromScratch bool
 		state       request.State
+		fromRound   int
 	}{
-		`{"from":"scratch"}`: {http.StatusOK, true, request.StateBuilding},
-		`{"from":"attempt"}`: {http.StatusOK, false, request.StateBuilding},
-		`{}`:                 {http.StatusOK, false, request.StateBuilding},
-		`{"from":"base"}`:    {http.StatusBadRequest, false, request.StateQuarantined},
+		`{"from":"scratch"}`: {http.StatusOK, true, request.StateBuilding, 0},
+		`{"from":"attempt"}`: {http.StatusOK, false, request.StateBuilding, 0},
+		`{}`:                 {http.StatusOK, false, request.StateBuilding, 0},
+		`{"from":"base"}`:    {http.StatusBadRequest, false, request.StateQuarantined, 0},
+		`{"from":"2"}`:       {http.StatusOK, false, request.StateBuilding, 2},
+		`{"from":"7"}`:       {http.StatusConflict, false, request.StateQuarantined, 0},
+		`{"from":"0"}`:       {http.StatusBadRequest, false, request.StateQuarantined, 0},
 	} {
 		t.Run(body, func(t *testing.T) {
 			dataDir := seed(t)
@@ -2657,8 +2661,8 @@ func TestRetryRequestHandlerFrom(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if saved.State != want.state || saved.RetryFromScratch != want.fromScratch {
-				t.Errorf("saved state %s, from scratch %v; want %s, %v", saved.State, saved.RetryFromScratch, want.state, want.fromScratch)
+			if saved.State != want.state || saved.RetryFromScratch != want.fromScratch || saved.RetryFromRound != want.fromRound {
+				t.Errorf("saved state %s, from scratch %v, from round %d; want %s, %v, %d", saved.State, saved.RetryFromScratch, saved.RetryFromRound, want.state, want.fromScratch, want.fromRound)
 			}
 		})
 	}

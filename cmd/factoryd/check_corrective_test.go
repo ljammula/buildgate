@@ -104,7 +104,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			if got := requestdrivertest.ArgValue(builds[0], "-earlier-attempt"); got != "" {
 				t.Fatalf("the ticket's first build was given a record: %q", got)
 			}
-			if handled, err := retryRequestFrom(dp, dataDir, quarantined, "", tc.fromScratch, time.Now()); err != nil || !handled {
+			if handled, err := retryRequestFrom(dp, dataDir, quarantined, "", retryChoice{scratch: tc.fromScratch}, time.Now()); err != nil || !handled {
 				t.Fatalf("retryRequest: handled %v, err %v", handled, err)
 			}
 			drive()

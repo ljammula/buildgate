@@ -21,7 +21,7 @@ var dispatchGoldenSubcommands = []string{
 	"check-project", "check-ticket", "ticket-template", "init", "onboard", "doctor",
 	"intake", "kill-switch", "reconcile", "status", "inbox", "inspect", "stop", "uninstall",
 	"upgrade", "use", "watch", "logs", "cost", "submit", "approve", "reject", "cancel",
-	"worker", "retry", "resume", "amend-scope", "init-config", "install-service",
+	"worker", "retry", "rounds", "resume", "amend-scope", "init-config", "install-service",
 	"uninstall-service", "quickstart", "console", "install-skill", "configure-images",
 	"image-inputs-hash", "restart", "project-image-args", "image-reuse", "setup",
 	"mcp", "memory", "content", "stats", "build-ca-bundle", "gate-token", "remote-console", "help",

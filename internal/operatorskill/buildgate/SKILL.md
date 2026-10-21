@@ -27,6 +27,9 @@ another profile:
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
   getting better, per repository and per week (read-only; counts, no model call)
+- `factoryd rounds <request-id>`: the round ledger of a request, one line per
+  build round that ended in a commit, with its outcome and failed checks
+  (read-only)
 - `factoryd content [-config <profile>] [-show <selector>]`: list built-in prompts, team skills, selected roles, design guides, and compiled language profiles with source and hash; `-show` prints one source or full profile metadata (read-only; displayed text is sanitized)
 - `factoryd inbox [-config <profile>] [-project <name>] [-json]`: everything
   waiting on the operator across every profile, oldest first (it ignores the
@@ -56,7 +59,9 @@ another profile:
   `-plan-dir <dir>` with it only when the operator also hands over the
   tickets (`001.spec.md`, `002.spec.md`, ...)
   in this request
-- `factoryd retry [-from scratch] <id>`, `factoryd resume [-from scratch] <id>` and
+- `factoryd retry [-from scratch|<round>] <id>` (a round number from
+  `factoryd rounds <id>` rebuilds the ticket on a new branch at that round's
+  commit; it is refused once the ticket's branch was pushed), `factoryd resume [-from scratch] <id>` and
   `factoryd cancel <id>`, when the operator asks for that request by id
 
 Every other `factoryd` command, every flag not shown in this skill, and every
@@ -211,7 +216,7 @@ request sits in a queue nobody drains.
 | `plan_review` | Summarize the ticket list; approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |
 | `resume_review` | A step ended with no verdict on the work (the worker stopped, its sandbox could not be started, the model route did not serve it, a review gave no verdict, a package registry could not be reached, or the oracle-drafting job ended before a draft; `reason:` says which, and the time the model provider said to try again when it gave one); nothing reruns on its own. Quote `reason:` and `next:` from `watch`, then name the choices: `factoryd resume <id>` (continue the build from its last completed round, review a kept build again without building, or rerun a lost drafting or planning step), `factoryd resume -from scratch <id>` (rebuild the ticket), `factoryd cancel <id>`. The operator chooses; if `resume` is refused, only `-from scratch` or `cancel` remain |
-| `halted`, `quarantined` | Quote `reason:` and `next:` from `watch`, then explain them |
+| `halted`, `quarantined` | Quote `reason:` and `next:` from `watch`, then explain them. A halt reading `<state> expired: no decision in <duration>` (`gate_expired`) means no one decided the review in time and nothing failed: offer `factoryd retry <id>`, which reopens that same review |
 | `done`, `closed`, `cancelled` | Final state and PR URL(s); `closed`: a PR was closed without merging, name any PR still open |
 
 ## Explain a failure

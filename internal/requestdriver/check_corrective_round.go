@@ -159,7 +159,8 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	// `resume -from scratch` is a rebuild in a fresh worktree from the
 	// base, also when the step it replaces was a retry lost before its
 	// run existed, whose own choice the move through resume_review dropped.
-	continues := resumeRunID == "" && !r.RetryFromScratch && r.PendingResumeVerb() == ""
+	scratch, _ := r.RetryChoiceFor(ticket.Index)
+	continues := resumeRunID == "" && !scratch && r.PendingResumeVerb() == ""
 	if previous.State == run.StateHalted && previous.EarlierAttemptOf != "" {
 		continues = false
 		unfinished := previous
@@ -176,13 +177,7 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 			}
 		}
 	}
-	// The ticket's spec has changed since that attempt (an amended scope, an
-	// edited ticket): what it failed on was judged against another task, and
-	// telling the build "the task has not changed" would be false.
-	if !sameSpec(previous, argValueOf(args, "-spec")) {
-		return args, "", false
-	}
-	doc, ok := handoffForABuild(dataDir, previous)
+	doc, ok := recordableHandoff(dataDir, previous, args)
 	if !ok {
 		return args, "", false
 	}
@@ -193,18 +188,41 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	if continues {
 		start = startsOnItsBranch
 	}
-	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-%s", ticket.Index, dirName))
-	path, err := writeRecordFile(dir, doc, start)
-	if err != nil {
-		log.Printf("request %s: ticket %d: the build goes ahead without the record of run %s: %v", r.ID, ticket.Index, previous.ID, err)
+	path, ok := writeEarlierRecord(dataDir, r, ticket, previous, doc, dirName, start)
+	if !ok {
 		return args, "", false
 	}
-	log.Printf("request %s: ticket %d/%d: the build is given the record of run %s (failed %s)", r.ID, ticket.Index, r.TicketCount, previous.ID, failedCheckNames(doc))
 	args = append(args, "-earlier-attempt", path)
 	if continues {
 		args = append(args, "-on-branch", previous.Branch, "-diff-base", diffBase)
 	}
 	return args, previous.ID, continues
+}
+
+// recordableHandoff is previous's handoff when a build about to run with args
+// may be given it: the ticket's spec has not changed since that attempt (an
+// amended scope, an edited ticket: what it failed on was judged against
+// another task, and telling the build "the task has not changed" would be
+// false), and the failure is one a build is told about.
+func recordableHandoff(dataDir string, previous *run.Run, args []string) (handoff.Document, bool) {
+	if !sameSpec(previous, argValueOf(args, "-spec")) {
+		return handoff.Document{}, false
+	}
+	return handoffForABuild(dataDir, previous)
+}
+
+// writeEarlierRecord writes the record of previous for the build of ticket and
+// returns its path. An error writing it is logged and reported as ok false: the
+// record is an aid, never a condition.
+func writeEarlierRecord(dataDir string, r *request.Request, ticket *request.Ticket, previous *run.Run, doc handoff.Document, dirName, start string) (path string, ok bool) {
+	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-%s", ticket.Index, dirName))
+	path, err := writeRecordFile(dir, doc, start)
+	if err != nil {
+		log.Printf("request %s: ticket %d: the build goes ahead without the record of run %s: %v", r.ID, ticket.Index, previous.ID, err)
+		return "", false
+	}
+	log.Printf("request %s: ticket %d/%d: the build is given the record of run %s (failed %s)", r.ID, ticket.Index, r.TicketCount, previous.ID, failedCheckNames(doc))
+	return path, true
 }
 
 // The sentence a record opens with, saying where the build that reads it

@@ -309,6 +309,10 @@ describe("writes", () => {
       retryRequest(http, "req-1", { reason: "flaky", fromScratch: false }),
     );
     expect(attempt.body).toBe('{"reason":"flaky"}');
+    const round = await sentBy((http) =>
+      retryRequest(http, "req-1", { reason: "round 2 was right", by: "jane", fromRound: 2 }),
+    );
+    expect(round.body).toBe('{"reason":"round 2 was right","by":"jane","from":"2"}');
 
     const cancel = await sentBy((http) =>
       cancelRequest(http, "req-1", { reason: "obsolete", by: "jane" }),

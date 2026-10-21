@@ -280,7 +280,7 @@ type ResumePreflight func(r *Request) (reasons []string, err error)
 // step), and applies
 // ResumeDecide. A refused preflight returns *ResumeRefusedError and saves
 // nothing. A request not in resume_review wraps ErrIllegalTransition.
-func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight ResumePreflight) (*Request, error) {
+func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight ResumePreflight, opts ...DecisionOption) (*Request, error) {
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
 		return nil, err
@@ -288,6 +288,9 @@ func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight Resume
 	defer unlock()
 	r, err := Load(dataDir, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.refuseLapsed(dataDir, now, opts); err != nil {
 		return nil, err
 	}
 	if verb != ResumeRound && verb != ResumeScratch {

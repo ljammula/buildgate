@@ -609,6 +609,11 @@ type Server struct {
 	// resumePreflight checks a "round" resume of a lost build (see
 	// WithResumePreflight); nil skips it.
 	resumePreflight request.ResumePreflight
+	// reviewGateExpiry reads review_gate_expiry (WithReviewGateExpirySource);
+	// nil is off. gateExpiredNotifier tells the operator of the halt a refused
+	// decision made (WithGateExpiredNotifier).
+	reviewGateExpiry    func() (time.Duration, error)
+	gateExpiredNotifier func(id string)
 	// requestWaker wakes a request's worker after a write (see WithRequestWaker); nil is safe.
 	requestWaker RequestWaker
 	// releasePolicy is used only to record a release decision (evaluate +
@@ -2546,9 +2551,101 @@ type retryOrCancelRequestBody struct {
 	By     string `json:"by,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// From is retry's only: "scratch" rebuilds a ticket from the base
-	// commit (request.RetryFromScratch); "" or "attempt" is the default.
-	// Any other value is refused. Cancel ignores it.
+	// commit (request.RetryFromScratch); a round number such as "2"
+	// rebuilds it on a new branch at that round's commit
+	// (request.RetryFromRound); "" or "attempt" is the default. Any other
+	// value is refused. Cancel ignores it.
 	From string `json:"from,omitempty"`
+}
+
+// WithReviewGateExpiry sets a fixed review_gate_expiry: a decision on a gate
+// that has waited this long is refused under the request's lock, which halts
+// the request (gate_expired). 0, the default, is off.
+func WithReviewGateExpiry(d time.Duration) Option {
+	return WithReviewGateExpirySource(func() (time.Duration, error) { return d, nil })
+}
+
+// WithReviewGateExpirySource is WithReviewGateExpiry read afresh at every
+// decision (serve reads the session config each time, so a changed key applies
+// without a restart). A source that fails refuses the decision: the expiry is
+// not guessed.
+func WithReviewGateExpirySource(source func() (time.Duration, error)) Option {
+	return func(s *Server) {
+		s.reviewGateExpiry = source
+	}
+}
+
+// WithGateExpiredNotifier sets what tells the operator that a decision found
+// its review gate expired and halted the request (the halt's notification).
+func WithGateExpiredNotifier(notify func(id string)) Option {
+	return func(s *Server) {
+		s.gateExpiredNotifier = notify
+	}
+}
+
+// gateExpiry is the review_gate_expiry in force now, 0 without a source.
+func (s *Server) gateExpiry() (time.Duration, error) {
+	if s.reviewGateExpiry == nil {
+		return 0, nil
+	}
+	expiry, err := s.reviewGateExpiry()
+	if err != nil {
+		return 0, fmt.Errorf("review_gate_expiry cannot be read, so this decision is refused: %w", err)
+	}
+	return expiry, nil
+}
+
+// gateOptions makes a decision refuse a lapsed gate under the request's lock.
+func (s *Server) gateOptions() ([]request.DecisionOption, error) {
+	expiry, err := s.gateExpiry()
+	if err != nil {
+		return nil, err
+	}
+	return []request.DecisionOption{request.WithGateExpiry(expiry)}, nil
+}
+
+// noteGateExpired tells the operator when err is a decision refused because
+// its gate had expired.
+func (s *Server) noteGateExpired(id string, err error) {
+	if s.gateExpiredNotifier != nil && errors.Is(err, request.ErrGateExpired) {
+		s.gateExpiredNotifier(id)
+	}
+}
+
+// refuseLapsedEdit refuses an in-place edit of a gate that has expired (the
+// caller holds the request lock and loaded r under it): the request is halted
+// and the refusal written. false means the response is written.
+func (s *Server) refuseLapsedEdit(w http.ResponseWriter, loaded *request.Request) bool {
+	expiry, err := s.gateExpiry()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if err := loaded.RefuseLapsedGate(s.dataDir, expiry, time.Now()); err != nil {
+		s.noteGateExpired(loaded.ID, err)
+		writeError(w, http.StatusConflict, err.Error())
+		return false
+	}
+	return true
+}
+
+// retryFor is the shared retry a body's "from" names: "" or "attempt", "scratch",
+// or a round number of the ticket's ledger (request.RetryFromRound). ok is false
+// for anything else.
+func retryFor(from string) (retry func(dataDir, id, by, reason string, now time.Time, openPR request.PROpener) (*request.Request, error), ok bool) {
+	switch from {
+	case "", "attempt":
+		return request.Retry, true
+	case "scratch":
+		return request.RetryFromScratch, true
+	}
+	n, err := strconv.Atoi(from)
+	if err != nil || n < 1 {
+		return nil, false
+	}
+	return func(dataDir, id, by, reason string, now time.Time, openPR request.PROpener) (*request.Request, error) {
+		return request.RetryFromRound(dataDir, id, by, reason, n, now, openPR)
+	}, true
 }
 
 // resumeRequestBody is POST /requests/{id}/resume's JSON body. From is
@@ -3781,9 +3878,15 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
+	opts, err := s.gateOptions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	// ApproveShown, not Approve: the API must not pin oracle files the
 	// client never displayed (the CLI path stays unconditional).
-	loaded, err := request.ApproveShown(s.dataDir, id, by, time.Now(), body.ExpectedSHA256)
+	loaded, err := request.ApproveShown(s.dataDir, id, by, time.Now(), body.ExpectedSHA256, opts...)
+	s.noteGateExpired(id, err)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
@@ -3881,6 +3984,11 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seen := request.Seen{State: request.State(body.ExpectedState), EnteredAt: body.ExpectedEnteredAt}
+	opts, err := s.gateOptions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if body.To != "" {
 		target := request.SendBackTarget(body.To)
 		if !target.Valid() {
@@ -3889,7 +3997,8 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		loaded, err = request.SendBackSeen(s.dataDir, id, by, body.Reason, target, seen, time.Now())
 	} else {
-		loaded, err = request.RejectSeen(s.dataDir, id, by, body.Reason, body.Anchors, seen, time.Now())
+		loaded, err = request.RejectSeen(s.dataDir, id, by, body.Reason, body.Anchors, seen, time.Now(), opts...)
+		s.noteGateExpired(id, err)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
@@ -3952,13 +4061,9 @@ func (s *Server) retryRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
-	retry := request.Retry
-	switch body.From {
-	case "", "attempt":
-	case "scratch":
-		retry = request.RetryFromScratch
-	default:
-		writeError(w, http.StatusBadRequest, `"from" must be "attempt" or "scratch"`)
+	retry, ok := retryFor(body.From)
+	if !ok {
+		writeError(w, http.StatusBadRequest, `"from" must be "attempt", "scratch" or a round number`)
 		return
 	}
 	loaded, err := retry(s.dataDir, id, by, body.Reason, time.Now(), s.prOpener)
@@ -4012,7 +4117,13 @@ func (s *Server) resumeRequest(w http.ResponseWriter, r *http.Request) {
 	if from == "" {
 		from = request.ResumeRound
 	}
-	loaded, err := request.ResumeRequest(s.dataDir, id, from, by, time.Now(), s.resumePreflight)
+	opts, err := s.gateOptions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	loaded, err := request.ResumeRequest(s.dataDir, id, from, by, time.Now(), s.resumePreflight, opts...)
+	s.noteGateExpired(id, err)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
@@ -4052,22 +4163,11 @@ func (s *Server) resumeRequest(w http.ResponseWriter, r *http.Request) {
 // absent, the same defaulting rejectRequest's own body uses. 409 on a
 // state this request cannot be cancelled from (already a terminal state).
 //
-// Gap: this only ever marks the request record cancelled. If a ticket
-// build is in flight (state building), cmd/factoryd's request driver
-// notices the cancel before it persists the build's outcome and discards
-// the result instead of resurrecting the request (request_driver.go's
-// stillInState, wired into advanceBuilding/advanceSpecDrafting/
-// advanceOracleDrafting/advancePlanning -- found via adversarial review,
-// 2026-09-24: the driver held its own unlocked *request.Request from a
-// pre-job request.List and would otherwise overwrite this Cancel with a
-// stale in-memory Save once the job finished). But the underlying sandbox
-// run itself is not stopped -- there is no context-cancel or signal hook
-// from this route to the in-flight run_ticket.go execution, so a build
-// already running when cancel is called keeps running to its own
-// conclusion (using compute/relay budget, possibly opening a PR) even
-// though the request it belongs to is now cancelled. Wiring that requires
-// a cancellable context threaded from here through ticketRunner/runner
-// down to the run itself, which does not exist today.
+// This route only writes the request record. The worker's step for the
+// request finds it cancelled within its next poll and stops: its context ends
+// with cause request.ErrCancelled, a build's sandbox is removed, the run halts
+// with run.HaltReasonRequestCancelled and its worktree is rolled back, and the
+// step's result is discarded (request_driver.go's stillInState).
 func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequestWrite(r) {
 		writeError(w, http.StatusForbidden, "requests endpoint is not authorized")
@@ -4244,6 +4344,9 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "load request")
 		return
 	}
+	if !s.refuseLapsedEdit(w, loaded) {
+		return
+	}
 	if loaded.State != request.StateSpecReview {
 		writeError(w, http.StatusConflict, fmt.Sprintf("request %s: cannot edit spec.md from state %q (must be %q)", id, loaded.State, request.StateSpecReview))
 		return
@@ -4330,6 +4433,9 @@ func (s *Server) updateRequestTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load request")
+		return
+	}
+	if !s.refuseLapsedEdit(w, loaded) {
 		return
 	}
 	if loaded.State != request.StatePlanReview {

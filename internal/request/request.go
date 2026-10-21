@@ -190,6 +190,9 @@ type Ticket struct {
 	// per batch of newly-surfaced unresolved review threads turned into a
 	// build against the ticket's existing PR branch.
 	Rounds []Round `json:"rounds,omitempty"`
+	// RoundTags is the ticket's round ledger: one entry per build round that
+	// ended in a commit, with the ref that keeps it and the gates' verdict.
+	RoundTags []RoundTag `json:"round_tags,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -415,6 +418,16 @@ type Request struct {
 	// one, so it holds exactly while the request is in the building state
 	// that retry put it in.
 	RetryFromScratch bool `json:"retry_from_scratch,omitempty"`
+	// RetryFromRound is the operator's `factoryd retry -from <N>`: the rebuild
+	// the retry leads to starts on a new branch at the commit of round N of the
+	// ticket being built (RoundTag). 0 when the retry named no round. Dropped by
+	// every later transition, like RetryFromScratch.
+	RetryFromRound int `json:"retry_from_round,omitempty"`
+	// RetryTicket is the index of the ticket RetryFromScratch and
+	// RetryFromRound apply to: the ticket the retry rebuilds. The choice is
+	// honoured for that ticket only (RetryChoiceFor), so a request that goes
+	// on to build its next ticket does not carry it over.
+	RetryTicket int `json:"retry_ticket,omitempty"`
 	// HaltKind is a typed marker for a halt whose recovery is not the default
 	// one (see HaltOracleMaterialize); empty for every other halt. Cleared by
 	// every transition, so it is only ever set while State is halted.
@@ -1005,6 +1018,8 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	// A retry's choice is set after its own transition returns
 	// (RetryFromScratch); every move drops an earlier one.
 	r.RetryFromScratch = false
+	r.RetryFromRound = 0
+	r.RetryTicket = 0
 	r.History = append(r.History, Transition{From: from, To: to, At: ts, By: by, Reason: reason})
 	// Only re-entering planning drops the per-ticket pins (the re-plan
 	// rewrites or deletes those files). Pruning on every transition would
@@ -1607,6 +1622,8 @@ func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
 	case HaltOracleMaterialize:
 		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
+	case HaltGateExpired:
+		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltAcceptedNoPR:
 		branch := r.ID
 		if b := r.awaitingPRBranch(); b != "" {
