@@ -168,6 +168,9 @@ type Params struct {
 	FullSuiteCommand      string
 	NoCommitOracles       bool
 	DraftOracles          bool
+	// Bug is `factoryd submit -bug`: stored on the request, which then drafts
+	// oracles whether or not DraftOracles is set.
+	Bug bool
 	// ImportedSpec is the content of `factoryd submit -spec-file`: a
 	// finished spec the operator hands over. It must pass
 	// request.ValidateSpecSkeleton, the check a drafted spec passes, or
@@ -568,6 +571,14 @@ func validateDraftingInputs(workspace string, p Params) error {
 	return validateImportedTickets(p.ImportedSpec, p.ImportedTickets)
 }
 
+// recordOracleOptions stores the request's oracle options: a bug request
+// always has the oracle stage, since it needs a test that fails first.
+func recordOracleOptions(req *request.Request, p Params) {
+	req.NoCommitOracles = p.NoCommitOracles
+	req.Bug = p.Bug
+	req.DraftOracles = p.DraftOracles || p.Bug
+}
+
 // ImportedTicket is one handed-over ticket: its file name (NNN.spec.md)
 // and full text.
 type ImportedTicket struct {
@@ -762,8 +773,7 @@ func Submit(p Params) (Result, error) {
 		}
 	}
 	req.FullSuiteCommand, req.FullSuiteSource = ResolveFullSuiteCommand(fullSuiteConfigured, verifyCommand)
-	req.NoCommitOracles = p.NoCommitOracles
-	req.DraftOracles = p.DraftOracles
+	recordOracleOptions(req, p)
 	req.SpecImported = p.ImportedSpec != ""
 	req.PlanImported = len(p.ImportedTickets) > 0
 	req.PreflightProfile = preflightProfile

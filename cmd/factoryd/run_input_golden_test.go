@@ -110,6 +110,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-reference-oracle-mount-path", "verify",
 		"-reference-oracle-in-loop-retry",
 		"-no-commit-oracles",
+		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
 	}

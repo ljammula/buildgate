@@ -12,7 +12,6 @@ import (
 	"go.temporal.io/sdk/activity"
 
 	"buildgate/internal/evidence"
-	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
@@ -95,7 +94,7 @@ func gateBaseNotChecked(baseSHA, format string, args ...any) *run.GateBaseCheck 
 // or it is the reference oracle), else the "interrupted" record the finished
 // rerun replaces.
 func pendingGateBaseCheck(input NamedGateActivityInput, result runner.Result, runErr, evidenceErr error) *run.GateBaseCheck {
-	if runErr != nil || evidenceErr != nil || result.ExitCode == 0 || input.Check == policy.ReferenceOracleGateID {
+	if runErr != nil || evidenceErr != nil || result.ExitCode == 0 || isOracleMountingCheck(input.Check) {
 		return nil
 	}
 	base, _ := gateBaseCommit(input.RunWorkflowInput)

@@ -1036,6 +1036,11 @@ func unresolvedRunAwaitingDecision(dataDir string, r *request.Request, ticket *r
 // with only a rebuild left to choose. Any other halt halts the request with
 // reason.
 func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
+	if runRecord.HaltReasonCode == run.HaltReasonOraclePassesOnBase {
+		// A verdict on the oracle, not a lost step: the request is
+		// quarantined naming the check, so its next action says what to do.
+		return quarantineRequestWithCheck(dataDir, r, reason, request.QuarantineCheckOracleGreenOnBase, now)
+	}
 	cause := run.UnresolvedCauseOf(runRecord)
 	if runRecord.KeptForResume || cause != "" {
 		return EnterResumeReview(dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
@@ -2390,6 +2395,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		FullSuiteCommand:       fullSuiteCommand,
 		FullSuiteSource:        fullSuiteSource,
 		NoCommitOracles:        r.NoCommitOracles,
+		Bug:                    r.Bug,
 		SpecAcceptanceCriteria: criteriaPath,
 		ReferenceOracleDir:     oracleDir,
 		ReferenceOracleCommand: oracleCommand,

@@ -537,6 +537,12 @@ type Request struct {
 	// approval going straight to planning, byte-for-byte as before this field
 	// existed. Read only by Approve's routing, never by advance.
 	DraftOracles bool `json:"draft_oracles,omitempty"`
+	// Bug is `factoryd submit -bug`: the request fixes a bug, so it needs a
+	// test that fails before the change. Submit sets DraftOracles with it; an
+	// oracle_review approval with no oracle files is refused, and a build
+	// whose reference oracle passes on the base commit is halted before any
+	// model call (workflow bug-oracle-red-on-base).
+	Bug bool `json:"bug,omitempty"`
 	// SpecImported is `factoryd submit -spec-file`: the operator handed over
 	// a finished spec (ImportedSpecPath). The first spec_drafting pass takes
 	// that document in place of the drafting job, and it reaches spec_review
@@ -1301,6 +1307,12 @@ const QuarantineCheckBudgetRequest = "budget_exhausted:request"
 // (monthly_token_budget/monthly_cost_budget_micro_usd).
 const QuarantineCheckBudgetMonthly = "budget_exhausted:monthly"
 
+// QuarantineCheckOracleGreenOnBase is set when a bug request's build was
+// halted before any model call because its reference oracle passes on the
+// base commit (run.HaltReasonOraclePassesOnBase): the test does not
+// reproduce the bug. See quarantinedNextAction's branch for it.
+const QuarantineCheckOracleGreenOnBase = "oracle_green_on_base"
+
 // HaltKind names why a request halted when the recovery differs from the
 // default (resume the stage that failed).
 type HaltKind string
@@ -1605,6 +1617,9 @@ func (r *Request) quarantinedNextAction() string {
 	}
 	if r.QuarantineCheck == QuarantineCheckDiffScope {
 		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files (named above). If a file is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())
+	}
+	if r.QuarantineCheck == QuarantineCheckOracleGreenOnBase {
+		return fmt.Sprintf("oracle_green_on_base quarantined -- the acceptance oracle passes on the base commit, so it does not reproduce the bug and no model call was made; hand-write an oracle that fails on the current code: `factoryd reject -to spec -reason \"...\" %s`, then approve a failing oracle at oracle_review", r.ID)
 	}
 	if r.QuarantineCheck == QuarantineCheckBudgetRequest {
 		return fmt.Sprintf("budget exhausted -- %s; raise request_token_budget/request_cost_budget_micro_usd in the session config, then `factoryd retry %s`", r.Error, r.ID)

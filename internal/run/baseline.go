@@ -132,6 +132,12 @@ const BaselineVerifyAttemptKind = "baseline_verify"
 // .gitignore or the ticket, never in the ticket's code.
 const HaltReasonBaselineVerifyFailed = "baseline_verify_failed"
 
+// HaltReasonOraclePassesOnBase is Run.HaltReasonCode's value when a bug
+// request's reference oracle passed on the base commit, before the build: a
+// test that already passes does not reproduce the bug. No model call was
+// made. The fix is a failing test, never the ticket's code.
+const HaltReasonOraclePassesOnBase = "oracle_passes_on_base"
+
 // BaselineVerify is the result of running the ticket's verify command on
 // the base commit, in a fresh sandbox, before the build spent a model call
 // (RunBaselineVerifyActivity). Recorded for every run; nil only on a run

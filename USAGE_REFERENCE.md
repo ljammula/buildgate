@@ -2135,6 +2135,23 @@ version marker. A history recorded before the marker replays without it.
 `unnamed_count`), `named_as`, `needs_created`, `first_error` (when no test was named), `cause` and `cause_detail` (when the log shows one), `expected`,
 `left_out_of_scope` (at most 20, each a clean line of at most 200 bytes) and `left_out_of_scope_count`, `inherited_from`, `log_path`, `duration_ms`.
 
+### Bug requests: the oracle on the base commit
+
+`factoryd submit -bug` sets `request.json` `bug` and `draft_oracles`. An
+approval at `oracle_review` that pins no oracle file is refused. A ticket run
+of a bug request that has a reference oracle is given the internal `-bug`
+flag (`RunWorkflowInput.Bug`), and on a history with the
+`bug-oracle-red-on-base` version marker `RunWorkflow` runs the reference-oracle
+command once between the baseline verify and the build.
+
+| | |
+|---|---|
+| Where | The run's own worktree, just created at the base commit; not made for a run with a diff base, a resumed worktree or an existing branch |
+| Command | The ticket's reference-oracle command, `sh -c` in the normal sandbox with the oracle mounted read-only and no model route; no canary and no rerun on the base commit |
+| Attempt | Kind `oracle_red_on_base`, in the run's attempt list; its bin is `operator` |
+| Pass condition | A non-zero exit: any failure counts, a test that does not compile included |
+| Halt | Exit 0: application error type `OraclePassesOnBase`, `halt_reason_code` `oracle_passes_on_base`, not retried, not counted toward the repository's stop line. The request is quarantined with `quarantine_check` `oracle_green_on_base` (`next_action`: `factoryd reject -to spec`) |
+
 ### Oracle-approved runs
 
 A run with an approved oracle (`submit -draft-oracles`, or

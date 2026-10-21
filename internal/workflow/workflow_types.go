@@ -234,10 +234,15 @@ type RunWorkflowInput struct {
 	// NoCommitOracles is the request's explicit opt-out from the host oracle
 	// commit: CommitOraclesActivity runs validate-only (nothing written or
 	// committed, so no post-commit verify follows).
-	NoCommitOracles bool   `json:"no_commit_oracles,omitempty"`
-	SandboxImage    string `json:"sandbox_image,omitempty"`
-	SandboxDocker   string `json:"sandbox_docker,omitempty"`
-	SandboxUser     string `json:"sandbox_user,omitempty"`
+	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
+	// Bug is a bug request's run: with a ReferenceOracleDir, preBuildChecks
+	// runs the reference-oracle command on the base commit and halts the run
+	// when it passes, since a test that already passes does not reproduce the
+	// bug (workflow change bug-oracle-red-on-base).
+	Bug           bool   `json:"bug,omitempty"`
+	SandboxImage  string `json:"sandbox_image,omitempty"`
+	SandboxDocker string `json:"sandbox_docker,omitempty"`
+	SandboxUser   string `json:"sandbox_user,omitempty"`
 	// RoutePolicy is the build's model route and its per-run
 	// token/cost/rate ceilings: when set, RunBuildActivity launches
 	// build_app.py's sandboxed worker with that route admitted by its

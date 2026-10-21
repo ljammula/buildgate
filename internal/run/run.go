@@ -1460,7 +1460,8 @@ type Run struct {
 	// reason so an operator can tell "hit the ceiling" apart from "the
 	// code is wrong". Values: HaltReasonRelayCeilingExceeded,
 	// HaltReasonComposeServicesRejected, HaltReasonReviewInstructionsFailed,
-	// HaltReasonFactoryDirFailed, HaltReasonBaselineVerifyFailed, and an
+	// HaltReasonFactoryDirFailed, HaltReasonBaselineVerifyFailed,
+	// HaltReasonOraclePassesOnBase, and an
 	// UnresolvedCause for a halt that is no verdict on the work.
 	// Empty for every halt cause that predates this field or has no such
 	// need -- most halts already carry enough signal in their own

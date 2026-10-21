@@ -266,6 +266,9 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 		if err != nil {
 			return nil, nil, err
 		}
+		if r.Bug && len(relPaths) == 0 {
+			return nil, nil, fmt.Errorf("request %s: a bug request needs a failing test: hand-write oracle/ (a test that fails on the current code) and approve again", id)
+		}
 	default:
 		return nil, nil, fmt.Errorf("request %s: cannot approve from state %q (must be %q, %q or %q) %w", id, r.State, StateSpecReview, StateOracleReview, StatePlanReview, ErrIllegalTransition)
 	}

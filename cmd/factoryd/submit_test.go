@@ -286,6 +286,37 @@ preflight_profile: brownfield
 	}
 }
 
+// TestSubmitMainBugForcesDraftOracles: -bug records the request as a bug
+// fix and adds the oracle stage whether or not -draft-oracles is given.
+func TestSubmitMainBugForcesDraftOracles(t *testing.T) {
+	dp := newTestDeps(t)
+	workspace := t.TempDir()
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
+preflight_profile: brownfield
+`)
+	for _, tc := range []struct {
+		args      []string
+		bug, oras bool
+	}{
+		{[]string{"-bug"}, true, true},
+		{[]string{"-draft-oracles"}, false, true},
+		{nil, false, false},
+	} {
+		dataDir := t.TempDir()
+		args := append(append([]string{}, tc.args...), "-data-dir", dataDir, workspace, "Fix the crash")
+		if err := submitMain(dp, args); err != nil {
+			t.Fatalf("submitMain(%v): %v", tc.args, err)
+		}
+		requests, err := request.List(dataDir)
+		if err != nil || len(requests) != 1 {
+			t.Fatalf("List = %v, %v; want one request", requests, err)
+		}
+		if requests[0].Bug != tc.bug || requests[0].DraftOracles != tc.oras {
+			t.Errorf("args %v: Bug = %v DraftOracles = %v, want %v and %v", tc.args, requests[0].Bug, requests[0].DraftOracles, tc.bug, tc.oras)
+		}
+	}
+}
+
 // routesModeConfigWithAllowedSonnet writes a routes:/models:/roles:
 // session config file with roles.execution.allowed naming both "luna"
 // (the default) and "sonnet", and returns its path -- the fixture every

@@ -170,6 +170,7 @@ type runFlags struct {
 	gateCommands                 map[string]*string
 	referenceOracleDir           *string
 	noCommitOracles              *bool
+	bug                          *bool
 	referenceOracleMountPath     *string
 	referenceOracleInLoopRetry   *bool
 	sandboxImage                 *string
@@ -234,6 +235,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 		f.gateCommands[g.ID] = flags.String(g.Flag, "", g.Help)
 	}
 	f.referenceOracleDir = flags.String("reference-oracle-dir", "", "host directory mounted read-only at -reference-oracle-mount-path for the reference-oracle gate. Must be outside -workspace, which the agent can write. Set both flags or neither")
+	f.bug = flags.Bool("bug", false, "internal: the request fixes a bug, so the reference oracle must fail on the base commit before the build starts")
 	f.noCommitOracles = flags.Bool("no-commit-oracles", false, "do not commit accepted oracles to the target repository. The oracle still gates the build, and the run record and evidence say it was not committed")
 	f.referenceOracleMountPath = flags.String("reference-oracle-mount-path", "", "path inside the workspace where -reference-oracle-dir is mounted, such as verify; set both flags or neither")
 	f.referenceOracleInLoopRetry = flags.Bool("reference-oracle-in-loop-retry", false, "also run the reference oracle in every build round, so a failing round is retried. The build agent can then read the oracle. Needs the other three -reference-oracle flags")
@@ -311,6 +313,7 @@ type ticketRun struct {
 	referenceOracleCommand                *string
 	referenceOracleDir                    *string
 	noCommitOracles                       *bool
+	bug                                   *bool
 	referenceOracleMountPath              *string
 	referenceOracleInLoopRetry            *bool
 	sandboxImage                          *string
@@ -490,6 +493,7 @@ func (tr *ticketRun) parseFlags() error {
 	tr.referenceOracleCommand = tr.rf.gateCommands[policy.ReferenceOracleGateID]
 	tr.referenceOracleDir = tr.rf.referenceOracleDir
 	tr.noCommitOracles = tr.rf.noCommitOracles
+	tr.bug = tr.rf.bug
 	tr.referenceOracleMountPath, tr.referenceOracleInLoopRetry, tr.sandboxImage = tr.rf.referenceOracleMountPath, tr.rf.referenceOracleInLoopRetry, tr.rf.sandboxImage
 	tr.executionModel, tr.executionHarness, tr.executionThinkingChoice = tr.rf.executionModel, tr.rf.executionHarness, tr.rf.executionThinking
 	tr.registryProxy, tr.registryProxyImage, tr.composeServices, tr.egressCABundle, tr.dataDir = tr.rf.registryProxy, tr.rf.registryProxyImage, tr.rf.composeServices, tr.rf.egressCABundle, tr.rf.dataDir
@@ -2366,6 +2370,7 @@ func (tr *ticketRun) dispatch() error {
 			RequestTicket:              *tr.requestTicket,
 			ReferenceOracleInLoopRetry: *tr.referenceOracleInLoopRetry,
 			NoCommitOracles:            *tr.noCommitOracles,
+			Bug:                        *tr.bug,
 			ResumeFrom:                 tr.resumeFrom,
 			ExecutionRouteSkips:        routeSkipsOf(tr.execSelection),
 			ReviewRouteSkips:           routeSkipsOf(tr.reviewSelection),

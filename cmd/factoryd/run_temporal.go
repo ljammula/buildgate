@@ -91,6 +91,8 @@ type temporalSliceOptions struct {
 	ReferenceOracleInLoopRetry bool
 	// NoCommitOracles carries -no-commit-oracles onto RunWorkflowInput.NoCommitOracles.
 	NoCommitOracles bool
+	// Bug carries -bug onto RunWorkflowInput.Bug.
+	Bug bool
 	// ResumeFrom carries -resume-worktree-of onto RunWorkflowInput.ResumeFrom:
 	// the halted run whose kept worktree this run adopts.
 	ResumeFrom *workflow.ResumeFrom
@@ -383,6 +385,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		ReferenceOracleMountPath:         o.ReferenceOracleMountPath,
 		ReferenceOracleInLoopRetry:       o.Slice.ReferenceOracleInLoopRetry,
 		NoCommitOracles:                  o.Slice.NoCommitOracles,
+		Bug:                              o.Slice.Bug,
 		SandboxImage:                     o.SandboxImage,
 		SandboxDocker:                    o.SandboxDocker,
 		SandboxUser:                      o.SandboxUser,

@@ -51,8 +51,12 @@ another profile:
 - `factoryd submit [-verify-command '<cmd>'] -request-file <file> <repo-path>`,
   after the operator confirms the request text. Add
   `-preflight-profile brownfield` when step 1 of "Build something" found
-  the repo brownfield. Add `-draft-oracles`, `-model <role>=<model>` or
-  `-harness <role>=<harness>` only when the operator asked for that option.
+  the repo brownfield. Add `-draft-oracles`, `-bug`, `-model <role>=<model>` or
+  `-harness <role>=<harness>` only when the operator asked for that option;
+  `-bug` is for a bug fix, adds the oracle stage and needs a test that fails
+  before the change. A request quarantined as `oracle_green_on_base` has an
+  oracle that already passes: explain that, and relay `next:` (a send-back to
+  spec, then a failing oracle).
   Add `-spec-file <file>` only when the operator hands over a finished spec
   and says it is the spec, not the request: it must use Buildgate's spec
   headings or `submit` refuses it, naming the missing one. Add
