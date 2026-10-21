@@ -107,6 +107,11 @@ const HaltReasonReviewInstructionsFailed = "review_instructions_failed"
 // reason is in the refused attempt's FactoryDirError.
 const HaltReasonFactoryDirFailed = "factory_dir_failed"
 
+// HaltReasonRequestCancelled is Run.HaltReasonCode's value when the run was
+// stopped because its request was cancelled while it was building: an
+// operator's end, not a failure, and nothing is kept for a resume.
+const HaltReasonRequestCancelled = "request_cancelled"
+
 // RouteSkip is one route modelrole.SelectRoute passed over on its way to
 // Attempt.RelayRoute -- a durable, evidence-only copy of modelrole.
 // RouteSkip (this package cannot import internal/modelrole: modelrole

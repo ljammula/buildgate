@@ -88,12 +88,11 @@ func RequestDriverOwnsState(state request.State) bool {
 // job had never run; the next driveRequests pass reads the cancelled
 // state fresh and, per RequestDriverOwnsState above, leaves it alone.
 //
-// This does not reach into a build already launched for the ticket the
-// job was building (run_ticket.go's own context is not plumbed through
-// cancelRequest) -- a cancel during AdvanceBuilding stops the *request*
-// from being resurrected into building/pr_review, but the underlying run
-// itself keeps executing to its own conclusion in the sandbox. Cancelling
-// the in-flight run is not implemented; see cancelRequest's doc comment.
+// The cancel also stops the job itself: the worker's step ends its context,
+// with cause request.ErrCancelled, as soon as it finds the request cancelled
+// (cmd/factoryd's cancelWhenRequestCancelled), which removes a build's sandbox
+// and rolls its worktree back. This check is what keeps the stopped job's
+// result from being saved.
 func stillInState(dataDir string, id string, expected request.State) (bool, error) {
 	unlock, err := request.Lock(dataDir, id)
 	if err != nil {
@@ -771,8 +770,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// any of runErr/runRecord's outcome is persisted below -- a cancel that
 	// landed while the ticket built must not be resurrected by
 	// startNextTicketOrFinish/HaltRequest/quarantineRequest's own r.Save.
-	// This does not stop or unwind the run itself; see stillInState's doc
-	// comment for that gap.
 	if ok, err := stillInState(dataDir, r.ID, request.StateBuilding); err != nil {
 		return err
 	} else if !ok {

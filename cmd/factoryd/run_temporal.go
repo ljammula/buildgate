@@ -16,6 +16,7 @@ import (
 	temporalworker "go.temporal.io/sdk/worker"
 
 	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/workflow"
@@ -588,7 +589,12 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		// is a decision to give up and still rolls back. The two are told
 		// apart by the context error: runCtx is WithTimeout(lifecycleCtx),
 		// so it reports Canceled only when the parent was canceled.
-		processLost := buildLostWithProcess(ctxErr, waitTimedOut)
+		//
+		// cancelled: the run's request was cancelled (cancelWhenRequestCancelled).
+		// Nothing is kept for a decision: the build stops with its sandbox and
+		// its worktree is rolled back.
+		cancelled := cancelledByOperator(runCtx)
+		processLost := buildLostWithProcess(ctxErr, context.Cause(runCtx), waitTimedOut)
 		// contactLost: it was Temporal that went away, not the operator or
 		// the worker. The cause of the cancelled context says which.
 		contactLost := lostTemporalContact(runCtx, processLost, ctxErr, err)
@@ -600,7 +606,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		// run keeps today's reap.
 		resumed := opts.Slice.ResumeFrom != nil
 		keepEligible := keepEligibleRun(r, resumed)
-		keepWanted := keepEligible && (processLost || resumed || contactLost != nil)
+		keepWanted := keepsWorktree(keepEligible, cancelled, processLost, resumed, contactLost)
 		if ctxErr != nil || waitTimedOut {
 			// Our own wait was canceled or timed out — not the Workflow
 			// Execution itself, which is still running server-side with
@@ -622,7 +628,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 			logRunLost(opts.ID, processLost, contactLost, context.Cause(runCtx))
 			terminateErr := terminateRunWorkflow(temporalClient, execution.GetID(), execution.GetRunID(),
 				"factoryd: supervisor timeout or operator cancellation; this run is halting regardless of workflow outcome",
-				terminateBudget(processLost, contactLost), time.Second)
+				terminateBudget(stopsBuildNow(processLost, cancelled), contactLost), time.Second)
 			if terminateErr == nil {
 				// Only with the workflow confirmed stopped: a still-running
 				// workflow that saw its build Activity fail would run its
@@ -632,7 +638,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 				// the next heartbeat. A supervisor timeout keeps its
 				// behaviour: the in-flight attempt stays "outcome unknown"
 				// (TestIntegrationTemporalTimeoutStillRecoversAttemptsFromCheckpoint).
-				if processLost {
+				if stopsBuildNow(processLost, cancelled) {
 					cancelActivities()
 				}
 				// Success, or the execution was already closed by the
@@ -750,7 +756,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		// a human decides, but only when a worktree was recovered and still
 		// exists on disk (a replay under an older workflow version may have
 		// rolled it back).
-		if keepEligible && wp != "" && (keptForResume || resumed || workflow.StepLostFromError(err)) && worktreeExists(wp) {
+		if keptAtHalt(keepEligible, cancelled, wp, keptForResume, resumed, workflow.StepLostFromError(err)) {
 			r.KeptForResume = true
 		}
 		// Distinct, machine-readable reason: a run
@@ -766,6 +772,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 			r.HaltReasonCode = code
 		}
 		recordContactLoss(r, contactLost)
+		recordRequestCancelled(r, cancelled)
 		// Always, not only with a reason code: without it a halted run
 		// carried no reason at all and triage had nothing to classify.
 		if r.HaltError == "" {
@@ -800,10 +807,12 @@ func worktreeExists(path string) bool {
 
 // buildLostWithProcess reports whether awaitRunWorkflow gave up waiting
 // because this process was told to stop (its lifecycle context was canceled:
-// SIGTERM or Ctrl-C), as opposed to its own supervisor timeout. ctxErr is
-// runCtx.Err() read once; waitTimedOut is the deadline having elapsed.
-func buildLostWithProcess(ctxErr error, waitTimedOut bool) bool {
-	return ctxErr != nil && !waitTimedOut && !errors.Is(ctxErr, context.DeadlineExceeded)
+// SIGTERM or Ctrl-C), as opposed to its own supervisor timeout or the
+// request's cancel (cause request.ErrCancelled: the build is stopped, not
+// lost). ctxErr is runCtx.Err() read once, cause its context.Cause;
+// waitTimedOut is the deadline having elapsed.
+func buildLostWithProcess(ctxErr, cause error, waitTimedOut bool) bool {
+	return ctxErr != nil && !waitTimedOut && !errors.Is(ctxErr, context.DeadlineExceeded) && !errors.Is(cause, request.ErrCancelled)
 }
 
 // rollbackIsolatedWorkspaceIfTerminated is the caller-side counterpart to

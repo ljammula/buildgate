@@ -4100,22 +4100,11 @@ func (s *Server) resumeRequest(w http.ResponseWriter, r *http.Request) {
 // absent, the same defaulting rejectRequest's own body uses. 409 on a
 // state this request cannot be cancelled from (already a terminal state).
 //
-// Gap: this only ever marks the request record cancelled. If a ticket
-// build is in flight (state building), cmd/factoryd's request driver
-// notices the cancel before it persists the build's outcome and discards
-// the result instead of resurrecting the request (request_driver.go's
-// stillInState, wired into advanceBuilding/advanceSpecDrafting/
-// advanceOracleDrafting/advancePlanning -- found via adversarial review,
-// 2026-09-24: the driver held its own unlocked *request.Request from a
-// pre-job request.List and would otherwise overwrite this Cancel with a
-// stale in-memory Save once the job finished). But the underlying sandbox
-// run itself is not stopped -- there is no context-cancel or signal hook
-// from this route to the in-flight run_ticket.go execution, so a build
-// already running when cancel is called keeps running to its own
-// conclusion (using compute/relay budget, possibly opening a PR) even
-// though the request it belongs to is now cancelled. Wiring that requires
-// a cancellable context threaded from here through ticketRunner/runner
-// down to the run itself, which does not exist today.
+// This route only writes the request record. The worker's step for the
+// request finds it cancelled within its next poll and stops: its context ends
+// with cause request.ErrCancelled, a build's sandbox is removed, the run halts
+// with run.HaltReasonRequestCancelled and its worktree is rolled back, and the
+// step's result is discarded (request_driver.go's stillInState).
 func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequestWrite(r) {
 		writeError(w, http.StatusForbidden, "requests endpoint is not authorized")

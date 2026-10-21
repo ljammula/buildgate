@@ -1006,18 +1006,32 @@ infrastructure failure (`internal/request.Quarantine`/`Halt`). A
 quarantined or halted request could previously only be retried
 (`internal/request.Retry`), never dismissed, so a request an operator has
 no intention of retrying stayed red in `factoryd doctor`'s mount-visibility
-check forever. `internal/request.Cancel` now also accepts these two states:
+check forever. `internal/request.Cancel` accepts these two states, and every
+non-terminal one, as the operator's own distinct end of a request:
 
+- `submitted -> cancelled`
+- `spec_drafting -> cancelled`
+- `spec_review -> cancelled`
+- `oracle_drafting -> cancelled`
+- `oracle_review -> cancelled`
+- `planning -> cancelled`
+- `plan_review -> cancelled`
+- `building -> cancelled`
+- `pr_review -> cancelled`
 - `quarantined -> cancelled`
 - `halted -> cancelled`
 
-`cancelled` releases nothing by itself (`Cancel` never launches or resumes
-anything); the request driver has already stopped driving a
-quarantined/halted request before this transition runs. Its underlying run
-may not have: a request halted on an unconfirmed run can still have a
-Temporal execution in flight, and reclaim can still apply its result
-(including opening a PR), the same gap `cancelRequest` in
-`internal/api/server.go` documents for cancelling from `building`. Nothing
+`cancelled` grants nothing (`Cancel` never launches, resumes or merges
+anything), and a cancel stops what the request had running. The worker's step
+for the request polls its state and, on `cancelled`, ends the step's context
+with cause `request.ErrCancelled`: a drafting job or a build's sandbox is killed
+at once, the run halts with `HaltReasonCode` `request_cancelled`, its worktree
+is rolled back and never kept for a resume, and the step's result is discarded
+(`stillInState`), so a cancelled request is never resurrected by a job that
+finished meanwhile. A pull request already opened stays open. A request halted
+on an unconfirmed run can still have a Temporal execution in flight, and
+reclaim can still apply its result (including opening a PR); that run belongs to
+the halted request's earlier step, not to a step a cancel could stop. Nothing
 moves the request out of `cancelled` again. `done` and `closed` are excluded
 from `Cancel`'s allowed states: each is a final outcome, not a dead end, and
 stays immutable.

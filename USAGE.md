@@ -1386,7 +1386,7 @@ run halted or left quarantined, worktree kept   request -> resume_review
         |                                      review again; or rerun a lost drafting /
         |                                      planning step
         +-- factoryd resume -from scratch <id> rebuild the ticket, reaping the kept worktree
-        +-- factoryd cancel <id>               withdraw it, reaping the kept worktree
+        +-- factoryd cancel <id>               withdraw it: a running step stops, its worktree is reaped
 ```
 
 `resume` for a build runs only when no sandbox container of the lost run

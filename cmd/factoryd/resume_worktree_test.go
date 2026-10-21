@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"buildgate/internal/release"
+	"buildgate/internal/request"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -120,6 +121,7 @@ func TestBuildLostWithProcess(t *testing.T) {
 	cases := []struct {
 		name         string
 		ctxErr       error
+		cause        error
 		waitTimedOut bool
 		want         bool
 	}{
@@ -128,9 +130,10 @@ func TestBuildLostWithProcess(t *testing.T) {
 		{name: "deadline elapsed before the context reported it", waitTimedOut: true},
 		{name: "canceled but the deadline had already elapsed", ctxErr: context.Canceled, waitTimedOut: true},
 		{name: "wait failed for its own reason"},
+		{name: "the request was cancelled: stopped, not lost", ctxErr: context.Canceled, cause: request.ErrCancelled},
 	}
 	for _, tc := range cases {
-		if got := buildLostWithProcess(tc.ctxErr, tc.waitTimedOut); got != tc.want {
+		if got := buildLostWithProcess(tc.ctxErr, tc.cause, tc.waitTimedOut); got != tc.want {
 			t.Errorf("%s: buildLostWithProcess = %v, want %v", tc.name, got, tc.want)
 		}
 	}

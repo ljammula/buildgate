@@ -23,7 +23,6 @@
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
-26 cmd/factoryd/run_temporal.go awaitRunWorkflow
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -37,6 +38,9 @@ type requestActivities struct {
 	planRunner   requestdriver.PlanTicketsRunner
 	oracleRunner requestdriver.OracleDraftRunner
 	buildRunner  requestdriver.TicketRunner
+	// cancelPoll is how often a running step looks for its request being
+	// cancelled; 0 is requestHeartbeatInterval.
+	cancelPoll time.Duration
 
 	// consoleStart guards consoleStartedAt, when ensureConsole last tried.
 	consoleStart     sync.Mutex
@@ -140,13 +144,17 @@ const requestHeartbeatInterval = 5 * time.Second
 // AdvanceRequest runs one step of request id (advanceRequest), saves its
 // outcome and returns the state the request is in afterwards. It heartbeats
 // for as long as the step runs, so a worker that dies mid-step is noticed,
-// and a cancel of the activity cancels the step. A stall of the connection to
+// and a cancel of the activity, or of the request, cancels the step. A stall of the connection to
 // Temporal shorter than the heartbeat timeout does not.
 func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (string, error) {
 	// The step runs under a context a stalled connection to Temporal cannot
 	// cancel (workflow.GuardStep): a build that lost nothing is not killed.
 	ctx, endGuard := workflow.GuardStep(ctx)
 	defer endGuard()
+	// A cancel of the request stops the step (cause request.ErrCancelled): a
+	// build in its sandbox included, whose worktree is rolled back.
+	ctx, endWatch := cancelWhenRequestCancelled(ctx, a.dataDir, id, cmp.Or(a.cancelPoll, requestHeartbeatInterval))
+	defer endWatch()
 	a.ensureConsole()
 	r, err := request.Load(a.dataDir, id)
 	if err != nil {

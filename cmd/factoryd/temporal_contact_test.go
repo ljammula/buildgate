@@ -139,7 +139,7 @@ func TestLostTemporalContactReadsTheContextCause(t *testing.T) {
 		"a cancel with no recorded cause": {cancelledWith(nil), false},
 	} {
 		runCtx, cancel := context.WithTimeout(tc.parent, time.Hour)
-		got := lostTemporalContact(runCtx, buildLostWithProcess(runCtx.Err(), false), runCtx.Err(), nil)
+		got := lostTemporalContact(runCtx, buildLostWithProcess(runCtx.Err(), context.Cause(runCtx), false), runCtx.Err(), nil)
 		cancel()
 		if (got != nil) != tc.lost {
 			t.Errorf("%s: contact lost = %v, want %v", name, got, tc.lost)
