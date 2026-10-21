@@ -1,0 +1,11 @@
+# The install image of one repository's approved sandbox install
+# (internal/sandbox/install_image.go): the worker image BASE, pinned by digest,
+# plus the tree the install wrote, captured on the host and filtered there.
+# factoryd builds it with --network none and nothing here runs: there is no
+# RUN step. Every repository-command sandbox restores the tree into
+# /workspace before its command (the worker wrapper's restore prelude).
+ARG BASE
+FROM ${BASE}
+ADD tree.tar /opt/buildgate/install/tree/
+COPY paths commands inputs.sha256 key /opt/buildgate/install/
+USER 65532:65532

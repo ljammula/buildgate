@@ -221,6 +221,7 @@ func (s LaunchSpec) sandboxCommand() []string {
 		WorkDir:    workerContainerWorkDir,
 		Umask:      s.WorkerUmask,
 		GuardTries: workerGuardWaitTries,
+		Restore:    s.RestoreInstall,
 	}, s.Scratch)
 	return append([]string{"/bin/sh", "-c", script, "--"}, s.Command...)
 }
@@ -233,6 +234,8 @@ type workerWrapper struct {
 	WorkDir    string
 	Umask      string
 	GuardTries int
+	// Restore runs installRestorePrelude before the command.
+	Restore bool
 }
 
 // scratchCheck is the wrapper step that makes the worker's directories in the
@@ -272,13 +275,20 @@ func workerWrapperScript(w workerWrapper, scratch bool) string {
 		script = append(script, scratchCheck(WorkerScratchMount))
 	}
 	if w.Umask == "" {
+		if w.Restore {
+			script = append(script, installRestorePrelude)
+		}
 		script = append(script, `exec "$@"`)
 	} else {
 		// stderr dropped: the workspace's .git is mounted read-only, so this
 		// walk always reports it, and that line landed in every step's
 		// captured output, a gate's failing lines included.
 		reclaim := "chmod -R g+rwX -- " + workDir + " 2>/dev/null || true"
-		script = append(script, "umask "+w.Umask, `"$@"`, "ec=$?", reclaim, "exit $ec")
+		script = append(script, "umask "+w.Umask)
+		if w.Restore {
+			script = append(script, installRestorePrelude)
+		}
+		script = append(script, `"$@"`, "ec=$?", reclaim, "exit $ec")
 	}
 	return strings.Join(script, "; ")
 }

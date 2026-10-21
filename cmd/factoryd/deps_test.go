@@ -5,6 +5,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
+	"buildgate/internal/workflow"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -27,6 +28,29 @@ type fakeDocker struct {
 	toolImageFn        func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
 	requiredBinariesFn func(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
 	workerChecksFn     func(ctx context.Context, in doctorInputs) []doctorCheck
+	installImagesFn    func() workflow.InstallImages
+}
+
+func (f *fakeDocker) installImages() workflow.InstallImages { return f.installImagesFn() }
+
+// refusingInstallImages is the test default install image store: every call
+// fails, and nothing reaches docker.
+type refusingInstallImages struct{}
+
+func (refusingInstallImages) Lookup(context.Context, string, string) (sandbox.InstallImageRef, error) {
+	return sandbox.InstallImageRef{}, errors.New("test docker: no install image is looked up")
+}
+func (refusingInstallImages) Build(context.Context, string, sandbox.InstallImageBuild) (string, error) {
+	return "", errors.New("test docker: no install image is built")
+}
+func (refusingInstallImages) Evict(context.Context, string, string, int) (int, error) {
+	return 0, errors.New("test docker: no install image is evicted")
+}
+func (refusingInstallImages) Remove(context.Context, string, string) error {
+	return errors.New("test docker: no install image is removed")
+}
+func (refusingInstallImages) SweepRunLocal(context.Context, string, func(string) bool) (int, error) {
+	return 0, errors.New("test docker: no install image is swept")
 }
 
 func (f *fakeDocker) colimaBinary() string { return f.colimaBinaryFn() }
@@ -295,7 +319,8 @@ func newTestDeps(t testing.TB) *deps {
 		requiredBinariesFn: func(context.Context, string, string, string, []string) ([]string, error) {
 			return nil, errors.New("test docker: no image is probed for required binaries")
 		},
-		workerChecksFn: realDocker.workerChecks,
+		workerChecksFn:  realDocker.workerChecks,
+		installImagesFn: func() workflow.InstallImages { return refusingInstallImages{} },
 	}
 	realForge := realForge{dp: dp}
 	dp.forge = &fakeForge{

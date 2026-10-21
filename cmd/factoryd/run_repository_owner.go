@@ -93,6 +93,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 	checkpointDir := opts.checkpointDir()
 	activities := opts.activities()
 	activities.Sandboxes, activities.MeterLedgerRoot = dp.sandbox.runtime(), meterLedgerRoot()
+	activities.InstallImages = dp.docker.installImages()
 	effectiveTimeout := opts.OverallTimeout
 	if effectiveTimeout == 0 {
 		effectiveTimeout = time.Duration(opts.TimeoutMinutes+5) * time.Minute
@@ -175,7 +176,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 					return alreadyReconciledResultError(fresh)
 				}
 				stampRouteSkips(giveUpResult.Attempts, opts.Slice)
-				giveUpResult = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, giveUpResult)
+				giveUpResult = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, opts.sandboxSHA256(), giveUpResult)
 				return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, ownerTaskQueue, giveUpResult, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, true)
 			})
 		}
@@ -314,7 +315,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 			return alreadyReconciledResultError(fresh)
 		}
 		stampRouteSkips(result.Attempts, opts.Slice)
-		result = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, result)
+		result = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, opts.sandboxSHA256(), result)
 		return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, ownerTaskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, true)
 	})
 }

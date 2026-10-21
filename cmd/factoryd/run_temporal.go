@@ -381,6 +381,13 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		SetupCommands:                    o.SetupCommands,
 		AutofixCommands:                  o.AutofixCommands,
 		ProjectConfigCommitSHA:           o.ProjectConfigCommitSHA,
+		SandboxSHA256:                    o.sandboxSHA256(),
+		InstallCommands:                  o.sandboxBlock().Install,
+		InstallCachePaths:                o.sandboxBlock().CachePaths,
+		InstallInputs:                    o.sandboxBlock().Inputs,
+		InstallRegistries:                o.sandboxBlock().Registries,
+		InstallRepoKey:                   o.sandboxRepoKey(),
+		ConfiguredSandboxImage:           o.ConfiguredSandboxImage,
 		ReferenceOracleDir:               o.ReferenceOracleDir,
 		ReferenceOracleMountPath:         o.ReferenceOracleMountPath,
 		ReferenceOracleInLoopRetry:       o.Slice.ReferenceOracleInLoopRetry,
@@ -447,6 +454,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 	taskQueue := "factoryd-" + opts.ID
 	activities := opts.activities()
 	activities.Sandboxes, activities.MeterLedgerRoot = dp.sandbox.runtime(), meterLedgerRoot()
+	activities.InstallImages = dp.docker.installImages()
 	effectiveTimeout := opts.OverallTimeout
 	if effectiveTimeout == 0 {
 		effectiveTimeout = time.Duration(opts.TimeoutMinutes+5) * time.Minute
@@ -788,7 +796,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 	}
 
 	stampRouteSkips(result.Attempts, opts.Slice)
-	result = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, result)
+	result = requireCurrentWorker(opts.GateCommands, opts.SetupCommands, opts.sandboxSHA256(), result)
 	// underRunLock=false: this call site holds no run.WithLock on id (see
 	// applyRunWorkflowResult's own doc comment on that parameter).
 	return finishRunWorkflow(dp, r, opts, taskQueue, result)

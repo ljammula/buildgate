@@ -2814,10 +2814,13 @@ func quickstartEnsureRepoReady(dp *deps, opts *quickstartOptions, p *quickstartP
 			fmt.Fprintf(w, "Detected an existing repo (has commits) with no onboarding docs -- treating it as brownfield (preflight profile: %s) without asking; pass -scaffold to generate spec/spec.md, spec/contract.md, and ARCHITECTURE.md instead.\n", preflightProfile)
 			factoryYMLPath := filepath.Join(repoRoot, projectconfig.FileName)
 			if _, statErr := os.Lstat(factoryYMLPath); os.IsNotExist(statErr) {
-				if err := writeScaffoldFiles(repoRoot, map[string]string{factoryYMLPath: factoryYMLContent(verifyCommand, preflightProfile)}); err != nil {
+				if err := writeScaffoldFiles(repoRoot, map[string]string{factoryYMLPath: factoryYMLWithSandbox(repoRoot, verifyCommand, preflightProfile)}); err != nil {
 					return "", false, "", false, err
 				}
 				fmt.Fprintln(w, factoryYMLQuickstartNote())
+				if note := sandboxDraftNote(repoRoot); note != "" {
+					fmt.Fprintln(w, note)
+				}
 				// The reminder just printed already told the operator this
 				// file isn't committed yet -- suppress projectconfig's own
 				// identical warning the very next Load (submitRequest,

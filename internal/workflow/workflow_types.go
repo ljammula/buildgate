@@ -191,11 +191,38 @@ type RunWorkflowInput struct {
 	// runs those after the registry's, by name (gateChecksToRun).
 	GateCommands map[string]string `json:"gate_commands,omitempty"`
 	// SetupCommands is the committed .factory.yml `setup:` list, resolved
-	// before the workflow starts and never re-read from the worktree. For
-	// now it is carried only: no Activity reads it yet.
+	// before the workflow starts and never re-read from the worktree. Every
+	// repository-command step (build, verify, gates) runs them first
+	// (stepCommand).
 	SetupCommands []string `json:"setup_commands,omitempty"`
+	// SandboxSHA256 is the hash of the committed .factory.yml `sandbox:`
+	// block the operator approved (projectconfig.Sandbox.SHA256), empty
+	// when the repository has none. With it, RunWorkflow prepares the
+	// run's install image (PrepareInstallImageActivity) after preflight,
+	// and the Activity checks the approval again and that the Install*
+	// fields below hash to it.
+	SandboxSHA256 string `json:"sandbox_sha256,omitempty"`
+	// InstallCommands, InstallCachePaths, InstallInputs and
+	// InstallRegistries are the block's install, cache_paths, inputs and
+	// registries, read from the commit ProjectConfigCommitSHA names.
+	InstallCommands   []string `json:"install_commands,omitempty"`
+	InstallCachePaths []string `json:"install_cache_paths,omitempty"`
+	InstallInputs     []string `json:"install_inputs,omitempty"`
+	InstallRegistries []string `json:"install_registries,omitempty"`
+	// InstallRepoKey names the repository the approval and the install
+	// image belong to (memory.StoreKey of its project and root).
+	InstallRepoKey string `json:"install_repo_key,omitempty"`
+	// ConfiguredSandboxImage is the operator's sandbox_image before a
+	// derived toolchain image replaced SandboxImage; part of the install
+	// image's key.
+	ConfiguredSandboxImage string `json:"configured_sandbox_image,omitempty"`
+	// InstallImage is set by RunWorkflow, never by a caller: the install
+	// image PrepareInstallImageActivity returned, which SandboxImage is
+	// also set to. A repository-command launch from it restores the
+	// install (sandbox.LaunchSpec.RestoreInstall); a review's does not.
+	InstallImage string `json:"install_image,omitempty"`
 	// AutofixCommands is the committed .factory.yml `autofix:` list, with
-	// the same source and status as SetupCommands.
+	// the same source as SetupCommands; no Activity reads it.
 	AutofixCommands []string `json:"autofix_commands,omitempty"`
 	// ReferenceOracleDir/ReferenceOracleMountPath provide the read-only oracle mount (and the content hash it makes
 	// possible) to the Temporal/-repository path -- the parity follow-up
@@ -963,8 +990,11 @@ type RunWorkflowResult struct {
 	State run.State `json:"state"`
 	// BaselineChecked reports a BaselineCheck run whose baseline passed: its
 	// State is empty and its worktree is rolled back.
-	BaselineChecked    bool `json:"baseline_checked,omitempty"`
-	CleanupUnconfirmed bool `json:"cleanup_unconfirmed,omitempty"`
+	BaselineChecked bool `json:"baseline_checked,omitempty"`
+	// Install is the run's install image record (run.Run.Install), nil
+	// when the run's repository has no sandbox block.
+	Install            *run.InstallImage `json:"install,omitempty"`
+	CleanupUnconfirmed bool              `json:"cleanup_unconfirmed,omitempty"`
 	// HaltReasonCode mirrors run.Run.HaltReasonCode (see its own doc
 	// comment) for a run that went through RepositoryOwnerWorkflow: that
 	// workflow cannot propagate a failed child RunWorkflow's raw error to

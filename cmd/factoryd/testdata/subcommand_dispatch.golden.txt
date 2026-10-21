@@ -362,6 +362,12 @@ stderr: factoryd: usage: factoryd memory <subcommand> -workspace <repository> [f
 stderr: 
 stderr:   list                             the switch, the budget, the lines in force and the candidates
 
+$ factoryd sandbox -zz-not-a-flag
+exit 1
+stderr: factoryd: usage: factoryd sandbox <show|approve|evict> -repo <repository> [flags]
+stderr: 
+stderr:   show                             the committed sandbox block, its hash, and whether it is approved
+
 $ factoryd content -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag

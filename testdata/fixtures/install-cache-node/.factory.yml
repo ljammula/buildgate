@@ -1,0 +1,6 @@
+verify_command: "npm test"
+sandbox:
+  version: 1
+  install: ["npm ci --ignore-scripts"]
+  cache_paths: ["node_modules"]
+  registries: [npm]

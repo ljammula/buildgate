@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/memory"
 	"buildgate/internal/policy"
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/release"
@@ -680,14 +681,9 @@ func Submit(p Params) (Result, error) {
 	if err := validateDraftingInputs(workspaceAbs, p); err != nil {
 		return Result{}, err
 	}
-	if inside, _, dataAbs, err := DataDirInsideWorkspace(workspaceAbs, p.DataDir); err != nil {
+	dataAbs, err := dataDirOutsideWorkspace(workspaceAbs, p.DataDir)
+	if err != nil {
 		return Result{}, err
-	} else if inside {
-		return Result{}, &Refusal{
-			Reason:     fmt.Sprintf("the data dir (%q, resolving to %q) is inside the workspace %q; Docker containment is unconditional and a later worker will refuse to drain this entry once queued here, with no way to re-home it", p.DataDir, dataAbs, workspaceAbs),
-			Remedy:     "the operator has to keep the data dir outside the workspace",
-			FlagRemedy: "pass -data-dir <path outside -workspace>",
-		}
 	}
 	repositoryRoot := release.RepositoryRoot(workspaceAbs)
 	project := filepath.Base(repositoryRoot)
@@ -695,6 +691,10 @@ func Submit(p Params) (Result, error) {
 		return Result{}, fmt.Errorf("workspace %q: %w", p.WorkspaceArg, err)
 	}
 	if err := release.RejectProjectCollision(p.DataDir, project, repositoryRoot); err != nil {
+		return Result{}, err
+	}
+
+	if err := requireSandboxApproved(p.Settings, workspaceAbs, dataAbs, project, repositoryRoot); err != nil {
 		return Result{}, err
 	}
 
@@ -784,6 +784,45 @@ func Submit(p Params) (Result, error) {
 	}
 
 	return Result{ID: id, Project: project, RepositoryRoot: repositoryRoot}, nil
+}
+
+// dataDirOutsideWorkspace returns the data dir's absolute path, or refuses
+// one that lies inside the workspace.
+func dataDirOutsideWorkspace(workspaceAbs, dataDir string) (string, error) {
+	inside, _, dataAbs, err := DataDirInsideWorkspace(workspaceAbs, dataDir)
+	if err != nil {
+		return "", err
+	}
+	if inside {
+		return "", &Refusal{
+			Reason:     fmt.Sprintf("the data dir (%q, resolving to %q) is inside the workspace %q; Docker containment is unconditional and a later worker will refuse to drain this entry once queued here, with no way to re-home it", dataDir, dataAbs, workspaceAbs),
+			Remedy:     "the operator has to keep the data dir outside the workspace",
+			FlagRemedy: "pass -data-dir <path outside -workspace>",
+		}
+	}
+	return dataAbs, nil
+}
+
+// requireSandboxApproved refuses a workspace whose committed .factory.yml has
+// a sandbox block the operator has not approved, with the sentence a run
+// would later fail with.
+func requireSandboxApproved(settings sessionconfig.Settings, workspaceAbs, dataDir, project, repositoryRoot string) error {
+	cfg, found, err := projectconfig.Load(workspaceAbs)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
+	}
+	if !found {
+		return nil
+	}
+	err = projectconfig.RequireSandboxApproved(dataDir, memory.StoreKey(project, repositoryRoot), repositoryRoot, cfg.Sandbox, projectconfig.HeadCommit(workspaceAbs))
+	var notApproved *projectconfig.SandboxNotApprovedError
+	if errors.As(err, &notApproved) {
+		return &Refusal{Reason: notApproved.Reason(), Remedy: "the operator has to run " + notApproved.Command(), FlagRemedy: notApproved.Command()}
+	}
+	if err == nil && cfg.Sandbox != nil && settings.RegistryProxyConfigured && !settings.RegistryProxy {
+		return &Refusal{Reason: projectconfig.SandboxNeedsRegistryProxy, Remedy: "the operator has to turn registry_proxy on in the session config", FlagRemedy: "turn registry_proxy on in the session config"}
+	}
+	return err
 }
 
 // FullSuiteCommandNone is the explicit `-full-suite-command none` /

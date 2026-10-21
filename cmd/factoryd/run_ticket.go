@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -19,6 +20,7 @@ import (
 	"buildgate/internal/evidence"
 	"buildgate/internal/harness"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/memory"
 	"buildgate/internal/modelrole"
 	"buildgate/internal/policy"
 	"buildgate/internal/projectconfig"
@@ -413,6 +415,16 @@ type ticketRun struct {
 	setup, autofix      []string
 	requiredBinaries    []string
 	projectConfigSHA256 string
+	// sandbox is the committed .factory.yml sandbox block, nil when it has
+	// none. fitSandboxToRepository refuses the run unless the operator
+	// approved its hash.
+	sandbox *projectconfig.Sandbox
+	// configuredSandboxImage is -sandbox-image as configured, before
+	// fitSandboxToRepository replaced it with a derived toolchain image.
+	configuredSandboxImage string
+	// approvalDataDir is the operator's data dir, where sandbox approvals are
+	// kept, when tr.dataDir was replaced by a run's own (-baseline-check).
+	approvalDataDir string
 	// headBeforeProjectConfig is the workspace's HEAD commit before the
 	// first read of .factory.yml; projectConfigCommitSHA is that commit
 	// once applyCommittedProjectConfig has proven every read came from it.
@@ -1054,27 +1066,9 @@ func (tr *ticketRun) prepareSandbox() error {
 	// registryProxyPolicy mirrors relayPolicy's own construction just
 	// above.
 	if *tr.registryProxy {
-		if *tr.sandboxImage == "" {
-			return fmt.Errorf("-registry-proxy requires -sandbox-image")
+		if tr.registryProxyPolicy, err = tr.buildRegistryProxyPolicy(); err != nil {
+			return err
 		}
-		routes, err := sandbox.RegistryProxyRoutesWithUpstreams(*tr.registryProxyNPMUpstream, *tr.registryProxyPyPIUpstream, *tr.registryProxyPyPIFilesUpstream, *tr.registryProxyGoUpstream, *tr.registryProxyGoSumDBUpstream)
-		if err != nil {
-			return fmt.Errorf("-registry-proxy-pypi-files-upstream: %w", err)
-		}
-		policy := sandbox.RegistryProxyPolicy{
-			Image:                 *tr.registryProxyImage,
-			Routes:                routes,
-			CacheBytes:            *tr.registryProxyCacheBytes,
-			MaxObjectBytes:        *tr.registryProxyMaxObjectBytes,
-			MaxConcurrentUpstream: *tr.registryProxyMaxConcurrent,
-			UpstreamTimeout:       *tr.registryProxyUpstreamTimeout,
-		}
-		// Rejected here, before a run record exists, mirroring relayPolicy's
-		// own early Validate call just above.
-		if err := policy.Validate(); err != nil {
-			return fmt.Errorf("-registry-proxy configuration: %w", err)
-		}
-		tr.registryProxyPolicy = &policy
 	}
 	// An isolated chained run is based on the predecessor's accepted ResultSHA, not the shared
 	// checkout's HEAD. Direct and Temporal paths validate the predecessor
@@ -1420,6 +1414,9 @@ func (tr *ticketRun) checkProject() error {
 // repository's declared toolchains need, when the configured one lacks them,
 // which may be built here on first use.
 func (tr *ticketRun) fitSandboxToRepository() error {
+	if err := tr.requireSandboxApproved(); err != nil {
+		return err
+	}
 	// The image is the run's first start-up step; its feed needs the run id.
 	tr.mintRunID()
 	var image string
@@ -1431,7 +1428,7 @@ func (tr *ticketRun) fitSandboxToRepository() error {
 	if err != nil {
 		return err
 	}
-	*tr.sandboxImage = image
+	tr.configuredSandboxImage, *tr.sandboxImage = *tr.sandboxImage, image
 	if len(tr.requiredBinaries) == 0 {
 		return nil
 	}
@@ -1444,6 +1441,71 @@ func (tr *ticketRun) fitSandboxToRepository() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("final worker image %s is missing required executable(s) on PATH as worker %s: %s; install them in the operator-selected sandbox image or choose an image that provides them", image, user, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// buildRegistryProxyPolicy is the run's registry proxy policy, rejected here,
+// before a run record exists, mirroring relayPolicy's own early Validate call.
+func (tr *ticketRun) buildRegistryProxyPolicy() (*sandbox.RegistryProxyPolicy, error) {
+	if *tr.sandboxImage == "" {
+		return nil, fmt.Errorf("-registry-proxy requires -sandbox-image")
+	}
+	routes, err := tr.registryProxyRoutes()
+	if err != nil {
+		return nil, err
+	}
+	policy := sandbox.RegistryProxyPolicy{
+		Image:                 *tr.registryProxyImage,
+		Routes:                routes,
+		CacheBytes:            *tr.registryProxyCacheBytes,
+		MaxObjectBytes:        *tr.registryProxyMaxObjectBytes,
+		MaxConcurrentUpstream: *tr.registryProxyMaxConcurrent,
+		UpstreamTimeout:       *tr.registryProxyUpstreamTimeout,
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, fmt.Errorf("-registry-proxy configuration: %w", err)
+	}
+	return &policy, nil
+}
+
+// registryProxyRoutes is the operator's registry proxy routes, narrowed to
+// the registries the committed sandbox block lists. Narrowing only removes
+// routes: a repository cannot reach an upstream the operator did not
+// configure.
+func (tr *ticketRun) registryProxyRoutes() ([]sandbox.RegistryProxyRoute, error) {
+	routes, err := sandbox.RegistryProxyRoutesWithUpstreams(*tr.registryProxyNPMUpstream, *tr.registryProxyPyPIUpstream, *tr.registryProxyPyPIFilesUpstream, *tr.registryProxyGoUpstream, *tr.registryProxyGoSumDBUpstream)
+	if err != nil {
+		return nil, fmt.Errorf("-registry-proxy-pypi-files-upstream: %w", err)
+	}
+	if tr.sandbox == nil {
+		return routes, nil
+	}
+	if routes, err = sandbox.NarrowRegistryRoutes(routes, tr.sandbox.Registries); err != nil {
+		return nil, fmt.Errorf("sandbox.registries in %s: %w", projectconfig.FileName, err)
+	}
+	return routes, nil
+}
+
+// requireSandboxApproved refuses a run whose committed .factory.yml carries a
+// sandbox block the operator has not approved, or one whose install cannot
+// reach the registries it lists. The block and the commit are the ones
+// applyCommittedProjectConfig read from HEAD, never the worktree.
+func (tr *ticketRun) requireSandboxApproved() error {
+	if tr.sandbox == nil {
+		return nil
+	}
+	key := memory.StoreKey(tr.project, tr.repositoryRoot)
+	dataDir := firstNonEmptyString(tr.approvalDataDir, tr.sandboxDataDir)
+	if err := projectconfig.RequireSandboxApproved(dataDir, key, tr.repositoryRoot, tr.sandbox, tr.projectConfigCommitSHA); err != nil {
+		return err
+	}
+	if !*tr.registryProxy {
+		return errors.New(projectconfig.SandboxNeedsRegistryProxy)
+	}
+	// What the install writes is never part of a build's commit.
+	if err := wsisolation.ExcludeRepoPaths(*tr.workspace, tr.sandbox.CachePaths); err != nil {
+		log.Printf("sandbox: exclude the install's cache paths via info/exclude: %v", err)
 	}
 	return nil
 }
@@ -2465,6 +2527,11 @@ func (tr *ticketRun) dispatch() error {
 			SetupCommands:            tr.setup,
 			AutofixCommands:          tr.autofix,
 			ProjectConfigCommitSHA:   tr.projectConfigCommitSHA,
+			Sandbox:                  tr.sandbox,
+			SandboxRepoKey:           memory.StoreKey(tr.project, tr.repositoryRoot),
+			ConfiguredSandboxImage:   tr.configuredSandboxImage,
+			ApprovalDataDir:          firstNonEmptyString(tr.approvalDataDir, tr.sandboxDataDir),
+			InstallCacheImages:       tr.settings.SandboxInstallCacheImages,
 			Skills:                   roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
 			ReferenceOracleDir:       *tr.referenceOracleDir,
 			ReferenceOracleMountPath: *tr.referenceOracleMountPath,
@@ -2548,6 +2615,7 @@ func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 			*tr.fullSuiteCommand = cfg.FullSuiteCommand
 		}
 		tr.setup, tr.autofix, tr.requiredBinaries, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.RequiredBinaries, cfg.SHA256
+		tr.sandbox = cfg.Sandbox
 	}
 	// HEAD is the commit it was before the first read of the file
 	// (headBeforeProjectConfig) and that commit's file is the one just read,

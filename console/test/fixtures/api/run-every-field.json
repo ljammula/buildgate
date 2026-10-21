@@ -432,6 +432,25 @@
       "reason": "every-field reason"
     }
   },
+  "install": {
+    "key": "every-field key",
+    "scope": "every-field scope",
+    "image": "every-field image",
+    "cache_hit": true,
+    "built_by_run_id": "every-field built_by_run_id",
+    "commit": "every-field commit",
+    "sandbox_sha256": "every-field sandbox_sha256",
+    "approved_by": "every-field approved_by",
+    "approved_at": "2026-09-10T09:00:00Z",
+    "inputs": [
+      {
+        "path": "every-field path",
+        "blob": "every-field blob"
+      }
+    ],
+    "duration_ms": 3,
+    "log_path": "every-field log_path"
+  },
   "triage": "every-field triage",
   "handoff_sha256": "every-field handoff_sha256",
   "harness_eval": {

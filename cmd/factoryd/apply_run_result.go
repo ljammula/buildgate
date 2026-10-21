@@ -102,6 +102,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	r.ChangedFiles = result.ChangedFiles
 	r.Oracles = result.Oracles
 	r.OracleCanary = result.OracleCanary
+	r.Install = result.Install
 	r.DependencyLockfilesTouched = evidence.DependencyLockfilesTouched(result.ChangedFiles)
 	recordComposeEvidence(r, dataDir)
 	r.DependencyChanges = result.DependencyChanges

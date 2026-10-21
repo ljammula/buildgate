@@ -17,6 +17,7 @@ package sessionconfig
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -71,7 +72,10 @@ type Config struct {
 	// MaxParallelJobs caps how many model jobs and builds `factoryd worker`
 	// runs at once across all requests (its jobs task queue). Default 3;
 	// at least 1.
-	MaxParallelJobs                *int    `yaml:"max_parallel_jobs,omitempty"`
+	MaxParallelJobs *int `yaml:"max_parallel_jobs,omitempty"`
+	// SandboxInstallCacheImages is how many install images of one
+	// repository are kept after a new one is built. Default 3; at least 1.
+	SandboxInstallCacheImages      *int    `yaml:"sandbox_install_cache_images,omitempty"`
 	RegistryProxy                  *bool   `yaml:"registry_proxy,omitempty"`
 	RegistryProxyImage             *string `yaml:"registry_proxy_image,omitempty"`
 	RegistryProxyNPMUpstream       *string `yaml:"registry_proxy_npm_upstream,omitempty"`
@@ -480,16 +484,17 @@ type Settings struct {
 	SandboxCPUs      string
 	SandboxTmpfsSize string
 
-	ModelHostConcurrency     int
-	MaxParallelJobs          int
-	MeterMaxRequestBytes     int64
-	MeterRequestsPerMinute   int
-	MeterTokenBudget         int
-	MeterTokenBudgetWindow   time.Duration
-	MeterCostBudgetMicroUSD  int64
-	MeterCostBudgetWindow    time.Duration
-	MeterTokenCeiling        int
-	MeterCostCeilingMicroUSD int64
+	ModelHostConcurrency      int
+	MaxParallelJobs           int
+	SandboxInstallCacheImages int
+	MeterMaxRequestBytes      int64
+	MeterRequestsPerMinute    int
+	MeterTokenBudget          int
+	MeterTokenBudgetWindow    time.Duration
+	MeterCostBudgetMicroUSD   int64
+	MeterCostBudgetWindow     time.Duration
+	MeterTokenCeiling         int
+	MeterCostCeilingMicroUSD  int64
 
 	// RequestTokenBudget/RequestCostBudgetMicroUSD/MonthlyTokenBudget/
 	// MonthlyCostBudgetMicroUSD mirror the identically-named Config
@@ -618,14 +623,15 @@ func DefaultSettings() Settings {
 		SandboxCPUs:      "2",
 		SandboxTmpfsSize: "1g",
 
-		MeterMaxRequestBytes:    1 << 20,
-		MeterRequestsPerMinute:  60,
-		MeterTokenBudget:        1_000_000,
-		MeterTokenBudgetWindow:  time.Hour,
-		MeterCostBudgetMicroUSD: 5_000_000,
-		MeterCostBudgetWindow:   time.Hour,
-		ModelHostConcurrency:    modelhost.DefaultConcurrency,
-		MaxParallelJobs:         DefaultMaxParallelJobs,
+		MeterMaxRequestBytes:      1 << 20,
+		MeterRequestsPerMinute:    60,
+		MeterTokenBudget:          1_000_000,
+		MeterTokenBudgetWindow:    time.Hour,
+		MeterCostBudgetMicroUSD:   5_000_000,
+		MeterCostBudgetWindow:     time.Hour,
+		ModelHostConcurrency:      modelhost.DefaultConcurrency,
+		MaxParallelJobs:           DefaultMaxParallelJobs,
+		SandboxInstallCacheImages: DefaultSandboxInstallCacheImages,
 
 		RegistryProxyNPMUpstream:           "https://registry.npmjs.org",
 		RegistryProxyPyPIUpstream:          "https://pypi.org/simple",
@@ -754,11 +760,9 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	str(&s.CodeReviewPolicy, c.CodeReviewPolicy)
 
 	integer(&s.ModelHostConcurrency, c.ModelHostConcurrency)
-	if c.MaxParallelJobs != nil {
-		if *c.MaxParallelJobs < 1 {
-			return s, fmt.Errorf("max_parallel_jobs: must be at least 1, got %d", *c.MaxParallelJobs)
-		}
-		s.MaxParallelJobs = *c.MaxParallelJobs
+	if err := errors.Join(atLeastOne(&s.MaxParallelJobs, "max_parallel_jobs", c.MaxParallelJobs),
+		atLeastOne(&s.SandboxInstallCacheImages, "sandbox_install_cache_images", c.SandboxInstallCacheImages)); err != nil {
+		return s, err
 	}
 	integer64(&s.MeterMaxRequestBytes, c.MeterMaxRequestBytes)
 	integer(&s.MeterRequestsPerMinute, c.MeterRequestsPerMinute)
@@ -902,6 +906,21 @@ const (
 // typical Go build uses about 1.3 GiB (peak 1.26 GiB measured 2026-10-04, a
 // small Python build 0.2 GiB).
 const DefaultMaxParallelJobs = 2
+
+// atLeastOne sets *dst to *v when v is set, refusing a value below 1.
+func atLeastOne(dst *int, name string, v *int) error {
+	if v == nil {
+		return nil
+	}
+	if *v < 1 {
+		return fmt.Errorf("%s: must be at least 1, got %d", name, *v)
+	}
+	*dst = *v
+	return nil
+}
+
+// DefaultSandboxInstallCacheImages is sandbox_install_cache_images' default.
+const DefaultSandboxInstallCacheImages = 3
 
 // Example is the commented config `factoryd init-config` writes and the
 // no-config message shows. sandbox_image's digest is a placeholder: `make

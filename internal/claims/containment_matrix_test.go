@@ -15,7 +15,7 @@ func TestContainmentMatrixCoversRequiredBoundaries(t *testing.T) {
 		t.Fatalf("read containment matrix: %v", err)
 	}
 	text := string(b)
-	for _, boundary := range []string{"Filesystem", "Network", "Credentials", "Docker control", "Cancellation", "Skills"} {
+	for _, boundary := range []string{"Filesystem", "Network", "Credentials", "Docker control", "Cancellation", "Skills", "Install cache"} {
 		if !regexp.MustCompile(`(?m)^\| ` + regexp.QuoteMeta(boundary) + ` \|`).MatchString(text) {
 			t.Errorf("matrix missing boundary %q", boundary)
 		}

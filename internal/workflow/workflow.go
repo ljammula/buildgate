@@ -31,6 +31,12 @@ const (
 	// RunBaselineVerifyActivityName runs the verify command on the base
 	// commit, before the build's first round (see baselineVerifyChange).
 	RunBaselineVerifyActivityName = "RunBaselineVerifyActivity"
+	// PrepareInstallImageActivityName finds or builds the run's install
+	// image (see installImageChange).
+	PrepareInstallImageActivityName = "PrepareInstallImageActivity"
+	// EvictRunInstallImageActivityName removes a run-local install image
+	// when its run ends.
+	EvictRunInstallImageActivityName = "EvictRunInstallImageActivity"
 	// RunFullSuiteVerifyActivityName runs -full-suite-command (the regression-oracle gate, gap 3 of the plan's 2026-08-28 readiness review). A separate
 	// Activity from RunVerifyActivity, not a parameterization of it: it is
 	// optional (RunWorkflow only calls it when RunWorkflowInput.
@@ -240,6 +246,11 @@ const (
 	// sandbox starts and the run halts. Never an infrastructure failure: a
 	// rerun repeats it.
 	FactoryDirFailureType = "FactoryDirFailure"
+	// InstallImageFailureType marks a run whose install image could not be
+	// prepared: its sandbox block is not approved on this Worker, the
+	// install failed, its tree was refused, or the image could not be
+	// built. The run halts before its baseline and its build.
+	InstallImageFailureType = "InstallImageFailure"
 	// AmbiguousPriorAttemptType marks a RunBuildActivity/RunVerifyActivity
 	// failure raised when a durable intent record shows a prior attempt
 	// started the subprocess but never reached its completed checkpoint —
@@ -458,8 +469,10 @@ const NonIsolatedRunFailureType = "NonIsolatedRun"
 const baselineVerifyChange = "baseline-verify"
 
 // preBuildChecks runs what must hold before a build spends a model call:
-// PreflightActivity (the ticket and the workspace), then, on a history that
-// has baselineVerifyChange, RunBaselineVerifyActivity. It returns the
+// PreflightActivity (the ticket and the workspace), then, for a run with a
+// sandbox block on a history that has installImageChange, the install image
+// (prepareInstallImage), then, on a history that has baselineVerifyChange,
+// RunBaselineVerifyActivity. It returns the
 // baseline's attempts for the run's record. A baseline that failed the way
 // the ticket expects sets input.BaselineNotePath, which RunBuildActivity
 // gives the build; one that failed any other way returns the Activity's
@@ -469,7 +482,7 @@ const baselineVerifyChange = "baseline-verify"
 // isolation ran, worktreePath/branch are set, and the deferred rollback
 // discards them; without them on the error the caller would record the
 // shared checkout as the workspace of a run that used an isolated one.
-func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, baseSHA string, committed bool, worktreePath, branch string) ([]run.Attempt, error) {
+func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, baseSHA string, committed bool, worktreePath, branch string, install **run.InstallImage) ([]run.Attempt, error) {
 	current.Stage, current.StartedAt = "preflight", temporalworkflow.Now(ctx)
 	if err := temporalworkflow.ExecuteActivity(ids.with(ctx, "preflight"), PreflightActivityName, PreflightInput{
 		WorkspacePath:        input.WorkspacePath,
@@ -484,6 +497,62 @@ func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	}).Get(ctx, nil); err != nil {
 		return nil, wrapActivityFailure("preflight activity", err, nil, baseSHA, committed, worktreePath, branch)
 	}
+	installAttempts, err := prepareInstallImage(ctx, ids, buildVerifyCtx, input, current, install)
+	if err != nil {
+		return nil, wrapActivityFailure("install image activity", err, installAttempts, baseSHA, committed, worktreePath, branch)
+	}
+	attempts, err := baselineChecks(ctx, ids, buildVerifyCtx, input, current, baseSHA, committed, worktreePath, branch)
+	return append(installAttempts, attempts...), err
+}
+
+// installImageChange is the GetVersion change ID under which RunWorkflow
+// prepares a run's install image (PrepareInstallImageActivity) between
+// preflight and the baseline verify, and launches every later step from it.
+// Only a run whose input carries a SandboxSHA256 asks for the version, so a
+// run without a sandbox block records no marker. A history recorded before
+// it replays as DefaultVersion and goes from preflight to the baseline, as
+// it did.
+const installImageChange = "install-image"
+
+// prepareInstallImage runs PrepareInstallImageActivity for a run with a
+// sandbox block and points input at the image it returns: SandboxImage and
+// InstallImage, which every later Activity's input is built from.
+func prepareInstallImage(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, install **run.InstallImage) ([]run.Attempt, error) {
+	if input.SandboxSHA256 == "" || temporalworkflow.GetVersion(ctx, installImageChange, temporalworkflow.DefaultVersion, 1) != 1 {
+		return nil, nil
+	}
+	current.Stage, current.StartedAt = run.InstallAttemptKind, temporalworkflow.Now(ctx)
+	var res InstallImageResult
+	if err := temporalworkflow.ExecuteActivity(ids.with(buildVerifyCtx, "install-image"), PrepareInstallImageActivityName, *input).Get(ctx, &res); err != nil {
+		// A failed install's attempt rides on the error (withInstallAttempts),
+		// which wrapActivityFailure keeps.
+		return nil, err
+	}
+	*install = res.Record
+	if res.Image != "" {
+		input.SandboxImage, input.InstallImage = res.Image, res.Image
+	}
+	return res.Attempts, nil
+}
+
+// evictRunLocalInstall removes a run-local install image when its run ends;
+// a shared one, or none, is left.
+func evictRunLocalInstall(ctx temporalworkflow.Context, ids *activityIDs, options temporalworkflow.ActivityOptions, install *run.InstallImage, docker string) {
+	if install == nil || install.Shared() || install.Key == "" {
+		return
+	}
+	disconnectedCtx, cancel := temporalworkflow.NewDisconnectedContext(ctx)
+	defer cancel()
+	disconnectedCtx = temporalworkflow.WithActivityOptions(disconnectedCtx, options)
+	if err := temporalworkflow.ExecuteActivity(ids.with(disconnectedCtx, "evict-install-image"), EvictRunInstallImageActivityName, EvictRunInstallImageInput{Key: install.Key, SandboxDocker: docker}).Get(disconnectedCtx, nil); err != nil {
+		temporalworkflow.GetLogger(ctx).Error("removing the run-local install image failed", "error", err)
+	}
+}
+
+// baselineChecks is preBuildChecks after preflight and the install image:
+// the baseline verify on a history that has baselineVerifyChange, and a
+// BaselineCheck run's checks after it.
+func baselineChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, baseSHA string, committed bool, worktreePath, branch string) ([]run.Attempt, error) {
 	if temporalworkflow.GetVersion(ctx, baselineVerifyChange, temporalworkflow.DefaultVersion, 1) != 1 {
 		return nil, nil
 	}
@@ -833,7 +902,10 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 	//
 	// The baseline verify follows it in the same helper: see
 	// baselineVerifyChange.
-	baselineAttempts, err := preBuildChecks(ctx, ids, buildVerifyCtx, &input, &current, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	var install *run.InstallImage
+	defer func() { evictRunLocalInstall(ctx, ids, activityOptions, install, input.SandboxDocker) }()
+	baselineAttempts, err := preBuildChecks(ctx, ids, buildVerifyCtx, &input, &current, result.BaseSHA, result.CommittedByWorker, worktreePath, branch, &install)
+	result.Install = install
 	if err != nil {
 		return preBuildEnd(result, baselineAttempts, err)
 	}

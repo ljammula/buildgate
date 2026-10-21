@@ -43,6 +43,27 @@ func runTerminalConfirmed(r *run.Run) bool {
 // false) keeps the cache a daemon-side Worker may still be building in;
 // the daemon's own reclaim scan removes it once the run is reconciled
 // terminal. A missing record is not in flight.
+// runFinishedIn reports whether dataDir records runID and its run is over.
+// A run the data dir does not record (another profile's) is not finished.
+func runFinishedIn(dataDir string) func(runID string) bool {
+	return func(runID string) bool {
+		r, err := run.Load(dataDir, runID)
+		return err == nil && runTerminalConfirmed(r)
+	}
+}
+
+// sweepRunLocalInstallImages removes the run-local install images of the
+// finished runs of dataDir whose own eviction did not happen (a lost
+// worker). Best effort: an error is logged.
+func sweepRunLocalInstallImages(ctx context.Context, dp *deps, dockerBinary, dataDir string) {
+	removed, err := dp.docker.installImages().SweepRunLocal(ctx, dockerBinary, runFinishedIn(dataDir))
+	if err != nil {
+		log.Printf("install images: sweep the run-local images of %s: %v", dataDir, err)
+	} else if removed > 0 {
+		log.Printf("install images: removed %d run-local image(s) of finished runs", removed)
+	}
+}
+
 func scratchRunInFlight(dataDir string) func(runID string) bool {
 	return func(runID string) bool {
 		r, err := run.Load(dataDir, runID)
@@ -1065,7 +1086,7 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 		// they run here against .factory.yml at the commit the run was
 		// dispatched from, and an accepted result that cannot be checked
 		// is refused.
-		result = requireCurrentWorkerAtReclaim(ctx, dp, fresh, result)
+		result = requireCurrentWorkerAtReclaim(ctx, dp, dataDir, fresh, result)
 		if applyErr := applyRunWorkflowResult(dp, fresh, dataDir, requestID, fresh.Ticket, fresh.WorkspacePath, fresh.BaseSHA, "reclaimed", result, false, nil, forge.GHPullRequestOpener{}, true); applyErr != nil && fresh.State != run.StateQuarantined {
 			return applyErr
 		}

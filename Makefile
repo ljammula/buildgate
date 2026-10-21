@@ -1,4 +1,4 @@
-.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
 
 # source remains the default for development checkouts. Release users can
 # install the published, digest-pinned images with IMAGE_SOURCE=ghcr.
@@ -175,6 +175,14 @@ live-compose:
 # proxy's Go route, or the worker's Go environment.
 live-private-module:
 	scripts/live-private-module.sh
+
+# live-install-cache runs one real ticket four times on a Node fixture with an
+# approved sandbox block: the install image is built once, reused, rebuilt on
+# a lockfile change, and an unapproved block is refused (see
+# scripts/live-install-cache.sh's header). Before merging a change to the
+# install image or the sandbox block.
+live-install-cache:
+	scripts/live-install-cache.sh
 
 # console-walk is the console's live browser walk: a real factoryd serving a
 # seeded data directory, headless Chrome through every screen and action,

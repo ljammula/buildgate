@@ -535,3 +535,23 @@ func TestMaxParallelJobsDefaultsAndValidates(t *testing.T) {
 		t.Error("max_parallel_jobs: 0 accepted, want an error")
 	}
 }
+
+func TestSandboxInstallCacheImagesDefaultsToThreeAndRefusesZero(t *testing.T) {
+	if got := DefaultSettings().SandboxInstallCacheImages; got != 3 {
+		t.Errorf("default = %d, want 3", got)
+	}
+	cfg, err := Load(writeConfig(t, "sandbox_install_cache_images: 5\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err := cfg.ApplySettings(DefaultSettings()); err != nil || s.SandboxInstallCacheImages != 5 {
+		t.Errorf("settings = %d, %v; want 5", s.SandboxInstallCacheImages, err)
+	}
+	zero, err := Load(writeConfig(t, "sandbox_install_cache_images: 0\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zero.ApplySettings(DefaultSettings()); err == nil {
+		t.Error("sandbox_install_cache_images: 0 accepted, want an error")
+	}
+}

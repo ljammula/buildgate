@@ -138,6 +138,22 @@ type Activities struct {
 	// MeterLedgerRoot is where the meter writes ledgers on this Worker's
 	// machine; required with Sandboxes for a step that has a model route.
 	MeterLedgerRoot string
+	// InstallImages finds, builds and removes install images
+	// (PrepareInstallImageActivity). nil refuses a run whose repository has
+	// a sandbox block.
+	InstallImages InstallImages
+	// SandboxApprovalsDataDir is the operator's data dir on this Worker's
+	// machine, whose approvals PrepareInstallImageActivity checks again
+	// (projectconfig.ApprovalStore). Empty approves nothing.
+	SandboxApprovalsDataDir string
+	// InstallLockDir is the machine-wide directory of the install image
+	// build locks, shared by every profile (cmd/factoryd: under
+	// sessionconfig.DataRoot). Empty uses the run's data dir.
+	InstallLockDir string
+	// InstallCacheImages is how many install images of one repository are
+	// kept after a new one is pushed (sandbox_install_cache_images); zero
+	// or less keeps DefaultInstallCacheImages.
+	InstallCacheImages int
 	// DataDir is the durable run-record root (cmd/factoryd's own -data-dir)
 	// a sandboxed attempt's container is labeled with, so
 	// sandbox.ReconcileOrphans — run once at factoryd startup against that

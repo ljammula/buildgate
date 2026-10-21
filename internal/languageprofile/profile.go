@@ -27,8 +27,15 @@ type Profile struct {
 	FullSuiteCommand        string
 	TestCommand             string
 	LintCommand             string
-	TestPatterns            []string
-	BaselineFailureFormat   string
+	// InstallCommand is the reviewed candidate for a `.factory.yml` sandbox
+	// block's install, with CachePaths the paths it writes. InstallRequires
+	// is the root file that must be present for the candidate to apply (a
+	// lockfile). Empty InstallCommand means no candidate.
+	InstallCommand        string
+	CachePaths            []string
+	InstallRequires       string
+	TestPatterns          []string
+	BaselineFailureFormat string
 }
 
 const (
@@ -49,8 +56,8 @@ type Match struct {
 
 var profiles = []Profile{
 	{ID: "go", Name: "Go", Markers: []string{"go.mod"}, RequiredBinaries: []string{"go"}, VersionSources: []string{"go.mod"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"go.mod", "go.sum"}, ProjectImageManifests: []string{"go.mod", "go.sum"}, RegistryProxyEcosystems: []string{"Go modules"}, VerifyCommand: "go test ./...", FullSuiteCommand: "go test ./...", TestCommand: "go test ./...", TestPatterns: []string{"*_test.go"}, BaselineFailureFormat: BaselineGoTest},
-	{ID: "python", Name: "Python", Markers: []string{"pyproject.toml", "requirements.txt", "setup.py"}, RequiredBinaries: []string{"python3"}, VersionSources: []string{".python-version", "pyproject.toml"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock"}, ProjectImageManifests: []string{"requirements.txt"}, RegistryProxyEcosystems: []string{"PyPI"}, TestPatterns: []string{"test_*.py", "*_test.py"}, BaselineFailureFormat: BaselinePytest},
-	{ID: "node", Name: "Node.js", Markers: []string{"package.json"}, RequiredBinaries: []string{"node", "npm"}, VersionSources: []string{".nvmrc", ".node-version", "package.json"}, ToolchainProvisioning: ToolchainConfiguredImage, DependencyManifests: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"}, ProjectImageManifests: []string{"package.json", "package-lock.json"}, RegistryProxyEcosystems: []string{"npm"}, TestPatterns: []string{"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "python", Name: "Python", Markers: []string{"pyproject.toml", "requirements.txt", "setup.py"}, RequiredBinaries: []string{"python3"}, VersionSources: []string{".python-version", "pyproject.toml"}, ToolchainProvisioning: ToolchainAutomatic, InstallCommand: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt", CachePaths: []string{".venv"}, InstallRequires: "requirements.txt", DependencyManifests: []string{"pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock"}, ProjectImageManifests: []string{"requirements.txt"}, RegistryProxyEcosystems: []string{"PyPI"}, TestPatterns: []string{"test_*.py", "*_test.py"}, BaselineFailureFormat: BaselinePytest},
+	{ID: "node", Name: "Node.js", Markers: []string{"package.json"}, RequiredBinaries: []string{"node", "npm"}, VersionSources: []string{".nvmrc", ".node-version", "package.json"}, ToolchainProvisioning: ToolchainConfiguredImage, InstallCommand: "npm ci", CachePaths: []string{"node_modules"}, InstallRequires: "package-lock.json", DependencyManifests: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"}, ProjectImageManifests: []string{"package.json", "package-lock.json"}, RegistryProxyEcosystems: []string{"npm"}, TestPatterns: []string{"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "rust", Name: "Rust", Markers: []string{"Cargo.toml"}, RequiredBinaries: []string{"cargo", "rustc"}, VersionSources: []string{"rust-toolchain", "rust-toolchain.toml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"Cargo.toml", "Cargo.lock"}, VerifyCommand: "cargo test --workspace", FullSuiteCommand: "cargo test --workspace", TestCommand: "cargo test --workspace", LintCommand: "cargo clippy --workspace --all-targets -- -D warnings", BaselineFailureFormat: BaselineUnparsed},
 	{ID: "ruby", Name: "Ruby", Markers: []string{"Gemfile"}, RequiredBinaries: []string{"ruby", "bundle"}, VersionSources: []string{".ruby-version", ".tool-versions"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"Gemfile", "Gemfile.lock"}, ProjectImageManifests: []string{"Gemfile", "Gemfile.lock"}, TestPatterns: []string{"*_spec.rb", "*_test.rb"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "php-composer", Name: "PHP / Composer", Markers: []string{"composer.json"}, RequiredBinaries: []string{"php", "composer"}, VersionSources: []string{".php-version", "composer.json"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"composer.json", "composer.lock"}, TestPatterns: []string{"test_*.php", "*Test.php"}, BaselineFailureFormat: BaselineUnparsed},
@@ -70,6 +77,7 @@ func Catalog() []Profile {
 		profile.DependencyManifests = append([]string(nil), profile.DependencyManifests...)
 		profile.ProjectImageManifests = append([]string(nil), profile.ProjectImageManifests...)
 		profile.RegistryProxyEcosystems = append([]string(nil), profile.RegistryProxyEcosystems...)
+		profile.CachePaths = append([]string(nil), profile.CachePaths...)
 		profile.TestPatterns = append([]string(nil), profile.TestPatterns...)
 		out = append(out, profile)
 	}

@@ -28,6 +28,22 @@ func ExcludeHarnessArtifacts(worktreePath string) error {
 	return excludeNames(worktreePath, HarnessArtifacts)
 }
 
+// ExcludeRepoPaths appends each of paths (relative to the repository's top
+// level, as a sandbox block's cache_paths are) to the repository's own
+// info/exclude, anchored and escaped, so what an install writes there never
+// lands in a build's commit. Idempotent.
+func ExcludeRepoPaths(dir string, paths []string) error {
+	patterns := make([]string, 0, len(paths))
+	for _, p := range paths {
+		segments := strings.Split(p, "/")
+		for i, seg := range segments {
+			segments[i] = escapeGitignoreComponent(seg)
+		}
+		patterns = append(patterns, "/"+strings.Join(segments, "/"))
+	}
+	return excludeNames(dir, patterns)
+}
+
 // ExcludeWorkspacePlaceholder appends workspaceDirName (the basename of a
 // factoryd <run>/onboard -workspace value, e.g. "workspace") to repoRoot's
 // own info/exclude, the same untracked mechanism ExcludeHarnessArtifacts

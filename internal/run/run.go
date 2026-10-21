@@ -1679,6 +1679,9 @@ type Run struct {
 	// comment). Read from the run's baseline record by cmd/factoryd's save,
 	// so a run that halted on it carries it too.
 	BaselineVerify *BaselineVerify `json:"baseline_verify,omitempty"`
+	// Install is the run's install image (InstallImage), nil when its
+	// repository has no sandbox block or the run never got that far.
+	Install *InstallImage `json:"install,omitempty"`
 	// Triage is one factory-authored sentence explaining why this run
 	// quarantined or halted -- derived from evidence the factory already
 	// holds (GateResults, Attempts and their logs, ChangedFiles, halt

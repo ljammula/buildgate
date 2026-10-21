@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+
+	wsisolation "buildgate/internal/workspace"
 )
 
 // The git calls of a review-instruction snapshot: the environment and argv
@@ -25,27 +26,12 @@ import (
 // environment is dropped first (GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY,
 // GIT_CONFIG_*, GIT_REPLACE_REF_BASE and the rest redirect or alter a read), so
 // only what is set here reaches git.
-func reviewGitEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "GIT_") {
-			env = append(env, kv)
-		}
-	}
-	return append(env, "GIT_LITERAL_PATHSPECS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1")
-}
+func reviewGitEnv() []string { return wsisolation.HardenedGitEnv() }
 
 // reviewGitArgs is the argv after "git" for running git in dir with nothing
 // from any configuration that executes a program or changes what is read.
 func reviewGitArgs(dir string, args ...string) []string {
-	return append([]string{
-		"--no-pager",
-		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-		"-c", "core.pager=cat", "-c", "diff.external=",
-		"-c", "core.attributesFile=/dev/null",
-		"-c", "protocol.allow=never",
-		"-C", dir,
-	}, args...)
+	return wsisolation.HardenedGitArgs(dir, args...)
 }
 
 // cappedWriter keeps the first max bytes written and counts the rest.

@@ -814,7 +814,7 @@ func writeBaselineBuildNote(logDir string, record *run.BaselineVerify) (string, 
 // log and the ticket's text.
 func (a *Activities) judgeBaseline(input RunWorkflowInput, res VerifyActivityResult, created []string) *run.BaselineVerify {
 	evaluate := baseline.Evaluate
-	if len(input.SetupCommands) > 0 {
+	if len(input.SetupCommands) > 0 || input.InstallImage != "" {
 		evaluate = baseline.EvaluateWithSetup
 	}
 	record := evaluate(a.verifyCommandFor(input), res.Result.ExitCode, readFileTail(res.Result.LogPath, baselineLogTailBytes), triage.FirstFailureLine(res.Result.LogPath), a.ticketTextFor(input), created)
