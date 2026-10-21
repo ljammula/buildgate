@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +10,7 @@ import (
 func writeFakeDockerScript(t *testing.T, script string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path

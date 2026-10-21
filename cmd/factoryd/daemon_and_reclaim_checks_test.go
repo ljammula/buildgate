@@ -484,7 +484,7 @@ func TestDaemonMainReconcilesSandboxOrphansBeforeDialingTemporal(t *testing.T) {
 		"ps) printf 'container-terminal\\trun-terminal\\n' ;;\n" +
 		"rm) exit 0 ;;\n" +
 		"esac\n"
-	if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -503,7 +503,7 @@ func TestDaemonMainReconcilesSandboxOrphansBeforeDialingTemporal(t *testing.T) {
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
 
-	writeSessionConfig(t, isolateSessionConfig(t), "sandbox_docker: "+docker+"\n")
+	writeSessionConfig(t, isolateSessionConfig(t), fmt.Sprintf("sandbox_docker: %s\nsandbox_worker_uid: %d\n", docker, testSandboxWorkerUID()))
 	err = daemonMain(dp, []string{
 		"-temporal-address", unreachable,
 		"-repository", "fixture/repo",
@@ -548,7 +548,7 @@ func TestDaemonMainCanonicalizesSymlinkedDataDirBeforeReconciling(t *testing.T) 
 		"ps) printf '%s\\n' \"$*\" > " + psArgsPath + " ;;\n" +
 		"rm) exit 0 ;;\n" +
 		"esac\n"
-	if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -559,7 +559,7 @@ func TestDaemonMainCanonicalizesSymlinkedDataDirBeforeReconciling(t *testing.T) 
 	unreachable := l.Addr().String()
 	l.Close()
 
-	writeSessionConfig(t, isolateSessionConfig(t), "sandbox_docker: "+docker+"\n")
+	writeSessionConfig(t, isolateSessionConfig(t), fmt.Sprintf("sandbox_docker: %s\nsandbox_worker_uid: %d\n", docker, testSandboxWorkerUID()))
 	err = daemonMain(dp, []string{
 		"-temporal-address", unreachable,
 		"-repository", "fixture/repo",
@@ -848,12 +848,12 @@ func TestCheckSandboxDockerAgainstDaemonHeartbeatRejectsPathResolutionDivergence
 
 	submitterDir := t.TempDir()
 	submitterDocker := filepath.Join(submitterDir, "docker")
-	if err := os.WriteFile(submitterDocker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := writeExecutable(submitterDocker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	daemonDir := t.TempDir()
 	daemonDocker := filepath.Join(daemonDir, "docker")
-	if err := os.WriteFile(daemonDocker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := writeExecutable(daemonDocker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -896,7 +896,7 @@ func TestCheckSandboxDockerAgainstDaemonHeartbeatAllowsPathResolutionMatch(t *te
 
 	sharedDir := t.TempDir()
 	sharedDocker := filepath.Join(sharedDir, "docker")
-	if err := os.WriteFile(sharedDocker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := writeExecutable(sharedDocker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1310,7 +1310,7 @@ func TestDirectRunSandboxWithRetriesDoesNotPadMarginForADisabledComposeSpec(t *t
 	defer cancel()
 
 	docker := filepath.Join(t.TempDir(), "docker-fake")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	composeSpec := &sandbox.ComposeServicesSpec{} // empty ComposeYAML: disabled, matching a target repo with no compose file at all.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -193,6 +194,11 @@ func factorydCommand(t testing.TB, args ...string) *exec.Cmd {
 	t.Helper()
 	if isTicketRun(args) {
 		args = append(append([]string{}, args...), "-temporal-address", sharedTemporalAddress(t))
+	}
+	if len(args) > 0 && args[0] == "serve" && !slices.Contains(args, "-sandbox-worker-uid") {
+		// serve takes the worker uid only from its flag, and refuses one
+		// equal to its own, which the default is inside buildgate's sandbox.
+		args = append(slices.Clone(args), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID()))
 	}
 	return exec.Command(binPath, args...)
 }

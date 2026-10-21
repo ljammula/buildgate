@@ -28,7 +28,7 @@ func TestDoctorCheckScratchOwned(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bin := filepath.Join(t.TempDir(), "docker")
 			script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> \"%s.args\"\ncase \"$1\" in\nrun) echo '%s'; exit %d ;;\nesac\nexit 0\n", bin, tc.out, tc.exit)
-			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			if err := writeExecutable(bin, []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			check := doctorCheckScratchOwned(context.Background(), bin, "img:1")
@@ -81,7 +81,7 @@ func scratchVolumeDocker(t *testing.T, volumes ...string) string {
 	}
 	script += "  exit 0 ;;\n\"volume rm\") touch " + dir + "/rm; exit 0 ;;\nesac\nexit 0\n"
 	bin := filepath.Join(dir, "docker")
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return bin
@@ -135,7 +135,7 @@ func TestDoctorScratchVolumesCheck(t *testing.T) {
 func TestDoctorCheckProfileImages(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\ncase \"$1\" in\nrun) case \"$*\" in *stale:1*) echo '0:0:755' ;; *) echo '65532:65532:770' ;; esac ;;\nesac\nexit 0\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	groups := []doctorProfileImage{

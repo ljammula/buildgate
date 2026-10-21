@@ -39,7 +39,7 @@ func TestIntegrationRelativeDataDirInsideWorkspaceFailsClosedWithClearMessage(t 
 		t.Fatalf("write spec: %v", err)
 	}
 	fakeDocker := filepath.Join(t.TempDir(), "fake-docker")
-	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	fakeSandboxImage := "localhost:5050/example@sha256:" + strings.Repeat("a", 64)

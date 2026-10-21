@@ -116,7 +116,7 @@ func fakeDockerMemTotal(t *testing.T, memTotal string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\n[ \"$1\" = info ] && echo " + memTotal + "\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -138,7 +138,7 @@ func requiredBinaryDocker(t *testing.T, missing string) (string, string) {
 	if missing != "" {
 		script += "printf '%s\\n' '" + missing + "'\n"
 	}
-	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return binary, argsPath
@@ -202,7 +202,7 @@ func TestProbeRequiredBinariesBoundsImageOutput(t *testing.T) {
 	docker := filepath.Join(t.TempDir(), "docker")
 	argsPath := filepath.Join(t.TempDir(), "docker-args")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsPath + "'\nif [ \"$1\" = run ]; then i=0; while [ \"$i\" -lt 2000 ]; do printf 'probe output exceeds the configured byte limit\\n'; i=$((i + 1)); done; fi\n"
-	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	_, err := probeRequiredBinaries(context.Background(), docker, "worker", "65532:65532", []string{"cargo"})
@@ -227,7 +227,7 @@ func TestProbeRequiredBinariesBoundsImageOutput(t *testing.T) {
 func TestRequiredBinaryProbeAcceptsExecutableNamedLikeShellBuiltin(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "printf")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := writeExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("/bin/sh", "-c", requiredBinaryProbe, "required-binaries", "printf")
@@ -440,7 +440,7 @@ func TestDoctorTargetRepoFailsAnAgentsFileEmptyAtHead(t *testing.T) {
 func TestProbeRequiredBinariesIgnoresPullProgress(t *testing.T) {
 	docker := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\nif [ \"$1\" = run ]; then\n  echo \"Unable to find image 'img@sha256:abc' locally\" >&2\n  echo 'eff67d702678: Pull complete' >&2\n  echo 'Status: Downloaded newer image' >&2\n  echo 'cargo'\nfi\n"
-	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	missing, err := probeRequiredBinaries(context.Background(), docker, "img@sha256:abc", "65532:65532", []string{"cargo", "go"})

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -316,7 +317,7 @@ func TestServeUsesStableStartTokenFileWhenPresent(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
 	t.Cleanup(func() { tier2SettingsOverride = nil })
 
-	if err := serveMain(dp, []string{"-data-dir", dataDir, "-addr", listener.Addr().String()}); err == nil {
+	if err := serveMain(dp, []string{"-data-dir", dataDir, "-addr", listener.Addr().String(), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID())}); err == nil {
 		t.Fatal("serveMain unexpectedly succeeded (it should have failed to bind the already-occupied address)")
 	}
 	logs := logBuf.String()

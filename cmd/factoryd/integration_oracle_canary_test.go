@@ -22,7 +22,7 @@ func canaryDockerWrapper(t *testing.T) string {
 	t.Helper()
 	script := fmt.Sprintf("#!/bin/sh\nfor a in \"$@\"; do\n  case \"$a\" in\n    *:/workspace/verify:ro) ORACLE_HOST=\"${a%%%%:*}\"; export ORACLE_HOST;;\n  esac\ndone\nexec %q \"$@\"\n", fakeSandboxDockerBinary(t))
 	path := filepath.Join(t.TempDir(), "docker-canary-wrapper")
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

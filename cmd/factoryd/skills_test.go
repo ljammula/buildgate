@@ -37,7 +37,7 @@ func fakeDockerRecordingArgv(t *testing.T) (docker, argvPath string) {
 	argvPath = filepath.Join(t.TempDir(), "argv.txt")
 	docker = filepath.Join(t.TempDir(), "docker-fake")
 	script := "#!/bin/sh\n{\n  printf '=== %s\\n' \"$1\"\n  for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n} >> \"" + argvPath + "\"\nexit 0\n"
-	if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return docker, argvPath
@@ -198,7 +198,7 @@ func TestDoctorCheckSkills(t *testing.T) {
 		t.Fatalf("configured: %+v", c)
 	}
 	script := filepath.Join(settings.SkillDirs[0], "alpha", "run.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o750); err != nil {
+	if err := writeExecutable(script, []byte("#!/bin/sh\n"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if c := doctorCheckSkills(doctorInputs{settings: settings}); c.Err == nil || !strings.Contains(c.Err.Error(), "executable") {

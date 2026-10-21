@@ -40,7 +40,7 @@ fi
 exec "` + fake + `" "$@"
 `
 	path := filepath.Join(t.TempDir(), "docker-capturing")
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -57,7 +57,7 @@ func TestIntegrationFactoryDirIsMountedFromTheCommitTheConfigWasReadFrom(t *test
 	if err := os.Mkdir(filepath.Join(ws, ".factory"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ws, ".factory", "lint.sh"), []byte(committedLint), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(ws, ".factory", "lint.sh"), []byte(committedLint), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := runGit(t, ws, "add", ".factory"); err != nil {

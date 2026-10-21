@@ -254,7 +254,7 @@ func fakeDockerRecording(dp *deps, t *testing.T) (binary, argvFile string) {
 	argvFile = filepath.Join(tmp, "argv")
 	binary = filepath.Join(tmp, "docker")
 	script := "#!/bin/sh\necho \"$@\" >> " + argvFile + "\nexit 0\n"
-	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	prev := dp.docker.dockerBinary()
@@ -345,7 +345,7 @@ func TestStopFailsOnADockerError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	tmp := t.TempDir()
 	binary := filepath.Join(tmp, "docker")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho boom >&2\nexit 1\n"), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte("#!/bin/sh\necho boom >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	prev := dp.docker.dockerBinary()

@@ -23,7 +23,7 @@ run) echo '%s'; exit %d ;;
 esac
 exit 0
 `, bin, infoExit, infoExit, securityOptions, probeOut, probeExit)
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return bin

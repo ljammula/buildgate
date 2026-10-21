@@ -310,7 +310,7 @@ func TestDoctorFixRemovesANamedSandboxNoKnownRunStarted(t *testing.T) {
 	script := "#!/bin/sh\necho \"$*\" >> " + logFile + "\ncase \"$1 $2\" in\n" +
 		"\"ps -a\") case \"$*\" in *compose.project*) ;; *) printf 'proxy-gone\\t" + gone + "\\trun-gone\\n' ;; esac ;;\n" +
 		"\"network ls\") printf 'net-gone\\t" + gone + "\\trun-gone\\n' ;;\nesac\nexit 0\n"
-	if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	held := []string{"sb-stray", "sb-other"}

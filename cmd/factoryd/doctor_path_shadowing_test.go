@@ -16,7 +16,7 @@ func writeFakeFactoryd(t *testing.T, dir, version string) string {
 	t.Helper()
 	path := filepath.Join(dir, "factoryd")
 	script := "#!/bin/sh\necho factoryd version " + version + "\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake factoryd: %v", err)
 	}
 	return path
@@ -69,7 +69,7 @@ func TestDoctorPathShadowingNeverExecutesShadowBinary(t *testing.T) {
 	sentinel := filepath.Join(shadowDir, "executed.sentinel")
 	shadowPath := filepath.Join(shadowDir, "factoryd")
 	script := "#!/bin/sh\ntouch " + sentinel + "\necho factoryd version 0.9.0-shadow\n"
-	if err := os.WriteFile(shadowPath, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(shadowPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write sentinel shadow factoryd: %v", err)
 	}
 

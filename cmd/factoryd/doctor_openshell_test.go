@@ -22,7 +22,7 @@ func fakeImageDocker(t *testing.T, present bool) string {
 		exit = "0"
 	}
 	binary := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit "+exit+"\n"), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte("#!/bin/sh\nexit "+exit+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return binary

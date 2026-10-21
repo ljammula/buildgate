@@ -37,7 +37,7 @@ func TestRunSandboxWithRetriesPassesTheWorkerEnvironmentItIsGiven(t *testing.T) 
 			argvPath := filepath.Join(t.TempDir(), "argv.txt")
 			docker := filepath.Join(t.TempDir(), "docker-fake")
 			script := "#!/bin/sh\n{\n  printf '=== %s\\n' \"$1\"\n  for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n} >> \"" + argvPath + "\"\nexit 0\n"
-			if err := os.WriteFile(docker, []byte(script), 0o700); err != nil {
+			if err := writeExecutable(docker, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			logDir := t.TempDir()

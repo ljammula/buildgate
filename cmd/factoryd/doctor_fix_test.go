@@ -114,7 +114,7 @@ func stubDoctorMakeImage(dp *deps, t *testing.T, stdout string, err error) (call
 func writeAlwaysOKDocker(t *testing.T) string {
 	t.Helper()
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return fakeDocker
@@ -414,7 +414,7 @@ func TestDoctorFixFailsWhenMakePrintsNoDigestPinnedReference(t *testing.T) {
 func TestIntegrationDoctorWithoutFixNamesConfiguredImageRestoration(t *testing.T) {
 	t.Parallel()
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	// sandbox-docker is config-file only as of flags-consolidate

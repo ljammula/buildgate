@@ -1197,7 +1197,7 @@ func TestDoctorCheckRelayUpstreamHostResolvesInSandbox(t *testing.T) {
 		dir := t.TempDir()
 		fakeDocker := filepath.Join(dir, "docker")
 		script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"network\" ]; then exit 0; fi\nexit %d\n", exitCode)
-		if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		if err := writeExecutable(fakeDocker, []byte(script), 0o755); err != nil {
 			t.Fatalf("write fake docker: %v", err)
 		}
 		return fakeDocker
@@ -1251,7 +1251,7 @@ func TestDoctorCheckRelayUpstreamReachableFromSandbox(t *testing.T) {
 		dir := t.TempDir()
 		fakeDocker := filepath.Join(dir, "docker")
 		script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"network\" ]; then exit 0; fi\nexit %d\n", exitCode)
-		if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		if err := writeExecutable(fakeDocker, []byte(script), 0o755); err != nil {
 			t.Fatalf("write fake docker: %v", err)
 		}
 		return fakeDocker
@@ -1671,7 +1671,7 @@ func TestDoctorCheckHomeNotShared(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			bin := filepath.Join(t.TempDir(), "docker")
-			if err := os.WriteFile(bin, []byte(fmt.Sprintf("#!/bin/sh\nexit %d\n", tc.exit)), 0o755); err != nil {
+			if err := writeExecutable(bin, []byte(fmt.Sprintf("#!/bin/sh\nexit %d\n", tc.exit)), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			check := doctorCheckHomeNotShared(context.Background(), bin, "irrelevant-image")
@@ -1787,7 +1787,7 @@ func TestDoctorCheckImagePresentNeverFallsBackToPull(t *testing.T) {
 	dir := t.TempDir()
 	fakeDocker := filepath.Join(dir, "docker")
 	script := "#!/bin/sh\ncase \"$1 $2\" in\n  'image inspect') exit 1 ;;\n  *) echo \"unexpected: $@\" >&2; exit 1 ;;\nesac\n"
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	check := doctorCheckImagePresent(context.Background(), fakeDocker, "sandbox image", "localhost:5050/example@sha256:deadbeef", "some fix")
@@ -1818,7 +1818,7 @@ func TestDoctorCheckImagePresentTimesOutIndependentlyOfCallersContext(t *testing
 	dir := t.TempDir()
 	fakeDocker := filepath.Join(dir, "docker")
 	script := "#!/bin/sh\ncase \"$1 $2\" in\n  'image inspect') sleep 5 ;;\n  *) exit 1 ;;\nesac\n"
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	image := "localhost:5050/example/slow@sha256:deadbeef"
@@ -1985,7 +1985,7 @@ func TestDoctorRelayUpstreamProbeRequiresTheWorkerModelToBeListed(t *testing.T) 
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
 	// Every arg but the last is docker's own; the last is the probe.
 	script := "#!/bin/sh\nif [ \"$1\" = \"network\" ]; then exit 0; fi\nfor last; do :; done\nexec python3 -c \"$last\"\n"
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

@@ -19,7 +19,7 @@ import (
 func writeFakeGH(t *testing.T, dir, script string) string {
 	t.Helper()
 	path := filepath.Join(dir, "fake-gh")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	return path
@@ -831,7 +831,7 @@ func TestSubmitMainIssueBeforeWorkspaceReachesFetchPath(t *testing.T) {
 	ghDir := t.TempDir()
 	ghPath := filepath.Join(ghDir, "gh")
 	script := "#!/bin/sh\necho '{\"title\":\"Reading-time endpoint\",\"body\":\"See the spec for details.\",\"number\":42}'\n"
-	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(ghPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", ghDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -881,7 +881,7 @@ func TestSubmitMainIssueRequestIDSlugsTitleOnly(t *testing.T) {
 	ghDir := t.TempDir()
 	ghPath := filepath.Join(ghDir, "gh")
 	script := "#!/bin/sh\necho '{\"title\":\"Reading time endpoint\",\"body\":\"Includes zzqqxxbodyword nowhere near the title.\",\"number\":42}'\n"
-	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(ghPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", ghDir+string(os.PathListSeparator)+os.Getenv("PATH"))
