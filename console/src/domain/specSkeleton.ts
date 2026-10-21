@@ -56,7 +56,7 @@ export function isIndented(raw: string): boolean {
 // Go's regexp `\s`, `\S` and `\d` are ASCII-only; JavaScript's are not.
 /** A trimmed line that opens a numbered criterion (`specCriterionItemRE`). */
 export const CRITERION_ITEM = /^[0-9]+[.)][\t\n\f\r ]+[^\t\n\f\r ]/;
-const COVERED_ITEM = /^(?:[-*][\t\n\f\r ]*)?([0-9]+)[\t\n\f\r ]*$/;
+const COVERED_ITEM = /^(?:[-*][\t\n\f\r ]*)?(?:AC-)?([0-9]+)[\t\n\f\r ]*$/;
 const GO_MAX_INT = 9223372036854775807n;
 
 /** Line indexes of `headings` found in order, each searched after the one before; -1 where not found. */

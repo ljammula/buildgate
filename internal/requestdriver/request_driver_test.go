@@ -219,8 +219,8 @@ func TestAdvanceSpecDraftingKeepsACommitMessageCriterionAndNotesIt(t *testing.T)
 	}
 	draft := "# Spec\n\n## Problem\n\nRefunds can be double-processed on retry.\n\n## Scope\n\nThe /refunds endpoint only.\n\n## Non-goals\n\nNot touching /charges.\n\n" +
 		"## Affected services and packages\n\ninternal/payments\n\n## Acceptance criteria\n\n" +
-		"1. The commit subject line begins with `ticket(refunds):`.\n" +
-		"2. The consumer commits the offset and logs the message id.\n\n" +
+		"1. AC-1: The system shall begin the commit subject line with `ticket(refunds):`.\n" +
+		"2. AC-2: The system shall have the consumer commit the offset and log the message id.\n\n" +
 		"## Risks\n\nNone known.\n\n## Open questions\n\nNone.\n"
 	runner, _ := stubSpecDraftRunner(draft, &request.SpecEvidence{}, nil)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
@@ -846,7 +846,7 @@ func TestDriveRequestsAdvancesSubmittedToSpecReview(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner, calls := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0, DurationS: 1.5}, nil)
+	runner, calls := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0, DurationS: 1.5}, nil)
 
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (1st call): %v", err)
@@ -880,7 +880,7 @@ func TestDriveRequestsAdvancesSubmittedToSpecReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read spec.md: %v", err)
 	}
-	if string(specBytes) != requestdrivertest.CanonicalValidSpec {
+	if string(specBytes) != requestdrivertest.DraftedSpec {
 		t.Errorf("spec.md = %q, want the drafted spec verbatim", string(specBytes))
 	}
 }
@@ -906,7 +906,7 @@ func TestAdvanceSpecDraftingStampsCompletionAfterJobReturns(t *testing.T) {
 	before := time.Now()
 	runner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		time.Sleep(jobDuration)
-		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
+		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
 	}
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
@@ -946,7 +946,7 @@ func TestAdvanceSpecDraftingAccumulatesSpendAcrossRedraft(t *testing.T) {
 
 	firstSpend := &request.JobSpend{Role: "planning", Model: "gpt-5.6-luna", InputTokens: 100, OutputTokens: 50, CostMicroUSD: 1000}
 	firstRunner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
-		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: firstSpend}, nil
+		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: firstSpend}, nil
 	}
 	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, firstRunner, time.Now()); err != nil {
 		t.Fatalf("advanceSpecDrafting (first pass): %v", err)
@@ -967,7 +967,7 @@ func TestAdvanceSpecDraftingAccumulatesSpendAcrossRedraft(t *testing.T) {
 
 	secondSpend := &request.JobSpend{Role: "planning", Model: "gpt-5.6-luna", InputTokens: 40, OutputTokens: 20, CostMicroUSD: 400, SpendPartial: true}
 	secondRunner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
-		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: secondSpend}, nil
+		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: secondSpend}, nil
 	}
 	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, secondRunner, time.Now()); err != nil {
 		t.Fatalf("advanceSpecDrafting (second pass): %v", err)
@@ -1008,7 +1008,7 @@ func TestAdvanceSpecDraftingWritesFeedbackFileFromSpecRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner, _ := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
+	runner, _ := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
@@ -1039,7 +1039,7 @@ func TestAdvanceSpecDraftingWritesNoFeedbackFileWithoutASpecRejection(t *testing
 		t.Fatal(err)
 	}
 
-	runner, _ := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
+	runner, _ := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (1st call): %v", err)
 	}
@@ -1075,7 +1075,7 @@ func TestRequestFromEachSourceReachesSpecReviewWithValidSpec(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			runner, _ := stubSpecDraftRunner(requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{}, nil)
+			runner, _ := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{}, nil)
 			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
@@ -2602,7 +2602,7 @@ func TestAdvanceSpecDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing
 
 	runner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		cancelRequestForTest(t, dataDir, "req-1")
-		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
+		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
 	}
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
@@ -2859,7 +2859,7 @@ func readSpecFeedbackRunner(dataDir string, seen *string) requestdriver.SpecDraf
 	return func(ctx context.Context, dd string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		b, _ := os.ReadFile(request.SpecFeedbackPath(dataDir, r.ID))
 		*seen = string(b)
-		return requestdrivertest.CanonicalValidSpec, &request.SpecEvidence{}, nil
+		return requestdrivertest.DraftedSpec, &request.SpecEvidence{}, nil
 	}
 }
 

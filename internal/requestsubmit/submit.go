@@ -562,6 +562,9 @@ func validateDraftingInputs(workspace string, p Params) error {
 	if err := request.ValidateSpecSkeleton(p.ImportedSpec); err != nil {
 		return fmt.Errorf("-spec-file: %w", err)
 	}
+	if err := request.ValidateSpecCriteria(p.ImportedSpec, false); err != nil {
+		return fmt.Errorf("-spec-file: %w", err)
+	}
 	return validateImportedTickets(p.ImportedSpec, p.ImportedTickets)
 }
 

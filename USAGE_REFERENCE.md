@@ -903,6 +903,7 @@ of its prose:
 | No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
 | An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's numbered criteria |
 | The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
+| A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order) and their `AC-N:` labels: every criterion `N. AC-N: ...` with the label equal to its number. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for numbering and mixed labels only |
 
 A plan the planning model drafted that fails one is re-planned once, with
 the check's message as the feedback; a second refused plan halts the
@@ -929,6 +930,8 @@ other text of the spec.
 | `plan_review` | `criterion N names <file>, which ticket T may change, but the tickets covering criterion N may not` | The criterion names, in backticks, a file that is in the `Allowed-Files` of a ticket that does not list the criterion as covered, and in those of no ticket that does. Only names and ticket headers are read: any wording earns it |
 | `plan_review` | `criterion N says <file> changes, but no ticket may change it` | The file exists, no ticket may change it, and the words around its name say it changes (`adds`, `gains`, `new`, `updated`, `removed` ...) without denying it (`no`, `not`, `unchanged`) or only referring to it (`already`, `pattern`, `like`, `from`) |
 | `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review, which sees only the diff, is told not to judge a requirement on the commit's text and to judge every other part of the criterion as usual |
+| `spec_review` | `criterion N is not in the "When ..., the system shall ..." form` | The spec's criteria carry `AC-N:` labels and criterion N's text does not start with `When`, `While`, `If` or `Where` ... `, the system shall`, or `The system shall`. Wording only: the spec is not changed |
+| `plan_review` | `criterion N has no test: no covering ticket's Tests to add cites AC-N` (`and no approved oracle covers it` when the request has an approved oracle) | The spec's criteria carry labels, a ticket lists criterion N as covered, no listing ticket's `### Tests to add` mentions `AC-N`, and no approved oracle manifest entry covers it. A ticket cites a criterion in `### Acceptance criteria covered` as `- N` or `- AC-N`, and the plan prompt asks for `(AC-N)` at the end of each step and test |
 
 A backticked name is a file when a file of exactly that name exists
 (`tests/x.py::test_y` and `a.go:42` name that file; letter case counts

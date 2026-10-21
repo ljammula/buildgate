@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -647,3 +648,29 @@ func HandedOverRequest(t *testing.T, dataDir, spec string) *request.Request {
 	}
 	return r
 }
+
+// WithCriterionIDs returns spec with each top-level numbered item under its
+// "## Acceptance criteria" labelled "N. AC-N: ...", the shape a drafted spec
+// must have (request.ValidateSpecCriteria).
+func WithCriterionIDs(spec string) string {
+	section := ""
+	lines := strings.Split(spec, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "## ") {
+			section = strings.TrimSpace(line)
+		}
+		if section != "## Acceptance criteria" {
+			continue
+		}
+		if m := criterionItem.FindStringSubmatch(line); m != nil {
+			lines[i] = m[1] + ". AC-" + m[1] + ": " + m[2]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+var criterionItem = regexp.MustCompile(`^(\d+)\.\s+(\S.*)$`)
+
+// DraftedSpec is CanonicalValidSpec as the drafting job writes a spec: with
+// criterion IDs.
+var DraftedSpec = WithCriterionIDs(CanonicalValidSpec)

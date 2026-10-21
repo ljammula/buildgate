@@ -23,7 +23,14 @@ this document drops.)
 
 ## Acceptance criteria
 
-(A numbered list. Each criterion must be concrete and independently
+(A numbered list, one criterion per item, written as
+"N. AC-N: <criterion>" -- the ID repeats the item's own number, so the first
+is "1. AC-1: ...", the second "2. AC-2: ...", with no gaps and no item
+without its ID. Write each criterion in the EARS form: "When <trigger>, the
+system shall <observable response>." (or "While <state>, ...", "If
+<condition>, ...", "Where <feature>, ..."; "The system shall ..." when
+nothing triggers it). Plan steps and tests cite these IDs.
+Each criterion must be concrete and independently
 checkable by a reviewer reading the eventual diff -- not a restatement of
 the request. Do NOT include a criterion about the commit message/subject
 line itself -- the build system, not this ticket, owns commit authorship,

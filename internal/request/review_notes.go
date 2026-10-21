@@ -85,7 +85,7 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		}
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed})
 	}
-	r.ReviewNotes = PlanReviewNotes(criteria, tickets, r.Workspace)
+	r.ReviewNotes = PlanReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r))
 }
 
 // SpecReviewNotes returns one note for each acceptance criterion of
@@ -96,7 +96,9 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 // text, and to judge the rest of the criterion as usual
 // (spec_conformity.command_outcome_rule). The criterion is never removed
 // or renumbered here: "the consumer commits the offset and logs the message
-// id" was once deleted from a spec by this reading.
+// id" was once deleted from a spec by this reading. A spec whose criteria
+// carry IDs also gets one note for each criterion not in an EARS form
+// ("When ..., the system shall ..."); that wording is advice, never refused.
 func SpecReviewNotes(specContent string) []string {
 	criteria, err := SpecAcceptanceCriteria(specContent)
 	if err != nil {
@@ -108,6 +110,7 @@ func SpecReviewNotes(specContent string) []string {
 			notes = append(notes, fmt.Sprintf("criterion %d reads as a rule for the commit message, which the factory writes; keep, edit or remove it", i+1))
 		}
 	}
+	notes = append(notes, earsNotes(criteria)...)
 	return capReviewNotes(notes)
 }
 
@@ -128,10 +131,14 @@ func SpecReviewNotes(specContent string) []string {
 //     file exists, no ticket of the plan may change it, and the words
 //     around its name say it changes (criterionClause.saysFileChanges).
 //     That reading of prose is the weaker note.
+//   - for a spec whose criteria carry IDs, "criterion N has no test": a
+//     ticket lists it as covered, none of the tickets listing it cites AC-N in
+//     its Tests to add, and the approved oracle (oracleCovered, by criterion
+//     number) does not cover it.
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
-func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string) []string {
+func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))
@@ -154,6 +161,7 @@ func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string) 
 			notes = append(notes, plan.criterionNotes(n, text, covering[n], listing[n])...)
 		}
 	}
+	notes = append(notes, noTestNotes(criteria, tickets, oracleCovered)...)
 	return capReviewNotes(notes)
 }
 

@@ -150,6 +150,25 @@ func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Req
 // AdvanceRequest itself is a single switch: one state, one function, easy
 // to read top to bottom.
 func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time) error {
+	for attempt := 1; ; attempt++ {
+		retry, err := advanceSpecDraftingAttempt(ctx, dataDir, r, cfg, runner, now, attempt)
+		if err != nil || !retry {
+			return err
+		}
+		now = time.Now()
+	}
+}
+
+// maxSpecDraftingAttempts bounds AdvanceSpecDrafting's automatic redraft to
+// exactly one retry within a single drafting pass: when a spec the model
+// drafted fails request.ValidateSpecCriteria, the drafting job runs once
+// more, told the refusal in its own words. A second failure halts.
+const maxSpecDraftingAttempts = 2
+
+// advanceSpecDraftingAttempt is one drafting launch of AdvanceSpecDrafting.
+// retry is true when the drafted spec was refused for its criteria and the
+// caller should draft again.
+func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time, attempt int) (retry bool, err error) {
 	// A spec_review rejection's reason must reach draft_spec.py the same way an
 	// oracle_review rejection already reaches the oracle drafter (see
 	// AdvanceOracleDrafting's identical block) -- this dedicated feedback
@@ -161,7 +180,7 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	// request.SpecFeedbackPath(dataDir, r.ID) itself -- see its own doc
 	// comment.
 	if err := writeDraftFeedback(request.SpecFeedbackPath(dataDir, r.ID), draftFeedbackText(r, request.StateSpecDrafting, request.SpecFeedback(r), "## Spec rejected ")); err != nil {
-		return err
+		return false, err
 	}
 	var (
 		specMD   string
@@ -172,9 +191,9 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 		specMD, jobErr = readImportedSpec(dataDir, r.ID)
 	} else {
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
-			return err
+			return false, err
 		} else if check != "" {
-			return quarantineRequestWithCheck(dataDir, r, reason, check, now)
+			return false, quarantineRequestWithCheck(dataDir, r, reason, check, now)
 		}
 		specMD, evidence, jobErr = runner(ctx, dataDir, r, cfg)
 	}
@@ -188,25 +207,41 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	// the drafting job above was running must not be resurrected by this
 	// function's own r.Save below.
 	if ok, err := stillInState(dataDir, r.ID, request.StateSpecDrafting); err != nil {
-		return err
+		return false, err
 	} else if !ok {
 		log.Printf("request %s: spec drafting finished but the request left spec_drafting while it ran (e.g. cancelled) -- discarding the result", r.ID)
-		return nil
+		return false, nil
 	}
 	if jobErr != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
+		return false, HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
 	}
 	// A review that commented on sections redrafts only those: every other
 	// byte of the reviewed spec.md is kept, whatever the model wrote.
 	specMD, spliceErr := spliceScopedSpec(dataDir, r, specMD)
 	if spliceErr != nil {
-		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
+		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
 	}
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
-		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
+		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
+	}
+	if err := request.ValidateSpecCriteria(specMD, !importsSpec(r)); err != nil {
+		// Keep what the refused draft spent: the next pass, or the halt, adds to it.
+		accumulateSpecEvidence(r, evidence)
+		if attempt < maxSpecDraftingAttempts && !importsSpec(r) {
+			r.Rejections = append(r.Rejections, request.Rejection{
+				By:        request.FactoryActor,
+				At:        now.UTC().Format(time.RFC3339Nano),
+				Reason:    DraftHaltNote(err.Error()),
+				FromState: request.StateSpecDrafting,
+				ForStage:  request.StateSpecReview,
+			})
+			log.Printf("request %s: drafted spec refused (%v) -- drafting again automatically", r.ID, err)
+			return true, nil
+		}
+		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
 	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
-		return fmt.Errorf("write spec: %w", err)
+		return false, fmt.Errorf("write spec: %w", err)
 	}
 	// A rejected spec_review sends this request back through
 	// spec_drafting again (RejectSpec), so this evidence record can
@@ -215,12 +250,9 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	// replacement, so a re-draft's real relay cost is never silently
 	// dropped just because its evidence record was overwritten (see
 	// request.JobSpend.Add's own doc comment).
-	if evidence != nil && r.SpecEvidence != nil {
-		evidence.Spend = r.SpecEvidence.Spend.Add(evidence.Spend)
-	}
-	r.SpecEvidence = evidence
+	accumulateSpecEvidence(r, evidence)
 	if err := r.CompleteSpecDrafting(now); err != nil {
-		return err
+		return false, err
 	}
 	// What the factory's reading of the spec found is advice for the review
 	// (request.SpecReviewNotes): it changes nothing in the document.
@@ -230,14 +262,24 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	// the two saves costs at most one duplicate reminder (the ticker
 	// re-sends on its next tick), never a re-run of the drafting job.
 	if err := r.Save(dataDir); err != nil {
-		return err
+		return false, err
 	}
 	// Entering spec_review: the operator is waiting on them starting
 	// now -- send the first reminder immediately rather than leaving
 	// them to discover it only on RemindIfDue's own next tick.
 	// See RemindRequest's own doc comment.
 	RemindRequest(dataDir, r, now)
-	return r.Save(dataDir)
+	return false, r.Save(dataDir)
+}
+
+// accumulateSpecEvidence records evidence as r.SpecEvidence, adding the spend
+// of the record it replaces: a redraft's, or an earlier attempt's within this
+// pass, is real relay cost that must not vanish with the overwritten record.
+func accumulateSpecEvidence(r *request.Request, evidence *request.SpecEvidence) {
+	if evidence != nil && r.SpecEvidence != nil {
+		evidence.Spend = r.SpecEvidence.Spend.Add(evidence.Spend)
+	}
+	r.SpecEvidence = evidence
 }
 
 // importsSpec reports whether this spec_drafting pass takes the spec the

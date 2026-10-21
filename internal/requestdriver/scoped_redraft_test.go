@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,8 @@ import (
 
 // rewriteSpecEverywhere is what a model that ignored the scope would write:
 // every section of the spec changed.
+var criterionLabelRE = regexp.MustCompile(`^\d+\. AC-\d+: `)
+
 func rewriteSpecEverywhere(spec string) string {
 	var b strings.Builder
 	for _, line := range strings.SplitAfter(spec, "\n") {
@@ -24,7 +27,9 @@ func rewriteSpecEverywhere(spec string) string {
 		case strings.TrimSpace(line) == "":
 			b.WriteString(line)
 		default:
-			b.WriteString("REWRITTEN. " + line)
+			// Keep a criterion's "N. AC-N: " label in front, so the list stays valid.
+			label := criterionLabelRE.FindString(line)
+			b.WriteString(label + "REWRITTEN. " + line[len(label):])
 		}
 	}
 	return b.String()
@@ -64,7 +69,7 @@ func advanceSpec(t *testing.T, dataDir string, r *request.Request, drafted strin
 // rewrites every section of the spec still changes only the commented one;
 // every other byte is the reviewed file's, which the test knows as a literal.
 func TestScopedSpecRedraftKeepsUncommentedSectionsByteIdentical(t *testing.T) {
-	original := requestdrivertest.TwoCriteriaSpec
+	original := requestdrivertest.WithCriterionIDs(requestdrivertest.TwoCriteriaSpec)
 	dataDir, r := rejectedSpecFixture(t, original, request.RejectionAnchor{Path: "spec.md", Section: "## Scope", Quote: "The /refunds endpoint only.", Note: "mention /refunds/{id}"})
 	drafted := rewriteSpecEverywhere(original)
 	drafted = strings.Replace(drafted, "REWRITTEN. The /refunds endpoint only.", "The /refunds and /refunds/{id} endpoints.", 1)
@@ -79,7 +84,7 @@ func TestScopedSpecRedraftKeepsUncommentedSectionsByteIdentical(t *testing.T) {
 	for _, kept := range []string{
 		"## Problem\n\nRefunds can be double-processed on retry.\n\n",
 		"## Non-goals\n\nNot touching /charges.\n\n",
-		"## Acceptance criteria\n\n1. A retried POST /refunds with the same idempotency key returns the original result.\n2. A non-idempotent POST /refunds still processes normally.\n\n",
+		"## Acceptance criteria\n\n1. AC-1: A retried POST /refunds with the same idempotency key returns the original result.\n2. AC-2: A non-idempotent POST /refunds still processes normally.\n\n",
 		"## Open questions\n\nNone.\n",
 	} {
 		if !bytes.Contains(got, []byte(kept)) {
@@ -94,7 +99,7 @@ func TestScopedSpecRedraftKeepsUncommentedSectionsByteIdentical(t *testing.T) {
 // TestScopedSpecRedraftKeepsAHandEditOutsideTheComment: the operator's own
 // edit to a section nobody commented on survives a redraft that rewrote it.
 func TestScopedSpecRedraftKeepsAHandEditOutsideTheComment(t *testing.T) {
-	original := requestdrivertest.TwoCriteriaSpec
+	original := requestdrivertest.WithCriterionIDs(requestdrivertest.TwoCriteriaSpec)
 	edited := strings.Replace(original, "None known.", "Rate limits on /refunds are the risk the operator added.", 1)
 	dataDir, r := rejectedSpecFixture(t, edited, request.RejectionAnchor{Path: "spec.md", Section: "## Problem", Note: "name the account"})
 	drafted := rewriteSpecEverywhere(original)
@@ -111,7 +116,7 @@ func TestScopedSpecRedraftKeepsAHandEditOutsideTheComment(t *testing.T) {
 }
 
 func TestWholeSpecCommentRedraftsEverything(t *testing.T) {
-	original := requestdrivertest.TwoCriteriaSpec
+	original := requestdrivertest.WithCriterionIDs(requestdrivertest.TwoCriteriaSpec)
 	dataDir, r := rejectedSpecFixture(t, original, request.RejectionAnchor{Path: "spec.md", Note: "start over"})
 	drafted := rewriteSpecEverywhere(original)
 	advanceSpec(t, dataDir, r, drafted)
