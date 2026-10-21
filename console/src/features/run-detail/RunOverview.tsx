@@ -17,6 +17,7 @@ import { RunPromptsCard } from "@/features/run-detail/RunPromptsCard";
 import { RunReleaseCard } from "@/features/run-detail/RunReleaseCard";
 import { RunStopCallout } from "./RunStopCallout";
 import { RunVerdictLine } from "@/features/run-detail/RunVerdictLine";
+import { StartupSteps } from "@/features/run-detail/StartupSteps";
 import { Timeline } from "@/features/run-detail/Timeline";
 import type { RunProgress } from "@/features/run-detail/useRunProgress";
 import { Section } from "@/ui/PageLayout";
@@ -63,6 +64,7 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
         <RunHandoffCard run={run} />
         {gatesFailed ? gates : null}
         {attemptsFailed ? attempts : null}
+        <StartupSteps runId={run.id} steps={run.startupSteps} live={!over} />
         <Section title="Timeline" card>
           <Timeline run={run} events={progress.events} error={progress.error} />
         </Section>

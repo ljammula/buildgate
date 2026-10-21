@@ -498,6 +498,35 @@ export interface RequestBuild {
   readonly stalled: boolean;
 }
 
+/**
+ * Why a request is waiting rather than running (Go's request.Wait): the
+ * server's one answer, shared with `factoryd status`. `kind` is a
+ * server-owned set that can grow, so it stays a string; `waitLine` and
+ * `waitChipLabel` word the kinds they know and fall back for the rest.
+ */
+export interface RequestWait {
+  /** job_slot, repository, repository_queue, model_host, compose_slot or no_worker. */
+  readonly kind: string;
+  /** RFC3339 time the wait began; empty when the server did not know. */
+  readonly since: string;
+  /** What the request waits behind: a request id (job_slot) or the lock holder's text. */
+  readonly on: string;
+  /** The request's place in line (job_slot, from 1); null otherwise. */
+  readonly position: number | null;
+  /** How many jobs the worker runs at once (job_slot); null otherwise. */
+  readonly slots: number | null;
+}
+
+function decodeRequestWait(o: JsonObject, at: string): RequestWait {
+  return {
+    kind: reqString(o, "kind", at),
+    since: optString(o, "since", at),
+    on: optString(o, "on", at),
+    position: optNumber(o, "position", at),
+    slots: optNumber(o, "slots", at),
+  };
+}
+
 function decodeRequestBuild(o: JsonObject, at: string): RequestBuild {
   return {
     runId: optString(o, "run_id", at),
@@ -620,20 +649,15 @@ export interface RequestSummary {
    */
   readonly canSendBackToPlan: boolean;
   /**
-   * The id of the request/run this one is queued behind; null unless
-   * currently waiting on one.
+   * Why this request is waiting rather than running; null while it runs or
+   * waits on a person. GET /requests and its event stream only.
    */
-  readonly waitingOn: string | null;
+  readonly wait: RequestWait | null;
   /**
    * Which check quarantined this request (e.g. "spec_conformity"); null
    * unless currently quarantined for that reason.
    */
   readonly quarantineCheck: string | null;
-  /**
-   * This request's place (from 1) among the requests waiting for a worker
-   * slot; null unless it is waiting. GET /requests and its event stream only.
-   */
-  readonly queuePosition: number | null;
   /** The build under way; null unless the request is building and its run has started. */
   readonly build: RequestBuild | null;
   /**
@@ -765,9 +789,8 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     canSendBackToPlan: optBoolean(o, "can_send_back_to_plan", at),
     approveNextState: optString(o, "approve_next_state", at),
     draftOracles: optBoolean(o, "draft_oracles", at),
-    waitingOn: stringOrNull(o, "waiting_on", at),
+    wait: optObject(o, "wait", at, decodeRequestWait),
     quarantineCheck: stringOrNull(o, "quarantine_check", at),
-    queuePosition: optNumber(o, "queue_position", at),
     build: optObject(o, "build", at, decodeRequestBuild),
     lastNotifiedAt: optString(o, "last_notified_at", at),
     lastAsk: optString(o, "last_ask", at),

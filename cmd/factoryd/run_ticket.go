@@ -1420,7 +1420,14 @@ func (tr *ticketRun) checkProject() error {
 // repository's declared toolchains need, when the configured one lacks them,
 // which may be built here on first use.
 func (tr *ticketRun) fitSandboxToRepository() error {
-	image, err := toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
+	// The image is the run's first start-up step; its feed needs the run id.
+	tr.mintRunID()
+	var image string
+	err := withStage(*tr.dataDir, tr.id, "image", func() (string, string, error) {
+		var imageErr error
+		image, imageErr = toolchainImageFor(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, *tr.sandboxImage, *tr.sandboxDocker)
+		return imageStageOutcome(image, *tr.sandboxImage, imageErr)
+	})
 	if err != nil {
 		return err
 	}
@@ -1466,14 +1473,18 @@ func (tr *ticketRun) lockRepository() error {
 	// first, to reconcile stranded worktrees, then releases it and takes it
 	// shared (see acquireIsolatedRunLock).
 	var directLock *wsisolation.DirectLock
+	// A wait for the lock is written to this run's progress feed, so the run
+	// id is minted before it.
+	tr.mintRunID()
+	report := repoLockReport{dataDir: *tr.dataDir, runID: tr.id}
 	isolatedRun := *tr.repository == "" && *tr.onBranch == ""
 	reconcileStranded := func(lock *wsisolation.DirectLock) {
 		reconcileIsolationMarkers(tr.lifecycleCtx, *tr.dataDir, *tr.workspace, *tr.sandboxDocker, lock, nil)
 	}
 	if isolatedRun {
-		directLock, err = acquireIsolatedRunLock(tr.lifecycleCtx, *tr.workspace, reconcileStranded)
+		directLock, err = acquireIsolatedRunLock(tr.lifecycleCtx, *tr.workspace, reconcileStranded, report)
 	} else if *tr.repository == "" {
-		directLock, err = acquireDirectRunLock(tr.lifecycleCtx, *tr.workspace)
+		directLock, err = acquireDirectRunLock(tr.lifecycleCtx, *tr.workspace, report)
 	} else {
 		// Repository-owner submissions retain the same Git-common-dir
 		// ownership boundary as bare runs, but wait only within this run's
@@ -1535,6 +1546,31 @@ func (tr *ticketRun) lockRepository() error {
 	return nil
 }
 
+// imageStageOutcome is the image start-up step's end: its outcome and a
+// detail naming the image the run uses and whether it is the configured one
+// or one derived for the repository's toolchains.
+func imageStageOutcome(image, configured string, err error) (outcome, detail string, _ error) {
+	if err != nil {
+		return "fail", err.Error(), err
+	}
+	if image == configured {
+		return "pass", image + " (configured)", nil
+	}
+	return "pass", image + " (derived for the repository's toolchains)", nil
+}
+
+// mintRunID fixes this run's id (the -run-id serve passed, else one made from
+// the ticket, the time and the process); a second call keeps it.
+func (tr *ticketRun) mintRunID() {
+	if tr.id != "" {
+		return
+	}
+	tr.id = *tr.runID
+	if tr.id == "" {
+		tr.id = fmt.Sprintf("%s-%s-%d", *tr.ticket, time.Now().Format("20060102-150405"), os.Getpid())
+	}
+}
+
 // snapshotSpec mints the run id, snapshots the spec into the run's directory and reads the verify command and declared scope from it.
 func (tr *ticketRun) snapshotSpec() error {
 	var err error
@@ -1542,10 +1578,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	// progress feed (internal/progress) can record preflight under the same
 	// id every later stage uses -- api_start.go always passes -run-id; a
 	// bare CLI invocation generates one.
-	tr.id = *tr.runID
-	if tr.id == "" {
-		tr.id = fmt.Sprintf("%s-%s-%d", *tr.ticket, time.Now().Format("20060102-150405"), os.Getpid())
-	}
+	tr.mintRunID()
 	if !*tr.skipProjectCheck {
 		err := withStage(*tr.dataDir, tr.id, "preflight", func() (outcome, detail string, err error) {
 			specArtifact, contractArtifact, architectureArtifact := projectBootstrapArtifactPaths(*tr.workspace)

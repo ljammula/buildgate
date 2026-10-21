@@ -14,6 +14,7 @@ import {
   requestWaitingSinceOrEnteredAt,
 } from "@/domain/request";
 import { FINISHED_STATES } from "@/domain/requestStage";
+import { waitLine } from "@/domain/requestWait";
 import { safeHttpUrl } from "@/domain/safeUrl";
 import { stateLabel } from "@/domain/status";
 import { escapeInvisible } from "@/domain/textEscape";
@@ -39,29 +40,13 @@ export interface CardAlert {
 export interface CardFacts {
   /** Short text lines, most important first. */
   readonly lines: readonly string[];
-  /** "Queued · position 2 · behind req-a" while the request waits for a worker slot; null otherwise. */
+  /** One sentence naming why the request waits ("Queued · position 2 · behind req-a"); null while it does not. */
   readonly queue: string | null;
   readonly alert: CardAlert | null;
   /** The server's stalled verdict on the build under way. */
   readonly stalled: boolean;
   /** Opened pull requests, by ticket; empty before any is opened. */
   readonly pullRequests: readonly CardPullRequest[];
-}
-
-/**
- * "Queued · position 2 · behind req-a" from the server's `queue_position` and
- * `waiting_on`; null for a request that is not waiting. The position is the
- * server's: nothing here infers an order from timestamps.
- */
-export function queueLine(request: RequestSummary): string | null {
-  const behind =
-    request.waitingOn !== null && request.waitingOn !== "" ? `behind ${request.waitingOn}` : "";
-  if (request.queuePosition !== null) {
-    return ["Queued", `position ${request.queuePosition}`, behind]
-      .filter((part) => part !== "")
-      .join(" · ");
-  }
-  return behind === "" ? null : `Queued ${behind}`;
 }
 
 const ASKS: Readonly<Record<string, string>> = {
@@ -171,7 +156,7 @@ export function cardFacts(request: RequestSummary): CardFacts {
       return {
         ...none,
         lines: buildingLines(request),
-        queue: queueLine(request),
+        queue: waitLine(request.wait),
         stalled: request.build?.stalled ?? false,
       };
     case "pr_review":
@@ -185,7 +170,7 @@ export function cardFacts(request: RequestSummary): CardFacts {
         lines: [stateLabel(request.state), job === null ? "" : activeJobLabel(job)].filter(
           (line) => line !== "",
         ),
-        queue: queueLine(request),
+        queue: waitLine(request.wait),
       };
     }
   }

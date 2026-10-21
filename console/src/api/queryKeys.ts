@@ -32,6 +32,8 @@ export const queryKeys = {
     handoff: (id: string, sha256: string) =>
       ["runs", "detail", id, "evidence", "handoff", sha256] as const,
     prompts: (id: string) => ["runs", "detail", id, "evidence", "prompts"] as const,
+    stepLog: (id: string, step: string) =>
+      ["runs", "detail", id, "evidence", "step", step] as const,
     promptText: (id: string, attempt: string, name: string) =>
       ["runs", "detail", id, "evidence", "prompts", attempt, name] as const,
   },

@@ -2,6 +2,7 @@ import { describeError } from "@/ui/ErrorDisplay";
 import { formatUsageFigure, formatUsageLines } from "@/domain/cost";
 import type { RequestSummary } from "@/domain/request";
 import { requestAwaitingPullRequest } from "@/domain/request";
+import { waitLine } from "@/domain/requestWait";
 import { DigestedText } from "@/shared/request/DigestedText";
 import { DescriptionItem, DescriptionList } from "@/ui/DescriptionList";
 import { Disclosure } from "@/ui/Disclosure";
@@ -35,6 +36,9 @@ export function RequestFacts({ request, refreshError }: RequestFactsProps) {
         <DescriptionItem label="Updated">
           <RelativeTime value={request.updatedAt} />
         </DescriptionItem>
+        {waitLine(request.wait) === null ? null : (
+          <DescriptionItem label="Waiting">{waitLine(request.wait)}</DescriptionItem>
+        )}
         {request.ticketCount > 0 ? (
           <DescriptionItem label="Tickets">{`${request.ticketIndex} / ${request.ticketCount}`}</DescriptionItem>
         ) : null}

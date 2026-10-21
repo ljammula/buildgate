@@ -378,10 +378,16 @@ func (a *Activities) logDirFor(input RunWorkflowInput) string {
 // logDir (no per-execution LogDir and no static a.LogDir configured) is
 // silently skipped rather than writing to some arbitrary relative path.
 func progressMark(ctx context.Context, logDir, stage, event, outcome, detail string) {
+	progressMarkLog(ctx, logDir, stage, event, outcome, detail, "")
+}
+
+// progressMarkLog is progressMark for a line that names a log file, a path
+// relative to the run's directory (progress.Event.Log).
+func progressMarkLog(ctx context.Context, logDir, stage, event, outcome, detail, log string) {
 	if logDir == "" {
 		return
 	}
-	if err := progress.Mark(progress.PathInDir(logDir), stage, event, outcome, detail); err != nil {
+	if err := progress.MarkLog(progress.PathInDir(logDir), stage, event, outcome, detail, log); err != nil {
 		activity.GetLogger(ctx).Warn("append progress event", "stage", stage, "event", event, "error", err)
 	}
 }

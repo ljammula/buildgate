@@ -1,4 +1,5 @@
-import { headTruncate } from "@/domain/middleTruncate";
+import type { RequestWait } from "@/domain/request";
+import { waitChipLabel } from "@/domain/requestWait";
 import { AWAITING_PR_LABEL, statusForToken, statusIconForToken } from "@/domain/status";
 import { StatusChip } from "@/ui/StatusChip";
 
@@ -7,12 +8,11 @@ export interface RequestStageChipProps {
   /** A halted request that is really accepted work awaiting its pull request: a calm label, not "halted". */
   readonly awaitingPullRequest?: boolean;
   /**
-   * The id of the request/run running ahead of this one, set only while it is
-   * queued behind it. Shown in place of "Building": found in the operator
-   * demo, a request stalled behind another build showed a chip
-   * indistinguishable from one making progress.
+   * Why the request waits rather than runs, when it does. Shown in place of
+   * "Building": found in the operator demo, a request stalled behind another
+   * build showed a chip indistinguishable from one making progress.
    */
-  readonly waitingOn?: string | null;
+  readonly wait?: RequestWait | null;
   /** The request waits on a human: a pr_review request whose PRs all wait on their reviewer takes the needs-you colour, matching its board section. */
   readonly needsYou?: boolean;
 }
@@ -26,7 +26,7 @@ export interface RequestStageChipProps {
 export function RequestStageChip({
   state,
   awaitingPullRequest = false,
-  waitingOn = null,
+  wait = null,
   needsYou = false,
 }: RequestStageChipProps) {
   // Halted work that waits on the operator: the request's own (waiting) tone
@@ -36,13 +36,9 @@ export function RequestStageChip({
       <StatusChip status={statusForToken(state)} label={AWAITING_PR_LABEL} icon="octagon_pause" />
     );
   }
-  if (waitingOn !== null && waitingOn !== "") {
+  if (wait !== null) {
     return (
-      <StatusChip
-        status={statusForToken(state)}
-        label={`Queued behind ${headTruncate(waitingOn, 12, "…")}`}
-        icon="circle_dashed"
-      />
+      <StatusChip status={statusForToken(state)} label={waitChipLabel(wait)} icon="circle_dashed" />
     );
   }
   // A failure that waits on the operator (quarantined) keeps its failure

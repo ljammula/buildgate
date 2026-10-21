@@ -844,7 +844,7 @@ func TestMemoryProposeSubmitsARequestMarkedAsMemory(t *testing.T) {
 			t.Errorf("lesson %s after propose: %s for request %q", l.ID, l.State, l.RequestID)
 		}
 	}
-	if entry := buildRequestStatusEntry(r, "", time.Now()); entry.Kind != "memory" || !strings.Contains(requestRowSuffix(entry), "[memory]") {
+	if entry := buildRequestStatusEntry(r, nil, time.Now()); entry.Kind != "memory" || !strings.Contains(requestRowSuffix(entry), "[memory]") {
 		t.Errorf("status entry = %+v, want it labelled memory", entry)
 	}
 	var row bytes.Buffer

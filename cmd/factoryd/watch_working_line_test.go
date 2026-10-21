@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/request"
 )
 
@@ -62,6 +63,14 @@ func TestRequestWaitTextWithoutJob(t *testing.T) {
 		t.Fatalf("write active job: %v", err)
 	}
 	text, _ := requestWaitText(dataDir, req)
+	if !strings.HasPrefix(text, "submitted · no worker is running") {
+		t.Errorf("without a worker text = %q, want it to say no worker is running", text)
+	}
+	hb := daemonheartbeat.Heartbeat{UpdatedAt: time.Now().Format(time.RFC3339Nano), JobSlots: 1, TemporalAddress: "localhost:7233", SlotRequests: []string{"req-nojob"}}
+	if err := daemonheartbeat.Write(workerHeartbeatPath(dataDir), hb); err != nil {
+		t.Fatal(err)
+	}
+	text, _ = requestWaitText(dataDir, req)
 	if want := "submitted · waiting for the request driver to pick it up"; text != want {
 		t.Errorf("text = %q, want %q", text, want)
 	}

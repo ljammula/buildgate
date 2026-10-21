@@ -118,6 +118,17 @@ export async function getRunPrompts(
   return decodeSavedPrompts(asObject(json, at), at);
 }
 
+/** GET /runs/{id}/log?step=<name>: the log the factory recorded for one start-up step. */
+export async function getRunStepLog(
+  http: Http,
+  id: string,
+  step: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const path = `/runs/${encodeURIComponent(id)}/log?step=${encodeURIComponent(step)}`;
+  return new TextDecoder().decode(await http.getBytes(path, readToken, signal));
+}
+
 /** GET /runs/{id}/prompts/{attempt}/{name}: one prompt's text, as the build saved it. */
 export async function getRunPromptText(
   http: Http,

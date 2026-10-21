@@ -532,46 +532,21 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 			return noRoomForAttempt(last, margin, lastErr, commandRan)
 		}
-		if registryProxy != nil {
-			// Ensure runs before the worker timeout below is computed, not
-			// after: only the first attempt that needs the proxy pays for its
-			// startup, and computing the timeout first would let that time
-			// eat into the fixed teardown margin.
-			if proxyErr := registryProxy.Ensure(ctx, ""); proxyErr != nil {
-				// ExitCode -1 and real Command/timestamps, matching
-				// runner.Result's own contract for an attempt that never got
-				// far enough to exit a process: the zero value would persist
-				// as a successful exit at 0001-01-01 in this attempt's
-				// durable evidence.
-				lastErr = fmt.Errorf("start registry proxy: %w", proxyErr)
-				var hookErr error
-				if last, hookErr = unlaunchedAttempt(afterAttempt, attempt, command, lastErr); hookErr != nil {
-					return last, hookErr
-				}
-				if ctx.Err() != nil || errors.Is(lastErr, sandbox.ErrCleanupUnconfirmed) {
-					return last, lastErr
-				}
-				continue
+		if ensureErr := a.ensureSidecars(ctx, input, attempt, registryProxy, compose); ensureErr != nil {
+			// ExitCode -1 and real Command/timestamps, matching
+			// runner.Result's own contract for an attempt that never got far
+			// enough to exit a process: the zero value would persist as a
+			// successful exit at 0001-01-01 in this attempt's durable
+			// evidence.
+			lastErr = ensureErr
+			var hookErr error
+			if last, hookErr = unlaunchedAttempt(afterAttempt, attempt, command, lastErr); hookErr != nil {
+				return last, hookErr
 			}
-		}
-		if compose != nil {
-			// Runs after registryProxy Ensure, before the worker
-			// timeout below is computed, for the identical reason:
-			// EnsureForAttempt can run a real `docker compose up
-			// --wait` (bounded by ComposeServicesReadyTimeout, already
-			// folded into margin above), and computing the timeout first
-			// would let that time silently eat into margin instead.
-			if composeErr := compose.EnsureForAttempt(ctx, attempt); composeErr != nil {
-				lastErr = fmt.Errorf("start compose services: %w", composeErr)
-				var hookErr error
-				if last, hookErr = unlaunchedAttempt(afterAttempt, attempt, command, lastErr); hookErr != nil {
-					return last, hookErr
-				}
-				if ctx.Err() != nil || errors.Is(lastErr, sandbox.ErrCleanupUnconfirmed) {
-					return last, lastErr
-				}
-				continue
+			if ctx.Err() != nil || errors.Is(lastErr, sandbox.ErrCleanupUnconfirmed) {
+				return last, lastErr
 			}
+			continue
 		}
 		timeout := time.Hour
 		if deadline, ok := ctx.Deadline(); ok {
@@ -618,6 +593,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 			}
 			s = prepared
 		}
+		s.StartupSteps = ctx.Value(buildLaunchKey{}) != nil
 		s = sandbox.PrepareWorkerScratch(s)
 		// compose.ApplyToWorkerLaunch, not a PrepareWorker call: compose
 		// services add ComposeNetwork (which sandbox.Run makes the primary

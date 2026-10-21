@@ -140,8 +140,7 @@ describe("the board", () => {
         },
         {
           ...requestJson({ id: "req-q", state: "submitted", title: "Wait" }),
-          queue_position: 2,
-          waiting_on: "req-b",
+          wait: { kind: "job_slot", position: 2, on: "req-b" },
         },
       ]),
     });
@@ -469,7 +468,12 @@ describe("health strip", () => {
   test("a live worker with nothing to do says so, and counts what waits", async () => {
     renderApp(<BoardScreen />, {
       server: server(
-        [{ ...requestJson({ id: "req-q", state: "submitted" }), queue_position: 1 }],
+        [
+          {
+            ...requestJson({ id: "req-q", state: "submitted" }),
+            wait: { kind: "job_slot", position: 1 },
+          },
+        ],
         [{ on: "GET /queue-run", reply: () => json({ ...alive, job_slots: 1 }) }],
       ),
     });
@@ -1146,9 +1150,15 @@ describe("groups inside a column", () => {
   test("Spec groups drafting by the running job before the queue", async () => {
     renderApp(<BoardScreen />, {
       server: server([
-        { ...requestJson({ id: "req-q2", state: "submitted" }), queue_position: 2 },
+        {
+          ...requestJson({ id: "req-q2", state: "submitted" }),
+          wait: { kind: "job_slot", position: 2 },
+        },
         { ...requestJson({ id: "req-plan", state: "planning" }) },
-        { ...requestJson({ id: "req-q1", state: "spec_drafting" }), queue_position: 1 },
+        {
+          ...requestJson({ id: "req-q1", state: "spec_drafting" }),
+          wait: { kind: "job_slot", position: 1 },
+        },
         requestJson({ id: "req-run", state: "oracle_drafting" }),
       ]),
     });

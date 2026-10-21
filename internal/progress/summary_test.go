@@ -78,7 +78,7 @@ func TestSummary(t *testing.T) {
 			lines: []Event{
 				{Ts: "t1", Source: "factory", Stage: "queued", Event: "note", Detail: "behind 1 run(s) on foo/bar"},
 			},
-			want: RunSummary{LastAt: "t1", WaitingReason: "behind 1 run(s) on foo/bar"},
+			want: RunSummary{LastAt: "t1", WaitingReason: "behind 1 run(s) on foo/bar", WaitingStage: "queued", WaitingSince: "t1"},
 		},
 		{
 			name: "start after queued clears waiting reason",
@@ -93,7 +93,7 @@ func TestSummary(t *testing.T) {
 			lines: []Event{
 				{Ts: "t1", Source: "factory", Stage: "model_host_lock", Event: "waiting", Detail: "queued behind run-a"},
 			},
-			want: RunSummary{LastAt: "t1", WaitingReason: "queued behind run-a"},
+			want: RunSummary{LastAt: "t1", WaitingReason: "queued behind run-a", WaitingStage: "model_host_lock", WaitingSince: "t1"},
 		},
 		{
 			name: "model host lock acquired clears waiting reason",
@@ -108,7 +108,7 @@ func TestSummary(t *testing.T) {
 			lines: []Event{
 				{Ts: "t1", Source: "factory", Stage: "compose_services_lock", Event: "waiting", Detail: "queued behind run-a (pid 7)"},
 			},
-			want: RunSummary{LastAt: "t1", WaitingReason: "queued behind run-a (pid 7)"},
+			want: RunSummary{LastAt: "t1", WaitingReason: "queued behind run-a (pid 7)", WaitingStage: "compose_services_lock", WaitingSince: "t1"},
 		},
 		{
 			name: "compose services lock acquired clears waiting reason",
@@ -124,7 +124,7 @@ func TestSummary(t *testing.T) {
 				{Ts: "t1", Source: "factory", Stage: "queued", Event: "note", Detail: "behind 1 run(s) on foo/bar"},
 				{Ts: "t2", Source: "factory", Stage: "queued", Event: "note", Detail: "behind 2 run(s) on foo/bar"},
 			},
-			want: RunSummary{LastAt: "t2", WaitingReason: "behind 2 run(s) on foo/bar"},
+			want: RunSummary{LastAt: "t2", WaitingReason: "behind 2 run(s) on foo/bar", WaitingStage: "queued", WaitingSince: "t1"},
 		},
 	}
 
@@ -325,5 +325,32 @@ func TestStalled(t *testing.T) {
 				t.Errorf("Stalled = (%v, %v), want (%v, %v)", stalled, since, c.wantStalled, c.wantSince)
 			}
 		})
+	}
+}
+
+// TestSummarizeNamesTheWaitingStageAndSince: the stage a wait is recorded in
+// and the time of its first line are reported; a new detail in the same stage
+// keeps the time, a start, an acquired line or the finished line ends the
+// wait, and repository_lock is a wait stage like the other locks.
+func TestSummarizeNamesTheWaitingStageAndSince(t *testing.T) {
+	waiting := func(ts, stage, detail string) Event {
+		return Event{Ts: ts, Source: "factory", Stage: stage, Event: "waiting", Detail: detail}
+	}
+	got := Summarize([]Event{
+		waiting("t1", "repository_lock", "another build holds the repository"),
+		waiting("t2", "repository_lock", "another build holds the repository"),
+	})
+	if got.WaitingStage != "repository_lock" || got.WaitingSince != "t1" || got.WaitingReason == "" {
+		t.Errorf("repository_lock wait = %+v, want stage repository_lock since t1 with a reason", got)
+	}
+	for name, end := range map[string]Event{
+		"acquired": {Ts: "t3", Source: "factory", Stage: "repository_lock", Event: "acquired"},
+		"start":    {Ts: "t3", Source: "factory", Stage: "build", Event: "start"},
+		"finished": {Ts: "t3", Source: "factory", Stage: "finished", Event: "end", Outcome: "halted"},
+	} {
+		got := Summarize([]Event{waiting("t1", "repository_lock", "held"), end})
+		if got.WaitingStage != "" || got.WaitingSince != "" || got.WaitingReason != "" {
+			t.Errorf("after %s: %+v, want no wait", name, got)
+		}
 	}
 }

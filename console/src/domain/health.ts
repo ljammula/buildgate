@@ -106,7 +106,8 @@ export function factoryHealth(
         ? { busy: held.length, total: status.jobSlots }
         : null,
     running: active.map((id) => runningJob(id, requests)),
-    queued: worker?.alive === true ? requests.filter((r) => r.queuePosition !== null).length : null,
+    queued:
+      worker?.alive === true ? requests.filter((r) => r.wait?.kind === "job_slot").length : null,
     needWorker: requests.filter((r) => workerJobStates.has(r.state)).length,
     lastTransitionAt: lastTransitionAt(requests),
   };

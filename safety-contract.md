@@ -761,6 +761,10 @@ requires a new contract review and an updated machine-checkable test.
   copied to the run directory first, where only the operator's prompts route
   and `factoryd logs -prompt` read them); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it.
+  A line the worker prints in the progress feed's protocol can never carry a
+  `log` path or begin or end a start-up step: the feed drops a log from every
+  line but the factory's, and the worker parser accepts only the `round` and
+  `agent` stages.
   The build's evidence file (`BUILD_EVIDENCE.json`) and round-state file
   (`.pi-build-round-state.json`), which hold the build agent's last message
   of each failed round (`agent_notes`), leave the worktree with the session:

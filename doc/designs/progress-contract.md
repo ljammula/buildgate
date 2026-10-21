@@ -40,10 +40,11 @@ One JSON object per line, never rewritten.
 | `ts` | RFC3339 UTC with milliseconds, stamped by factoryd. Never taken from the worker. |
 | `source` | `factory` (written by factoryd Go code) or `worker` (relayed from sandbox stdout). |
 | `stage` | Fixed vocabulary below. |
-| `event` | `start`, `end`, or `note`. |
+| `event` | `start`, `end`, `note`, `waiting`, `acquired` (a lock wait, below), or `step_start`, `step_end` (a start-up step, below). A worker line is only ever `start`, `end` or `note`. |
 | `round`, `max_rounds` | Integers, omitted when 0. |
 | `outcome` | `""`, `pass`, `fail`, or for `stage=finished` the terminal run state (`accepted`/`quarantined`/`halted`). |
 | `detail` | Free text, truncated to 500 characters. |
+| `log` | A path relative to the run's directory, on a start-up step's end line when the factory recorded a log for it. Only a factory line carries one: `ParseWorkerLine` never sets it and `Append` drops it from any other source. |
 
 ## Factory stages (`source: factory`)
 
@@ -51,7 +52,7 @@ Emitted by `cmd/factoryd/run_ticket.go` (before the workflow starts) and by
 the Activities in `internal/workflow/activities_*.go`, via the
 `progressMark` helpers:
 
-`prepare_workspace`, `preflight`, `baseline_verify` (the `end` event's
+`image` (the sandbox image the run launches in; the `end` event's `detail` names the image and whether it is the configured one or one derived for the repository's toolchains), `prepare_workspace`, `preflight`, `baseline_verify` (the `end` event's
 `detail` is the result: `passed`, or `failed` with the failing test named),
 `build` (one `start`/`end` per attempt,
 `detail` = `attempt N/M`), `post_build`, `verify`, `full_suite`, `gate`
@@ -93,11 +94,44 @@ Two factory `note` lines exist:
   `compose_services_concurrency`), and `acquired` whenever it takes the
   slot, waited or not; written by `cmd/factoryd/run_ticket.go` before the
   run starts, and by the daemon when it reclaims a crashed run.
+- `repository_lock` — event `waiting` (`detail` = `another build holds the
+  repository`) while a run waits for the repository lock, and `acquired`
+  once it holds it; written by `cmd/factoryd/repo_lock_wait.go` when a
+  build waits for the lock inside its job slot (a corrective round beside
+  builds that hold it shared) and when an isolated run waits for the shared
+  lock behind an exclusive holder. A wait that ends without the lock writes
+  `acquired` with outcome `fail`, so it no longer reads as waiting. A run that finds the repository held
+  before it starts gives its slot back instead; that wait is the worker
+  heartbeat's `repository_waits`.
 - `build` note — written once after evidence is loaded, `detail` = a
   factory-formatted round summary derived from `BUILD_EVIDENCE.json`,
   e.g. `3 rounds · r1 fail (verify) · r2 fail (verify) · r3 pass · 41.2k
   tokens · $0.12` (`cmd/factoryd/round_summary.go`). Derived from
   agent-reported evidence, so informational, like `AgentEvidence` itself.
+
+## Start-up steps
+
+A run's start-up is six steps in a fixed order, derived from the feed by
+`progress.StartupSteps` and sent as `startup_steps` on `GET /runs/{id}`:
+
+| Step | From |
+|---|---|
+| `image` | the `image` stage |
+| `workspace` | the `prepare_workspace` stage |
+| `install` | `step_start`/`step_end` in stage `install`, around the registry proxy and compose services the build launch's first attempt starts; `detail` names them |
+| `sandbox` | `step_start`/`step_end` in stage `sandbox`, for the build launch only (`LaunchSpec.StartupSteps`; baseline verify, gates and reviews write none): from the credential push and the sandbox's creation until the command's output file appears; `log` is the launch's log |
+| `verify` | the `baseline_verify` stage; `log` is the baseline attempt's log |
+| `agent` | the factory writes `step_start` in stage `agent` once the build launch's command has begun; done at the first worker `round` `start` line after it; failed when `finished` comes first. A round line before that start (a baseline command printing one) counts for nothing |
+
+`step_start` and `step_end` nest inside whatever stage is open: `Summarize`
+ignores them, so a step never closes the open `build` stage. The first
+occurrence of a step wins, and the feed is read only up to the agent's first
+round. A feed with no start-up line (a run recorded before the steps existed) has no steps. A step with no line is `skipped` once a later step began (no sidecars,
+a non-isolated run), else `pending`. The lock wait the run is in is shown on
+the step that is running, else the first one pending. A step's `log` is served
+by `GET /runs/{id}/log?step=<name>` only when it is a local path inside the
+run's directory (`withinEvidenceDir`); a worker line cannot start a step or
+name a log.
 
 ## Worker stages (`source: worker`)
 
@@ -138,14 +172,38 @@ the file is drained (with one extra drain after terminal is observed, since
 computed from the tail of the feed (`internal/progress.Summary`):
 `last_progress_at`, `current_stage`, `current_round`, `max_rounds`,
 `waiting_reason` (the latest `queued` note's or `model_host_lock`/
-`compose_services_lock` `waiting` event's detail, cleared when a stage
-starts or the lock is `acquired`). Consumers flag a non-terminal run as **stalled** when
+`compose_services_lock`/`repository_lock` `waiting` event's detail, cleared
+when a stage starts, the lock is `acquired` or the run `finished`) and
+`waiting_kind` (the `request.WaitKind` of the stage that wait is recorded in). Consumers flag a non-terminal run as **stalled** when
 `now − last_progress_at` exceeds 5 minutes (or, with no lines, `now −
 created_at`). While a verify-family stage (`baseline_verify`, `verify`,
 `full_suite`, `post_oracle_commit_verify`, `gate`) is open, which writes only its start and end
 lines, the threshold is the longer of 5 minutes and 1.5 times the longest
 verify-family stage the window shows completed; a run's first has no such
 reference and keeps 5 minutes.
+
+## Waits
+
+A request's wait is one typed `wait` (`request.Wait`: `kind`, `since`, `on`,
+`position`, `slots`), computed by `request.WaitFor` and shared by
+`factoryd status`, `factoryd watch`, `GET /requests` and the console. Its
+facts are the worker heartbeat (fresh or not, the slot holders, the
+repository waits) and, for a drafting job or a build, the waiting stage of
+the request's own progress feed (`progress.RunSummary.WaitingStage` and
+`WaitingSince`). Only `source: factory` lines count: a worker line in the
+same stage is never read as a wait.
+
+| Kind | From |
+|---|---|
+| `no_worker` | a job-state request and no fresh worker heartbeat |
+| `model_host` | the feed's `model_host_lock` wait |
+| `compose_slot` | the feed's `compose_services_lock` wait |
+| `repository_queue` | the feed's `queued` note |
+| `repository` | the feed's `repository_lock` wait, else the heartbeat's `repository_waits` |
+| `job_slot` | every job slot of the heartbeat held (`request.WaitingOn`) |
+
+Earlier rows win. A wait that began before the request entered its current
+state is dropped.
 
 ## Related surfaces
 

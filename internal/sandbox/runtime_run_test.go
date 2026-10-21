@@ -285,12 +285,20 @@ func TestAProgressLineFromTheSandboxIsRecordedAsTheWorkersNeverTheFactorys(t *te
 	if _, _, err := RunThroughRuntime(context.Background(), rt, spec, fastLaunch()); err != nil {
 		t.Fatal(err)
 	}
-	events, err := progress.Read(spec.ProgressPath)
+	recorded, err := progress.Read(spec.ProgressPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The host's own sandbox step lines are the only factory lines.
+	var events []progress.Event
+	for _, ev := range recorded {
+		if ev.Source == "factory" && ev.Stage == "sandbox" && (ev.Event == progress.StepStart || ev.Event == progress.StepEnd) {
+			continue
+		}
+		events = append(events, ev)
+	}
 	if len(events) != 3 {
-		t.Fatalf("recorded %d events, want the three round and agent lines: %+v", len(events), events)
+		t.Fatalf("recorded %d events, want the three round and agent lines: %+v", len(events), recorded)
 	}
 	for _, ev := range events {
 		if ev.Source != "worker" {

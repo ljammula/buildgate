@@ -716,7 +716,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs/{id}", s.getRun)
 	s.mux.HandleFunc("GET /runs/{id}/events", s.streamRunEvents)
 	s.mux.HandleFunc("GET /runs/{id}/progress", s.streamRunProgress)
-	s.mux.HandleFunc("GET /runs/{id}/log", s.streamRunLog)
+	s.mux.HandleFunc("GET /runs/{id}/log", s.runLog)
 	s.mux.HandleFunc("GET /runs/{id}/diff", s.getRunDiff)
 	s.mux.HandleFunc("GET /runs/{id}/release", s.getRunRelease)
 	s.mux.HandleFunc("GET /runs/{id}/handoff", s.getRunHandoff)
@@ -1243,6 +1243,14 @@ type runView struct {
 	CurrentRound   int    `json:"current_round,omitempty"`
 	MaxRounds      int    `json:"max_rounds,omitempty"`
 	WaitingReason  string `json:"waiting_reason,omitempty"`
+	// WaitingKind is the request.WaitKind of the wait WaitingReason states
+	// (model_host, compose_slot, repository_queue, repository), so the
+	// console can word it without parsing the reason.
+	WaitingKind string `json:"waiting_kind,omitempty"`
+	// StartupSteps are the run's start-up steps (progress.StartupSteps),
+	// read from its progress feed. Only GET /runs/{id} computes them: a list
+	// would read every run's feed from its start on every poll.
+	StartupSteps []progress.StartupStep `json:"startup_steps,omitempty"`
 	// Stalled/StalledSinceSeconds are internal/progress.Stalled's verdict
 	// (see its own doc comment) -- the single shared "silence is a bug"
 	// rule, computed here so `factoryd status`, `factoryd watch`, and this
@@ -1371,6 +1379,9 @@ func (s *Server) runViewFor(r *run.Run) runView {
 	view.CurrentRound = sum.CurrentRound
 	view.MaxRounds = sum.MaxRounds
 	view.WaitingReason = sum.WaitingReason
+	if kind, ok := request.WaitKindForStage(sum.WaitingStage); ok && sum.WaitingReason != "" {
+		view.WaitingKind = string(kind)
+	}
 	stalled, since := progress.Stalled(sum, r.CreatedAt, time.Now())
 	view.Stalled = stalled
 	if stalled {
@@ -1585,6 +1596,9 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	// Only a single run's view carries its compose phases: GET /runs
 	// would otherwise read every run's reports on every poll.
 	view.ComposePhases = readComposePhases(s.dataDir, loaded.ID)
+	if steps, err := progress.StartupSteps(progress.Path(s.dataDir, loaded.ID)); err == nil {
+		view.StartupSteps = steps
+	}
 	writeJSON(w, http.StatusOK, view)
 }
 
@@ -2253,6 +2267,68 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// runLog serves GET /runs/{id}/log: one start-up step's log with ?step=<name>,
+// else the run's build-loop log (streamRunLog).
+func (s *Server) runLog(w http.ResponseWriter, r *http.Request) {
+	if step := r.URL.Query().Get("step"); step != "" {
+		s.serveStartupStepLog(w, r, step)
+		return
+	}
+	s.streamRunLog(w, r)
+}
+
+// serveStartupStepLog serves GET /runs/{id}/log?step=<name>: the log the
+// factory recorded for one start-up step, a path relative to the run's
+// directory in its progress feed. The path is data read back from a file, so
+// it must be local, and withinEvidenceDir must accept what it resolves to,
+// before anything is opened. A step with no recorded log, or no such step, is
+// a 404; the log is not followed. Read-token gated, like streamRunLog.
+func (s *Server) serveStartupStepLog(w http.ResponseWriter, r *http.Request, step string) {
+	if !s.authorizeRead(r) {
+		writeError(w, http.StatusForbidden, "log endpoint is not authorized")
+		return
+	}
+	loaded, err := s.loadRun(r.PathValue("id"))
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "load run")
+		return
+	}
+	// An unreadable feed has no recorded step log.
+	steps, _ := progress.StartupSteps(progress.Path(s.dataDir, loaded.ID))
+	var rel string
+	for _, candidate := range steps {
+		if candidate.Name == step {
+			rel = candidate.Log
+		}
+	}
+	if rel == "" {
+		writeError(w, http.StatusNotFound, "no log recorded for that start-up step")
+		return
+	}
+	logPath := filepath.Join(run.Dir(s.dataDir, loaded.ID), rel)
+	if !filepath.IsLocal(rel) || !withinEvidenceDir(s.dataDir, loaded.ID, logPath) {
+		writeError(w, http.StatusInternalServerError, "log path outside evidence directory")
+		return
+	}
+	f, err := os.Open(logPath)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusNotFound, "the step's log is not written")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "open log")
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.Copy(w, f)
+}
+
 // overrideRequest is the JSON body POST /runs/{id}/override expects.
 // Mirrors cmd/factoryd's own "override" CLI subcommand (run.ApplyOverride's
 // existing caller) exactly, rather than inventing a second validation path
@@ -2674,14 +2750,11 @@ type requestSummaryView struct {
 	*request.Request
 	Title       string      `json:"title"`
 	CostSummary CostSummary `json:"cost_summary"`
-	// WaitingOn is the id of the request the driver is advancing while
-	// this one waits its turn (request.WaitingOn, the same function
-	// `factoryd status` uses, so the console and CLI agree) (C5).
-	WaitingOn string `json:"waiting_on,omitempty"`
-	// QueuePosition is this request's place among the requests that wait
-	// their turn (request.QueuePositions: oldest submitted first, an
-	// estimate), from 1; 0 when it is not waiting or no worker is alive.
-	QueuePosition int `json:"queue_position,omitempty"`
+	// Wait is why the request is waiting rather than running
+	// (request.WaitFor, the same rule `factoryd status` uses, so the console
+	// and CLI agree): no worker, every job slot taken, the repository held,
+	// a model-host or sidecar slot. Absent while it runs or waits on a human.
+	Wait *request.Wait `json:"wait,omitempty"`
 	// Build is where the ticket build of a building request stands, from its
 	// run's own progress record; nil for a request that is not building or
 	// whose build has not started a run yet.
@@ -3658,7 +3731,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 // its whole batch of requests (listRequests, streamRequestEvents) -- see
 // computeCostSummary's own doc comment for why this is passed through
 // rather than each request's cost summary re-scanning dataDir/runs.
-func (s *Server) requestSummaryViewFor(req *request.Request, queue requestQueue, runsByRequest map[string][]*run.Run) requestSummaryView {
+func (s *Server) requestSummaryViewFor(req *request.Request, queue *request.WaitContext, runsByRequest map[string][]*run.Run) requestSummaryView {
 	// The board needs no edit history, and each edit carries its diff: only
 	// GET /requests/{id} sends them.
 	listed := *req
@@ -3671,32 +3744,14 @@ func (s *Server) requestSummaryViewFor(req *request.Request, queue requestQueue,
 		NextAction:  req.NextAction(),
 		Build:       s.buildProgressFor(req, runsByRequest[req.ID]),
 	}
-	view.WaitingOn = queue.waitingOn[req.ID]
-	view.QueuePosition = queue.position[req.ID]
+	view.Wait = queue.For(req)
 	return view
-}
-
-// requestQueue is what the worker's heartbeat says of the requests' turns:
-// per request id, the request it waits on and its place in the queue.
-type requestQueue struct {
-	waitingOn map[string]string
-	position  map[string]int
 }
 
 // requestQueueFor reads the worker's heartbeat once for requests, which must
 // be in request.List's order.
-func (s *Server) requestQueueFor(requests []*request.Request) requestQueue {
-	now := time.Now()
-	// Every request holding a job slot, a pr_review pass included: a full
-	// set of slots is what a request waits for.
-	active, slots := daemonheartbeat.WorkerSlotRequests(s.dataDir, now)
-	queue := requestQueue{waitingOn: request.WaitingOn(requests, active, slots)}
-	// A place in the queue means something only while a worker takes
-	// requests from it.
-	if hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(s.dataDir)); err == nil && !daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
-		queue.position = request.QueuePositions(requests, active, slots)
-	}
-	return queue
+func (s *Server) requestQueueFor(requests []*request.Request) *request.WaitContext {
+	return request.NewWaitContext(s.dataDir, requests, time.Now())
 }
 
 // streamRequestEvents serves GET /requests/events: an SSE "state" event

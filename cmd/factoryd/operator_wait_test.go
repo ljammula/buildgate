@@ -96,8 +96,8 @@ func TestStatusSaysARequestWaitsForASlotThePRReviewPassesHold(t *testing.T) {
 		if r.ID != "queued" {
 			continue
 		}
-		if r.WaitingOn == "" || r.QueuePosition != 1 || r.JobSlots != 2 || r.InState == "" {
-			t.Errorf("queued in -json = %+v, want waiting_on, queue_position 1, job_slots 2, in_state", r)
+		if r.Wait == nil || r.Wait.Kind != request.WaitJobSlot || r.Wait.On == "" || r.Wait.Position != 1 || r.Wait.Slots != 2 || r.InState == "" {
+			t.Errorf("queued in -json = %+v, want a job_slot wait on a request, position 1, slots 2, in_state", r)
 		}
 	}
 }

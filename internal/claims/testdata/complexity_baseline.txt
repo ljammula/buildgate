@@ -26,7 +26,7 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
+30 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 46 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 30 cmd/factoryd/watch.go printRunRecap
 27 cmd/factoryd/worker_config.go loadWorkerConfig
@@ -54,7 +54,7 @@
 32 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 35 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
-87 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
+81 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
 38 internal/workflow/activities_verify.go (*Activities).RunNamedGateActivity
 43 internal/workflow/post_oracle_commit_verify.go (*Activities).RunPostOracleCommitVerifyActivity
 56 internal/workflow/repository_owner_workflow.go RepositoryOwnerWorkflow

@@ -189,6 +189,11 @@ type LaunchSpec struct {
 	// progress feed is informational-only and must never fail or halt a
 	// run (see progress-contract.md).
 	ProgressPath string
+	// StartupSteps marks this launch as the run's build launch: its sandbox
+	// start is the "sandbox" start-up step, and once its command has begun
+	// the factory writes the "agent" step's start. Other launches (baseline
+	// verify, gates, reviews) write neither.
+	StartupSteps bool
 	// RunID and DataDir are recorded as container labels (never passed to
 	// the worker itself) solely so ReconcileOrphans can later identify,
 	// scoped to this exact data directory, which run a leftover container
