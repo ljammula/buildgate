@@ -536,3 +536,19 @@ func TestACachePathGitDoesNotIgnoreIsRefusedBeforeTheInstall(t *testing.T) {
 		t.Error("the install ran before the cache path was checked")
 	}
 }
+
+// The key's names include package-manager settings and tool wrappers, a name
+// with a slash matching at any depth and as a pattern.
+func TestInstallKeyNamesCoverSettingsAndWrappers(t *testing.T) {
+	names := installKeyNames()
+	for p, want := range map[string]bool{
+		".npmrc": true, "web/.yarnrc": true, ".yarn/releases/yarn-4.1.0.cjs": true, "app/.yarn/releases/yarn.cjs": true,
+		"bun.lockb": true, "src/NuGet.config": true, ".cargo/config.toml": true, ".bundle/config": true,
+		".mvn/wrapper/maven-wrapper.properties": true, "svc/.mvn/maven.config": true, "gradle/wrapper/gradle-wrapper.properties": true,
+		"vendor/x/.npmrc": false, "README.md": false, ".yarn/cache/x.zip": false, "config": false,
+	} {
+		if got := installKeyInput(p, names, nil); got != want {
+			t.Errorf("%s is a key input: %v, want %v", p, got, want)
+		}
+	}
+}

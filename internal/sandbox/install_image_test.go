@@ -3,8 +3,12 @@ package sandbox
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"buildgate/internal/run"
 )
@@ -158,7 +163,7 @@ func newInstallTree(t *testing.T) string {
 func TestInstallCaptureNormalisesModesAndKeepsInTreeLinks(t *testing.T) {
 	dir := newInstallTree(t)
 	var buf bytes.Buffer
-	captured, err := CaptureInstallTree(dir, []string{"node_modules", "missing"}, &buf, DefaultInstallCaptureLimits)
+	captured, err := CaptureInstallTree(context.Background(), dir, []string{"node_modules", "missing"}, &buf, DefaultInstallCaptureLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,6 +199,9 @@ func TestInstallCaptureRefusesLinksOutOfTheTreeAndSpecialFiles(t *testing.T) {
 		"a link through a dangling name stays refused when it leaves first": func(t *testing.T, dir string) {
 			_ = os.Symlink("../../secret.txt", filepath.Join(dir, "node_modules/pkg/far"))
 		},
+		"a dangling link that names a way out after the missing name": func(t *testing.T, dir string) {
+			_ = os.Symlink("missing/../../../etc", filepath.Join(dir, "node_modules/esc"))
+		},
 		"a loop of links": func(t *testing.T, dir string) {
 			_ = os.Symlink("l2/x", filepath.Join(dir, "node_modules/l1"))
 			_ = os.Symlink("l1/x", filepath.Join(dir, "node_modules/l2"))
@@ -223,7 +231,7 @@ func TestInstallCaptureRefusesLinksOutOfTheTreeAndSpecialFiles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := newInstallTree(t)
 			plant(t, dir)
-			_, err := CaptureInstallTree(dir, []string{"node_modules"}, io.Discard, DefaultInstallCaptureLimits)
+			_, err := CaptureInstallTree(context.Background(), dir, []string{"node_modules"}, io.Discard, DefaultInstallCaptureLimits)
 			if !errors.Is(err, ErrInstallCaptureRefused) {
 				t.Errorf("err = %v, want a refusal", err)
 			}
@@ -232,7 +240,7 @@ func TestInstallCaptureRefusesLinksOutOfTheTreeAndSpecialFiles(t *testing.T) {
 	t.Run("limits", func(t *testing.T) {
 		dir := newInstallTree(t)
 		for _, limits := range []InstallCaptureLimits{{MaxBytes: 1, MaxEntries: 100}, {MaxBytes: 1 << 20, MaxEntries: 2}} {
-			if _, err := CaptureInstallTree(dir, []string{"node_modules"}, io.Discard, limits); !errors.Is(err, ErrInstallCaptureRefused) {
+			if _, err := CaptureInstallTree(context.Background(), dir, []string{"node_modules"}, io.Discard, limits); !errors.Is(err, ErrInstallCaptureRefused) {
 				t.Errorf("limits %+v: err = %v, want a refusal", limits, err)
 			}
 		}
@@ -296,5 +304,80 @@ func TestInstallLookupAndEvictReadDocker(t *testing.T) {
 	}
 	if got := installImagesToEvict("a\nb\n", 0); !slices.Equal(got, []string{"a", "b"}) {
 		t.Errorf("evict all = %v", got)
+	}
+}
+
+// A fan-out of links (lK -> lK-1 four times over) would take 4^30 lookups to
+// resolve by nesting depth alone; counting every link followed refuses it at
+// once, and a capture whose context ended stops.
+func TestInstallCaptureRefusesALinkFanOutFastAndStopsWithItsContext(t *testing.T) {
+	dir := t.TempDir()
+	c := filepath.Join(dir, "node_modules", "c")
+	if err := os.MkdirAll(c, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".", filepath.Join(c, "l0")); err != nil {
+		t.Fatal(err)
+	}
+	for k := 1; k <= 30; k++ {
+		prev := fmt.Sprintf("l%d", k-1)
+		if err := os.Symlink(strings.Repeat(prev+"/", 4)+".", filepath.Join(c, fmt.Sprintf("l%d", k))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := CaptureInstallTree(context.Background(), dir, []string{"node_modules"}, io.Discard, DefaultInstallCaptureLimits)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrInstallCaptureRefused) || !strings.Contains(err.Error(), "more than 40 links") {
+			t.Errorf("err = %v, want the fan-out refused for following too many links", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the capture of a link fan-out did not finish")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := CaptureInstallTree(ctx, newInstallTree(t), []string{"node_modules"}, io.Discard, DefaultInstallCaptureLimits); !errors.Is(err, context.Canceled) {
+		t.Errorf("a capture whose context ended: err = %v, want context.Canceled", err)
+	}
+	budget := DefaultInstallCaptureLimits
+	budget.MaxSteps = 3
+	if _, err := CaptureInstallTree(context.Background(), newInstallTree(t), []string{"node_modules"}, io.Discard, budget); !errors.Is(err, ErrInstallCaptureRefused) {
+		t.Errorf("a capture past its step budget: err = %v, want a refusal", err)
+	}
+}
+
+// The digest a build returns is the registry's own answer for the tag.
+func TestRegistryManifestDigestIsTheRegistrysAnswer(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("d", 64)
+	var accept, path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accept, path = r.Header.Get("Accept"), r.URL.Path
+		if r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Docker-Content-Digest", digest)
+	}))
+	defer srv.Close()
+	got, err := registryManifestDigest(context.Background(), srv.URL, installImageRepoPath, "k1")
+	if err != nil || got != digest {
+		t.Fatalf("digest = %q, %v; want %q", got, err, digest)
+	}
+	if path != "/v2/buildgate-install/manifests/k1" || !strings.Contains(accept, "application/vnd.oci.image.index.v1+json") {
+		t.Errorf("asked %s with Accept %q", path, accept)
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Docker-Content-Digest", "md5:x") }))
+	defer bad.Close()
+	if _, err := registryManifestDigest(context.Background(), bad.URL, installImageRepoPath, "k1"); err == nil {
+		t.Error("a registry answer with no sha256 digest was taken")
+	}
+	missing := httptest.NewServer(http.NotFoundHandler())
+	defer missing.Close()
+	if _, err := registryManifestDigest(context.Background(), missing.URL, installImageRepoPath, "k1"); err == nil {
+		t.Error("a tag the registry does not have was taken")
 	}
 }

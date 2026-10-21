@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"archive/tar"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,10 +19,14 @@ import (
 type InstallCaptureLimits struct {
 	MaxBytes   int64
 	MaxEntries int
+	// MaxSteps bounds the path components all link resolutions of one
+	// capture take together.
+	MaxSteps int
 }
 
-// DefaultInstallCaptureLimits are 4 GiB of file content and 500,000 entries.
-var DefaultInstallCaptureLimits = InstallCaptureLimits{MaxBytes: 4 << 30, MaxEntries: 500_000}
+// DefaultInstallCaptureLimits are 4 GiB of file content, 500,000 entries and
+// 20 million link-resolution steps.
+var DefaultInstallCaptureLimits = InstallCaptureLimits{MaxBytes: 4 << 30, MaxEntries: 500_000, MaxSteps: 20_000_000}
 
 // ErrInstallCaptureRefused wraps every refusal of CaptureInstallTree: an
 // entry it does not carry, or a limit passed.
@@ -37,13 +42,16 @@ var ErrInstallCaptureRefused = errors.New("install capture refused")
 // Every entry is owned 0:0 with a normal mode: directories 0755, files 0755
 // when any execute bit was set, else 0644; set-id and sticky bits are gone.
 // Modification times are zero, so the tar is the same for the same tree.
-func CaptureInstallTree(dir string, paths []string, w io.Writer, limits InstallCaptureLimits) ([]string, error) {
+//
+// It stops with ctx's error when ctx ends, checked at every entry and every
+// resolution step.
+func CaptureInstallTree(ctx context.Context, dir string, paths []string, w io.Writer, limits InstallCaptureLimits) ([]string, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
-	c := &installCapture{root: root, tw: tar.NewWriter(w), limits: limits}
+	c := &installCapture{ctx: ctx, root: root, tw: tar.NewWriter(w), limits: limits}
 	var captured []string
 	for _, p := range paths {
 		info, err := root.Lstat(p)
@@ -65,6 +73,8 @@ func CaptureInstallTree(dir string, paths []string, w io.Writer, limits InstallC
 }
 
 type installCapture struct {
+	ctx     context.Context
+	steps   int
 	root    *os.Root
 	tw      *tar.Writer
 	limits  InstallCaptureLimits
@@ -101,6 +111,9 @@ func (c *installCapture) parents(p string) error {
 }
 
 func (c *installCapture) header(h *tar.Header) error {
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
 	if c.entries++; c.entries > c.limits.MaxEntries {
 		return c.refuse("more than %d entries", c.limits.MaxEntries)
 	}
@@ -127,7 +140,11 @@ func (c *installCapture) walk(top, rel string, info fs.FileInfo) error {
 		if err != nil {
 			return err
 		}
-		if _, err := c.resolve(top, path.Dir(rel), target, 0); err != nil && !errors.Is(err, errDangling) {
+		followed := 0
+		if _, err := c.resolve(top, path.Dir(rel), target, &followed); err != nil && !errors.Is(err, errDangling) {
+			if ctxErr := c.ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			return c.refuse("%s is a link to %q, which %v", rel, target, err)
 		}
 		return c.header(&tar.Header{Typeflag: tar.TypeSymlink, Name: rel, Linkname: target, Mode: 0o777})
@@ -150,26 +167,32 @@ func normalFileMode(m fs.FileMode) int64 {
 // kernel's resolution fails there, so nothing past it is reached.
 var errDangling = errors.New("names a path the tree does not have")
 
-// maxLinkDepth bounds how many links one resolution follows, as the kernel's
-// own limit does.
-const maxLinkDepth = 40
+// maxLinksFollowed bounds how many links one resolution follows in all, as
+// the kernel's own limit (40) does: counted across the whole resolution, not
+// by nesting, so a fan-out of links (lK -> lK-1/lK-1/...) is refused at once.
+const maxLinksFollowed = 40
 
 // resolve resolves target from the directory dir (a real directory of the
 // tree, never reached through a link) the way the kernel will once the tree
 // is restored: component by component, following every link it meets in the
 // tree (so a chain such as a/sub -> .. with a/esc -> sub/../.. is resolved as
-// a chain, not as text), and fails when any step leaves top, the target or a
-// link on the way is absolute or empty, or the chain is too deep. A name that
-// does not exist ends the resolution where it is: the kernel stops there too.
-func (c *installCapture) resolve(top, dir, target string, depth int) (string, error) {
-	if depth > maxLinkDepth {
-		return "", errors.New("is a chain of more than 40 links")
-	}
+// a chain, not as text). It fails when any step leaves top, the target or a
+// link on the way is absolute or empty, more than maxLinksFollowed links are
+// followed (*followed counts them for the one captured link being checked),
+// the capture's step budget is spent, or its context ends. A name that does
+// not exist ends the resolution (errDangling), as the kernel's does, unless
+// the components after it name a way up ("..") that a later file of that
+// name would open.
+func (c *installCapture) resolve(top, dir, target string, followed *int) (string, error) {
 	if target == "" || path.IsAbs(target) {
 		return "", errors.New("is empty or absolute")
 	}
 	cur := dir
-	for _, comp := range strings.Split(target, "/") {
+	comps := strings.Split(target, "/")
+	for i, comp := range comps {
+		if err := c.step(); err != nil {
+			return "", err
+		}
 		switch comp {
 		case "", ".":
 			continue
@@ -183,21 +206,48 @@ func (c *installCapture) resolve(top, dir, target string, depth int) (string, er
 		next := cur + "/" + comp
 		info, err := c.root.Lstat(next)
 		if err != nil {
-			return next, errDangling
+			return next, danglingAt(comps[i+1:])
 		}
 		if info.Mode().Type() != fs.ModeSymlink {
 			cur = next
 			continue
 		}
+		if *followed++; *followed > maxLinksFollowed {
+			return "", fmt.Errorf("follows more than %d links", maxLinksFollowed)
+		}
 		link, err := c.root.Readlink(next)
 		if err != nil {
 			return "", err
 		}
-		if cur, err = c.resolve(top, cur, link, depth+1); err != nil {
+		if cur, err = c.resolve(top, cur, link, followed); err != nil {
+			if errors.Is(err, errDangling) {
+				return cur, danglingAt(comps[i+1:])
+			}
 			return cur, err
 		}
 	}
 	return cur, nil
+}
+
+// danglingAt is the end of a resolution at a missing name, with rest the
+// components after it: refused when they hold "..".
+func danglingAt(rest []string) error {
+	if slices.Contains(rest, "..") {
+		return errors.New("names a missing path and then a way up (\"..\") past it")
+	}
+	return errDangling
+}
+
+// step spends one resolution step of the capture's budget and checks its
+// context.
+func (c *installCapture) step() error {
+	if c.steps++; c.steps > c.limits.MaxSteps {
+		return fmt.Errorf("takes the capture past %d link-resolution steps", c.limits.MaxSteps)
+	}
+	if c.steps%1024 == 0 {
+		return c.ctx.Err()
+	}
+	return nil
 }
 
 // dirBatch is how many entries a directory read takes at a time; the entry

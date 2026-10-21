@@ -441,16 +441,29 @@ func HardenedGitEnv() []string {
 			env = append(env, kv)
 		}
 	}
-	return append(env, "GIT_LITERAL_PATHSPECS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1")
+	// GIT_LFS_SKIP_SMUDGE: a checkout leaves Git LFS pointers as they are
+	// committed, so what a scratch worktree holds is the commit's own bytes.
+	return append(env, "GIT_LITERAL_PATHSPECS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
 // HardenedGitArgs is the argv after "git" for running git in dir with
 // nothing from any configuration that executes a program or changes what is
 // read. Use it with HardenedGitEnv.
+//
+// The repository's own config (.git/config of the operator's checkout, and
+// any file it includes) is still read: a -c cannot undo an include. It is
+// the operator's file, outside every sandbox's reach: a linked worktree's
+// `.git` pointer and the repository's common git dir are bind-mounted
+// read-only into a sandbox (sandbox.LaunchSpec.sandboxMounts,
+// internal/sandbox/sandbox_request.go, and the :ro volumes of
+// LaunchSpec.DockerCommand on the Docker
+// path), so no build, verify or gate can write that config. The settings
+// below override what it could set that runs a program or changes a read.
 func HardenedGitArgs(dir string, args ...string) []string {
 	return append([]string{
 		"--no-pager",
 		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+		"-c", "core.excludesFile=/dev/null",
 		"-c", "core.pager=cat", "-c", "diff.external=",
 		"-c", "core.attributesFile=/dev/null",
 		"-c", "protocol.allow=never",

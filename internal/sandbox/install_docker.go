@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -90,13 +92,75 @@ func (DockerInstallImages) Build(ctx context.Context, docker string, b InstallIm
 	if out, err := exec.CommandContext(ctx, docker, "push", InstallImageTag(b.Key)).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("push the install image to the local registry (`make install` starts it): %v: %s", err, lastLine(string(out)))
 	}
-	// The digest is the local image's own record of its push, read with
-	// its key label, never the push command's output.
-	found, err := (DockerInstallImages{}).Lookup(ctx, docker, b.Key)
-	if err != nil || found.Image == "" {
-		return "", fmt.Errorf("the pushed image %s has no registry digest with its key label", InstallImageTag(b.Key))
+	// The digest is the one the local registry serves for the tag, never
+	// the push command's output, and the local image with this key label
+	// must record that same digest.
+	digest, err := registryManifestDigest(ctx, installRegistryURL, installImageRepoPath, b.Key)
+	if err != nil {
+		return "", fmt.Errorf("ask the local registry for %s: %w", InstallImageTag(b.Key), err)
 	}
-	return found.Image, nil
+	ref := InstallImageRepo + "@" + digest
+	if !localImageRecords(ctx, docker, b.Key, ref) {
+		return "", fmt.Errorf("the local image %s with its key label does not record the digest the registry serves (%s)", InstallImageTag(b.Key), digest)
+	}
+	return ref, nil
+}
+
+// installRegistryURL is the local registry `make install` starts, as the host
+// reaches it; installImageRepoPath is InstallImageRepo's path in it.
+const (
+	installRegistryURL   = "http://localhost:5050"
+	installImageRepoPath = "buildgate-install"
+)
+
+// manifestAccept is every manifest media type a pushed image can have.
+var manifestAccept = strings.Join([]string{
+	"application/vnd.oci.image.index.v1+json",
+	"application/vnd.oci.image.manifest.v1+json",
+	"application/vnd.docker.distribution.manifest.list.v2+json",
+	"application/vnd.docker.distribution.manifest.v2+json",
+}, ", ")
+
+// registryManifestDigest asks the registry at base for the digest of
+// repo:tag's manifest (the Docker-Content-Digest of a HEAD request, the
+// registry API's own answer).
+func registryManifestDigest(ctx context.Context, base, repo, tag string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, base+"/v2/"+repo+"/manifests/"+tag, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", manifestAccept)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("the registry answered %s", resp.Status)
+	}
+	digest := resp.Header.Get("Docker-Content-Digest")
+	if _, ok := relayImageDigest("x@" + digest); !ok {
+		return "", fmt.Errorf("the registry sent no sha256 digest (%q)", digest)
+	}
+	return digest, nil
+}
+
+// localImageRecords reports whether the local image tagged with key carries
+// the key label and records ref among its registry digests.
+func localImageRecords(ctx context.Context, docker, key, ref string) bool {
+	out, err := exec.CommandContext(ctx, docker, "image", "inspect", "--format", "{{json .Config.Labels}}\n{{json .RepoDigests}}", InstallImageTag(key)).Output()
+	if err != nil {
+		return false
+	}
+	labelsLine, digestsLine, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	var labels map[string]string
+	var digests []string
+	if json.Unmarshal([]byte(labelsLine), &labels) != nil || json.Unmarshal([]byte(digestsLine), &digests) != nil {
+		return false
+	}
+	return labels[InstallLabelImage] == installLabelValue && labels[InstallLabelKey] == key && slices.Contains(digests, ref)
 }
 
 func installKeyLabelled(ctx context.Context, docker, key string) bool {

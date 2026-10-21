@@ -91,7 +91,7 @@ func TestReviewGitEnvDropsInheritedGitVariables(t *testing.T) {
 			env[k] = v
 		}
 	}
-	want := map[string]string{"GIT_LITERAL_PATHSPECS": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "GIT_ATTR_NOSYSTEM": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+	want := map[string]string{"GIT_LITERAL_PATHSPECS": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "GIT_ATTR_NOSYSTEM": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_LFS_SKIP_SMUDGE": "1"}
 	if fmt.Sprint(env) != fmt.Sprint(want) {
 		t.Fatalf("GIT_ environment = %v, want %v", env, want)
 	}

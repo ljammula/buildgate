@@ -61,8 +61,9 @@ const (
 
 // installKeyExtraNames are the files an install reads that the language
 // profiles' manifests and version sources do not list: other lockfiles,
-// package-manager settings, workspace files and version pins. A name with a
-// slash matches that path at any depth. A repository adds a file its install
+// package-manager settings, workspace files, version pins and the build
+// tools' wrappers. A name with a slash matches that path, or pattern, at any
+// depth. A repository adds a file its install
 // reads (a postinstall script) with the block's `inputs:`.
 var installKeyExtraNames = []string{
 	"yarn.lock", "pnpm-lock.yaml", "requirements*.txt",
@@ -71,6 +72,9 @@ var installKeyExtraNames = []string{
 	"Pipfile", "Pipfile.lock", "setup.py", "setup.cfg", "pyproject.toml", ".python-version",
 	"settings.gradle", "settings.gradle.kts", "gradle/wrapper/gradle-wrapper.properties",
 	".tool-versions",
+	".yarnrc", ".pnpmfile.cjs", "bun.lock", "bun.lockb", ".yarn/releases/*",
+	"NuGet.config", "Directory.Packages.props", ".cargo/config.toml", "poetry.toml", ".bundle/config",
+	".mvn/wrapper/maven-wrapper.properties", ".mvn/extensions.xml", ".mvn/maven.config",
 }
 
 // installKeyExcludedDirs are directories whose manifests are not key inputs:
@@ -326,9 +330,14 @@ func installKeyInput(p string, names, patterns []string) bool {
 	}
 	base := path.Base(p)
 	for _, name := range names {
-		if strings.Contains(name, "/") {
-			if p == name || strings.HasSuffix(p, "/"+name) {
-				return true
+		if n := strings.Count(name, "/") + 1; n > 1 {
+			// A name with a slash matches the same number of trailing
+			// components of p, at any depth (a pattern allowed).
+			parts := strings.Split(p, "/")
+			if len(parts) >= n {
+				if ok, _ := path.Match(name, strings.Join(parts[len(parts)-n:], "/")); ok {
+					return true
+				}
 			}
 			continue
 		}
@@ -549,7 +558,7 @@ func (a *Activities) captureAndBuild(ctx context.Context, input RunWorkflowInput
 	if err != nil {
 		return "", installFailure("install image: %v", err)
 	}
-	_, err = sandbox.CaptureInstallTree(scratch, input.InstallCachePaths, f, sandbox.DefaultInstallCaptureLimits)
+	_, err = sandbox.CaptureInstallTree(ctx, scratch, input.InstallCachePaths, f, sandbox.DefaultInstallCaptureLimits)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
