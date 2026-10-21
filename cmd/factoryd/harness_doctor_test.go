@@ -88,7 +88,7 @@ func TestDoctorCheckHarnessInImageRunsTheBinary(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	docker := filepath.Join(dir, "docker")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\necho \"$@\" >> "+filepath.Join(dir, "argv")+"\nexit 0\n"), 0o755); err != nil {
+	if err := writeExecutable(docker, []byte("#!/bin/sh\necho \"$@\" >> "+filepath.Join(dir, "argv")+"\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	pifork, _ := harness.Lookup("pifork")
@@ -100,7 +100,7 @@ func TestDoctorCheckHarnessInImageRunsTheBinary(t *testing.T) {
 		t.Errorf("docker argv = %q, want it to run `pifork --version`", argv)
 	}
 	failing := filepath.Join(dir, "docker-fail")
-	if err := os.WriteFile(failing, []byte("#!/bin/sh\necho 'pifork: not found'\nexit 127\n"), 0o755); err != nil {
+	if err := writeExecutable(failing, []byte("#!/bin/sh\necho 'pifork: not found'\nexit 127\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	c := doctorCheckHarnessInImage(context.Background(), failing, "img@sha256:aa", pifork)

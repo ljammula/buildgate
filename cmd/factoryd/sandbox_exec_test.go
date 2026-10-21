@@ -124,7 +124,7 @@ func TestRunSandboxWithRetriesStagesAndTranslatesBothSpecAndExtraRunInput(t *tes
 		"  prev=\"$a\"\n" +
 		"done\n" +
 		"exit 0\n"
-	if err := os.WriteFile(docker, []byte(dockerScript), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(dockerScript), 0o700); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testi
 		"  esac\n" +
 		"done\n" +
 		"exit 0\n"
-	if err := os.WriteFile(docker, []byte(dockerScript), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(dockerScript), 0o700); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 
@@ -319,7 +319,7 @@ func TestRunSandboxWithRetriesWiresComposeServicesIntoWorkerLaunch(t *testing.T)
 		"  for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n" +
 		"} >> \"" + argvPath + "\"\n" +
 		"exit 0\n"
-	if err := os.WriteFile(docker, []byte(dockerScript), 0o700); err != nil {
+	if err := writeExecutable(docker, []byte(dockerScript), 0o700); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 

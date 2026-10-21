@@ -57,7 +57,7 @@ func writeFakeDockerLabelsWithLegacy(t *testing.T, kind, inputsHash, legacyKind,
 		"  esac\n" +
 		"fi\n" +
 		"echo \"unexpected: $@\" >&2; exit 1\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return path

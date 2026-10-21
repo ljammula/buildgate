@@ -773,7 +773,7 @@ func writeDockerPresentFor(t *testing.T, refs ...string) string {
 		"  *) exit 1 ;;\n" +
 		"esac\n"
 	path := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return path
@@ -2218,7 +2218,7 @@ func TestQuickstartEnsureDaemonRestartsAliveChildWhenConfigRewritten(t *testing.
 	t.Setenv("HOME", home)
 	restoreLaunchctlBinary := dp.host.launchctlBinary()
 	fakeLaunchctl := filepath.Join(home, "launchctl")
-	if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeLaunchctl, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fakeHostOf(dp).launchctlBinaryFn = func() string { return fakeLaunchctl }
@@ -2287,7 +2287,7 @@ func TestQuickstartEnsureDaemonSkipsAliveChildWhenConfigNotRewritten(t *testing.
 	t.Setenv("HOME", home)
 	restoreLaunchctlBinary := dp.host.launchctlBinary()
 	fakeLaunchctl := filepath.Join(home, "launchctl")
-	if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeLaunchctl, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fakeHostOf(dp).launchctlBinaryFn = func() string { return fakeLaunchctl }
@@ -2334,7 +2334,7 @@ func TestQuickstartEnsureDaemonWithoutTemporalIsAnErrorAndSpawnsNothing(t *testi
 	t.Setenv("HOME", home)
 	restoreLaunchctlBinary := dp.host.launchctlBinary()
 	fakeLaunchctl := filepath.Join(home, "launchctl")
-	if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeLaunchctl, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fakeHostOf(dp).launchctlBinaryFn = func() string { return fakeLaunchctl }
@@ -2733,7 +2733,7 @@ func TestQuickstartEnsureDaemonRestartsMatchingLaunchdServiceWhenRestartNeeded(t
 	configPath := filepath.Join(home, "config.yml")
 
 	binary := filepath.Join(home, "factoryd")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	plist := buildWorkerPlist(workerPlistConfig{
@@ -2754,7 +2754,7 @@ func TestQuickstartEnsureDaemonRestartsMatchingLaunchdServiceWhenRestartNeeded(t
 	}
 
 	fakeLaunchctl := filepath.Join(home, "launchctl")
-	if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\necho 'state = running'\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeLaunchctl, []byte("#!/bin/sh\necho 'state = running'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	restoreBinary := dp.host.launchctlBinary()
@@ -2796,7 +2796,7 @@ func TestQuickstartEnsureDaemonSkipsMatchingLaunchdServiceWhenRestartNotNeeded(t
 	configPath := filepath.Join(home, "config.yml")
 
 	binary := filepath.Join(home, "factoryd")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	plist := buildWorkerPlist(workerPlistConfig{
@@ -2817,7 +2817,7 @@ func TestQuickstartEnsureDaemonSkipsMatchingLaunchdServiceWhenRestartNotNeeded(t
 	}
 
 	fakeLaunchctl := filepath.Join(home, "launchctl")
-	if err := os.WriteFile(fakeLaunchctl, []byte("#!/bin/sh\necho 'state = running'\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeLaunchctl, []byte("#!/bin/sh\necho 'state = running'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	restoreBinary := dp.host.launchctlBinary()

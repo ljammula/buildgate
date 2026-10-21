@@ -110,7 +110,7 @@ func TestStopAllKeepsColimaWhenTemporalWasNotStopped(t *testing.T) {
 	f := newColimaFake(dp, t, "colima", false)
 	// A docker that fails compose stop: Temporal was not stopped.
 	script := "#!/bin/sh\ncase \"$1\" in context) echo colima ;; compose) echo boom >&2; exit 1 ;; esac\nexit 0\n"
-	if err := os.WriteFile(dp.docker.dockerBinary(), []byte(script), 0o755); err != nil {
+	if err := writeExecutable(dp.docker.dockerBinary(), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	stubStopSeams(dp, t)

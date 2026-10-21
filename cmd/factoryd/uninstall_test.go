@@ -40,7 +40,7 @@ func newUninstallFixture(dp *deps, t *testing.T) *uninstallFixture {
 		}
 	}
 	f.exe = filepath.Join(f.home, "go/bin/factoryd")
-	if err := os.WriteFile(f.exe, []byte("bin"), 0o755); err != nil {
+	if err := writeExecutable(f.exe, []byte("bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	f.dockerLog = filepath.Join(root, "docker.log")
@@ -226,7 +226,7 @@ func TestUninstallOnlyRemovesABinaryNamedFactoryd(t *testing.T) {
 	dp := newTestDeps(t)
 	f := newUninstallFixture(dp, t)
 	tmp := filepath.Join(f.home, "go/bin/factoryd.test")
-	if err := os.WriteFile(tmp, []byte("x"), 0o755); err != nil {
+	if err := writeExecutable(tmp, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	f.env.exePath = tmp
@@ -262,10 +262,10 @@ func TestUninstallRemovesTheLinksToItsBinary(t *testing.T) {
 	if err := os.Symlink(exe, filepath.Join(linked, "factoryd")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(foreign, "factoryd"), []byte("another build"), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(foreign, "factoryd"), []byte("another build"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(other, "elsewhere"), []byte("x"), 0o755); err != nil {
+	if err := writeExecutable(filepath.Join(other, "elsewhere"), []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(other, "elsewhere"), filepath.Join(other, "factoryd")); err != nil {

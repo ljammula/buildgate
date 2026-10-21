@@ -17,7 +17,7 @@ const fakeSandboxImage = "example.test/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaa
 func fakeOfflineBuildAppScript(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "offline-build.sh")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := writeExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake offline build script: %v", err)
 	}
 	return path

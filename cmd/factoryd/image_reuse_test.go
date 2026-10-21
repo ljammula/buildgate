@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -27,7 +26,7 @@ func writeFakeDockerReuse(t *testing.T, existingHash string) string {
 		"  esac\n" +
 		"fi\n" +
 		"echo \"unexpected: $@\" >&2; exit 1\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return path

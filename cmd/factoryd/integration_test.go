@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -88,12 +89,61 @@ func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
 }
 
+// dirAllowsExec reports whether a script written into dir can be run: a
+// sandbox mounts /tmp noexec, where the built factoryd and every fake
+// docker or colima script would fail with "permission denied".
+func dirAllowsExec(dir string) bool {
+	script := filepath.Join(dir, fmt.Sprintf("exec-probe-%d.sh", os.Getpid()))
+	if err := writeExecutable(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		return false
+	}
+	defer os.Remove(script)
+	return exec.Command(script).Run() == nil
+}
+
+// useExecutableTempDir makes os.TempDir, and with it os.MkdirTemp and
+// t.TempDir, a place this process can run files from. When the default
+// temp dir allows exec it changes nothing. When it does not (buildgate's
+// own worker sandbox), it points TMPDIR at a directory of this process
+// under GOTMPDIR, the scratch volume there, and fails when neither
+// location allows exec. The returned function removes that directory.
+// The name carries a random suffix because the sharded run starts several
+// processes of this test binary at once.
+func useExecutableTempDir() (func(), error) {
+	if dirAllowsExec(os.TempDir()) {
+		return func() {}, nil
+	}
+	base := os.Getenv("GOTMPDIR")
+	if base == "" {
+		return nil, fmt.Errorf("%s does not allow running files and GOTMPDIR is not set; point TMPDIR at a directory that does", os.TempDir())
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return nil, fmt.Errorf("%s does not allow running files and GOTMPDIR is unusable: %w", os.TempDir(), err)
+	}
+	dir, err := os.MkdirTemp(base, "factoryd-test-tmp-*")
+	if err != nil {
+		return nil, fmt.Errorf("%s does not allow running files and GOTMPDIR is unusable: %w", os.TempDir(), err)
+	}
+	if !dirAllowsExec(dir) {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("neither %s nor GOTMPDIR (%s) allows running files; point TMPDIR at a directory that does", os.TempDir(), base)
+	}
+	os.Setenv("TMPDIR", dir)
+	return func() { os.RemoveAll(dir) }, nil
+}
+
 // runTests exists separately from TestMain because os.Exit terminates the
 // process without running deferred functions — calling it directly inside
 // TestMain would skip the binary's cleanup on every normal run and leak a
 // factoryd-bin-* directory into the system temp dir each time the suite
 // runs.
 func runTests(m *testing.M) int {
+	restoreTmp, err := useExecutableTempDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cmd/factoryd tests:", err)
+		return 1
+	}
+	defer restoreTmp()
 	tmp, err := os.MkdirTemp("", "factoryd-bin-*")
 	if err != nil {
 		panic(err)
@@ -164,7 +214,12 @@ func runTests(m *testing.M) int {
 	// connection. Tests that need a sandbox image resolved by default set
 	// -api-default-sandbox-image/-api-allowed-sandbox-images themselves,
 	// or set SandboxImage directly on their own StartRequest.
-	defaultSessionConfig := "sandbox_docker: " + fakeDockerPath + "\n"
+	// sandbox_worker_uid is pinned to a uid that differs from this
+	// process's own: the daemon and serve refuse a worker uid equal to the
+	// host uid, which is what the default 65532 is inside buildgate's own
+	// sandbox.
+	defaultSessionConfig := "sandbox_docker: " + fakeDockerPath + "\n" +
+		"sandbox_worker_uid: " + strconv.Itoa(testSandboxWorkerUID()) + "\n"
 	if err := os.WriteFile(filepath.Join(xdgConfigHome, "factoryd", "config.yml"), []byte(defaultSessionConfig), 0o600); err != nil {
 		panic("write default session config: " + err.Error())
 	}

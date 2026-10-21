@@ -44,7 +44,7 @@ done
 echo "barrier: the other run never started" >&2
 exit 1
 `
-	if err := os.WriteFile(barrierScript, []byte(barrier), 0o755); err != nil {
+	if err := writeExecutable(barrierScript, []byte(barrier), 0o755); err != nil {
 		t.Fatalf("write barrier script: %v", err)
 	}
 

@@ -33,7 +33,7 @@ func toolchainDocker(t *testing.T, out string) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\ncat <<'OUT'\n" + out + "OUT\n"
-	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return binary

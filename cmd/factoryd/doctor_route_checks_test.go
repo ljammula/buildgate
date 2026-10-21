@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -420,7 +419,7 @@ func TestDoctorRoutesModeFixTextKeepsUserValues(t *testing.T) {
 	// by TestDoctorCheckRelayUpstreamReachableFromSandbox for the same
 	// reason.
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\nif [ \"$1\" = version ] || [ \"$1\" = network ]; then exit 0; fi\nexit 1\n"), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte("#!/bin/sh\nif [ \"$1\" = version ] || [ \"$1\" = network ]; then exit 0; fi\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	in := doctorInputs{
@@ -448,7 +447,7 @@ func writeDockerAlwaysMissingImages(t *testing.T) string {
 	t.Helper()
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\nif [ \"$1\" = version ]; then exit 0; fi\nexit 1\n"
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(fakeDocker, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return fakeDocker

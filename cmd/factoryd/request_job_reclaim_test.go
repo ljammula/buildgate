@@ -26,7 +26,7 @@ func fakeRequestJobDocker(t *testing.T) (docker, psFile, logFile string) {
 	logFile = filepath.Join(dir, "calls.log")
 	script := "#!/bin/sh\necho \"$*\" >> " + logFile + "\n" +
 		"case \"$*\" in *name=^*) ;; *) if [ \"$1\" = ps ]; then cat " + psFile + "; fi ;; esac\nexit 0\n"
-	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
 	return docker, psFile, logFile

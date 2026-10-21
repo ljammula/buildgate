@@ -40,6 +40,7 @@ type memFix struct {
 	out     *bytes.Buffer
 	budget  memory.Budget
 	on      bool
+	saved   int
 }
 
 func strPtr(s string) *string { return &s }
@@ -110,6 +111,7 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)
 	}
+	f.dateRun(id)
 	return rr
 }
 
@@ -141,7 +143,22 @@ func (f *memFix) acceptedRunWithNotes(id, notesFile string) *run.Run {
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)
 	}
+	f.dateRun(id)
 	return rr
+}
+
+// dateRun stamps a saved run's record one second after the run saved before
+// it, all of them an hour back so a run saved without it is still newer. The memory command orders runs by that file's modification time, and
+// two saves in quick succession get the same time on a filesystem whose
+// clock ticks coarsely (a Linux tmpfs or volume), which would leave their
+// order to the directory listing.
+func (f *memFix) dateRun(id string) {
+	f.t.Helper()
+	f.saved++
+	at := time.Now().Add(-time.Hour + time.Duration(f.saved)*time.Second)
+	if err := os.Chtimes(filepath.Join(run.Dir(f.data, id), "run.json"), at, at); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func worthKnowing(items ...string) string {

@@ -40,7 +40,7 @@ func (f sizingFake) install(t *testing.T) (docker, argvFile string) {
 		"esac\n" +
 		"[ \"$1\" = run ] && { printf '%s\\n' '" + f.runOut + "'; exit " + strconv.Itoa(f.runStatus) + "; }\n" +
 		"exit 9\n"
-	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+	if err := writeExecutable(docker, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return docker, argvFile

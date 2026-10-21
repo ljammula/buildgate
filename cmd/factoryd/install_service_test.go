@@ -250,7 +250,7 @@ func TestDoctorCheckWorkerServiceNamesEachState(t *testing.T) {
 	})
 
 	binary := filepath.Join(dir, "factoryd")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := writeExecutable(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write fake binary: %v", err)
 	}
 	plist := buildWorkerPlist(workerPlistConfig{
@@ -266,7 +266,7 @@ func TestDoctorCheckWorkerServiceNamesEachState(t *testing.T) {
 	writeFakeLaunchctl := func(t *testing.T, script string) string {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "launchctl")
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		if err := writeExecutable(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
 			t.Fatalf("write fake launchctl: %v", err)
 		}
 		return path
