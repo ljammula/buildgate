@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -92,6 +93,11 @@ func TestBugOraclePassingOnBaseHaltsBeforeTheBuild(t *testing.T) {
 	}
 	if got := HaltReasonCodeFromError(err); got != run.HaltReasonOraclePassesOnBase {
 		t.Errorf("halt reason code = %q, want %q", got, run.HaltReasonOraclePassesOnBase)
+	}
+	// The run command is the oracle's RUN_COMMAND.txt, often a long script:
+	// the halt sentence an operator reads never quotes it.
+	if strings.Contains(err.Error(), "go test ./.oracle/...") {
+		t.Errorf("halt sentence quotes the oracle's run command: %v", err)
 	}
 	if built || containsString(ids, "build") {
 		t.Errorf("the build ran after an oracle that passes on the base: %q", ids)

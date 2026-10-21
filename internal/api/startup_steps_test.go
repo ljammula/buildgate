@@ -56,14 +56,14 @@ func TestGetRunCarriesTheStartupSteps(t *testing.T) {
 	for i, s := range got.Steps {
 		names[i], status[s.Name] = s.Name, s.Status
 	}
-	if strings.Join(names, ",") != "image,workspace,install,sandbox,verify,agent" {
+	if strings.Join(names, ",") != "image,workspace,verify,install,sandbox,agent" {
 		t.Fatalf("steps = %v", names)
 	}
 	if status["image"] != "done" || status["workspace"] != "skipped" || status["sandbox"] != "done" || status["verify"] != "running" || status["agent"] != "pending" {
 		t.Errorf("statuses = %v", status)
 	}
-	if got.Steps[3].Log != "launch.log" {
-		t.Errorf("sandbox step log = %q", got.Steps[3].Log)
+	if got.Steps[4].Log != "launch.log" {
+		t.Errorf("sandbox step log = %q", got.Steps[4].Log)
 	}
 }
 

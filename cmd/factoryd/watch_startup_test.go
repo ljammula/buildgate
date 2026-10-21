@@ -30,11 +30,11 @@ func TestWatchShowsTheStartupStepsAndTheFooterNamesTheCurrentOne(t *testing.T) {
 	}
 
 	footer := withStartup("⏱ 46s  ·  prepare_workspace", progress.StartupFooter(progress.StartupStepsFrom(events), t0.Add(46*time.Second)))
-	if want := "start-up 3/6: install (running 42s)  ·  ⏱ 46s  ·  prepare_workspace"; footer != want {
+	if want := "start-up 4/6: install (running 42s)  ·  ⏱ 46s  ·  prepare_workspace"; footer != want {
 		t.Errorf("footer = %q, want %q", footer, want)
 	}
 	launched := append(events, progress.Event{Ts: at(8), Source: "factory", Stage: "agent", Event: progress.StepStart})
-	if got := progress.StartupFooter(progress.StartupStepsFrom(launched), t0.Add(50*time.Second)); !strings.HasPrefix(got, "start-up 3/6: install") {
+	if got := progress.StartupFooter(progress.StartupStepsFrom(launched), t0.Add(50*time.Second)); !strings.HasPrefix(got, "start-up 4/6: install") {
 		t.Errorf("footer before the first round = %q", got)
 	}
 	started := append(launched, progress.Event{Ts: at(9), Source: "worker", Stage: "round", Event: "start", Round: 1, MaxRounds: 6})
