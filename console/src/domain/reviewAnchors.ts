@@ -1,7 +1,10 @@
 import { ticketRelPath } from "@/domain/contentHash";
 import type { Rejection, RejectionAnchor, RequestSummary } from "@/domain/request";
 import {
+  CRITERION_ITEM,
+  criteriaSectionRange,
   headingPositions,
+  isIndented,
   requiredSpecHeadings,
   requiredTicketHeadings,
   sectionRange,
@@ -190,4 +193,103 @@ export function rejectionForRevision(
 ): Rejection | null {
   const instant = Date.parse(revision.at);
   return rejections.find((r) => r.by === revision.by && Date.parse(r.at) === instant) ?? null;
+}
+
+const QUOTE_BYTE_LIMIT = 2000;
+const QUOTE_SHOWN = 60;
+
+/** A quote as shown beside its note: one line, clipped. */
+export function clipQuote(quote: string): string {
+  const oneLine = quote.split(/\s+/).join(" ").trim();
+  return oneLine.length <= QUOTE_SHOWN ? oneLine : `${oneLine.slice(0, QUOTE_SHOWN - 1)}…`;
+}
+
+/** The longest prefix of text that fits in `limit` UTF-8 bytes, cut between characters. */
+function clipBytes(text: string, limit: number): string {
+  const encoder = new TextEncoder();
+  let used = 0;
+  let out = "";
+  for (const ch of text) {
+    used += encoder.encode(ch).length;
+    if (used > limit) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** Where a selection of a reviewed file lands: the place and the passage, ready for a note. */
+export interface SelectionAnchor {
+  readonly path: string;
+  readonly section: string;
+  readonly item: number;
+  readonly quote: string;
+}
+
+/**
+ * The anchor for the characters [start, end) of `content`, the file at `path`
+ * (request-relative): the nearest required heading above `start` (""
+ * before the first), the numbered criterion `start` is in when that section is
+ * the spec's acceptance criteria, and the selected text as the quote. The
+ * quote is cut at the end of its section and at the server's byte limit, so a
+ * selection that runs across a heading still names one section the quote is
+ * really in. Null for an empty selection, a file the console reads no
+ * sections of, or a range outside the content.
+ */
+export function anchorForSelection(
+  path: string,
+  content: string,
+  start: number,
+  end: number,
+): SelectionAnchor | null {
+  const headings = headingsFor(path);
+  if (headings === null || start < 0 || end > content.length || start >= end) return null;
+  const lines = content.split("\n");
+  const positions = headingPositions(lines, headings);
+  const lineStarts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineStarts.push(offset);
+    offset += line.length + 1;
+  }
+  // The line the selection starts in.
+  let startLine = 0;
+  while (startLine + 1 < lines.length && (lineStarts[startLine + 1] ?? Infinity) <= start) {
+    startLine++;
+  }
+  let at = -1;
+  positions.forEach((position, i) => {
+    if (position !== -1 && position <= startLine) at = i;
+  });
+  const section = at === -1 ? "" : (headings[at] ?? "");
+  const next = positions.slice(at + 1).find((position) => position !== -1);
+  const sectionEnd = next === undefined ? content.length : (lineStarts[next] ?? content.length);
+  const quote = clipBytes(content.slice(start, Math.min(end, sectionEnd)).trim(), QUOTE_BYTE_LIMIT);
+  if (quote === "") return null;
+  return { path, section, item: itemAt(path, section, lines, startLine), quote };
+}
+
+/** The 1-based numbered criterion line `line` is in under the spec's acceptance criteria; 0 elsewhere. */
+function itemAt(path: string, section: string, lines: readonly string[], line: number): number {
+  if (path !== "spec.md" || section !== ACCEPTANCE_CRITERIA) return 0;
+  const range = criteriaSectionRange(lines);
+  if (range === null || line < range.start || line >= range.end) return 0;
+  let item = 0;
+  for (let i = range.start; i <= line; i++) {
+    const raw = lines[i] ?? "";
+    if (!isIndented(raw) && CRITERION_ITEM.test(trimSpace(raw))) item++;
+  }
+  return item;
+}
+
+/**
+ * Whether the redraft that follows a rejection with these notes and this
+ * reason changes only the commented sections: the server's rule
+ * (`RedraftScope`). Any free reason, a note on the whole of spec.md, or a note
+ * on a file that is neither spec.md nor a ticket asks for the whole document.
+ */
+export function redraftIsScoped(notes: readonly RejectionAnchor[], reason: string): boolean {
+  if (notes.length === 0 || reason.trim() !== "") return false;
+  return notes.every(
+    (n) => headingsFor(n.path) !== null && !(n.path === "spec.md" && n.section === ""),
+  );
 }

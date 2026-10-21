@@ -2,7 +2,7 @@ import { Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import type { RejectionAnchor } from "@/domain/request";
-import { type AnchorTarget, anchorPlace } from "@/domain/reviewAnchors";
+import { type AnchorTarget, anchorPlace, clipQuote } from "@/domain/reviewAnchors";
 import { Button } from "@/ui/Button";
 import { IconButton } from "@/ui/IconButton";
 import { Field, Input, Select } from "@/ui/Input";
@@ -29,7 +29,10 @@ export function AnchoredNotes({ targets, notes, onChange, disabled = false }: An
   function add() {
     const note = text.trim();
     if (target === undefined || note === "") return;
-    onChange([...notes, { path: target.path, section: target.section, item: target.item, note }]);
+    onChange([
+      ...notes,
+      { path: target.path, section: target.section, item: target.item, note, quote: "" },
+    ]);
     setText("");
   }
   return (
@@ -41,6 +44,9 @@ export function AnchoredNotes({ targets, notes, onChange, disabled = false }: An
             <li key={i} className="flex items-start gap-2 text-sm">
               <span className="min-w-0 flex-1 break-words">
                 <span className="text-fg-muted font-mono text-xs">{anchorPlace(note)}</span>
+                {note.quote === "" ? null : (
+                  <q className="text-fg-muted ml-1 text-xs break-words">{clipQuote(note.quote)}</q>
+                )}
                 {`: ${note.note}`}
               </span>
               <IconButton

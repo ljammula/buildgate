@@ -3,8 +3,9 @@ import { type ReactNode, useState } from "react";
 import { useApi } from "@/api/ApiProvider";
 import { useRejectRequest } from "@/api/requestQueries";
 import type { RejectionAnchor, RequestSummary } from "@/domain/request";
-import { anchorTargets } from "@/domain/reviewAnchors";
+import { anchorTargets, redraftIsScoped } from "@/domain/reviewAnchors";
 import { REQUEST_VERBS } from "@/domain/status";
+import { usePendingComments } from "@/shared/request/usePendingComments";
 
 import { AnchoredNotes } from "./AnchoredNotes";
 import type { FlowProps } from "./flowTypes";
@@ -62,7 +63,10 @@ function RejectBody({ request, by, onOpenChange, onDone, blocked }: BodyProps) {
   // Fixed when the dialog opens, like an approval's hashes: a redraft
   // arriving underneath must not re-point a note already written.
   const [targets] = useState(() => anchorTargets(request));
-  const [notes, setNotes] = useState<readonly RejectionAnchor[]>([]);
+  // The comments written on passages of the document go in as the first
+  // notes; they are forgotten once the rejection is sent.
+  const pending = usePendingComments(request);
+  const [notes, setNotes] = useState<readonly RejectionAnchor[]>(() => pending.fresh());
   // The stage on screen when the dialog opened is the one being rejected. It
   // is fixed here too: the caller's record can change underneath (a redraft
   // arriving), and sending the new stage would defeat the server's check
@@ -78,7 +82,16 @@ function RejectBody({ request, by, onOpenChange, onDone, blocked }: BodyProps) {
       error={reject.error}
       onOpenChange={onOpenChange}
       write={(reason) => reject.mutateAsync({ reason, by, anchors: notes, seen })}
-      onDone={onDone}
+      onDone={(updated) => {
+        pending.clear();
+        onDone?.(updated);
+      }}
+      description={(reason) => {
+        if (notes.length === 0) return undefined;
+        return redraftIsScoped(notes, reason)
+          ? "Only the commented sections will be redrafted."
+          : "The whole document will be redrafted: a reason, or a note on the whole spec, asks for that.";
+      }}
     >
       <AnchoredNotes
         targets={targets}

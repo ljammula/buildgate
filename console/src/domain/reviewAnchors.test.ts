@@ -4,6 +4,8 @@ import { requestJson } from "@/test/requestFixtures";
 
 import {
   anchorExcerpt,
+  anchorForSelection,
+  redraftIsScoped,
   anchorPlace,
   anchoredChanges,
   anchorTargets,
@@ -71,7 +73,7 @@ const NEW_SPEC =
   "# Spec\n\n## Problem\n\nnew problem\n\n## Acceptance criteria\n\n1. It adds.\n2. A key is scoped to one account.\n\n## Risks\n\nr\n";
 
 function anchor(path: string, section: string, item: number) {
-  return { path, section, item, note: "n" };
+  return { path, section, item, note: "n", quote: "" };
 }
 
 test("an anchor's place reads file, section and item", () => {
@@ -165,4 +167,80 @@ test("a criterion that kept its text under another number is matched by its text
     // Its text is nowhere in the list now: compared by number, and not called moved.
     ["1. Drop me.", "1. Vague thing.", null],
   ]);
+});
+
+describe("anchorForSelection", () => {
+  const spec =
+    "# Spec\n\n## Problem\n\nRefunds double.\n\n## Scope\n\nThe /refunds endpoint.\n\n## Acceptance criteria\n\n1. A repeat returns the first result.\n   It keeps the key.\n2. A new key processes.\n\n## Risks\n\nNone.\n";
+  const at = (text: string) => {
+    const start = spec.indexOf(text);
+    return anchorForSelection("spec.md", spec, start, start + text.length);
+  };
+
+  test("names the nearest heading above the selection and quotes it", () => {
+    expect(at("The /refunds endpoint.")).toEqual({
+      path: "spec.md",
+      section: "## Scope",
+      item: 0,
+      quote: "The /refunds endpoint.",
+    });
+  });
+
+  test("names the numbered criterion the selection starts in, continuation lines included", () => {
+    expect(at("A new key processes.")).toMatchObject({
+      section: "## Acceptance criteria",
+      item: 2,
+    });
+    expect(at("It keeps the key.")).toMatchObject({ item: 1 });
+  });
+
+  test("a selection running into the next heading is cut at its section", () => {
+    const start = spec.indexOf("A new key");
+    const anchor = anchorForSelection("spec.md", spec, start, spec.indexOf("None."));
+    expect(anchor?.section).toBe("## Acceptance criteria");
+    expect(anchor?.quote).toBe("A new key processes.");
+  });
+
+  test("text before the first heading is on no section", () => {
+    const text = "x intro\n# Spec\n\n## Problem\n\np\n";
+    expect(anchorForSelection("spec.md", text, 0, 7)).toMatchObject({
+      section: "",
+      quote: "x intro",
+    });
+  });
+
+  test("a ticket's selection is under its own headings", () => {
+    const ticket = "Verify-Command: true\n\n## Goal\n\ng\n\n## Plan\n\n### Steps\n\n1. s\n";
+    const start = ticket.indexOf("1. s");
+    expect(anchorForSelection("tickets/001.spec.md", ticket, start, start + 4)).toEqual({
+      path: "tickets/001.spec.md",
+      section: "### Steps",
+      item: 0,
+      quote: "1. s",
+    });
+  });
+
+  test("nothing to comment on: an empty or blank selection, a range outside the file, a file without sections", () => {
+    expect(anchorForSelection("spec.md", spec, 5, 5)).toBeNull();
+    expect(anchorForSelection("spec.md", spec, 0, spec.length + 1)).toBeNull();
+    expect(anchorForSelection("spec.md", "a\n\n\nb", 1, 3)).toBeNull();
+    expect(anchorForSelection("oracle/RUN_COMMAND.txt", spec, 0, 4)).toBeNull();
+  });
+
+  test("a quote is cut at 2000 bytes between characters", () => {
+    const long = `# Spec\n\n## Problem\n\n${"é".repeat(1500)}\n`;
+    const anchor = anchorForSelection("spec.md", long, 0, long.length);
+    expect(new TextEncoder().encode(anchor?.quote ?? "").length).toBeLessThanOrEqual(2000);
+  });
+});
+
+test("a redraft is scoped only by comments with no reason and none on the whole spec", () => {
+  const scope = { ...anchor("spec.md", "## Scope", 0) };
+  expect(redraftIsScoped([scope], "")).toBe(true);
+  expect(redraftIsScoped([scope], "  ")).toBe(true);
+  expect(redraftIsScoped([scope], "also the tone")).toBe(false);
+  expect(redraftIsScoped([], "")).toBe(false);
+  expect(redraftIsScoped([scope, anchor("spec.md", "", 0)], "")).toBe(false);
+  expect(redraftIsScoped([anchor("tickets/001.spec.md", "", 0)], "")).toBe(true);
+  expect(redraftIsScoped([anchor("oracle/RUN_COMMAND.txt", "", 0)], "")).toBe(false);
 });

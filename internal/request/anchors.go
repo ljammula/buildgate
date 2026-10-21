@@ -5,7 +5,19 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
+
+// truncateRunes cuts s to at most n bytes at a rune boundary, marking a cut.
+func truncateRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "..."
+}
 
 // RejectionAnchor is one note of a review rejection tied to a place in a
 // reviewed file: the file, optionally a section heading in it, optionally a
@@ -24,6 +36,10 @@ type RejectionAnchor struct {
 	Item int `json:"item,omitempty"`
 	// Note is the reviewer's text, one line.
 	Note string `json:"note"`
+	// Quote is the passage the note is about, copied from the reviewed file
+	// (a byte-for-byte substring of Section, or of the file when Section is
+	// empty). RejectSeen refuses the rejection when it is no longer there.
+	Quote string `json:"quote,omitempty"`
 }
 
 const (
@@ -33,7 +49,11 @@ const (
 	maxAnchorPathLen    = 200
 	maxAnchorSectionLen = 200
 	maxAnchorNoteLen    = 2000
-	maxAnchorItem       = 9999
+	maxAnchorQuoteLen   = 2000
+	// quoteInReasonLen bounds how much of a quote AnchoredReason renders:
+	// the redraft is given the file itself.
+	quoteInReasonLen = 300
+	maxAnchorItem    = 9999
 )
 
 // anchorPathRE is the shape of a request-relative reviewed file: no
@@ -77,6 +97,10 @@ func NormalizeRejectionAnchors(anchors []RejectionAnchor) ([]RejectionAnchor, er
 			return nil, fmt.Errorf("anchored note %d: the note is empty", n)
 		case len(a.Note) > maxAnchorNoteLen:
 			return nil, fmt.Errorf("anchored note %d: the note is longer than %d bytes", n, maxAnchorNoteLen)
+		case len(a.Quote) > maxAnchorQuoteLen:
+			return nil, fmt.Errorf("anchored note %d: the quoted passage is longer than %d bytes", n, maxAnchorQuoteLen)
+		case !utf8.ValidString(a.Quote):
+			return nil, fmt.Errorf("anchored note %d: the quoted passage is not valid UTF-8", n)
 		}
 		out = append(out, a)
 	}
@@ -102,7 +126,11 @@ func AnchoredReason(anchors []RejectionAnchor, note string) string {
 		if a.Item > 0 {
 			fmt.Fprintf(&b, ", number %d", a.Item)
 		}
-		b.WriteString(": " + a.Note + "\n")
+		b.WriteString(": " + a.Note)
+		if quote := oneLine(quotedLine(a.Quote)); quote != "" {
+			b.WriteString(" (passage: \"" + truncateRunes(quote, quoteInReasonLen) + "\")")
+		}
+		b.WriteString("\n")
 	}
 	if note != "" {
 		b.WriteString("\n" + note)

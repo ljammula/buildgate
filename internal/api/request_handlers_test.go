@@ -57,6 +57,17 @@ func seedApprovableRequest(t *testing.T, dataDir, id string, state request.State
 	}
 }
 
+// seedSpecWithSkeleton is a spec with every required heading and two
+// acceptance criteria.
+const seedSpecWithSkeleton = "# Spec\n\n## Problem\n\np\n\n## Scope\n\nThe refund path.\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\n- a\n\n## Acceptance criteria\n\n1. one\n2. two\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n"
+
+func writeSeedSpec(t *testing.T, dataDir, id string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(request.Dir(dataDir, id), "spec.md"), []byte(seedSpecWithSkeleton), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // requestActionFor builds a request against a /requests route carrying
 // token as its Authorization: Bearer header, mirroring overrideRequestFor.
 func requestActionFor(t *testing.T, method, path, token, body string) *http.Request {
@@ -2510,12 +2521,31 @@ func TestRequestDetailReportsSendBackTargets(t *testing.T) {
 	}
 }
 
+// TestRejectRequestAPIQuoteNotInSectionIs409: a comment whose quoted passage
+// is not in its section is refused as a conflict, and the request stays put.
+func TestRejectRequestAPIQuoteNotInSectionIs409(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	writeSeedSpec(t, dataDir, "req-1")
+
+	recorder := httptest.NewRecorder()
+	body := `{"by":"alice","anchors":[{"path":"spec.md","section":"## Risks","quote":"The refund path.","note":"n"}]}`
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/reject", "test-token", seenBody(t, dataDir, "req-1", body)))
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "comment 1") {
+		t.Fatalf("status = %d, want 409 naming comment 1: %s", recorder.Code, recorder.Body.String())
+	}
+	if r, err := request.Load(dataDir, "req-1"); err != nil || r.State != request.StateSpecReview {
+		t.Errorf("request after the refusal: %+v, %v", r, err)
+	}
+}
+
 // TestRejectRequestHandlerRecordsAnchors: notes tied to places in the
 // reviewed file are recorded on the rejection, the reason is their composed
 // text, and no free reason is needed beside them.
 func TestRejectRequestHandlerRecordsAnchors(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	writeSeedSpec(t, dataDir, "req-1")
 
 	recorder := httptest.NewRecorder()
 	body := `{"by":"alice","anchors":[{"path":"spec.md","section":"## Acceptance criteria","item":2,"note":"which\naccount?"}]}`

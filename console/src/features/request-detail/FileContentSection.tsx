@@ -1,6 +1,7 @@
 import { Pencil } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import type { RejectionAnchor } from "@/domain/request";
 import { EscapedText } from "@/shared/oracle/EscapedText";
 import { Button } from "@/ui/Button";
 import { CopyButton } from "@/ui/CopyButton";
@@ -8,6 +9,7 @@ import { Disclosure } from "@/ui/Disclosure";
 import { Markdown } from "@/ui/Markdown";
 
 import { FileEditor } from "./FileEditor";
+import { PassageComposer } from "./PassageComposer";
 import { Panel } from "./Panel";
 import type { StructureKind } from "./StructureChecklist";
 import type { EditorBinding } from "./useEditSession";
@@ -44,6 +46,14 @@ export interface FileContentSectionProps {
    * (requestDetailLogic.foldsContent). Undefined leaves it open, whole.
    */
   readonly foldedSummary?: string;
+  /**
+   * The request-relative path comments on this file are made under, set only
+   * where the reader may comment (a review state, with write access). A
+   * passage selected in the raw view can then be commented on.
+   */
+  readonly commentPath?: string;
+  /** Receives a comment on a passage of this file, for the pending batch. */
+  readonly onComment?: (comment: RejectionAnchor) => void;
 }
 
 /**
@@ -68,8 +78,44 @@ export function FileContentSection({
   specCriteria,
   children,
   foldedSummary,
+  commentPath,
+  onComment,
 }: FileContentSectionProps) {
   const [raw, setRaw] = useState(true);
+  const rawBox = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<{ text: string; offset: number | null }>({
+    text: "",
+    offset: null,
+  });
+  // The passage last selected in the raw view. Moving to the comment field
+  // collapses the selection, so only a new non-empty selection inside the
+  // text replaces it.
+  useEffect(() => {
+    if (commentPath === undefined) return;
+    function onSelectionChange() {
+      const selection = window.getSelection();
+      const box = rawBox.current;
+      if (selection === null || box === null || selection.isCollapsed) return;
+      if (!box.contains(selection.anchorNode) || !box.contains(selection.focusNode)) return;
+      // Where the selection starts in the shown text, so a passage that occurs
+      // twice is the one the reader chose. Null when it cannot be told.
+      let offset: number | null;
+      try {
+        const before = document.createRange();
+        before.selectNodeContents(box);
+        const range = selection.getRangeAt(0);
+        before.setEnd(range.startContainer, range.startOffset);
+        offset = before.toString().length;
+      } catch {
+        offset = null;
+      }
+      setSelected({ text: selection.toString(), offset });
+    }
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
+  }, [commentPath]);
   // Focus goes back to Edit when the editor closes, not to the page's top.
   const editButton = useRef<HTMLButtonElement>(null);
   const wasEditing = useRef(false);
@@ -102,6 +148,7 @@ export function FileContentSection({
   );
   const text = raw ? (
     <div
+      ref={rawBox}
       data-testid="markdown-raw-content"
       className="border-border bg-surface-sunken max-h-[32rem] overflow-auto rounded-md border p-3"
     >
@@ -146,6 +193,18 @@ export function FileContentSection({
       }
     >
       {pathRow}
+      {commentPath !== undefined && onComment !== undefined && raw && !editing ? (
+        <PassageComposer
+          path={commentPath}
+          content={content}
+          selected={selected.text}
+          offset={selected.offset}
+          onAdd={onComment}
+          onDone={() => {
+            setSelected({ text: "", offset: null });
+          }}
+        />
+      ) : null}
       {editing ? (
         <FileEditor
           path={path}

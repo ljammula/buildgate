@@ -137,7 +137,11 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	if err != nil {
 		return nil, nil, err
 	}
-	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, previousDraft: hostPreviousPath}
+	hostRewritePath, err := stageRewriteSections(redraftScopeOf(r, request.StatePlanReview), scratchDir, sandboxUser)
+	if err != nil {
+		return nil, nil, err
+	}
+	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath}
 
 	timeoutMinutes := cfg.PlanTicketsTimeoutMinutes
 	if timeoutMinutes <= 0 {
@@ -364,17 +368,21 @@ func truncateBytes(s string, n int) string {
 }
 
 // stagePreviousPlan stages the tickets to revise for --previous-draft-file
-// when the operator handed the plan over (`submit -plan-dir`), so the
+// when the operator handed the plan over (`submit -plan-dir`) or the
+// rejection being redrafted commented on tickets (request.RedraftScope), so the
 // planning job revises their tickets instead of planning afresh. They are
 // the request's current tickets when a reviewed plan exists (a plan_review
 // rejection), else the tickets as handed over (the factory found the
 // imported plan infeasible and removed it). It returns "" for a drafted
 // plan. The tickets are staged as one file, each under a line naming it.
 func stagePreviousPlan(dataDir string, r *request.Request, scratchDir, sandboxUser string) (string, error) {
-	if !r.PlanImported {
+	if !r.PlanImported && r.RedraftScope(request.StatePlanReview) == nil {
 		return "", nil
 	}
-	tickets, err := requestdriver.ReadTicketFiles(filepath.Join(request.Dir(dataDir, r.ID), "tickets"))
+	tickets, err := requestdriver.ReviewedTickets(dataDir, r)
+	if tickets == nil && err == nil {
+		tickets, err = requestdriver.ReadTicketFiles(filepath.Join(request.Dir(dataDir, r.ID), "tickets"))
+	}
 	if os.IsNotExist(err) || (err == nil && len(tickets) == 0) {
 		tickets, err = requestdriver.ReadTicketFiles(request.ImportedTicketsDir(dataDir, r.ID))
 	}

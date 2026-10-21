@@ -11,7 +11,7 @@ export interface ReasonFlowProps {
   readonly confirmLabel: string;
   readonly tone?: "primary" | "danger";
   /** One line under the title: what confirming does. */
-  readonly description?: ReactNode;
+  readonly description?: ReactNode | ((reason: string) => ReactNode);
   /** Extra controls under the reason field (the send-back target, the anchored notes). */
   readonly children?: ReactNode;
   /** The reason may be left empty: something in `children` carries the feedback instead. */
@@ -54,6 +54,7 @@ export function ReasonFlow({
   const trimmed = reason.trim();
   const missing = trimmed === "" && !reasonOptional;
   const isBlocked = blocked !== undefined && blocked !== null;
+  const shownDescription = typeof description === "function" ? description(trimmed) : description;
   async function confirm() {
     if (missing || isBlocked) return;
     try {
@@ -69,7 +70,7 @@ export function ReasonFlow({
       open
       onOpenChange={onOpenChange}
       title={title}
-      {...(description === undefined ? {} : { description })}
+      {...(shownDescription === undefined ? {} : { description: shownDescription })}
       confirmLabel={confirmLabel}
       tone={tone}
       confirmDisabled={missing || isBlocked}

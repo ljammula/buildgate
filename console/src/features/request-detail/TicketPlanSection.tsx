@@ -3,6 +3,8 @@ import type { RequestSummary, RequestTicket } from "@/domain/request";
 import { specAcceptanceCriteria } from "@/domain/specSkeleton";
 import { getOperatorName } from "@/platform/operatorIdentity";
 
+import { ticketRelPath } from "@/domain/contentHash";
+import { usePendingComments } from "@/shared/request/usePendingComments";
 import { FileContentSection } from "./FileContentSection";
 import type { EditorBinding } from "./useEditSession";
 import { foldsContent, planSummary } from "./requestDetailLogic";
@@ -31,6 +33,8 @@ export function TicketPlanSection({
   session,
 }: TicketPlanSectionProps) {
   const update = useUpdateRequestTicket(request.id, ticket.index);
+  const pending = usePendingComments(request);
+  const commentPath = ticketRelPath(ticket.specPath);
   return (
     <FileContentSection
       title={`Ticket ${ticket.index} plan`}
@@ -46,6 +50,7 @@ export function TicketPlanSection({
       }}
       onFetchCurrent={onFetchCurrent}
       structure="ticket"
+      {...(editable && commentPath !== null ? { commentPath, onComment: pending.add } : {})}
       specCriteria={specAcceptanceCriteria(request.spec)}
       {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}

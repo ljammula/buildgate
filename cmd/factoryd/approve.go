@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"time"
@@ -76,6 +79,10 @@ func approveMain(dp *deps, args []string) error {
 // /requests/{id}/reject, the same way approveMain shares
 // internal/request.Approve.
 //
+// -comments-file takes the place of -reason for a review of the spec or the
+// plan: a JSON list of comments on passages (request.RejectionAnchor). With
+// only comments, the redraft changes just the commented sections.
+//
 // -to is meaningful only for a quarantined or halted request: it routes
 // to internal/request.SendBack instead of Reject, sending the request
 // back to planning (the default) or spec drafting rather than the prior
@@ -88,24 +95,28 @@ func approveMain(dp *deps, args []string) error {
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newRejectFlags() (flags *flag.FlagSet, dataDir, reason, to, configPath *string) {
+func newRejectFlags() (flags *flag.FlagSet, dataDir, reason, to, configPath, commentsFile *string) {
 	flags = flag.NewFlagSet("reject", flag.ContinueOnError)
 	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
-	reason = flags.String("reason", "", "why the request is being rejected (required); the next redraft is given it")
+	reason = flags.String("reason", "", "why the request is being rejected; the next redraft is given it")
 	to = flags.String("to", "", "Send a quarantined or halted request back to \"plan\" or \"spec\" to be redrafted. Refused in a review state and once any ticket is accepted. Empty rejects the document at the current review gate.")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	commentsFile = flags.String("comments-file", "", "JSON list of comments on passages of the spec or tickets; only the commented sections are redrafted. A -reason given too asks for a whole redraft. - reads standard input.")
 	finishFlags(flags)
 	return
 }
 
 func rejectMain(dp *deps, args []string) error {
-	flags, dataDir, reason, to, configPath := newRejectFlags()
+	flags, dataDir, reason, to, configPath, commentsFile := newRejectFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *reason == "" {
+	if *reason == "" && *commentsFile == "" {
 		flags.Usage()
-		return fmt.Errorf("-reason is required")
+		return fmt.Errorf("-reason or -comments-file is required")
+	}
+	if *commentsFile != "" && *to != "" {
+		return fmt.Errorf("-comments-file comments on a review's document, and -to sends a quarantined or halted request back: give one")
 	}
 	positional := flags.Args()
 	if len(positional) != 1 {
@@ -135,7 +146,14 @@ func rejectMain(dp *deps, args []string) error {
 		return nil
 	}
 
-	r, err := request.Reject(*dataDir, id, by, *reason, time.Now())
+	var anchors []request.RejectionAnchor
+	if *commentsFile != "" {
+		var err error
+		if anchors, err = readCommentsFile(*commentsFile, os.Stdin); err != nil {
+			return err
+		}
+	}
+	r, err := request.RejectAnchored(*dataDir, id, by, *reason, anchors, time.Now())
 	if err != nil {
 		return fmt.Errorf("reject request %q: %w", id, err)
 	}
@@ -144,6 +162,36 @@ func rejectMain(dp *deps, args []string) error {
 		return fmt.Errorf("print reject result: %w", err)
 	}
 	return nil
+}
+
+// readCommentsFile reads `reject -comments-file`: a JSON array of
+// {path, section, item, quote, note}, from the named file or, for "-", stdin.
+// Unknown fields are refused so a misspelt "quote" cannot silently drop the
+// binding of a comment to its passage.
+func readCommentsFile(name string, stdin io.Reader) ([]request.RejectionAnchor, error) {
+	var data []byte
+	var err error
+	if name == "-" {
+		data, err = io.ReadAll(stdin)
+	} else {
+		data, err = os.ReadFile(name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read -comments-file: %w", err)
+	}
+	var anchors []request.RejectionAnchor
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&anchors); err != nil {
+		return nil, fmt.Errorf("-comments-file must be a JSON list of {path, section, item, quote, note}: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("-comments-file must hold one JSON list and nothing after it")
+	}
+	if len(anchors) == 0 {
+		return nil, fmt.Errorf("-comments-file holds no comments")
+	}
+	return anchors, nil
 }
 
 // currentOSUser resolves "by" for a CLI-driven approve/reject: the OS

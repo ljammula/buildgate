@@ -90,6 +90,7 @@ func TestNormalizeRejectionAnchorsRefusals(t *testing.T) {
 func TestRejectAnchoredRecordsTheComposedReasonEverywhere(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StateSpecReview, false)
+	writeSpecFile(t, dataDir, "req-1", joinSections(scopedSpecSections))
 	anchors := []RejectionAnchor{{Path: "spec.md", Section: "## Acceptance criteria", Item: 2, Note: "which\naccount?"}}
 
 	r, err := RejectAnchored(dataDir, "req-1", "bob", "Otherwise fine.", anchors, fixedNow)

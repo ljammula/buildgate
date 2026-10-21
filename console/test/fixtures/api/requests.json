@@ -393,7 +393,8 @@
             "path": "every-field path",
             "section": "every-field section",
             "item": 3,
-            "note": "every-field note"
+            "note": "every-field note",
+            "quote": "every-field quote"
           }
         ],
         "note": "every-field note"

@@ -244,6 +244,25 @@ class BuildPromptTests(unittest.TestCase):
 		previous = prompt.index("<<<BEGIN CURRENT TICKETS>>>\n=== 001.spec.md ===\nVerify-Command: make verify\n<<<END CURRENT TICKETS>>>")
 		self.assertLess(previous, prompt.index("<<<BEGIN OPERATOR FEEDBACK>>>"))
 
+	def test_build_prompt_lists_rewrite_sections(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			init_repo(workspace)
+			prompt, _ = plan_tickets.build_prompt(
+				VALID_SPEC, "text", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR,
+				feedback="- tickets/001.spec.md, ### Steps: split it", previous_draft="=== 001.spec.md ===\nx\n",
+				rewrite_sections=[("tickets/001.spec.md", "### Steps"), ("tickets/002.spec.md", "")],
+			)
+			without, _ = plan_tickets.build_prompt(
+				VALID_SPEC, "text", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR,
+				feedback="f", previous_draft="=== 001.spec.md ===\nx\n",
+			)
+		self.assertIn("## Tickets and sections to rewrite", prompt)
+		self.assertIn("- tickets/001.spec.md: ### Steps\n- tickets/002.spec.md: (the whole file)", prompt)
+		self.assertLess(prompt.index("<<<END CURRENT TICKETS>>>"), prompt.index("## Tickets and sections to rewrite"))
+		self.assertLess(prompt.index("## Tickets and sections to rewrite"), prompt.index("<<<BEGIN OPERATOR FEEDBACK>>>"))
+		self.assertNotIn("sections to rewrite", without)
+
 	def test_omits_the_previous_tickets_section_when_none_given(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)

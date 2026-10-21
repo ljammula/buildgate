@@ -463,6 +463,11 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	if err := seen.check(r); err != nil {
 		return nil, err
 	}
+	// Each comment is about text in a file as the reviewer read it: refuse
+	// before anything changes if that text has moved.
+	if err := checkAnchorsAgainstFiles(dataDir, r, anchors); err != nil {
+		return nil, err
+	}
 	fromState := r.State
 	var relPaths []string
 	switch r.State {

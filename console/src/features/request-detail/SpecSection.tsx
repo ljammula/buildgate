@@ -2,6 +2,7 @@ import { useUpdateRequestSpec } from "@/api/requestQueries";
 import type { RequestSummary } from "@/domain/request";
 import { getOperatorName } from "@/platform/operatorIdentity";
 
+import { usePendingComments } from "@/shared/request/usePendingComments";
 import { AcceptanceCriteriaList } from "./AcceptanceCriteriaList";
 import { FileContentSection } from "./FileContentSection";
 import type { EditorBinding } from "./useEditSession";
@@ -28,6 +29,7 @@ export function SpecSection({
   session,
 }: SpecSectionProps) {
   const update = useUpdateRequestSpec(request.id);
+  const pending = usePendingComments(request);
   return (
     <FileContentSection
       title="Spec"
@@ -43,6 +45,7 @@ export function SpecSection({
       }}
       onFetchCurrent={onFetchCurrent}
       structure="spec"
+      {...(editable ? { commentPath: "spec.md", onComment: pending.add } : {})}
       {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: specSummary(request.spec) } : {})}
     >

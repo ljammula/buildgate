@@ -189,6 +189,12 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	if jobErr != nil {
 		return HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
 	}
+	// A review that commented on sections redrafts only those: every other
+	// byte of the reviewed spec.md is kept, whatever the model wrote.
+	specMD, spliceErr := spliceScopedSpec(dataDir, r, specMD)
+	if spliceErr != nil {
+		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
+	}
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
@@ -414,6 +420,10 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 
 	runner = withPlanImport(runner)
+	reviewedTickets, reviewErr := ReviewedTickets(dataDir, r)
+	if reviewErr != nil {
+		return HaltRequest(dataDir, r, reviewErr.Error(), now)
+	}
 	var (
 		requestTickets []request.Ticket
 		evidence       *request.PlanEvidence
@@ -456,10 +466,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		// separate accumulation below folds in spend from an earlier,
 		// plan_review-rejected pass -- an automatic re-plan must not
 		// silently drop the first attempt's own relay cost.
-		if evidence != nil && attemptEvidence != nil {
-			attemptEvidence.Spend = evidence.Spend.Add(attemptEvidence.Spend)
-		}
-		evidence = attemptEvidence
+		evidence = withEarlierAttemptSpend(evidence, attemptEvidence)
 
 		if err := clearTicketArtifacts(ticketsDir); err != nil {
 			return fmt.Errorf("clear previous plan's tickets: %w", err)
@@ -467,7 +474,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
 			return fmt.Errorf("create tickets dir: %w", err)
 		}
-		requestTickets, validateErr = writeAndValidateDraftedTickets(ticketsDir, tickets, criteriaCount, verifyCommand, testPatterns)
+		requestTickets, validateErr = writeAndValidateScopedTickets(ticketsDir, r, reviewedTickets, tickets, criteriaCount, verifyCommand, testPatterns)
 		if validateErr == nil {
 			break
 		}
@@ -3038,4 +3045,13 @@ func CapFeedback(feedback string, max int, sectionHeading string) string {
 		tail = tail[i:]
 	}
 	return note + strings.ToValidUTF8(tail, "")
+}
+
+// withEarlierAttemptSpend is attempt with the Spend of the earlier attempts of
+// the same planning pass added to it.
+func withEarlierAttemptSpend(earlier, attempt *request.PlanEvidence) *request.PlanEvidence {
+	if earlier != nil && attempt != nil {
+		attempt.Spend = earlier.Spend.Add(attempt.Spend)
+	}
+	return attempt
 }

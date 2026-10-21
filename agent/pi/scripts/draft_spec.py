@@ -137,6 +137,35 @@ DESIGN_GUIDE_SECTION = prompt_templates.load("draft_spec.design_guide", ("guide"
 # The spec an operator handed over, given back to be revised after a
 # spec_review rejection; factoryd stages it for --previous-draft-file.
 PREVIOUS_DRAFT_SECTION = prompt_templates.load("draft_spec.previous_draft", ("spec",))
+# The sections of that document the review commented on, the only ones the
+# redraft is taken from; factoryd stages them for --rewrite-sections-file.
+SCOPED_SECTIONS_SECTION = prompt_templates.load("draft_spec.scoped_sections", ("sections",))
+
+
+def read_rewrite_sections(path: Path | None) -> list[tuple[str, str]] | None:
+	"""Returns the (file, heading) pairs of --rewrite-sections-file, a JSON
+	list of {"path", "section"} objects ("section" empty: the whole file), or
+	None when path is unset or the file is unreadable or not that shape: the
+	optional flag must never turn into a failed draft. buildgate takes only
+	these sections of the redraft whatever the model writes, so a missing list
+	only costs the model the hint."""
+	if path is None:
+		return None
+	try:
+		raw = json.loads(Path(path).read_text(encoding="utf-8"))
+		pairs = [(str(entry["path"]), str(entry["section"])) for entry in raw]
+	except (OSError, ValueError, KeyError, TypeError):
+		return None
+	return pairs or None
+
+
+def rewrite_sections_text(pairs: list[tuple[str, str]]) -> str:
+	"""One list line per place to rewrite, each on one line."""
+	lines = []
+	for file, section in pairs:
+		place = " ".join(section.split()) or "(the whole file)"
+		lines.append(f"- {' '.join(file.split())}: {place}")
+	return "\n".join(lines)
 
 # --- Worked-example verification (added after live runs where drafted criteria
 # carried wrong arithmetic, e.g. `Eval("10 % 3 ^ 2")` stated as 10 when it is 1;
@@ -360,6 +389,7 @@ def file_inventory(workspace: Path, max_lines: int) -> str | None:
 def build_prompt(
 	request_text: str, workspace: Path, draft_path: Path, feedback: str | None = None, design_guide: str | None = None,
 	previous_draft: str | None = None, spec_guidance: str | None = None,
+	rewrite_sections: list[tuple[str, str]] | None = None,
 ) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- agents_md_used is threaded straight into
@@ -393,6 +423,8 @@ def build_prompt(
 		)
 	if previous_draft and previous_draft.strip():
 		sections.append(PREVIOUS_DRAFT_SECTION.format(spec=previous_draft.strip()).rstrip("\n"))
+		if rewrite_sections:
+			sections.append(SCOPED_SECTIONS_SECTION.format(sections=rewrite_sections_text(rewrite_sections)).rstrip("\n"))
 	if feedback and feedback.strip():
 		sections.append(FEEDBACK_HEADER.format(kind="spec", feedback=neutralise_feedback(feedback.strip())))
 	sections.append(SPEC_SKELETON_INSTRUCTIONS.format(draft_path=draft_path))
@@ -420,7 +452,7 @@ def run_draft(
 	workspace: Path, request_path: Path, out_path: Path, evidence_path: Path, timeout_minutes: int,
 	feedback_path: Path | None = None, thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
 	design_guide_path: Path | None = None, previous_draft_path: Path | None = None,
-	spec_guidance_path: Path | None = None,
+	spec_guidance_path: Path | None = None, rewrite_sections_path: Path | None = None,
 ) -> int:
 	request_text = request_path.read_text()
 	draft_path = workspace / DRAFT_RELATIVE_PATH
@@ -428,7 +460,7 @@ def run_draft(
 	design_guide = design_guide_path.read_text(encoding="utf-8") if design_guide_path else None
 	previous_draft = previous_draft_path.read_text(encoding="utf-8") if previous_draft_path else None
 	spec_guidance = spec_guidance_path.read_text(encoding="utf-8") if spec_guidance_path else None
-	prompt, agents_md_used = build_prompt(request_text, workspace, DRAFT_RELATIVE_PATH, feedback, design_guide, previous_draft, spec_guidance)
+	prompt, agents_md_used = build_prompt(request_text, workspace, DRAFT_RELATIVE_PATH, feedback, design_guide, previous_draft, spec_guidance, read_rewrite_sections(rewrite_sections_path))
 
 	session_dir = workspace / ".factory-spec-draft" / "session"
 	session_dir.mkdir(parents=True, exist_ok=True)
@@ -522,6 +554,7 @@ def main() -> int:
 	)
 	parser.add_argument("--feedback-file", type=Path, default=None, help="optional operator feedback from a spec_review rejection (the request driver writes spec-feedback.md from Request.Rejections), included in the prompt as guidance only")
 	parser.add_argument("--previous-draft-file", type=Path, default=None, help="optional spec the operator handed over, to be revised with the feedback instead of drafted afresh; staged by factoryd")
+	parser.add_argument("--rewrite-sections-file", type=Path, default=None, help="optional JSON list of {path, section} naming the sections of --previous-draft-file the feedback commented on; only those are taken from the redraft (buildgate keeps the rest); staged by factoryd")
 	parser.add_argument("--design-guide-file", type=Path, default=None, help="optional spec-decisions part of the team design guide, staged by factoryd")
 	parser.add_argument("--spec-guidance-file", type=Path, default=None, help="optional operator guidance for spec drafting, staged by factoryd")
 	args = parser.parse_args()
@@ -533,6 +566,7 @@ def main() -> int:
 		workspace, args.request.resolve(), args.out, args.evidence, args.timeout_minutes,
 		args.feedback_file, thinking=args.thinking, adapter=adapter, design_guide_path=args.design_guide_file,
 		previous_draft_path=args.previous_draft_file, spec_guidance_path=args.spec_guidance_file,
+		rewrite_sections_path=args.rewrite_sections_file,
 	)
 
 

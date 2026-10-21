@@ -166,6 +166,23 @@ still in that stage, checked under the request lock, and refused with 409
 otherwise, so a decision written for one draft cannot land on the stage or
 the redraft that followed. It binds the stage, not the text: an edit made
 in place while the request stays in that stage does not change `entered_at`.
+A comment on a passage (`anchors[].quote`, `factoryd reject -comments-file`)
+is bound to the text: under the same lock, its file must be `spec.md` (at
+`spec_review`) or a current ticket file (at `plan_review`), its section a
+required heading present in that file, its item no larger than the spec's
+criteria count, and its quote a byte-for-byte substring of its section, else
+the rejection is refused with 409 (`request.ErrPassageMoved`; a place the
+document cannot have is 400, `request.ErrBadAnchor`) and nothing changes. A redraft that follows such comments is scoped by buildgate, not by
+the model: the model writes the whole document, and the driver copies every
+section nobody commented on from the reviewed file byte for byte
+(`request.SpliceSections`), hand edits included, and refuses a redraft that
+does not bound a commented section as the skeleton does (a missing or renamed
+next heading, an extra heading of its level) or that has a skeleton heading
+inside a code fence; a scoped plan redraft revises the rejection's snapshot of
+the tickets, and a send-back to the spec ends the scope; the result goes through the
+same structural checks and, once approved, the same hashes as any draft. A
+whole-file comment on `spec.md`, a free note beside the comments, or a
+send-back makes a full redraft.
 An approval is bound to text instead, by the hashes of the files it
 approves: always for oracle files, and for a spec or plan when the caller
 sends them.

@@ -228,6 +228,12 @@ export interface RejectionAnchor {
   /** The 1-based numbered item under the section; 0 for the section as a whole. */
   readonly item: number;
   readonly note: string;
+  /**
+   * The passage the note is about, copied from the file as the reviewer read
+   * it; "" for a note on a place and not on a passage. The server refuses the
+   * rejection (409) when it is no longer in its section.
+   */
+  readonly quote: string;
 }
 
 function decodeRejectionAnchor(o: JsonObject, at: string): RejectionAnchor {
@@ -236,6 +242,7 @@ function decodeRejectionAnchor(o: JsonObject, at: string): RejectionAnchor {
     section: optString(o, "section", at),
     item: numberOr(o, "item", at, 0),
     note: reqString(o, "note", at),
+    quote: optString(o, "quote", at),
   };
 }
 

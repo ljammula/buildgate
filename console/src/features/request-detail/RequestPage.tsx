@@ -11,6 +11,7 @@ import { InspectPanel } from "./InspectPanel";
 import { NextActionBanner } from "./NextActionBanner";
 import { OracleSkipWarning } from "./OracleSkipWarning";
 import { Panel } from "./Panel";
+import { PendingComments } from "./PendingComments";
 import { PipelineStepper } from "./PipelineStepper";
 import { RequestDialogs } from "./RequestDialogs";
 import { RequestFacts } from "./RequestFacts";
@@ -95,6 +96,7 @@ export function RequestPage({
               anyEditorOpen={editorOpen}
             />
             <OracleSkipWarning request={request} />
+            <PendingComments request={request} />
             {inspectBuilt ? <InspectPanel inspection={inspectBuilt} /> : null}
             {leads ? tickets : null}
             {comparable ? <RevisionCompare request={request} /> : null}
