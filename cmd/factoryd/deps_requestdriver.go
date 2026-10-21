@@ -33,11 +33,14 @@ func (dp *deps) RetargetPullRequestBase(ctx context.Context, prURL string, base 
 func (dp *deps) RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error) {
 	return dp.forge.roundResultDescendsFromHead(dir, ancestor, descendant)
 }
-func (dp *deps) UpdateRef(dir string, ref string, sha string) error {
-	return dp.forge.updateRef(dir, ref, sha)
+func (dp *deps) CreateRef(dir string, ref string, sha string) error {
+	return dp.forge.createRef(dir, ref, sha)
 }
 func (dp *deps) CreateBranchAt(dir string, branch string, sha string) error {
 	return dp.forge.createBranchAt(dir, branch, sha)
+}
+func (dp *deps) PruneRoundRefs(dir string, id string, keepPrefixes []string) error {
+	return dp.forge.pruneRoundRefs(dir, id, keepPrefixes)
 }
 func (dp *deps) UndoMarkPullRequestReady(ctx context.Context, prURL string) error {
 	return dp.forge.undoMarkPullRequestReady(ctx, prURL)

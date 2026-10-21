@@ -755,7 +755,15 @@ func (sv *serveRun) listenAndServe() error {
 		}),
 		// POST /requests/{id}/resume refuses "round" for a lost build whose
 		// kept worktree cannot be continued, the same check the CLI makes.
-		api.WithReviewGateExpiry(sv.baseSettings.ReviewGateExpiry),
+		api.WithReviewGateExpirySource(func() (time.Duration, error) {
+			settings, err := loadSettingsForConfig(*sv.sf.configPath)
+			return settings.ReviewGateExpiry, err
+		}),
+		api.WithGateExpiredNotifier(func(id string) {
+			if err := requestdriver.NotifyGateExpired(*sv.dataDir, id, time.Now()); err != nil {
+				log.Printf("request %s: could not send the expiry notification: %v", id, err)
+			}
+		}),
 		api.WithResumePreflight(func(r *request.Request) ([]string, error) {
 			return requestdriver.ResumeGate{Sandboxes: sv.dp.sandbox.runtime()}.RequestResumeRefusals(context.Background(), *sv.dataDir, sv.baseSettings.SandboxDocker, r)
 		}),

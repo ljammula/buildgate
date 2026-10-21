@@ -70,8 +70,9 @@ type fakeForge struct {
 	retargetPullRequestBaseFn     func(ctx context.Context, prURL string, base string) error
 	roundResultDescendsFromHeadFn func(dir string, ancestor string, descendant string) (bool, error)
 	undoMarkPullRequestReadyFn    func(ctx context.Context, prURL string) error
-	updateRefFn                   func(dir string, ref string, sha string) error
+	createRefFn                   func(dir string, ref string, sha string) error
 	createBranchAtFn              func(dir string, branch string, sha string) error
+	pruneRoundRefsFn              func(dir string, id string, keepPrefixes []string) error
 	userLoginFn                   func() (string, error)
 }
 
@@ -112,8 +113,11 @@ func (f *fakeForge) roundResultDescendsFromHead(dir string, ancestor string, des
 func (f *fakeForge) undoMarkPullRequestReady(ctx context.Context, prURL string) error {
 	return f.undoMarkPullRequestReadyFn(ctx, prURL)
 }
-func (f *fakeForge) updateRef(dir string, ref string, sha string) error {
-	return f.updateRefFn(dir, ref, sha)
+func (f *fakeForge) createRef(dir string, ref string, sha string) error {
+	return f.createRefFn(dir, ref, sha)
+}
+func (f *fakeForge) pruneRoundRefs(dir string, id string, keepPrefixes []string) error {
+	return f.pruneRoundRefsFn(dir, id, keepPrefixes)
 }
 func (f *fakeForge) createBranchAt(dir string, branch string, sha string) error {
 	return f.createBranchAtFn(dir, branch, sha)
@@ -311,8 +315,9 @@ func newTestDeps(t testing.TB) *deps {
 		retargetPullRequestBaseFn:     realForge.retargetPullRequestBase,
 		roundResultDescendsFromHeadFn: realForge.roundResultDescendsFromHead,
 		undoMarkPullRequestReadyFn:    realForge.undoMarkPullRequestReady,
-		updateRefFn:                   realForge.updateRef,
+		createRefFn:                   realForge.createRef,
 		createBranchAtFn:              realForge.createBranchAt,
+		pruneRoundRefsFn:              realForge.pruneRoundRefs,
 		userLoginFn:                   realForge.userLogin,
 	}
 	realHost := realHost{dp: dp}

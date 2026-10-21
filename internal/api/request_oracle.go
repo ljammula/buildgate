@@ -212,7 +212,13 @@ func (s *Server) putRequestOracleFile(w http.ResponseWriter, r *http.Request) {
 	// change the file out from under a check that had already passed
 	// (fixed after an adversarial review, 2026-09-24); see
 	// SetOracleRunCommand's own doc comment.
-	sum, err := request.SetOracleRunCommand(s.dataDir, id, name, body.Content, body.BaseSHA256)
+	opts, optsErr := s.gateOptions()
+	if optsErr != nil {
+		writeError(w, http.StatusInternalServerError, optsErr.Error())
+		return
+	}
+	sum, err := request.SetOracleRunCommand(s.dataDir, id, name, body.Content, body.BaseSHA256, opts...)
+	s.noteGateExpired(id, err)
 	var stale *request.OracleRunCommandStaleError
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -225,7 +231,7 @@ func (s *Server) putRequestOracleFile(w http.ResponseWriter, r *http.Request) {
 			"error":          err.Error(),
 			"current_sha256": stale.Current,
 		})
-	case errors.Is(err, request.ErrOracleWrongState):
+	case errors.Is(err, request.ErrOracleWrongState), errors.Is(err, request.ErrGateExpired):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, request.ErrOracleInvalid):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())

@@ -111,8 +111,8 @@ func TestRoundRefsAreNeverInAPushRefspec(t *testing.T) {
 	sha := gitIn(work, "rev-parse", "HEAD")
 	dp := newTestDeps(t)
 	ref := request.RoundRef("req-3", 1, 1)
-	if err := dp.UpdateRef(work, ref, sha); err != nil {
-		t.Fatalf("UpdateRef: %v", err)
+	if err := dp.CreateRef(work, ref, sha); err != nil {
+		t.Fatalf("CreateRef: %v", err)
 	}
 	if got := gitIn(work, "rev-parse", ref); got != sha {
 		t.Fatalf("%s = %s, want %s", ref, got, sha)

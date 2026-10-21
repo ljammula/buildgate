@@ -609,8 +609,11 @@ type Server struct {
 	// resumePreflight checks a "round" resume of a lost build (see
 	// WithResumePreflight); nil skips it.
 	resumePreflight request.ResumePreflight
-	// reviewGateExpiry is review_gate_expiry (WithReviewGateExpiry); 0 is off.
-	reviewGateExpiry time.Duration
+	// reviewGateExpiry reads review_gate_expiry (WithReviewGateExpirySource);
+	// nil is off. gateExpiredNotifier tells the operator of the halt a refused
+	// decision made (WithGateExpiredNotifier).
+	reviewGateExpiry    func() (time.Duration, error)
+	gateExpiredNotifier func(id string)
 	// requestWaker wakes a request's worker after a write (see WithRequestWaker); nil is safe.
 	requestWaker RequestWaker
 	// releasePolicy is used only to record a release decision (evaluate +
@@ -2555,25 +2558,75 @@ type retryOrCancelRequestBody struct {
 	From string `json:"from,omitempty"`
 }
 
-// refuseExpiredGate halts request id when its review gate has waited longer
-// than review_gate_expiry and refuses the decision, so a late approve or reject
-// never lands whatever the worker's timing. nil when the gate is open, the
-// request is not at one, or expiry is off.
-func (s *Server) refuseExpiredGate(id string) error {
-	r, expired, err := request.ExpireIfDue(s.dataDir, id, s.reviewGateExpiry, time.Now())
-	if err != nil || !expired {
-		return nil
-	}
-	return r.ExpiredRefusal()
+// WithReviewGateExpiry sets a fixed review_gate_expiry: a decision on a gate
+// that has waited this long is refused under the request's lock, which halts
+// the request (gate_expired). 0, the default, is off.
+func WithReviewGateExpiry(d time.Duration) Option {
+	return WithReviewGateExpirySource(func() (time.Duration, error) { return d, nil })
 }
 
-// WithReviewGateExpiry sets review_gate_expiry for approve and reject: a
-// decision on a gate that has waited this long is refused and halts the request
-// (gate_expired). 0, the default, is off.
-func WithReviewGateExpiry(d time.Duration) Option {
+// WithReviewGateExpirySource is WithReviewGateExpiry read afresh at every
+// decision (serve reads the session config each time, so a changed key applies
+// without a restart). A source that fails refuses the decision: the expiry is
+// not guessed.
+func WithReviewGateExpirySource(source func() (time.Duration, error)) Option {
 	return func(s *Server) {
-		s.reviewGateExpiry = d
+		s.reviewGateExpiry = source
 	}
+}
+
+// WithGateExpiredNotifier sets what tells the operator that a decision found
+// its review gate expired and halted the request (the halt's notification).
+func WithGateExpiredNotifier(notify func(id string)) Option {
+	return func(s *Server) {
+		s.gateExpiredNotifier = notify
+	}
+}
+
+// gateExpiry is the review_gate_expiry in force now, 0 without a source.
+func (s *Server) gateExpiry() (time.Duration, error) {
+	if s.reviewGateExpiry == nil {
+		return 0, nil
+	}
+	expiry, err := s.reviewGateExpiry()
+	if err != nil {
+		return 0, fmt.Errorf("review_gate_expiry cannot be read, so this decision is refused: %w", err)
+	}
+	return expiry, nil
+}
+
+// gateOptions makes a decision refuse a lapsed gate under the request's lock.
+func (s *Server) gateOptions() ([]request.DecisionOption, error) {
+	expiry, err := s.gateExpiry()
+	if err != nil {
+		return nil, err
+	}
+	return []request.DecisionOption{request.WithGateExpiry(expiry)}, nil
+}
+
+// noteGateExpired tells the operator when err is a decision refused because
+// its gate had expired.
+func (s *Server) noteGateExpired(id string, err error) {
+	if s.gateExpiredNotifier != nil && errors.Is(err, request.ErrGateExpired) {
+		s.gateExpiredNotifier(id)
+	}
+}
+
+// refuseLapsedEdit refuses an in-place edit of a gate that has expired (the
+// caller holds the request lock and loaded r under it): the request is halted
+// and the refusal written. false means the response is written.
+func (s *Server) refuseLapsedEdit(w http.ResponseWriter, loaded *request.Request) bool {
+	expiry, err := s.gateExpiry()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if err := loaded.RefuseLapsedGate(s.dataDir, expiry, time.Now()); err != nil {
+		s.noteGateExpired(loaded.ID, err)
+		writeError(w, http.StatusConflict, err.Error())
+		return false
+	}
+	return true
 }
 
 // retryFor is the shared retry a body's "from" names: "" or "attempt", "scratch",
@@ -3825,13 +3878,15 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, badPrincipal)
 		return
 	}
-	if err := s.refuseExpiredGate(id); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+	opts, err := s.gateOptions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// ApproveShown, not Approve: the API must not pin oracle files the
 	// client never displayed (the CLI path stays unconditional).
-	loaded, err := request.ApproveShown(s.dataDir, id, by, time.Now(), body.ExpectedSHA256)
+	loaded, err := request.ApproveShown(s.dataDir, id, by, time.Now(), body.ExpectedSHA256, opts...)
+	s.noteGateExpired(id, err)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
@@ -3929,8 +3984,9 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seen := request.Seen{State: request.State(body.ExpectedState), EnteredAt: body.ExpectedEnteredAt}
-	if err := s.refuseExpiredGate(id); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+	opts, err := s.gateOptions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if body.To != "" {
@@ -3941,7 +3997,8 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		loaded, err = request.SendBackSeen(s.dataDir, id, by, body.Reason, target, seen, time.Now())
 	} else {
-		loaded, err = request.RejectSeen(s.dataDir, id, by, body.Reason, body.Anchors, seen, time.Now())
+		loaded, err = request.RejectSeen(s.dataDir, id, by, body.Reason, body.Anchors, seen, time.Now(), opts...)
+		s.noteGateExpired(id, err)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
@@ -4060,7 +4117,13 @@ func (s *Server) resumeRequest(w http.ResponseWriter, r *http.Request) {
 	if from == "" {
 		from = request.ResumeRound
 	}
-	loaded, err := request.ResumeRequest(s.dataDir, id, from, by, time.Now(), s.resumePreflight)
+	opts, err := s.gateOptions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	loaded, err := request.ResumeRequest(s.dataDir, id, from, by, time.Now(), s.resumePreflight, opts...)
+	s.noteGateExpired(id, err)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
@@ -4281,6 +4344,9 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "load request")
 		return
 	}
+	if !s.refuseLapsedEdit(w, loaded) {
+		return
+	}
 	if loaded.State != request.StateSpecReview {
 		writeError(w, http.StatusConflict, fmt.Sprintf("request %s: cannot edit spec.md from state %q (must be %q)", id, loaded.State, request.StateSpecReview))
 		return
@@ -4367,6 +4433,9 @@ func (s *Server) updateRequestTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load request")
+		return
+	}
+	if !s.refuseLapsedEdit(w, loaded) {
 		return
 	}
 	if loaded.State != request.StatePlanReview {

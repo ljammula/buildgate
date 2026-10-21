@@ -69,6 +69,10 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 	if err != nil {
 		return workflow.RequestStep{}, fmt.Errorf("load request %s: %w", id, err)
 	}
+	if r.State.Finished() {
+		// Nothing can retry from a round of a request that is over.
+		requestdriver.PruneRoundRefs(a.dp, r)
+	}
 	step := requestStepFor(r.State, a.cfg)
 	if step.Remind {
 		step.Wait = reviewWait(r, a.cfg.HitlReminderInterval, a.cfg.Settings.ReviewGateExpiry, time.Now())
@@ -215,7 +219,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 		stopHeartbeat := heartbeatUntilDone(ctx, requestHeartbeatInterval)
 		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.oracleRunner, a.buildRunner)
 		stopHeartbeat()
-		if err != nil {
+		if err != nil && !errors.Is(err, request.ErrCancelledOnDisk) {
 			return "", err
 		}
 	}

@@ -72,11 +72,36 @@ func tagTicketRound(dp Deps, r *request.Request, ticket *request.Ticket, runReco
 	if !ok {
 		return
 	}
-	if err := dp.UpdateRef(repo, tag.Ref, tag.SHA); err != nil {
+	tag, err := createRoundRef(dp, repo, r.ID, ticket.Index, tag)
+	if err != nil {
 		log.Printf("request %s: ticket %d: could not keep round %d's commit under %s: %v", r.ID, ticket.Index, tag.N, tag.Ref, err)
 		return
 	}
+	tag.Repo = repo
 	r.AppendRoundTag(ticket.Index, tag)
+}
+
+// maxRoundRefAttempts bounds the round numbers createRoundRef tries.
+const maxRoundRefAttempts = 1000
+
+// createRoundRef creates tag's ref, never moving one that exists: a ticket's
+// ledger starts again after a send-back re-plans it, while the refs of its
+// earlier plan still keep their commits, so a taken name moves the round to
+// the next free number.
+func createRoundRef(dp Deps, repo, id string, ticketIndex int, tag request.RoundTag) (request.RoundTag, error) {
+	for attempt := 0; attempt < maxRoundRefAttempts; attempt++ {
+		candidate := tag
+		candidate.N = tag.N + attempt
+		candidate.Ref = request.RoundRef(id, ticketIndex, candidate.N)
+		err := dp.CreateRef(repo, candidate.Ref, candidate.SHA)
+		if err == nil {
+			return candidate, nil
+		}
+		if !errors.Is(err, workspace.ErrRefExists) {
+			return candidate, err
+		}
+	}
+	return tag, fmt.Errorf("every round ref name from %s is taken", tag.Ref)
 }
 
 // tagRoundByID is tagTicketRound for the run named by runID, read from disk.
@@ -124,7 +149,7 @@ func createRoundBranch(dp Deps, repo string, id string, ticketIndex int, tag req
 // attempt's record, as withEarlierAttemptOf says. Then the earlier tickets'
 // work (withEarlierTicketsWork).
 func startingPoint(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, args []string, resumeRunID string) (argv []string, recordOf string, onBranch bool, err error) {
-	if r.RetryFromRound > 0 && resumeRunID == "" {
+	if _, round := r.RetryChoiceFor(ticket.Index); round > 0 && resumeRunID == "" {
 		argv, recordOf, onBranch, err = withRoundBranch(dp, dataDir, r, ticket, args)
 	} else {
 		argv, recordOf, onBranch = withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
@@ -142,15 +167,19 @@ func startingPoint(dp Deps, dataDir string, r *request.Request, ticket *request.
 // failure a build is told about, the build is given its record, saying the
 // attempt's commit is in the workspace.
 func withRoundBranch(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, args []string) (argv []string, recordOf string, onBranch bool, err error) {
-	tag, ok := ticket.RoundTagN(r.RetryFromRound)
+	_, round := r.RetryChoiceFor(ticket.Index)
+	tag, ok := ticket.RoundTagN(round)
 	if !ok || ticket.Pushed() {
-		return args, "", false, fmt.Errorf("ticket %d/%d: retry from round %d: that round is not in the ledger, or the ticket's branch was pushed", ticket.Index, r.TicketCount, r.RetryFromRound)
+		return args, "", false, fmt.Errorf("ticket %d/%d: retry from round %d: that round is not in the ledger, or the ticket's branch was pushed", ticket.Index, r.TicketCount, round)
 	}
 	previous, loadErr := run.Load(dataDir, tag.RunID)
 	if loadErr != nil || previous.RequestID != r.ID {
 		previous = nil
 	}
-	branch, err := createRoundBranch(dp, roundRepoDir(r, previous), r.ID, ticket.Index, tag)
+	if tag.Repo == "" {
+		return args, "", false, fmt.Errorf("ticket %d/%d: retry from round %d: the round records no repository", ticket.Index, r.TicketCount, tag.N)
+	}
+	branch, err := createRoundBranch(dp, tag.Repo, r.ID, ticket.Index, tag)
 	if err != nil {
 		return args, "", false, fmt.Errorf("ticket %d/%d: retry from round %d: %w", ticket.Index, r.TicketCount, tag.N, err)
 	}
@@ -168,4 +197,36 @@ func withRoundBranch(dp Deps, dataDir string, r *request.Request, ticket *reques
 	}
 	log.Printf("request %s: ticket %d/%d: rebuilding on %s, at round %d's commit %s", r.ID, ticket.Index, r.TicketCount, branch, tag.N, tag.SHA)
 	return append(args, "-on-branch", branch, "-diff-base", diffBase), recordOf, true, nil
+}
+
+// PruneRoundRefs deletes request r's round refs, and the retry-from branches
+// of its tickets that were never pushed, from every repository its ledger names.
+// A request that has reached done, closed or cancelled needs neither: they
+// exist so an operator can retry from a round. A branch of a pushed ticket stays
+// (it is the pull request's). Failures are logged, never returned: the request
+// is already over.
+func PruneRoundRefs(dp Deps, r *request.Request) {
+	if dp == nil {
+		return
+	}
+	repos := map[string][]string{}
+	for i := range r.Tickets {
+		ticket := &r.Tickets[i]
+		for _, tag := range ticket.RoundTags {
+			if tag.Repo == "" {
+				continue
+			}
+			if _, ok := repos[tag.Repo]; !ok {
+				repos[tag.Repo] = nil
+			}
+			if ticket.Pushed() {
+				repos[tag.Repo] = append(repos[tag.Repo], fmt.Sprintf("buildgate/%s/t%d-", r.ID, ticket.Index))
+			}
+		}
+	}
+	for repo, keep := range repos {
+		if err := dp.PruneRoundRefs(repo, r.ID, keep); err != nil {
+			log.Printf("request %s: round refs in %s not pruned: %v", r.ID, repo, err)
+		}
+	}
 }

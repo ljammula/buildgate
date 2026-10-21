@@ -159,7 +159,8 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	// `resume -from scratch` is a rebuild in a fresh worktree from the
 	// base, also when the step it replaces was a retry lost before its
 	// run existed, whose own choice the move through resume_review dropped.
-	continues := resumeRunID == "" && !r.RetryFromScratch && r.PendingResumeVerb() == ""
+	scratch, _ := r.RetryChoiceFor(ticket.Index)
+	continues := resumeRunID == "" && !scratch && r.PendingResumeVerb() == ""
 	if previous.State == run.StateHalted && previous.EarlierAttemptOf != "" {
 		continues = false
 		unfinished := previous

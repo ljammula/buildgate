@@ -16,19 +16,19 @@ func headOf(t *testing.T, repo string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func TestUpdateRefKeepsACommitUnderALocalRef(t *testing.T) {
+func TestCreateRefKeepsACommitUnderALocalRef(t *testing.T) {
 	repo := newFixtureRepo(t)
 	sha := headOf(t, repo)
 	ref := "refs/buildgate/rounds/req-1/t1/r1"
-	if err := UpdateRef(repo, ref, sha); err != nil {
-		t.Fatalf("UpdateRef: %v", err)
+	if err := CreateRef(repo, ref, sha); err != nil {
+		t.Fatalf("CreateRef: %v", err)
 	}
 	if out, err := exec.Command("git", "-C", repo, "rev-parse", ref).Output(); err != nil || strings.TrimSpace(string(out)) != sha {
 		t.Fatalf("%s = %q (%v), want %s", ref, out, err, sha)
 	}
 	for _, bad := range [][2]string{{"heads/main", sha}, {"refs/x y", sha}, {ref, "HEAD"}, {ref, "--delete"}} {
-		if err := UpdateRef(repo, bad[0], bad[1]); err == nil {
-			t.Errorf("UpdateRef(%q, %q) was accepted", bad[0], bad[1])
+		if err := CreateRef(repo, bad[0], bad[1]); err == nil {
+			t.Errorf("CreateRef(%q, %q) was accepted", bad[0], bad[1])
 		}
 	}
 }

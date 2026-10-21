@@ -285,6 +285,9 @@ func (r *Request) retryRebuild(by, reason string, choice retryChoice, now time.T
 	}
 	r.RetryFromScratch = choice.scratch
 	r.RetryFromRound = choice.round
+	if choice.scratch || choice.round > 0 {
+		r.RetryTicket = max(r.TicketIndex, 1)
+	}
 	return nil
 }
 

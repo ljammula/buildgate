@@ -14,10 +14,16 @@ var commitID = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 // points at another commit.
 var ErrBranchExists = errors.New("branch already exists at another commit")
 
-// UpdateRef points ref (a full name, such as refs/buildgate/rounds/...) at sha
-// in repoDir's local repository, under the git metadata lock. It writes only
-// the local ref database: nothing is pushed.
-func UpdateRef(repoDir, ref, sha string) error {
+// ErrRefExists is returned by CreateRef for a ref that already points at
+// another commit.
+var ErrRefExists = errors.New("ref already exists at another commit")
+
+// CreateRef creates ref (a full name, such as refs/buildgate/rounds/...) at sha
+// in repoDir's local repository, under the git metadata lock. A ref that
+// exists is never moved: at sha it is left as it is, at another commit it is
+// ErrRefExists, so the commit it keeps stays reachable. It writes only the
+// local ref database: nothing is pushed.
+func CreateRef(repoDir, ref, sha string) error {
 	if !strings.HasPrefix(ref, "refs/") || strings.ContainsAny(ref, " \t\n") {
 		return fmt.Errorf("update-ref: %q is not a full ref name", ref)
 	}
@@ -29,7 +35,14 @@ func UpdateRef(repoDir, ref, sha string) error {
 		return err
 	}
 	defer unlock()
-	if out, err := gitMutate(repoDir, "update-ref", ref, sha); err != nil {
+	if out, err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output(); err == nil {
+		if strings.TrimSpace(string(out)) == sha {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", ErrRefExists, ref)
+	}
+	// The empty old value makes git refuse a ref created meanwhile.
+	if out, err := gitMutate(repoDir, "update-ref", ref, sha, ""); err != nil {
 		return fmt.Errorf("git update-ref %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -57,4 +70,48 @@ func CreateBranchAt(repoDir, name, sha string) error {
 		return fmt.Errorf("git branch %s %s: %w: %s", name, sha, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// PruneRoundRefs deletes the round refs of request id (refs/buildgate/rounds/<id>/)
+// from repoDir and its local branches buildgate/<id>/t<n>-from-r<m> that start
+// with none of keepPrefixes (the branches of tickets that were pushed). A branch
+// that cannot be deleted (checked out in a worktree) is left and reported in
+// the returned error after the rest are done.
+func PruneRoundRefs(repoDir, id string, keepPrefixes []string) error {
+	if id == "" || strings.ContainsAny(id, " \t\n/") {
+		return fmt.Errorf("prune round refs: %q is not a request id", id)
+	}
+	unlock, err := lockGitMetadata(repoDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	var failed []string
+	for _, prefix := range []string{"refs/buildgate/rounds/" + id + "/", "refs/heads/buildgate/" + id + "/"} {
+		out, err := exec.Command("git", "-C", repoDir, "for-each-ref", "--format=%(refname)", prefix).Output()
+		if err != nil {
+			return fmt.Errorf("git for-each-ref %s: %w", prefix, err)
+		}
+		for _, ref := range strings.Fields(string(out)) {
+			if strings.HasPrefix(ref, "refs/heads/") && keptBranch(strings.TrimPrefix(ref, "refs/heads/"), keepPrefixes) {
+				continue
+			}
+			if msg, err := gitMutate(repoDir, "update-ref", "-d", ref); err != nil {
+				failed = append(failed, ref+": "+strings.TrimSpace(string(msg)))
+			}
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("prune round refs: could not delete %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+func keptBranch(branch string, keepPrefixes []string) bool {
+	for _, prefix := range keepPrefixes {
+		if strings.HasPrefix(branch, prefix) {
+			return true
+		}
+	}
+	return false
 }

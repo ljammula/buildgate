@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"buildgate/internal/oraclecanary"
 )
@@ -334,7 +335,7 @@ func validateOracleRunCommandText(content string) error {
 //
 // Validation runs after the hash check; on any failure nothing is
 // written. Returns the new file's sha256.
-func SetOracleRunCommand(dataDir, id, name, content, baseSHA256 string) (string, error) {
+func SetOracleRunCommand(dataDir, id, name, content, baseSHA256 string, opts ...DecisionOption) (string, error) {
 	if name != TicketOracleRunCommandFilename {
 		return "", ErrOracleNotEditable
 	}
@@ -345,6 +346,9 @@ func SetOracleRunCommand(dataDir, id, name, content, baseSHA256 string) (string,
 	defer unlock()
 	r, err := Load(dataDir, id)
 	if err != nil {
+		return "", err
+	}
+	if err := r.refuseLapsed(dataDir, time.Now(), opts); err != nil {
 		return "", err
 	}
 	if r.State != StateOracleReview {

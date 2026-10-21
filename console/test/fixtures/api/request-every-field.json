@@ -44,6 +44,7 @@
   },
   "retry_from_scratch": true,
   "retry_from_round": 3,
+  "retry_ticket": 3,
   "quarantine_check": "every-field quarantine_check",
   "approved_by": "every-field approved_by",
   "approved_at": "2026-09-10T09:00:00Z",
@@ -274,6 +275,7 @@
           "base_sha": "every-field base_sha",
           "diff_base_sha": "every-field diff_base_sha",
           "ref": "every-field ref",
+          "repo": "every-field repo",
           "outcome": "every-field outcome",
           "failed_checks": [
             "every-field failed_checks"

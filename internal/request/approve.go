@@ -91,8 +91,8 @@ func NextApprovalState(r *Request) (state State, ok bool) {
 	}
 }
 
-func Approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string) (*Request, error) {
-	return approve(dataDir, id, by, now, expectedSHA256, false)
+func Approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string, opts ...DecisionOption) (*Request, error) {
+	return approve(dataDir, id, by, now, expectedSHA256, false, opts)
 }
 
 // ErrOracleNotShown is returned by ApproveShown when an approval would pin
@@ -109,8 +109,8 @@ var ErrOracleNotShown = errors.New("approval has oracle files this client did no
 // Approve, unconditional by design) or a client that lists oracle hashes.
 // The check runs under the same lock and hashing as Approve, so no file can
 // change between the coverage check and the pin.
-func ApproveShown(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string) (*Request, error) {
-	return approve(dataDir, id, by, now, expectedSHA256, true)
+func ApproveShown(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string, opts ...DecisionOption) (*Request, error) {
+	return approve(dataDir, id, by, now, expectedSHA256, true, opts)
 }
 
 // validateTicketSpecs is approve's re-validation of every ticket under
@@ -144,7 +144,7 @@ func refuseOpenDecisions(dataDir, id string) error {
 	return fmt.Errorf("request %s: %w (%d under %q in %s): answer them by requesting changes (`factoryd reject -reason \"<your answers>\" %s`; \"take the recommended option\" is an answer) and the redraft writes the answers into the spec, or settle them yourself by editing the spec. The items: %s", id, ErrOpenDecisions, len(decisions), openQuestionsHeading, specFileName, id, strings.Join(decisions, " | "))
 }
 
-func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string, requireOracleShown bool) (*Request, error) {
+func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]string, requireOracleShown bool, opts []DecisionOption) (*Request, error) {
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
 		return nil, err
@@ -152,6 +152,9 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 	defer unlock()
 	r, err := Load(dataDir, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.refuseLapsed(dataDir, now, opts); err != nil {
 		return nil, err
 	}
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
@@ -397,8 +400,8 @@ func (r *Request) approveTransition(by string, now time.Time, relPaths []string)
 // stageFeedback already renders every same-stage rejection (not just the
 // latest), so removing the request.md copy loses no information a
 // redraft needs.
-func Reject(dataDir, id, by, reason string, now time.Time) (*Request, error) {
-	return RejectAnchored(dataDir, id, by, reason, nil, now)
+func Reject(dataDir, id, by, reason string, now time.Time, opts ...DecisionOption) (*Request, error) {
+	return RejectAnchored(dataDir, id, by, reason, nil, now, opts...)
 }
 
 // Seen is the stage a caller read a request in before deciding on it: its
@@ -433,14 +436,14 @@ func (seen Seen) check(r *Request) error {
 // feedback file included; the anchors and the free note are also kept on
 // the Rejection as given, for a console to show against the document. note
 // may be empty when there is at least one anchor.
-func RejectAnchored(dataDir, id, by, note string, anchors []RejectionAnchor, now time.Time) (*Request, error) {
-	return RejectSeen(dataDir, id, by, note, anchors, Seen{}, now)
+func RejectAnchored(dataDir, id, by, note string, anchors []RejectionAnchor, now time.Time, opts ...DecisionOption) (*Request, error) {
+	return RejectSeen(dataDir, id, by, note, anchors, Seen{}, now, opts...)
 }
 
 // RejectSeen is RejectAnchored for a caller that read the request before
 // deciding: it rejects only while the request is in the stage seen names
 // (ErrStageMoved otherwise), checked under the request lock.
-func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Seen, now time.Time) (*Request, error) {
+func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Seen, now time.Time, opts ...DecisionOption) (*Request, error) {
 	anchors, err := NormalizeRejectionAnchors(anchors)
 	if err != nil {
 		return nil, fmt.Errorf("request %s: %w", id, err)
@@ -456,6 +459,9 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	defer unlock()
 	r, err := Load(dataDir, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.refuseLapsed(dataDir, now, opts); err != nil {
 		return nil, err
 	}
 	// Under the request lock, with the record just read: nothing moves the

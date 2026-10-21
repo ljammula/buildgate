@@ -95,11 +95,12 @@ type forgeBoundary interface {
 	retargetPullRequestBase(ctx context.Context, prURL string, base string) error
 	roundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error)
 	undoMarkPullRequestReady(ctx context.Context, prURL string) error
-	// updateRef points a full ref at a commit in the local .git of dir, and
+	// createRef points a full ref at a commit in the local .git of dir, and
 	// createBranchAt creates a local branch there: the round refs and the
 	// branch of `retry -from <N>`. Neither touches a remote.
-	updateRef(dir string, ref string, sha string) error
+	createRef(dir string, ref string, sha string) error
 	createBranchAt(dir string, branch string, sha string) error
+	pruneRoundRefs(dir string, id string, keepPrefixes []string) error
 	userLogin() (string, error)
 }
 

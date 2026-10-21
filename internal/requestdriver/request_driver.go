@@ -44,11 +44,14 @@ type Deps interface {
 	RetargetPullRequestBase(ctx context.Context, prURL string, base string) error
 	RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error)
 	UndoMarkPullRequestReady(ctx context.Context, prURL string) error
-	// UpdateRef points a full ref at a commit in the target repository's local
+	// CreateRef points a full ref at a commit in the target repository's local
 	// .git (the round refs; nothing is pushed). CreateBranchAt creates a local
 	// branch at a commit, workspace.ErrBranchExists when it is elsewhere.
-	UpdateRef(dir string, ref string, sha string) error
+	CreateRef(dir string, ref string, sha string) error
 	CreateBranchAt(dir string, branch string, sha string) error
+	// PruneRoundRefs deletes request id's round refs, and its retry-from
+	// branches that start with none of keepPrefixes, from the repository.
+	PruneRoundRefs(dir string, id string, keepPrefixes []string) error
 	// RunTicket builds one ticket: the command's single-ticket run.
 	RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error
 }
@@ -742,6 +745,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// later rebuild of this ticket never reuses it. Until here a crash
 		// leaves it in place and the next pass applies it again.
 		r.ConsumeResumeDecision()
+		r.ClearRetryChoice()
 		log.Printf("request %s: building -> building (ticket %d/%d started as run %s)", r.ID, idx, r.TicketCount, startedRun.ID)
 		// Recorded on the run's own durable record too, not just this
 		// ticket's RunID back-reference -- see run.Run.RequestID's own
@@ -2896,32 +2900,44 @@ func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 }
 
 // ExpireIfDue halts the request id when it waits at an expiring review gate
-// (request.ExpiringGate) that has waited expiry or longer at now, with halt
-// kind gate_expired, and tells the operator through the same notification a
-// halt sends. It runs under the request's lock on a fresh read, so a decision
-// made meanwhile wins. An expiry of 0 is off. It reports whether it halted.
+// (request.ExpireIfDue, the one implementation) and tells the operator. An
+// expiry of 0 is off. It reports whether it halted.
 func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (bool, error) {
 	if expiry <= 0 {
 		return false, nil
 	}
+	_, expired, err := request.ExpireIfDue(dataDir, id, expiry, now)
+	if err != nil || !expired {
+		return false, err
+	}
+	return true, NotifyGateExpired(dataDir, id, now)
+}
+
+// NotifyGateExpired tells the operator that request id was halted by an expired
+// review gate: the halt's notification, sent once (a request already notified
+// since it entered halted is left alone). Whoever finds a gate expired calls
+// it after request.ExpireIfDue or a refused decision (request.ErrGateExpired):
+// the worker's review wait, the CLI, and the API's notifier option.
+func NotifyGateExpired(dataDir, id string, now time.Time) error {
 	unlock, err := request.Lock(dataDir, id)
 	if err != nil {
-		return false, fmt.Errorf("request %s: %w", id, err)
+		return fmt.Errorf("request %s: %w", id, err)
 	}
 	defer unlock()
 	r, err := request.Load(dataDir, id)
 	if err != nil {
-		return false, fmt.Errorf("request %s: %w", id, err)
+		return fmt.Errorf("request %s: %w", id, err)
 	}
-	if !r.GateExpired(expiry, now) {
-		return false, nil
+	if r.State != request.StateHalted || r.HaltKind != request.HaltGateExpired {
+		return nil
 	}
-	from := r.State
-	if err := r.HaltGateExpired(expiry, now); err != nil {
-		return false, err
+	if sent, ok := time.Parse(time.RFC3339Nano, r.LastNotifiedAt); ok == nil {
+		if entered, ok := r.InStateSince(); ok && !sent.Before(entered) {
+			return nil
+		}
 	}
-	log.Printf("request %s: %s -> halted (%s)", r.ID, from, r.Error)
-	return true, notifyTerminalRequest(dataDir, r, r.Error, now)
+	log.Printf("request %s: halted (%s)", r.ID, r.Error)
+	return notifyTerminalRequest(dataDir, r, r.Error, now)
 }
 
 // ReviewState reports whether s is one of the states a request waits on the

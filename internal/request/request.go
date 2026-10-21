@@ -423,6 +423,11 @@ type Request struct {
 	// ticket being built (RoundTag). 0 when the retry named no round. Dropped by
 	// every later transition, like RetryFromScratch.
 	RetryFromRound int `json:"retry_from_round,omitempty"`
+	// RetryTicket is the index of the ticket RetryFromScratch and
+	// RetryFromRound apply to: the ticket the retry rebuilds. The choice is
+	// honoured for that ticket only (RetryChoiceFor), so a request that goes
+	// on to build its next ticket does not carry it over.
+	RetryTicket int `json:"retry_ticket,omitempty"`
 	// HaltKind is a typed marker for a halt whose recovery is not the default
 	// one (see HaltOracleMaterialize); empty for every other halt. Cleared by
 	// every transition, so it is only ever set while State is halted.
@@ -1014,6 +1019,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	// (RetryFromScratch); every move drops an earlier one.
 	r.RetryFromScratch = false
 	r.RetryFromRound = 0
+	r.RetryTicket = 0
 	r.History = append(r.History, Transition{From: from, To: to, At: ts, By: by, Reason: reason})
 	// Only re-entering planning drops the per-ticket pins (the re-plan
 	// rewrites or deletes those files). Pruning on every transition would

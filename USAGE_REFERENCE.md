@@ -315,7 +315,14 @@ checks that failed) and kept under a local ref
 the commit stays reachable after a halted run's branch is deleted. The host
 writes the refs; they are never pushed. A round that committed nothing (its
 result equals its starting commit) has no entry, and a ref that cannot be
-written is logged and leaves no entry.
+written is logged and leaves no entry. A ref is created and never moved: a
+ticket's ledger starts again after a send-back re-plans it, and a name already
+taken moves the new round to the next free number, so the earlier plan's commits
+stay reachable. Each entry records its repository. When the request reaches
+`done`, `closed` or `cancelled` its round refs and its unpushed
+`buildgate/<request-id>/t<ticket>-from-r<n>` branches are deleted from the
+repository (a pushed ticket's branches stay); until then they are the only way
+back to a round.
 
 A retry is not a corrective round: it uses none of that budget and records no
 round. If the rebuild cannot start on the quarantined run's branch (the branch
@@ -1902,7 +1909,7 @@ limits for API-started runs.
 | `request_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `request_token_budget`, in micro-USD |
 | `monthly_token_budget` | `0` (unlimited) -- total spend across every request in the data dir during the current calendar month (UTC) |
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
-| `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review` |
+| `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, the oracle run-command edit and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
 | `registry_proxy_pypi_upstream` | `https://pypi.org/simple` |
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |

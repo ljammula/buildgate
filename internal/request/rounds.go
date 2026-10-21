@@ -32,8 +32,10 @@ type RoundTag struct {
 	SHA         string `json:"sha"`
 	BaseSHA     string `json:"base_sha,omitempty"`
 	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
-	// Ref is RoundRefPrefix<request>/t<ticket>/r<N>.
+	// Ref is RoundRefPrefix<request>/t<ticket>/r<n> (the first free n).
 	Ref string `json:"ref"`
+	// Repo is the repository the ref lives in (the run's RepositoryRoot).
+	Repo string `json:"repo,omitempty"`
 	// Outcome is accepted, quarantined or halted; FailedChecks names the gates
 	// that did not pass.
 	Outcome      string   `json:"outcome"`
@@ -133,4 +135,20 @@ func roundNumbers(t *Ticket) string {
 		ns = append(ns, fmt.Sprint(tag.N))
 	}
 	return strings.Join(ns, ", ")
+}
+
+// RetryChoiceFor is the operator's `retry -from` choice as it applies to the
+// build of ticket ticketIndex: scratch, or a ledger round (0 for none). Another
+// ticket's build gets neither.
+func (r *Request) RetryChoiceFor(ticketIndex int) (scratch bool, round int) {
+	if r.RetryTicket != ticketIndex {
+		return false, 0
+	}
+	return r.RetryFromScratch, r.RetryFromRound
+}
+
+// ClearRetryChoice drops the `retry -from` choice once the build it was for has
+// started.
+func (r *Request) ClearRetryChoice() {
+	r.RetryFromScratch, r.RetryFromRound, r.RetryTicket = false, 0, 0
 }

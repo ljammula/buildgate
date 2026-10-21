@@ -64,8 +64,9 @@ func resumeMainWith(dp *deps, args []string, gate requestdriver.ResumeGate) erro
 			checked = fmt.Sprintf("resume preconditions hold for run %s: no sandbox container alive, worktree HEAD matches its round state", r.Resume.LostRunID)
 		}
 		return reasons, err
-	})
+	}, request.WithGateExpiry(settings.ReviewGateExpiry))
 	if err != nil {
+		notifyIfGateExpired(*dataDir, id, err)
 		return err
 	}
 	// A decision that continues no kept build (a drafting or planning rerun,

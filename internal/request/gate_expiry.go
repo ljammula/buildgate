@@ -1,6 +1,7 @@
 package request
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -60,28 +61,77 @@ func (r *Request) HaltGateExpired(expiry time.Duration, now time.Time) error {
 	return nil
 }
 
+// ErrGateExpired wraps the refusal of a decision on a review gate that has
+// waited longer than review_gate_expiry. The request has been halted
+// (HaltGateExpired) by the time a caller sees it, so a caller tells the
+// operator (the halt's notification) and reports the refusal.
+var ErrGateExpired = errors.New("the review gate expired")
+
+// DecisionOption adjusts a decision on a request (Approve, Reject, ResumeRequest).
+type DecisionOption func(*decisionOptions)
+
+type decisionOptions struct{ expiry time.Duration }
+
+// WithGateExpiry makes the decision refuse, under the request's own lock, a
+// review gate that has waited expiry or longer: the request is halted
+// (HaltGateExpired) in the same locked step and the decision returns an error
+// wrapping ErrGateExpired. 0 is off.
+func WithGateExpiry(expiry time.Duration) DecisionOption {
+	return func(o *decisionOptions) { o.expiry = expiry }
+}
+
+// expiryOf is the gate expiry a decision's options carry.
+func expiryOf(opts []DecisionOption) time.Duration {
+	var o decisionOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o.expiry
+}
+
+// RefuseLapsedGate halts r when it waits at an expiring gate that has waited
+// expiry or longer, saves it, and returns the refusal (wrapping ErrGateExpired
+// and ErrIllegalTransition). nil when expiry is off or the gate is open. The
+// caller holds the request's lock and loaded r under it, so a decision and the
+// expiry cannot interleave: whichever takes the lock first wins.
+func (r *Request) RefuseLapsedGate(dataDir string, expiry time.Duration, now time.Time) error {
+	if !r.GateExpired(expiry, now) {
+		return nil
+	}
+	if err := r.HaltGateExpired(expiry, now); err != nil {
+		return err
+	}
+	if err := r.Save(dataDir); err != nil {
+		return err
+	}
+	return r.ExpiredRefusal()
+}
+
+// refuseLapsed is RefuseLapsedGate with the expiry of a decision's options.
+func (r *Request) refuseLapsed(dataDir string, now time.Time, opts []DecisionOption) error {
+	return r.RefuseLapsedGate(dataDir, expiryOf(opts), now)
+}
+
 // ExpireIfDue halts the request id when it waits at an expiring gate that has
 // waited expiry or longer, under the request's lock and on a fresh read. It
 // reports whether it did; the returned request is the one read. An expiry of 0
-// is off and changes nothing.
+// is off and changes nothing. It sends no notification: the caller tells the
+// operator (requestdriver.NotifyGateExpired).
 func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (r *Request, expired bool, err error) {
-	if expiry <= 0 {
-		r, err = Load(dataDir, id)
-		return r, false, err
-	}
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
 		return nil, false, err
 	}
 	defer unlock()
 	r, err = Load(dataDir, id)
-	if err != nil || !r.GateExpired(expiry, now) {
-		return r, false, err
+	if err != nil {
+		return nil, false, err
 	}
-	if err := r.HaltGateExpired(expiry, now); err != nil {
-		return r, false, err
+	err = r.RefuseLapsedGate(dataDir, expiry, now)
+	if errors.Is(err, ErrGateExpired) {
+		return r, true, nil
 	}
-	return r, true, r.Save(dataDir)
+	return r, false, err
 }
 
 // ReopenReview is the recovery of a gate_expired halt: halted -> the review
@@ -113,5 +163,5 @@ func (r *Request) ReopenReview(by, reason string, now time.Time) error {
 // ExpiredRefusal is the error a decision on a gate that has just expired
 // returns: it names the expiry and the retry that reopens the review.
 func (r *Request) ExpiredRefusal() error {
-	return fmt.Errorf("request %s: %s; `factoryd retry %s` reopens the review %w", r.ID, r.Error, r.ID, ErrIllegalTransition)
+	return fmt.Errorf("request %s: %s; `factoryd retry %s` reopens the review %w %w", r.ID, r.Error, r.ID, ErrGateExpired, ErrIllegalTransition)
 }

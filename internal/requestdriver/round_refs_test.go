@@ -36,7 +36,7 @@ func quarantinedRun(t *testing.T, dataDir, runID, baseSHA, resultSHA, failedChec
 	return rr.Save(dataDir)
 }
 
-// refRecorder is the fake's UpdateRef and CreateBranchAt: the refs written and
+// refRecorder is the fake's CreateRef and CreateBranchAt: the refs written and
 // the branches created, in order.
 type refRecorder struct {
 	refs     map[string]string
@@ -46,7 +46,13 @@ type refRecorder struct {
 
 func recordRefs(dp *fakeDeps) *refRecorder {
 	rec := &refRecorder{refs: map[string]string{}, branches: map[string]string{}}
-	dp.updateRefFn = func(dir, ref, sha string) error {
+	dp.createRefFn = func(dir, ref, sha string) error {
+		if have, ok := rec.refs[ref]; ok {
+			if have == sha {
+				return nil
+			}
+			return workspace.ErrRefExists
+		}
 		rec.refs[ref] = sha
 		rec.order = append(rec.order, ref)
 		return nil
