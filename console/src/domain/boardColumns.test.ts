@@ -277,8 +277,11 @@ describe("buildBoard", () => {
           state: "oracle_review",
           waitingSince: "2026-09-10T08:00:00Z",
         }),
-        wire({ id: "third", state: "oracle_drafting" }, { queue_position: 2 }),
-        wire({ id: "second", state: "submitted" }, { queue_position: 1 }),
+        wire(
+          { id: "third", state: "oracle_drafting" },
+          { wait: { kind: "job_slot", position: 2 } },
+        ),
+        wire({ id: "second", state: "submitted" }, { wait: { kind: "job_slot", position: 1 } }),
         wire({ id: "running", state: "spec_drafting" }, {}),
       ],
       { showCancelled: false },

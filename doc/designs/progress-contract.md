@@ -93,6 +93,14 @@ Two factory `note` lines exist:
   `compose_services_concurrency`), and `acquired` whenever it takes the
   slot, waited or not; written by `cmd/factoryd/run_ticket.go` before the
   run starts, and by the daemon when it reclaims a crashed run.
+- `repository_lock` — event `waiting` (`detail` = `another build holds the
+  repository`) while a run waits for the repository lock, and `acquired`
+  once it holds it; written by `cmd/factoryd/repo_lock_wait.go` when a
+  build waits for the lock inside its job slot (a corrective round beside
+  builds that hold it shared) and when an isolated run waits for the shared
+  lock behind an exclusive holder. A run that finds the repository held
+  before it starts gives its slot back instead; that wait is the worker
+  heartbeat's `repository_waits`.
 - `build` note — written once after evidence is loaded, `detail` = a
   factory-formatted round summary derived from `BUILD_EVIDENCE.json`,
   e.g. `3 rounds · r1 fail (verify) · r2 fail (verify) · r3 pass · 41.2k
@@ -138,14 +146,38 @@ the file is drained (with one extra drain after terminal is observed, since
 computed from the tail of the feed (`internal/progress.Summary`):
 `last_progress_at`, `current_stage`, `current_round`, `max_rounds`,
 `waiting_reason` (the latest `queued` note's or `model_host_lock`/
-`compose_services_lock` `waiting` event's detail, cleared when a stage
-starts or the lock is `acquired`). Consumers flag a non-terminal run as **stalled** when
+`compose_services_lock`/`repository_lock` `waiting` event's detail, cleared
+when a stage starts, the lock is `acquired` or the run `finished`) and
+`waiting_kind` (the `request.WaitKind` of the stage that wait is recorded in). Consumers flag a non-terminal run as **stalled** when
 `now − last_progress_at` exceeds 5 minutes (or, with no lines, `now −
 created_at`). While a verify-family stage (`baseline_verify`, `verify`,
 `full_suite`, `post_oracle_commit_verify`, `gate`) is open, which writes only its start and end
 lines, the threshold is the longer of 5 minutes and 1.5 times the longest
 verify-family stage the window shows completed; a run's first has no such
 reference and keeps 5 minutes.
+
+## Waits
+
+A request's wait is one typed `wait` (`request.Wait`: `kind`, `since`, `on`,
+`position`, `slots`), computed by `request.WaitFor` and shared by
+`factoryd status`, `factoryd watch`, `GET /requests` and the console. Its
+facts are the worker heartbeat (fresh or not, the slot holders, the
+repository waits) and, for a drafting job or a build, the waiting stage of
+the request's own progress feed (`progress.RunSummary.WaitingStage` and
+`WaitingSince`). Only `source: factory` lines count: a worker line in the
+same stage is never read as a wait.
+
+| Kind | From |
+|---|---|
+| `no_worker` | a job-state request and no fresh worker heartbeat |
+| `model_host` | the feed's `model_host_lock` wait |
+| `compose_slot` | the feed's `compose_services_lock` wait |
+| `repository_queue` | the feed's `queued` note |
+| `repository` | the feed's `repository_lock` wait, else the heartbeat's `repository_waits` |
+| `job_slot` | every job slot of the heartbeat held (`request.WaitingOn`) |
+
+Earlier rows win. A wait that began before the request entered its current
+state is dropped.
 
 ## Related surfaces
 

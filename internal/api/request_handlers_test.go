@@ -1574,12 +1574,12 @@ func TestUpdateRequestTicketHandlerUnknownIndexNotFound(t *testing.T) {
 	}
 }
 
-// TestListRequestsIncludesWaitingOn is C5's own API regression test:
-// GET /requests must expose "waiting_on" for a building request whose own
+// TestListRequestsIncludesTheJobSlotWait is C5's own API regression test:
+// GET /requests must expose a job_slot "wait" for a building request whose own
 // ticket has not started yet while another request's ticket is actively
-// running -- the same request.WaitingOn decision `factoryd status` renders
+// running -- the same request.WaitFor decision `factoryd status` renders
 // as "queued behind <id>".
-func TestListRequestsIncludesWaitingOn(t *testing.T) {
+func TestListRequestsIncludesTheJobSlotWait(t *testing.T) {
 	dataDir := t.TempDir()
 
 	running := request.New("req-running", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
@@ -1608,21 +1608,19 @@ func TestListRequestsIncludesWaitingOn(t *testing.T) {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
 	var got []struct {
-		ID        string `json:"id"`
-		WaitingOn string `json:"waiting_on"`
+		ID   string        `json:"id"`
+		Wait *request.Wait `json:"wait"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	byID := map[string]string{}
+	byID := map[string]*request.Wait{}
 	for _, r := range got {
-		byID[r.ID] = r.WaitingOn
+		byID[r.ID] = r.Wait
 	}
-	if byID["req-running"] != "" {
-		t.Errorf("req-running's waiting_on = %q, want empty", byID["req-running"])
-	}
-	if byID["req-waiting"] != "req-running" {
-		t.Errorf("req-waiting's waiting_on = %q, want %q", byID["req-waiting"], "req-running")
+	// No worker heartbeat in this fixture: both wait for one.
+	if w := byID["req-waiting"]; w == nil || w.Kind != request.WaitNoWorker {
+		t.Errorf("req-waiting's wait = %+v, want no_worker without a heartbeat", w)
 	}
 }
 
@@ -2724,10 +2722,17 @@ func seedQueueFixture(t *testing.T) string {
 
 // queueFixtureRow is what the tests below read of one GET /requests item.
 type queueFixtureRow struct {
-	ID            string             `json:"id"`
-	WaitingOn     string             `json:"waiting_on"`
-	QueuePosition int                `json:"queue_position"`
-	Build         *buildProgressView `json:"build"`
+	ID    string             `json:"id"`
+	Wait  *request.Wait      `json:"wait"`
+	Build *buildProgressView `json:"build"`
+}
+
+// position is the place in line the row's wait carries, 0 for none.
+func (r queueFixtureRow) position() int {
+	if r.Wait == nil {
+		return 0
+	}
+	return r.Wait.Position
 }
 
 func listQueueFixture(t *testing.T, dataDir string) map[string]queueFixtureRow {
@@ -2752,9 +2757,9 @@ func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
 	rows := listQueueFixture(t, seedQueueFixture(t))
 	positions := map[string]int{}
 	for id, r := range rows {
-		positions[id] = r.QueuePosition
-		if (r.QueuePosition > 0) != (r.WaitingOn != "") {
-			t.Errorf("%s: queue_position %d with waiting_on %q, want both or neither", id, r.QueuePosition, r.WaitingOn)
+		positions[id] = r.position()
+		if r.Wait != nil && (r.Wait.Kind != request.WaitJobSlot || r.Wait.On == "") {
+			t.Errorf("%s: wait %+v, want a job_slot wait on a request", id, r.Wait)
 		}
 	}
 	want := map[string]int{"req-building": 0, "req-second": 1, "req-third": 2, "req-fourth": 3, "req-review": 0}
@@ -2763,16 +2768,16 @@ func TestListRequestsCarriesQueuePositionAndBuildProgress(t *testing.T) {
 	}
 }
 
-// TestListRequestsGivesNoQueuePositionWithoutALiveWorker: a place in the
+// TestListRequestsGivesNoPlaceInLineWithoutALiveWorker: a place in the
 // queue is reported only while a worker takes requests from it.
-func TestListRequestsGivesNoQueuePositionWithoutALiveWorker(t *testing.T) {
+func TestListRequestsGivesNoPlaceInLineWithoutALiveWorker(t *testing.T) {
 	dataDir := seedQueueFixture(t)
 	if err := os.Remove(daemonheartbeat.WorkerPath(dataDir)); err != nil {
 		t.Fatal(err)
 	}
 	for id, r := range listQueueFixture(t, dataDir) {
-		if r.QueuePosition != 0 {
-			t.Errorf("%s: queue_position %d with no worker, want none", id, r.QueuePosition)
+		if r.Wait != nil && r.Wait.Kind != request.WaitNoWorker {
+			t.Errorf("%s: wait %+v with no worker, want none or no_worker", id, r.Wait)
 		}
 	}
 }
@@ -2958,5 +2963,56 @@ func TestRejectRequestRefusesADecisionMadeOnAnotherStage(t *testing.T) {
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
 	if got := post(dataDir, seenBody(t, dataDir, "req-1", `{"reason":"redo it"}`)); got.Code != http.StatusOK {
 		t.Errorf("a rejection made on the stage the request is in = %d %s, want 200", got.Code, got.Body.String())
+	}
+}
+
+// TestListRequestsCarriesTheWait: GET /requests names why each request waits,
+// one kind per rule: a model-host lock and a sidecar slot read from the run's
+// progress feed, a repository wait read from the heartbeat, and no worker.
+func TestListRequestsCarriesTheWait(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now()
+	stamp := now.UTC().Format(time.RFC3339Nano)
+	save := func(id string, state request.State, runID string, at time.Time) {
+		t.Helper()
+		r := request.New(id, "/repos/app", "app", request.Source{Kind: request.SourceText}, at)
+		r.State = state
+		if runID != "" {
+			r.TicketIndex, r.TicketCount = 1, 1
+			r.Tickets = []request.Ticket{{Index: 1, RunID: runID}}
+		}
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("req-host", request.StatePlanning, "", now.Add(-4*time.Minute))
+	save("req-compose", request.StateBuilding, "req-compose-001", now.Add(-3*time.Minute))
+	save("req-repo", request.StateBuilding, "", now.Add(-2*time.Minute))
+	// The request's own feed: a drafting job waits for the model host.
+	if err := progress.Mark(progress.Path(dataDir, "req-host"), "model_host_lock", "waiting", "", "queued behind other-job"); err != nil {
+		t.Fatal(err)
+	}
+	if err := progress.Mark(progress.Path(dataDir, "req-compose-001"), "compose_services_lock", "waiting", "", "queued behind run-x"); err != nil {
+		t.Fatal(err)
+	}
+	hb := daemonheartbeat.Heartbeat{PID: os.Getpid(), StartedAt: stamp, UpdatedAt: stamp, JobSlots: 4, RepositoryWaits: map[string]string{"req-repo": now.UTC().Format(time.RFC3339)}}
+	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dataDir), hb); err != nil {
+		t.Fatal(err)
+	}
+	rows := listQueueFixture(t, dataDir)
+	for id, want := range map[string]request.WaitKind{"req-host": request.WaitModelHost, "req-compose": request.WaitComposeSlot, "req-repo": request.WaitRepository} {
+		if w := rows[id].Wait; w == nil || w.Kind != want {
+			t.Errorf("%s: wait = %+v, want kind %s", id, w, want)
+		}
+	}
+	if w := rows["req-host"].Wait; w != nil && w.On != "queued behind other-job" {
+		t.Errorf("model_host wait on = %q, want the holder text", w.On)
+	}
+
+	if err := os.Remove(daemonheartbeat.WorkerPath(dataDir)); err != nil {
+		t.Fatal(err)
+	}
+	if w := listQueueFixture(t, dataDir)["req-host"].Wait; w == nil || w.Kind != request.WaitNoWorker {
+		t.Errorf("without a heartbeat: wait = %+v, want no_worker", w)
 	}
 }

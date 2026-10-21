@@ -22,7 +22,7 @@ func TestRequestViewsCarryActiveJob(t *testing.T) {
 	}
 	s := NewServer(dataDir)
 	for name, view := range map[string]any{
-		"summary": s.requestSummaryViewFor(r, requestQueue{}, nil),
+		"summary": s.requestSummaryViewFor(r, s.requestQueueFor(nil), nil),
 		"detail":  s.buildRequestDetailView(dataDir, r.ID, r),
 	} {
 		b, err := json.Marshal(view)
@@ -42,7 +42,7 @@ func TestRequestViewsCarryActiveJob(t *testing.T) {
 	if err := request.ClearActiveJob(dataDir, r.ID); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(s.requestSummaryViewFor(r, requestQueue{}, nil))
+	b, _ := json.Marshal(s.requestSummaryViewFor(r, s.requestQueueFor(nil), nil))
 	var cleared map[string]any
 	_ = json.Unmarshal(b, &cleared)
 	if _, ok := cleared["active_job"]; ok {

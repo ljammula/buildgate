@@ -243,6 +243,12 @@ type RunSummary struct {
 	CurrentRound  int
 	MaxRounds     int
 	WaitingReason string
+	// WaitingStage is the factory stage the run waits in (queued,
+	// model_host_lock, compose_services_lock, repository_lock) and
+	// WaitingSince the timestamp of the first line of that wait; both are
+	// empty when WaitingReason is cleared and the run is not waiting.
+	WaitingStage string
+	WaitingSince string
 	// LongestVerify is the longest completed (start to end) verify-family
 	// factory stage in the window (see VerifyStage); 0 when none completed.
 	LongestVerify time.Duration
@@ -343,7 +349,14 @@ func summarize(tail []byte) (sum RunSummary, sawFactory bool, err error) {
 func Summarize(events []Event) RunSummary {
 	var sum RunSummary
 	var stageOpen string
-	var waiting string
+	var waiting, waitStage, waitSince string
+	setWait := func(e Event) {
+		if waitStage != e.Stage {
+			waitStage, waitSince = e.Stage, e.Ts
+		}
+		waiting = e.Detail
+	}
+	clearWait := func() { waiting, waitStage, waitSince = "", "", "" }
 	var verifyStart time.Time
 	for _, e := range events {
 		sum.LastAt = e.Ts
@@ -353,12 +366,15 @@ func Summarize(events []Event) RunSummary {
 			switch e.Event {
 			case "start":
 				stageOpen = e.Stage
-				waiting = ""
+				clearWait()
 				verifyStart = time.Time{}
 				if VerifyStage(e.Stage) {
 					verifyStart, _ = time.Parse(tsLayout, e.Ts)
 				}
 			case "end":
+				if e.Stage == "finished" {
+					clearWait()
+				}
 				if e.Stage == stageOpen {
 					stageOpen = ""
 					sum.LongestVerify = max(sum.LongestVerify, verifyDuration(verifyStart, e.Ts))
@@ -366,18 +382,18 @@ func Summarize(events []Event) RunSummary {
 				}
 			case "note":
 				if e.Stage == "queued" {
-					waiting = e.Detail
+					setWait(e)
 				}
 			case "waiting":
 				// A run queued behind another on a single-instance model
 				// host (internal/modelhost), or behind another run's compose
 				// sidecars -- surfaced like a queue wait.
-				if e.Stage == "model_host_lock" || e.Stage == "compose_services_lock" {
-					waiting = e.Detail
+				if isLockStage(e.Stage) {
+					setWait(e)
 				}
 			case "acquired":
-				if e.Stage == "model_host_lock" || e.Stage == "compose_services_lock" {
-					waiting = ""
+				if isLockStage(e.Stage) {
+					clearWait()
 				}
 			}
 		case "worker":
@@ -398,7 +414,19 @@ func Summarize(events []Event) RunSummary {
 
 	sum.CurrentStage = stageOpen
 	sum.WaitingReason = waiting
+	sum.WaitingStage = waitStage
+	sum.WaitingSince = waitSince
 	return sum
+}
+
+// isLockStage reports whether stage is one of the factory stages whose
+// waiting and acquired events bracket a wait for a lock or slot.
+func isLockStage(stage string) bool {
+	switch stage {
+	case "model_host_lock", "compose_services_lock", "repository_lock":
+		return true
+	}
+	return false
 }
 
 // verifyDuration is how long a verify-family stage that started at start ran

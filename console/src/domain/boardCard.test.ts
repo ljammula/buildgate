@@ -1,11 +1,4 @@
-import {
-  cardAge,
-  cardAlert,
-  cardFacts,
-  cardSince,
-  needsYouAsk,
-  queueLine,
-} from "@/domain/boardCard";
+import { cardAge, cardAlert, cardFacts, cardSince, needsYouAsk } from "@/domain/boardCard";
 import { columnForRequest } from "@/domain/boardColumns";
 import { decodeRequestList, decodeRequestSummary } from "@/domain/request";
 import { readFixtureJson } from "@/test/fixtures";
@@ -22,26 +15,6 @@ const fixture = (id: string) => {
   return found;
 };
 
-describe("queueLine", () => {
-  test("names the server's position and what the request is behind", () => {
-    expect(queueLine(wire({ id: "a", state: "submitted" }, { queue_position: 2 }))).toBe(
-      "Queued · position 2",
-    );
-    expect(
-      queueLine(
-        wire({ id: "a", state: "building" }, { queue_position: 1, waiting_on: "req-ahead" }),
-      ),
-    ).toBe("Queued · position 1 · behind req-ahead");
-    expect(queueLine(wire({ id: "a", state: "building" }, { waiting_on: "run-9" }))).toBe(
-      "Queued behind run-9",
-    );
-  });
-
-  test("is null for a request that is not waiting", () => {
-    expect(queueLine(wire({ id: "a", state: "building" }))).toBeNull();
-  });
-});
-
 describe("cardFacts", () => {
   test("drafting: the state, the running job, and the queue position", () => {
     const drafting = wire(
@@ -49,7 +22,10 @@ describe("cardFacts", () => {
       { active_job: { stage: "planning", role: "planning", model: "luna", harness: "pi" } },
     );
     expect(cardFacts(drafting).lines).toEqual(["Planning", "planning role · luna · harness pi"]);
-    const queued = wire({ id: "b", state: "submitted" }, { queue_position: 3 });
+    const queued = wire(
+      { id: "b", state: "submitted" },
+      { wait: { kind: "job_slot", position: 3 } },
+    );
     expect(cardFacts(queued)).toMatchObject({
       lines: ["Submitted"],
       queue: "Queued · position 3",
@@ -70,7 +46,7 @@ describe("cardFacts", () => {
     expect(cardFacts(building)).toMatchObject({
       lines: ["Ticket 2 of 2", "Build"],
       stalled: true,
-      queue: null,
+      queue: "No worker is running",
     });
   });
 
@@ -89,7 +65,7 @@ describe("cardFacts", () => {
   test("Building: before its run starts, the queue position and the request's own ticket count", () => {
     const waiting = wire(
       { id: "a", state: "building", ticketIndex: 1, ticketCount: 2 },
-      { queue_position: 1, waiting_on: "req-ahead" },
+      { wait: { kind: "job_slot", position: 1, on: "req-ahead" } },
     );
     expect(cardFacts(waiting)).toMatchObject({
       lines: ["Ticket 1 of 2"],

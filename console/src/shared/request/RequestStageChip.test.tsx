@@ -16,18 +16,28 @@ test("the awaiting-PR chip is in the waiting tone with the stuck shape, not the 
   expect(chip?.querySelector("svg")).toHaveClass("lucide-octagon-pause");
 });
 
-test('the state chip shows "Queued behind <short id>" instead of Building when waitingOn is set', () => {
-  render(<RequestStageChip state="building" waitingOn="req-ahead" />);
+test('the state chip shows "Queued behind <short id>" instead of Building when a job_slot wait is set', () => {
+  render(
+    <RequestStageChip
+      state="building"
+      wait={{ kind: "job_slot", since: "", on: "req-ahead", position: 1, slots: 1 }}
+    />,
+  );
   expect(screen.getByText("Queued behind req-ahead")).toBeInTheDocument();
   expect(screen.queryByText("Building")).not.toBeInTheDocument();
 });
 
 test("a long waiting-on id is shortened to twelve characters", () => {
-  render(<RequestStageChip state="building" waitingOn="req-ahead-1234567890" />);
+  render(
+    <RequestStageChip
+      state="building"
+      wait={{ kind: "job_slot", since: "", on: "req-ahead-1234567890", position: 1, slots: 1 }}
+    />,
+  );
   expect(screen.getByText("Queued behind req-ahead-12…")).toBeInTheDocument();
 });
 
-test('the state chip shows plain "Building" when waitingOn is absent', () => {
+test('the state chip shows plain "Building" when no wait is set', () => {
   render(<RequestStageChip state="building" />);
   expect(screen.getByText("Building")).toBeInTheDocument();
   expect(screen.queryByText(/Queued behind/)).not.toBeInTheDocument();
@@ -50,4 +60,19 @@ test("a quarantined chip that needs you keeps its failure colour", () => {
     "data-tone",
     "danger",
   );
+});
+
+test("each kind of wait is named on the chip in place of the state", () => {
+  const wait = (kind: string) => ({ kind, since: "", on: "", position: null, slots: null });
+  for (const [kind, label] of [
+    ["repository", "Waiting for repository"],
+    ["repository_queue", "Queued on repository"],
+    ["model_host", "Waiting for model host"],
+    ["compose_slot", "Waiting for sidecars"],
+    ["no_worker", "No worker"],
+  ] as const) {
+    const { unmount } = render(<RequestStageChip state="building" wait={wait(kind)} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    unmount();
+  }
 });

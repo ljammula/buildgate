@@ -171,8 +171,8 @@ function cardOrder(a: RequestSummary, b: RequestSummary): number {
         timeKey(requestWaitingSinceOrEnteredAt(a)) - timeKey(requestWaitingSinceOrEnteredAt(b))
       );
     case 1: {
-      const left = a.queuePosition ?? 0;
-      const right = b.queuePosition ?? 0;
+      const left = a.wait?.position ?? 0;
+      const right = b.wait?.position ?? 0;
       return left !== right ? left - right : newestFirst(a, b);
     }
     case 2:

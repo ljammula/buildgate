@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/modelrole"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
@@ -169,22 +168,10 @@ type requestStatusEntry struct {
 	// (every state before building/pr_review, or a ticket not yet
 	// opened).
 	Tickets string `json:"tickets,omitempty"`
-	// WaitingOn is the id of the request the driver is advancing while
-	// this one waits its turn (request.WaitingOn over the heartbeat's slot
-	// holders). Without it, a request
-	// queued behind another showed as plain "building", indistinguishable
-	// from one whose ticket is actually running (C5).
-	WaitingOn string `json:"waiting_on,omitempty"`
-	// QueuePosition is this request's place among those waiting for a job
-	// slot (request.QueuePositions), from 1; 0 when it is not waiting.
-	QueuePosition int `json:"queue_position,omitempty"`
-	// JobSlots is how many jobs the worker runs at once, set only while
-	// this request waits for one.
-	JobSlots int `json:"job_slots,omitempty"`
-	// RepositoryWaitSince is when the request's build step first found its
-	// repository held by another build (RFC3339), set only while the request
-	// is building and the worker's heartbeat reports the wait.
-	RepositoryWaitSince string `json:"repository_wait_since,omitempty"`
+	// Wait is why the request is waiting rather than running (request.WaitFor):
+	// no worker, every job slot taken, the repository held by another build,
+	// a model-host or sidecar slot. Absent while it runs or waits on a human.
+	Wait *request.Wait `json:"wait,omitempty"`
 	// InState is how long the request has been in State (since EnteredAt):
 	// what tells a request that is stuck from one that is merely old.
 	InState string `json:"in_state,omitempty"`
@@ -229,8 +216,8 @@ func requestRowSuffix(r requestStatusEntry) string {
 
 // buildRequestStatusEntry converts a loaded request record into its
 // display form, with now used to compute Age from SubmittedAt and
-// waitingOn the id request.WaitingOn reports for r ("" when none).
-func buildRequestStatusEntry(r *request.Request, waitingOn string, now time.Time) requestStatusEntry {
+// wait what request.WaitFor reports for r (nil when none).
+func buildRequestStatusEntry(r *request.Request, wait *request.Wait, now time.Time) requestStatusEntry {
 	entry := requestStatusEntry{
 		ID:      r.ID,
 		Project: r.Project,
@@ -257,7 +244,7 @@ func buildRequestStatusEntry(r *request.Request, waitingOn string, now time.Time
 	if since, ok := r.InStateSince(); ok {
 		entry.InState = now.Sub(since).Round(time.Second).String()
 	}
-	entry.WaitingOn = waitingOn
+	entry.Wait = wait
 	return entry
 }
 
@@ -267,27 +254,15 @@ func buildRequestStatusEntry(r *request.Request, waitingOn string, now time.Time
 // table uses (buildStatusEntries' own statusCreatedBefore), applied here
 // to request.List's oldest-first result.
 //
-// repositoryWaits is the heartbeat's RepositoryWaits: a wait is shown only for
-// a request that is building.
-func buildRequestStatusEntries(requests []*request.Request, active []string, slots int, repositoryWaits map[string]string, project string, now time.Time) []requestStatusEntry {
-	waiting := request.WaitingOn(requests, active, slots)
-	positions := request.QueuePositions(requests, active, slots)
-
+// waits decides each request's wait (request.WaitContext.For).
+func buildRequestStatusEntries(requests []*request.Request, waits *request.WaitContext, project string, now time.Time) []requestStatusEntry {
 	entries := make([]requestStatusEntry, 0, len(requests))
 	for i := len(requests) - 1; i >= 0; i-- {
 		r := requests[i]
 		if project != "" && r.Project != project {
 			continue
 		}
-		entry := buildRequestStatusEntry(r, waiting[r.ID], now)
-		if r.State == request.StateBuilding {
-			entry.RepositoryWaitSince = currentRepositoryWait(r, repositoryWaits[r.ID])
-		}
-		if entry.WaitingOn != "" {
-			entry.QueuePosition = positions[r.ID]
-			entry.JobSlots = slots
-		}
-		entries = append(entries, entry)
+		entries = append(entries, buildRequestStatusEntry(r, waits.For(r), now))
 	}
 	return entries
 }
@@ -616,8 +591,7 @@ func statusMain(args []string) error {
 	// a console filter instead, and a CLI -request-state would be
 	// speculative ahead of any caller needing it), so requests are only
 	// ever filtered by -project here.
-	slotHolders, jobSlots := daemonheartbeat.WorkerSlotRequests(*dataDir, now)
-	requestEntries := buildRequestStatusEntries(requests, slotHolders, jobSlots, daemonheartbeat.WorkerRepositoryWaits(*dataDir, now), *project, now)
+	requestEntries := buildRequestStatusEntries(requests, request.NewWaitContext(*dataDir, requests, now), *project, now)
 	entries := buildStatusEntries(runs, *project, *state, *n, now)
 	applyProgressStatus(entries, runs, *dataDir, now)
 
@@ -694,46 +668,6 @@ func statusMain(args []string) error {
 	return printStatusFooter(len(requestEntries) > 0 || len(entries) > 0, heartbeatLine, routeLine, roleLines)
 }
 
-// requestWaitingText is the reason column of a request queued for a job
-// slot: with one slot, the request the worker is advancing; with several,
-// that every slot is taken and the request's place in line, since the
-// request holding the first slot (perhaps a pr_review pass) is not one it
-// waits behind.
-func requestWaitingText(r requestStatusEntry) string {
-	if r.JobSlots <= 1 {
-		return "queued behind " + r.WaitingOn
-	}
-	text := fmt.Sprintf("waiting for a job slot (all %d in use)", r.JobSlots)
-	if r.QueuePosition > 0 {
-		text += fmt.Sprintf(", #%d in line", r.QueuePosition)
-	}
-	return text
-}
-
-// currentRepositoryWait is since, the time r's build step first found its
-// repository busy, unless that was before r entered its current state: a wait
-// recorded before a halt and a retry is not this build's, and the step clears
-// it only when it runs again.
-func currentRepositoryWait(r *request.Request, since string) string {
-	at, err := time.Parse(time.RFC3339, since)
-	entered, ok := r.InStateSince()
-	if err == nil && ok && at.Before(entered.Truncate(time.Second)) {
-		return ""
-	}
-	return since
-}
-
-// requestRepositoryWaitText is the reason column of a building request whose
-// build step found the repository held by another build, with how long ago it
-// first did; the duration is omitted when the time does not parse.
-func requestRepositoryWaitText(r requestStatusEntry, now time.Time) string {
-	text := "waiting for the repository (another build holds it)"
-	if since, err := time.Parse(time.RFC3339, r.RepositoryWaitSince); err == nil {
-		text += ", " + now.Sub(since).Round(time.Second).String()
-	}
-	return text
-}
-
 // printRequestStatusRows prints one line per request, ids padded to the
 // widest: id, project, state, age since submitted, time in this state,
 // ticket, and the PR, reason or wait.
@@ -767,16 +701,13 @@ func printRequestStatusRows(requestEntries []requestStatusEntry, now time.Time) 
 			// retry hint: the work is accepted, only the PR is missing.
 			stateCol = "accepted*"
 			prOrError = r.Label
-		} else if r.RepositoryWaitSince != "" {
+		} else if r.Wait != nil {
+			// A request that waits looked identical to one that runs: its
+			// state starred plus the sentence naming the wait, the same
+			// "asterisk marks a state this factory annotates" convention
+			// accepted* above uses.
 			stateCol = r.State + "*"
-			prOrError = requestRepositoryWaitText(r, now)
-		} else if r.WaitingOn != "" {
-			// C5: a request next in line looked identical to the one the
-			// driver is actually advancing -- its own state starred plus
-			// the id it's queued behind, the same "asterisk marks a state
-			// this factory annotates" convention accepted* above uses.
-			stateCol = r.State + "*"
-			prOrError = requestWaitingText(r)
+			prOrError = r.Wait.Sentence(now)
 		}
 		inState := r.InState
 		if inState == "" {

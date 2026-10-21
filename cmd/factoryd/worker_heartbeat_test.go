@@ -160,7 +160,7 @@ func TestAcquireDirectRunLockWaitsOnlyWhenMarked(t *testing.T) {
 	}
 	defer owner.Close()
 
-	if _, err := acquireDirectRunLock(context.Background(), repo); !errors.Is(err, wsisolation.ErrBusy) {
+	if _, err := acquireDirectRunLock(context.Background(), repo, repoLockReport{}); !errors.Is(err, wsisolation.ErrBusy) {
 		t.Fatalf("unmarked ctx: err = %v, want ErrBusy", err)
 	}
 
@@ -169,7 +169,7 @@ func TestAcquireDirectRunLockWaitsOnlyWhenMarked(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
-	if _, err := acquireDirectRunLock(cancelCtx, repo); !errors.Is(err, context.Canceled) {
+	if _, err := acquireDirectRunLock(cancelCtx, repo, repoLockReport{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled wait: err = %v, want context.Canceled", err)
 	}
 
@@ -179,7 +179,7 @@ func TestAcquireDirectRunLockWaitsOnlyWhenMarked(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		lock, err := acquireDirectRunLock(withWaitForRepoLock(context.Background()), repo)
+		lock, err := acquireDirectRunLock(withWaitForRepoLock(context.Background()), repo, repoLockReport{})
 		done <- result{lock, err}
 	}()
 	select {

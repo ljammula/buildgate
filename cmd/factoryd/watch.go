@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -925,13 +924,9 @@ func requestWaitText(dataDir string, r *request.Request) (text string, since tim
 func requestWaitDetail(dataDir string, r *request.Request) string {
 	requests, err := request.List(dataDir)
 	if err == nil {
-		holders, slots := daemonheartbeat.WorkerSlotRequests(dataDir, time.Now())
-		if waitingOn := request.WaitingOn(requests, holders, slots)[r.ID]; waitingOn != "" {
-			return requestWaitingText(requestStatusEntry{
-				WaitingOn:     waitingOn,
-				QueuePosition: request.QueuePositions(requests, holders, slots)[r.ID],
-				JobSlots:      slots,
-			})
+		now := time.Now()
+		if wait := request.NewWaitContext(dataDir, requests, now).For(r); wait != nil {
+			return wait.Sentence(now)
 		}
 	}
 	if r.State == request.StateSubmitted {

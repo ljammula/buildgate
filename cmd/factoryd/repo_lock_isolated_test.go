@@ -21,7 +21,7 @@ func TestAcquireIsolatedRunLockReconcilesExclusivelyThenHoldsShared(t *testing.T
 		if !l.HeldExclusive() {
 			t.Error("reconcile ran without the exclusive lock")
 		}
-	})
+	}, repoLockReport{})
 	if err != nil {
 		t.Fatalf("acquireIsolatedRunLock: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestAcquireIsolatedRunLockWaitsOutAnExclusiveHolder(t *testing.T) {
 		holder.Close()
 	}()
 	reconciled := false
-	lock, err := acquireIsolatedRunLock(context.Background(), ws, func(*wsisolation.DirectLock) { reconciled = true })
+	lock, err := acquireIsolatedRunLock(context.Background(), ws, func(*wsisolation.DirectLock) { reconciled = true }, repoLockReport{})
 	if err != nil {
 		t.Fatalf("acquireIsolatedRunLock beside a short exclusive hold: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestAcquireIsolatedRunLockReturnsBusyAfterTheBound(t *testing.T) {
 	old := isolatedRunLockWait
 	isolatedRunLockWait = 100 * time.Millisecond
 	defer func() { isolatedRunLockWait = old }()
-	lock, err := acquireIsolatedRunLock(context.Background(), ws, func(*wsisolation.DirectLock) {})
+	lock, err := acquireIsolatedRunLock(context.Background(), ws, func(*wsisolation.DirectLock) {}, repoLockReport{})
 	if !errors.Is(err, wsisolation.ErrBusy) || lock != nil {
 		t.Fatalf("lock=%v err=%v, want ErrBusy after the bound", lock, err)
 	}
@@ -94,7 +94,7 @@ func TestAcquireIsolatedRunLockSharedWaitHonoursContextCancel(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
-	lock, err := acquireIsolatedRunLock(ctx, ws, func(*wsisolation.DirectLock) {})
+	lock, err := acquireIsolatedRunLock(ctx, ws, func(*wsisolation.DirectLock) {}, repoLockReport{})
 	if !errors.Is(err, context.Canceled) || lock != nil {
 		t.Fatalf("lock=%v err=%v, want context.Canceled", lock, err)
 	}

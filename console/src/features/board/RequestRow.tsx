@@ -74,7 +74,7 @@ export function RequestRow({ request, now, showProject }: RequestRowProps) {
           <RequestStageChip
             state={request.state}
             awaitingPullRequest={awaitingPr}
-            waitingOn={request.waitingOn}
+            wait={request.wait}
             needsYou={needsYou}
           />
         </RequestStatusUnit>

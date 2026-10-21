@@ -215,10 +215,22 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 		}
 		if stepWaitsForRepoLock(r.State, onJobs) {
 			ctx = withWaitForRepoLock(ctx)
+			// A wait for the lock inside the slot reaches the heartbeat, so
+			// status names it.
+			ctx = withRepoLockWaitHook(ctx, func(waiting bool) {
+				if waiting {
+					repositoryWaits.markBusy(id, time.Now())
+				} else {
+					repositoryWaits.clear(id)
+				}
+			})
 		}
 		stopHeartbeat := heartbeatUntilDone(ctx, requestHeartbeatInterval)
 		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.oracleRunner, a.buildRunner)
 		stopHeartbeat()
+		if r.State == request.StatePRReview {
+			repositoryWaits.clear(id)
+		}
 		if err != nil && !errors.Is(err, request.ErrCancelledOnDisk) {
 			return "", err
 		}

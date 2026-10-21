@@ -26,7 +26,7 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 34 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-31 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
+30 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 46 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 30 cmd/factoryd/watch.go printRunRecap
 27 cmd/factoryd/worker_config.go loadWorkerConfig

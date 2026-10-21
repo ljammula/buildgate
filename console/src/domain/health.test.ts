@@ -94,8 +94,8 @@ test("absent reads as not running; no answer at all is no worker fact", () => {
 
 test("queued counts the requests a live worker's server gave a position", () => {
   const requests = [
-    wire({ id: "a", state: "submitted" }, { queue_position: 1 }),
-    wire({ id: "b", state: "building" }, { queue_position: 2 }),
+    wire({ id: "a", state: "submitted" }, { wait: { kind: "job_slot", position: 1 } }),
+    wire({ id: "b", state: "building" }, { wait: { kind: "job_slot", position: 2 } }),
     wire({ id: "c", state: "building" }),
     wire({ id: "d", state: "spec_review" }),
   ];

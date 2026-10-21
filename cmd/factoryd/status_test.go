@@ -458,7 +458,7 @@ func TestBuildRequestStatusEntriesOldestFirstReversedToNewestFirst(t *testing.T)
 		{ID: "older", Project: "app", State: request.StateSubmitted, SubmittedAt: "2026-09-01T00:00:00Z"},
 		{ID: "newer", Project: "app", State: request.StateSpecReview, SubmittedAt: "2026-09-05T00:00:00Z"},
 	}
-	entries := buildRequestStatusEntries(requests, nil, 1, nil, "", time.Now())
+	entries := buildRequestStatusEntries(requests, liveWaits(t, requests, nil, 1, nil), "", time.Now())
 	if len(entries) != 2 || entries[0].ID != "newer" || entries[1].ID != "older" {
 		t.Fatalf("entries = %v, want [newer, older]", entries)
 	}
@@ -472,7 +472,7 @@ func TestBuildRequestStatusEntriesFiltersByProject(t *testing.T) {
 		{ID: "a", Project: "appa", State: request.StateSubmitted, SubmittedAt: "2026-09-01T00:00:00Z"},
 		{ID: "b", Project: "appb", State: request.StateSubmitted, SubmittedAt: "2026-09-02T00:00:00Z"},
 	}
-	entries := buildRequestStatusEntries(requests, nil, 1, nil, "appa", time.Now())
+	entries := buildRequestStatusEntries(requests, liveWaits(t, requests, nil, 1, nil), "appa", time.Now())
 	if len(entries) != 1 || entries[0].ID != "a" {
 		t.Fatalf("entries = %v, want only the appa request", entries)
 	}
@@ -511,7 +511,7 @@ preflight_profile: brownfield
 		t.Fatalf("statusMain -json: %v", err)
 	}
 
-	entries := buildRequestStatusEntries(requests, nil, 1, nil, "", time.Now())
+	entries := buildRequestStatusEntries(requests, liveWaits(t, requests, nil, 1, nil), "", time.Now())
 	if len(entries) != 1 {
 		t.Fatalf("buildRequestStatusEntries = %v, want 1 entry", entries)
 	}
@@ -656,7 +656,7 @@ func TestBuildRequestStatusEntryLabelsAcceptedAwaitingPullRequest(t *testing.T) 
 		Error:   "ticket 1/1: run run-9 was accepted but no pull request was opened",
 		Tickets: []request.Ticket{{Index: 1, RunID: "run-9"}},
 	}
-	e := buildRequestStatusEntry(r, "", time.Now())
+	e := buildRequestStatusEntry(r, nil, time.Now())
 	if !e.AwaitingPullRequest {
 		t.Fatalf("entry = %+v, want AwaitingPullRequest", e)
 	}
@@ -665,18 +665,18 @@ func TestBuildRequestStatusEntryLabelsAcceptedAwaitingPullRequest(t *testing.T) 
 			t.Errorf("label %q missing %q", e.Label, want)
 		}
 	}
-	plain := buildRequestStatusEntry(&request.Request{ID: "r2", State: request.StateHalted, Error: "boom"}, "", time.Now())
+	plain := buildRequestStatusEntry(&request.Request{ID: "r2", State: request.StateHalted, Error: "boom"}, nil, time.Now())
 	if plain.AwaitingPullRequest || plain.Label != "" {
 		t.Errorf("an ordinary halt must not be relabelled: %+v", plain)
 	}
 }
 
-// TestBuildRequestStatusEntriesSetsWaitingOnForARequestQueuedBehindAnother
+// TestBuildRequestStatusEntriesSetsAJobSlotWaitForARequestQueuedBehindAnother
 // is C5's regression test: of two building requests, the older is the one
 // the driver advances and the newer shows "queued behind" it. The running
 // ticket's run id has the real shape (<ticket>-<timestamp>-<pid>), not the
 // queue-entry id, which an earlier version wrongly matched on.
-func TestBuildRequestStatusEntriesSetsWaitingOnForARequestQueuedBehindAnother(t *testing.T) {
+func TestBuildRequestStatusEntriesSetsAJobSlotWaitForARequestQueuedBehindAnother(t *testing.T) {
 	t.Parallel()
 	requests := []*request.Request{
 		{
@@ -691,16 +691,16 @@ func TestBuildRequestStatusEntriesSetsWaitingOnForARequestQueuedBehindAnother(t 
 		},
 	}
 
-	entries := buildRequestStatusEntries(requests, nil, 1, nil, "", time.Now())
+	entries := buildRequestStatusEntries(requests, liveWaits(t, requests, nil, 1, nil), "", time.Now())
 	byID := map[string]requestStatusEntry{}
 	for _, e := range entries {
 		byID[e.ID] = e
 	}
-	if got := byID["req-running"].WaitingOn; got != "" {
-		t.Errorf("req-running's WaitingOn = %q, want empty (it is the one being built)", got)
+	if got := byID["req-running"].Wait; got != nil {
+		t.Errorf("req-running's Wait = %+v, want none (it is the one being built)", got)
 	}
-	if got := byID["req-waiting"].WaitingOn; got != "req-running" {
-		t.Errorf("req-waiting's WaitingOn = %q, want %q", got, "req-running")
+	if got := byID["req-waiting"].Wait; got == nil || got.Kind != request.WaitJobSlot || got.On != "req-running" {
+		t.Errorf("req-waiting's Wait = %+v, want a job_slot wait on req-running", got)
 	}
 }
 
@@ -775,6 +775,9 @@ func TestStatusMainStarsTheQueuedRequestsOwnState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := daemonheartbeat.Write(workerHeartbeatPath(dataDir), daemonheartbeat.Heartbeat{UpdatedAt: time.Now().Format(time.RFC3339Nano), JobSlots: 1, TemporalAddress: "localhost:7233"}); err != nil {
+		t.Fatal(err)
+	}
 	out := captureStdout(t, func() {
 		if err := statusMain([]string{"-data-dir", dataDir}); err != nil {
 			t.Fatalf("statusMain: %v", err)
@@ -842,4 +845,12 @@ func TestASpendTotalHoldingAnEstimateSaysWhatHappened(t *testing.T) {
 	if exact.CostUSD != "1.2300" || strings.Contains(relaySpendLine(cost, tokens, partial, false), "estimate") {
 		t.Errorf("all-metered spend: status cost %q, evidence line %q", exact.CostUSD, relaySpendLine(cost, tokens, partial, false))
 	}
+}
+
+// liveWaits is a wait context over a live worker with the given slot holders,
+// slots and repository waits, and no progress feeds.
+func liveWaits(t *testing.T, requests []*request.Request, holders []string, slots int, repositoryWaits map[string]string) *request.WaitContext {
+	t.Helper()
+	c := &request.WaitContext{DataDir: t.TempDir(), Live: true, Holders: holders, Slots: slots, RepositoryWaits: repositoryWaits}
+	return c.Number(requests)
 }

@@ -92,9 +92,9 @@ test("only a halted request with the accepted_no_pr kind awaits a PR", () => {
   );
 });
 
-test("waitingOn/quarantineCheck are null when absent from the JSON", () => {
+test("wait/quarantineCheck are null when absent from the JSON", () => {
   const r = request({ state: "building" });
-  expect(r.waitingOn).toBeNull();
+  expect(r.wait).toBeNull();
   expect(r.quarantineCheck).toBeNull();
 });
 
@@ -114,13 +114,19 @@ test("lastNotifiedAt and lastAsk parse verbatim when present", () => {
   expect(r.lastAsk).toBe("Spec ready for your review");
 });
 
-test("waitingOn/quarantineCheck parse verbatim when present", () => {
+test("wait/quarantineCheck parse verbatim when present", () => {
   const r = request({
     state: "building",
-    waiting_on: "req-ahead-1",
+    wait: { kind: "model_host", since: "2026-10-20T10:00:00Z", on: "queued behind run-a" },
     quarantine_check: "spec_conformity",
   });
-  expect(r.waitingOn).toBe("req-ahead-1");
+  expect(r.wait).toEqual({
+    kind: "model_host",
+    since: "2026-10-20T10:00:00Z",
+    on: "queued behind run-a",
+    position: null,
+    slots: null,
+  });
   expect(r.quarantineCheck).toBe("spec_conformity");
 });
 
@@ -236,9 +242,10 @@ test("GET /requests carries the running build of a building request, and no queu
     maxRounds: 0,
     stalled: true,
   });
-  expect(list[0]!.queuePosition).toBeNull();
+  // The fixture's worker heartbeat is stale, so the job-state request has no worker.
+  expect(list[0]!.wait).toMatchObject({ kind: "no_worker" });
   // Only a building request whose run has started has one.
-  expect(list.slice(1).every((r) => r.build === null && r.queuePosition === null)).toBe(true);
+  expect(list.slice(1).every((r) => r.build === null && r.wait === null)).toBe(true);
 });
 
 test("a waiting request decodes its queue position, and a build its round", () => {
@@ -250,13 +257,12 @@ test("a waiting request decodes its queue position, and a build its round", () =
       state: "building",
       submitted_at: "2026-09-10T09:00:00Z",
       updated_at: "2026-09-10T09:00:00Z",
-      queue_position: 2,
-      waiting_on: "req-ahead",
+      wait: { kind: "job_slot", position: 2, on: "req-ahead" },
       build: { run_id: "run-1", ticket: 1, tickets: 3, stage: "verify", round: 2, max_rounds: 3 },
     },
     "GET /requests[0]",
   );
-  expect(waiting.queuePosition).toBe(2);
+  expect(waiting.wait).toMatchObject({ kind: "job_slot", position: 2, on: "req-ahead" });
   expect(waiting.build).toMatchObject({ round: 2, maxRounds: 3, stage: "verify", stalled: false });
 });
 
@@ -466,7 +472,7 @@ test("request-every-field leaves only fields the API sends in other states unset
   // states, so these decode to their fallbacks here.
   const r = detail("request-every-field");
   expect(r.activeJob).toBeNull();
-  expect(r.waitingOn).toBeNull();
+  expect(r.wait).toBeNull();
   expect(r.haltKind).toBe("");
   expect(r.approveNextState).toBe("");
   expect(r.canSendBack).toBe(false);

@@ -1466,14 +1466,18 @@ func (tr *ticketRun) lockRepository() error {
 	// first, to reconcile stranded worktrees, then releases it and takes it
 	// shared (see acquireIsolatedRunLock).
 	var directLock *wsisolation.DirectLock
+	// A wait for the lock is written to this run's progress feed, so the run
+	// id is minted before it.
+	tr.mintRunID()
+	report := repoLockReport{dataDir: *tr.dataDir, runID: tr.id}
 	isolatedRun := *tr.repository == "" && *tr.onBranch == ""
 	reconcileStranded := func(lock *wsisolation.DirectLock) {
 		reconcileIsolationMarkers(tr.lifecycleCtx, *tr.dataDir, *tr.workspace, *tr.sandboxDocker, lock, nil)
 	}
 	if isolatedRun {
-		directLock, err = acquireIsolatedRunLock(tr.lifecycleCtx, *tr.workspace, reconcileStranded)
+		directLock, err = acquireIsolatedRunLock(tr.lifecycleCtx, *tr.workspace, reconcileStranded, report)
 	} else if *tr.repository == "" {
-		directLock, err = acquireDirectRunLock(tr.lifecycleCtx, *tr.workspace)
+		directLock, err = acquireDirectRunLock(tr.lifecycleCtx, *tr.workspace, report)
 	} else {
 		// Repository-owner submissions retain the same Git-common-dir
 		// ownership boundary as bare runs, but wait only within this run's
@@ -1535,6 +1539,18 @@ func (tr *ticketRun) lockRepository() error {
 	return nil
 }
 
+// mintRunID fixes this run's id (the -run-id serve passed, else one made from
+// the ticket, the time and the process); a second call keeps it.
+func (tr *ticketRun) mintRunID() {
+	if tr.id != "" {
+		return
+	}
+	tr.id = *tr.runID
+	if tr.id == "" {
+		tr.id = fmt.Sprintf("%s-%s-%d", *tr.ticket, time.Now().Format("20060102-150405"), os.Getpid())
+	}
+}
+
 // snapshotSpec mints the run id, snapshots the spec into the run's directory and reads the verify command and declared scope from it.
 func (tr *ticketRun) snapshotSpec() error {
 	var err error
@@ -1542,10 +1558,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	// progress feed (internal/progress) can record preflight under the same
 	// id every later stage uses -- api_start.go always passes -run-id; a
 	// bare CLI invocation generates one.
-	tr.id = *tr.runID
-	if tr.id == "" {
-		tr.id = fmt.Sprintf("%s-%s-%d", *tr.ticket, time.Now().Format("20060102-150405"), os.Getpid())
-	}
+	tr.mintRunID()
 	if !*tr.skipProjectCheck {
 		err := withStage(*tr.dataDir, tr.id, "preflight", func() (outcome, detail string, err error) {
 			specArtifact, contractArtifact, architectureArtifact := projectBootstrapArtifactPaths(*tr.workspace)

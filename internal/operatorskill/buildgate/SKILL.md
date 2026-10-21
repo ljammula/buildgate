@@ -206,7 +206,10 @@ request sits in a queue nobody drains.
   entry names its profile and the `approve`/`reject` commands with
   `-config <profile>` already in them; relay those as printed.
 - One request: `factoryd watch -no-follow <id>`.
-- Everything: `factoryd status` (add `-json` to parse it).
+- Everything: `factoryd status` (add `-json` to parse it). A starred state
+  (`building*`) names why the request waits instead of running: no worker, a
+  job slot, the repository, the model host or a sidecar slot; `-json` has it as
+  `wait.kind`.
 - Spend: `factoryd cost [-request <id>]`, by role and model.
   On a subscription route (ChatGPT, Copilot) the dollars are an API-price
   estimate, not a bill.

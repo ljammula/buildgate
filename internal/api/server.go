@@ -1243,6 +1243,10 @@ type runView struct {
 	CurrentRound   int    `json:"current_round,omitempty"`
 	MaxRounds      int    `json:"max_rounds,omitempty"`
 	WaitingReason  string `json:"waiting_reason,omitempty"`
+	// WaitingKind is the request.WaitKind of the wait WaitingReason states
+	// (model_host, compose_slot, repository_queue, repository), so the
+	// console can word it without parsing the reason.
+	WaitingKind string `json:"waiting_kind,omitempty"`
 	// Stalled/StalledSinceSeconds are internal/progress.Stalled's verdict
 	// (see its own doc comment) -- the single shared "silence is a bug"
 	// rule, computed here so `factoryd status`, `factoryd watch`, and this
@@ -1371,6 +1375,9 @@ func (s *Server) runViewFor(r *run.Run) runView {
 	view.CurrentRound = sum.CurrentRound
 	view.MaxRounds = sum.MaxRounds
 	view.WaitingReason = sum.WaitingReason
+	if kind, ok := request.WaitKindForStage(sum.WaitingStage); ok && sum.WaitingReason != "" {
+		view.WaitingKind = string(kind)
+	}
 	stalled, since := progress.Stalled(sum, r.CreatedAt, time.Now())
 	view.Stalled = stalled
 	if stalled {
@@ -2674,14 +2681,11 @@ type requestSummaryView struct {
 	*request.Request
 	Title       string      `json:"title"`
 	CostSummary CostSummary `json:"cost_summary"`
-	// WaitingOn is the id of the request the driver is advancing while
-	// this one waits its turn (request.WaitingOn, the same function
-	// `factoryd status` uses, so the console and CLI agree) (C5).
-	WaitingOn string `json:"waiting_on,omitempty"`
-	// QueuePosition is this request's place among the requests that wait
-	// their turn (request.QueuePositions: oldest submitted first, an
-	// estimate), from 1; 0 when it is not waiting or no worker is alive.
-	QueuePosition int `json:"queue_position,omitempty"`
+	// Wait is why the request is waiting rather than running
+	// (request.WaitFor, the same rule `factoryd status` uses, so the console
+	// and CLI agree): no worker, every job slot taken, the repository held,
+	// a model-host or sidecar slot. Absent while it runs or waits on a human.
+	Wait *request.Wait `json:"wait,omitempty"`
 	// Build is where the ticket build of a building request stands, from its
 	// run's own progress record; nil for a request that is not building or
 	// whose build has not started a run yet.
@@ -3658,7 +3662,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 // its whole batch of requests (listRequests, streamRequestEvents) -- see
 // computeCostSummary's own doc comment for why this is passed through
 // rather than each request's cost summary re-scanning dataDir/runs.
-func (s *Server) requestSummaryViewFor(req *request.Request, queue requestQueue, runsByRequest map[string][]*run.Run) requestSummaryView {
+func (s *Server) requestSummaryViewFor(req *request.Request, queue *request.WaitContext, runsByRequest map[string][]*run.Run) requestSummaryView {
 	// The board needs no edit history, and each edit carries its diff: only
 	// GET /requests/{id} sends them.
 	listed := *req
@@ -3671,32 +3675,14 @@ func (s *Server) requestSummaryViewFor(req *request.Request, queue requestQueue,
 		NextAction:  req.NextAction(),
 		Build:       s.buildProgressFor(req, runsByRequest[req.ID]),
 	}
-	view.WaitingOn = queue.waitingOn[req.ID]
-	view.QueuePosition = queue.position[req.ID]
+	view.Wait = queue.For(req)
 	return view
-}
-
-// requestQueue is what the worker's heartbeat says of the requests' turns:
-// per request id, the request it waits on and its place in the queue.
-type requestQueue struct {
-	waitingOn map[string]string
-	position  map[string]int
 }
 
 // requestQueueFor reads the worker's heartbeat once for requests, which must
 // be in request.List's order.
-func (s *Server) requestQueueFor(requests []*request.Request) requestQueue {
-	now := time.Now()
-	// Every request holding a job slot, a pr_review pass included: a full
-	// set of slots is what a request waits for.
-	active, slots := daemonheartbeat.WorkerSlotRequests(s.dataDir, now)
-	queue := requestQueue{waitingOn: request.WaitingOn(requests, active, slots)}
-	// A place in the queue means something only while a worker takes
-	// requests from it.
-	if hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(s.dataDir)); err == nil && !daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
-		queue.position = request.QueuePositions(requests, active, slots)
-	}
-	return queue
+func (s *Server) requestQueueFor(requests []*request.Request) *request.WaitContext {
+	return request.NewWaitContext(s.dataDir, requests, time.Now())
 }
 
 // streamRequestEvents serves GET /requests/events: an SSE "state" event

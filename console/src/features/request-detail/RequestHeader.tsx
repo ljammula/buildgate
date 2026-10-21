@@ -40,7 +40,7 @@ function RequestChips({ request }: { readonly request: RequestSummary }) {
       <RequestStageChip
         state={request.state}
         awaitingPullRequest={requestAwaitingPullRequest(request)}
-        waitingOn={request.waitingOn}
+        wait={request.wait}
         needsYou={requestStageGroupOf(request) === "review"}
       />
       {job === null ? null : (

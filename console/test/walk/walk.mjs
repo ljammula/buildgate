@@ -289,7 +289,7 @@ step("mission-control", async () => {
     }
   }
   if (worker.state === "alive") {
-    const queued = listed.filter((r) => r.queue_position !== undefined).length;
+    const queued = listed.filter((r) => r.wait?.kind === "job_slot").length;
     await health.getByText("Queued").waitFor();
     await health.getByText(String(queued), { exact: true }).first().waitFor();
   } else {
