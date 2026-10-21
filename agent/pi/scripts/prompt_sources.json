@@ -13,6 +13,7 @@
         "draft_spec.prompt.md",
         "draft_spec.design_guide.prompt.md",
         "draft_spec.previous_draft.prompt.md",
+        "draft_spec.scoped_sections.prompt.md",
         "draft_feedback.prompt.md"
       ],
       "description": "Combines request text, repository architecture and overview, a capped file inventory, optional design guidance and revision feedback, and spec-writing instructions."
@@ -48,6 +49,7 @@
         "plan_tickets.prompt.md",
         "plan_tickets.design_guide.prompt.md",
         "plan_tickets.previous_draft.prompt.md",
+        "plan_tickets.scoped_sections.prompt.md",
         "draft_feedback.prompt.md"
       ],
       "description": "Combines the approved spec and original request with repository context, optional design guidance and revision feedback, and ticket-planning instructions."

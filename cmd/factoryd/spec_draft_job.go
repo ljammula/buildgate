@@ -245,7 +245,11 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	if err != nil {
 		return "", nil, err
 	}
-	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath}
+	hostRewritePath, err := stageRewriteSections(r.RedraftScope(request.StateSpecReview), scratchDir, sandboxUser)
+	if err != nil {
+		return "", nil, err
+	}
+	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath}
 
 	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
 	if timeoutMinutes <= 0 {
@@ -358,15 +362,17 @@ func stageSpecDraftGuidance(settings sessionconfig.Settings, scratchDir, sandbox
 const previousDraftFileName = "previous-draft.md"
 
 // stagePreviousSpec stages r's current spec.md for --previous-draft-file
-// when the operator handed the spec over (`submit -spec-file`), so a
-// redraft after a spec_review rejection revises their document instead of
-// drafting afresh from the request. It returns "" for a drafted request.
+// when the operator handed the spec over (`submit -spec-file`), or when the
+// rejection being redrafted commented on sections (request.RedraftScope), so
+// a redraft after a spec_review rejection revises the reviewed document
+// (hand edits included) instead of drafting afresh from the request. It
+// returns "" for any other drafted request.
 // The drafting job only runs for a handed-over spec once there is feedback.
 // After a spec_review rejection spec.md holds the document that was
 // reviewed. After a send-back from a halt of the import itself there is no
 // spec.md yet, and the file as handed over is the document to revise.
 func stagePreviousSpec(dataDir string, r *request.Request, scratchDir, sandboxUser string) (string, error) {
-	if !r.SpecImported {
+	if !r.SpecImported && r.RedraftScope(request.StateSpecReview) == nil {
 		return "", nil
 	}
 	current, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, r.ID))

@@ -37,6 +37,7 @@ freely, headings only together with their validator.
 | `draft_feedback.prompt.md` | `draft_spec.py`, `plan_tickets.py` (operator feedback on a rejected draft) | `{kind}`, `{feedback}` |
 | `plan_tickets.prompt.md` | `plan_tickets.py` | `{draft_dir}`, `{verify_command}` |
 | `draft_spec.previous_draft.prompt.md` | `draft_spec.py` (a handed-over spec to revise, given with `--previous-draft-file`) | `{spec}` |
+| `draft_spec.scoped_sections.prompt.md`, `plan_tickets.scoped_sections.prompt.md` | `draft_spec.py`, `plan_tickets.py` (the sections of the previous draft a review commented on, given with `--rewrite-sections-file`; buildgate takes only those from the redraft) | `{sections}` |
 | `plan_tickets.previous_draft.prompt.md` | `plan_tickets.py` (handed-over tickets to revise, given with `--previous-draft-file`) | `{tickets}` |
 | `draft_spec.design_guide.prompt.md`, `plan_tickets.design_guide.prompt.md` | `draft_spec.py`, `plan_tickets.py` (the team design guide part given with `--design-guide-file`) | `{guide}` |
 | `draft_acceptance_oracles.qualification.prompt.md` | `draft_acceptance_oracles.py` (start of both language prompts) | none |

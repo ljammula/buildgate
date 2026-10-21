@@ -189,6 +189,12 @@ func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request
 	if jobErr != nil {
 		return HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
 	}
+	// A review that commented on sections redrafts only those: every other
+	// byte of the reviewed spec.md is kept, whatever the model wrote.
+	specMD, spliceErr := spliceScopedSpec(dataDir, r, specMD)
+	if spliceErr != nil {
+		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
+	}
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		return haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
@@ -414,6 +420,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 
 	runner = withPlanImport(runner)
+	reviewedTickets := readReviewedTickets(ticketsDir, r)
 	var (
 		requestTickets []request.Ticket
 		evidence       *request.PlanEvidence
@@ -467,7 +474,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 		if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
 			return fmt.Errorf("create tickets dir: %w", err)
 		}
-		requestTickets, validateErr = writeAndValidateDraftedTickets(ticketsDir, tickets, criteriaCount, verifyCommand, testPatterns)
+		requestTickets, validateErr = writeAndValidateScopedTickets(ticketsDir, r, reviewedTickets, tickets, criteriaCount, verifyCommand, testPatterns)
 		if validateErr == nil {
 			break
 		}
@@ -478,7 +485,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 			recordPlanEvidence(r, evidence)
 			return haltDraftInvalid(dataDir, r, request.StatePlanning, importsPlan(r), validateErr, validateErr.Error(), now)
 		}
-		_ = os.RemoveAll(ticketsDir)
+		resetTicketsDir(ticketsDir, reviewedTickets)
 		r.Rejections = append(r.Rejections, request.Rejection{
 			By:        request.FactoryActor,
 			At:        now.UTC().Format(time.RFC3339Nano),

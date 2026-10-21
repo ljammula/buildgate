@@ -3838,6 +3838,10 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 // names the rejecting operator the same way approveRequest's does,
 // falling back to requestAPIPrincipal when absent.
 //
+// A comment's "quote" (and its section and item) must still be in the file
+// the reviewer read: otherwise the rejection is refused with 409
+// (request.ErrPassageMoved) and nothing changes.
+//
 // The body's optional "to" field ("plan" or "spec") routes instead to
 // internal/request.SendBack, the same way `factoryd reject
 // -to` does -- meaningful only for a request
@@ -3896,7 +3900,7 @@ func (s *Server) rejectRequest(w http.ResponseWriter, r *http.Request) {
 	// a malformed request (400) -- an empty reason (checked first, inside
 	// request.Reject/request.SendBack, before either ever loads r) is
 	// still a genuine 400.
-	if errors.Is(err, request.ErrIllegalTransition) || errors.Is(err, request.ErrStageMoved) {
+	if errors.Is(err, request.ErrIllegalTransition) || errors.Is(err, request.ErrStageMoved) || errors.Is(err, request.ErrPassageMoved) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

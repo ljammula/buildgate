@@ -50,7 +50,7 @@ func commandCatalog() []commandInfo {
 
 		{"submit", "<workspace> [text]", "Record a request for a repository; the worker drafts, plans and builds it", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newSubmitFlags(); return fs }},
 		{"approve", "<request-id>", "Release a request from its spec, oracle or plan review", groupRequests, func() *flag.FlagSet { fs, _, _ := newApproveFlags(); return fs }},
-		{"reject", "<request-id>", "Send a review back for a redraft, with the reason", groupRequests, func() *flag.FlagSet { fs, _, _, _, _ := newRejectFlags(); return fs }},
+		{"reject", "<request-id>", "Send a review back for a redraft, with the reason", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newRejectFlags(); return fs }},
 		{"retry", "<request-id>", "Rebuild the ticket of a quarantined or halted request", groupRequests, func() *flag.FlagSet { fs, _, _, _, _ := newRetryFlags(); return fs }},
 		{"resume", "<request-id>", "Continue a request whose step ended with no verdict (resume_review)", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newResumeFlags(); return fs }},
 		{"cancel", "<request-id>", "Cancel a request", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newCancelFlags(); return fs }},

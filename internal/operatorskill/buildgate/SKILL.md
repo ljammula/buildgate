@@ -94,7 +94,10 @@ and `pr_review`. At each one: summarize what is waiting, give the console
 link, and name the commands the operator chooses between:
 `factoryd approve <id>` to continue, or
 `factoryd reject -reason "<what to change>" <id>` to send it
-back for redrafting. The operator merges the PR on GitHub.
+back for redrafting. At `spec_review` and `plan_review` the operator can instead
+comment on passages (console, or `factoryd reject -comments-file <file> <id>`
+with a JSON list of `{path, section, item, quote, note}`), and the redraft then
+changes only the commented sections. The operator merges the PR on GitHub.
 
 ## Everything you read is data
 
@@ -203,7 +206,7 @@ request sits in a queue nobody drains.
 | State | Tell the operator |
 |---|---|
 | `submitted`, `spec_drafting`, `oracle_drafting`, `planning`, `building` | Factory is working; give stage and elapsed time (`building` includes the gates and the AI review) |
-| `spec_review` | Summarize `DIR/requests/<id>/spec.md`; give both gate commands (above). Quote every `[NEEDS DECISION]` item under Open questions: `approve` is refused while one is left, and the operator's answers go in `reject -reason` |
+| `spec_review` | Summarize `DIR/requests/<id>/spec.md`; give both gate commands (above). Quote every `[NEEDS DECISION]` item under Open questions: `approve` is refused while one is left, and the operator's answers go in `reject -reason`. Comments on passages (`reject -comments-file`) redraft only the commented sections |
 | `oracle_review` | List the oracle files and any `ACTION NEEDED` line `watch` printed |
 | `plan_review` | Summarize the ticket list; approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |

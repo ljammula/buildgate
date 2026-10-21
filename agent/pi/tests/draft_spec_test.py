@@ -221,6 +221,42 @@ class BuildPromptTests(unittest.TestCase):
 		previous = prompt.index("<<<BEGIN CURRENT SPEC>>>\n# Spec\n\n## Problem\n\nRefunds double-process.\n<<<END CURRENT SPEC>>>")
 		self.assertLess(previous, prompt.index("<<<BEGIN OPERATOR FEEDBACK>>>"))
 
+	def test_build_prompt_lists_rewrite_sections(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			init_repo(workspace)
+			prompt, _ = draft_spec.build_prompt(
+				"text", workspace, draft_spec.DRAFT_RELATIVE_PATH,
+				feedback="- spec.md, ## Scope: name the endpoint", previous_draft="# Spec\n\n## Scope\n\nx\n",
+				rewrite_sections=[("spec.md", "## Scope"), ("spec.md", "## Risks")],
+			)
+			without, _ = draft_spec.build_prompt(
+				"text", workspace, draft_spec.DRAFT_RELATIVE_PATH, feedback="f", previous_draft="# Spec\n",
+			)
+		self.assertIn("## Sections to rewrite", prompt)
+		self.assertIn("- spec.md: ## Scope\n- spec.md: ## Risks", prompt)
+		self.assertLess(prompt.index("<<<END CURRENT SPEC>>>"), prompt.index("## Sections to rewrite"))
+		self.assertLess(prompt.index("## Sections to rewrite"), prompt.index("<<<BEGIN OPERATOR FEEDBACK>>>"))
+		self.assertNotIn("Sections to rewrite", without)
+
+	def test_read_rewrite_sections_is_tolerant(self):
+		with tempfile.TemporaryDirectory() as directory:
+			good = Path(directory) / "good.json"
+			good.write_text(json.dumps([{"path": "spec.md", "section": "## Scope"}, {"path": "tickets/001.spec.md", "section": ""}]))
+			bad = Path(directory) / "bad.json"
+			bad.write_text("{not json")
+			self.assertEqual(
+				draft_spec.read_rewrite_sections(good),
+				[("spec.md", "## Scope"), ("tickets/001.spec.md", "")],
+			)
+			self.assertIsNone(draft_spec.read_rewrite_sections(bad))
+			self.assertIsNone(draft_spec.read_rewrite_sections(Path(directory) / "missing.json"))
+			self.assertIsNone(draft_spec.read_rewrite_sections(None))
+		self.assertEqual(
+			draft_spec.rewrite_sections_text([("tickets/001.spec.md", "")]),
+			"- tickets/001.spec.md: (the whole file)",
+		)
+
 	def test_omits_the_previous_draft_section_when_none_given(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)

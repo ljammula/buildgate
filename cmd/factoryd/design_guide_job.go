@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"buildgate/internal/projectconfig"
@@ -26,6 +28,10 @@ type draftInputFiles struct {
 	designGuide   string // --design-guide-file: this job's part of the team design guide
 	specGuidance  string // --spec-guidance-file: operator guidance for spec drafting
 	previousDraft string // --previous-draft-file: a handed-over document to revise
+	// rewriteSections is --rewrite-sections-file: the sections of the
+	// previous draft a review commented on, the only ones the redraft is
+	// taken from.
+	rewriteSections string
 }
 
 func (f draftInputFiles) args() []string {
@@ -42,6 +48,9 @@ func (f draftInputFiles) args() []string {
 	if f.previousDraft != "" {
 		args = append(args, "--previous-draft-file", f.previousDraft)
 	}
+	if f.rewriteSections != "" {
+		args = append(args, "--rewrite-sections-file", f.rewriteSections)
+	}
 	return args
 }
 
@@ -54,7 +63,7 @@ func (f draftInputFiles) inContainer(containerScratchDir string) draftInputFiles
 		}
 		return containerScratchDir + "/" + filepath.Base(hostPath)
 	}
-	return draftInputFiles{feedback: at(f.feedback), designGuide: at(f.designGuide), specGuidance: at(f.specGuidance), previousDraft: at(f.previousDraft)}
+	return draftInputFiles{feedback: at(f.feedback), designGuide: at(f.designGuide), specGuidance: at(f.specGuidance), previousDraft: at(f.previousDraft), rewriteSections: at(f.rewriteSections)}
 }
 
 // Which part of the guide a drafting job is given: spec drafting gets the
@@ -137,4 +146,53 @@ func doctorCheckDesignGuide(in doctorInputs) doctorCheck {
 		return doctorCheck{Name: name, Err: err, Fix: "put " + project.DesignGuide + ".md, with its two headings, in a design_guide_dirs folder"}
 	}
 	return doctorCheck{Name: name, Detail: fmt.Sprintf("%s (%s, sha256 %s)", guide.Name, guide.Path, shortSHA256(guide.SHA256))}
+}
+
+// rewriteSectionsFileName is the staged list of sections to rewrite inside a
+// drafting job's scratch directory.
+const rewriteSectionsFileName = "rewrite-sections.json"
+
+// rewriteSection is one entry of the --rewrite-sections-file list: a file of
+// the reviewed set and a heading in it, or "" for the whole file.
+type rewriteSection struct {
+	Path    string `json:"path"`
+	Section string `json:"section"`
+}
+
+// stageRewriteSections writes scope as the JSON list a drafting script reads
+// for --rewrite-sections-file, and returns its host path; "" when scope is
+// nil (a full redraft). The script only tells the model which sections the
+// review commented on: the driver splices them in, and keeps every other byte
+// of the reviewed files whatever the model writes.
+func stageRewriteSections(scope *request.RedraftScope, scratchDir, sandboxUser string) (string, error) {
+	if scope == nil {
+		return "", nil
+	}
+	var list []rewriteSection
+	paths := make([]string, 0, len(scope.Files))
+	for path := range scope.Files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if scope.Whole(path) {
+			list = append(list, rewriteSection{Path: path})
+			continue
+		}
+		for _, heading := range scope.Files[path] {
+			list = append(list, rewriteSection{Path: path, Section: heading})
+		}
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
+		return "", fmt.Errorf("create draft scratch dir: %w", err)
+	}
+	path := filepath.Join(scratchDir, rewriteSectionsFileName)
+	if err := writeRequestJobFeedbackFile(path, append(data, '\n'), sandboxUser); err != nil {
+		return "", fmt.Errorf("stage the sections to rewrite: %w", err)
+	}
+	return path, nil
 }

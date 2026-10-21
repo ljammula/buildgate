@@ -82,9 +82,12 @@ DESIGN_GUIDE_SECTION = prompt_templates.load("plan_tickets.design_guide", ("guid
 # The tickets an operator handed over, given back to be revised with the
 # feedback; factoryd stages them as one file for --previous-draft-file.
 PREVIOUS_DRAFT_SECTION = prompt_templates.load("plan_tickets.previous_draft", ("tickets",))
+# The tickets and sections of that plan the review commented on, the only
+# ones the redraft is taken from; factoryd stages them for --rewrite-sections-file.
+SCOPED_SECTIONS_SECTION = prompt_templates.load("plan_tickets.scoped_sections", ("sections",))
 
 
-def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None) -> tuple[str, bool]:
+def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- see draft_spec.py's own build_prompt for
 	why agents_md_used is threaded straight into the evidence payload.
@@ -109,6 +112,8 @@ def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_comm
 		sections.append(DESIGN_GUIDE_SECTION.format(guide=design_guide.strip()).rstrip("\n"))
 	if previous_draft and previous_draft.strip():
 		sections.append(PREVIOUS_DRAFT_SECTION.format(tickets=previous_draft.strip()).rstrip("\n"))
+		if rewrite_sections:
+			sections.append(SCOPED_SECTIONS_SECTION.format(sections=draft_spec.rewrite_sections_text(rewrite_sections)).rstrip("\n"))
 	if feedback and feedback.strip():
 		sections.append(draft_spec.FEEDBACK_HEADER.format(kind="plan", feedback=draft_spec.neutralise_feedback(feedback.strip())))
 	sections.append(PLAN_INSTRUCTIONS.format(draft_dir=draft_dir, verify_command=verify_command))
@@ -136,6 +141,7 @@ def run_plan(
 	workspace: Path, spec_path: Path, request_path: Path, verify_command: str, out_dir: Path, evidence_path: Path,
 	timeout_minutes: int, feedback_path: Path | None = None, thinking: str | None = None,
 	adapter=build_app.DEFAULT_ADAPTER, design_guide_path: Path | None = None, previous_draft_path: Path | None = None,
+	rewrite_sections_path: Path | None = None,
 ) -> int:
 	spec_text = spec_path.read_text()
 	request_text = request_path.read_text()
@@ -145,6 +151,7 @@ def run_plan(
 	previous_draft = previous_draft_path.read_text(encoding="utf-8") if previous_draft_path else None
 	prompt, agents_md_used = build_prompt(
 		spec_text, request_text, workspace, verify_command, DRAFT_RELATIVE_DIR, feedback, design_guide, previous_draft,
+		draft_spec.read_rewrite_sections(rewrite_sections_path),
 	)
 
 	session_dir = workspace / ".factory-plan-draft" / "session"
@@ -242,6 +249,7 @@ def main() -> int:
 	)
 	parser.add_argument("--feedback-file", type=Path, default=None, help="optional operator feedback from a plan_review rejection (the request driver writes plan-feedback.md from Request.Rejections), included in the prompt as guidance only")
 	parser.add_argument("--previous-draft-file", type=Path, default=None, help="optional tickets the operator handed over, in one file, to be revised with the feedback instead of planned afresh; staged by factoryd")
+	parser.add_argument("--rewrite-sections-file", type=Path, default=None, help="optional JSON list of {path, section} naming the tickets and sections of --previous-draft-file the feedback commented on; only those are taken from the redraft (buildgate keeps the rest); staged by factoryd")
 	parser.add_argument("--design-guide-file", type=Path, default=None, help="optional plan-rules part of the team design guide, staged by factoryd")
 	args = parser.parse_args()
 
@@ -251,7 +259,7 @@ def main() -> int:
 	return run_plan(
 		workspace, args.spec.resolve(), args.request.resolve(), args.verify_command, args.out_dir, args.evidence,
 		args.timeout_minutes, args.feedback_file, thinking=args.thinking, adapter=adapter,
-		design_guide_path=args.design_guide_file, previous_draft_path=args.previous_draft_file,
+		design_guide_path=args.design_guide_file, previous_draft_path=args.previous_draft_file, rewrite_sections_path=args.rewrite_sections_file,
 	)
 
 
