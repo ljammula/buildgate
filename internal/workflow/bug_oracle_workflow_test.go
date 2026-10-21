@@ -52,6 +52,8 @@ func bugOracleFixture(t *testing.T, input RunWorkflowInput, baseExit int, pin fu
 			Attempts: []run.Attempt{{Kind: in.Check, ExitCode: exit}},
 		}, nil
 	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
+	env.RegisterActivityWithOptions(func(context.Context, CheckChainSuccessorInput) error { return nil }, activity.RegisterOptions{Name: CheckChainSuccessorActivityName})
+	env.RegisterActivityWithOptions(func(context.Context, ValidateSliceChainInput) error { return nil }, activity.RegisterOptions{Name: ValidateSliceChainActivityName})
 	if pin != nil {
 		pin(env)
 	}
@@ -136,7 +138,14 @@ func TestOnlyABugRunWithAnApprovedOracleChecksTheBase(t *testing.T) {
 	delete(noOracle.GateCommands, policy.ReferenceOracleGateID)
 	corrective := bugRunInput()
 	corrective.DiffBaseSHA = "ticket-base-sha"
-	for name, input := range map[string]RunWorkflowInput{"not a bug": notBug, "no oracle": noOracle, "continuing earlier work": corrective} {
+	secondTicket := bugRunInput()
+	secondTicket.PriorRunID = "req-001"
+	secondTicket.PriorRunState = run.StateAccepted
+	secondTicket.PriorRunProjectPath = secondTicket.WorkspacePath
+	secondTicket.PriorRunResultSHA = "fixture-base-sha"
+	resumedPastBase := bugRunInput()
+	resumedPastBase.ResumeFrom = &ResumeFrom{RunID: "lost", WorktreePath: "/fixture/wt", Branch: "b", BaseSHA: "base-sha", BeyondBase: true}
+	for name, input := range map[string]RunWorkflowInput{"not a bug": notBug, "no oracle": noOracle, "continuing earlier work": corrective, "a later ticket of the request": secondTicket, "a resume past the base": resumedPastBase} {
 		t.Run(name, func(t *testing.T) {
 			err, _, ids, checks, built := bugOracleFixture(t, input, 0, nil)
 			if err != nil || !built {
@@ -224,5 +233,68 @@ func TestTheBaseCheckGetsTheOracleButNoBaseRerun(t *testing.T) {
 	}
 	if isOracleMountingCheck("lint") {
 		t.Error("lint mounts the oracle")
+	}
+}
+
+// TestAResumeLostBeforeItsBuildChecksTheBaseAgain: a resumed run whose halted
+// run never got past the base is at the base commit and is asked.
+func TestAResumeLostBeforeItsBuildChecksTheBaseAgain(t *testing.T) {
+	input := bugRunInput()
+	input.ResumeFrom = &ResumeFrom{RunID: "lost", WorktreePath: "/fixture/wt", Branch: "b", BaseSHA: "base-sha"}
+	err, _, ids, checks, _ := bugOracleFixture(t, input, 0, nil)
+	if err == nil || !hasApplicationErrorType(err, OraclePassesOnBaseFailureType) {
+		t.Fatalf("err = %v, want the resumed run halted by the check", err)
+	}
+	if !containsString(ids, "oracle-red-on-base") || len(checks) != 1 {
+		t.Errorf("ids %q checks %q, want the check made once", ids, checks)
+	}
+}
+
+func TestNewResumeFromSaysWhetherTheHaltedRunGotPastTheBase(t *testing.T) {
+	for name, tc := range map[string]struct {
+		halted *run.Run
+		want   bool
+	}{
+		"lost in the baseline":  {&run.Run{ID: "a", BaseSHA: "b", Attempts: []run.Attempt{{Kind: run.BaselineVerifyAttemptKind}, {Kind: OracleRedOnBaseCheck}}}, false},
+		"the build began":       {&run.Run{ID: "a", BaseSHA: "b", Attempts: []run.Attempt{{Kind: "build"}}}, true},
+		"a result":              {&run.Run{ID: "a", BaseSHA: "b", ResultSHA: "r"}, true},
+		"chained after another": {&run.Run{ID: "a", BaseSHA: "b", PriorRunID: "p"}, true},
+	} {
+		if got := NewResumeFrom(tc.halted).BeyondBase; got != tc.want {
+			t.Errorf("%s: BeyondBase = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// TestAnOracleThatRanNoTestOnBaseHaltsWithItsOwnCode: pytest's 5 and the
+// timeout and not-found codes are not a red test, nor is a go test that ran
+// no test.
+func TestAnOracleThatRanNoTestOnBaseHaltsWithItsOwnCode(t *testing.T) {
+	for _, code := range []int{5, 124, 125, 126, 127} {
+		err, _, _, _, built := bugOracleFixture(t, bugRunInput(), code, nil)
+		if err == nil || !hasApplicationErrorType(err, OracleNotRunOnBaseFailureType) || built {
+			t.Errorf("exit %d: err = %v built = %v, want a halt of type %s", code, err, built, OracleNotRunOnBaseFailureType)
+			continue
+		}
+		if got := HaltReasonCodeFromError(err); got != run.HaltReasonOracleNotRunOnBase {
+			t.Errorf("exit %d: halt reason code = %q", code, got)
+		}
+	}
+	if err, _, _, _, built := bugOracleFixture(t, bugRunInput(), 2, nil); err != nil || !built {
+		t.Errorf("exit 2 is a failing test: err = %v built = %v, want a build", err, built)
+	}
+}
+
+func TestOracleRanNothingReadsAGoTestLog(t *testing.T) {
+	for log, want := range map[string]bool{
+		"?   \tx/y\t[no test files]\n":                                             true,
+		"ok  \tx/y\t0.003s [no tests to run]\ntesting: warning: no tests to run\n": true,
+		"?   \tx/y\t[no test files]\nok  \tx/z\t0.01s\n":                           false,
+		"--- PASS: TestOracleA (0.00s)\nPASS\n":                                    false,
+		"":                                                                         false,
+	} {
+		if got := oracleRanNothing(log); got != want {
+			t.Errorf("log %q: oracleRanNothing = %v, want %v", log, got, want)
+		}
 	}
 }

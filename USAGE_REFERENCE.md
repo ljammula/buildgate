@@ -903,7 +903,7 @@ of its prose:
 | No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
 | An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's numbered criteria |
 | The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
-| A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order) and their `AC-N:` labels: every criterion `N. AC-N: ...` with the label equal to its number. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for numbering and mixed labels only |
+| A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order, numbered lines inside a code fence are not items) and their `AC-N:` labels: every criterion `N. AC-N: ...` (its text may follow on the next lines) with the label equal to its number and no leading zero. A scoped redraft that keeps the reviewed criteria section is not asked for IDs. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for numbering and mixed labels only |
 
 A plan the planning model drafted that fails one is re-planned once, with
 the check's message as the feedback; a second refused plan halts the
@@ -2146,10 +2146,13 @@ command once between the baseline verify and the build.
 
 | | |
 |---|---|
-| Where | The run's own worktree, just created at the base commit; not made for a run with a diff base, a resumed worktree or an existing branch |
+| Where | The run's own worktree, just created at the request's base commit: the request's first ticket, first build. Not made for a run with a diff base, a `-prior-run` (a later ticket), an existing branch, or a resume of a run whose build had begun or that produced a result (`resume.beyond_base`); a resume of a run lost before its build is made again |
+| Plan approval | A bug request's plan is refused at `plan_review` unless ticket 1 has an oracle file under `tickets/001.oracle/` |
+| Surface | `factoryd submit -bug` only; the HTTP API, MCP and console do not set it |
 | Command | The ticket's reference-oracle command, `sh -c` in the normal sandbox with the oracle mounted read-only and no model route; no canary and no rerun on the base commit |
 | Attempt | Kind `oracle_red_on_base`, in the run's attempt list; its bin is `operator` |
-| Pass condition | A non-zero exit: any failure counts, a test that does not compile included |
+| Pass condition | A non-zero exit other than the not-run codes below: any failure counts, a test that does not compile included |
+| Not run | Exit 5 (pytest, no tests collected), 124 to 127 (timeout, not found, not executable), or exit 0 with a log that shows only `no test files` / `no tests to run` (`go test`): application error type `OracleNotRunOnBase`, `halt_reason_code` `oracle_not_run_on_base`, not retried; the request is quarantined with `quarantine_check` `oracle_not_run_on_base` |
 | Halt | Exit 0: application error type `OraclePassesOnBase`, `halt_reason_code` `oracle_passes_on_base`, not retried, not counted toward the repository's stop line. The request is quarantined with `quarantine_check` `oracle_green_on_base` (`next_action`: `factoryd reject -to spec`) |
 
 ### Oracle-approved runs

@@ -1313,6 +1313,11 @@ const QuarantineCheckBudgetMonthly = "budget_exhausted:monthly"
 // reproduce the bug. See quarantinedNextAction's branch for it.
 const QuarantineCheckOracleGreenOnBase = "oracle_green_on_base"
 
+// QuarantineCheckOracleNotRun is set when a bug request's build was halted
+// before any model call because its reference oracle ran no test on the base
+// commit (run.HaltReasonOracleNotRunOnBase).
+const QuarantineCheckOracleNotRun = "oracle_not_run_on_base"
+
 // HaltKind names why a request halted when the recovery differs from the
 // default (resume the stage that failed).
 type HaltKind string
@@ -1620,6 +1625,9 @@ func (r *Request) quarantinedNextAction() string {
 	}
 	if r.QuarantineCheck == QuarantineCheckOracleGreenOnBase {
 		return fmt.Sprintf("oracle_green_on_base quarantined -- the acceptance oracle passes on the base commit, so it does not reproduce the bug and no model call was made; hand-write an oracle that fails on the current code: `factoryd reject -to spec -reason \"...\" %s`, then approve a failing oracle at oracle_review", r.ID)
+	}
+	if r.QuarantineCheck == QuarantineCheckOracleNotRun {
+		return fmt.Sprintf("oracle_not_run_on_base quarantined -- the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected) and no model call was made; fix the oracle's RUN_COMMAND.txt so it runs the oracle: `factoryd reject -to spec -reason \"...\" %s`, then approve a corrected oracle at oracle_review", r.ID)
 	}
 	if r.QuarantineCheck == QuarantineCheckBudgetRequest {
 		return fmt.Sprintf("budget exhausted -- %s; raise request_token_budget/request_cost_budget_micro_usd in the session config, then `factoryd retry %s`", r.Error, r.ID)

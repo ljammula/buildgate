@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -224,7 +225,7 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
-	if err := request.ValidateSpecCriteria(specMD, !importsSpec(r)); err != nil {
+	if err := request.ValidateSpecCriteria(specMD, criteriaAreDrafted(r)); err != nil {
 		// Keep what the refused draft spent: the next pass, or the halt, adds to it.
 		accumulateSpecEvidence(r, evidence)
 		if attempt < maxSpecDraftingAttempts && !importsSpec(r) {
@@ -238,8 +239,12 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 			log.Printf("request %s: drafted spec refused (%v) -- drafting again automatically", r.ID, err)
 			return true, nil
 		}
+		// The refusal is the halt's own note (DraftHalt), not also a rejection.
+		dropFactorySpecRejection(r)
 		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
 	}
+	// A refusal this pass answered is not feedback for any later redraft.
+	dropFactorySpecRejection(r)
 	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
 		return false, fmt.Errorf("write spec: %w", err)
 	}
@@ -270,6 +275,40 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	// See RemindRequest's own doc comment.
 	RemindRequest(dataDir, r, now)
 	return false, r.Save(dataDir)
+}
+
+// criteriaAreDrafted reports whether the criteria section of the spec this
+// pass writes is the model's own output, so it must carry IDs: not for a
+// handed-over spec, and not for a scoped redraft that keeps the reviewed
+// criteria section (the splice copies it from the reviewed file).
+func criteriaAreDrafted(r *request.Request) bool {
+	if importsSpec(r) {
+		return false
+	}
+	scope := r.RedraftScope(request.StateSpecReview)
+	if scope == nil {
+		return true
+	}
+	headings, ok := scope.Sections(specRelPath)
+	if !ok || scope.Whole(specRelPath) {
+		return true
+	}
+	return slices.Contains(headings, "## Acceptance criteria")
+}
+
+// dropFactorySpecRejection removes the factory's automatic criteria
+// rejection of this drafting pass, the newest rejection when it is one: it
+// only fed the second attempt, and left on the request it would keep
+// feeding later redrafts and count as feedback to a handed-over spec.
+func dropFactorySpecRejection(r *request.Request) {
+	n := len(r.Rejections)
+	if n == 0 {
+		return
+	}
+	last := r.Rejections[n-1]
+	if last.By == request.FactoryActor && last.FromState == request.StateSpecDrafting && last.ForStage == request.StateSpecReview {
+		r.Rejections = r.Rejections[:n-1]
+	}
 }
 
 // accumulateSpecEvidence records evidence as r.SpecEvidence, adding the spend
@@ -1036,16 +1075,28 @@ func unresolvedRunAwaitingDecision(dataDir string, r *request.Request, ticket *r
 // with only a rebuild left to choose. Any other halt halts the request with
 // reason.
 func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
-	if runRecord.HaltReasonCode == run.HaltReasonOraclePassesOnBase {
+	if check := baseOracleQuarantineCheck(runRecord); check != "" {
 		// A verdict on the oracle, not a lost step: the request is
 		// quarantined naming the check, so its next action says what to do.
-		return quarantineRequestWithCheck(dataDir, r, reason, request.QuarantineCheckOracleGreenOnBase, now)
+		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
 	}
 	cause := run.UnresolvedCauseOf(runRecord)
 	if runRecord.KeptForResume || cause != "" {
 		return EnterResumeReview(dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
 	}
 	return HaltRequest(dataDir, r, reason, now)
+}
+
+// baseOracleQuarantineCheck is the request quarantine check for a run halted
+// before its build by the bug request's oracle check on the base commit, or "".
+func baseOracleQuarantineCheck(runRecord *run.Run) string {
+	switch runRecord.HaltReasonCode {
+	case run.HaltReasonOraclePassesOnBase:
+		return request.QuarantineCheckOracleGreenOnBase
+	case run.HaltReasonOracleNotRunOnBase:
+		return request.QuarantineCheckOracleNotRun
+	}
+	return ""
 }
 
 // startFailedReason is the halt reason of a ticket build that never started.

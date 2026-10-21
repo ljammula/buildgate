@@ -2,12 +2,14 @@ package workflow
 
 import (
 	"fmt"
+	"strings"
 
 	"go.temporal.io/sdk/temporal"
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
+	"buildgate/internal/runner"
 )
 
 // bugOracleRedOnBaseChange is the GetVersion change ID under which a bug
@@ -34,13 +36,58 @@ func isOracleMountingCheck(check string) bool {
 	return check == policy.ReferenceOracleGateID || check == OracleRedOnBaseCheck
 }
 
+// OracleNotRunOnBaseFailureType marks the oracle command not having run its
+// tests on the base commit (oracleNotRun): the check says nothing about the
+// bug, and a halt, not a pass, follows. Not an infrastructure failure.
+const OracleNotRunOnBaseFailureType = "OracleNotRunOnBase"
+
 // bugOracleApplies reports whether the base-commit check is made for this
-// run: a bug request's first build of a ticket that has an approved oracle.
-// A run that continues earlier work (a diff base, a resumed worktree, an
-// existing branch) is not at the base commit, so it is not asked.
+// run: a bug request's first build of the request's first ticket, which has
+// an approved oracle and starts at the request's base. A run that continues
+// earlier work is not at that commit, so it is not asked: one with a diff
+// base, one chained after an earlier ticket's run (PriorRunID), one on an
+// existing branch, and a resume of a worktree that is past the base
+// (ResumeFrom.BeyondBase). A resume of a run lost before its build began
+// starts at the base again and is asked.
 func bugOracleApplies(input RunWorkflowInput) bool {
 	return input.Bug && input.ReferenceOracleDir != "" && input.GateCommands[policy.ReferenceOracleGateID] != "" &&
-		input.DiffBaseSHA == "" && input.ResumeFrom == nil && input.OnBranch == ""
+		input.DiffBaseSHA == "" && input.PriorRunID == "" && input.OnBranch == "" &&
+		(input.ResumeFrom == nil || !input.ResumeFrom.BeyondBase)
+}
+
+// oracleNotRunExit reports an exit code that says the oracle command did not
+// run its tests: 5 is pytest's "no tests collected", and 124 to 127 are a
+// timeout, a failure to run the command, a command that is not executable
+// and one that was not found.
+func oracleNotRunExit(code int) bool {
+	return code == 5 || (code >= 124 && code <= 127)
+}
+
+// oracleCheckRanNothing is the base-commit check's NotRun: the command
+// exited 0 and its log shows that no test ran. False for any other check.
+func oracleCheckRanNothing(check string, runErr error, result runner.Result) bool {
+	if check != OracleRedOnBaseCheck || runErr != nil || result.ExitCode != 0 {
+		return false
+	}
+	return oracleRanNothing(readFileTail(result.LogPath, baselineLogTailBytes))
+}
+
+// oracleRanNothing reports whether the log of an oracle command that exited
+// 0 shows that no test ran: go test prints "[no test files]" and "[no tests
+// to run]" for a package it ran nothing in, and "ok" with neither for one it
+// did. Any package that ran tests means tests ran.
+func oracleRanNothing(log string) bool {
+	nothing := false
+	for _, line := range strings.Split(log, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.Contains(line, "no test files"), strings.Contains(line, "no tests to run"):
+			nothing = true
+		case strings.HasPrefix(line, "ok ") || strings.HasPrefix(line, "ok\t") || strings.HasPrefix(line, "--- PASS"):
+			return false
+		}
+	}
+	return nothing
 }
 
 // bugOracleRedOnBase runs a bug request's reference-oracle command in the
@@ -62,6 +109,10 @@ func bugOracleRedOnBase(ctx temporalworkflow.Context, ids *activityIDs, buildVer
 		return nil, wrapActivityFailure("oracle red on base activity", err, attempts, baseSHA, committed, worktreePath, branch)
 	}
 	attempts = append(attempts, gate.Attempts...)
+	if gate.NotRun || oracleNotRunExit(gate.Result.ExitCode) {
+		msg := fmt.Sprintf("the acceptance oracle did not run its tests on the base commit (`%s` exited %d or ran no test), so it says nothing about the bug; no model call was made. Fix the oracle's RUN_COMMAND.txt so the command runs the oracle, then approve it again", input.GateCommands[policy.ReferenceOracleGateID], gate.Result.ExitCode)
+		return nil, wrapActivityFailure("oracle not run on base", temporal.NewNonRetryableApplicationError(msg, OracleNotRunOnBaseFailureType, nil), attempts, baseSHA, committed, worktreePath, branch)
+	}
 	if gate.Result.ExitCode != 0 {
 		return attempts, nil
 	}

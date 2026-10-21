@@ -49,6 +49,11 @@ type ResumeFrom struct {
 	// from the commit the ticket's work started from, not from the commit
 	// the halted run started from.
 	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
+	// BeyondBase is true when the halted run's worktree is past the request's
+	// base: its build had begun or it produced a result, or it was chained
+	// after an earlier ticket's run. A bug request's oracle check on the base
+	// commit is not made for such a resume; for one lost earlier it is.
+	BeyondBase bool `json:"beyond_base,omitempty"`
 }
 
 // roundState is the part of build_app.py's round-state file the host reads
@@ -280,7 +285,22 @@ func NewResumeFrom(halted *run.Run) *ResumeFrom {
 		BaseSHA:            halted.BaseSHA,
 		InstructionBaseSHA: firstNonEmpty(halted.InstructionBaseSHA, halted.DiffBaseSHA, halted.BaseSHA),
 		DiffBaseSHA:        halted.DiffBaseSHA,
+		BeyondBase:         haltedBeyondBase(halted),
 	}
+}
+
+// haltedBeyondBase reports whether the halted run got past the request's base
+// commit: it has a result, it chained after another run, or its build began.
+func haltedBeyondBase(halted *run.Run) bool {
+	if halted.ResultSHA != "" || halted.PriorRunID != "" {
+		return true
+	}
+	for _, a := range halted.Attempts {
+		if a.Kind == "build" {
+			return true
+		}
+	}
+	return false
 }
 
 // CarriedSpend is the relay spend a run resumed from haltedID inherits: what

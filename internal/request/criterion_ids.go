@@ -9,7 +9,7 @@ import (
 
 // criterionIDRE matches the ID a drafted criterion starts with, after its
 // own number: "1. AC-1: When ...". Group 1 is the ID's number.
-var criterionIDRE = regexp.MustCompile(`^\d+[.)]\s+AC-(\d+):\s*\S`)
+var criterionIDRE = regexp.MustCompile(`^\d+[.)]\s+AC-(\d+):(?:\s|$)`)
 
 // criterionEARSRE matches the wording of a criterion (its text after
 // "N. AC-N: ") in the EARS forms a drafted spec is asked for: an event,
@@ -51,8 +51,14 @@ func ValidateSpecCriteria(content string, requireIDs bool) error {
 		}
 		if m := criterionIDRE.FindStringSubmatch(first); m != nil {
 			withID++
+			if len(m[1]) > 1 && m[1][0] == '0' {
+				return fmt.Errorf("criterion %d is labelled AC-%s: write the ID without leading zeros (AC-%d)", n, m[1], n)
+			}
 			if id, _ := strconv.Atoi(m[1]); id != n {
 				return fmt.Errorf("criterion %d is labelled AC-%d: its ID must equal its number (AC-%d)", n, id, n)
+			}
+			if strings.TrimSpace(criterionLeadRE.ReplaceAllString(b.folded, "")) == "" {
+				return fmt.Errorf("criterion %d has the ID AC-%d but no text", n, n)
 			}
 		}
 	}
@@ -91,6 +97,24 @@ func stripCriterionID(text string) string {
 		return m[1] + t[len(m[0]):]
 	}
 	return text
+}
+
+// manifestLabel returns the "AC-N" label a manifest entry's criterion text
+// carries, or "".
+func manifestLabel(text string) string {
+	if m := criterionIDPrefixRE.FindString(strings.TrimSpace(text)); m != "" {
+		if i := strings.Index(m, "AC-"); i >= 0 {
+			return strings.TrimRight(strings.TrimSpace(m[i:]), ":")
+		}
+	}
+	return ""
+}
+
+// manifestLabelMismatch reports whether text carries a label that is not
+// AC-<index>. An unlabelled quote matches.
+func manifestLabelMismatch(text string, index int) bool {
+	label := manifestLabel(text)
+	return label != "" && label != fmt.Sprintf("AC-%d", index)
 }
 
 // criterionLeadRE strips a folded criterion's "N. AC-N: " prefix.

@@ -412,13 +412,22 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 		})
 		current = nil
 	}
+	inFence := false
 	for _, raw := range sectionLines {
 		trimmed := strings.TrimSpace(raw)
 		if trimmed == "" {
 			continue
 		}
+		// A numbered line inside a fenced code block is code, not a
+		// criterion: the fence lines and what they hold continue the
+		// criterion they sit in.
+		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+		wasInFence := inFence
+		if isFence {
+			inFence = !inFence
+		}
 		indented := raw != strings.TrimLeft(raw, " \t")
-		if !indented && specCriterionItemRE.MatchString(trimmed) {
+		if !indented && !wasInFence && !isFence && specCriterionItemRE.MatchString(trimmed) {
 			flush()
 			started = true
 		}

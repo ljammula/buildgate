@@ -632,6 +632,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		}
 	}
 	gateResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts), ReferenceOracleSHA256: referenceOracleSHA256, OracleCanary: canary}
+	gateResult.NotRun = oracleCheckRanNothing(input.Check, runErr, result)
 	if runErr == nil && err == nil {
 		gateResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 		gateResult.LogSHA256, err = evidence.SHA256File(result.LogPath)

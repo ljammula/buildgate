@@ -1120,3 +1120,11 @@ func TestTriageNamesAnOraclePassingOnTheBase(t *testing.T) {
 		t.Errorf("Run() = %q, want %q", got, want)
 	}
 }
+
+func TestTriageNamesAnOracleThatRanNoTestOnTheBase(t *testing.T) {
+	r := &run.Run{ID: "run1", State: run.StateHalted, HaltReasonCode: run.HaltReasonOracleNotRunOnBase, HaltError: "temporal workflow did not complete: ..."}
+	want := "halted before the build: the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected), so it says nothing about the bug; no model call was made"
+	if got := Run(r, t.TempDir()); got != want {
+		t.Errorf("Run() = %q, want %q", got, want)
+	}
+}

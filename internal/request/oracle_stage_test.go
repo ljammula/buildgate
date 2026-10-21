@@ -480,3 +480,36 @@ func TestANextActionForAnOracleGreenOnBaseNamesTheRemedy(t *testing.T) {
 		t.Errorf("NextAction = %q", got)
 	}
 }
+
+// TestPlanApprovalOfABugRequestNeedsTicketOneToHaveAnOracle: a bug request's
+// plan whose first ticket has no oracle directory is refused with the way to
+// fix it; with an oracle file under ticket 1 the approval goes on.
+func TestPlanApprovalOfABugRequestNeedsTicketOneToHaveAnOracle(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newApprovableRequest(t, dataDir, "req-1", StatePlanReview, true)
+	r.Bug = true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	// An oracle under ticket 2 alone does not help.
+	dir2 := filepath.Join(Dir(dataDir, "req-1"), "tickets", "002.oracle")
+	if err := os.MkdirAll(dir2, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{TicketOracleRunCommandFilename: "go test ./.oracle/...\n", "b_test.go": "package x\n\nimport \"testing\"\n\nfunc TestOracleB(t *testing.T) {}\n"} {
+		if err := os.WriteFile(filepath.Join(dir2, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := Approve(dataDir, "req-1", "alice", fixedNow, nil)
+	if err == nil || !strings.Contains(err.Error(), "ticket 1 has none") || !strings.Contains(err.Error(), "map the approved oracle to ticket 1's criteria") {
+		t.Fatalf("approve err = %v", err)
+	}
+	if got, _ := Load(dataDir, "req-1"); got.State != StatePlanReview {
+		t.Errorf("State = %q, want plan_review", got.State)
+	}
+	writeOracleDir(t, dataDir, "req-1", TicketOracleRunCommandFilename, "oracle_001_test.go")
+	if got, err := Approve(dataDir, "req-1", "alice", fixedNow, nil); err != nil || got.State != StateBuilding {
+		t.Fatalf("approve with ticket 1's oracle: %v %v", got, err)
+	}
+}

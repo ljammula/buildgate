@@ -184,3 +184,53 @@ func TestOracleManifestMatchesACriterionWithOrWithoutItsLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSpecCriteriaRefusesALeadingZeroID(t *testing.T) {
+	t.Parallel()
+	err := ValidateSpecCriteria(specWithCriteria("1. AC-01: x.\n2. AC-2: y."), true)
+	if err == nil || !strings.Contains(err.Error(), "without leading zeros (AC-1)") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateSpecCriteriaAcceptsALabelWithItsTextOnTheNextLines(t *testing.T) {
+	t.Parallel()
+	spec := specWithCriteria("1. AC-1:\n   When a, the system shall b.\n2. AC-2: When c, the system shall d.")
+	if err := ValidateSpecCriteria(spec, true); err != nil {
+		t.Fatalf("a label with its text below: %v", err)
+	}
+	if err := ValidateSpecCriteria(specWithCriteria("1. AC-1:\n2. AC-2: y."), true); err == nil || !strings.Contains(err.Error(), "no text") {
+		t.Fatalf("a label with no text: err = %v", err)
+	}
+}
+
+// TestAFencedNumberedLineIsNotACriterion: a numbered line inside a code fence
+// continues the criterion it is in.
+func TestAFencedNumberedLineIsNotACriterion(t *testing.T) {
+	t.Parallel()
+	for _, fence := range []string{"```", "~~~"} {
+		spec := specWithCriteria("1. AC-1: When a, the system shall print:\n" + fence + "\n2. not a criterion\n3. nor this\n" + fence + "\n2. AC-2: When c, the system shall d.")
+		if err := ValidateSpecCriteria(spec, true); err != nil {
+			t.Errorf("%s: %v", fence, err)
+		}
+		criteria, err := SpecAcceptanceCriteria(spec)
+		if err != nil || len(criteria) != 2 {
+			t.Errorf("%s: criteria = %d (%v), want 2", fence, len(criteria), err)
+		}
+	}
+}
+
+func TestOracleManifestLabelMustBeItsCriterionIndex(t *testing.T) {
+	t.Parallel()
+	criteria := []string{"1. AC-1: When x, the system shall y.", "2. AC-2: When z, the system shall w."}
+	files := map[string]bool{"a_test.go": true}
+	manifest := `[{"criterion":"AC-2: When x, the system shall y.","oracle_file":"a_test.go","criterion_index":1}]`
+	problems := validateOracleManifest([]byte(manifest), criteria, files)
+	found := false
+	for _, p := range problems {
+		found = found || strings.Contains(p, "labelled AC-2 but its criterion_index is 1")
+	}
+	if !found {
+		t.Errorf("problems = %q, want the label/index mismatch", problems)
+	}
+}

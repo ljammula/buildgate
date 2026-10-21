@@ -54,3 +54,22 @@ func TestABugRunWhoseOraclePassesOnBaseQuarantinesTheRequest(t *testing.T) {
 		t.Errorf("next action %q does not name the send-back", got.NextAction())
 	}
 }
+
+// TestABugRunWhoseOracleRanNoTestOnBaseQuarantinesTheRequest: the same, with
+// its own check, for an oracle that never ran.
+func TestABugRunWhoseOracleRanNoTestOnBaseQuarantinesTheRequest(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runner := func(_ context.Context, a []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(a, "-ticket")
+		onReady(&run.Run{ID: ticket, State: run.StateReady})
+		return (&run.Run{ID: ticket, State: run.StateHalted, HaltReasonCode: run.HaltReasonOracleNotRunOnBase, HaltError: "the acceptance oracle did not run"}).Save(dataDir)
+	}
+	got := requestdrivertest.AdvanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{}, runner)
+	if got.State != request.StateQuarantined || got.QuarantineCheck != request.QuarantineCheckOracleNotRun {
+		t.Fatalf("state %s check %q, want quarantined by %s", got.State, got.QuarantineCheck, request.QuarantineCheckOracleNotRun)
+	}
+	if !strings.Contains(got.NextAction(), "RUN_COMMAND.txt") {
+		t.Errorf("next action %q does not say how to fix it", got.NextAction())
+	}
+}

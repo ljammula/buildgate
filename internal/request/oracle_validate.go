@@ -298,6 +298,8 @@ func validateOracleManifest(data []byte, criteria []string, files map[string]boo
 			problems = append(problems, fmt.Sprintf("%s: no criterion_index -- an entry must say which spec criterion (1-based) it checks so it can be assigned to a ticket", label))
 		case e.index < 1 || e.index > len(criteria):
 			problems = append(problems, fmt.Sprintf("%s: criterion_index %d is outside the spec's %d acceptance criteria", label, e.index, len(criteria)))
+		case manifestLabelMismatch(e.criterion, e.index):
+			problems = append(problems, fmt.Sprintf("%s: criterion is labelled %s but its criterion_index is %d (the label must be AC-%d)", label, manifestLabel(e.criterion), e.index, e.index))
 		case conformity.NormalizeCriterion(stripCriterionID(e.criterion)) != conformity.NormalizeCriterion(stripCriterionID(criteria[e.index-1])):
 			problems = append(problems, fmt.Sprintf("%s: criterion text does not match spec criterion %d (compared exactly, whitespace included) -- %s; fix criterion_index if the oracle was drafted against different numbering, or fix the text", label, e.index, criterionDiff(e.criterion, criteria[e.index-1])))
 		}

@@ -138,6 +138,13 @@ const HaltReasonBaselineVerifyFailed = "baseline_verify_failed"
 // made. The fix is a failing test, never the ticket's code.
 const HaltReasonOraclePassesOnBase = "oracle_passes_on_base"
 
+// HaltReasonOracleNotRunOnBase is Run.HaltReasonCode's value when a bug
+// request's reference oracle did not run any test on the base commit (a
+// timeout, a command that was not found or not executable, pytest's "no tests
+// collected", go test's "no test files" or "no tests to run"): the check says
+// nothing about the bug. No model call was made.
+const HaltReasonOracleNotRunOnBase = "oracle_not_run_on_base"
+
 // BaselineVerify is the result of running the ticket's verify command on
 // the base commit, in a fresh sandbox, before the build spent a model call
 // (RunBaselineVerifyActivity). Recorded for every run; nil only on a run

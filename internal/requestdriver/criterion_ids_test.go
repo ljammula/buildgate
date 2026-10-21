@@ -60,8 +60,10 @@ func TestADraftedSpecWithBadCriterionIDsGetsOneRedraft(t *testing.T) {
 	if seen[0] != "" || !strings.Contains(seen[1], "carry no IDs") {
 		t.Errorf("feedback seen = %q, want none then the refusal in its own words", seen)
 	}
-	if len(loaded.Rejections) != 1 || loaded.Rejections[0].By != request.FactoryActor || loaded.Rejections[0].ForStage != request.StateSpecReview {
-		t.Errorf("Rejections = %+v, want the factory's one", loaded.Rejections)
+	// The refusal fed the second attempt only: once a draft passes it is not
+	// feedback for any later redraft.
+	if len(loaded.Rejections) != 0 || request.SpecFeedback(loaded) != "" {
+		t.Errorf("Rejections = %+v, feedback %q; want none once a draft passed", loaded.Rejections, request.SpecFeedback(loaded))
 	}
 	if got := string(mustReadFile(t, requestdriver.RequestSpecPath(dataDir, "req-1"))); got != labelledSpec {
 		t.Errorf("spec.md is not the second draft: %q", got)
@@ -164,5 +166,33 @@ func TestRealApprovedPlansWithIDsAddedPassEveryPlanTimeCheck(t *testing.T) {
 				t.Fatalf("a real approved plan with IDs added is refused: %s", refusal)
 			}
 		})
+	}
+}
+
+// TestAScopedRedraftOfASpecWithoutIDsReachesSpecReview: a comment on Scope
+// redrafts only that section, so the reviewed criteria stay as they are, ID-less.
+func TestAScopedRedraftOfASpecWithoutIDsReachesSpecReview(t *testing.T) {
+	original := requestdrivertest.TwoCriteriaSpec
+	dataDir, r := rejectedSpecFixture(t, original, request.RejectionAnchor{Path: "spec.md", Section: "## Scope", Quote: "The /refunds endpoint only.", Note: "mention /refunds/{id}"})
+	drafted := strings.Replace(rewriteSpecEverywhere(original), "REWRITTEN. The /refunds endpoint only.", "The /refunds and /refunds/{id} endpoints.", 1)
+	advanceSpec(t, dataDir, r, drafted)
+	loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	if loaded.State != request.StateSpecReview {
+		t.Fatalf("State = %q (Error: %s), want spec_review", loaded.State, loaded.Error)
+	}
+	if got := string(mustReadFile(t, requestdriver.RequestSpecPath(dataDir, "req-1"))); !strings.Contains(got, "1. A retried POST") {
+		t.Errorf("the reviewed criteria were not kept: %q", got)
+	}
+}
+
+// TestAScopedRedraftOfTheCriteriaStillNeedsIDs: when the commented section is
+// the criteria, they are the model's output and must carry IDs.
+func TestAScopedRedraftOfTheCriteriaStillNeedsIDs(t *testing.T) {
+	original := requestdrivertest.TwoCriteriaSpec
+	dataDir, r := rejectedSpecFixture(t, original, request.RejectionAnchor{Path: "spec.md", Section: "## Acceptance criteria", Note: "tighten"})
+	advanceSpec(t, dataDir, r, original)
+	loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "carry no IDs") {
+		t.Fatalf("State = %q Error = %q, want a halt for IDs", loaded.State, loaded.Error)
 	}
 }

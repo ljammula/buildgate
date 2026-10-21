@@ -591,6 +591,9 @@ type VerifyActivityResult struct {
 	// for a gate that passed, for the reference oracle and for every other
 	// Activity.
 	BaseCheck *run.GateBaseCheck `json:"base_check,omitempty"`
+	// NotRun is set by the base-commit check of a bug request (oracle_red_on_base)
+	// when the command exited 0 but its log shows that no test ran.
+	NotRun bool `json:"not_run,omitempty"`
 	// Rerun is the second run of RunVerifyActivity's, RunFullSuiteVerify-
 	// Activity's or the baseline's command after a first run whose failure
 	// qualified (verify_rerun.go); when it reached an exit code, Result,
