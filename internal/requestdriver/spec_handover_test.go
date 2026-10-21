@@ -62,7 +62,7 @@ func TestAdvanceSpecDraftingRunsTheDraftingJobAfterARejection(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	revised := strings.Replace(requestdrivertest.CanonicalValidSpec, "None known.", "Keys are kept for 24 hours.", 1)
+	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
 	calls := 0
 	runner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		calls++

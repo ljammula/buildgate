@@ -4376,6 +4376,12 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// The numbering and the IDs, if any, stay consistent; an edit is not
+	// forced to add IDs a handed-over spec never had.
+	if err := request.ValidateSpecCriteria(content, false); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	by, named := s.writePrincipal(r, body.By)
 	if !named {
 		writeError(w, http.StatusBadRequest, badPrincipal)

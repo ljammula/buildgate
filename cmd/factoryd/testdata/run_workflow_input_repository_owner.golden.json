@@ -6,6 +6,7 @@
     "gofmt -w ."
   ],
   "base_sha": "<BASE_SHA>",
+  "bug": true,
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,

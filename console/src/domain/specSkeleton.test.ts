@@ -176,6 +176,11 @@ describe("ticketStructure", () => {
     ]);
   });
 
+  test("a covered line may cite a criterion by its ID", () => {
+    const check = ticketStructure(TICKET.replace("- 3", "- AC-3"));
+    expect(check.rows.at(-1)).toEqual({ label: "Criteria covered", ok: true, note: "1, 3" });
+  });
+
   test("a covered line that is not a number is quoted", () => {
     const check = ticketStructure(TICKET.replace("- 3", "- criterion three"));
     expect(check.rows.at(-1)).toEqual({

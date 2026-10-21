@@ -420,6 +420,7 @@
       }
     ],
     "draft_oracles": true,
+    "bug": true,
     "spec_imported": true,
     "plan_imported": true,
     "review_notes": [

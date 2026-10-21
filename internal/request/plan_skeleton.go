@@ -204,7 +204,7 @@ func anyNonBlank(lines []string) bool {
 // criteriaListItemRE matches a Markdown bullet list item naming a single
 // criterion number ("- 1", "* 2") or a bare number on its own line ("3"),
 // and captures that number.
-var criteriaListItemRE = regexp.MustCompile(`^(?:[-*]\s*)?(\d+)\s*$`)
+var criteriaListItemRE = regexp.MustCompile(`^(?:[-*]\s*)?(?:AC-)?(\d+)\s*$`)
 
 // parseCriteriaNumbers parses lines (the "### Acceptance criteria
 // covered" section's own content lines) into a list of criterion
@@ -220,7 +220,7 @@ func parseCriteriaNumbers(lines []string) ([]int, error) {
 		}
 		match := criteriaListItemRE.FindStringSubmatch(line)
 		if match == nil {
-			return nil, fmt.Errorf("line %q is not a recognizable criterion list item (want \"- N\")", line)
+			return nil, fmt.Errorf("line %q is not a recognizable criterion list item (want \"- N\" or \"- AC-N\")", line)
 		}
 		n, err := strconv.Atoi(match[1])
 		if err != nil {
@@ -412,13 +412,22 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 		})
 		current = nil
 	}
+	inFence := false
 	for _, raw := range sectionLines {
 		trimmed := strings.TrimSpace(raw)
 		if trimmed == "" {
 			continue
 		}
+		// A numbered line inside a fenced code block is code, not a
+		// criterion: the fence lines and what they hold continue the
+		// criterion they sit in.
+		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+		wasInFence := inFence
+		if isFence {
+			inFence = !inFence
+		}
 		indented := raw != strings.TrimLeft(raw, " \t")
-		if !indented && specCriterionItemRE.MatchString(trimmed) {
+		if !indented && !wasInFence && !isFence && specCriterionItemRE.MatchString(trimmed) {
 			flush()
 			started = true
 		}

@@ -234,10 +234,15 @@ type RunWorkflowInput struct {
 	// NoCommitOracles is the request's explicit opt-out from the host oracle
 	// commit: CommitOraclesActivity runs validate-only (nothing written or
 	// committed, so no post-commit verify follows).
-	NoCommitOracles bool   `json:"no_commit_oracles,omitempty"`
-	SandboxImage    string `json:"sandbox_image,omitempty"`
-	SandboxDocker   string `json:"sandbox_docker,omitempty"`
-	SandboxUser     string `json:"sandbox_user,omitempty"`
+	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
+	// Bug is a bug request's run: with a ReferenceOracleDir, preBuildChecks
+	// runs the reference-oracle command on the base commit and halts the run
+	// when it passes, since a test that already passes does not reproduce the
+	// bug (workflow change bug-oracle-red-on-base).
+	Bug           bool   `json:"bug,omitempty"`
+	SandboxImage  string `json:"sandbox_image,omitempty"`
+	SandboxDocker string `json:"sandbox_docker,omitempty"`
+	SandboxUser   string `json:"sandbox_user,omitempty"`
 	// RoutePolicy is the build's model route and its per-run
 	// token/cost/rate ceilings: when set, RunBuildActivity launches
 	// build_app.py's sandboxed worker with that route admitted by its
@@ -586,6 +591,9 @@ type VerifyActivityResult struct {
 	// for a gate that passed, for the reference oracle and for every other
 	// Activity.
 	BaseCheck *run.GateBaseCheck `json:"base_check,omitempty"`
+	// NotRun is set by the base-commit check of a bug request (oracle_red_on_base)
+	// when the command exited 0 but its log shows that no test ran.
+	NotRun bool `json:"not_run,omitempty"`
 	// Rerun is the second run of RunVerifyActivity's, RunFullSuiteVerify-
 	// Activity's or the baseline's command after a first run whose failure
 	// qualified (verify_rerun.go); when it reached an exit code, Result,

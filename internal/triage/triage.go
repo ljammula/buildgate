@@ -993,6 +993,10 @@ func triageHalt(r *run.Run) string {
 		return factoryDirSentence(r)
 	case string(unresolved.TemporalUnreachable):
 		return temporalUnreachableTriage
+	case run.HaltReasonOracleNotRunOnBase:
+		return "halted before the build: the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected), so it says nothing about the bug; no model call was made"
+	case run.HaltReasonOraclePassesOnBase:
+		return "halted before the build: the acceptance oracle passes on the base commit, so it does not reproduce the bug; no model call was made"
 	case run.HaltReasonBaselineVerifyFailed:
 		// No model call was made: the verify command failed on the base
 		// commit with a failure the ticket does not name.

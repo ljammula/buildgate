@@ -44,6 +44,9 @@ type QueueEntry struct {
 	// NoCommitOracles is forwarded as -no-commit-oracles when set (a
 	// request's own `factoryd submit -no-commit-oracles`).
 	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
+	// Bug is forwarded as -bug when set (a request's own `factoryd submit
+	// -bug`).
+	Bug bool `json:"bug,omitempty"`
 	// PreflightProfile is passed through to runMainWithReady's own
 	// -preflight-profile verbatim; empty means "let it resolve its own
 	// default" (its .factory.yml/strict-default precedence).

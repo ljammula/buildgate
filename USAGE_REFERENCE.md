@@ -903,6 +903,7 @@ of its prose:
 | No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
 | An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's numbered criteria |
 | The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
+| A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order, numbered lines inside a code fence are not items) and their `AC-N:` labels: every criterion `N. AC-N: ...` (its text may follow on the next lines) with the label equal to its number and no leading zero. A scoped redraft that keeps the reviewed criteria section is not asked for IDs. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for numbering and mixed labels only |
 
 A plan the planning model drafted that fails one is re-planned once, with
 the check's message as the feedback; a second refused plan halts the
@@ -929,6 +930,8 @@ other text of the spec.
 | `plan_review` | `criterion N names <file>, which ticket T may change, but the tickets covering criterion N may not` | The criterion names, in backticks, a file that is in the `Allowed-Files` of a ticket that does not list the criterion as covered, and in those of no ticket that does. Only names and ticket headers are read: any wording earns it |
 | `plan_review` | `criterion N says <file> changes, but no ticket may change it` | The file exists, no ticket may change it, and the words around its name say it changes (`adds`, `gains`, `new`, `updated`, `removed` ...) without denying it (`no`, `not`, `unchanged`) or only referring to it (`already`, `pattern`, `like`, `from`) |
 | `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review, which sees only the diff, is told not to judge a requirement on the commit's text and to judge every other part of the criterion as usual |
+| `spec_review` | `criterion N is not in the "When ..., the system shall ..." form` | The spec's criteria carry `AC-N:` labels and criterion N's text does not start with `When`, `While`, `If` or `Where` ... `, the system shall`, or `The system shall`. Wording only: the spec is not changed |
+| `plan_review` | `criterion N has no test: no covering ticket's Tests to add cites AC-N` (`and no approved oracle covers it` when the request has an approved oracle) | The spec's criteria carry labels, a ticket lists criterion N as covered, no listing ticket's `### Tests to add` mentions `AC-N`, and no approved oracle manifest entry covers it. A ticket cites a criterion in `### Acceptance criteria covered` as `- N` or `- AC-N`, and the plan prompt asks for `(AC-N)` at the end of each step and test |
 
 A backticked name is a file when a file of exactly that name exists
 (`tests/x.py::test_y` and `a.go:42` name that file; letter case counts
@@ -2131,6 +2134,26 @@ version marker. A history recorded before the marker replays without it.
 `failing_tests` and `unnamed` (at most 20 each, with `failing_count` and
 `unnamed_count`), `named_as`, `needs_created`, `first_error` (when no test was named), `cause` and `cause_detail` (when the log shows one), `expected`,
 `left_out_of_scope` (at most 20, each a clean line of at most 200 bytes) and `left_out_of_scope_count`, `inherited_from`, `log_path`, `duration_ms`.
+
+### Bug requests: the oracle on the base commit
+
+`factoryd submit -bug` sets `request.json` `bug` and `draft_oracles`. An
+approval at `oracle_review` that pins no oracle file is refused. A ticket run
+of a bug request that has a reference oracle is given the internal `-bug`
+flag (`RunWorkflowInput.Bug`), and on a history with the
+`bug-oracle-red-on-base` version marker `RunWorkflow` runs the reference-oracle
+command once between the baseline verify and the build.
+
+| | |
+|---|---|
+| Where | The run's own worktree, just created at the request's base commit: the request's first ticket, first build. Not made for a run with a diff base, a `-prior-run` (a later ticket), an existing branch, or a resume of a run whose build had begun or that produced a result (`resume.beyond_base`); a resume of a run lost before its build is made again |
+| Plan approval | A bug request's plan is refused at `plan_review` unless ticket 1 has an oracle file under `tickets/001.oracle/` |
+| Surface | `factoryd submit -bug` only; the HTTP API, MCP and console do not set it |
+| Command | The ticket's reference-oracle command, `sh -c` in the normal sandbox with the oracle mounted read-only and no model route; no canary and no rerun on the base commit |
+| Attempt | Kind `oracle_red_on_base`, in the run's attempt list; its bin is `operator` |
+| Pass condition | A non-zero exit other than the not-run codes below: any failure counts, a test that does not compile included |
+| Not run | Exit 5 (pytest, no tests collected), 124 to 127 (timeout, not found, not executable), or exit 0 with a log that shows only `no test files` / `no tests to run` (`go test`): application error type `OracleNotRunOnBase`, `halt_reason_code` `oracle_not_run_on_base`, not retried; the request is quarantined with `quarantine_check` `oracle_not_run_on_base` |
+| Halt | Exit 0: application error type `OraclePassesOnBase`, `halt_reason_code` `oracle_passes_on_base`, not retried, not counted toward the repository's stop line. The request is quarantined with `quarantine_check` `oracle_green_on_base` (`next_action`: `factoryd reject -to spec`) |
 
 ### Oracle-approved runs
 

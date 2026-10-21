@@ -496,7 +496,7 @@ func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	if input.BaselineCheck && temporalworkflow.GetVersion(ctx, baselineCheckChange, temporalworkflow.DefaultVersion, 1) == 1 {
 		return runBaselineCheck(ctx, ids, buildVerifyCtx, *input, current, baseline.Attempts, baseSHA, committed, worktreePath, branch)
 	}
-	return baseline.Attempts, nil
+	return bugOracleRedOnBase(ctx, ids, buildVerifyCtx, *input, current, baseline.Attempts, baseSHA, committed, worktreePath, branch)
 }
 
 // errBaselineCheckPassed is how preBuildChecks reports a BaselineCheck run

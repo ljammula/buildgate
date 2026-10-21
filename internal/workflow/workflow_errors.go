@@ -76,6 +76,10 @@ func HaltReasonCodeFromError(err error) string {
 		return run.HaltReasonComposeServicesRejected
 	case BaselineVerifyFailureType:
 		return run.HaltReasonBaselineVerifyFailed
+	case OraclePassesOnBaseFailureType:
+		return run.HaltReasonOraclePassesOnBase
+	case OracleNotRunOnBaseFailureType:
+		return run.HaltReasonOracleNotRunOnBase
 	case ReviewInstructionsFailureType:
 		return run.HaltReasonReviewInstructionsFailed
 	case FactoryDirFailureType:

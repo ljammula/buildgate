@@ -834,12 +834,39 @@ contract its spec states — the drafter invents names the builder won't
 share if the spec doesn't pin the package, functions, signatures, routes
 and JSON shapes.
 
-- Bug fix or behaviour change: use `-draft-oracles`.
+- Bug fix or behaviour change: use `-draft-oracles`, or `submit -bug`, which
+  adds the oracle stage and holds the request to a test that fails before the
+  fix (below).
 - New feature with a firm contract: pin every name/shape in the spec
   first, then use `-draft-oracles`.
 - Exploratory new feature: skip it, rely on the verify command,
   `tests_added`, and the conformity review; add contract tests once the
   interface settles.
+
+**Bug requests (`submit -bug`).** A bug fix needs a test that fails on the
+current code. `-bug` adds the oracle stage, refuses an approval at
+`oracle_review` that pins no oracle file (hand-write `oracle/` and approve
+again), and runs the approved oracle's command on the base commit before the
+build, in the normal sandbox with no model route. A non-zero exit is the bug
+reproduced and the build goes on. An exit of 0 means the test does not
+reproduce the bug: the run halts with `oracle_passes_on_base` before any model
+call, and the request is quarantined as `oracle_green_on_base`. Send it back
+(`factoryd reject -to spec -reason "..."`) and approve an oracle that fails.
+Any other non-zero exit counts as red, a test that does not compile included.
+An oracle that did not run its tests (exit 5, pytest's "no tests collected";
+124 to 127, a timeout or a command that was not found or not executable; or
+`go test` exiting 0 with only `no test files` or `no tests to run`) is not a
+red test: the run halts with `oracle_not_run_on_base` and the request is
+quarantined the same way, with a next action to fix `RUN_COMMAND.txt`. The
+build's own reference-oracle gate and canary still judge the oracle
+afterwards. `-bug` is a `factoryd submit` flag only: the HTTP API, the MCP
+`submit_request` tool and the console do not set it. The check is made on the request's first ticket only, on its first build
+and on a resume of a build lost before it began: a later ticket (chained after
+an earlier ticket's run), a corrective round, a retry on the failed attempt's
+branch and a resume of a build that had begun are not at the request's base.
+Approving the plan of a bug request is refused unless ticket 1 has an oracle
+file: list the criteria the oracle's `MANIFEST.json` covers under ticket 1's
+`### Acceptance criteria covered`, or edit the plan so ticket 1 covers them.
 
 **Always read every drafted oracle before approving.** Live runs have
 produced the wrong package or target path, code that doesn't compile,
@@ -1502,6 +1529,8 @@ What changes for a build:
 | Request is in `resume_review`: "the job of the oracle_drafting step ended before it produced a draft, so there is nothing to review" (or the sandbox, model route, provider limit or spend meter clause for `oracle_drafting`) | The oracle-drafting job gave no draft to review: its sandbox never started, its launch was lost or cut off, the script exited non-zero with no evidence file, or none of its model requests was answered. Nothing is drafted again on its own | The reason line ends with what the job reported; `<data-dir>/requests/<id>/logs/oracle_draft.log` has the rest. Fix it (`factoryd doctor -fix`, the route, the session config's budget), then `factoryd resume <id>`. Refused while a container of the job is alive |
 | Run or request halted: `halted before the build: baseline verify failed: <test> ...; the ticket names none of them` | The verify command fails on the untouched repository: the command is wrong for this repo or image (a test needs a program the image lacks, a plugin is not installed), or the repo's default branch is red. No model call was made | Run the command in the worker image yourself, fix it, and build again: [Baseline verify](#baseline-verify-the-verify-command-runs-before-the-build). If the ticket is meant to make those tests pass, name them in the ticket |
 | Run or request halted: `halted before the build: baseline verify passed, but the command leaves <path> and N more outside the ticket's Allowed-Files` | The verify command (or a `setup:` command) writes files the repository does not ignore, and the factory commits what it leaves, so every build would be quarantined by `diff_scope`. No model call was made | Add those paths to the repository's `.gitignore`, or make the command remove them: [Baseline verify](#baseline-verify-the-verify-command-runs-before-the-build) |
+| Request quarantined `oracle_green_on_base`: `the acceptance oracle passes on the base commit, so it does not reproduce the bug` | A `submit -bug` request whose approved oracle exits 0 before any change, so it tests behaviour that already works. No model call was made | `factoryd reject -to spec -reason "..." <id>`, then hand-write or redraft an oracle that fails on the current code and approve it: [Oracles](#oracles-submit--draft-oracles) |
+| Request quarantined `oracle_not_run_on_base`: `the acceptance oracle ran no test on the base commit` | A `submit -bug` request whose oracle command timed out, was not found, collected no test (exit 5) or ran no Go test. No model call was made | Fix the oracle's `RUN_COMMAND.txt`: `factoryd reject -to spec -reason "..." <id>`, then approve a corrected oracle |
 | Run or request halted: `halted (operator finding): .factory/ cannot be mounted read-only: ...` | Every sandbox that runs a repository command mounts `.factory/` read-only as the commit `.factory.yml` was read from holds it. The directory at that commit, or the worktree's entry of that name, has a shape the mount cannot carry: the worktree lacks the directory, it is a file or a symlink, another spelling (`.Factory`) exists, or the committed directory holds a symlink or a submodule | Fix what the sentence names (USAGE_REFERENCE, "The `.factory/` directory"), commit, then `factoryd retry <id>` |
 | A gate or the verify command fails with `Read-only file system` under `.factory/` | A repository command writes into `.factory/` (a cache, a report, `chmod +x`) | Write to a gitignored directory or `/tmp`; commit the executable bit instead of setting it at run time |
 | Quarantine names a gate but not why it failed | Nothing wrong — the triage sentence quotes the first compile/test failure line from that gate's log | Read the run's full log for the rest |

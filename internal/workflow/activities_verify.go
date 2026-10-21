@@ -519,7 +519,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	// check, rather than sharing one call for every gate the way this
 	// Activity does.
 	var referenceOracleDir, referenceOracleMountPath, referenceOracleSHA256 string
-	if input.Check == "reference_oracle" {
+	if isOracleMountingCheck(input.Check) {
 		// Set for this check UNCONDITIONALLY, not gated on
 		// input.ReferenceOracleDir != "" -- found via review, round 2:
 		// the previous version skipped this whole assignment whenever
@@ -532,7 +532,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		// pair reach Validate's "must be set together" rule for real.
 		referenceOracleMountPath = input.ReferenceOracleMountPath
 	}
-	if input.Check == "reference_oracle" && input.ReferenceOracleDir != "" {
+	if isOracleMountingCheck(input.Check) && input.ReferenceOracleDir != "" {
 		snapshotDir, absErr := filepath.Abs(filepath.Join(a.logDirFor(input.RunWorkflowInput), "reference-oracle-snapshot"))
 		if absErr != nil {
 			return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("resolve reference-oracle snapshot path", InfrastructureFailureType, absErr)
@@ -632,6 +632,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		}
 	}
 	gateResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts), ReferenceOracleSHA256: referenceOracleSHA256, OracleCanary: canary}
+	gateResult.NotRun = oracleCheckRanNothing(input.Check, runErr, result)
 	if runErr == nil && err == nil {
 		gateResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 		gateResult.LogSHA256, err = evidence.SHA256File(result.LogPath)

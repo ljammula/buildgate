@@ -54,6 +54,10 @@ var bins = map[string]Bin{
 
 	policy.ReferenceOracleGateID: BinCorrectiveIfOracleInLoop,
 
+	// A bug request's oracle that passes on the base commit: the operator
+	// supplies a test that fails.
+	"oracle_red_on_base": BinOperator,
+
 	// Telling a build "add a test" trains a token test.
 	"tests_added": BinNever,
 }

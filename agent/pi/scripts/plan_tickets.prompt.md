@@ -66,17 +66,23 @@ Tests-Required: no -- <reason> (omit this line entirely unless this ticket adds 
 
 ### Steps
 
-(An ordered list of implementation steps.)
+(An ordered list of implementation steps. When the spec's criteria carry
+IDs ("N. AC-N: ..."), end each step that serves a criterion with
+"(AC-N)", or "(AC-N, AC-M)" for several.)
 
 ### Tests to add
 
-(A list of the tests this ticket adds.)
+(A list of the tests this ticket adds. When the spec's criteria carry IDs,
+end each test with the IDs of the criteria it checks, as "(AC-N)" or
+"(AC-N, AC-M)": every criterion this ticket covers is cited by at least one
+test unless the approved oracle already checks it.)
 
 ### Acceptance criteria covered
 
 (A list of the spec's own acceptance-criteria numbers this ticket
-satisfies, e.g. "- 1" / "- 3", one number per list item. Do not restate
-the criteria's text here -- numbers only.)
+satisfies, e.g. "- 1" / "- 3", one number per list item; when the spec's
+criteria carry IDs, write the ID instead: "- AC-1" / "- AC-3". Do not
+restate the criteria's text here -- the number or ID only.)
 
 ## Out of scope
 

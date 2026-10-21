@@ -431,3 +431,85 @@ func TestPlanFeedbackOnlyCarriesPlanStageRejections(t *testing.T) {
 		t.Errorf("PlanFeedback = %q", fb)
 	}
 }
+
+// TestApproveRefusesAnOracleSkipForABugRequest: a bug request needs a test
+// that fails before the fix, so an approval pinning no oracle file is refused
+// and the request stays at oracle_review; with an oracle file it goes on.
+func TestApproveRefusesAnOracleSkipForABugRequest(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newDraftOraclesRequest(t, dataDir, "req-1", StateOracleReview)
+	r.Bug = true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	for name, setup := range map[string]func(){
+		"no oracle directory": func() {},
+		"empty oracle directory": func() {
+			if err := os.MkdirAll(filepath.Join(Dir(dataDir, "req-1"), RequestOracleDirName), 0o750); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		setup()
+		_, err := Approve(dataDir, "req-1", "alice", fixedNow, nil)
+		if err == nil || !strings.Contains(err.Error(), "a bug request needs a failing test: hand-write oracle/") {
+			t.Fatalf("%s: approve err = %v", name, err)
+		}
+		if got, _ := Load(dataDir, "req-1"); got.State != StateOracleReview {
+			t.Errorf("%s: State = %q, want oracle_review", name, got.State)
+		}
+	}
+	dir := filepath.Join(Dir(dataDir, "req-1"), RequestOracleDirName)
+	if err := os.WriteFile(filepath.Join(dir, "a_test.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, TicketOracleRunCommandFilename), []byte("go test ./.oracle/...\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// With oracle files the approval is judged as any other (here by its
+	// missing manifest), not refused as a skip.
+	if _, err := Approve(dataDir, "req-1", "alice", fixedNow, nil); err == nil || strings.Contains(err.Error(), "a bug request needs") {
+		t.Fatalf("approve with an oracle file: err = %v, want the usual oracle checks", err)
+	}
+}
+
+func TestANextActionForAnOracleGreenOnBaseNamesTheRemedy(t *testing.T) {
+	r := &Request{ID: "req-1", State: StateQuarantined, QuarantineCheck: QuarantineCheckOracleGreenOnBase}
+	got := r.NextAction()
+	if !strings.Contains(got, "factoryd reject -to spec") || !strings.Contains(got, "does not reproduce the bug") {
+		t.Errorf("NextAction = %q", got)
+	}
+}
+
+// TestPlanApprovalOfABugRequestNeedsTicketOneToHaveAnOracle: a bug request's
+// plan whose first ticket has no oracle directory is refused with the way to
+// fix it; with an oracle file under ticket 1 the approval goes on.
+func TestPlanApprovalOfABugRequestNeedsTicketOneToHaveAnOracle(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newApprovableRequest(t, dataDir, "req-1", StatePlanReview, true)
+	r.Bug = true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	// An oracle under ticket 2 alone does not help.
+	dir2 := filepath.Join(Dir(dataDir, "req-1"), "tickets", "002.oracle")
+	if err := os.MkdirAll(dir2, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{TicketOracleRunCommandFilename: "go test ./.oracle/...\n", "b_test.go": "package x\n\nimport \"testing\"\n\nfunc TestOracleB(t *testing.T) {}\n"} {
+		if err := os.WriteFile(filepath.Join(dir2, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := Approve(dataDir, "req-1", "alice", fixedNow, nil)
+	if err == nil || !strings.Contains(err.Error(), "ticket 1 has none") || !strings.Contains(err.Error(), "map the approved oracle to ticket 1's criteria") {
+		t.Fatalf("approve err = %v", err)
+	}
+	if got, _ := Load(dataDir, "req-1"); got.State != StatePlanReview {
+		t.Errorf("State = %q, want plan_review", got.State)
+	}
+	writeOracleDir(t, dataDir, "req-1", TicketOracleRunCommandFilename, "oracle_001_test.go")
+	if got, err := Approve(dataDir, "req-1", "alice", fixedNow, nil); err != nil || got.State != StateBuilding {
+		t.Fatalf("approve with ticket 1's oracle: %v %v", got, err)
+	}
+}

@@ -676,6 +676,12 @@ requires a new contract review and an updated machine-checkable test.
   When the pass a resume started fails so again, the request goes on to
   `oracle_review` with a failed draft, where the operator can also write
   the oracles by hand or approve without them.
+  A bug request (`submit -bug`) whose first build of a ticket finds its
+  reference oracle passing on the base commit halts the run before any model
+  call with `oracle_passes_on_base`: a verdict on the oracle, not a lost
+  step, so the request is quarantined (`oracle_green_on_base`), not moved to
+  `resume_review`. Its approval at `oracle_review` pins at least one oracle
+  file.
   A spec-drafting or planning job whose sandbox does not start
   halts its request. The run halts with the cause
   as its `HaltReasonCode`, a ticket run keeps its worktree (one built on an existing branch

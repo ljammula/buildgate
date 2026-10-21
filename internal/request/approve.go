@@ -256,6 +256,9 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 		if err != nil {
 			return nil, nil, err
 		}
+		if r.Bug && !ticketOneHasOracle(specRelPaths, oraclePaths) {
+			return nil, nil, fmt.Errorf("request %s: a bug request needs ticket 1 to run a failing oracle, and ticket 1 has none: map the approved oracle to ticket 1's criteria (list the criteria the oracle's MANIFEST.json covers under ticket 1's \"### Acceptance criteria covered\"), or edit the plan so ticket 1 covers them, then approve again", id)
+		}
 		relPaths = append(relPaths, oraclePaths...)
 	case StateOracleReview:
 		// The request-level oracle (oracle/*, beside spec.md) is hash-pinned
@@ -265,6 +268,9 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 		relPaths, err = requestOracleRelPaths(dataDir, id)
 		if err != nil {
 			return nil, nil, err
+		}
+		if r.Bug && len(relPaths) == 0 {
+			return nil, nil, fmt.Errorf("request %s: a bug request needs a failing test: hand-write oracle/ (a test that fails on the current code) and approve again", id)
 		}
 	default:
 		return nil, nil, fmt.Errorf("request %s: cannot approve from state %q (must be %q, %q or %q) %w", id, r.State, StateSpecReview, StateOracleReview, StatePlanReview, ErrIllegalTransition)
@@ -703,6 +709,25 @@ func ticketSpecRelPaths(dataDir, id string) ([]string, error) {
 	}
 	sort.Strings(relPaths)
 	return relPaths, nil
+}
+
+// ticketOneHasOracle reports whether the first ticket's oracle directory holds
+// an oracle file (more than RUN_COMMAND.txt and MANIFEST.json) among
+// oraclePaths. A structural check on the materialized files.
+func ticketOneHasOracle(specRelPaths, oraclePaths []string) bool {
+	if len(specRelPaths) == 0 {
+		return false
+	}
+	dir := TicketOracleDir(specRelPaths[0])
+	for _, p := range oraclePaths {
+		if filepath.Dir(p) == dir {
+			base := filepath.Base(p)
+			if base != TicketOracleRunCommandFilename && base != ManifestFileName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ticketOracleRelPaths lists every file under each ticket's own
