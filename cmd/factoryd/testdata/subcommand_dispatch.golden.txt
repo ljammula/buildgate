@@ -260,6 +260,12 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd retry [flags] <request-id>
 stderr:   Rebuild the ticket of a quarantined or halted request
 
+$ factoryd rounds -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd rounds [flags] <request-id>
+stderr:   List the rounds a request's builds ended in, to retry a ticket from one
+
 $ factoryd resume -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
