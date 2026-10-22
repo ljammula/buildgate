@@ -1,12 +1,14 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -40,9 +42,10 @@ import (
 //     mentioned by the change: neither its name nor the name it tests (the
 //     part after Test, Example, Benchmark or Fuzz; a pytest function's name
 //     without test_) appears, in any letter case, as a word in the path or
-//     in either version of any file that differs from that commit, no
-//     failing pytest file is one of them, and no changed path is a
-//     submodule;
+//     in either version of any file that differs from that commit (of a
+//     documentation file, only the lines the change added or removed:
+//     isDocumentationPath), no failing pytest file is one of them, and no
+//     changed path is a submodule;
 //   - the baseline verify: the failure would halt the run (the ticket does
 //     not name every failing test). The base commit holds no build work;
 //   - the worktree can be put back to exactly what it held before the first
@@ -168,7 +171,11 @@ func identifierByte(c byte) bool {
 
 // changeMentions reports why the build's change rules out rerunning tests:
 // "" when no path the change touches, and no version of its file, mentions
-// any of them. Anything it cannot read rules the rerun out too.
+// any of them. A documentation file (isDocumentationPath) is searched only in
+// the lines the change added or removed: no test runs its prose, and a
+// README that lists every helper would otherwise rule out the rerun of any
+// test for the change that edits it. Anything it cannot read rules the rerun
+// out too.
 func changeMentions(ctx context.Context, workspace, base string, tests []string) string {
 	paths, err := changedPathsSince(ctx, workspace, base)
 	if err != nil {
@@ -190,11 +197,7 @@ func changeMentions(ctx context.Context, workspace, base string, tests []string)
 		words = append(words, w...)
 	}
 	for _, p := range paths {
-		for _, version := range []func() (string, error){
-			func() (string, error) { return p, nil },
-			func() (string, error) { return readWorktreeFile(workspace, p) },
-			func() (string, error) { return readCommitFile(ctx, workspace, base, p) },
-		} {
+		for _, version := range searchedVersions(ctx, workspace, base, p) {
 			text, err := version()
 			if err != nil {
 				return p + ": " + err.Error()
@@ -207,6 +210,98 @@ func changeMentions(ctx context.Context, workspace, base string, tests []string)
 		}
 	}
 	return ""
+}
+
+// searchedVersions are the texts of p that changeMentions searches: its path,
+// then both whole versions of the file, or, for a documentation file, only
+// the lines the change added or removed.
+func searchedVersions(ctx context.Context, workspace, base, p string) []func() (string, error) {
+	path := func() (string, error) { return p, nil }
+	if isDocumentationPath(p) {
+		return []func() (string, error){path, func() (string, error) { return changedLines(ctx, workspace, base, p) }}
+	}
+	return []func() (string, error){
+		path,
+		func() (string, error) { return readWorktreeFile(workspace, p) },
+		func() (string, error) { return readCommitFile(ctx, workspace, base, p) },
+	}
+}
+
+// documentationExtensions are the extensions of prose files.
+var documentationExtensions = map[string]bool{".md": true, ".markdown": true, ".rst": true, ".adoc": true, ".txt": true}
+
+// testInputDirs are directory names under which a prose-looking file may be a
+// test's input or expected output, so it is searched whole like code.
+var testInputDirs = map[string]bool{
+	"testdata": true, "test": true, "tests": true, "fixtures": true, "golden": true,
+	"snapshots": true, "__snapshots__": true, "examples": true, "expected": true,
+}
+
+// buildInputTextFiles are .txt files that are build or dependency inputs, not
+// prose: a pin changed in one can break a test without naming it.
+var buildInputTextFiles = regexp.MustCompile(`(?i)^(requirements.*|constraints.*|cmakelists)\.txt$`)
+
+// isDocumentationPath reports whether p is a prose file no test executes: a
+// documentation extension, not a build input, under no directory a test
+// reads its inputs from. It reads the path only.
+func isDocumentationPath(p string) bool {
+	if !documentationExtensions[strings.ToLower(filepath.Ext(p))] || buildInputTextFiles.MatchString(filepath.Base(p)) {
+		return false
+	}
+	for _, dir := range strings.Split(filepath.ToSlash(filepath.Dir(p)), "/") {
+		if testInputDirs[strings.ToLower(dir)] {
+			return false
+		}
+	}
+	return true
+}
+
+// changedLines is the text of the lines the change added to or removed from
+// p since base, committed or not; a file git does not track yet is all added.
+// When git shows no text hunk for a tracked file (binary, or marked -diff),
+// both whole versions are searched, as for code.
+func changedLines(ctx context.Context, workspace, base, p string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", append(append(hostGitAfterSandbox(workspace), "--literal-pathspecs"),
+		"diff", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", "-U0", base, "--", p)...).Output()
+	if err != nil {
+		return "", fmt.Errorf("git diff: %w", err)
+	}
+	if len(out) > maxRerunChangedFileBytes {
+		return "", errors.New("too large to search")
+	}
+	if len(out) == 0 {
+		return readWorktreeFile(workspace, p)
+	}
+	if !bytes.Contains(out, []byte("\n@@")) {
+		return wholeVersions(ctx, workspace, base, p)
+	}
+	// The file's header ends at its first hunk; after that every line that
+	// starts with + or - is one the change added or removed.
+	var lines []string
+	inHunks := false
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			inHunks = true
+		case inHunks && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")):
+			lines = append(lines, line[1:])
+		}
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// wholeVersions is both whole versions of p, joined, for a documentation file
+// whose change git shows no text hunk for.
+func wholeVersions(ctx context.Context, workspace, base, p string) (string, error) {
+	now, err := readWorktreeFile(workspace, p)
+	if err != nil {
+		return "", err
+	}
+	before, err := readCommitFile(ctx, workspace, base, p)
+	if err != nil {
+		return "", err
+	}
+	return now + "\n" + before, nil
 }
 
 // changedPathsSince lists the paths of workspace that differ from base:
