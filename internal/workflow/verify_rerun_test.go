@@ -391,6 +391,70 @@ func TestContainsIdentifierMatchesWholeIdentifiersOnly(t *testing.T) {
 	}
 }
 
+// A README that already lists the failing test's subject does not rule out
+// its rerun when the change edits other lines of it; a line the change adds
+// or removes that names it does, and a code file is still searched whole.
+func TestChangeMentionsSearchesOnlyTheChangedLinesOfADocumentationFile(t *testing.T) {
+	base := map[string]string{
+		"README.md":       "# lo\n\n- BufferWithTimeout\n-- Synchronize\n",
+		"docs/llms.txt":   "BufferWithTimeout\n",
+		"channel.go":      "package lo\n\nfunc BufferWithTimeout() {}\n\nfunc Other() {}\n",
+		"testdata/in.txt": "BufferWithTimeout\n",
+		"notes.md":        "BufferWithTimeout\n",
+		".gitattributes":  "notes.md -diff\n",
+		"channel_test.go": flakyTestSource,
+	}
+	readme := "# lo\n\n- BufferWithTimeout\n-- Synchronize\n- Clamp\n"
+	for name, c := range map[string]struct {
+		change      map[string]string // a path to a body; "" deletes the file
+		uncommitted bool
+		want        string
+	}{
+		"another line of the README":   {change: map[string]string{"README.md": readme, "docs/llms.txt": "BufferWithTimeout\nClamp\n"}},
+		"a README line naming it":      {change: map[string]string{"README.md": "# lo\n\n- BufferWithTimeout (now flaky)\n-- Synchronize\n"}, want: "README.md mentions BufferWithTimeout"},
+		"a removed README line":        {change: map[string]string{"README.md": "# lo\n\n- BufferWithTimeout\n"}, want: "README.md mentions Synchronize"},
+		"a new README naming it":       {change: map[string]string{"docs/new.md": "Synchronize\n"}, want: "docs/new.md mentions Synchronize"},
+		"a deleted README":             {change: map[string]string{"README.md": ""}, want: "README.md mentions BufferWithTimeout"},
+		"another function of its file": {change: map[string]string{"channel.go": "package lo\n\nfunc BufferWithTimeout() {}\n\nfunc Other() { _ = 1 }\n"}, want: "channel.go mentions BufferWithTimeout"},
+		"a test input under testdata":  {change: map[string]string{"testdata/in.txt": "BufferWithTimeout\nmore\n"}, want: "testdata/in.txt mentions BufferWithTimeout"},
+		"a doc git shows no hunk for":  {change: map[string]string{"notes.md": "BufferWithTimeout\nmore\n"}, want: "notes.md mentions BufferWithTimeout"},
+		"an uncommitted README edit":   {change: map[string]string{"README.md": readme}, uncommitted: true},
+		"an untracked doc naming it":   {change: map[string]string{"docs/new.md": "Synchronize\n"}, uncommitted: true, want: "docs/new.md mentions Synchronize"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFactoryDirFixture(t, base)
+			for rel, body := range c.change {
+				path := filepath.Join(f.repo, filepath.FromSlash(rel))
+				if body == "" {
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				writeFile(t, path, body)
+			}
+			if !c.uncommitted {
+				trustedCommit(t, f.repo)
+			}
+			if why := changeMentions(context.Background(), f.repo, f.commit, []string{"TestBufferWithTimeout", "TestSynchronize"}); why != c.want {
+				t.Errorf("changeMentions = %q, want %q", why, c.want)
+			}
+		})
+	}
+}
+
+func TestIsDocumentationPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"README.md": true, "docs/data/core-clamp.md": true, "doc/source/api.rst": true, "docs/static/llms.txt": true, "CHANGES.adoc": true,
+		"channel.go": false, "tests/expected.txt": false, "pkg/testdata/golden.md": false, "fixtures/a.rst": false, "Makefile": false,
+		"requirements-dev.txt": false, "constraints.txt": false, "CMakeLists.txt": false, "examples/basic.md": false, "ui/__snapshots__/a.md": false,
+	} {
+		if got := isDocumentationPath(p); got != want {
+			t.Errorf("isDocumentationPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 // A changed pytest file is the failing test's own file: no rerun.
 func TestChangeMentionsAPytestFileItChanges(t *testing.T) {
 	f := newVerifyRerunFixture(t, map[string]string{"tests/test_a.py": "def test_x():\n    pass\n"}, []int{1})

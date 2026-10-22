@@ -716,8 +716,10 @@ requires a new contract review and an updated machine-checkable test.
   after `Test`, `Example`, `Benchmark` or `Fuzz`; a pytest function's name
   without `test_`) is a word, in any letter case, of the path or of either
   version of any file that differs from that commit (committed,
-  uncommitted or untracked), no failing pytest file is one of them, and no
-  changed path is a submodule; for the baseline verify, only when the
+  uncommitted or untracked; of a documentation file, which no test runs,
+  only the lines the change added or removed, and the whole file again
+  when git shows it no text hunk), no failing pytest file is one of them,
+  and no changed path is a submodule; for the baseline verify, only when the
   failure would halt the run. The worktree is put back to exactly what it
   held before the first run, or the rerun is not made: every path the first
   run added is removed, ignored files included, every tracked file it
