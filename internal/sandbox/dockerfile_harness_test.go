@@ -42,14 +42,16 @@ func TestWorkerImageCarriesEveryHarnessAtAnExactVersion(t *testing.T) {
 		}
 	}
 
-	// Every npm install of an agent CLI names an exact x.y.z, never a tag or
-	// range. Project package managers in the same Node stages are not agent
-	// installs and deliberately do not match this check.
+	// Every global npm install is one of the three agent CLIs or pnpm, and
+	// names an exact x.y.z, never a tag or range.
 	installs := regexp.MustCompile(`npm install -g [^\n]*`).FindAllString(text, -1)
 	var agentInstalls []string
 	for _, install := range installs {
-		if strings.Contains(install, "@earendil-works/pi-coding-agent") || strings.Contains(install, "@openai/codex") || strings.Contains(install, "@github/copilot") {
+		switch {
+		case strings.Contains(install, "@earendil-works/pi-coding-agent"), strings.Contains(install, "@openai/codex"), strings.Contains(install, "@github/copilot"):
 			agentInstalls = append(agentInstalls, install)
+		case install != "npm install -g --ignore-scripts pnpm@${PNPM_VERSION}":
+			t.Errorf("Dockerfile has a global npm install that is neither an agent CLI nor pnpm: %q", install)
 		}
 	}
 	if len(agentInstalls) != 3 {
@@ -60,6 +62,9 @@ func TestWorkerImageCarriesEveryHarnessAtAnExactVersion(t *testing.T) {
 		if !exact.MatchString(install) {
 			t.Errorf("agent install %q is not an exact-version --ignore-scripts install", install)
 		}
+	}
+	if !regexp.MustCompile(`(?m)^ARG PNPM_VERSION=\d+\.\d+\.\d+$`).MatchString(text) {
+		t.Error("Dockerfile's PNPM_VERSION is not an exact x.y.z")
 	}
 
 	// The image never bakes a credential for any harness.
