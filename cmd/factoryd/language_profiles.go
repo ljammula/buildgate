@@ -124,6 +124,9 @@ func profileFactoryYMLFix(profile languageprofile.Profile, config projectconfig.
 	} else if config.VerifyCommand == "" {
 		lines = append(lines, "# verify_command: choose the repository's real verification command")
 	}
+	if config.PreflightProfile == "" {
+		lines = append(lines, "preflight_profile: "+projectconfig.PreflightProfileBrownfield)
+	}
 	if config.FullSuiteCommand == "" && profile.FullSuiteCommand != "" && (config.VerifyCommand == "" || config.VerifyCommand == profile.VerifyCommand) {
 		lines = append(lines, "full_suite_command: "+strconv.Quote(profile.FullSuiteCommand))
 	}

@@ -59,6 +59,7 @@ func TestDoctorLanguageProfileOffersReviewableFactoryYMLFields(t *testing.T) {
 	for _, want := range []string{
 		"warn  language profile Java / Maven",
 		`verify_command: "mvn test"`,
+		"preflight_profile: brownfield",
 		`full_suite_command: "mvn test"`,
 		`required_binaries: ["java", "mvn"]`,
 		`test_patterns: ["*Test.java"]`,
@@ -74,8 +75,42 @@ func TestDoctorLanguageProfileOffersReviewableFactoryYMLFields(t *testing.T) {
 		t.Fatal("output did not include a candidate .factory.yml block")
 	}
 	block := strings.SplitN(out.String()[start+len("candidate .factory.yml fields (review before commit):\n"):], "; review the command", 2)[0]
-	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.VerifyCommand != "mvn test" || cfg.FullSuiteCommand != "mvn test" || !slices.Contains(cfg.RequiredBinaries, "mvn") || !slices.Contains(cfg.TestPatterns, "*Test.java") {
+	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.VerifyCommand != "mvn test" || cfg.FullSuiteCommand != "mvn test" || cfg.PreflightProfile != projectconfig.PreflightProfileBrownfield || !slices.Contains(cfg.RequiredBinaries, "mvn") || !slices.Contains(cfg.TestPatterns, "*Test.java") {
 		t.Fatalf("candidate .factory.yml does not parse or lost its values: config=%+v err=%v\n%s", cfg, err, block)
+	}
+}
+
+func TestDoctorLanguageProfileCandidatePassesSubmitPreflightWhenAdopted(t *testing.T) {
+	repo := commitFiles(t, map[string]string{
+		"pom.xml":   "<project/>\n",
+		"AGENTS.md": "# AGENTS.md\n\n- Test: `mvn test`\n",
+	})
+	check := doctorCheckLanguageProfile(repo)
+	var out strings.Builder
+	if failed := runDoctorChecks([]doctorCheck{check}, &out); failed != 0 {
+		t.Fatalf("language profile check failed = %d:\n%s", failed, out.String())
+	}
+	start := strings.Index(out.String(), "candidate .factory.yml fields (review before commit):\n")
+	if start < 0 {
+		t.Fatalf("language profile output did not include a candidate:\n%s", out.String())
+	}
+	block := strings.SplitN(out.String()[start+len("candidate .factory.yml fields (review before commit):\n"):], "; review the command", 2)[0]
+	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.PreflightProfile != projectconfig.PreflightProfileBrownfield {
+		t.Fatalf("candidate config = %+v, err = %v; want brownfield preflight:\n%s", cfg, err, block)
+	}
+	path := filepath.Join(repo, projectconfig.FileName)
+	if err := os.WriteFile(path, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", projectconfig.FileName}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "adopt candidate"}} {
+		if output, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	for _, c := range doctorTargetRepoSubmitChecks(repo) {
+		if c.Err != nil {
+			t.Errorf("adopted candidate check %q failed: %v", c.Name, c.Err)
+		}
 	}
 }
 
