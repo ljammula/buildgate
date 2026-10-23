@@ -2335,7 +2335,7 @@ repository's release policy denied its change to protected `.factory.yml`.
 | Python | Python from the configured image, or derived from `.python-version` / `pyproject.toml` when needed | `requirements.txt` |
 | Java / Maven | Java and Maven in the configured worker image | `pom.xml` |
 | Ruby / Bundler | Ruby and Bundler in the configured worker image | `Gemfile`, `Gemfile.lock` |
-| React Native / TypeScript | Node and npm in the configured worker image | `package.json`, `package-lock.json` |
+| React Native / TypeScript | Node, npm, npx and pnpm in the configured worker image | `package.json`, `package-lock.json` |
 | C# / .NET | .NET in an operator-configured worker image | Not baked by `project-sandbox-image`; install it in the image |
 
 A project image keeps npm's and Maven's caches under `/scratch`

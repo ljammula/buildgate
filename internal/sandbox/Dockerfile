@@ -19,7 +19,18 @@
 # One place for the Copilot CLI version: the npm install below and the
 # pre-extracted package directory the final stage selects.
 ARG COPILOT_VERSION=1.0.88
+ARG PNPM_VERSION=10.17.1
 FROM node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS node
+
+# pnpm is a project package manager, not a harness, so keep its exact version
+# pinned separately from the agent CLIs below. Its package is copied into the
+# final image without npm's install-time state.
+FROM node AS pnpm
+ARG PNPM_VERSION
+RUN --mount=type=secret,id=build-ca,required=false \
+    if [ -f /run/secrets/build-ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build-ca; fi \
+    && npm install -g --ignore-scripts pnpm@${PNPM_VERSION}
+
 FROM golang@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS golang
 
 # bg-forward (cmd/bg-forward): wraps the worker command when the run's
@@ -117,10 +128,13 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=pi /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=codex /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=copilot /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=pnpm /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
 RUN ln -s /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /usr/local/bin/pi \
     && ln -s /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
     && ln -s /usr/local/lib/node_modules/@github/copilot/npm-loader.js /usr/local/bin/copilot \
-    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
 
 # --- project profile: Go -------------------------------------------------
 # Baked into this "generic worker" image, not split into a separate
@@ -188,6 +202,6 @@ WORKDIR /sandbox
 
 # Build-time smoke test: a broken symlink or missing toolchain fails the
 # image build right here, not a sandboxed run three weeks from now.
-RUN pi --version && codex --version && copilot --version && git --version && go version && node --version \
+RUN pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
     && printf 'all:\n\t@true\n' | make -f - \
     && BG_COMPOSE_FORWARDS= bg-forward -- true

@@ -43,13 +43,20 @@ func TestWorkerImageCarriesEveryHarnessAtAnExactVersion(t *testing.T) {
 	}
 
 	// Every npm install of an agent CLI names an exact x.y.z, never a tag or
-	// range.
+	// range. Project package managers in the same Node stages are not agent
+	// installs and deliberately do not match this check.
 	installs := regexp.MustCompile(`npm install -g [^\n]*`).FindAllString(text, -1)
-	if len(installs) != 3 {
-		t.Errorf("Dockerfile has %d agent npm installs, want 3 (pi, codex, copilot): %q", len(installs), installs)
+	var agentInstalls []string
+	for _, install := range installs {
+		if strings.Contains(install, "@earendil-works/pi-coding-agent") || strings.Contains(install, "@openai/codex") || strings.Contains(install, "@github/copilot") {
+			agentInstalls = append(agentInstalls, install)
+		}
+	}
+	if len(agentInstalls) != 3 {
+		t.Errorf("Dockerfile has %d agent npm installs, want 3 (pi, codex, copilot): %q", len(agentInstalls), agentInstalls)
 	}
 	exact := regexp.MustCompile(`--ignore-scripts @[a-z-]+/[a-z-]+@(\d+\.\d+\.\d+|\$\{COPILOT_VERSION\})$`)
-	for _, install := range installs {
+	for _, install := range agentInstalls {
 		if !exact.MatchString(install) {
 			t.Errorf("agent install %q is not an exact-version --ignore-scripts install", install)
 		}
