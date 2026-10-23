@@ -35,24 +35,36 @@ func TestWorkerImageCarriesEveryHarnessAtAnExactVersion(t *testing.T) {
 		"ln -s /usr/local/lib/node_modules/@github/copilot/npm-loader.js /usr/local/bin/copilot",
 		"ENV COPILOT_AUTO_UPDATE=false",
 		"ENV COPILOT_CLI_DIST_DIR=/opt/copilot-pkg",
-		"RUN pi --version && codex --version && copilot --version",
+		"pi --version && codex --version && copilot --version",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Dockerfile missing %q", want)
 		}
 	}
 
-	// Every npm install of an agent CLI names an exact x.y.z, never a tag or
-	// range.
+	// Every global npm install is one of the three agent CLIs or pnpm, and
+	// names an exact x.y.z, never a tag or range.
 	installs := regexp.MustCompile(`npm install -g [^\n]*`).FindAllString(text, -1)
-	if len(installs) != 3 {
-		t.Errorf("Dockerfile has %d agent npm installs, want 3 (pi, codex, copilot): %q", len(installs), installs)
+	var agentInstalls []string
+	for _, install := range installs {
+		switch {
+		case strings.Contains(install, "@earendil-works/pi-coding-agent"), strings.Contains(install, "@openai/codex"), strings.Contains(install, "@github/copilot"):
+			agentInstalls = append(agentInstalls, install)
+		case install != "npm install -g --ignore-scripts pnpm@${PNPM_VERSION}":
+			t.Errorf("Dockerfile has a global npm install that is neither an agent CLI nor pnpm: %q", install)
+		}
+	}
+	if len(agentInstalls) != 3 {
+		t.Errorf("Dockerfile has %d agent npm installs, want 3 (pi, codex, copilot): %q", len(agentInstalls), agentInstalls)
 	}
 	exact := regexp.MustCompile(`--ignore-scripts @[a-z-]+/[a-z-]+@(\d+\.\d+\.\d+|\$\{COPILOT_VERSION\})$`)
-	for _, install := range installs {
+	for _, install := range agentInstalls {
 		if !exact.MatchString(install) {
 			t.Errorf("agent install %q is not an exact-version --ignore-scripts install", install)
 		}
+	}
+	if !regexp.MustCompile(`(?m)^ARG PNPM_VERSION=\d+\.\d+\.\d+$`).MatchString(text) {
+		t.Error("Dockerfile's PNPM_VERSION is not an exact x.y.z")
 	}
 
 	// The image never bakes a credential for any harness.

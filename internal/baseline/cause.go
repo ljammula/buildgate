@@ -22,7 +22,7 @@ type causePattern struct {
 
 // causePatterns is the closed set of causes a failure with no test name can
 // show, by the tools the rule was measured on (Python, sh, Maven, Gradle,
-// NuGet, Bundler, MSBuild, pytest, Ruby). A log that none of them matches
+// NuGet, Bundler, npm, pnpm, MSBuild, pytest, Ruby). A log that none of them matches
 // has no cause.
 var causePatterns = []causePattern{
 	{run.BaselineCauseMissingModule, regexp.MustCompile(`No module named ['"]?([\w.\-]+)`)},
@@ -38,6 +38,11 @@ var causePatterns = []causePattern{
 	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`Could not resolve (?:all dependencies|([\w.\-]+:[\w.\-]+(?::[\w.\-]+)?))`)},
 	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`NU1101: Unable to find package ([\w.\-]+)`)},
 	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`Could not find gem '([^'\n]+)'`)},
+	// A registry the sandbox's network policy does not admit: npm's and
+	// pnpm's fetch reports the refused socket as "request to <url> failed,
+	// reason: connect EACCES". A test's own refused connection prints no
+	// "request to ... failed". The host is the detail.
+	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`request to https?://([\w.\-]+)[^\n]*? failed, reason: connect EACCES\b`)},
 	{run.BaselineCauseMissingPath, regexp.MustCompile(`MSB1009: Project file does not exist\.?(?:\s*\n\s*Switch: (\S+))?`)},
 	{run.BaselineCauseMissingPath, regexp.MustCompile(`ERROR: file or directory not found: (\S+)`)},
 	{run.BaselineCauseMissingPath, regexp.MustCompile(`cannot load such file -- (\S+)`)},

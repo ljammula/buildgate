@@ -180,7 +180,7 @@ type BaselineVerify struct {
 	FirstError string `json:"first_error,omitempty"`
 	// Cause is what the log shows as the reason, for a failure that named no
 	// test: one of the BaselineCause constants. CauseDetail is the module,
-	// program, artifact or path it names, bounded and limited to path and
+	// program, artifact, host or path it names, bounded and limited to path and
 	// identifier characters. Both are set only when the failure is not the
 	// ticket's own work and no special case below applies.
 	Cause       string `json:"cause,omitempty"`

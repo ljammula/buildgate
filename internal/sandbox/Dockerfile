@@ -19,7 +19,18 @@
 # One place for the Copilot CLI version: the npm install below and the
 # pre-extracted package directory the final stage selects.
 ARG COPILOT_VERSION=1.0.88
+ARG PNPM_VERSION=10.17.1
 FROM node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS node
+
+# pnpm is a project package manager, not a harness, so keep its exact version
+# pinned separately from the agent CLIs below. Its package is copied into the
+# final image without npm's install-time state.
+FROM node AS pnpm
+ARG PNPM_VERSION
+RUN --mount=type=secret,id=build-ca,required=false \
+    if [ -f /run/secrets/build-ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build-ca; fi \
+    && npm install -g --ignore-scripts pnpm@${PNPM_VERSION}
+
 FROM golang@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS golang
 
 # bg-forward (cmd/bg-forward): wraps the worker command when the run's
@@ -91,6 +102,27 @@ RUN --mount=type=secret,id=build-ca,required=false \
     && ./configure --disable-posix-spawn --without-guile --disable-dependency-tracking \
     && make -j"$(nproc)" && install -m 0755 make /usr/local/bin/make-no-posix-spawn
 
+# Git is used directly by build_app.py for the build worktree and commit
+# protocol. Debian bookworm's package is 2.39.x, so build the exact upstream
+# release needed for SHA-256 object-format repositories and verify its source
+# tarball before compiling it. The runtime image copies Git's binaries and
+# support files, but does not retain the build toolchain.
+FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e AS git
+ARG GIT_VERSION=2.51.2
+ARG GIT_SHA256=9b44c2b337ec838e10aad42439d390963904449710d30c9e7e4ba449f45da98f
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates gcc libc6-dev gettext libcurl4-openssl-dev libexpat1-dev libpcre2-dev libssl-dev make zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=secret,id=build-ca,required=false \
+    if [ -f /run/secrets/build-ca ]; then export SSL_CERT_FILE=/run/secrets/build-ca; fi \
+    && cd /tmp \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://mirrors.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.gz', 'git.tar.gz')" \
+    && echo "${GIT_SHA256}  git.tar.gz" | sha256sum -c - \
+    && tar xzf git.tar.gz && cd git-${GIT_VERSION} \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" all \
+    && make install
+
 FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e
 
 # git: build_app.py shells straight to it (rev-parse, init, add, commit --
@@ -100,9 +132,12 @@ FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3
 # Makefile entry point, and most target repos' verify command) comes from the
 # gnumake stage above, not from apt.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates gcc libc6-dev \
+        ca-certificates gcc libc6-dev libcurl4 libexpat1 libpcre2-8-0 libssl3 openssh-client zlib1g \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=gnumake /usr/local/bin/make-no-posix-spawn /usr/local/bin/make
+COPY --from=git /usr/local/bin/git* /usr/local/bin/
+COPY --from=git /usr/local/libexec/git-core/ /usr/local/libexec/git-core/
+COPY --from=git /usr/local/share/git-core/ /usr/local/share/git-core/
 
 RUN groupadd --gid 65532 worker \
     && useradd --uid 65532 --gid worker --create-home --shell /usr/sbin/nologin worker
@@ -117,10 +152,13 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=pi /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=codex /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=copilot /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=pnpm /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
 RUN ln -s /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /usr/local/bin/pi \
     && ln -s /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
     && ln -s /usr/local/lib/node_modules/@github/copilot/npm-loader.js /usr/local/bin/copilot \
-    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
 
 # --- project profile: Go -------------------------------------------------
 # Baked into this "generic worker" image, not split into a separate
@@ -188,6 +226,21 @@ WORKDIR /sandbox
 
 # Build-time smoke test: a broken symlink or missing toolchain fails the
 # image build right here, not a sandboxed run three weeks from now.
-RUN pi --version && codex --version && copilot --version && git --version && go version && node --version \
+RUN set -eu; \
+    smoke="$(mktemp -d)"; \
+    git -C "$smoke" init -q; \
+    git -C "$smoke" config user.name buildgate; \
+    git -C "$smoke" config user.email buildgate@example.invalid; \
+    printf 'proof\n' > "$smoke/proof.txt"; \
+    git -C "$smoke" add proof.txt; \
+    git -C "$smoke" commit -qm image-proof; \
+    test -n "$(git -C "$smoke" rev-parse HEAD)"; \
+    sha256="$(mktemp -d)"; \
+    git -C "$sha256" init -q --object-format=sha256; \
+    test "$(git -C "$sha256" rev-parse --show-object-format)" = sha256; \
+    rm -rf "$smoke" "$sha256"; \
+    ssh -V 2>&1 && command -v ssh-keygen && test ! -e /usr/sbin/sshd \
+    && for key in /etc/ssh/ssh_host_*; do test ! -e "$key"; done \
+    && pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
     && printf 'all:\n\t@true\n' | make -f - \
     && BG_COMPOSE_FORWARDS= bg-forward -- true
