@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -103,7 +105,7 @@ func TestRunAgentsDraftJobWritesAnUncommittedDraftThroughTheSandbox(t *testing.T
 	}
 	for _, mount := range requests[0].Mounts {
 		if mount.Target == "/workspace" && mount.Source == workspace {
-			t.Fatal("sandbox mounted the operator checkout directly; the draft workspace must be a private copy")
+			t.Fatal("sandbox mounted the operator checkout directly; the draft workspace must be a worktree at HEAD")
 		}
 	}
 	command := strings.Join(requests[0].Command, " ")
@@ -142,6 +144,9 @@ func TestRunAgentsDraftJobLeavesAnExistingFileAlone(t *testing.T) {
 func TestRunAgentsDraftJobFailureLeavesNoFileAndReportsOneLine(t *testing.T) {
 	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	workspace, dataDir, _ := runtimeJobWorkspace(t)
+	if out, err := exec.Command("git", "-C", workspace, "-c", "user.name=buildgate-test", "-c", "user.email=buildgate-test@example.com", "commit", "--allow-empty", "-m", "initial").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"draft_agents: model route failed"}, ExitCode: 2, DiskFree: []uint64{1 << 40}}
 	_, err := runAgentsDraftJob(context.Background(), agentsDraftTestInput(workspace, dataDir, filepath.Join(dataDir, "meter-ledgers"), rt))
 	if err == nil {
@@ -158,24 +163,97 @@ func TestRunAgentsDraftJobFailureLeavesNoFileAndReportsOneLine(t *testing.T) {
 	}
 }
 
-func TestCopyAgentsDraftWorkspaceSkipsDestinationInsideSource(t *testing.T) {
-	source := t.TempDir()
-	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("read me\n"), 0o644); err != nil {
+func TestRunAgentsDraftJobGivesTheModelOnlyTheCommittedTree(t *testing.T) {
+	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	workspace, dataDir, _ := runtimeJobWorkspace(t)
+	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("read me\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	parent := filepath.Join(source, ".factory-data")
-	if err := os.MkdirAll(parent, 0o750); err != nil {
+	if out, err := exec.Command("git", "-C", workspace, "add", "README.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", workspace, "-c", "user.name=buildgate-test", "-c", "user.email=buildgate-test@example.com", "commit", "-m", "readme").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".env"), []byte("SECRET=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	destination, err := copyAgentsDraftWorkspace(source, parent)
-	if err != nil {
-		t.Fatalf("copyAgentsDraftWorkspace: %v", err)
+	rt := &sandboxtest.WorkerRuntime{Lines: []string{"draft_agents: completed"}, DiskFree: []uint64{1 << 40}}
+	seen := make(chan [2]bool, 1)
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, req := range rt.Requests() {
+				for _, mount := range req.Mounts {
+					if mount.Target == "/workspace" {
+						_, readmeErr := os.Stat(filepath.Join(mount.Source, "README.md"))
+						_, envErr := os.Stat(filepath.Join(mount.Source, ".env"))
+						seen <- [2]bool{readmeErr == nil, envErr == nil}
+						return
+					}
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+		seen <- [2]bool{false, true}
+	}()
+	_, _ = runAgentsDraftJob(context.Background(), agentsDraftTestInput(workspace, dataDir, filepath.Join(dataDir, "meter-ledgers"), rt))
+	got := <-seen
+	if !got[0] || got[1] {
+		t.Fatalf("sandbox workspace has README.md=%v .env=%v, want only the committed tree", got[0], got[1])
 	}
-	defer os.RemoveAll(destination)
-	if content, err := os.ReadFile(filepath.Join(destination, "README.md")); err != nil || string(content) != "read me\n" {
-		t.Fatalf("copied README.md = %q, err %v", content, err)
+}
+
+func TestReadAgentsDraftRefusesALinkOutOfTheWorktree(t *testing.T) {
+	worktree, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "AGENTS.md"), []byte("host file\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(destination, ".factory-data")); !os.IsNotExist(err) {
-		t.Fatalf("copied private workspace recursively into itself: %v", err)
+	if err := os.Symlink(outside, filepath.Join(worktree, agentsDraftScratchDirName)); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := readAgentsDraft(worktree, filepath.Join(agentsDraftScratchDirName, "AGENTS.md")); err == nil {
+		t.Fatalf("readAgentsDraft followed a link out of the worktree: %q", content)
+	}
+}
+
+func TestReadAgentsDraftDoesNotBlockOnAFIFO(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, agentsDraftScratchDirName), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(worktree, agentsDraftScratchDirName, "AGENTS.md"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := readAgentsDraft(worktree, filepath.Join(agentsDraftScratchDirName, "AGENTS.md"))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("readAgentsDraft accepted a FIFO")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("readAgentsDraft blocked on a FIFO")
+	}
+}
+
+func TestInstallAgentsDraftNeverReplacesAFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(path, []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := installAgentsDraft(path, []byte("draft\n")); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("installAgentsDraft over an existing file: err %v, want os.ErrExist", err)
+	}
+	if content, _ := os.ReadFile(path); string(content) != "keep me\n" {
+		t.Fatalf("AGENTS.md = %q, want it untouched", content)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("directory holds %d entries, want only AGENTS.md (no temporary file left)", len(entries))
 	}
 }

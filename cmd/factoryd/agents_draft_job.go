@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
+	wsisolation "buildgate/internal/workspace"
 )
 
 const (
@@ -57,6 +57,17 @@ func doctorDraftTargetRepoAgentsFileIfNeeded(dp *deps, in doctorInputs, checks [
 	return doctorDraftTargetRepoAgentsFile(dp, in, checks, w)
 }
 
+// agentsDraftRepoRoot is the git top level of the -target-repo path, the
+// directory whose HEAD the AGENTS.md check reads, so a subdirectory or a
+// symlinked path drafts the root file the check looks for.
+func agentsDraftRepoRoot(dp *deps, targetRepo string) (string, error) {
+	top, err := dp.forge.gitToplevel(targetRepo)
+	if err != nil {
+		return "", fmt.Errorf("%s is not inside a git checkout: %w", targetRepo, err)
+	}
+	return filepath.EvalSymlinks(top)
+}
+
 // doctorDraftTargetRepoAgentsFile runs the one doctor -fix repair that is
 // allowed to call a model. The original submit-style check stays in place;
 // only its AGENTS.md row is replaced, and a successful draft deliberately
@@ -68,8 +79,16 @@ func doctorDraftTargetRepoAgentsFile(dp *deps, in doctorInputs, checks []doctorC
 			return checks
 		}
 	}
+	repoRoot, err := agentsDraftRepoRoot(dp, in.targetRepo)
+	if err != nil {
+		return doctorReplaceCheck(checks, doctorCheck{
+			Name: name,
+			Err:  errors.New(oneLineAgentsDraftError(err)),
+			Fix:  "pass the root of a git checkout with a commit at HEAD to -target-repo",
+		})
+	}
 	result, err := runAgentsDraftJob(context.Background(), agentsDraftJobInput{
-		Workspace:       in.targetRepo,
+		Workspace:       repoRoot,
 		DataDir:         in.dataDir,
 		SandboxImage:    in.sandboxImage,
 		MeterLedgerRoot: meterLedgerRoot(),
@@ -95,11 +114,14 @@ func doctorDraftTargetRepoAgentsFile(dp *deps, in doctorInputs, checks []doctorC
 	})
 }
 
-// runAgentsDraftJob drafts the target repository's root AGENTS.md in the
-// sandbox and installs only the successful, non-empty draft in the target
-// worktree. The model writes to a scratch path; the root file is created by
-// this process only after the sandbox exits successfully, so a failed job
-// cannot leave a partial AGENTS.md behind.
+// runAgentsDraftJob drafts the root AGENTS.md of the repository at
+// in.Workspace (its git top level) in the sandbox and installs only a
+// successful, non-empty draft there. The model works in a detached worktree
+// at HEAD, as the spec draft job does: the committed tree a run reads, with
+// no ignored or untracked file (an .env, node_modules) and no write to the
+// operator's checkout. It writes to a scratch path in that worktree; the root
+// file is created by this process only after the sandbox exits successfully,
+// so a failed job leaves no AGENTS.md behind.
 func runAgentsDraftJob(ctx context.Context, in agentsDraftJobInput) (agentsDraftJobResult, error) {
 	workspace, err := filepath.Abs(in.Workspace)
 	if err != nil {
@@ -150,17 +172,19 @@ func runAgentsDraftJob(ctx context.Context, in agentsDraftJobInput) (agentsDraft
 	if err := os.MkdirAll(filepath.Join(in.DataDir, "logs"), 0o750); err != nil {
 		return agentsDraftJobResult{}, fmt.Errorf("create AGENTS.md draft log directory: %w", err)
 	}
-	jobDir, err := os.MkdirTemp(in.DataDir, "doctor-agents-")
-	if err != nil {
+	jobDir := filepath.Join(in.DataDir, "doctor", runID)
+	if err := os.MkdirAll(jobDir, 0o750); err != nil {
 		return agentsDraftJobResult{}, fmt.Errorf("create AGENTS.md draft staging directory: %w", err)
 	}
 	defer os.RemoveAll(jobDir)
 	defer os.RemoveAll(run.Dir(in.DataDir, runID))
-	draftWorkspace, err := copyAgentsDraftWorkspace(workspace, jobDir)
-	if err != nil {
-		return agentsDraftJobResult{}, err
+	draftWorkspace := filepath.Join(jobDir, "worktree")
+	// Through the workspace mutators, not bare git: worktree add/remove write
+	// shared Git metadata that the git metadata lock serializes.
+	if err := wsisolation.AddDetachedWorktree(workspace, draftWorkspace, "HEAD"); err != nil {
+		return agentsDraftJobResult{}, fmt.Errorf("create AGENTS.md draft worktree at HEAD: %w", err)
 	}
-	defer os.RemoveAll(draftWorkspace)
+	defer func() { _ = wsisolation.RemoveWorktreeOnly(workspace, draftWorkspace) }()
 	promptPath := filepath.Join(jobDir, "instructions.txt")
 	if err := os.WriteFile(promptPath, []byte(requestsubmit.AgentsFilePrompt+"\n"), 0o600); err != nil {
 		return agentsDraftJobResult{}, fmt.Errorf("stage AGENTS.md draft instructions: %w", err)
@@ -189,8 +213,7 @@ func runAgentsDraftJob(ctx context.Context, in agentsDraftJobInput) (agentsDraft
 	if res.ExitCode != 0 {
 		return agentsDraftJobResult{}, fmt.Errorf("%s", requestJobExitReason(agentsDraftScriptName, res.ExitCode, "", res.LogPath))
 	}
-	draftPath := filepath.Join(draftWorkspace, agentsDraftScratchDirName, run.RootInstructionFile)
-	draft, err := readAgentsDraft(draftPath)
+	draft, err := readAgentsDraft(draftWorkspace, filepath.Join(agentsDraftScratchDirName, run.RootInstructionFile))
 	if err != nil {
 		return agentsDraftJobResult{}, fmt.Errorf("%s", requestJobExitReason(agentsDraftScriptName, 0, "but wrote no readable AGENTS.md draft: "+oneLineAgentsDraftError(err), res.LogPath))
 	}
@@ -204,104 +227,6 @@ func runAgentsDraftJob(ctx context.Context, in agentsDraftJobInput) (agentsDraft
 		return agentsDraftJobResult{}, fmt.Errorf("install uncommitted AGENTS.md draft: %w", err)
 	}
 	return agentsDraftJobResult{Drafted: true}, nil
-}
-
-// copyAgentsDraftWorkspace makes the model's writable sandbox workspace a
-// private copy of the repository. The operator's checkout is therefore only
-// read by the factory; the root AGENTS.md is the one host-side write made
-// after a successful sandbox exit. Git metadata is deliberately omitted: the
-// drafting prompt needs repository files and commands, never host-side Git
-// credentials or a repository it could commit to.
-func copyAgentsDraftWorkspace(source, parent string) (string, error) {
-	destination, err := os.MkdirTemp(parent, "workspace-")
-	if err != nil {
-		return "", fmt.Errorf("create private AGENTS.md draft workspace: %w", err)
-	}
-	removeOnError := true
-	defer func() {
-		if removeOnError {
-			_ = os.RemoveAll(destination)
-		}
-	}()
-	source, err = filepath.Abs(source)
-	if err != nil {
-		return "", fmt.Errorf("resolve AGENTS.md draft source: %w", err)
-	}
-	destination, err = filepath.Abs(destination)
-	if err != nil {
-		return "", fmt.Errorf("resolve AGENTS.md draft workspace: %w", err)
-	}
-	err = filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if rel == ".git" || rel == agentsDraftScratchDirName || agentsPathWithin(rel, ".git") || agentsPathWithin(rel, agentsDraftScratchDirName) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// When the data directory is inside the target checkout, the private
-		// destination is inside the source tree too. Skip the data-directory
-		// ancestor and the destination itself to avoid copying the copy
-		// recursively or exposing factory runtime state to the model.
-		if path != source && (agentsPathWithin(path, destination) || agentsPathWithin(destination, path)) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		target := filepath.Join(destination, rel)
-		if entry.IsDir() {
-			return os.MkdirAll(target, 0o750)
-		}
-		if entry.Type()&fs.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		}
-		if !entry.Type().IsRegular() {
-			return nil
-		}
-		return copyAgentsDraftFile(path, target, entry)
-	})
-	if err != nil {
-		return "", fmt.Errorf("copy repository for sandboxed AGENTS.md draft: %w", err)
-	}
-	removeOnError = false
-	return destination, nil
-}
-
-func agentsPathWithin(path, parent string) bool {
-	rel, err := filepath.Rel(parent, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func copyAgentsDraftFile(source, target string, entry fs.DirEntry) error {
-	info, err := entry.Info()
-	if err != nil {
-		return err
-	}
-	in, err := os.OpenFile(source, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 func agentsDraftArgs(script, workspace, instructionsPath, outputPath string, timeoutMinutes int, thinking, harness string) []string {
@@ -326,8 +251,17 @@ func agentsDraftRunID() (string, error) {
 	return "doctor-agents-" + hex.EncodeToString(raw[:]), nil
 }
 
-func readAgentsDraft(path string) ([]byte, error) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+// readAgentsDraft reads the model's draft at name inside the sandbox's
+// worktree. The sandbox wrote that tree, so the read goes through an os.Root
+// (no component may be a symlink out of it) and opens with O_NONBLOCK (a FIFO
+// put in its place cannot hang doctor).
+func readAgentsDraft(worktree, name string) ([]byte, error) {
+	root, err := os.OpenRoot(worktree)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -349,16 +283,27 @@ func readAgentsDraft(path string) ([]byte, error) {
 	return content, nil
 }
 
+// installAgentsDraft writes content to a temporary file beside path and links
+// it into place, so a failed write leaves no partial AGENTS.md and a file
+// that appeared meanwhile is never replaced (os.ErrExist).
 func installAgentsDraft(path string, content []byte) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".draft-*")
 	if err != nil {
 		return err
 	}
-	if _, writeErr := file.Write(content); writeErr != nil {
-		_ = file.Close()
-		return writeErr
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return err
 	}
-	return file.Close()
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Link(tmp.Name(), path)
 }
 
 func oneLineAgentsDraftError(err error) string {
