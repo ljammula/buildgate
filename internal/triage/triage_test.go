@@ -365,6 +365,14 @@ func TestTriageRun(t *testing.T) {
 			want: "halted before the build: baseline verify failed: tests/test_pager.py::test_less; the ticket does not name it",
 		},
 		{
+			name: "halted on a blocked package registry fetch",
+			setup: func(t *testing.T, dataDir string) *run.Run {
+				record := &run.BaselineVerify{Command: "pnpm test", ExitCode: 1, Cause: run.BaselineCauseDependencyUnavailable, CauseDetail: "jsr.io"}
+				return &run.Run{ID: id, State: run.StateHalted, HaltReasonCode: run.HaltReasonBaselineVerifyFailed, BaselineVerify: record, HaltError: "temporal workflow did not complete: baseline verify activity: ..."}
+			},
+			want: `halted before the build: baseline verify failed: exit 1; cannot get the dependency "jsr.io" (no network or cache for it)`,
+		},
+		{
 			name: "halted on a .factory directory the mount cannot carry",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{ID: id, State: run.StateHalted, HaltReasonCode: run.HaltReasonFactoryDirFailed, HaltError: "temporal workflow did not complete: ...",
