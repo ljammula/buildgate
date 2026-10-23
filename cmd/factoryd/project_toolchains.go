@@ -222,16 +222,7 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 			checks = append(checks, doctorCheck{Name: name, Advisory: true, Err: errors.New(imageHas(f)),
 				Fix: "the image's Node also runs the coding agents and is not replaced per project; build on it, or supply your own worker image"})
 		case f.Tool == toolchain.Go || f.Tool == toolchain.Python:
-			plan, planErr := planProjectImage([]toolchain.Finding{f}, codename)
-			if planErr != nil || len(plan.BuildArgs) == 0 {
-				if planErr == nil {
-					planErr = errors.New("the project-image planner produced no derived-image arguments")
-				}
-				checks = append(checks, doctorCheck{Name: name,
-					Err: fmt.Errorf("%s; cannot derive a project image: %w", imageHas(f), planErr), Fix: projectImageFix(in)})
-				continue
-			}
-			checks = append(checks, doctorCheck{Name: name, Detail: imageHas(f) + "; a build derives an image from it with the declared version, on first use"})
+			checks = append(checks, derivedToolchainCheck(name, f, codename, in))
 		default:
 			checks = append(checks, doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)})
 		}
@@ -251,4 +242,24 @@ func projectImageFix(in doctorInputs) string {
 		repo = in.targetRepo
 	}
 	return fmt.Sprintf("build this project's image, which installs what it declares: `make -C %s project-sandbox-image PROJECT_DIR=%s BASE_IMAGE=%s`, then `factoryd configure-images -sandbox-image <the ref it prints>`", source, repo, in.sandboxImage)
+}
+
+// derivedToolchainCheck is doctor's row for a Go or Python the sandbox image
+// lacks: it passes when the project-image planner can derive an image with
+// the declared version, as the build does, and fails when it cannot. The
+// build that derives is the worker's or the run's own process: one started
+// with FACTORYD_AUTOSTART=0 keeps the configured image, and the row says so.
+func derivedToolchainCheck(name string, f toolchain.Finding, codename string, in doctorInputs) doctorCheck {
+	plan, err := planProjectImage([]toolchain.Finding{f}, codename)
+	if err == nil && len(plan.BuildArgs) == 0 {
+		err = errors.New("the project-image planner produced no derived-image arguments")
+	}
+	if err != nil {
+		return doctorCheck{Name: name, Err: fmt.Errorf("%s; cannot derive a project image: %w", imageHas(f), err), Fix: projectImageFix(in)}
+	}
+	detail := imageHas(f) + "; a build derives an image from it with the declared version, on first use"
+	if !hostcontrol.AutostartEnabled() {
+		detail += " (a build started with FACTORYD_AUTOSTART=0 keeps the configured image)"
+	}
+	return doctorCheck{Name: name, Detail: detail}
 }

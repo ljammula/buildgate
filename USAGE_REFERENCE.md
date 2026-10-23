@@ -2310,7 +2310,7 @@ the build runs in localhost:5050/buildgate-toolchain@sha256:<digest>
 | What goes into the derived image | The configured image and the official toolchain image. No file of the repository, and none of its code runs to build it. Its dependencies come through the registry proxy during the build, or from `make project-sandbox-image` below |
 | Python and buildgate's own scripts | The build scripts run on the worker's `python3`. Deriving an image with another Python runs those scripts' test suite on it first and refuses the run if they fail |
 | Checking ahead | `factoryd doctor -target-repo <repo>`: one row per declaration, saying what a build will do; a derivable Go or Python mismatch is reported as a build-time derived image, while a declaration with no derivable image fails |
-| Turning it off | `FACTORYD_AUTOSTART=0` stops host-side autostart. Doctor still reports a derivable Go or Python image plan; an autostart-disabled build keeps the configured image as-is, so `submit` warns and use `make project-sandbox-image` when the build must run without derivation |
+| Turning it off | A build started with `FACTORYD_AUTOSTART=0` uses the configured image as it is, and `submit` warns; `doctor -target-repo` still reports what a build with autostart on derives |
 | A declaration with no version to install | An upper bound alone (`requires-python = "<3.12"`) refuses the run, naming it; add `.python-version` |
 | An alias | `lts/*`, `system` and other names with no number are not compared |
 | Not covered | Acceptance-test drafting (`-draft-oracles`) runs in the configured image |
