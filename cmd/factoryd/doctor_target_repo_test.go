@@ -114,6 +114,21 @@ func TestDoctorLanguageProfileCandidatePassesSubmitPreflightWhenAdopted(t *testi
 	}
 }
 
+func TestDoctorLanguageProfileUsesSandboxSafeGoVerifyCandidate(t *testing.T) {
+	repo := commitFiles(t, map[string]string{"go.mod": "module example.test/sample\n\ngo 1.26\n"})
+	check := doctorCheckLanguageProfile(repo)
+	var out strings.Builder
+	runDoctorChecks([]doctorCheck{check}, &out)
+	for _, want := range []string{
+		`verify_command: "go build ./... && go vet ./..."`,
+		`full_suite_command: "go test ./..."`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("Go candidate output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestDoctorLanguageProfileReportsAmbiguousAndNestedLayouts(t *testing.T) {
 	t.Run("ambiguous root markers", func(t *testing.T) {
 		repo := commitFiles(t, map[string]string{"go.mod": "module example.test/x\n", "package.json": "{}\n"})

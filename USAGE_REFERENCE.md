@@ -717,6 +717,9 @@ Java/Gradle, .NET, and Dart have entries. See
 [the language profile contract](doc/designs/language-profiles.md) for field
 semantics and support limits.
 
+The Go profile's reviewable candidates are `go build ./... && go vet ./...`
+for `verify_command` and `go test ./...` for `full_suite_command`.
+
 Node and Python also carry an install candidate that drafts a `sandbox:` block (see "Sandbox block").
 
 Only an unambiguous profile with a reviewed verify candidate can prefill

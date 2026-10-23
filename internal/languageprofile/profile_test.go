@@ -82,6 +82,9 @@ func TestCatalogDescribesAgentSetupContract(t *testing.T) {
 	if got := byID["go"].RegistryProxyEcosystems; len(got) != 1 || got[0] != "Go modules" {
 		t.Errorf("Go RegistryProxyEcosystems = %v, want Go modules", got)
 	}
+	if byID["go"].VerifyCommand != "go build ./... && go vet ./..." || byID["go"].FullSuiteCommand != "go test ./..." {
+		t.Errorf("Go command candidates = %q / %q, want build-and-vet / go test", byID["go"].VerifyCommand, byID["go"].FullSuiteCommand)
+	}
 	if len(byID["python"].VerifyCommand) != 0 || len(byID["python"].FullSuiteCommand) != 0 {
 		t.Errorf("Python command candidates = %q / %q, want no runner assumed from manifest markers", byID["python"].VerifyCommand, byID["python"].FullSuiteCommand)
 	}
