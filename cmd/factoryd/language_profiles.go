@@ -62,16 +62,16 @@ func doctorCheckLanguageProfile(root string) doctorCheck {
 	detail := profileDoctorDetail(profile, matches[0].Markers, config)
 	if profile.VerifyCommand != "" && config.VerifyCommand == "" {
 		return doctorCheck{Name: name, Err: fmt.Errorf(".factory.yml has no verify_command; the profile has a reviewed candidate"), Advisory: true,
-			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(profile, config) + "; review the command and commit .factory.yml"}
+			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(root, profile, config) + "; review the command and commit .factory.yml"}
 	}
 	missing := missingProfileBinaries(profile.RequiredBinaries, config.RequiredBinaries)
 	if len(missing) > 0 {
 		return doctorCheck{Name: name, Err: fmt.Errorf(".factory.yml required_binaries does not name: %s", strings.Join(missing, ", ")), Advisory: true,
-			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(profile, config) + "; review the fields and commit .factory.yml so each run checks these executables in its final image"}
+			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(root, profile, config) + "; review the fields and commit .factory.yml so each run checks these executables in its final image"}
 	}
 	if !found {
 		return doctorCheck{Name: name, Err: fmt.Errorf("no committed .factory.yml describes this project"), Advisory: true,
-			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(profile, config) + "; review and commit .factory.yml"}
+			Fix: "profile metadata: " + detail + "\n" + profileFactoryYMLFix(root, profile, config) + "; review and commit .factory.yml"}
 	}
 	return doctorCheck{Name: name, Detail: detail}
 }
@@ -117,12 +117,16 @@ func profileDoctorDetail(profile languageprofile.Profile, markers []string, conf
 	return strings.Join(parts, "; ")
 }
 
-func profileFactoryYMLFix(profile languageprofile.Profile, config projectconfig.Config) string {
+func profileFactoryYMLFix(root string, profile languageprofile.Profile, config projectconfig.Config) string {
 	var lines []string
 	if config.VerifyCommand == "" && profile.VerifyCommand != "" {
 		lines = append(lines, "verify_command: "+strconv.Quote(profile.VerifyCommand))
 	} else if config.VerifyCommand == "" {
 		lines = append(lines, "# verify_command: choose the repository's real verification command")
+	}
+	specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(root)
+	if config.PreflightProfile == "" && onboardingNotDone(specPath, contractPath, architecturePath) {
+		lines = append(lines, "preflight_profile: "+projectconfig.PreflightProfileBrownfield)
 	}
 	if config.FullSuiteCommand == "" && profile.FullSuiteCommand != "" && (config.VerifyCommand == "" || config.VerifyCommand == profile.VerifyCommand) {
 		lines = append(lines, "full_suite_command: "+strconv.Quote(profile.FullSuiteCommand))

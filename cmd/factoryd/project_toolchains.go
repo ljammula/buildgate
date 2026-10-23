@@ -194,11 +194,11 @@ func projectImageArgsMain(dp *deps, args []string, stdout, stderr io.Writer) err
 
 // doctorCheckProjectToolchains holds the toolchain versions repo declares
 // against the sandbox image a build of it would start from: one row per
-// declaration. A Go or Python the image lacks is what a build derives an
-// image for (toolchainImageFor), and the row says so; under
-// FACTORYD_AUTOSTART=0 nothing is derived, the verify command cannot pass,
-// and the row fails with the command that builds the image. A Node mismatch
-// warns.
+// declaration. A Go or Python mismatch is what a build derives an image for
+// (toolchainImageFor), and the row says so when autostart is enabled. With
+// FACTORYD_AUTOSTART=0 the configured image is kept, so a derivable mismatch
+// is an advisory warning. A tool the image does not report, or a declaration
+// the planner cannot install, fails. A Node mismatch warns.
 func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctorCheck {
 	prefix := "toolchains for " + in.targetRepo
 	reqs, err := toolchain.Detect(in.targetRepo)
@@ -208,7 +208,7 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 	if len(reqs) == 0 || in.sandboxImage == "" {
 		return nil
 	}
-	installed, _, err := imageToolchains(ctx, in.sandboxDocker, in.sandboxImage)
+	installed, codename, err := imageToolchains(ctx, in.sandboxDocker, in.sandboxImage)
 	if err != nil {
 		return []doctorCheck{{Name: prefix, Err: err, Advisory: true}}
 	}
@@ -221,8 +221,8 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 		case f.Tool == toolchain.Node:
 			checks = append(checks, doctorCheck{Name: name, Advisory: true, Err: errors.New(imageHas(f)),
 				Fix: "the image's Node also runs the coding agents and is not replaced per project; build on it, or supply your own worker image"})
-		case hostcontrol.AutostartEnabled():
-			checks = append(checks, doctorCheck{Name: name, Detail: imageHas(f) + "; a build derives an image from it with the declared version, on first use"})
+		case f.Tool == toolchain.Go || f.Tool == toolchain.Python:
+			checks = append(checks, derivedToolchainCheck(name, f, codename, in))
 		default:
 			checks = append(checks, doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)})
 		}
@@ -242,4 +242,31 @@ func projectImageFix(in doctorInputs) string {
 		repo = in.targetRepo
 	}
 	return fmt.Sprintf("build this project's image, which installs what it declares: `make -C %s project-sandbox-image PROJECT_DIR=%s BASE_IMAGE=%s`, then `factoryd configure-images -sandbox-image <the ref it prints>`", source, repo, in.sandboxImage)
+}
+
+// derivedToolchainCheck is doctor's row for a Go or Python the sandbox image
+// lacks: it passes when the project-image planner can derive an image with
+// the declared version, as the build does, and fails when it cannot. The
+// build that derives is the worker's or the run's own process: one started
+// with FACTORYD_AUTOSTART=0 keeps the configured image, and the row says so.
+func derivedToolchainCheck(name string, f toolchain.Finding, codename string, in doctorInputs) doctorCheck {
+	if f.Installed.Parts == nil {
+		return doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)}
+	}
+	plan, err := planProjectImage([]toolchain.Finding{f}, codename)
+	if err == nil && len(plan.BuildArgs) == 0 {
+		err = errors.New("the project-image planner produced no derived-image arguments")
+	}
+	if err != nil {
+		return doctorCheck{Name: name, Err: fmt.Errorf("%s; cannot derive a project image: %w", imageHas(f), err), Fix: projectImageFix(in)}
+	}
+	if !hostcontrol.AutostartEnabled() {
+		return doctorCheck{
+			Name:     name,
+			Err:      fmt.Errorf("%s; a build started with %s=0 keeps configured image %s, while a build with autostart enabled derives an image with the declared version", toolchainMismatch(f), hostcontrol.AutostartEnvVar, in.sandboxImage),
+			Advisory: true,
+		}
+	}
+	detail := imageHas(f) + "; a build derives an image from it with the declared version, on first use"
+	return doctorCheck{Name: name, Detail: detail}
 }
