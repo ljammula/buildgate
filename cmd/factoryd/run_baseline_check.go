@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"buildgate/internal/forge"
@@ -92,9 +93,11 @@ func finishBaselineCheck(checkDir string) {
 	dataDir := filepath.Join(checkDir, "data")
 	records, _ := filepath.Glob(filepath.Join(dataDir, "runs", "*", "run.json"))
 	halted, reason := false, ""
+	var haltedRun *run.Run
 	for _, path := range records {
 		if r, err := run.Load(dataDir, filepath.Base(filepath.Dir(path))); err == nil && r.State == run.StateHalted {
 			halted, reason = true, r.HaltReasonCode
+			haltedRun = r
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "baseline check: could not remove its run record %s: %v\n", path, err)
@@ -107,19 +110,72 @@ func finishBaselineCheck(checkDir string) {
 		return
 	}
 	if reason == run.HaltReasonBaselineVerifyFailed {
+		printBaselineCheckFailure(haltedRun)
 		fmt.Fprintf(os.Stderr, "baseline check failed; its logs are in %s\n", checkDir)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "baseline check did not finish (%s); its logs are in %s\n", reason, checkDir)
 }
 
-// baselineCheckFullSuiteNote names the full-suite command in a passed
-// check's line when the check ran it too.
-func baselineCheckFullSuiteNote(opts runOptions) string {
-	if opts.FullSuiteCommand == "" || opts.FullSuiteCommand == opts.VerifyCommand {
-		return ""
+// baselineCheckAttempt returns the last attempt of kind. A retry is the
+// command's result for output purposes, just as it is in the run record.
+func baselineCheckAttempt(attempts []run.Attempt, kind string) (run.Attempt, bool) {
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if attempts[i].Kind == kind {
+			return attempts[i], true
+		}
 	}
-	return " and the full-suite command"
+	return run.Attempt{}, false
+}
+
+// baselineCheckDuration formats the recorded wall time. The baseline record
+// has the exact duration for verify; attempt timestamps cover full suite and
+// older records that predate the duration field.
+func baselineCheckDuration(attempts []run.Attempt, kind string, durationMs int64) string {
+	if durationMs > 0 {
+		return (time.Duration(durationMs) * time.Millisecond).String()
+	}
+	attempt, ok := baselineCheckAttempt(attempts, kind)
+	if !ok {
+		return "unknown"
+	}
+	started, startErr := time.Parse(time.RFC3339, attempt.StartedAt)
+	finished, finishErr := time.Parse(time.RFC3339, attempt.FinishedAt)
+	if startErr != nil || finishErr != nil || finished.Before(started) {
+		return "unknown"
+	}
+	return finished.Sub(started).String()
+}
+
+func baselineCheckAttemptSummary(attempt run.Attempt) string {
+	if attempt.ExitCode == 0 {
+		return "passed"
+	}
+	return fmt.Sprintf("failed: exit %d", attempt.ExitCode)
+}
+
+// baselineCheckFailureDetail keeps the one-line output useful for a full
+// suite halt, whose baseline record only describes verify. The run's triage
+// sentence is factory-authored and is the best extra detail when present.
+func baselineCheckFailureDetail(r *run.Run, fallback string) string {
+	if r != nil && strings.TrimSpace(r.Triage) != "" {
+		return fallback + "; " + strings.TrimSpace(r.Triage)
+	}
+	return fallback
+}
+
+func printBaselineCheckFailure(r *run.Run) {
+	if r == nil {
+		return
+	}
+	if b := r.BaselineVerify; b != nil {
+		fmt.Fprintf(os.Stderr, "baseline check: verify %s: %s\n", baselineCheckDuration(r.Attempts, run.BaselineVerifyAttemptKind, b.DurationMs), b.Summary())
+	} else if attempt, ok := baselineCheckAttempt(r.Attempts, run.BaselineVerifyAttemptKind); ok {
+		fmt.Fprintf(os.Stderr, "baseline check: verify %s: %s\n", baselineCheckDuration(r.Attempts, run.BaselineVerifyAttemptKind, 0), baselineCheckAttemptSummary(attempt))
+	}
+	if attempt, ok := baselineCheckAttempt(r.Attempts, run.FullSuiteVerifyAttemptKind); ok {
+		fmt.Fprintf(os.Stderr, "baseline check: full suite %s: %s\n", baselineCheckDuration(r.Attempts, run.FullSuiteVerifyAttemptKind, 0), baselineCheckFailureDetail(r, baselineCheckAttemptSummary(attempt)))
+	}
 }
 
 // finishRunWorkflow is awaitRunWorkflow's end once the workflow returned: a
@@ -127,7 +183,15 @@ func baselineCheckFullSuiteNote(opts runOptions) string {
 // no release; every other result is applied to the run record.
 func finishRunWorkflow(dp *deps, r *run.Run, opts runOptions, taskQueue string, result workflow.RunWorkflowResult) error {
 	if result.BaselineChecked {
-		fmt.Printf("baseline check passed: the verify command%s passes in the sandbox on %s\n", baselineCheckFullSuiteNote(opts), opts.WorkspacePath)
+		baseline, _ := run.LoadBaselineVerify(run.Dir(opts.DataDir, opts.ID))
+		verifySummary, verifyDuration := "passed", int64(0)
+		if baseline != nil {
+			verifySummary, verifyDuration = baseline.Summary(), baseline.DurationMs
+		}
+		fmt.Printf("baseline check: verify %s: %s\n", baselineCheckDuration(result.Attempts, run.BaselineVerifyAttemptKind, verifyDuration), verifySummary)
+		if attempt, ok := baselineCheckAttempt(result.Attempts, run.FullSuiteVerifyAttemptKind); ok {
+			fmt.Printf("baseline check: full suite %s: %s\n", baselineCheckDuration(result.Attempts, run.FullSuiteVerifyAttemptKind, 0), baselineCheckAttemptSummary(attempt))
+		}
 		return nil
 	}
 	return applyRunWorkflowResult(dp, r, opts.DataDir, opts.ID, opts.Ticket, opts.WorkspacePath, opts.BaseSHA, taskQueue, result, true, &opts.ReleasePolicy, forge.GHPullRequestOpener{}, false)

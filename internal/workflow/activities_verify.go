@@ -238,6 +238,32 @@ func (v verifyRun) what() string {
 // ActivityID so it cannot collide with RunVerifyActivity's checkpoint for
 // the same execution.
 func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWorkflowInput) (progressResult VerifyActivityResult, err error) {
+	before, err := baselineCheckFullSuiteBefore(ctx, input)
+	if err != nil {
+		return VerifyActivityResult{}, err
+	}
+	return a.runFullSuiteVerifyActivity(ctx, input, before)
+}
+
+// baselineCheckFullSuiteBefore records the worktree state only for the
+// preflight full-suite command. A nil slice means this is an ordinary
+// full-suite gate; an empty but non-nil slice means a baseline check started
+// from a clean worktree.
+func baselineCheckFullSuiteBefore(ctx context.Context, input RunWorkflowInput) ([]string, error) {
+	if !input.BaselineCheck {
+		return nil, nil
+	}
+	before, err := gitStatusAllPaths(ctx, input.WorkspacePath)
+	if err != nil {
+		return nil, temporal.NewApplicationErrorWithCause("read the workspace's state before the baseline full-suite verify", InfrastructureFailureType, err)
+	}
+	if before == nil {
+		before = []string{}
+	}
+	return before, nil
+}
+
+func (a *Activities) runFullSuiteVerifyActivity(ctx context.Context, input RunWorkflowInput, before []string) (progressResult VerifyActivityResult, err error) {
 	ctx, endGuard := GuardStep(ctx)
 	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
@@ -321,7 +347,7 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	beforeAttempt = a.leaseChecked(ctx, a.checkpointDirFor(input), beforeAttempt)
 	afterAttempt := func(attempt int, res runner.Result, _ error) error {
 		attempts = append(attempts, run.Attempt{
-			Kind:             "full_suite_verify",
+			Kind:             run.FullSuiteVerifyAttemptKind,
 			Command:          res.Command,
 			SetupSHA256:      run.SetupDigest(input.SetupCommands),
 			FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
@@ -362,9 +388,13 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 		fullSuiteResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 		fullSuiteResult.LogSHA256, err = evidence.SHA256File(result.LogPath)
 	}
+	leftoverErr := baselineCheckFullSuiteLeftoverError(ctx, input, before, fullSuiteResult.Attempts)
 	if runErr != nil {
 		checkpoint.Error = "full-suite verify subprocess infrastructure failure: " + runErr.Error()
 		checkpoint.ErrorType = checkpointErrorType(runErr)
+	} else if leftoverErr != nil {
+		checkpoint.Error = leftoverErr.Error()
+		checkpoint.ErrorType = BaselineVerifyFailureType
 	} else if err != nil {
 		checkpoint.Error = "full-suite verify evidence infrastructure failure: " + err.Error()
 	}
@@ -377,10 +407,13 @@ func (a *Activities) RunFullSuiteVerifyActivity(ctx context.Context, input RunWo
 		errType := launchErrorType(stepErr(ctx, runErr))
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("full-suite verify subprocess infrastructure failure", errType, runErr, fullSuiteResult.Attempts)
 	}
+	if leftoverErr != nil {
+		return fullSuiteResult, leftoverErr
+	}
 	if err != nil {
 		return fullSuiteResult, temporal.NewApplicationErrorWithCause("full-suite verify evidence infrastructure failure", InfrastructureFailureType, err, fullSuiteResult.Attempts)
 	}
-	rerunResult, rerunErr := a.maybeRerunVerify(ctx, input, rerun, verifyRerunStep{kind: "full_suite_verify", command: command, registrySpec: registrySpec, path: path, checkpoint: checkpoint}, fullSuiteResult)
+	rerunResult, rerunErr := a.maybeRerunVerify(ctx, input, rerun, verifyRerunStep{kind: run.FullSuiteVerifyAttemptKind, command: command, registrySpec: registrySpec, path: path, checkpoint: checkpoint}, fullSuiteResult)
 	if rerunErr != nil {
 		return rerunResult, temporal.NewApplicationErrorWithCause("full-suite verify rerun subprocess infrastructure failure", launchErrorType(rerunErr), rerunErr, rerunResult.Attempts)
 	}
@@ -794,8 +827,36 @@ func recordLeftovers(ctx context.Context, input RunWorkflowInput, before []strin
 	if err != nil {
 		return err
 	}
-	baseline.NoteLeftovers(record, left, input.AllowedFiles)
+	allowed := input.AllowedFiles
+	if input.BaselineCheck {
+		// A baseline check has no ticket, so every path a build would leave
+		// outside the repository's ignored files is out of scope.
+		allowed = []string{}
+	}
+	baseline.NoteLeftovers(record, left, allowed)
 	return nil
+}
+
+// baselineCheckFullSuiteLeftoverError is the full-suite counterpart of
+// recordLeftovers. The ordinary full-suite gate has a ticket's diff scope;
+// only a baseline check has to reject every non-ignored path because no
+// ticket is available to declare it.
+func baselineCheckFullSuiteLeftoverError(ctx context.Context, input RunWorkflowInput, before []string, attempts []run.Attempt) error {
+	if before == nil {
+		return nil
+	}
+	left, err := pathsAddedSince(ctx, input.WorkspacePath, before)
+	if err != nil {
+		return temporal.NewApplicationErrorWithCause("read the workspace's state after the baseline full-suite verify", InfrastructureFailureType, err, attempts)
+	}
+	record := &run.BaselineVerify{Passed: true}
+	baseline.NoteLeftovers(record, left, []string{})
+	if !record.Halts() {
+		return nil
+	}
+	return temporal.NewNonRetryableApplicationError(
+		"baseline check failed: the full-suite command "+record.Summary()+". "+record.HaltAdvice(),
+		BaselineVerifyFailureType, nil, attempts)
 }
 
 // writeBaselineBuildNote writes what the build is told about a baseline

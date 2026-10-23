@@ -423,6 +423,47 @@ func TestRunFullSuiteVerifyActivityDuplicateInvocationRunsSubprocessOnce(t *test
 	}
 }
 
+func TestBaselineCheckFullSuiteThatLeavesAnUnignoredFileHalts(t *testing.T) {
+	workspace := baselineRepo(t)
+	logDir := t.TempDir()
+	checkpointDir := t.TempDir()
+	activities := &Activities{
+		LogDir: logDir,
+		runWithRetries: func(_ context.Context, dir string, logPath func(int) string, _ int, onAttempt func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+			started := time.Now()
+			path := logPath(1)
+			if err := os.WriteFile(path, []byte("ok\n"), 0o600); err != nil {
+				t.Fatalf("write full-suite log: %v", err)
+			}
+			leftWriteFile(t, dir, "test", "SSL key log\n")
+			result := runner.Result{
+				Command:    []string{"sh", "-c", "make full"},
+				ExitCode:   0,
+				StartedAt:  started,
+				FinishedAt: started.Add(time.Second),
+				LogPath:    path,
+			}
+			onAttempt(1, result, nil)
+			return result, nil
+		},
+	}
+	input := fixtureInput()
+	input.BaselineCheck = true
+	input.FullSuiteCommand = "make full"
+	input.WorkspacePath = workspace
+	input.LogDir = logDir
+	input.CheckpointDir = checkpointDir
+	input.RunID = "baseline-check"
+
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(activities.RunFullSuiteVerifyActivity)
+	_, err := env.ExecuteActivity(activities.RunFullSuiteVerifyActivity, input)
+	if err == nil || !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "No model call was made") {
+		t.Fatalf("err=%v, want the baseline check to halt on its leftover", err)
+	}
+}
+
 // TestRunVerifyActivityRecordsAttempts is
 // TestRunBuildActivityRecordsAttempts' counterpart for the verify
 // Activity's own onAttempt callback.
