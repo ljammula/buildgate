@@ -79,8 +79,8 @@ it explains what the flag changes. Flags come before positional arguments.
 | `-list` | `logs` | Lists every log of the id, oldest first, saved prompts included |
 | `-all` | `stop` | Every profile's `worker` and `serve`, then the OpenShell stack, Temporal and (when nothing else runs) colima |
 | `-force` | `stop`, `uninstall`, `install-service` | Proceeds past the refusal: `stop` despite a building request, whose build then waits in `resume_review` |
-| `-fix` | `doctor` | Repairs what it can: starts Temporal, the gateway and the meter, writes missing config values, and reclaims a sandbox whose build is gone |
-| `-target-repo <checkout>` | `doctor` | Checks a repository as a run and a `submit` would: verify command, root `AGENTS.md`, preflight, compose file, declared toolchains, and, when `.factory.yml` has a `sandbox:` block, its approval and registries; then, when every other row passed, the baseline check (`factoryd -baseline-check`) |
+| `-fix` | `doctor` | Repairs what it can: starts Temporal, the gateway and the meter, writes missing config values, reclaims a sandbox whose build is gone, and for `-target-repo` runs the planning-role sandbox job that drafts a missing root `AGENTS.md` as an uncommitted file |
+| `-target-repo <checkout>` | `doctor` | Checks a repository as a run and a `submit` would: verify command, root `AGENTS.md`, preflight, compose file, declared toolchains, and, when `.factory.yml` has a `sandbox:` block, its approval and registries; `-fix` drafts a missing `AGENTS.md` in the sandbox for review, but the row remains failed until it is committed; then, when every other row passed, the baseline check (`factoryd -baseline-check`) |
 | `-purge` | `uninstall` | Also deletes `~/.config/factoryd`, `~/buildgate`, the Temporal volumes, the gateway's state and the worker scratch volumes; asks you to type `purge` |
 
 `factoryd doctor` reports the launchd service state as info. It fails only
@@ -2253,7 +2253,9 @@ LIVE_SMOKE_ONLY=oracle LIVE_SMOKE_TEMPORAL=localhost:7233 scripts/live-smoke.sh
 `quickstart` defaults to `-preflight-profile brownfield`, which tolerates
 a repo without the onboarding docs. By hand (either way the repo needs an
 `AGENTS.md` committed at its root: a run, like `submit`, is refused without
-one, and `-skip-project-check` does not skip that):
+one, and `-skip-project-check` does not skip that. To prepare a repository,
+`factoryd doctor -target-repo <repo> -fix` can draft the file in the planning
+role's sandbox; review and commit it before submitting.
 
 | Repo has its own `ARCHITECTURE.md`? | What to do |
 |---|---|

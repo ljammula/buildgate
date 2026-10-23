@@ -19,6 +19,16 @@
       "description": "Combines request text, repository architecture and overview, a capped file inventory, optional design guidance and revision feedback, and spec-writing instructions."
     },
     {
+      "id": "prompt-source:draft-agents.context",
+      "source_path": "agent/pi/scripts/draft_agents.py",
+      "fragment": "DRAFT_INSTRUCTIONS / build_prompt",
+      "role": "planning",
+      "stage": "agents_file_drafting",
+      "kind": "inline-assembly",
+      "template_refs": ["draft_agents.prompt.md"],
+      "description": "Combines the shared missing-AGENTS.md instructions, the repository workspace, and bounded repository context for the planning-role draft job."
+    },
+    {
       "id": "prompt-source:draft-feedback.section",
       "source_path": "agent/pi/scripts/draft_spec.py",
       "fragment": "FEEDBACK_HEADER / build_prompt",

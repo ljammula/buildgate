@@ -336,6 +336,7 @@ func doctorMain(dp *deps, args []string) error {
 		// caller, so without this `in` here still names the unbuilt
 		// canonical ref.
 		in = doctorApplyBuiltImageRefs(in, checks)
+		checks = doctorDraftTargetRepoAgentsFileIfNeeded(dp, in, checks, os.Stdout)
 		doctorApplyFixes(checks, *workspace, *dataDir, dataDirExplicit, *yes, os.Stdin, os.Stdout, *configPath)
 		// -target-repo's compose images under a registry the operator has
 		// not allowed: named, and added to the config only on a yes.

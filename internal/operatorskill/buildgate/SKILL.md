@@ -20,7 +20,7 @@ another profile:
 - `factoryd help [<command>]` and `factoryd help -json <command>`: the list of
   commands, or one command's arguments and flags (read-only; it takes no
   `-config`). Check here before giving the operator a command you are unsure of
-- `factoryd doctor [-target-repo <repo-path>]`
+- `factoryd doctor [-target-repo <repo-path>] [-fix]`
 - `factoryd status [-n N] [-json]`
 - `factoryd watch [-no-follow] <id>`
 - `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt as the build saved it, which may quote repository content)
@@ -153,9 +153,7 @@ request sits in a queue nobody drains.
    asking (step 4) and say so in your report. When some of those files
    exist but fail the check, the repo is part-way through adopting them:
    relay the failures and stop. A failed `AGENTS.md for <repo>` row is never
-   brownfield and has no override: the row prints a prompt for writing the file. Relay it and offer to run it
-   yourself in the repo; write the file only on a yes, show it to the
-   operator, and leave the commit to them unless they ask. When the only failures are Docker being unreachable
+   brownfield and has no override: run `factoryd doctor -target-repo <repo-path> -fix` to draft the file in the planning-role sandbox, show the uncommitted draft to the operator, and leave the commit to them. When the only failures are Docker being unreachable
    and you run inside an agent sandbox (Codex's default sandbox blocks the
    Docker socket), the sandbox is the likely cause: ask the operator to run
    the same command in their own terminal and tell you the result.
@@ -256,7 +254,9 @@ commit instead, for when the operator says the attempt's work should be dropped.
 ## Get a repo ready
 
 Run `factoryd doctor -target-repo <repo-path>` and relay each
-fix; `-target-repo` also checks what `submit` would refuse (no verify
+fix; when the root `AGENTS.md` row fails, offer
+`factoryd doctor -target-repo <repo-path> -fix`, then show the uncommitted
+draft and ask the operator to review and commit it. `-target-repo` also checks what `submit` would refuse (no verify
 command, no `AGENTS.md` committed at the repo root, the project-bootstrap
 preflight) and validates that repo's
 `docker-compose.yml` service dependencies exactly as a run would (a service
