@@ -132,7 +132,7 @@ FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3
 # Makefile entry point, and most target repos' verify command) comes from the
 # gnumake stage above, not from apt.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates gcc libc6-dev libcurl4 libexpat1 libpcre2-8-0 libssl3 zlib1g \
+        ca-certificates gcc libc6-dev libcurl4 libexpat1 libpcre2-8-0 libssl3 openssh-client zlib1g \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=gnumake /usr/local/bin/make-no-posix-spawn /usr/local/bin/make
 COPY --from=git /usr/local/bin/git* /usr/local/bin/
@@ -239,6 +239,8 @@ RUN set -eu; \
     git -C "$sha256" init -q --object-format=sha256; \
     test "$(git -C "$sha256" rev-parse --show-object-format)" = sha256; \
     rm -rf "$smoke" "$sha256"; \
-    pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
+    ssh -V 2>&1 && command -v ssh-keygen && test ! -e /usr/sbin/sshd \
+    && for key in /etc/ssh/ssh_host_*; do test ! -e "$key"; done \
+    && pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
     && printf 'all:\n\t@true\n' | make -f - \
     && BG_COMPOSE_FORWARDS= bg-forward -- true

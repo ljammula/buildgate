@@ -48,3 +48,24 @@ func TestWorkerImageCarriesPinnedGitWithBuildgateSmoke(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkerImageCarriesOpenSSHClientWithoutServerState(t *testing.T) {
+	data, err := os.ReadFile("Dockerfile")
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"openssh-client",
+		"command -v ssh-keygen",
+		"test ! -e /usr/sbin/sshd",
+		"for key in /etc/ssh/ssh_host_*; do test ! -e \"$key\"; done",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Dockerfile missing %q", want)
+		}
+	}
+	if strings.Contains(text, "openssh-server") {
+		t.Error("Dockerfile installs the OpenSSH server, want the client only")
+	}
+}
