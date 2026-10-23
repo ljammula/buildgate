@@ -155,10 +155,14 @@ func baselineCheckAttemptSummary(attempt run.Attempt) string {
 }
 
 // baselineCheckFailureDetail keeps the one-line output useful for a full
-// suite halt, whose baseline record only describes verify. The run's triage
+// suite halt, whose baseline record only describes verify: a full-suite
+// leftover halt prints its own sentence; otherwise the run's triage
 // sentence is factory-authored and is the best extra detail when present.
 func baselineCheckFailureDetail(r *run.Run, fallback string) string {
-	if r != nil && strings.TrimSpace(r.Triage) != "" {
+	if i := strings.Index(r.HaltError, workflow.FullSuiteLeftoverPrefix); i >= 0 {
+		return r.HaltError[i+len(workflow.FullSuiteLeftoverPrefix):]
+	}
+	if strings.TrimSpace(r.Triage) != "" {
 		return fallback + "; " + strings.TrimSpace(r.Triage)
 	}
 	return fallback

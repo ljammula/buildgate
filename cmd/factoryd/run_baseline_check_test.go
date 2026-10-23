@@ -150,6 +150,28 @@ func TestBaselineCheckFailurePrintsDetailsAndTimings(t *testing.T) {
 	}
 }
 
+func TestBaselineCheckFailurePrintsAFullSuiteLeftover(t *testing.T) {
+	checkDir := filepath.Join(t.TempDir(), "baseline-checks", "check-l")
+	dataDir := filepath.Join(checkDir, "data")
+	r := &run.Run{
+		ID:             "baseline-check-leftover",
+		State:          run.StateHalted,
+		HaltReasonCode: run.HaltReasonBaselineVerifyFailed,
+		HaltError:      "temporal workflow did not complete: " + workflow.FullSuiteLeftoverPrefix + "passed, but the command leaves coverage.xml outside the ticket's Allowed-Files. Ignore it",
+		Attempts: []run.Attempt{
+			{Kind: run.BaselineVerifyAttemptKind, StartedAt: "2026-10-23T12:00:00Z", FinishedAt: "2026-10-23T12:00:01Z"},
+			{Kind: run.FullSuiteVerifyAttemptKind, StartedAt: "2026-10-23T12:00:02Z", FinishedAt: "2026-10-23T12:00:04Z"},
+		},
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStderr(t, func() { finishBaselineCheck(checkDir) })
+	if want := "baseline check: full suite 2s: passed, but the command leaves coverage.xml"; !strings.Contains(out, want) {
+		t.Errorf("output=%q, want %q", out, want)
+	}
+}
+
 // doctor's row runs the check only on an otherwise healthy setup, and shows
 // a failed check's sentence without the Temporal wrapping.
 func TestDoctorCheckBaseline(t *testing.T) {

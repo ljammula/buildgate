@@ -389,15 +389,7 @@ func (a *Activities) runFullSuiteVerifyActivity(ctx context.Context, input RunWo
 		fullSuiteResult.LogSHA256, err = evidence.SHA256File(result.LogPath)
 	}
 	leftoverErr := baselineCheckFullSuiteLeftoverError(ctx, input, before, fullSuiteResult.Attempts)
-	if runErr != nil {
-		checkpoint.Error = "full-suite verify subprocess infrastructure failure: " + runErr.Error()
-		checkpoint.ErrorType = checkpointErrorType(runErr)
-	} else if leftoverErr != nil {
-		checkpoint.Error = leftoverErr.Error()
-		checkpoint.ErrorType = BaselineVerifyFailureType
-	} else if err != nil {
-		checkpoint.Error = "full-suite verify evidence infrastructure failure: " + err.Error()
-	}
+	checkpoint.Error, checkpoint.ErrorType = fullSuiteCheckpointError(runErr, leftoverErr, err)
 	checkpoint.Result = fullSuiteResult
 	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
 		errType := launchErrorType(stepErr(ctx, runErr))
@@ -837,6 +829,32 @@ func recordLeftovers(ctx context.Context, input RunWorkflowInput, before []strin
 	return nil
 }
 
+// fullSuiteCheckpointError is the error a full-suite checkpoint records, so
+// that a redelivery replays it with the type the first delivery returned: the
+// launch's own failure, then a baseline check's leftover verdict (or the
+// infrastructure failure of reading the workspace for it), then evidence.
+func fullSuiteCheckpointError(runErr, leftoverErr, evidenceErr error) (string, string) {
+	switch {
+	case runErr != nil:
+		return "full-suite verify subprocess infrastructure failure: " + runErr.Error(), checkpointErrorType(runErr)
+	case leftoverErr != nil:
+		errType := InfrastructureFailureType
+		var appErr *temporal.ApplicationError
+		if errors.As(leftoverErr, &appErr) {
+			errType = appErr.Type()
+		}
+		return leftoverErr.Error(), errType
+	case evidenceErr != nil:
+		return "full-suite verify evidence infrastructure failure: " + evidenceErr.Error(), ""
+	}
+	return "", ""
+}
+
+// FullSuiteLeftoverPrefix begins the halt error of a baseline check whose
+// full-suite command left paths behind; the rest of the error is what the
+// check prints for that command.
+const FullSuiteLeftoverPrefix = "baseline check failed: the full-suite command "
+
 // baselineCheckFullSuiteLeftoverError is the full-suite counterpart of
 // recordLeftovers. The ordinary full-suite gate has a ticket's diff scope;
 // only a baseline check has to reject every non-ignored path because no
@@ -855,7 +873,7 @@ func baselineCheckFullSuiteLeftoverError(ctx context.Context, input RunWorkflowI
 		return nil
 	}
 	return temporal.NewNonRetryableApplicationError(
-		"baseline check failed: the full-suite command "+record.Summary()+". "+record.HaltAdvice(),
+		FullSuiteLeftoverPrefix+record.Summary()+". "+record.HaltAdvice(),
 		BaselineVerifyFailureType, nil, attempts)
 }
 
