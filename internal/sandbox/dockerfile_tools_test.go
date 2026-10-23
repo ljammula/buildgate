@@ -25,3 +25,26 @@ func TestWorkerImageCarriesPinnedNodePackageManagers(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkerImageCarriesPinnedGitWithBuildgateSmoke(t *testing.T) {
+	data, err := os.ReadFile("Dockerfile")
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"ARG GIT_VERSION=2.51.2",
+		"ARG GIT_SHA256=9b44c2b337ec838e10aad42439d390963904449710d30c9e7e4ba449f45da98f",
+		"echo \"${GIT_SHA256}  git.tar.gz\" | sha256sum -c -",
+		"COPY --from=git /usr/local/bin/git* /usr/local/bin/",
+		"git -C \"$smoke\" init -q",
+		"git -C \"$smoke\" add proof.txt",
+		"git -C \"$smoke\" commit -qm image-proof",
+		"git -C \"$sha256\" init -q --object-format=sha256",
+		"git -C \"$sha256\" rev-parse --show-object-format",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Dockerfile missing %q", want)
+		}
+	}
+}

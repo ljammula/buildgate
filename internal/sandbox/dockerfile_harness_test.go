@@ -35,7 +35,7 @@ func TestWorkerImageCarriesEveryHarnessAtAnExactVersion(t *testing.T) {
 		"ln -s /usr/local/lib/node_modules/@github/copilot/npm-loader.js /usr/local/bin/copilot",
 		"ENV COPILOT_AUTO_UPDATE=false",
 		"ENV COPILOT_CLI_DIST_DIR=/opt/copilot-pkg",
-		"RUN pi --version && codex --version && copilot --version",
+		"pi --version && codex --version && copilot --version",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Dockerfile missing %q", want)

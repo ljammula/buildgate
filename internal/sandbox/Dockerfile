@@ -102,6 +102,27 @@ RUN --mount=type=secret,id=build-ca,required=false \
     && ./configure --disable-posix-spawn --without-guile --disable-dependency-tracking \
     && make -j"$(nproc)" && install -m 0755 make /usr/local/bin/make-no-posix-spawn
 
+# Git is used directly by build_app.py for the build worktree and commit
+# protocol. Debian bookworm's package is 2.39.x, so build the exact upstream
+# release needed for SHA-256 object-format repositories and verify its source
+# tarball before compiling it. The runtime image copies Git's binaries and
+# support files, but does not retain the build toolchain.
+FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e AS git
+ARG GIT_VERSION=2.51.2
+ARG GIT_SHA256=9b44c2b337ec838e10aad42439d390963904449710d30c9e7e4ba449f45da98f
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates gcc libc6-dev gettext libcurl4-openssl-dev libexpat1-dev libpcre2-dev libssl-dev make zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=secret,id=build-ca,required=false \
+    if [ -f /run/secrets/build-ca ]; then export SSL_CERT_FILE=/run/secrets/build-ca; fi \
+    && cd /tmp \
+    && python3 -c "import urllib.request; urllib.request.urlretrieve('https://mirrors.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.gz', 'git.tar.gz')" \
+    && echo "${GIT_SHA256}  git.tar.gz" | sha256sum -c - \
+    && tar xzf git.tar.gz && cd git-${GIT_VERSION} \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" all \
+    && make install
+
 FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e
 
 # git: build_app.py shells straight to it (rev-parse, init, add, commit --
@@ -111,9 +132,12 @@ FROM python@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3
 # Makefile entry point, and most target repos' verify command) comes from the
 # gnumake stage above, not from apt.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates gcc libc6-dev \
+        ca-certificates gcc libc6-dev libcurl4 libexpat1 libpcre2-8-0 libssl3 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=gnumake /usr/local/bin/make-no-posix-spawn /usr/local/bin/make
+COPY --from=git /usr/local/bin/git* /usr/local/bin/
+COPY --from=git /usr/local/libexec/git-core/ /usr/local/libexec/git-core/
+COPY --from=git /usr/local/share/git-core/ /usr/local/share/git-core/
 
 RUN groupadd --gid 65532 worker \
     && useradd --uid 65532 --gid worker --create-home --shell /usr/sbin/nologin worker
@@ -202,6 +226,19 @@ WORKDIR /sandbox
 
 # Build-time smoke test: a broken symlink or missing toolchain fails the
 # image build right here, not a sandboxed run three weeks from now.
-RUN pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
+RUN set -eu; \
+    smoke="$(mktemp -d)"; \
+    git -C "$smoke" init -q; \
+    git -C "$smoke" config user.name buildgate; \
+    git -C "$smoke" config user.email buildgate@example.invalid; \
+    printf 'proof\n' > "$smoke/proof.txt"; \
+    git -C "$smoke" add proof.txt; \
+    git -C "$smoke" commit -qm image-proof; \
+    test -n "$(git -C "$smoke" rev-parse HEAD)"; \
+    sha256="$(mktemp -d)"; \
+    git -C "$sha256" init -q --object-format=sha256; \
+    test "$(git -C "$sha256" rev-parse --show-object-format)" = sha256; \
+    rm -rf "$smoke" "$sha256"; \
+    pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
     && printf 'all:\n\t@true\n' | make -f - \
     && BG_COMPOSE_FORWARDS= bg-forward -- true
