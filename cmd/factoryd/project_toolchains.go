@@ -194,11 +194,11 @@ func projectImageArgsMain(dp *deps, args []string, stdout, stderr io.Writer) err
 
 // doctorCheckProjectToolchains holds the toolchain versions repo declares
 // against the sandbox image a build of it would start from: one row per
-// declaration. A Go or Python the image lacks is what a build derives an
-// image for (toolchainImageFor), and the row says so when the project-image
-// planner can derive it; this remains a passing diagnostic even when
-// FACTORYD_AUTOSTART=0. A declaration the planner cannot install fails. A
-// Node mismatch warns.
+// declaration. A Go or Python mismatch is what a build derives an image for
+// (toolchainImageFor), and the row says so when autostart is enabled. With
+// FACTORYD_AUTOSTART=0 the configured image is kept, so a derivable mismatch
+// is an advisory warning. A tool the image does not report, or a declaration
+// the planner cannot install, fails. A Node mismatch warns.
 func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctorCheck {
 	prefix := "toolchains for " + in.targetRepo
 	reqs, err := toolchain.Detect(in.targetRepo)
@@ -250,6 +250,9 @@ func projectImageFix(in doctorInputs) string {
 // build that derives is the worker's or the run's own process: one started
 // with FACTORYD_AUTOSTART=0 keeps the configured image, and the row says so.
 func derivedToolchainCheck(name string, f toolchain.Finding, codename string, in doctorInputs) doctorCheck {
+	if f.Installed.Parts == nil {
+		return doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)}
+	}
 	plan, err := planProjectImage([]toolchain.Finding{f}, codename)
 	if err == nil && len(plan.BuildArgs) == 0 {
 		err = errors.New("the project-image planner produced no derived-image arguments")
@@ -257,9 +260,13 @@ func derivedToolchainCheck(name string, f toolchain.Finding, codename string, in
 	if err != nil {
 		return doctorCheck{Name: name, Err: fmt.Errorf("%s; cannot derive a project image: %w", imageHas(f), err), Fix: projectImageFix(in)}
 	}
-	detail := imageHas(f) + "; a build derives an image from it with the declared version, on first use"
 	if !hostcontrol.AutostartEnabled() {
-		detail += " (a build started with FACTORYD_AUTOSTART=0 keeps the configured image)"
+		return doctorCheck{
+			Name:     name,
+			Err:      fmt.Errorf("%s; a build started with %s=0 keeps configured image %s, while a build with autostart enabled derives an image with the declared version", toolchainMismatch(f), hostcontrol.AutostartEnvVar, in.sandboxImage),
+			Advisory: true,
+		}
 	}
+	detail := imageHas(f) + "; a build derives an image from it with the declared version, on first use"
 	return doctorCheck{Name: name, Detail: detail}
 }

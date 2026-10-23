@@ -120,18 +120,22 @@ func TestProjectImageArgsPrintsOneBuildArgumentPerLine(t *testing.T) {
 
 func TestDoctorProjectToolchainRows(t *testing.T) {
 	t.Setenv(hostcontrol.AutostartEnvVar, "0")
-	repo := toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n", "pyproject.toml": "[project]\nrequires-python = \">=3.11\"\n", ".nvmrc": "20\n"})
+	repo := toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n", "pyproject.toml": "[project]\nrequires-python = \">=3.14\"\n", ".nvmrc": "20\n"})
 	in := doctorInputs{targetRepo: repo, sandboxImage: "worker@sha256:aaaa", sandboxDocker: toolchainDocker(t, workerImageToolchains), imageSourceRoot: "/src/buildgate"}
 	checks := doctorCheckProjectToolchains(context.Background(), in)
 	if len(checks) != 3 {
 		t.Fatalf("checks = %+v, want one per declaration", checks)
 	}
 	goRow, pythonRow, nodeRow := checks[0], checks[1], checks[2]
-	if goRow.Err != nil || goRow.Advisory || !strings.Contains(goRow.Detail, "go 1.26.8") || !strings.Contains(goRow.Detail, "a build derives an image") {
-		t.Errorf("Go row = %+v, want a passing derived-image detail", goRow)
+	for _, row := range []doctorCheck{goRow, pythonRow} {
+		if row.Err == nil || !row.Advisory || !strings.Contains(row.Err.Error(), "FACTORYD_AUTOSTART=0") || !strings.Contains(row.Err.Error(), "keeps configured image") || !strings.Contains(row.Err.Error(), "autostart enabled derives") {
+			t.Errorf("toolchain row = %+v, want an autostart-off advisory", row)
+		}
 	}
-	if pythonRow.Err != nil || !strings.Contains(pythonRow.Detail, "python 3.13.15") {
-		t.Errorf("Python row = %+v, want ok", pythonRow)
+	for _, want := range []string{`go.mod declares "go 1.27"`, "go 1.26.8", `pyproject.toml declares "requires-python >=3.14"`, "python 3.13.15"} {
+		if !strings.Contains(goRow.Err.Error()+pythonRow.Err.Error(), want) {
+			t.Errorf("toolchain warnings = %q, want %q", goRow.Err.Error()+pythonRow.Err.Error(), want)
+		}
 	}
 	if nodeRow.Err == nil || !nodeRow.Advisory {
 		t.Errorf("Node row = %+v, want a warning", nodeRow)
@@ -141,8 +145,18 @@ func TestDoctorProjectToolchainRows(t *testing.T) {
 	}
 	// With autostart a build derives the image, so the Go row is not a failure.
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
-	if derived := doctorCheckProjectToolchains(context.Background(), in)[0]; derived.Err != nil || !strings.Contains(derived.Detail, "a build derives an image") {
-		t.Errorf("Go row with autostart = %+v, want ok with what a build does", derived)
+	if derived := doctorCheckProjectToolchains(context.Background(), in); derived[0].Err != nil || derived[0].Advisory || !strings.Contains(derived[0].Detail, "a build derives an image") || derived[1].Err != nil || derived[1].Advisory {
+		t.Errorf("toolchain rows with autostart = %+v, want passing rows with what a build does", derived)
+	}
+}
+
+func TestDoctorProjectToolchainRowFailsWhenBaseImageDoesNotReportGo(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	repo := toolchainRepo(t, map[string]string{"go.mod": "module m\n\ngo 1.27\n"})
+	in := doctorInputs{targetRepo: repo, sandboxImage: "worker@sha256:aaaa", sandboxDocker: toolchainDocker(t, "Python 3.13.15\nnode v22.23.2\ncodename=bookworm\n"), imageSourceRoot: "/src/buildgate"}
+	checks := doctorCheckProjectToolchains(context.Background(), in)
+	if len(checks) != 1 || checks[0].Err == nil || checks[0].Advisory || !strings.Contains(checks[0].Err.Error(), "sandbox image has no go") || !strings.Contains(checks[0].Fix, "project-sandbox-image") {
+		t.Fatalf("checks = %+v, want a hard failure for an unreported Go toolchain", checks)
 	}
 }
 

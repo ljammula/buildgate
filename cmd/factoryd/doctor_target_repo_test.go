@@ -114,6 +114,25 @@ func TestDoctorLanguageProfileCandidatePassesSubmitPreflightWhenAdopted(t *testi
 	}
 }
 
+func TestDoctorLanguageProfileCandidateKeepsStrictPreflightForExistingOnboardingArtifacts(t *testing.T) {
+	for _, artifact := range []string{"spec/spec.md", "spec/contract.md", "ARCHITECTURE.md"} {
+		t.Run(artifact, func(t *testing.T) {
+			repo := commitFiles(t, map[string]string{
+				"pom.xml": "<project/>\n",
+				artifact:  "# existing onboarding artifact\n",
+			})
+			check := doctorCheckLanguageProfile(repo)
+			var out strings.Builder
+			if failed := runDoctorChecks([]doctorCheck{check}, &out); failed != 0 {
+				t.Fatalf("language profile check failed = %d:\n%s", failed, out.String())
+			}
+			if strings.Contains(out.String(), "preflight_profile: brownfield") {
+				t.Fatalf("candidate for %s changes the existing strict preflight to brownfield:\n%s", artifact, out.String())
+			}
+		})
+	}
+}
+
 func TestDoctorLanguageProfileUsesSandboxSafeGoVerifyCandidate(t *testing.T) {
 	repo := commitFiles(t, map[string]string{"go.mod": "module example.test/sample\n\ngo 1.26\n"})
 	check := doctorCheckLanguageProfile(repo)
