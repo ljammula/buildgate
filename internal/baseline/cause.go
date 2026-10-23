@@ -38,15 +38,10 @@ var causePatterns = []causePattern{
 	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`Could not resolve (?:all dependencies|([\w.\-]+:[\w.\-]+(?::[\w.\-]+)?))`)},
 	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`NU1101: Unable to find package ([\w.\-]+)`)},
 	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`Could not find gem '([^'\n]+)'`)},
-	// Package managers report a blocked registry fetch as an EACCES or
-	// policy-blocked request rather than as a named missing artifact. Keep
-	// the host from the URL when the log has one, so the operator can add it
-	// to the image or the already-supported registry configuration. The
-	// fetch context avoids turning a local npm permission error into a
-	// dependency failure.
-	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`(?i)(?:pnpm|npm|yarn|bun|pip|uv|cargo|mvn|maven|gradle|bundle|go)[^\n]*https?://([^/\s:]+)[^\n]*(?:\bEACCES\b|\bblocked\b)`)},
-	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`(?i)(?:pnpm|npm|yarn|bun|pip|uv|cargo|mvn|maven|gradle|bundle|go)[^\n]*(?:\bEACCES\b|\bblocked\b)[^\n]*https?://([^/\s:]+)`)},
-	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`(?i)(?:pnpm|npm|yarn|bun|pip|uv|cargo|mvn|maven|gradle|bundle|go)[^\n]*(?:fetch|request|registry|metadata|download|resolve)[^\n]*(?:\bEACCES\b|\bblocked\b)`)},
+	// A registry the sandbox's network policy does not admit: Node's package
+	// managers report the refused socket as `connect EACCES` on the line
+	// that names the URL. The host is the detail.
+	{run.BaselineCauseDependencyUnavailable, regexp.MustCompile(`https?://([\w.\-]+)[^\n]*\bconnect EACCES\b`)},
 	{run.BaselineCauseMissingPath, regexp.MustCompile(`MSB1009: Project file does not exist\.?(?:\s*\n\s*Switch: (\S+))?`)},
 	{run.BaselineCauseMissingPath, regexp.MustCompile(`ERROR: file or directory not found: (\S+)`)},
 	{run.BaselineCauseMissingPath, regexp.MustCompile(`cannot load such file -- (\S+)`)},

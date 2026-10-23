@@ -24,7 +24,7 @@ func TestCauseNamesWhatTheLogShows(t *testing.T) {
 		{"nuget", "error NU1101: Unable to find package Newtonsoft.Json. No packages exist\n", run.BaselineCauseDependencyUnavailable, "Newtonsoft.Json"},
 		{"bundler", "Could not find gem 'rake' in locally installed gems.\n", run.BaselineCauseDependencyUnavailable, "rake"},
 		{"pnpm blocked registry with EACCES", "2026-10-22T14:01:03Z ERR_PNPM_META_FETCH_FAIL GET https://jsr.io/@std/assert/meta.json: request to https://jsr.io/@std/assert/meta.json failed, reason: connect EACCES 10.0.0.1:443 - Local (0.0.0.0:0)\n", run.BaselineCauseDependencyUnavailable, "jsr.io"},
-		{"package manager blocked registry names host after blocked marker", "pnpm fetch blocked by sandbox policy: https://jsr.io/@std/assert/meta.json\n", run.BaselineCauseDependencyUnavailable, "jsr.io"},
+		{"a blocked word in test output is not a dependency failure", "--- FAIL: TestGoodRequestBlocked (0.01s)\n    request to https://example.test was blocked\n", "", ""},
 		{"local npm permission error is not a dependency failure", "npm error code EACCES\nnpm error syscall mkdir\nnpm error path /workspace/node_modules\n", "", ""},
 		{"msbuild project", "Time Elapsed 00:00:03.72\nMSBUILD : error MSB1009: Project file does not exist.\nSwitch: tests/ImageGallery.Model.Tests/ImageGallery.Model.Tests.csproj\n",
 			run.BaselineCauseMissingPath, "tests/ImageGallery.Model.Tests/ImageGallery.Model.Tests.csproj"},
