@@ -12,6 +12,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/workflow"
 )
 
 // -baseline-check reaches RunWorkflowInput: the workflow stops on it.
@@ -88,6 +89,86 @@ func TestFinishBaselineCheck(t *testing.T) {
 	}
 	if records, _ := filepath.Glob(filepath.Join(failed, "data", "runs", "*", "run.json")); len(records) != 0 {
 		t.Errorf("a failed check kept run records %v", records)
+	}
+}
+
+func TestBaselineCheckPassPrintsCommandTimings(t *testing.T) {
+	dataDir := t.TempDir()
+	const id = "baseline-check-pass"
+	if err := run.SaveBaselineVerify(run.Dir(dataDir, id), &run.BaselineVerify{Passed: true, DurationMs: 1234}); err != nil {
+		t.Fatal(err)
+	}
+	result := workflow.RunWorkflowResult{BaselineChecked: true, Attempts: []run.Attempt{
+		{Kind: run.BaselineVerifyAttemptKind, StartedAt: "2026-10-23T12:00:00Z", FinishedAt: "2026-10-23T12:00:01Z", ExitCode: 0},
+		{Kind: run.FullSuiteVerifyAttemptKind, StartedAt: "2026-10-23T12:00:02Z", FinishedAt: "2026-10-23T12:00:04Z", ExitCode: 0},
+	}}
+	out := captureStdout(t, func() {
+		if err := finishRunWorkflow(nil, nil, runOptions{DataDir: dataDir, ID: id}, "", result); err != nil {
+			t.Fatalf("finishRunWorkflow: %v", err)
+		}
+	})
+	if !strings.Contains(out, "baseline check: verify 1.234s: passed") || !strings.Contains(out, "baseline check: full suite 2s: passed") {
+		t.Fatalf("output=%q, want both command timings", out)
+	}
+}
+
+func TestBaselineCheckFailurePrintsDetailsAndTimings(t *testing.T) {
+	checkDir := filepath.Join(t.TempDir(), "baseline-checks", "check-f")
+	dataDir := filepath.Join(checkDir, "data")
+	const id = "baseline-check-fail"
+	r := &run.Run{
+		ID:             id,
+		State:          run.StateHalted,
+		HaltReasonCode: run.HaltReasonBaselineVerifyFailed,
+		Triage:         "full suite failed its tests",
+		Attempts: []run.Attempt{
+			{Kind: run.BaselineVerifyAttemptKind, StartedAt: "2026-10-23T12:00:00Z", FinishedAt: "2026-10-23T12:00:01Z", ExitCode: 1},
+			{Kind: run.FullSuiteVerifyAttemptKind, StartedAt: "2026-10-23T12:00:02Z", FinishedAt: "2026-10-23T12:00:03.500Z", ExitCode: 2},
+		},
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.SaveBaselineVerify(run.Dir(dataDir, id), &run.BaselineVerify{
+		Command:      "make verify",
+		ExitCode:     1,
+		FailingTests: []string{"TestSSL"},
+		FailingCount: 1,
+		DurationMs:   2345,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStderr(t, func() { finishBaselineCheck(checkDir) })
+	for _, want := range []string{
+		"baseline check: verify 2.345s: failed: TestSSL",
+		"baseline check: full suite 1.5s: failed: exit 2; full suite failed its tests",
+		"baseline check failed; its logs are in " + checkDir,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output=%q, want %q", out, want)
+		}
+	}
+}
+
+func TestBaselineCheckFailurePrintsAFullSuiteLeftover(t *testing.T) {
+	checkDir := filepath.Join(t.TempDir(), "baseline-checks", "check-l")
+	dataDir := filepath.Join(checkDir, "data")
+	r := &run.Run{
+		ID:             "baseline-check-leftover",
+		State:          run.StateHalted,
+		HaltReasonCode: run.HaltReasonBaselineVerifyFailed,
+		HaltError:      "temporal workflow did not complete: " + workflow.FullSuiteLeftoverPrefix + "passed, but the command leaves coverage.xml outside the ticket's Allowed-Files. Ignore it",
+		Attempts: []run.Attempt{
+			{Kind: run.BaselineVerifyAttemptKind, StartedAt: "2026-10-23T12:00:00Z", FinishedAt: "2026-10-23T12:00:01Z"},
+			{Kind: run.FullSuiteVerifyAttemptKind, StartedAt: "2026-10-23T12:00:02Z", FinishedAt: "2026-10-23T12:00:04Z"},
+		},
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStderr(t, func() { finishBaselineCheck(checkDir) })
+	if want := "baseline check: full suite 2s: passed, but the command leaves coverage.xml"; !strings.Contains(out, want) {
+		t.Errorf("output=%q, want %q", out, want)
 	}
 }
 

@@ -545,6 +545,22 @@ func TestBaselineVerifyThatPassesButLeavesAFileOutsideAllowedFilesHalts(t *testi
 	}
 }
 
+func TestBaselineCheckVerifyThatPassesButLeavesAnUnignoredFileHalts(t *testing.T) {
+	input := fixtureInput()
+	input.BaselineCheck = true
+	input.WorkspacePath = baselineRepo(t)
+	_, err, logDir, _ := runBaselineActivity(t, input, "x", "ok\n", 0, func(dir string) {
+		leftWriteFile(t, dir, "test", "SSL key log\n")
+	})
+	if err == nil || !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "No model call was made") {
+		t.Fatalf("err=%v, want the baseline check to halt on its leftover", err)
+	}
+	record := loadBaselineRecord(t, logDir)
+	if record.LeftOutOfScopeCount != 1 || !reflect.DeepEqual(record.LeftOutOfScope, []string{"test"}) {
+		t.Fatalf("record=%+v, want the leftover recorded", record)
+	}
+}
+
 func TestBaselineVerifyLeftoversTheGateWouldNotFlagDoNotHalt(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

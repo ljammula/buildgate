@@ -4,6 +4,7 @@ import (
 	"buildgate/internal/evidence"
 	"buildgate/internal/runner"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 )
 
@@ -420,6 +422,98 @@ func TestRunFullSuiteVerifyActivityDuplicateInvocationRunsSubprocessOnce(t *test
 	}
 	if logPaths[0] == logPaths[1] {
 		t.Fatalf("full-suite verify log paths for different Activity executions = %q, want distinct paths", logPaths[0])
+	}
+}
+
+func TestBaselineCheckFullSuiteThatLeavesAnUnignoredFileHalts(t *testing.T) {
+	workspace := baselineRepo(t)
+	logDir := t.TempDir()
+	checkpointDir := t.TempDir()
+	activities := &Activities{
+		LogDir: logDir,
+		runWithRetries: func(_ context.Context, dir string, logPath func(int) string, _ int, onAttempt func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+			started := time.Now()
+			path := logPath(1)
+			if err := os.WriteFile(path, []byte("ok\n"), 0o600); err != nil {
+				t.Fatalf("write full-suite log: %v", err)
+			}
+			leftWriteFile(t, dir, "test", "SSL key log\n")
+			result := runner.Result{
+				Command:    []string{"sh", "-c", "make full"},
+				ExitCode:   0,
+				StartedAt:  started,
+				FinishedAt: started.Add(time.Second),
+				LogPath:    path,
+			}
+			onAttempt(1, result, nil)
+			return result, nil
+		},
+	}
+	input := fixtureInput()
+	input.BaselineCheck = true
+	input.FullSuiteCommand = "make full"
+	input.WorkspacePath = workspace
+	input.LogDir = logDir
+	input.CheckpointDir = checkpointDir
+	input.RunID = "baseline-check"
+
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(activities.RunFullSuiteVerifyActivity)
+	_, err := env.ExecuteActivity(activities.RunFullSuiteVerifyActivity, input)
+	if err == nil || !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "No model call was made") {
+		t.Fatalf("err=%v, want the baseline check to halt on its leftover", err)
+	}
+}
+
+// A workspace whose state cannot be read after a baseline check's full-suite
+// command is an infrastructure failure, in the returned error and in the
+// checkpoint a redelivery replays, never a baseline verdict.
+func TestBaselineCheckFullSuiteUnreadableWorkspaceIsInfrastructure(t *testing.T) {
+	workspace := baselineRepo(t)
+	checkpointDir := t.TempDir()
+	activities := &Activities{
+		LogDir: t.TempDir(),
+		runWithRetries: func(_ context.Context, dir string, logPath func(int) string, _ int, onAttempt func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {
+			started := time.Now()
+			path := logPath(1)
+			if err := os.WriteFile(path, []byte("ok\n"), 0o600); err != nil {
+				t.Fatalf("write full-suite log: %v", err)
+			}
+			if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+				t.Fatal(err)
+			}
+			result := runner.Result{Command: []string{"sh", "-c", "make full"}, StartedAt: started, FinishedAt: started.Add(time.Second), LogPath: path}
+			onAttempt(1, result, nil)
+			return result, nil
+		},
+	}
+	input := fixtureInput()
+	input.BaselineCheck = true
+	input.FullSuiteCommand = "make full"
+	input.WorkspacePath = workspace
+	input.LogDir = activities.LogDir
+	input.CheckpointDir = checkpointDir
+	input.RunID = "baseline-check"
+
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(activities.RunFullSuiteVerifyActivity)
+	_, err := env.ExecuteActivity(activities.RunFullSuiteVerifyActivity, input)
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != InfrastructureFailureType {
+		t.Fatalf("err=%v, want an %s", err, InfrastructureFailureType)
+	}
+	var checkpoints []string
+	_ = filepath.WalkDir(checkpointDir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			data, _ := os.ReadFile(path)
+			checkpoints = append(checkpoints, string(data))
+		}
+		return nil
+	})
+	if joined := strings.Join(checkpoints, "\n"); !strings.Contains(joined, `"error_type": "`+InfrastructureFailureType+`"`) {
+		t.Fatalf("checkpoints = %q, want the error recorded as %s", joined, InfrastructureFailureType)
 	}
 }
 

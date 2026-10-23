@@ -122,6 +122,9 @@ func (g GateResult) ReclaimNotChecked() bool {
 // the base commit, before the build's first round.
 const BaselineVerifyAttemptKind = "baseline_verify"
 
+// FullSuiteVerifyAttemptKind is Attempt.Kind of the full-suite command's run.
+const FullSuiteVerifyAttemptKind = "full_suite_verify"
+
 // HaltReasonBaselineVerifyFailed is Run.HaltReasonCode's value when a run
 // halted before its build because no build of the ticket could be accepted:
 // the verify command failed on the base commit with a failure the ticket
