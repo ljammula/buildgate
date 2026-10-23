@@ -180,7 +180,7 @@ func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 	var checks []doctorCheck
 	if err := requestsubmit.RequireAgentsFile(abs); err != nil {
 		checks = append(checks, doctorCheck{Name: run.RootInstructionFile + " for " + repo, Err: err,
-			Fix: "run that prompt in the repo with your coding agent, review and commit the file, then run this again: submit, quickstart and a run refuse the repo until then, and no flag or config key skips the check"})
+			Fix: "run `factoryd doctor -target-repo <repo> -fix` to draft it in the sandbox, review and commit the uncommitted file, then run this again; submit, quickstart and a run read committed HEAD"})
 	} else {
 		checks = append(checks, doctorCheck{Name: run.RootInstructionFile + " for " + repo + ": committed at HEAD"})
 	}

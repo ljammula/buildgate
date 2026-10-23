@@ -45,6 +45,7 @@ def test_inventory_has_stable_unique_ids_and_does_not_expose_prompt_text():
 	assert len(ids) == len(set(ids))
 	assert {
 		"prompt-source:draft-spec.context",
+		"prompt-source:draft-agents.context",
 		"prompt-source:plan-tickets.context",
 		"prompt-source:draft-oracles.criteria-context",
 		"prompt-source:draft-oracles.criterion-index",

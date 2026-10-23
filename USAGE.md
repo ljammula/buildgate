@@ -167,11 +167,14 @@ factoryd quickstart -issue https://github.com/you/repo/issues/42 ~/code/your-rep
 
 `<repo-path>` must already be a git checkout (`.` if omitted) with an
 `AGENTS.md` committed at its root: the file every coding agent reads for the
-repo's setup, test, build and lint commands. `quickstart`, `submit`, a single-ticket run and
-`doctor -target-repo` refuse a repo where it is missing or empty at `HEAD`
-(an uncommitted file does not count), before any setup or model call; no flag
-or config key skips this. The refusal carries a prompt for your own coding
-agent to write the file; review what it writes, then commit it:
+repo's setup, test, build and lint commands. `quickstart`, `submit` and a
+single-ticket run refuse a repo where it is missing or empty at `HEAD` (an
+uncommitted file does not count), before their setup or model call; no flag or
+config key skips this. `doctor -target-repo` reports the same failure, and
+`doctor -target-repo <repo> -fix` drafts the file in the planning-role sandbox
+from the prompt below and leaves it uncommitted for you to review and commit;
+the doctor row stays failed until the commit exists. To write it with your own
+coding agent instead, give it the prompt the refusal prints:
 
 ```text
 Write AGENTS.md at the root of this repository for coding agents. First read README.md, the contributing guide if there is one, and the build files (Makefile, package manifest, CI workflows). Then give its setup, test, build and lint commands (run each one and keep only what works), its layout, and the rules a change must follow, taking each from those files or from what you ran and guessing none. Run the repository's own formatter or linter over the file. Keep it short and exact.
@@ -306,7 +309,7 @@ the target: it says so and changes nothing.
 
 | Step | What happens | Manual equivalent |
 |---|---|---|
-| Check the repo's `AGENTS.md` | Refuses, before anything else, a repo with no `AGENTS.md` committed at its root, printing a prompt to generate one | Have your coding agent write it from that prompt, review it, commit it |
+| Check the repo's `AGENTS.md` | Refuses, before anything else, a repo with no `AGENTS.md` committed at its root | Run `factoryd doctor -target-repo <repo> -fix`, review the uncommitted sandbox draft, commit it, then rerun quickstart |
 | Check setup | Docker, images, model route, mounts | `factoryd doctor` |
 | Scaffold onboarding docs | Interactive: asks whether to write `spec/spec.md`/`spec/contract.md`/`ARCHITECTURE.md` if missing; `-non-interactive` skips the prompt and uses the `brownfield` preflight profile instead (or pass `-scaffold` to write them unconditionally) | `factoryd onboard -project <name> -root <repo> -write-factory-yml` |
 | Pick a model route | Detects an existing Codex/Copilot/Anthropic login and offers it first (`-route` to pick explicitly: `openai`/`anthropic`/`copilot`/`chatgpt-codex`); lists models, picks a usable one, warns on a weak model | `factoryd init-config`, edit, `factoryd doctor -list-models` |
@@ -1552,7 +1555,7 @@ What changes for a build:
 | Run or request halted: `halted (operator finding): .factory/ cannot be mounted read-only: ...` | Every sandbox that runs a repository command mounts `.factory/` read-only as the commit `.factory.yml` was read from holds it. The directory at that commit, or the worktree's entry of that name, has a shape the mount cannot carry: the worktree lacks the directory, it is a file or a symlink, another spelling (`.Factory`) exists, or the committed directory holds a symlink or a submodule | Fix what the sentence names (USAGE_REFERENCE, "The `.factory/` directory"), commit, then `factoryd retry <id>` |
 | A gate or the verify command fails with `Read-only file system` under `.factory/` | A repository command writes into `.factory/` (a cache, a report, `chmod +x`) | Write to a gitignored directory or `/tmp`; commit the executable bit instead of setting it at run time |
 | Quarantine names a gate but not why it failed | Nothing wrong — the triage sentence quotes the first compile/test failure line from that gate's log | Read the run's full log for the rest |
-| `quickstart`, `submit` or a single-ticket run refuses: `<repo> has no AGENTS.md committed at its root`, `AGENTS.md at HEAD of <repo> is empty` or `... is not a regular file`, or `<repo> is not a git checkout with a commit at HEAD`; `doctor -target-repo` fails its `AGENTS.md for <repo>` row; the console's New request form and the MCP `submit_request` tool answer with the same line | The repo's root `AGENTS.md` is missing, empty, only in the working tree, or a symlink. It is read from git at `HEAD`, by that exact name, as a regular file. `onboard`, `init` and `quickstart -scaffold` do not write it | Run the prompt the message prints in the repo with your coding agent (Quick start has it), review the `AGENTS.md` it writes, commit it, then run the command again |
+| `quickstart`, `submit` or a single-ticket run refuses: `<repo> has no AGENTS.md committed at its root`, `AGENTS.md at HEAD of <repo> is empty` or `... is not a regular file`, or `<repo> is not a git checkout with a commit at HEAD`; `doctor -target-repo` fails its `AGENTS.md for <repo>` row; the console's New request form and the MCP `submit_request` tool answer with the same line | The repo's root `AGENTS.md` is missing, empty, only in the working tree, or a symlink. It is read from git at `HEAD`, by that exact name, as a regular file. `onboard`, `init` and `quickstart -scaffold` do not write it | Run `factoryd doctor -target-repo <repo> -fix` to draft it in the planning-role sandbox (or give your coding agent the prompt the message prints; Quick start has it), review the uncommitted `AGENTS.md`, commit it, then run the command again |
 | Request halts at preflight for a repo | Repo has no `.factory.yml` (strict preflight profile) | `factoryd onboard -project <name> -root <repo> -write-factory-yml`, commit, resubmit |
 | `factoryd doctor` warns the release policy denies every PR unconditionally | `release_max_files_changed`/`release_max_insertions` is `0` or `release_rollback_plan` is empty | Add all three to `config.yml` (`init-config`'s scaffold has usable defaults; `quickstart` writes them into a fresh config automatically) |
 | Status shows "accepted, awaiting pull request" | Every ticket's build was accepted but no PR exists (`-open-pull-request=false`, a release-policy denial, or the PR failed to open) | Merge the branch by hand, or `factoryd retry <id>` — re-opens just the PR if the release decision now allows it, otherwise rebuilds. When the reason names commits "not on origin", the repository had local commits under the run's base that no gate checked: push or drop them first. `factoryd doctor -target-repo` warns about them before a run |

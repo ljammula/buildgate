@@ -43,10 +43,10 @@ func GitToplevel(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// AgentsFilePrompt is the prompt every AGENTS.md refusal hands the operator
-// for their own coding agent (Claude Code, Copilot, Codex): buildgate does
-// not write the file, since nothing in it would have been checked by a
-// person. It names the sources (the README, the contributing guide, the build
+// AgentsFilePrompt is the shared instruction contract for an AGENTS.md:
+// refusals hand it to the operator for their own coding agent (Claude Code,
+// Copilot, Codex), and doctor -fix stages it for the planning-role sandbox
+// job. It names the sources (the README, the contributing guide, the build
 // files) because a file written from the directory listing alone states
 // commands that do not pass and rules the project never set.
 const AgentsFilePrompt = "Write " + run.RootInstructionFile + " at the root of this repository for coding agents. " +

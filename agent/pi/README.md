@@ -17,6 +17,7 @@ and [`USAGE.md`](../../USAGE.md).
 | `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |
 | `draft_spec.py` | Request driver's one-shot spec draft | `worker -draft-spec-script` |
 | `plan_tickets.py` | Request driver's one-shot ticket plan | `worker -plan-tickets-script` |
+| `draft_agents.py` | Doctor's one-shot root `AGENTS.md` draft; the factory supplies the shared refusal instructions and copies the successful scratch output to the repository root | `doctor -target-repo <repo> -fix` |
 | `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`) | `worker -draft-oracles-script` |
 | `conformity_review.py` | Bounded per-criterion spec-conformity review. A flag may name a file and the exact text it lacks (`missing`). When the result commit holds that text (read with `git cat-file`, and only where the worktree's copy is the same bytes, so a masked instruction file or a file a review turn rewrote is never read), those criteria are judged once more, alone, by a fresh turn in `.pi-conformity-session/recheck`, shown the commit's lines that hold the text (each with its neighbours) and nothing the earlier answer said. Its verdict replaces the flag; no answer leaves it, with the turn's error in the outcome. Text under 4 characters or cut to its cap is never looked up, and nothing is asked again under the advisory policy. The two turns share 20 minutes and the recheck is skipped under 5. This trades quarantines on a false flag for the chance that a second turn passes a criterion the first rightly flagged; the PR's Spec conformity section marks every criterion judged again. The evidence carries a `recheck` line, and each criterion asked about a `recheck` record; the prompt is saved as `review-conformity-recheck` | — |
 | `code_review.py` | Standalone AI code review (`-code-review-policy off\|advisory\|required`) | — |
@@ -33,6 +34,7 @@ freely, headings only together with their validator.
 | Template | Loaded by | Placeholders |
 |---|---|---|
 | `draft_spec.prompt.md` | `draft_spec.py` | `{draft_path}` |
+| `draft_agents.prompt.md` | `draft_agents.py` | `{instructions}`, `{draft_path}`, `{context}` |
 | `draft_spec.example_check.prompt.md` | `draft_spec.py` (worked-example check) | `{listing}`, `{out_path}` |
 | `draft_feedback.prompt.md` | `draft_spec.py`, `plan_tickets.py` (operator feedback on a rejected draft) | `{kind}`, `{feedback}` |
 | `plan_tickets.prompt.md` | `plan_tickets.py` | `{draft_dir}`, `{verify_command}` |

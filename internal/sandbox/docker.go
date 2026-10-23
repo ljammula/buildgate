@@ -2155,6 +2155,7 @@ var HarnessSiblingModules = map[string]bool{
 	"draft_acceptance_oracles.python.prompt.md":          true,
 	"draft_acceptance_oracles.qualification.prompt.md":   true,
 	"draft_feedback.prompt.md":                           true,
+	"draft_agents.prompt.md":                             true,
 	"draft_spec.design_guide.prompt.md":                  true,
 	"draft_spec.example_check.prompt.md":                 true,
 	"draft_spec.previous_draft.prompt.md":                true,
