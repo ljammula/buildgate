@@ -127,9 +127,8 @@ func TestDoctorProjectToolchainRows(t *testing.T) {
 		t.Fatalf("checks = %+v, want one per declaration", checks)
 	}
 	goRow, pythonRow, nodeRow := checks[0], checks[1], checks[2]
-	if goRow.Err == nil || goRow.Advisory || !strings.Contains(goRow.Err.Error(), "go 1.26.8") ||
-		!strings.Contains(goRow.Fix, "make -C /src/buildgate project-sandbox-image PROJECT_DIR="+repo+" BASE_IMAGE=worker@sha256:aaaa") {
-		t.Errorf("Go row = %+v, want a failure naming the image's Go and the build command", goRow)
+	if goRow.Err != nil || goRow.Advisory || !strings.Contains(goRow.Detail, "go 1.26.8") || !strings.Contains(goRow.Detail, "a build derives an image") {
+		t.Errorf("Go row = %+v, want a passing derived-image detail", goRow)
 	}
 	if pythonRow.Err != nil || !strings.Contains(pythonRow.Detail, "python 3.13.15") {
 		t.Errorf("Python row = %+v, want ok", pythonRow)
@@ -144,6 +143,16 @@ func TestDoctorProjectToolchainRows(t *testing.T) {
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	if derived := doctorCheckProjectToolchains(context.Background(), in)[0]; derived.Err != nil || !strings.Contains(derived.Detail, "a build derives an image") {
 		t.Errorf("Go row with autostart = %+v, want ok with what a build does", derived)
+	}
+}
+
+func TestDoctorProjectToolchainRowFailsWhenNoAutomaticImageCanBeDerived(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "0")
+	repo := toolchainRepo(t, map[string]string{"pyproject.toml": "[project]\nrequires-python = \"<3.12\"\n"})
+	in := doctorInputs{targetRepo: repo, sandboxImage: "worker@sha256:aaaa", sandboxDocker: toolchainDocker(t, workerImageToolchains), imageSourceRoot: "/src/buildgate"}
+	checks := doctorCheckProjectToolchains(context.Background(), in)
+	if len(checks) != 1 || checks[0].Err == nil || checks[0].Advisory || !strings.Contains(checks[0].Err.Error(), "no version to install") {
+		t.Fatalf("checks = %+v, want a hard failure naming the missing install version", checks)
 	}
 }
 

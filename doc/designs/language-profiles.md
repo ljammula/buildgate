@@ -41,6 +41,10 @@ by `doctor`. Since `.factory.yml` is read from committed HEAD, working-tree
 markers are onboarding hints and do not claim that the corresponding project
 is what the next run will build.
 
+For an automatic Go or Python toolchain, doctor reports the derived-image plan
+when the project-image planner can satisfy the declaration, even when
+`FACTORYD_AUTOSTART=0`; it fails only when no project image can be derived.
+
 The helper currently stages only manifests at `PROJECT_DIR`'s root. Its
 dependency support is Go (`go.mod`, `go.sum`), npm (`package.json`,
 `package-lock.json`), pip (`requirements.txt`), Maven (`pom.xml`), and Ruby

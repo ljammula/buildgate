@@ -195,10 +195,10 @@ func projectImageArgsMain(dp *deps, args []string, stdout, stderr io.Writer) err
 // doctorCheckProjectToolchains holds the toolchain versions repo declares
 // against the sandbox image a build of it would start from: one row per
 // declaration. A Go or Python the image lacks is what a build derives an
-// image for (toolchainImageFor), and the row says so; under
-// FACTORYD_AUTOSTART=0 nothing is derived, the verify command cannot pass,
-// and the row fails with the command that builds the image. A Node mismatch
-// warns.
+// image for (toolchainImageFor), and the row says so when the project-image
+// planner can derive it; this remains a passing diagnostic even when
+// FACTORYD_AUTOSTART=0. A declaration the planner cannot install fails. A
+// Node mismatch warns.
 func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctorCheck {
 	prefix := "toolchains for " + in.targetRepo
 	reqs, err := toolchain.Detect(in.targetRepo)
@@ -208,7 +208,7 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 	if len(reqs) == 0 || in.sandboxImage == "" {
 		return nil
 	}
-	installed, _, err := imageToolchains(ctx, in.sandboxDocker, in.sandboxImage)
+	installed, codename, err := imageToolchains(ctx, in.sandboxDocker, in.sandboxImage)
 	if err != nil {
 		return []doctorCheck{{Name: prefix, Err: err, Advisory: true}}
 	}
@@ -221,7 +221,16 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 		case f.Tool == toolchain.Node:
 			checks = append(checks, doctorCheck{Name: name, Advisory: true, Err: errors.New(imageHas(f)),
 				Fix: "the image's Node also runs the coding agents and is not replaced per project; build on it, or supply your own worker image"})
-		case hostcontrol.AutostartEnabled():
+		case f.Tool == toolchain.Go || f.Tool == toolchain.Python:
+			plan, planErr := planProjectImage([]toolchain.Finding{f}, codename)
+			if planErr != nil || len(plan.BuildArgs) == 0 {
+				if planErr == nil {
+					planErr = errors.New("the project-image planner produced no derived-image arguments")
+				}
+				checks = append(checks, doctorCheck{Name: name,
+					Err: fmt.Errorf("%s; cannot derive a project image: %w", imageHas(f), planErr), Fix: projectImageFix(in)})
+				continue
+			}
 			checks = append(checks, doctorCheck{Name: name, Detail: imageHas(f) + "; a build derives an image from it with the declared version, on first use"})
 		default:
 			checks = append(checks, doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)})
