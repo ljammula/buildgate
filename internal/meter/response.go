@@ -1,6 +1,7 @@
 package meter
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -207,7 +208,17 @@ func (s *responseSession) settleObserved() {
 	s.settle(s.observedSettlement())
 }
 
+// observedSettlement is the usage settlement plus the fact, when the stream
+// reports it, that its terminal event was a failure.
 func (s *responseSession) observedSettlement() settlement {
+	out := s.usageSettlement()
+	if parser, ok := s.sse.(interface{ Failed() bool }); ok {
+		out.failed = parser.Failed()
+	}
+	return out
+}
+
+func (s *responseSession) usageSettlement() settlement {
 	var usage usageFigures
 	var err error
 	switch {
@@ -217,6 +228,9 @@ func (s *responseSession) observedSettlement() settlement {
 		return settlement{mode: settleEstimate}
 	default:
 		usage.costInput, usage.meterInput, usage.cached, usage.cacheWrite, usage.output, err = ParseMessageUsage(s.format, s.body)
+	}
+	if errors.Is(err, errFailedBeforeAnyWork) {
+		return settlement{mode: settleRelease}
 	}
 	if err != nil {
 		return settlement{mode: settleEstimate}

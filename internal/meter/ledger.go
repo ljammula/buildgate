@@ -48,6 +48,10 @@ type LedgerRecord struct {
 	// success, is its Retry-After header as seconds from when it arrived, 0
 	// when it sent none or one the meter could not read.
 	RetryAfterSeconds int64 `json:"retry_after_seconds,omitempty"`
+	// Failed, on a complete record, is set when a 200 event stream's
+	// terminal event reported a failure (response.failed), whatever it
+	// settled as. Absent means false.
+	Failed bool `json:"failed,omitempty"`
 }
 
 // How a complete record's request ended.
@@ -57,7 +61,8 @@ const (
 	// SettledEstimate: the reserved estimate was charged (usage could not
 	// be read, or no response ever arrived and the reservation expired).
 	SettledEstimate = "estimate"
-	// SettledReleased: nothing was charged (the response was not a success).
+	// SettledReleased: nothing was charged (the response was not a success, or a 200
+	// stream failed before any work).
 	SettledReleased = "released"
 )
 
@@ -184,6 +189,9 @@ func eventLine(ts string, rec LedgerRecord) string {
 	}
 	if rec.RetryAfterSeconds > 0 {
 		fmt.Fprintf(&b, ",\"retry_after_seconds\":%d", rec.RetryAfterSeconds)
+	}
+	if rec.Failed {
+		b.WriteString(",\"failed\":true")
 	}
 	b.WriteString("}\n")
 	return b.String()

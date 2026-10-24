@@ -50,9 +50,14 @@ func openAIResponsesMessageUsage(body []byte) (costInputTokens, meterInputTokens
 	return input - cached, input, cached, 0, output, nil
 }
 
+// errFailedBeforeAnyWork is what Usage returns for a stream that ended in
+// response.failed with no usage after only response.created and
+// response.in_progress events: the upstream did no work, so nothing is owed.
+var errFailedBeforeAnyWork = errors.New("upstream response failed before any work")
+
 // openAIResponsesSSEUsage observes the Responses API event stream. The
-// authoritative usage object is carried by the terminal response.completed or
-// response.incomplete event; intermediate output deltas do not contain a
+// authoritative usage object is carried by the terminal response.completed,
+// response.incomplete or response.failed event (a failure may carry none); intermediate output deltas do not contain a
 // complete token count and must never be metered on their own.
 type openAIResponsesSSEUsage struct {
 	buffer           []byte
@@ -62,7 +67,12 @@ type openAIResponsesSSEUsage struct {
 	cachedTokens     int
 	outputTokens     *int
 	terminalResponse bool
-	err              error
+	// sawWork is set by any event before the terminal one that is not
+	// response.created or response.in_progress.
+	sawWork bool
+	// failed is set when the terminal event is response.failed.
+	failed bool
+	err    error
 }
 
 func (u *openAIResponsesSSEUsage) Write(p []byte) (int, error) {
@@ -139,28 +149,51 @@ func (u *openAIResponsesSSEUsage) parseEvent() {
 			u.fail(fmt.Errorf("parse upstream event stream usage: terminal response missing input_tokens or output_tokens"))
 			return
 		}
-		if *event.Response.Usage.InputTokens < 0 || *event.Response.Usage.OutputTokens < 0 {
+		u.readUsage(event.Response.Usage.InputTokens, event.Response.Usage.OutputTokens, event.Response.Usage.InputTokensDetails)
+	case "response.failed":
+		u.terminalResponse = true
+		u.failed = true
+		if event.Response == nil || event.Response.Usage == nil {
+			return
+		}
+		// A usage object that is there but incomplete is unreadable usage
+		// (charged its estimate), never "no usage" (released).
+		if event.Response.Usage.InputTokens == nil || event.Response.Usage.OutputTokens == nil {
+			u.fail(fmt.Errorf("parse upstream event stream usage: terminal response missing input_tokens or output_tokens"))
+			return
+		}
+		u.readUsage(event.Response.Usage.InputTokens, event.Response.Usage.OutputTokens, event.Response.Usage.InputTokensDetails)
+	case "response.created", "response.in_progress":
+	default:
+		u.sawWork = true
+	}
+}
+
+// readUsage validates and records a terminal event's usage object.
+func (u *openAIResponsesSSEUsage) readUsage(input, output *int, details *struct {
+	CachedTokens *int `json:"cached_tokens"`
+}) {
+	if *input < 0 || *output < 0 {
+		u.fail(fmt.Errorf("parse upstream event stream usage: token counts must not be negative"))
+		return
+	}
+	var cached int
+	if details != nil {
+		cachedValue, cachedErr := nonNegativeIntField(details.CachedTokens)
+		if cachedErr != nil {
 			u.fail(fmt.Errorf("parse upstream event stream usage: token counts must not be negative"))
 			return
 		}
-		var cached int
-		if event.Response.Usage.InputTokensDetails != nil {
-			cachedValue, cachedErr := nonNegativeIntField(event.Response.Usage.InputTokensDetails.CachedTokens)
-			if cachedErr != nil {
-				u.fail(fmt.Errorf("parse upstream event stream usage: token counts must not be negative"))
-				return
-			}
-			cached = cachedValue
-		}
-		inputTokens := *event.Response.Usage.InputTokens
-		outputTokens := *event.Response.Usage.OutputTokens
-		u.inputTokens = &inputTokens
-		u.cachedTokens = cached
-		u.outputTokens = &outputTokens
-	case "response.failed":
-		u.terminalResponse = true
+		cached = cachedValue
 	}
+	inputTokens, outputTokens := *input, *output
+	u.inputTokens = &inputTokens
+	u.cachedTokens = cached
+	u.outputTokens = &outputTokens
 }
+
+// Failed reports that the terminal event was response.failed.
+func (u *openAIResponsesSSEUsage) Failed() bool { return u.failed }
 
 func (u *openAIResponsesSSEUsage) fail(err error) {
 	u.err = err
@@ -177,6 +210,9 @@ func (u *openAIResponsesSSEUsage) Usage() (costInputTokens, meterInputTokens, ca
 		return 0, 0, 0, 0, 0, fmt.Errorf("parse upstream event stream usage: missing terminal response event")
 	}
 	if u.inputTokens == nil || u.outputTokens == nil {
+		if u.failed && !u.sawWork {
+			return 0, 0, 0, 0, 0, errFailedBeforeAnyWork
+		}
 		return 0, 0, 0, 0, 0, fmt.Errorf("parse upstream event stream usage: no usage object observed")
 	}
 	maxInt := int(^uint(0) >> 1)

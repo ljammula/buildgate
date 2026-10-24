@@ -204,3 +204,18 @@ func TestRefusedAtEndCountsOnlyRefusalsSinceTheLastAnswer(t *testing.T) {
 		t.Errorf("then a meter refusal: %+v, want 3 refused, the last by the meter", got)
 	}
 }
+
+// A 200 stream that ended in response.failed is the provider failing, even
+// when it carried usage and settled exact.
+func TestAnExactSettlementOnAFailedStreamIsNotCountedAsAnswered(t *testing.T) {
+	records := []LedgerRecord{
+		{Kind: LedgerKindAdmit, RequestID: "a"},
+		{Kind: LedgerKindComplete, RequestID: "a", Settled: SettledExact, Status: 200, Failed: true},
+		{Kind: LedgerKindAdmit, RequestID: "b"},
+		{Kind: LedgerKindComplete, RequestID: "b", Settled: SettledReleased, Status: 200, Failed: true},
+	}
+	got := SummarizeCalls(records)
+	if got.Answered != 0 || got.Failed != 2 || got.RefusedAtEnd != 2 || got.RefusedAtEndBy != RefusedByProviderError {
+		t.Errorf("SummarizeCalls = %+v, want 0 answered, 2 failed, 2 refused at the end by the provider's error", got)
+	}
+}

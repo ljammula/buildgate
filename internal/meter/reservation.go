@@ -158,6 +158,9 @@ type settlement struct {
 	usage             usageFigures
 	status            int
 	retryAfterSeconds int64
+	// failed: the response was a 200 stream whose terminal event reported a
+	// failure, whatever usage it carried.
+	failed bool
 }
 
 // settledNames are the ledger's names for the settle modes.
@@ -209,7 +212,7 @@ func (e *runEntry) settleLocked(requestID string, s settlement) bool {
 		e.account.AddUsage(p.estimateInputTokens, p.estimateInputTokens, 0, 0, p.estimateOutputTokens, p.effort)
 		e.logger.Printf("usage unmeterable; charged conservative estimate (input=%d output=%d): request %s", p.estimateInputTokens, p.estimateOutputTokens, requestID)
 	}
-	e.ledger.Append(LedgerRecord{TS: e.stamp(), Kind: LedgerKindComplete, RequestID: requestID, Settled: settledNames[s.mode], Status: s.status, RetryAfterSeconds: s.retryAfterSeconds})
+	e.ledger.Append(LedgerRecord{TS: e.stamp(), Kind: LedgerKindComplete, RequestID: requestID, Settled: settledNames[s.mode], Status: s.status, RetryAfterSeconds: s.retryAfterSeconds, Failed: s.failed})
 	return true
 }
 

@@ -355,6 +355,70 @@ func TestSessionEndWithoutFinalUnitSettles(t *testing.T) {
 	}
 }
 
+func TestAFailedResponseStreamSettlesByWhatItShowedBeforeFailing(t *testing.T) {
+	event := func(typ string) string { return "data: {\"type\":\"" + typ + "\"}\n\n" }
+	failedWith := func(usage string) string {
+		return "data: {\"type\":\"response.failed\",\"response\":{\"usage\":" + usage + "}}\n\n"
+	}
+	failed := event("response.failed")
+	cases := []struct {
+		name         string
+		stream       string
+		wantIn, want int64
+		settled      string
+		wantFailed   bool
+	}{
+		{"usage on the failure is charged exactly",
+			event("response.created") + failedWith(`{"input_tokens":5,"output_tokens":3}`), 5, 3, SettledExact, true},
+		{"usage on the failure after an output delta is charged exactly",
+			event("response.output_text.delta") + failedWith(`{"input_tokens":5,"output_tokens":3}`), 5, 3, SettledExact, true},
+		{"no usage after only created and in_progress is released",
+			event("response.created") + event("response.in_progress") + failed, 0, 0, SettledReleased, true},
+		{"no usage after an output delta is charged the estimate",
+			event("response.created") + event("response.output_text.delta") + failed, 12, 4096, SettledEstimate, true},
+		{"no usage after a reasoning event is charged the estimate",
+			event("response.created") + event("response.reasoning_summary_text.delta") + failed, 12, 4096, SettledEstimate, true},
+		{"no usage after an output item is charged the estimate",
+			event("response.output_item.added") + failed, 12, 4096, SettledEstimate, true},
+		{"no usage after an event with no type is charged the estimate",
+			"data: {}\n\n" + failed, 12, 4096, SettledEstimate, true},
+		{"incomplete usage on the failure is charged the estimate",
+			event("response.created") + failedWith(`{"input_tokens":5}`), 12, 4096, SettledEstimate, true},
+		{"negative usage on the failure is charged the estimate",
+			event("response.created") + failedWith(`{"input_tokens":-5,"output_tokens":3}`), 12, 4096, SettledEstimate, true},
+		{"no terminal event is charged the estimate",
+			event("response.created") + event("response.in_progress"), 12, 4096, SettledEstimate, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			config := policyStruct(t, map[string]any{"usage_format": "openai-responses", "request_format": "openai-responses"})
+			f.evaluate(config, httpRequest{sandboxID: "sbx-1", requestID: "r1", body: []byte(`{"input":[]}`)})
+			f.respond(config, httpResponse{sandboxID: "sbx-1", requestID: "r1", contentType: "text/event-stream",
+				chunks: [][]byte{[]byte(tc.stream)}})
+			if in, out, _ := f.usage("sbx-1"); in != tc.wantIn || out != tc.want {
+				t.Fatalf("usage = %d+%d, want %d+%d", in, out, tc.wantIn, tc.want)
+			}
+			records, err := ReadLedgerAll(filepath.Join(f.root, "run-1", "sbx-1.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var complete *LedgerRecord
+			for i := range records {
+				if records[i].Kind == LedgerKindComplete {
+					complete = &records[i]
+				}
+			}
+			if complete == nil {
+				t.Fatalf("no complete record in %+v", records)
+			}
+			if complete.Settled != tc.settled || complete.Failed != tc.wantFailed {
+				t.Fatalf("complete record settled %q failed %v, want %q failed %v", complete.Settled, complete.Failed, tc.settled, tc.wantFailed)
+			}
+		})
+	}
+}
+
 func TestOversizeRequestRefused(t *testing.T) {
 	f := newFixture(t)
 	config := policyStruct(t, map[string]any{"max_request_bytes": 10})
