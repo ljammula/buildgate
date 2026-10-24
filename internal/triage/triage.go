@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
@@ -205,6 +206,11 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		// suffixReserve isn't itself consulted.
 		return fitTriageSuffix(s, suffix)
 	default:
+		// The operator's sentence only: a later build's handoff lists the
+		// review's findings in their own section.
+		if s := triageCodeReview(r, g.Check); forOperator && s != "" {
+			return s
+		}
 		if g.FailsSameOnBase() {
 			return failsSameOnBaseSentence(g)
 		}
@@ -583,6 +589,24 @@ func triageNoChanges(r *run.Run) string {
 		return ""
 	}
 	return fmt.Sprintf("build: agent made no changes in %d round%s", rounds, progress.Plural(rounds))
+}
+
+// triageCodeReview words a failed code_review gate by how many blocking
+// findings the run record carries (r.CodeReview, filled from the retained
+// CODE_REVIEW_EVIDENCE.json by codereview.ParseResult before a run is saved),
+// counted by codereview.Blocking. Only that number appears: the findings are
+// model-written text and are never quoted. "" for any other check, and for a
+// record with no review result or no blocking finding, so the log-based
+// sentence stands.
+func triageCodeReview(r *run.Run, check string) string {
+	if check != "code_review" || r.CodeReview == nil {
+		return ""
+	}
+	n := len(codereview.Blocking(r.CodeReview.Findings))
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("code_review found %d blocking finding%s", n, progress.Plural(n))
 }
 
 // triageLogGate reports the first failure marker found in the failing
