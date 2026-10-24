@@ -137,6 +137,9 @@ func (c *Calls) countComplete(rec LedgerRecord, usageBefore bool) {
 		}
 	case rec.Status == 0:
 		c.Unanswered++
+	case rec.Failed:
+		c.Failed++
+		c.refusedAtEnd(RefusedByProviderError)
 	case rec.Status >= 200 && rec.Status < 300 && rec.Settled == SettledExact:
 		c.Answered++
 		c.RefusedAtEnd, c.RefusedAtEndBy = 0, ""
