@@ -139,7 +139,7 @@ func TestDoctorLanguageProfileUsesSandboxSafeGoVerifyCandidate(t *testing.T) {
 	var out strings.Builder
 	runDoctorChecks([]doctorCheck{check}, &out)
 	for _, want := range []string{
-		`verify_command: "go build ./... && go vet ./..."`,
+		`verify_command: "go build ./... && go test -run '^$' ./..."`,
 		`full_suite_command: "go test ./..."`,
 	} {
 		if !strings.Contains(out.String(), want) {
