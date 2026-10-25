@@ -1,9 +1,20 @@
 package request
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestSpliceSectionsRefusesARepeatedTakenHeading(t *testing.T) {
+	current := "## A\n\n### Example\n\nfoo\n\n## B\n\n### Example\n\nbar\n"
+	drafted := strings.ReplaceAll(current, "foo", "new foo")
+	drafted = strings.ReplaceAll(drafted, "bar", "new bar")
+	headings := SpecDocumentHeadings(current)
+	if _, err := SpliceSections(current, drafted, headings, []string{"### Example"}); !errors.Is(err, ErrAmbiguousSection) {
+		t.Fatalf("repeated taken heading: err = %v, want ErrAmbiguousSection", err)
+	}
+}
 
 // TestSpliceSectionsRefusesADraftThatDoesNotBoundTheSection: the redraft's
 // section ends where the skeleton says, so a renamed or dropped next heading,

@@ -98,7 +98,7 @@ func TestResolveSubmitSpecFileUsesStructuralFallbacks(t *testing.T) {
 		t.Fatalf("fallback request text = %q (%v), want the first heading", trailing, err)
 	}
 	noHeading := filepath.Join(dir, "no-heading.md")
-	if err := os.WriteFile(noHeading, []byte("\n---\ntitle: Example\n---\n\nFirst request line.\n"), 0o644); err != nil {
+	if err := os.WriteFile(noHeading, []byte("---\ntitle: Example\nitems:\n  - hidden\n...\n\nFirst request line.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: noHeading})

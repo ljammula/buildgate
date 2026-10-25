@@ -4437,7 +4437,8 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 		validationErr = err
 	} else if _, err := request.SpecAcceptanceCriteria(content); err != nil {
 		// ValidateSpecSkeleton only requires the criteria section to be
-		// non-blank. Planning needs it to contain a numbered list too.
+		// non-blank. Planning needs it to contain at least one parseable
+		// criteria item too.
 		validationErr = err
 	} else {
 		// The numbering and the IDs, if any, stay consistent; a drafted edit

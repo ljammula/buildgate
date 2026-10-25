@@ -26,16 +26,27 @@ var criterionEARSRE = regexp.MustCompile(`^(?:(?:When|While|If|Where) .+, the|Th
 //   - with requireIDs, every criterion carries one.
 //
 // A drafted spec is checked with requireIDs set; a spec the operator
-// handed over, or that was approved before IDs existed, without. A spec with
-// no numbered list passes unless requireIDs is set: ValidateSpecSkeleton
+// handed over, or that was approved before IDs existed, without. A bullet-only
+// exact criteria section is factory-numbered and does not carry IDs. A spec
+// with no numbered list passes unless requireIDs is set: ValidateSpecSkeleton
 // owns the section's presence.
 func ValidateSpecCriteria(content string, requireIDs bool) error {
 	lines := strings.Split(content, "\n")
-	start, end, ok := findAcceptanceCriteriaSection(lines)
+	mask := markdownLineMask(lines)
+	start, end, ok := findAcceptanceCriteriaSectionWithMask(lines, mask)
 	if !ok {
 		return fmt.Errorf("spec is missing %q", specAcceptanceCriteriaHeading)
 	}
-	blocks := splitAcceptanceCriteriaBlocks(lines[start:end])
+	if err := validateExactCriteriaItemKinds(lines[start:end], mask[start:end], start); err != nil {
+		return err
+	}
+	if hasTopLevelBullets(lines[start:end], mask[start:end]) {
+		if requireIDs {
+			return fmt.Errorf("acceptance criteria must be numbered (1. …) in a drafted spec")
+		}
+		return nil
+	}
+	blocks := splitAcceptanceCriteriaBlocks(lines[start:end], mask[start:end])
 	if len(blocks) == 0 {
 		if requireIDs {
 			return fmt.Errorf("spec's %q section has no numbered criteria", specAcceptanceCriteriaHeading)
@@ -74,7 +85,8 @@ func ValidateSpecCriteria(content string, requireIDs bool) error {
 // ValidateHandedOverSpec checks the one structural contract for a spec an
 // operator supplied with -spec-file. It must contain at least one criterion
 // as read by SpecAcceptanceCriteria; a named "## Acceptance criteria" section
-// keeps its existing numbering check, while a spec without that section gets
+// keeps its numbered check for numbered items and derives factory-numbered
+// criteria for bullet-only items, while a spec without that section gets
 // criteria derived from headings and list markup only. It intentionally does
 // not require the drafted-spec skeleton or criterion IDs.
 func ValidateHandedOverSpec(content string) error {

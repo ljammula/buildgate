@@ -74,7 +74,13 @@ describe("criteriaItems", () => {
   test.each(vectors.specs)("agrees with the server's criteria on: $name", ({ text }) => {
     const items = criteriaItems(text);
     if (items === null) {
-      expect(text).not.toContain("\n## Acceptance criteria\n");
+      // Factory-numbered bullet-only and mixed exact sections are not
+      // numbered-list editor surfaces, even though the server can parse or
+      // reject them structurally.
+      const hasExactHeading = text
+        .split("\n")
+        .some((line) => line.trim() === "## Acceptance criteria");
+      if (!hasExactHeading) expect(text).not.toContain("\n## Acceptance criteria\n");
       return;
     }
     expect(items).toHaveLength(specAcceptanceCriteria(text).length);
@@ -93,6 +99,11 @@ describe("criteriaItems", () => {
         "\n- Rewritten bullet.",
       ),
     ).toBe("# Operator spec\n\n## Wanted behaviour\n\n- Rewritten bullet.\n");
+  });
+
+  test("does not expose factory-numbered or mixed exact criteria as an editor", () => {
+    expect(criteriaItems("## Acceptance criteria\n\n- first\n- second\n")).toBeNull();
+    expect(criteriaItems("## Acceptance criteria\n\n- first\n1. second\n")).toBeNull();
   });
 });
 

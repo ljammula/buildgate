@@ -254,7 +254,9 @@ func resolveSubmitSpecFile(p submitParams) (spec string, trailingText []string, 
 func firstSubmitSpecHeading(spec string) string {
 	var fenceChar byte
 	var fenceLen int
-	for _, raw := range submitSpecContentLines(spec) {
+	lines := strings.Split(spec, "\n")
+	lines = lines[request.FrontMatterBodyOffset(lines):]
+	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if fenceChar != 0 {
 			if ticketspec.ClosesFence(line, fenceChar, fenceLen) {
@@ -266,11 +268,8 @@ func firstSubmitSpecHeading(spec string) string {
 			fenceChar, fenceLen = ch, n
 			continue
 		}
-		level := 0
-		for level < len(line) && line[level] == '#' {
-			level++
-		}
-		if level > 0 && level < len(line) && (line[level] == ' ' || line[level] == '\t') {
+		level := request.MarkdownHeadingLevel(raw)
+		if level > 0 {
 			return strings.TrimSpace(line[level:])
 		}
 	}
@@ -278,32 +277,14 @@ func firstSubmitSpecHeading(spec string) string {
 }
 
 func firstSubmitSpecLine(spec string) string {
-	for _, raw := range submitSpecContentLines(spec) {
+	lines := strings.Split(spec, "\n")
+	lines = lines[request.FrontMatterBodyOffset(lines):]
+	for _, raw := range lines {
 		if line := strings.TrimSpace(raw); line != "" {
 			return line
 		}
 	}
 	return ""
-}
-
-func submitSpecContentLines(spec string) []string {
-	lines := strings.Split(spec, "\n")
-	first := -1
-	for i, raw := range lines {
-		if strings.TrimSpace(raw) != "" {
-			first = i
-			break
-		}
-	}
-	if first == -1 || strings.TrimSpace(lines[first]) != "---" {
-		return lines
-	}
-	for i := first + 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "---" {
-			return lines[i+1:]
-		}
-	}
-	return nil
 }
 
 // readSubmitPlanDir reads -plan-dir's tickets, in name order. Their names
@@ -326,14 +307,18 @@ func readSubmitPlanDir(dir string) ([]requestsubmit.ImportedTicket, error) {
 	return tickets, nil
 }
 
-// specSection returns the trimmed text under heading, up to the next
-// "## " heading or the end of the spec.
+// specSection returns the trimmed text under heading, up to the next heading
+// of the same or higher level or the end of the spec.
 func specSection(spec, heading string) string {
 	var body []string
 	inside := false
+	wanted := request.NormalizeSpecHeading(heading)
+	wantedLevel := request.MarkdownHeadingLevel(heading)
 	var fenceChar byte
 	var fenceLen int
-	for _, line := range strings.Split(spec, "\n") {
+	lines := strings.Split(spec, "\n")
+	lines = lines[request.FrontMatterBodyOffset(lines):]
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if fenceChar != 0 {
 			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
@@ -345,10 +330,11 @@ func specSection(spec, heading string) string {
 			fenceChar, fenceLen = ch, n
 			continue
 		}
+		level := request.MarkdownHeadingLevel(line)
 		switch {
-		case trimmed == heading:
+		case level > 0 && request.NormalizeSpecHeading(line) == wanted:
 			inside = true
-		case inside && strings.HasPrefix(trimmed, "## "):
+		case inside && level > 0 && level <= wantedLevel:
 			return strings.TrimSpace(strings.Join(body, "\n"))
 		case inside:
 			body = append(body, line)

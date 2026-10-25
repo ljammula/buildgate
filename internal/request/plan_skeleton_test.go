@@ -2,8 +2,10 @@ package request
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 const validTicket = `Verify-Command: make verify
@@ -527,5 +529,28 @@ None.
 		if got[i] != want[i] {
 			t.Errorf("SpecAcceptanceCriteria[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestSpecAcceptanceCriteriaLargeHeadingDocumentIsLinearEnough(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 10_000; i++ {
+		b.WriteString("## Heading ")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	if b.Len() < 150_000 {
+		b.WriteString(strings.Repeat("x", 150_000-b.Len()))
+	}
+	if b.Len() < 150_000 {
+		t.Fatalf("test document is %d bytes, want at least 150000", b.Len())
+	}
+	started := time.Now()
+	_, err := SpecAcceptanceCriteria(b.String())
+	if err == nil {
+		t.Fatal("document with no list items: want a derivation error")
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("parsing 150 KB with 10000 headings took %s", elapsed)
 	}
 }

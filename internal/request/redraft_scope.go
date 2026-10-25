@@ -114,7 +114,7 @@ func (r *Request) RedraftScope(stage State) *RedraftScope {
 	order := map[string][]string{}
 	for _, a := range newest.Anchors {
 		if r.SpecImported && a.Path == specFileName {
-			if a.Section == "" || markdownHeadingLevel(strings.TrimSpace(a.Section)) == 0 {
+			if a.Section == "" || MarkdownHeadingLevel(strings.TrimSpace(a.Section)) == 0 {
 				return nil
 			}
 			if want[a.Path] == nil {

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"regexp"
 	"strings"
-
-	"buildgate/internal/ticketspec"
 )
 
 // The marker openDecisionItem looks for, "[NEEDS DECISION]", is what
@@ -38,25 +36,18 @@ var openDecisionItem = regexp.MustCompile("^(?:#{3,6}[ \\t]+|>[ \\t]*)?(?:[-*+][
 // stays in it. A marker anywhere else (quoted in Scope, say) is not an item.
 func OpenDecisions(content string) []string {
 	var items []string
-	inSection, inFence := false, false
+	lines := strings.Split(content, "\n")
+	mask := markdownLineMask(lines)
+	inSection := false
 	sectionLevel := 0
-	var fenceChar byte
-	var fenceLen int
-	for _, line := range strings.Split(content, "\n") {
+	for i, line := range lines {
+		if lineBlocked(mask, i) {
+			continue
+		}
 		trimmed := strings.TrimSpace(line)
-		if inFence {
-			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
-				inFence = false
-			}
-			continue
-		}
-		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
-			inFence, fenceChar, fenceLen = true, ch, n
-			continue
-		}
-		if level := markdownHeadingLevel(line); level > 0 {
+		if level := MarkdownHeadingLevel(line); level > 0 {
 			if level <= 2 {
-				inSection = level == 2 && normalizeSpecHeading(line) == "open questions"
+				inSection = level == 2 && NormalizeSpecHeading(line) == "open questions"
 				sectionLevel = level
 				continue
 			}

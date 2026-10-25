@@ -1591,7 +1591,7 @@ func replyFindings(runRecord *run.Run) string {
 			fmt.Fprintf(&b, "%d more not shown.\n", len(items)-maxReplyFindings)
 			break
 		}
-		fmt.Fprintf(&b, "`%s`\n\n%s\n", replyInline(it.label), fenceVerbatim(capConformityDetail(it.detail, maxReplyDetailBytes)))
+		fmt.Fprintf(&b, "`%s`\n\n%s\n", replyInline(it.label), ticketspec.FenceVerbatim(capConformityDetail(it.detail, maxReplyDetailBytes)))
 	}
 	return b.String()
 }
@@ -1628,7 +1628,7 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 		b.WriteString("\n")
 	}
 	// A spec that ends inside an unclosed fence would read the first
-	// fenceVerbatim opener below as that fence's close, leaving a comment
+	// verbatim-fence opener below as that fence's close, leaving a comment
 	// body or a finding's detail as top-level lines (WriteReviewAddendum
 	// closes it for the same reason).
 	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
@@ -1644,7 +1644,7 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 		// to one bounded line first (flattenConformityField).
 		path := flattenConformityField(t.Path, MaxConformityCriterionBytes)
 		author := flattenConformityField(t.Author, MaxConformityCriterionBytes)
-		fmt.Fprintf(&b, "- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, fenceVerbatim(t.Body))
+		fmt.Fprintf(&b, "- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, ticketspec.FenceVerbatim(t.Body))
 	}
 	if section := reviewFindingsSection(flaggedVerdicts, findings); section != "" {
 		b.WriteString(priorRoundFindingsNote)
@@ -1682,18 +1682,4 @@ func notifyRoundOutcome(dataDir string, r *request.Request, ticket *request.Tick
 		Next:   fmt.Sprintf("review %s", ticket.PRURL),
 	}, now)
 	notify.DispatchExternal(dataDir, n)
-}
-
-// fenceVerbatim wraps text in a Markdown code fence longer than any run of
-// backticks inside it (CommonMark's rule for an unclosable-from-inside
-// fence), so the content can never terminate the fence early.
-func fenceVerbatim(text string) string {
-	longest := 0
-	for _, run := range regexp.MustCompile("`+").FindAllString(text, -1) {
-		if len(run) > longest {
-			longest = len(run)
-		}
-	}
-	fence := strings.Repeat("`", max(3, longest+1))
-	return fence + "\n" + strings.TrimRight(text, "\n") + "\n" + fence + "\n"
 }

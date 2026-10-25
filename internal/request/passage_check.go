@@ -74,31 +74,36 @@ func checkAnchor(r *Request, a RejectionAnchor, read func(string) (string, error
 	if a.Section != "" && !slices.Contains(headings, a.Section) {
 		return fmt.Errorf("%q is not a section of %s: %w", a.Section, a.Path, ErrBadAnchor)
 	}
-	scope := content
+	scopes := []string{content}
 	if a.Section != "" {
-		text, ok := SectionText(content, headings, a.Section)
-		if !ok {
+		texts := SectionTexts(content, headings, a.Section)
+		if len(texts) == 0 {
 			return fmt.Errorf("the file has no %q section", a.Section)
 		}
-		scope = text
+		scopes = texts
 	}
 	if a.Item > 0 && isSpec {
 		locations := SpecCriterionLocations(content)
 		for _, location := range locations {
 			if location.Section == a.Section && location.Item == a.Item {
-				return checkAnchorQuote(scope, a)
+				return checkAnchorQuotes(scopes, a)
 			}
 		}
 		return fmt.Errorf("the spec has no acceptance criterion %d under %q", a.Item, a.Section)
 	}
-	return checkAnchorQuote(scope, a)
+	return checkAnchorQuotes(scopes, a)
 }
 
-func checkAnchorQuote(scope string, a RejectionAnchor) error {
-	if a.Quote != "" && !strings.Contains(scope, a.Quote) {
-		return fmt.Errorf("the quoted passage is not in %s", sectionOrFile(a.Section))
+func checkAnchorQuotes(scopes []string, a RejectionAnchor) error {
+	if a.Quote == "" {
+		return nil
 	}
-	return nil
+	for _, scope := range scopes {
+		if strings.Contains(scope, a.Quote) {
+			return nil
+		}
+	}
+	return fmt.Errorf("the quoted passage is not in %s", sectionOrFile(a.Section))
 }
 
 func sectionOrFile(section string) string {

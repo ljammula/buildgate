@@ -21,28 +21,15 @@ type sectionSpan struct {
 
 // parsedDoc is a document read for its skeleton sections.
 type parsedDoc struct {
-	lines  []string
-	starts []int
-	spans  []sectionSpan
+	lines       []string
+	starts      []int
+	spans       []sectionSpan
+	occurrences map[string]int
 	// fenced is the skeleton heading text found on a line inside a code fence:
 	// ValidateSpecSkeleton and ValidateTicketPlan do not know about fences, so
 	// where this is set the headings they find may differ from the ones read
 	// here, and a splice is refused.
 	fenced string
-}
-
-// headingLevel is the number of leading '#' of a Markdown heading line, 0 for
-// any other line.
-func headingLevel(line string) int {
-	t := strings.TrimSpace(line)
-	n := 0
-	for n < len(t) && t[n] == '#' {
-		n++
-	}
-	if n == 0 || n == len(t) || t[n] != ' ' {
-		return 0
-	}
-	return n
 }
 
 // fenceOpen returns the fence character and length a line opens, or 0.
@@ -61,7 +48,7 @@ func fenceCloses(line string, ch byte, n int) bool {
 // block is not a heading. A heading content lacks is absent from the spans and
 // does not move the search, so its neighbours are still found.
 func parseSkeleton(content string, headings []string) parsedDoc {
-	d := parsedDoc{lines: strings.SplitAfter(content, "\n")}
+	d := parsedDoc{lines: strings.SplitAfter(content, "\n"), occurrences: map[string]int{}}
 	d.starts = make([]int, len(d.lines))
 	inFence := make([]bool, len(d.lines))
 	offset := 0
@@ -90,6 +77,9 @@ func parseSkeleton(content string, headings []string) parsedDoc {
 		if inFence[i] && isSkeleton[strings.TrimSpace(line)] {
 			d.fenced = strings.TrimSpace(line)
 		}
+		if !inFence[i] && isSkeleton[strings.TrimSpace(line)] {
+			d.occurrences[strings.TrimSpace(line)]++
+		}
 	}
 	searchFrom := 0
 	for _, heading := range headings {
@@ -108,9 +98,9 @@ func parseSkeleton(content string, headings []string) parsedDoc {
 			s.end, s.endLine = d.spans[i+1].start, d.spans[i+1].startLine
 			continue
 		}
-		level := headingLevel(d.lines[s.startLine])
+		level := MarkdownHeadingLevel(d.lines[s.startLine])
 		for j := s.startLine + 1; j < len(d.lines); j++ {
-			if l := headingLevel(d.lines[j]); !inFence[j] && l > 0 && l <= level {
+			if l := MarkdownHeadingLevel(d.lines[j]); !inFence[j] && l > 0 && l <= level {
 				s.end, s.endLine = d.starts[j], j
 				break
 			}
@@ -128,6 +118,10 @@ func (d parsedDoc) span(heading string) (sectionSpan, bool) {
 	return sectionSpan{}, false
 }
 
+func (d parsedDoc) count(heading string) int {
+	return d.occurrences[heading]
+}
+
 // SectionText returns the text of the skeleton section heading opens in
 // content (its heading line included), and false when content has no such
 // heading.
@@ -137,6 +131,20 @@ func SectionText(content string, headings []string, heading string) (string, boo
 		return "", false
 	}
 	return content[s.start:s.end], true
+}
+
+// SectionTexts returns every section with the requested heading, in document
+// order. It is used for anchors because an operator-shaped spec may repeat a
+// heading and a quoted passage can be under any of those occurrences.
+func SectionTexts(content string, headings []string, heading string) []string {
+	d := parseSkeleton(content, headings)
+	var texts []string
+	for _, s := range d.spans {
+		if s.heading == heading {
+			texts = append(texts, content[s.start:s.end])
+		}
+	}
+	return texts
 }
 
 // draftedSection returns the text to take for heading from a redraft, or an
@@ -161,9 +169,9 @@ func draftedSection(d parsedDoc, content string, headings []string, heading stri
 		if !found {
 			return "", fmt.Errorf("the redraft has no %q section after %q, so %q cannot be bounded", next, heading, heading)
 		}
-		level := headingLevel(d.lines[s.startLine])
+		level := MarkdownHeadingLevel(d.lines[s.startLine])
 		for j := s.startLine + 1; j < n.startLine; j++ {
-			if l := headingLevel(d.lines[j]); l > 0 && l <= level {
+			if l := MarkdownHeadingLevel(d.lines[j]); l > 0 && l <= level {
 				return "", fmt.Errorf("the redraft has a heading %q inside %q that the skeleton does not have", strings.TrimSpace(d.lines[j]), heading)
 			}
 		}
@@ -195,6 +203,9 @@ func SpliceSections(current, drafted string, headings []string, take []string) (
 	}
 	replace := make(map[string]string, len(take))
 	for _, heading := range take {
+		if cur.count(heading) > 1 || dra.count(heading) > 1 {
+			return "", ErrAmbiguousSection
+		}
 		if _, ok := cur.span(heading); !ok {
 			return "", fmt.Errorf("the reviewed document has no %q section, which the review commented on", heading)
 		}
@@ -226,3 +237,8 @@ func SpliceSections(current, drafted string, headings []string, take []string) (
 	out.WriteString(current[last.end:])
 	return out.String(), nil
 }
+
+// ErrAmbiguousSection means a scoped heading is repeated in either document.
+// Text-based section replacement cannot safely choose one occurrence, so the
+// caller must use its existing whole-document redraft path.
+var ErrAmbiguousSection = fmt.Errorf("a scoped section heading occurs more than once")

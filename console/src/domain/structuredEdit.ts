@@ -51,6 +51,7 @@ interface ListLayout {
 }
 
 const PREFIX = /^([0-9]+)([.)])([\t\n\f\r ]+)/;
+const TOP_LEVEL_BULLET = /^[-*+][ \t]+/;
 
 function stripEol(line: string): string {
   return line.endsWith("\r") ? line.slice(0, -1) : line;
@@ -99,7 +100,20 @@ function layout(
 }
 
 function criteriaLayout(text: string): CriteriaLayout | null {
-  return layout(text, criteriaSectionRange(text.split("\n")), CRITERION_ITEM);
+  const lines = text.split("\n");
+  const range = criteriaSectionRange(lines);
+  if (range === null) return null;
+  // The editor only rewrites drafted numbered criteria. A bullet-only exact
+  // section is factory-numbered for validation, and a mixed exact section is
+  // refused; neither is a safe numbered-list edit surface.
+  if (
+    lines
+      .slice(range.start, range.end)
+      .some((raw) => !isIndented(raw) && TOP_LEVEL_BULLET.test(trimSpace(raw)))
+  ) {
+    return null;
+  }
+  return layout(text, range, CRITERION_ITEM);
 }
 
 function bodyOf(lines: readonly string[], span: Span, pattern = PREFIX): string {

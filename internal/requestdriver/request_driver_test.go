@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +42,46 @@ func TestCapOracleFeedbackKeepsNewestAndValidUTF8(t *testing.T) {
 	}
 	if small := "## Oracle rejected x\n\nshort\n\n"; requestdriver.CapFeedback(small, requestdriver.MaxFeedbackBytes, "## Oracle rejected ") != small {
 		t.Error("small feedback altered")
+	}
+}
+
+func TestTicketBuildInputCapLeavesRoundStateHeadroom(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "agent", "pi", "scripts", "build_app.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`ROUND_STATE_MAX_PROMPT_BYTES\s*=\s*([0-9_]+)`).FindSubmatch(data)
+	if len(match) != 2 {
+		t.Fatal("build_app.py does not declare ROUND_STATE_MAX_PROMPT_BYTES")
+	}
+	pythonCap, err := strconv.Atoi(strings.ReplaceAll(string(match[1]), "_", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headroom := pythonCap - requestdriver.MaxTicketBuildInputBytes; headroom < 20_000 {
+		t.Fatalf("build input cap leaves %d bytes of headroom, want at least 20000", headroom)
+	}
+}
+
+func TestTicketBuildSpecContentRefusesAnOversizedBuildInput(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	if err := request.SaveText(dataDir, r.ID, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.spec.md")
+	if err := os.MkdirAll(filepath.Dir(ticketPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ticketPath, []byte(strings.Repeat("x", requestdriver.MaxTicketBuildInputBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, request.Ticket{Index: 1, SpecPath: ticketPath})
+	if err == nil || !strings.Contains(err.Error(), "ticket build input") || !strings.Contains(err.Error(), "over the 180000-byte limit") {
+		t.Fatalf("TicketBuildSpecContent error = %v, want the clear build-input cap", err)
 	}
 }
 

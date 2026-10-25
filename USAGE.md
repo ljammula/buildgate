@@ -87,20 +87,26 @@ factory's numbered criteria, so exact names, formats and behaviours in the
 operator's spec remain part of the build contract.
 
 For `-spec-file`, criteria are structural: top-level list items in the title
-area and in non-excluded `##` sections are numbered; the excluded headings are
+area and in non-excluded `#`/`##` sections are numbered; the excluded headings are
 `Problem`, `Non-goals`, `Out of scope`, `Risks`, `Open questions`, `Background`,
 `Context`, `Motivation`, `Alternatives considered`, `References` and `Notes`
 (case-insensitive with one trailing colon ignored). A non-exact
 `##`-through-`######` `Acceptance criteria` heading uses the same derived
-reader; the exact `## Acceptance criteria` heading keeps the numbered reader.
+reader; the exact `## Acceptance criteria` heading uses numbered checks for
+numbered top-level items and derived rules for bullet-only items, refusing a
+mixture of top-level styles.
 Fenced lists use a closing delimiter with the same backtick/tilde character, at
 least the opening length, and no trailing content; thematic breaks end items,
 task checkboxes are removed, and prose after a blank line is outside the
 preceding item while a lazy continuation without that blank stays in it.
-The limit is 200,000 bytes at submit and at the console spec edit. If a
-handed-over plan's criteria change, planning stops and asks the operator to
-edit the tickets at plan review through the existing redraft/plan path or
-resubmit the spec and plan.
+The handed-over or edited spec limit is 120,000 bytes at submit, at the
+console spec edit, and after a redraft. The complete ticket build input is
+limited to 180,000 bytes, leaving 20,000 bytes below build_app.py's 200,000-
+byte round-prompt limit for round state and corrective framing. If a
+handed-over plan's criteria change, planning stops; send it back to planning
+with `factoryd reject <id> -to plan -reason "..."`. That command supplies plan
+feedback, so planning drafts revised tickets instead of taking the imported
+tickets again.
 
 The reason names one of ten causes (`resume.cause` in the request's
 `request.json`). The four that say a model was not served, or a review

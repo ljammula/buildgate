@@ -1,6 +1,7 @@
 package requestdriver
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -38,7 +39,11 @@ func spliceScopedSpec(dataDir string, r *request.Request, drafted string) (strin
 	if r.SpecImported {
 		sectionHeadings = request.SpecDocumentHeadings(string(current))
 	}
-	return request.SpliceSections(string(current), drafted, sectionHeadings, headings)
+	spliced, spliceErr := request.SpliceSections(string(current), drafted, sectionHeadings, headings)
+	if errors.Is(spliceErr, request.ErrAmbiguousSection) {
+		return drafted, nil
+	}
+	return spliced, spliceErr
 }
 
 // spliceScopedTickets is spliceScopedSpec for a plan: current is the reviewed
@@ -74,6 +79,9 @@ func spliceScopedTickets(r *request.Request, current, drafted []DraftedTicket) (
 			continue
 		}
 		content, err := request.SpliceSections(t.Content, draft, request.TicketSkeletonHeadings(), headings)
+		if errors.Is(err, request.ErrAmbiguousSection) {
+			return drafted, nil
+		}
 		if err != nil {
 			return nil, contentErr(fmt.Errorf("ticket %s: %w", t.Filename, err))
 		}

@@ -159,8 +159,41 @@ describe("specStructure", () => {
   test("a handed-over spec does not require the drafted skeleton", () => {
     const check = specStructure("# Operator spec\n\n## Scope\n\n- It works.\n", true);
     expect(check.passes).toBe(true);
-    expect(check.rows.map((row) => row.label)).toEqual(["Handed-over spec"]);
+    expect(check.rows.map((row) => row.label)).toEqual([
+      "Handed-over spec size",
+      "Handed-over criteria",
+    ]);
+    expect(check.rows.every((row) => row.ok)).toBe(true);
+    expect(check.rows.at(-1)?.note).toBe("1 parsed");
   });
+
+  test("a handed-over spec without criteria fails the mirrored checklist", () => {
+    const check = specStructure("# Operator spec\n\n## Scope\n\nprose only\n", true);
+    expect(check.passes).toBe(false);
+    expect(check.rows.find((row) => row.label === "Handed-over criteria")).toEqual({
+      label: "Handed-over criteria",
+      ok: false,
+      note: 'none parsed (want "- item")',
+    });
+  });
+
+  test("an oversized handed-over spec fails the mirrored checklist", () => {
+    const check = specStructure("# Operator spec\n\n- item\n" + "x".repeat(120_000), true);
+    expect(check.passes).toBe(false);
+    expect(check.rows.find((row) => row.label === "Handed-over spec size")?.ok).toBe(false);
+  });
+});
+
+test("the mirrored parser handles 150 KB with 10000 headings within a generous bound", () => {
+  const headings = Array.from({ length: 10_000 }, (_, i) => `## Heading ${i}`).join("\n");
+  const spec =
+    headings +
+    "\n" +
+    "x".repeat(Math.max(0, 150_000 - new TextEncoder().encode(headings).byteLength));
+  expect(new TextEncoder().encode(spec).byteLength).toBeGreaterThanOrEqual(150_000);
+  const started = Date.now();
+  expect(specAcceptanceCriteria(spec)).toEqual([]);
+  expect(Date.now() - started).toBeLessThan(5_000);
 });
 
 describe("ticketStructure", () => {

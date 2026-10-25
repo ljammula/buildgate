@@ -300,7 +300,7 @@
       "missing_heading": "## Problem",
       "criteria_section_empty": false,
       "criteria": [
-        "1. still hidden ~~~ - visible"
+        "1. still hidden"
       ]
     },
     {
@@ -336,6 +336,116 @@
       "criteria": [
         "1. first item lazy continuation",
         "2. second item"
+      ]
+    },
+    {
+      "name": "front matter lists are ignored",
+      "text": "---\ntitle: x\nitems:\n  - hidden\n---\n\n# Title\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "front matter document marker closes before criteria",
+      "text": "---\ntitle: x\nitems:\n  - hidden\n...\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "level-one headings end sections",
+      "text": "# Part one\n\n## Notes\n\n- hidden\n\n# Part two\n\n- must do\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. must do"
+      ]
+    },
+    {
+      "name": "exact acceptance criteria accepts top-level bullets",
+      "text": "## Acceptance criteria\n\n- first\n- second\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first",
+        "2. second"
+      ]
+    },
+    {
+      "name": "exact acceptance criteria mixed styles are refused",
+      "text": "## Acceptance criteria\n\n- first\n1. second\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": []
+    },
+    {
+      "name": "carriage return stays inside an item",
+      "text": "## Scope\n\n- a\rb\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. a\rb"
+      ]
+    },
+    {
+      "name": "BOM after a list marker is preserved",
+      "text": "## Scope\n\n- ﻿item\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. ﻿item"
+      ]
+    },
+    {
+      "name": "ASCII heading folding does not fold dotted I",
+      "text": "## Rİsks\n\n- x\n\n## Scope\n\n- y\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. x",
+        "2. y"
+      ]
+    },
+    {
+      "name": "empty task boxes are not criteria",
+      "text": "## Scope\n\n- [X]\n- [ ]\n- keep\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. keep"
+      ]
+    },
+    {
+      "name": "HTML comment list items are ignored",
+      "text": "## Scope\n\n<!--\n- hidden\n-->\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "seven-hash lines are not headings",
+      "text": "####### not a heading\n\n- item\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. item"
       ]
     }
   ],

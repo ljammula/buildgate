@@ -63,11 +63,11 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		r.ReviewNotes = SpecReviewNotes(string(spec))
 		return
 	}
-	criteria, err := SpecAcceptanceCriteria(string(spec))
-	if err != nil {
+	parsed := parseSpecAcceptanceCriteria(strings.Split(string(spec), "\n"))
+	if parsed.err != nil || len(parsed.criteria) == 0 {
 		return
 	}
-	parsed := parseSpecAcceptanceCriteria(strings.Split(string(spec), "\n"))
+	criteria := parsed.criteria
 	idNotes := !parsed.named && len(parsed.sections) == 0
 	var tickets []PlanTicket
 	for _, ticket := range r.Tickets {
@@ -108,22 +108,12 @@ func SpecReviewNotes(specContent string) []string {
 	}
 	criteria := parsed.criteria
 	var notes []string
-	if parsed.named || len(parsed.sections) > 0 {
-		names := parsed.sections
-		if parsed.named {
-			names = []string{headingLabel(parsed.heading)}
-		}
-		clean := make([]string, 0, len(names))
-		for _, name := range names {
-			name = sanitize.Line(name)
-			if name != "" {
-				clean = append(clean, name)
-			}
-		}
-		if len(clean) == 0 {
-			clean = []string{"document title"}
-		}
-		notes = append(notes, fmt.Sprintf("Criteria 1-%d were derived from the list items under: %s.", len(criteria), strings.Join(clean, ", ")))
+	derivedSections := len(parsed.sections)
+	if parsed.named && derivedSections == 0 {
+		derivedSections = 1
+	}
+	if derivedSections > 0 {
+		notes = append(notes, fmt.Sprintf("Criteria 1-%d were derived from the list items of %d sections.", len(criteria), derivedSections))
 	}
 	for i, criterion := range criteria {
 		if isCommitMessageCriterion(criterion) {

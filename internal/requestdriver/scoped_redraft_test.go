@@ -141,6 +141,19 @@ func TestImportedSpecRedraftKeepsItsShapeAndScopesAnyHeading(t *testing.T) {
 	}
 }
 
+func TestImportedScopedRedraftWithDuplicateHeadingFallsBackToWholeDraft(t *testing.T) {
+	original := "# Operator spec\n\n## A\n\n### Example\n\n- foo\n\n## B\n\n### Example\n\n- bar\n"
+	dataDir, r := rejectedImportedSpecFixture(t, original, request.RejectionAnchor{
+		Path: "spec.md", Section: "### Example", Quote: "bar", Note: "revise both examples",
+	})
+	drafted := strings.Replace(original, "- foo", "- revised foo", 1)
+	drafted = strings.Replace(drafted, "- bar", "- revised bar", 1)
+	advanceSpec(t, dataDir, r, drafted)
+	if got := string(mustReadFile(t, requestdriver.RequestSpecPath(dataDir, "req-1"))); got != drafted {
+		t.Fatalf("duplicate scoped heading did not use the whole redraft: %q\nwant %q", got, drafted)
+	}
+}
+
 func TestWholeSpecCommentRedraftsEverything(t *testing.T) {
 	original := requestdrivertest.WithCriterionIDs(requestdrivertest.TwoCriteriaSpec)
 	dataDir, r := rejectedSpecFixture(t, original, request.RejectionAnchor{Path: "spec.md", Note: "start over"})

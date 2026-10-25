@@ -292,7 +292,7 @@ func TestWriteReviewAddendumBoundsSizeWithoutTruncatingAFence(t *testing.T) {
 }
 
 // Round-2 review: a ticket spec that ends inside an unclosed fence
-// would read the section's first fenceVerbatim opener as that fence's
+// would read the section's first verbatim-fence opener as that fence's
 // close, making every Detail line after it a top-level header line.
 // writeReviewAddendum closes the open fence first.
 func TestWriteReviewAddendumClosesAFenceTheSpecLeftOpen(t *testing.T) {

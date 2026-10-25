@@ -223,7 +223,9 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
 	}
 	var validationErr error
-	if r.SpecImported {
+	if r.SpecImported && len([]byte(specMD)) > request.MaxHandedOverSpecBytes {
+		validationErr = fmt.Errorf("handed-over spec is %d bytes, over the %d-byte limit", len([]byte(specMD)), request.MaxHandedOverSpecBytes)
+	} else if r.SpecImported {
 		validationErr = request.ValidateHandedOverSpec(specMD)
 	} else if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		validationErr = err
@@ -473,7 +475,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 			return haltPlanningInputs(dataDir, r, fmt.Sprintf("approved spec.md: %v", criteriaErr), now)
 		}
 		if !slices.Equal(criteria, r.ImportedPlanCriteria) {
-			return haltPlanningInputs(dataDir, r, "the spec's criteria changed after the plan was handed over; edit the tickets at plan review via the existing redraft/plan path, or resubmit the spec and plan", now)
+			return haltPlanningInputs(dataDir, r, fmt.Sprintf("the spec's criteria changed after the plan was handed over; send this request back to planning with `factoryd reject %s -to plan -reason \"...\"`, then planning will draft revised tickets instead of taking the imported tickets again", r.ID), now)
 		}
 	}
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
@@ -1790,7 +1792,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 // maxConformityCriterionBytes/maxConformityVerdictBytes cap the single-line,
 // UNFENCED fields WriteReviewAddendum renders (a criterion/location and its
 // verdict/severity word); maxConformityDetailBytes caps a verdict or
-// finding's own free-text detail BEFORE it is wrapped in fenceVerbatim;
+// finding's own free-text detail BEFORE it is wrapped in a verbatim fence;
 // maxConformityFlaggedVerdicts caps how many flagged verdicts (and,
 // reused, how many blocking code-review findings) one addendum ever
 // includes per section. See WriteReviewAddendum's own doc comment for why
@@ -1843,7 +1845,7 @@ func flattenConformityField(s string, maxBytes int) string {
 
 // capConformityDetail truncates s (a verdict's free-text Detail, equally
 // untrusted -- see flattenConformityField's own doc comment) to maxBytes
-// BEFORE it is ever handed to fenceVerbatim, not after: CapFeedback's own
+// BEFORE it is ever handed to ticketspec.FenceVerbatim, not after: CapFeedback's own
 // keep-the-tail truncation, tried here first, can cut through an already
 // rendered fence -- reopening it to the same header-injection risk
 // flattenConformityField closes -- and an attacker who plants the section
@@ -1880,7 +1882,7 @@ func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.C
 			criterion := flattenConformityField(v.Criterion, MaxConformityCriterionBytes)
 			verdict := flattenConformityField(v.Verdict, MaxConformityVerdictBytes)
 			detail := capConformityDetail(v.Detail, MaxConformityDetailBytes)
-			fmt.Fprintf(&section, "- **%s** (%s):\n\n%s\n", criterion, verdict, fenceVerbatim(detail))
+			fmt.Fprintf(&section, "- **%s** (%s):\n\n%s\n", criterion, verdict, ticketspec.FenceVerbatim(detail))
 		}
 		if omitted > 0 {
 			fmt.Fprintf(&section, "_%d more flagged criteria omitted._\n", omitted)
@@ -1909,7 +1911,7 @@ func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.C
 				text += "\n\nFailure scenario: " + f.FailureScenario
 			}
 			detail := capConformityDetail(text, MaxConformityDetailBytes)
-			fmt.Fprintf(&section, "- **%s** (%s):\n\n%s\n", location, severity, fenceVerbatim(detail))
+			fmt.Fprintf(&section, "- **%s** (%s):\n\n%s\n", location, severity, ticketspec.FenceVerbatim(detail))
 		}
 		if omitted > 0 {
 			fmt.Fprintf(&section, "_%d more findings omitted._\n", omitted)
@@ -1968,7 +1970,7 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 		b.WriteString("\n")
 	}
 	// A spec that ends inside an unclosed fence would read the section's
-	// first fenceVerbatim opener as that fence's close, turning every
+	// first verbatim-fence opener as that fence's close, turning every
 	// Detail line after it into a top-level header line (adversarial
 	// review round 2, 2026-09-26). Close it first.
 	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
@@ -2766,6 +2768,11 @@ const BuildSpecCriteriaHeading = "## Acceptance criteria this ticket must satisf
 // paraphrase-able prose.
 const BuildSpecCriteriaFooter = "These are the approved spec's exact criteria; names, fields, formats and error codes in them are requirements, not suggestions."
 
+// MaxTicketBuildInputBytes caps the complete -spec content written for a
+// ticket build. build_app.py accepts a 200,000-byte round prompt; keeping
+// 20,000 bytes free lets its round-state framing and corrective prompt fit.
+const MaxTicketBuildInputBytes = 180_000
+
 // TicketBuildSpecContent returns the string a caller writes to disk as the
 // ticket's actual -spec (writeTicketBuildSpecFile) or embeds as a review
 // addendum's own base (WriteReviewAddendum, pr_review_driver.go's
@@ -2840,11 +2847,11 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 		if readErr != nil {
 			return "", fmt.Errorf("read approved spec: %w", readErr)
 		}
-		return renderApprovedSpecTicketBuildInput(string(specContent), string(ticketContent), "", texts), nil
+		return checkedTicketBuildInput(renderApprovedSpecTicketBuildInput(string(specContent), string(ticketContent), texts))
 	}
 
 	if len(texts) == 0 {
-		return string(ticketContent), nil
+		return checkedTicketBuildInput(string(ticketContent))
 	}
 
 	var b strings.Builder
@@ -2861,26 +2868,24 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "\n%s\n", BuildSpecCriteriaFooter)
-	return b.String(), nil
+	return checkedTicketBuildInput(b.String())
+}
+
+func checkedTicketBuildInput(content string) (string, error) {
+	bytes := len([]byte(content))
+	if bytes > MaxTicketBuildInputBytes {
+		return "", fmt.Errorf("ticket build input is %d bytes, over the %d-byte limit (build_app.py allows 200000 bytes; 20000 bytes are reserved for round state)", bytes, MaxTicketBuildInputBytes)
+	}
+	return content, nil
 }
 
 // renderApprovedSpecTicketBuildInput is the new ticket-build input shape.
-// specReviewContent is the insertion seam for review questions and answers;
-// the current caller passes an empty string, so no review material is present
-// yet.
-func renderApprovedSpecTicketBuildInput(specContent, ticketContent, specReviewContent string, criteria []string) string {
+func renderApprovedSpecTicketBuildInput(specContent, ticketContent string, criteria []string) string {
 	var b strings.Builder
 	b.WriteString("# Approved spec\n\n")
 	b.WriteString("The operator approved this spec. It is the contract for this build: names, fields, formats, behaviours and error texts in it are requirements. It is quoted verbatim between the tilde fences below.\n\n")
 	b.WriteString(ticketspec.FenceVerbatim(specContent))
 	b.WriteString("\n---\n\n")
-	if specReviewContent != "" {
-		b.WriteString(specReviewContent)
-		if specReviewContent[len(specReviewContent)-1] != '\n' {
-			b.WriteString("\n")
-		}
-		b.WriteString("\n---\n\n")
-	}
 	b.WriteString("# This ticket\n\n")
 	b.WriteString(ticketContent)
 	if len(ticketContent) == 0 || ticketContent[len(ticketContent)-1] != '\n' {

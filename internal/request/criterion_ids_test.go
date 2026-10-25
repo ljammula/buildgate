@@ -97,9 +97,28 @@ func TestSpecReviewNotesNameACriterionNotInEARSForm(t *testing.T) {
 func TestSpecReviewNotesDescribeDerivedCriteriaWithoutIDNotes(t *testing.T) {
 	t.Parallel()
 	spec := "# Feature\n\n- The title item.\n\n## Wanted behaviour\n\n- AC-7: The first behaviour.\n\n## Interface\n\n* The interface behaviour.\n\n## Notes\n\n- Not a criterion.\n"
-	want := []string{"Criteria 1-3 were derived from the list items under: Feature, Wanted behaviour, Interface."}
+	want := []string{"Criteria 1-3 were derived from the list items of 3 sections."}
 	if got := SpecReviewNotes(spec); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("notes = %q, want %q", got, want)
+	}
+}
+
+func TestExactAcceptanceCriteriaBulletListIsDerivedButDraftedListsMustBeNumbered(t *testing.T) {
+	t.Parallel()
+	spec := specWithCriteria("- first\n- second")
+	if err := ValidateHandedOverSpec(spec); err != nil {
+		t.Fatalf("handed-over bullet list: %v", err)
+	}
+	if err := ValidateSpecCriteria(spec, true); err == nil || !strings.Contains(err.Error(), "must be numbered (1. …)") {
+		t.Fatalf("drafted bullet list: err = %v", err)
+	}
+}
+
+func TestExactAcceptanceCriteriaMixedTopLevelItemsNameTheirLines(t *testing.T) {
+	t.Parallel()
+	err := ValidateHandedOverSpec(specWithCriteria("- first\n1. second"))
+	if err == nil || !strings.Contains(err.Error(), "lines 21, 22") || !strings.Contains(err.Error(), "write every item as numbered") {
+		t.Fatalf("mixed exact criteria: err = %v", err)
 	}
 }
 

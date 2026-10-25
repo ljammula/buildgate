@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
@@ -84,11 +85,59 @@ func TestPlanningStopsBeforeTakingImportedTicketsWhenSpecCriteriaChanged(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "the spec's criteria changed after the plan was handed over") || !strings.Contains(loaded.Error, "resubmit the spec and plan") {
+	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "the spec's criteria changed after the plan was handed over") || !strings.Contains(loaded.Error, "factoryd reject req-1 -to plan -reason") {
 		t.Fatalf("State = %q, Error = %q; want the criteria-change halt and choices", loaded.State, loaded.Error)
 	}
 	if loaded.TicketCount != 0 {
 		t.Fatalf("TicketCount = %d, want zero because imported tickets were not taken", loaded.TicketCount)
+	}
+}
+
+// A criteria-change halt is recoverable with the exact operator command in
+// the halt: reject the halted request back to planning, which adds plan
+// feedback and therefore makes planning draft revised tickets instead of
+// taking the imported ones again.
+func TestCriteriaChangeHaltRejectToPlanRunsPlanningJob(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{
+		"001.spec.md": requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2),
+	})
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(requestdrivertest.TwoCriteriaSpec, "1. A retried POST /refunds with the same idempotency key returns the original result.", "1. Changed.", 1)
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(changed))
+	r.ApprovedSHA256["spec.md"] = hex.EncodeToString(sum[:])
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	halted, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if halted.State != request.StateHalted {
+		t.Fatalf("State = %q, want halted; Error = %q", halted.State, halted.Error)
+	}
+	if _, err := request.SendBack(dataDir, id, "operator", "revise the imported tickets for the changed criteria", request.SendBackToPlan, time.Now()); err != nil {
+		t.Fatalf("factoryd reject -to plan equivalent: %v", err)
+	}
+	runner, gotVerify := requestdrivertest.StubPlanTicketsRunner([]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)}}, &request.PlanEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests after send-back: %v", err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview || loaded.PlanAsHandedOver() || *gotVerify != requestdrivertest.HandoverVerify {
+		t.Fatalf("State = %q, PlanAsHandedOver = %v, verify = %q; want drafted plan review after send-back", loaded.State, loaded.PlanAsHandedOver(), *gotVerify)
 	}
 }
 

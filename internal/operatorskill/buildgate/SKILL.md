@@ -71,21 +71,29 @@ another profile:
   Add `-spec-file <file>` only when the operator hands over a finished spec
   and says it is the spec, not the request: it may use the operator's own
   headings, but it must contain a named numbered criteria section or a
-  derivable top-level list item in the title area or a `##` section. Derived
+  derivable top-level list item in the title area or a `#`/`##` section. Derived
   criteria exclude `Problem`, `Non-goals`, `Out of scope`, `Risks`, `Open
   questions`, `Background`, `Context`, `Motivation`, `Alternatives considered`,
   `References` and `Notes` (case-insensitive, one trailing colon ignored).
   A non-exact `##`-through-`######` `Acceptance criteria` heading uses the
-  derived reader; exact `## Acceptance criteria` keeps numbered checks.
+  derived reader; exact `## Acceptance criteria` uses numbered checks when
+  its top-level items are numbered and derived rules when they are bullets.
   Fenced lists are ignored using a closing fence with the same backtick/tilde
   character, at least the opening length and no trailing content; thematic
   breaks end items, task checkboxes are removed, and prose after a blank line
   is outside the item while a lazy continuation without that blank stays in
-  it. The handed-over document is limited to 200,000 bytes at submit and the
-  console spec PUT. Add
+  it. Leading YAML front matter, fenced blocks and HTML comments are ignored
+  by criteria derivation. The exact `## Acceptance criteria` heading accepts
+  numbered top-level items or bullet-only derived items; mixed top-level styles
+  are refused. The handed-over document is limited to 120,000 bytes at submit,
+  console spec PUT and imported-spec redraft. Add
   `-plan-dir <dir>` with it only when the operator also hands over the
   tickets (`001.spec.md`, `002.spec.md`, ...)
   in this request
+- If a handed-over plan stops because the spec's criteria changed, run
+  `factoryd reject <id> -to plan -reason "..."`; the reason becomes planning
+  feedback and revised tickets are drafted instead of taking the imported
+  tickets again.
 - `factoryd retry [-from scratch|<round>] <id>` (a round number from
   `factoryd rounds <id>` rebuilds the ticket on a new branch at that round's
   commit; it is refused once the ticket's branch was pushed), `factoryd resume [-from scratch] <id>` and

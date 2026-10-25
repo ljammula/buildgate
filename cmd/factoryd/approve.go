@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/user"
+	"strings"
 	"time"
 
 	"buildgate/internal/request"
@@ -77,8 +78,9 @@ func approveMain(dp *deps, args []string) error {
 	return nil
 }
 
-// rejectMain implements `factoryd reject -reason "<text>" [-to plan|spec]
-// [-data-dir <path>] <request-id>` (USAGE.md §11): sends a request in
+// rejectMain implements `factoryd reject <request-id> -reason "<text>"
+// [-to plan|spec] [-data-dir <path>]` (USAGE.md §11); the established
+// flags-before-ID order remains accepted too. It sends a request in
 // spec_review, oracle_review or plan_review back to the prior drafting
 // state, appending -reason to request.md so the redraft sees it (an
 // oracle_review rejection is recorded on the request's Rejections instead,
@@ -115,7 +117,7 @@ func newRejectFlags() (flags *flag.FlagSet, dataDir, reason, to, configPath, com
 
 func rejectMain(dp *deps, args []string) error {
 	flags, dataDir, reason, to, configPath, commentsFile := newRejectFlags()
-	if err := flags.Parse(args); err != nil {
+	if err := flags.Parse(rejectArgsForFlagSet(args)); err != nil {
 		return err
 	}
 	if *reason == "" && *commentsFile == "" {
@@ -174,6 +176,18 @@ func rejectMain(dp *deps, args []string) error {
 		return fmt.Errorf("print reject result: %w", err)
 	}
 	return nil
+}
+
+// rejectArgsForFlagSet preserves the normal flags-before-positional syntax
+// and also accepts the operator-facing `reject <id> -to ...` form. The Go
+// flag package stops at the first positional argument, so move only a leading
+// request ID to the end before parsing.
+func rejectArgsForFlagSet(args []string) []string {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return args
+	}
+	ordered := append([]string(nil), args[1:]...)
+	return append(ordered, args[0])
 }
 
 // readCommentsFile reads `reject -comments-file`: a JSON array of

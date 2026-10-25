@@ -53,6 +53,24 @@ func TestAdvanceSpecDraftingHaltsOnAnInvalidOrMissingHandedOverSpec(t *testing.T
 	}
 }
 
+func TestAdvanceSpecDraftingHaltsOnAnOversizedImportedRedraft(t *testing.T) {
+	dataDir := t.TempDir()
+	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: time.Now().UTC().Format(time.RFC3339), Reason: "add more detail", FromState: request.StateSpecReview})
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	revised := requestdrivertest.CanonicalValidSpec + strings.Repeat("x", request.MaxHandedOverSpecBytes+1)
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return revised, &request.SpecEvidence{}, nil
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != request.StateHalted || !strings.Contains(r.Error, "handed-over spec") || !strings.Contains(r.Error, "120000-byte limit") {
+		t.Fatalf("State = %q, Error = %q; want oversized redraft halt", r.State, r.Error)
+	}
+}
+
 // After a spec_review rejection the drafting job runs: the operator asked
 // for the model to revise their document with the feedback.
 func TestAdvanceSpecDraftingRunsTheDraftingJobAfterARejection(t *testing.T) {
