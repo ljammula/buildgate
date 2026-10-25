@@ -16,6 +16,7 @@ and [`USAGE.md`](../../USAGE.md).
 | `goal_pilot.py` | Spec/contract/ticket drafting | `-goal-pilot-script` |
 | `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |
 | `draft_spec.py` | Request driver's one-shot spec draft | `worker -draft-spec-script` |
+| `read_back.py` | Request driver's one-shot read-back of a handed-over spec, shown at spec review: a summary and up to 7 questions as JSON, refused whole (exit 3) when not that shape or over its byte limits | read from beside `worker -draft-spec-script` |
 | `plan_tickets.py` | Request driver's one-shot ticket plan | `worker -plan-tickets-script` |
 | `draft_agents.py` | Doctor's one-shot root `AGENTS.md` draft; the factory supplies the shared refusal instructions and copies the successful scratch output to the repository root | `doctor -target-repo <repo> -fix` |
 | `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`) | `worker -draft-oracles-script` |
@@ -35,6 +36,7 @@ freely, headings only together with their validator.
 |---|---|---|
 | `draft_spec.prompt.md` | `draft_spec.py` | `{draft_path}` |
 | `draft_agents.prompt.md` | `draft_agents.py` | `{instructions}`, `{draft_path}`, `{context}` |
+| `read_back.prompt.md` | `read_back.py` | `{spec}`, `{draft_path}`, `{max_summary_bytes}`, `{max_questions}`, `{max_question_bytes}` |
 | `draft_spec.example_check.prompt.md` | `draft_spec.py` (worked-example check) | `{listing}`, `{out_path}` |
 | `draft_feedback.prompt.md` | `draft_spec.py`, `plan_tickets.py` (operator feedback on a rejected draft) | `{kind}`, `{feedback}` |
 | `plan_tickets.prompt.md` | `plan_tickets.py` | `{decomposition_rule}`, `{draft_dir}`, `{verify_command}` |
