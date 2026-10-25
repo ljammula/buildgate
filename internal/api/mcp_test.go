@@ -517,7 +517,7 @@ func TestMCPConsoleLinkFollowsTheProxy(t *testing.T) {
 		headers map[string]string
 		want    string
 	}{
-		{"tailscale serve", map[string]string{"X-Forwarded-For": "100.94.149.71", "Tailscale-User-Login": "someone"}, "https://studio.example.ts.net:8443"},
+		{"tailscale serve", map[string]string{"X-Forwarded-For": "100.64.0.7", "Tailscale-User-Login": "someone"}, "https://studio.example.ts.net:8443"},
 		{"proxy names its scheme", map[string]string{"X-Forwarded-For": "10.0.0.2", "X-Forwarded-Proto": "http"}, "http://studio.example.ts.net:8443"},
 		{"direct", nil, "http://studio.example.ts.net:8443"},
 	}
