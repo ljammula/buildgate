@@ -275,6 +275,9 @@ reviews, bugs and fixes is kept outside this repo.
 
 Real, currently-open gaps.
 
+- **Stacked tickets are not restacked yet.** A later ticket's branch is not
+  replayed when an earlier ticket's branch moves or merges; the Forge row's
+  restack rule is planned and its row here lands with its code.
 - **The Temporal-path scenario suite (`TestParityDirectAndTemporalPaths`)
   does not cover `reference_oracle` pass/fail/tamper, or a
   real-engine/live-Docker run.** `reference_oracle` pass/fail has its own
