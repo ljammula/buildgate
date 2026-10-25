@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"buildgate/internal/languageprofile"
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
@@ -572,5 +573,57 @@ func TestDoctorPassesARequiredBinaryTheDerivedToolchainImageProvides(t *testing.
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestDeriveTestPatternsAddsTheRepositorysTestDirectories(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"immer", map[string]string{"package.json": "{}\n", "src/a.ts": "x\n", "__tests__/patch.js": "x\n", "node_modules/x/tests/z.js": "x\n"},
+			`"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx", "__tests__/"`},
+		{"immer with a tests directory", map[string]string{"package.json": "{}\n", "tests/b.js": "x\n", "node_modules/x/spec/z.js": "x\n"},
+			`"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx", "__tests__/", "tests/"`},
+		{"rack", map[string]string{"Gemfile": "\n", "lib/rack.rb": "x\n", "test/spec_request.rb": "x\n", "test/data.txt": "x\n"},
+			`"*_spec.rb", "*_test.rb", "test/"`},
+		{"go package named spec", map[string]string{"go.mod": "module m\n", "pkg/spec/types.go": "package spec\n", "test/e2e/helper.go": "package e2e\n"},
+			`"*_test.go"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := commitFiles(t, c.files)
+			matches, err := languageprofile.Detect(repo)
+			if err != nil || len(matches) != 1 {
+				t.Fatalf("Detect = %v, %v", matches, err)
+			}
+			got := quotedYAMLList(deriveTestPatterns(repo, matches[0].Profile.TestPatterns, matches[0].Profile.TestDirectories))
+			if got != c.want {
+				t.Errorf("got %s, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+func TestDoctorLanguageProfileFlagsCommittedTestPatternsThatMissTheTestDirectories(t *testing.T) {
+	repo := commitFiles(t, map[string]string{
+		"package.json": "{}\n", "src/a.ts": "x\n", "__tests__/patch.js": "x\n",
+		".factory.yml": "verify_command: \"npm test\"\nrequired_binaries: [\"node\", \"npm\"]\ntest_patterns: [\"*.test.js\", \"*.spec.ts\"]\n",
+	})
+	check := doctorCheckLanguageProfile(repo)
+	if check.Err == nil || !check.Advisory || !strings.Contains(check.Err.Error(), "test_patterns match no file under the test directories __tests__/") {
+		t.Fatalf("check = %+v, want an advisory naming __tests__/", check)
+	}
+	if !strings.Contains(check.Fix, `add ["__tests__/"] to test_patterns`) {
+		t.Errorf("Fix = %q, want the entry to add", check.Fix)
+	}
+
+	covered := commitFiles(t, map[string]string{
+		"package.json": "{}\n", "__tests__/patch.js": "x\n",
+		".factory.yml": "verify_command: \"npm test\"\nrequired_binaries: [\"node\", \"npm\"]\ntest_patterns: [\"*.test.js\", \"__tests__/\"]\n",
+	})
+	if check := doctorCheckLanguageProfile(covered); check.Err != nil {
+		t.Errorf("covered patterns: check = %+v, want ok", check)
 	}
 }

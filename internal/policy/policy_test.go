@@ -1540,3 +1540,51 @@ func TestEvaluateRunCarriesANamedGatesBaseCheckWithoutJudgingByIt(t *testing.T) 
 		}
 	}
 }
+
+func TestIsTestFile(t *testing.T) {
+	cases := []struct {
+		file     string
+		patterns []string
+		want     bool
+	}{
+		{"__tests__/patch.js", []string{"__tests__/"}, true},
+		{"src/a/__tests__/x.ts", []string{"__tests__/"}, true},
+		{"my__tests__/x.js", []string{"__tests__/"}, false},
+		{"__tests__x.js", []string{"__tests__/"}, false},
+		{"src/__tests__", []string{"__tests__/"}, false},
+		{"internal/foo/bar_test.go", []string{"*_test.go"}, true},
+		{"internal/foo/bar_test.go", []string{"internal/*/bar_test.go"}, true},
+		{"internal/foo/bar.go", []string{"*_test.go"}, false},
+		{"a_test.go", []string{"[", "*_test.go"}, true},
+		{"a_test.go", []string{"["}, false},
+		{"/x/a.js", []string{"/x/"}, false},
+	}
+	for _, c := range cases {
+		if got := IsTestFile(c.file, c.patterns); got != c.want {
+			t.Errorf("IsTestFile(%q, %v) = %v, want %v", c.file, c.patterns, got, c.want)
+		}
+	}
+}
+
+func TestTestsAddedAcceptsATestDirectoryPattern(t *testing.T) {
+	immer := []string{"*.test.js", "*.spec.ts", "__tests__/"}
+	if !TestsAdded([]string{"src/patch.ts", "__tests__/patch.js"}, immer, "").Passed {
+		t.Error("__tests__/patch.js should satisfy tests_added")
+	}
+	if TestsAdded([]string{"__tests__/patch.js"}, []string{"*.test.js"}, "").Passed {
+		t.Error("without the directory entry the file is not a test")
+	}
+}
+
+func TestTicketTestsAddedFeasibleWithATestDirectory(t *testing.T) {
+	allowed := []string{"src/patch.ts", "__tests__/patch.js"}
+	if !TicketTestsAddedFeasible(allowed, []string{"*.test.js", "__tests__/"}, "") {
+		t.Error("directory pattern should make the ticket feasible")
+	}
+	if !TicketTestsAddedFeasible(allowed, nil, "") {
+		t.Error("default patterns should make the ticket feasible")
+	}
+	if TicketTestsAddedFeasible(allowed, []string{"*.test.js", "*.test.ts"}, "") {
+		t.Error("patterns lacking the directory should be infeasible")
+	}
+}

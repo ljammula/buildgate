@@ -31,10 +31,16 @@ type Profile struct {
 	// block's install, with CachePaths the paths it writes. InstallRequires
 	// is the root file that must be present for the candidate to apply (a
 	// lockfile). Empty InstallCommand means no candidate.
-	InstallCommand        string
-	CachePaths            []string
-	InstallRequires       string
-	TestPatterns          []string
+	InstallCommand  string
+	CachePaths      []string
+	InstallRequires string
+	TestPatterns    []string
+	// TestDirectories names the directories whose files this ecosystem's
+	// test runners treat as tests by location, not by file name (Jest's
+	// __tests__, Minitest's test). Doctor suggests one as a test_patterns
+	// directory entry when it holds files TestPatterns misses. Empty for an
+	// ecosystem whose runner finds tests by file name only (Go, pytest).
+	TestDirectories       []string
 	BaselineFailureFormat string
 }
 
@@ -57,9 +63,9 @@ type Match struct {
 var profiles = []Profile{
 	{ID: "go", Name: "Go", Markers: []string{"go.mod"}, RequiredBinaries: []string{"go"}, VersionSources: []string{"go.mod"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"go.mod", "go.sum"}, ProjectImageManifests: []string{"go.mod", "go.sum"}, RegistryProxyEcosystems: []string{"Go modules"}, VerifyCommand: "go build ./... && go test -run '^$' ./...", FullSuiteCommand: "go test ./...", TestCommand: "go test ./...", TestPatterns: []string{"*_test.go"}, BaselineFailureFormat: BaselineGoTest},
 	{ID: "python", Name: "Python", Markers: []string{"pyproject.toml", "requirements.txt", "setup.py"}, RequiredBinaries: []string{"python3"}, VersionSources: []string{".python-version", "pyproject.toml"}, ToolchainProvisioning: ToolchainAutomatic, InstallCommand: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt", CachePaths: []string{".venv"}, InstallRequires: "requirements.txt", DependencyManifests: []string{"pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock"}, ProjectImageManifests: []string{"requirements.txt"}, RegistryProxyEcosystems: []string{"PyPI"}, TestPatterns: []string{"test_*.py", "*_test.py"}, BaselineFailureFormat: BaselinePytest},
-	{ID: "node", Name: "Node.js", Markers: []string{"package.json"}, RequiredBinaries: []string{"node", "npm"}, VersionSources: []string{".nvmrc", ".node-version", "package.json"}, ToolchainProvisioning: ToolchainConfiguredImage, InstallCommand: "npm ci", CachePaths: []string{"node_modules"}, InstallRequires: "package-lock.json", DependencyManifests: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"}, ProjectImageManifests: []string{"package.json", "package-lock.json"}, RegistryProxyEcosystems: []string{"npm"}, TestPatterns: []string{"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "node", Name: "Node.js", Markers: []string{"package.json"}, RequiredBinaries: []string{"node", "npm"}, VersionSources: []string{".nvmrc", ".node-version", "package.json"}, ToolchainProvisioning: ToolchainConfiguredImage, InstallCommand: "npm ci", CachePaths: []string{"node_modules"}, InstallRequires: "package-lock.json", DependencyManifests: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"}, ProjectImageManifests: []string{"package.json", "package-lock.json"}, RegistryProxyEcosystems: []string{"npm"}, TestPatterns: []string{"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx", "__tests__/"}, TestDirectories: []string{"__tests__", "test", "tests", "spec"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "rust", Name: "Rust", Markers: []string{"Cargo.toml"}, RequiredBinaries: []string{"cargo", "rustc"}, VersionSources: []string{"rust-toolchain", "rust-toolchain.toml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"Cargo.toml", "Cargo.lock"}, VerifyCommand: "cargo test --workspace", FullSuiteCommand: "cargo test --workspace", TestCommand: "cargo test --workspace", LintCommand: "cargo clippy --workspace --all-targets -- -D warnings", BaselineFailureFormat: BaselineUnparsed},
-	{ID: "ruby", Name: "Ruby", Markers: []string{"Gemfile"}, RequiredBinaries: []string{"ruby", "bundle"}, VersionSources: []string{".ruby-version", "Gemfile"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"Gemfile", "Gemfile.lock"}, ProjectImageManifests: []string{"Gemfile", "Gemfile.lock"}, RegistryProxyEcosystems: []string{"RubyGems"}, TestPatterns: []string{"*_spec.rb", "*_test.rb"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "ruby", Name: "Ruby", Markers: []string{"Gemfile"}, RequiredBinaries: []string{"ruby", "bundle"}, VersionSources: []string{".ruby-version", "Gemfile"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"Gemfile", "Gemfile.lock"}, ProjectImageManifests: []string{"Gemfile", "Gemfile.lock"}, RegistryProxyEcosystems: []string{"RubyGems"}, TestPatterns: []string{"*_spec.rb", "*_test.rb"}, TestDirectories: []string{"test", "spec"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "php-composer", Name: "PHP / Composer", Markers: []string{"composer.json"}, RequiredBinaries: []string{"php", "composer"}, VersionSources: []string{".php-version", "composer.json"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"composer.json", "composer.lock"}, TestPatterns: []string{"test_*.php", "*Test.php"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "java-maven", Name: "Java / Maven", Markers: []string{"pom.xml"}, RequiredBinaries: []string{"java", "mvn"}, VersionSources: []string{".java-version", ".sdkmanrc", "pom.xml"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"pom.xml"}, ProjectImageManifests: []string{"pom.xml"}, RegistryProxyEcosystems: []string{"Maven Central"}, VerifyCommand: "mvn test", FullSuiteCommand: "mvn test", TestCommand: "mvn test", TestPatterns: []string{"*Test.java"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "java-gradle", Name: "Java / Gradle", Markers: []string{"build.gradle", "build.gradle.kts"}, RequiredBinaries: []string{"java", "gradle"}, VersionSources: []string{"gradle/wrapper/gradle-wrapper.properties", "build.gradle", "build.gradle.kts", ".java-version"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"build.gradle", "build.gradle.kts", "gradle.lockfile"}, TestPatterns: []string{"*Test.java"}, BaselineFailureFormat: BaselineUnparsed},
@@ -79,6 +85,7 @@ func Catalog() []Profile {
 		profile.RegistryProxyEcosystems = append([]string(nil), profile.RegistryProxyEcosystems...)
 		profile.CachePaths = append([]string(nil), profile.CachePaths...)
 		profile.TestPatterns = append([]string(nil), profile.TestPatterns...)
+		profile.TestDirectories = append([]string(nil), profile.TestDirectories...)
 		out = append(out, profile)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
