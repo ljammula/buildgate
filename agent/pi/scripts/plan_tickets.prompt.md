@@ -4,12 +4,9 @@ your current working directory; create it if it does not already exist).
 Name the files 001.spec.md, 002.spec.md, ... in DEPENDENCY ORDER -- a
 ticket must never depend on a later-numbered ticket's own changes.
 
-Decomposition rule: write exactly one ticket when the change fits one
-package and a reviewer could read the resulting PR in under ~400 changed
-lines. Otherwise split by service or package boundary -- never split a
-single service/package's own change across multiple tickets by layer
-(e.g. never "one ticket for the backend half, one for the frontend half"
-of what is really one change to one package). In particular, never split
+Decomposition rule: {decomposition_rule}
+
+In particular, never split
 wiring -- route registration, a router/mux entry, a dispatch-table line --
 into its own ticket separate from the code and tests that exercise it:
 a wiring-only ticket has no test of its own to add and can never pass the
@@ -55,6 +52,12 @@ Verify-Command: {verify_command}
 Allowed-Files: <comma-separated list of every file this ticket touches>
 Required-Changed-Files: <comma-separated list of files this ticket must actually change>
 Tests-Required: no -- <reason> (omit this line entirely unless this ticket adds no test file; see the tests rule above)
+Estimated-Changed-Lines: <N>
+
+The Estimated-Changed-Lines line is your estimate of this ticket's changed
+lines, insertions plus deletions, tests included. Write digits only, e.g.
+"Estimated-Changed-Lines: 240". The factory shows it at plan review; a value
+that is not a whole number above zero refuses the plan.
 
 ## Goal
 

@@ -34,6 +34,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/ticketspec"
 	"buildgate/internal/triage"
 )
 
@@ -3491,6 +3492,32 @@ type requestTicketView struct {
 	// page showed "ready for review" over a build in progress (found on a
 	// real corrective round, 2026-10-06).
 	ActiveRoundRunID string `json:"active_round_run_id,omitempty"`
+	// EstimatedChangedLines is the ticket's declared Estimated-Changed-Lines
+	// (ticketspec's one parser), omitted when it declares none or a value that
+	// is not a positive integer.
+	EstimatedChangedLines int `json:"estimated_changed_lines,omitempty"`
+	// BuiltChangedLines is the changed lines (insertions plus deletions, as
+	// git diff --shortstat counts them) of the accepted run whose commit is on
+	// the ticket's pull request (request.Ticket.PRHeadRunID). It is omitted
+	// until that run is accepted and recorded a diff stat, and when that run
+	// is a corrective round: a round's stat is measured from the branch tip it
+	// started on, so it is the round's own change, not the ticket's.
+	BuiltChangedLines int `json:"built_changed_lines,omitempty"`
+}
+
+// ticketBuiltChangedLines returns the changed lines of the ticket's PR-head
+// run when that run is accepted and measured from the ticket's own base, else
+// 0.
+func (s *Server) ticketBuiltChangedLines(ticket request.Ticket) int {
+	headID := ticket.PRHeadRunID()
+	if headID == "" {
+		return 0
+	}
+	head, err := run.Load(s.dataDir, headID)
+	if err != nil || head.State != run.StateAccepted || head.DiffStat == nil || head.DiffBaseSHA != "" {
+		return 0
+	}
+	return head.DiffStat.Insertions + head.DiffStat.Deletions
 }
 
 // activeRoundRunIDs returns, per ticket index, the run of a PR-review
@@ -3688,11 +3715,15 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 		activeRounds := activeRoundRunIDs(dataDir, loaded)
 		for _, ticket := range loaded.Tickets {
 			resolved := resolveTicketSpecPath(dataDir, id, ticket.SpecPath)
+			content := readRequestFileBestEffort(resolved)
+			estimate, _ := ticketspec.EstimatedChangedLinesOf(content)
 			view.Tickets = append(view.Tickets, requestTicketView{
-				Ticket:           ticket,
-				Content:          readRequestFileBestEffort(resolved),
-				FullPath:         absPathBestEffort(resolved),
-				ActiveRoundRunID: activeRounds[ticket.Index],
+				Ticket:                ticket,
+				Content:               content,
+				FullPath:              absPathBestEffort(resolved),
+				ActiveRoundRunID:      activeRounds[ticket.Index],
+				EstimatedChangedLines: estimate,
+				BuiltChangedLines:     s.ticketBuiltChangedLines(ticket),
 			})
 		}
 	}

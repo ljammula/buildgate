@@ -795,3 +795,51 @@ func TestClosingFenceIfOpen(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEstimatedChangedLines(t *testing.T) {
+	for _, tc := range []struct {
+		name, body   string
+		want         int
+		wantDeclared bool
+		wantErr      bool
+	}{
+		{"valid", "Verify-Command: x\nEstimated-Changed-Lines: 240\n\n## Goal\n", 240, true, false},
+		{"absent", "Verify-Command: x\n\n## Goal\n", 0, false, false},
+		{"zero", "Estimated-Changed-Lines: 0\n", 0, true, true},
+		{"negative", "Estimated-Changed-Lines: -3\n", 0, true, true},
+		{"not a number", "Estimated-Changed-Lines: about 200\n", 0, true, true},
+		{"decimal", "Estimated-Changed-Lines: 2.5\n", 0, true, true},
+		{"empty", "Estimated-Changed-Lines:\n", 0, true, true},
+		{"too large", "Estimated-Changed-Lines: 99999999\n", 0, true, true},
+		{"leading zero", "Estimated-Changed-Lines: 0240\n", 0, true, true},
+		{"plus sign", "Estimated-Changed-Lines: +240\n", 0, true, true},
+		{"largest", "Estimated-Changed-Lines: 999999\n", 999999, true, false},
+		{"quoted in a fence is not declared", "```\nEstimated-Changed-Lines: nonsense\n```\n", 0, false, false},
+		{"indented example is not declared", "    Estimated-Changed-Lines: nonsense\n", 0, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, declared, err := ParseEstimatedChangedLines(writeSpec(t, tc.body))
+			if (err != nil) != tc.wantErr || got != tc.want || declared != tc.wantDeclared {
+				t.Errorf("ParseEstimatedChangedLines = %d, %v, %v; want %d, %v, err %v", got, declared, err, tc.want, tc.wantDeclared, tc.wantErr)
+			}
+			problems, perr := HeaderStrictnessProblems(writeSpec(t, tc.body))
+			if perr != nil {
+				t.Fatal(perr)
+			}
+			if tc.wantErr != (len(problems) > 0) {
+				t.Errorf("HeaderStrictnessProblems = %v, want a problem: %v", problems, tc.wantErr)
+			}
+			lines, ok := EstimatedChangedLinesOf(tc.body)
+			if ok != (tc.wantDeclared && !tc.wantErr) || (ok && lines != tc.want) {
+				t.Errorf("EstimatedChangedLinesOf = %d, %v", lines, ok)
+			}
+		})
+	}
+}
+
+func TestMisspelledEstimateHeaderIsANearMiss(t *testing.T) {
+	misses, err := NearMissHeaderKeys(writeSpec(t, "Estimated_Changed_Lines: 40\n"))
+	if err != nil || len(misses) != 1 || misses[0].Known != EstimatedChangedLinesPrefix {
+		t.Errorf("near misses = %v, %v", misses, err)
+	}
+}

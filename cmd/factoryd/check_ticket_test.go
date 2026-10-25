@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"buildgate/internal/ticketspec"
 )
 
 // TestBuildTicketHeaderReports covers a real, well-formed brownfield
@@ -139,9 +142,8 @@ func TestTicketTemplateRoundTripsThroughCheckTicket(t *testing.T) {
 		t.Fatalf("buildTicketHeaderReports(ticketTemplateContent): %v", err)
 	}
 
-	wantDeclared := []string{"Verify-Command:", "Allowed-Files:", "Required-Changed-Files:", "Required-Content:", "Tests-Required:"}
-	if len(reports) != len(wantDeclared) {
-		t.Fatalf("got %d header reports, want %d", len(reports), len(wantDeclared))
+	if len(reports) != len(ticketspec.KnownHeaderKeys) {
+		t.Fatalf("got %d header reports, want %d", len(reports), len(ticketspec.KnownHeaderKeys))
 	}
 	for _, r := range reports {
 		if r.Malformed {
@@ -149,6 +151,67 @@ func TestTicketTemplateRoundTripsThroughCheckTicket(t *testing.T) {
 		}
 		if !r.Present {
 			t.Errorf("template header %s: Present = false, want true (the template declares every known header as a live example)", r.Prefix)
+		}
+	}
+}
+
+// TestTicketHeaderReportsCoverEveryKnownKey is the class guard: the report
+// has exactly one entry per ticketspec.KnownHeaderKeys key, in that order,
+// whatever the ticket holds, so a header added to ticketspec cannot be
+// missing from check-ticket.
+func TestTicketHeaderReportsCoverEveryKnownKey(t *testing.T) {
+	t.Parallel()
+	for _, content := range []string{"Just prose.\n", ticketTemplateContent, "Estimated-Changed-Lines: 0\n"} {
+		reports, err := buildTicketHeaderReportsFromContent(t, content)
+		if err != nil {
+			t.Fatalf("buildTicketHeaderReports: %v", err)
+		}
+		var got []string
+		for _, r := range reports {
+			got = append(got, r.Prefix)
+		}
+		if !slices.Equal(got, ticketspec.KnownHeaderKeys) {
+			t.Errorf("report keys = %v, want KnownHeaderKeys %v", got, ticketspec.KnownHeaderKeys)
+		}
+	}
+	for _, key := range ticketspec.KnownHeaderKeys {
+		if _, ok := ticketHeaderChecks[key]; !ok {
+			t.Errorf("no ticketHeaderChecks entry for %s", key)
+		}
+	}
+	if len(ticketHeaderChecks) != len(ticketspec.KnownHeaderKeys) {
+		t.Errorf("ticketHeaderChecks has %d entries, KnownHeaderKeys has %d", len(ticketHeaderChecks), len(ticketspec.KnownHeaderKeys))
+	}
+}
+
+// TestCheckTicketReportsEstimatedChangedLines covers the key that the
+// per-key report once missed: declared, absent and malformed.
+func TestCheckTicketReportsEstimatedChangedLines(t *testing.T) {
+	t.Parallel()
+	for content, want := range map[string]string{
+		"Estimated-Changed-Lines: 240\n": "ok",
+		"Estimated-Changed-Lines: 24x\n": "malformed",
+		"Estimated-Changed-Lines: 024\n": "malformed",
+		"Just prose.\n":                  "absent",
+	} {
+		reports, err := buildTicketHeaderReportsFromContent(t, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range reports {
+			if r.Prefix != ticketspec.EstimatedChangedLinesPrefix {
+				continue
+			}
+			got := "absent"
+			switch {
+			case r.Malformed:
+				got = "malformed"
+			case r.Present:
+				got = "ok"
+			}
+			if got != want {
+				t.Errorf("%q: %s = %s, want %s", content, r.Prefix, got, want)
+			}
 		}
 	}
 }

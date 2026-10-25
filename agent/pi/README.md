@@ -37,7 +37,8 @@ freely, headings only together with their validator.
 | `draft_agents.prompt.md` | `draft_agents.py` | `{instructions}`, `{draft_path}`, `{context}` |
 | `draft_spec.example_check.prompt.md` | `draft_spec.py` (worked-example check) | `{listing}`, `{out_path}` |
 | `draft_feedback.prompt.md` | `draft_spec.py`, `plan_tickets.py` (operator feedback on a rejected draft) | `{kind}`, `{feedback}` |
-| `plan_tickets.prompt.md` | `plan_tickets.py` | `{draft_dir}`, `{verify_command}` |
+| `plan_tickets.prompt.md` | `plan_tickets.py` | `{decomposition_rule}`, `{draft_dir}`, `{verify_command}` |
+| `plan_tickets.budget.prompt.md`, `plan_tickets.no_budget.prompt.md` | `plan_tickets.py` (the decomposition rule: with `--pr-budget-lines` above 0 the first, with its number, otherwise the second) | `{budget}`; none |
 | `draft_spec.previous_draft.prompt.md` | `draft_spec.py` (a handed-over spec to revise, given with `--previous-draft-file`) | `{spec}` |
 | `draft_spec.scoped_sections.prompt.md`, `plan_tickets.scoped_sections.prompt.md` | `draft_spec.py`, `plan_tickets.py` (the sections of the previous draft a review commented on, given with `--rewrite-sections-file`; buildgate takes only those from the redraft) | `{sections}` |
 | `plan_tickets.previous_draft.prompt.md` | `plan_tickets.py` (handed-over tickets to revise, given with `--previous-draft-file`) | `{tickets}` |

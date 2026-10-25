@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -70,6 +71,13 @@ const RequiredContentPrefix = "Required-Content:"
 // exists to catch an untested change.
 const TestsRequiredPrefix = "Tests-Required:"
 
+// EstimatedChangedLinesPrefix is the machine-readable line a ticket spec.md
+// may contain to declare the planner's estimate of the ticket's change, e.g.
+// "Estimated-Changed-Lines: 240": a positive integer counting insertions plus
+// deletions, as git diff --shortstat does. It is advice shown at plan review,
+// never a gate on the build, though a declared value that is malformed refuses the plan; absence is a legitimate shape (older and handed-over plans).
+const EstimatedChangedLinesPrefix = "Estimated-Changed-Lines:"
+
 // KnownHeaderKeys lists every machine-readable header key this package
 // parses, in the order tooling should report them (e.g. `factoryd
 // check-ticket`/`ticket-template`). Exported as the single source of
@@ -81,6 +89,7 @@ var KnownHeaderKeys = []string{
 	RequiredChangedFilesPrefix,
 	RequiredContentPrefix,
 	TestsRequiredPrefix,
+	EstimatedChangedLinesPrefix,
 }
 
 // PresentHeaderKeys returns, for each of KnownHeaderKeys, whether specPath
@@ -192,11 +201,12 @@ func NearMissHeaderKeys(specPath string) ([]NearMissHeaderKey, error) {
 // just for a header not yet added. TestHeaderStrictnessProblemsChecksEveryKnownHeaderKey
 // asserts this map has no missing/extra entries relative to KnownHeaderKeys.
 var headerParsers = map[string]func(specPath string) error{
-	VerifyCommandPrefix:        func(specPath string) error { _, err := ParseVerifyCommand(specPath); return err },
-	AllowedFilesPrefix:         func(specPath string) error { _, err := ParseAllowedFiles(specPath); return err },
-	RequiredChangedFilesPrefix: func(specPath string) error { _, err := ParseRequiredChangedFiles(specPath); return err },
-	RequiredContentPrefix:      func(specPath string) error { _, err := ParseRequiredContent(specPath); return err },
-	TestsRequiredPrefix:        func(specPath string) error { _, err := ParseTestsRequiredOptOut(specPath); return err },
+	VerifyCommandPrefix:         func(specPath string) error { _, err := ParseVerifyCommand(specPath); return err },
+	AllowedFilesPrefix:          func(specPath string) error { _, err := ParseAllowedFiles(specPath); return err },
+	RequiredChangedFilesPrefix:  func(specPath string) error { _, err := ParseRequiredChangedFiles(specPath); return err },
+	RequiredContentPrefix:       func(specPath string) error { _, err := ParseRequiredContent(specPath); return err },
+	TestsRequiredPrefix:         func(specPath string) error { _, err := ParseTestsRequiredOptOut(specPath); return err },
+	EstimatedChangedLinesPrefix: func(specPath string) error { _, _, err := ParseEstimatedChangedLines(specPath); return err },
 }
 
 // HeaderStrictnessProblems runs the two checks a mandatory preflight (see
@@ -267,6 +277,50 @@ func ParseTestsRequiredOptOut(specPath string) (string, error) {
 		return "", fmt.Errorf("ticket spec %s: %s no requires a reason (\"no -- <reason>\")", specPath, TestsRequiredPrefix)
 	}
 	return reason, nil
+}
+
+// ParseEstimatedChangedLines returns the ticket's declared estimate of its
+// changed lines and whether it declares one. A declared value that is not a
+// plain positive integer is a parse error.
+func ParseEstimatedChangedLines(specPath string) (lines int, declared bool, err error) {
+	val, found, err := parseTopLevelKeyLine(specPath, EstimatedChangedLinesPrefix)
+	if err != nil || !found {
+		return 0, false, err
+	}
+	lines, err = ParseEstimatedChangedLinesValue(val)
+	if err != nil {
+		return 0, true, fmt.Errorf("ticket spec %s: %s %w", specPath, EstimatedChangedLinesPrefix, err)
+	}
+	return lines, true, nil
+}
+
+// estimatedChangedLinesValue is the one accepted shape of the estimate: one
+// to six digits, no leading zero, so the value is a whole number above zero.
+var estimatedChangedLinesValue = regexp.MustCompile(`^[1-9][0-9]{0,5}$`)
+
+// ParseEstimatedChangedLinesValue parses the text after the header key: a
+// whole number above zero written as plain digits with no leading zero, at
+// most 999999.
+func ParseEstimatedChangedLinesValue(val string) (int, error) {
+	if !estimatedChangedLinesValue.MatchString(val) {
+		return 0, fmt.Errorf("must be a whole number above zero written as digits only, without a leading zero, got %q", val)
+	}
+	return strconv.Atoi(val)
+}
+
+// EstimatedChangedLinesOf reads the declared estimate from ticket content
+// (the text of a spec.md) with the same top-level-line rule as
+// ParseEstimatedChangedLines. It reports declared=false when the line is
+// absent or malformed.
+func EstimatedChangedLinesOf(content string) (lines int, declared bool) {
+	var val string
+	var found bool
+	_ = forEachTopLevelReaderLine(strings.NewReader(content), keyLineFinder(EstimatedChangedLinesPrefix, &val, &found))
+	if !found {
+		return 0, false
+	}
+	n, err := ParseEstimatedChangedLinesValue(val)
+	return n, err == nil
 }
 
 // ParseVerifyCommand returns the ticket's declared canonical verification
@@ -654,14 +708,21 @@ func hasModuleRootMarker(dir string) bool {
 // differently-charactered fence nested inside a longer one can't
 // prematurely end it.
 func parseTopLevelKeyLine(specPath, prefix string) (value string, found bool, err error) {
-	err = forEachTopLevelLine(specPath, func(raw string) (stop bool) {
+	err = forEachTopLevelLine(specPath, keyLineFinder(prefix, &value, &found))
+	return value, found, err
+}
+
+// keyLineFinder returns the line callback every single-valued key parse
+// shares: it stores the trimmed text after prefix of the first top-level line
+// that starts with it, and stops there.
+func keyLineFinder(prefix string, value *string, found *bool) func(line string) (stop bool) {
+	return func(raw string) (stop bool) {
 		if rest, ok := strings.CutPrefix(raw, prefix); ok {
-			value, found = strings.TrimSpace(rest), true
+			*value, *found = strings.TrimSpace(rest), true
 			return true
 		}
 		return false
-	})
-	return value, found, err
+	}
 }
 
 // parseAllTopLevelKeyLines is parseTopLevelKeyLine's multi-value sibling:
@@ -703,11 +764,18 @@ func forEachTopLevelLine(specPath string, fn func(line string) (stop bool)) erro
 		return fmt.Errorf("open ticket spec: %w", err)
 	}
 	defer f.Close()
+	if err := forEachTopLevelReaderLine(f, fn); err != nil {
+		return fmt.Errorf("read ticket spec: %w", err)
+	}
+	return nil
+}
 
+// forEachTopLevelReaderLine is forEachTopLevelLine over any reader.
+func forEachTopLevelReaderLine(r io.Reader, fn func(line string) (stop bool)) error {
 	inFence := false
 	var fenceChar byte
 	var fenceLen int
-	err = forEachLine(f, func(raw string) (stop bool) {
+	return forEachLine(r, func(raw string) (stop bool) {
 		trimmedForFence := strings.TrimSpace(raw)
 		if inFence {
 			if ClosesFence(trimmedForFence, fenceChar, fenceLen) {
@@ -724,10 +792,6 @@ func forEachTopLevelLine(specPath string, fn func(line string) (stop bool)) erro
 		}
 		return fn(raw)
 	})
-	if err != nil {
-		return fmt.Errorf("read ticket spec: %w", err)
-	}
-	return nil
 }
 
 // forEachLine calls fn with one line without its line ending, including a

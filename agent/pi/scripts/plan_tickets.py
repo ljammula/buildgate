@@ -76,7 +76,12 @@ EVIDENCE_SCHEMA_VERSION = 1
 CONTEXT_FILE_MAX_BYTES = draft_spec.CONTEXT_FILE_MAX_BYTES
 FILE_INVENTORY_MAX_LINES = draft_spec.FILE_INVENTORY_MAX_LINES
 
-PLAN_INSTRUCTIONS = prompt_templates.load("plan_tickets", ("draft_dir", "verify_command"))
+PLAN_INSTRUCTIONS = prompt_templates.load("plan_tickets", ("decomposition_rule", "draft_dir", "verify_command"))
+
+# The decomposition rule, with the session config's pr_budget_lines in it, or
+# the rule without a number when that key is 0.
+BUDGET_RULE = prompt_templates.load("plan_tickets.budget", ("budget",))
+NO_BUDGET_RULE = prompt_templates.load_text("plan_tickets.no_budget")
 # The plan-rules part of the team design guide; see draft_spec.DESIGN_GUIDE_SECTION.
 DESIGN_GUIDE_SECTION = prompt_templates.load("plan_tickets.design_guide", ("guide",))
 # The tickets an operator handed over, given back to be revised with the
@@ -87,7 +92,7 @@ PREVIOUS_DRAFT_SECTION = prompt_templates.load("plan_tickets.previous_draft", ("
 SCOPED_SECTIONS_SECTION = prompt_templates.load("plan_tickets.scoped_sections", ("sections",))
 
 
-def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None, criteria_text: str | None = None) -> tuple[str, bool]:
+def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None, criteria_text: str | None = None, pr_budget_lines: int = 0) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- see draft_spec.py's own build_prompt for
 	why agents_md_used is threaded straight into the evidence payload.
@@ -118,7 +123,8 @@ def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_comm
 			sections.append(SCOPED_SECTIONS_SECTION.format(sections=draft_spec.rewrite_sections_text(rewrite_sections)).rstrip("\n"))
 	if feedback and feedback.strip():
 		sections.append(draft_spec.FEEDBACK_HEADER.format(kind="plan", feedback=draft_spec.neutralise_feedback(feedback.strip())))
-	sections.append(PLAN_INSTRUCTIONS.format(draft_dir=draft_dir, verify_command=verify_command))
+	rule = BUDGET_RULE.format(budget=pr_budget_lines).rstrip("\n") if pr_budget_lines > 0 else NO_BUDGET_RULE
+	sections.append(PLAN_INSTRUCTIONS.format(decomposition_rule=rule, draft_dir=draft_dir, verify_command=verify_command))
 	return "\n\n".join(sections), agents_md_used
 
 
@@ -143,7 +149,7 @@ def run_plan(
 	workspace: Path, spec_path: Path, request_path: Path, verify_command: str, out_dir: Path, evidence_path: Path,
 	timeout_minutes: int, feedback_path: Path | None = None, thinking: str | None = None,
 	adapter=build_app.DEFAULT_ADAPTER, design_guide_path: Path | None = None, previous_draft_path: Path | None = None,
-	rewrite_sections_path: Path | None = None, criteria_path: Path | None = None,
+	rewrite_sections_path: Path | None = None, criteria_path: Path | None = None, pr_budget_lines: int = 0,
 ) -> int:
 	spec_text = spec_path.read_text()
 	criteria_text = criteria_path.read_text() if criteria_path is not None else None
@@ -155,7 +161,7 @@ def run_plan(
 	prompt, agents_md_used = build_prompt(
 		spec_text, request_text, workspace, verify_command, DRAFT_RELATIVE_DIR, feedback, design_guide, previous_draft,
 		draft_spec.read_rewrite_sections(rewrite_sections_path),
-		criteria_text=criteria_text,
+		criteria_text=criteria_text, pr_budget_lines=pr_budget_lines,
 	)
 
 	session_dir = workspace / ".factory-plan-draft" / "session"
@@ -256,7 +262,10 @@ def main() -> int:
 	parser.add_argument("--previous-draft-file", type=Path, default=None, help="optional tickets the operator handed over, in one file, to be revised with the feedback instead of planned afresh; staged by factoryd")
 	parser.add_argument("--rewrite-sections-file", type=Path, default=None, help="optional JSON list of {path, section} naming the tickets and sections of --previous-draft-file the feedback commented on; only those are taken from the redraft (buildgate keeps the rest); staged by factoryd")
 	parser.add_argument("--design-guide-file", type=Path, default=None, help="optional plan-rules part of the team design guide, staged by factoryd")
+	parser.add_argument("--pr-budget-lines", type=int, default=0, help="target changed lines per ticket (insertions plus deletions): a spec estimated within it is one ticket, a larger one is split into the fewest tickets that each fit; 0 is no budget")
 	args = parser.parse_args()
+	if args.pr_budget_lines < 0:
+		parser.error("--pr-budget-lines must not be negative")
 
 	adapter = harness_adapters.get(args.harness)
 	adapter.prepare()
@@ -265,7 +274,7 @@ def main() -> int:
 		workspace, args.spec.resolve(), args.request.resolve(), args.verify_command, args.out_dir, args.evidence,
 		args.timeout_minutes, args.feedback_file, thinking=args.thinking, adapter=adapter,
 		design_guide_path=args.design_guide_file, previous_draft_path=args.previous_draft_file, rewrite_sections_path=args.rewrite_sections_file,
-		criteria_path=args.criteria_file.resolve(),
+		criteria_path=args.criteria_file.resolve(), pr_budget_lines=args.pr_budget_lines,
 	)
 
 

@@ -32,11 +32,13 @@ import (
 const maxReviewNotes = 10
 
 // PlanTicket is one ticket of a plan as PlanReviewNotes reads it: its file
-// name ("001.spec.md"), its text and its Allowed-Files.
+// name ("001.spec.md"), its text, its Allowed-Files and its declared
+// Estimated-Changed-Lines (0 when it declares none).
 type PlanTicket struct {
-	Name    string
-	Content string
-	Allowed []string
+	Name     string
+	Content  string
+	Allowed  []string
+	Estimate int
 }
 
 // RefreshReviewNotes sets r.ReviewNotes to the notes on what r's current
@@ -85,9 +87,10 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		if err != nil {
 			return
 		}
-		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed})
+		estimate, _ := ticketspec.EstimatedChangedLinesOf(string(content))
+		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed, Estimate: estimate})
 	}
-	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r), idNotes)
+	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r), idNotes, r.PlanBudgetLines)
 }
 
 // SpecReviewNotes returns one note for each acceptance criterion of
@@ -151,14 +154,19 @@ func SpecReviewNotes(specContent string) []string {
 //     ticket lists it as covered, none of the tickets listing it cites AC-N in
 //     its Tests to add, and the approved oracle (oracleCovered, by criterion
 //     number) does not cover it.
+//   - "ticket T estimates N changed lines, over the B-line budget": a
+//     ticket declares Estimated-Changed-Lines above budgetLines, the budget
+//     the plan was drafted under (Request.PlanBudgetLines). Nothing when the
+//     budget is 0 or the ticket declares no estimate. Numbers and the
+//     ticket's file name only.
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
-func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool) []string {
-	return planReviewNotes(criteria, tickets, workspace, oracleCovered, true)
+func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool, budgetLines int) []string {
+	return planReviewNotes(criteria, tickets, workspace, oracleCovered, true, budgetLines)
 }
 
-func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool, idNotes bool) []string {
+func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool, idNotes bool, budgetLines int) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))
@@ -175,7 +183,7 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 			listing[n][i] = true
 		}
 	}
-	var notes []string
+	notes := overBudgetNotes(tickets, budgetLines)
 	for i, text := range criteria {
 		if n := i + 1; listing[n] != nil {
 			notes = append(notes, plan.criterionNotes(n, text, covering[n], listing[n])...)
@@ -185,6 +193,21 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 		notes = append(notes, noTestNotes(criteria, tickets, oracleCovered)...)
 	}
 	return capReviewNotes(notes)
+}
+
+// overBudgetNotes returns one note for each ticket whose declared estimate is
+// above budgetLines. It reads a number the ticket declared, never its prose.
+func overBudgetNotes(tickets []PlanTicket, budgetLines int) []string {
+	if budgetLines <= 0 {
+		return nil
+	}
+	var notes []string
+	for _, ticket := range tickets {
+		if ticket.Estimate > budgetLines {
+			notes = append(notes, fmt.Sprintf("Ticket %s estimates %d changed lines, over the %d-line budget.", noteName(ticket.Name), ticket.Estimate, budgetLines))
+		}
+	}
+	return notes
 }
 
 // capReviewNotes returns notes without repeats, the first maxReviewNotes

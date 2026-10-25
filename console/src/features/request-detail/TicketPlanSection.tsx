@@ -6,7 +6,7 @@ import { ticketRelPath } from "@/domain/contentHash";
 import { usePendingComments } from "@/shared/request/usePendingComments";
 import { FileContentSection } from "./FileContentSection";
 import type { EditorBinding } from "./useEditSession";
-import { foldsContent, planSummary } from "./requestDetailLogic";
+import { foldsContent, planSummary, sizeLine } from "./requestDetailLogic";
 
 export interface TicketPlanSectionProps {
   readonly request: RequestSummary;
@@ -34,25 +34,33 @@ export function TicketPlanSection({
   const update = useUpdateRequestTicket(request.id, ticket.index);
   const pending = usePendingComments(request);
   const commentPath = ticketRelPath(ticket.specPath);
+  const size = sizeLine(ticket, request.planBudgetLines);
   return (
-    <FileContentSection
-      title={`Ticket ${ticket.index} plan`}
-      path={ticket.specPath}
-      fullPath={ticket.fullPath}
-      content={ticket.content}
-      editable={editable}
-      editing={editing}
-      onStartEdit={onStartEdit}
-      onStopEdit={onStopEdit}
-      onSave={async (content, baseSha256) => {
-        await update.mutateAsync({ content, baseSha256, by: getOperatorName() });
-      }}
-      onFetchCurrent={onFetchCurrent}
-      structure="ticket"
-      {...(editable && commentPath !== null ? { commentPath, onComment: pending.add } : {})}
-      specCriteria={request.criteria}
-      {...(session === undefined ? {} : { session })}
-      {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
-    />
+    <>
+      {size !== "" ? (
+        <p className="text-fg-muted px-1 text-sm" data-testid={`ticket-size-${ticket.index}`}>
+          Ticket {ticket.index}: {size}
+        </p>
+      ) : null}
+      <FileContentSection
+        title={`Ticket ${ticket.index} plan`}
+        path={ticket.specPath}
+        fullPath={ticket.fullPath}
+        content={ticket.content}
+        editable={editable}
+        editing={editing}
+        onStartEdit={onStartEdit}
+        onStopEdit={onStopEdit}
+        onSave={async (content, baseSha256) => {
+          await update.mutateAsync({ content, baseSha256, by: getOperatorName() });
+        }}
+        onFetchCurrent={onFetchCurrent}
+        structure="ticket"
+        {...(editable && commentPath !== null ? { commentPath, onComment: pending.add } : {})}
+        specCriteria={request.criteria}
+        {...(session === undefined ? {} : { session })}
+        {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
+      />
+    </>
   );
 }

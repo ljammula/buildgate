@@ -69,8 +69,8 @@ func TestCurrentPRHeadRunIDPrefersLatestAcceptedRound(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := requestdriver.CurrentPRHeadRunID(&tc.ticket); got != tc.want {
-				t.Errorf("currentPRHeadRunID(...) = %q, want %q", got, tc.want)
+			if got := tc.ticket.PRHeadRunID(); got != tc.want {
+				t.Errorf("PRHeadRunID() = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -1549,8 +1549,8 @@ func TestRunCorrectiveRoundPushFailureHaltsRequest(t *testing.T) {
 	if len(r.Tickets[0].Rounds) != 1 || r.Tickets[0].Rounds[0].Outcome != request.RoundAccepted || r.Tickets[0].Rounds[0].Pushed {
 		t.Fatalf("round = %+v, want Outcome RoundAccepted with Pushed false", r.Tickets[0].Rounds)
 	}
-	if got := requestdriver.CurrentPRHeadRunID(&r.Tickets[0]); got != r.Tickets[0].RunID {
-		t.Errorf("currentPRHeadRunID(...) = %q, want the ticket's original RunID %q, not the unpushed round", got, r.Tickets[0].RunID)
+	if got := r.Tickets[0].PRHeadRunID(); got != r.Tickets[0].RunID {
+		t.Errorf("PRHeadRunID() = %q, want the ticket's original RunID %q, not the unpushed round", got, r.Tickets[0].RunID)
 	}
 }
 

@@ -159,7 +159,7 @@ func TestPlanReviewNotesNameACriterionWithNoTest(t *testing.T) {
 		citingTicket("001.spec.md", "- a_test.go: covers the b case (AC-1)\n", 1, 2),
 		citingTicket("002.spec.md", "- c_test.go: covers AC-30 only\n", 3),
 	}
-	got := PlanReviewNotes(criteria, tickets, "", nil)
+	got := PlanReviewNotes(criteria, tickets, "", nil, 0)
 	want := []string{
 		"criterion 2 has no test: no covering ticket's Tests to add cites AC-2",
 		"criterion 3 has no test: no covering ticket's Tests to add cites AC-3",
@@ -169,7 +169,7 @@ func TestPlanReviewNotesNameACriterionWithNoTest(t *testing.T) {
 	}
 	// An approved oracle covering criterion 2 removes its note, and the
 	// notes then say an oracle was looked at.
-	got = PlanReviewNotes(criteria, tickets, "", map[int]bool{2: true})
+	got = PlanReviewNotes(criteria, tickets, "", map[int]bool{2: true}, 0)
 	want = []string{"criterion 3 has no test: no covering ticket's Tests to add cites AC-3 and no approved oracle covers it"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("with an oracle: notes = %q, want %q", got, want)
@@ -179,10 +179,10 @@ func TestPlanReviewNotesNameACriterionWithNoTest(t *testing.T) {
 func TestNoTestNoteOnlyForASpecWithIDs(t *testing.T) {
 	t.Parallel()
 	tickets := []PlanTicket{citingTicket("001.spec.md", "- a_test.go\n", 1, 2)}
-	if got := PlanReviewNotes([]string{"1. It works.", "2. It also works."}, tickets, "", nil); len(got) != 0 {
+	if got := PlanReviewNotes([]string{"1. It works.", "2. It also works."}, tickets, "", nil, 0); len(got) != 0 {
 		t.Errorf("a spec without IDs: notes = %q", got)
 	}
-	if got := PlanReviewNotes([]string{"1. AC-1: It works.", "2. It also works."}, tickets, "", nil); len(got) != 0 {
+	if got := PlanReviewNotes([]string{"1. AC-1: It works.", "2. It also works."}, tickets, "", nil, 0); len(got) != 0 {
 		t.Errorf("a spec with some IDs: notes = %q", got)
 	}
 }

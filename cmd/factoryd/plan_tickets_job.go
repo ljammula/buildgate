@@ -65,8 +65,9 @@ type planTicketsEvidencePayload struct {
 // draftSpecArgs' own pure, unit-testable shape -- including feedbackPath's
 // own "may be empty, then --feedback-file is omitted" convention. thinking
 // mirrors draftSpecArgs' own parameter: the planning role's Pi
-// reasoning-effort level, or "" to omit --thinking entirely.
-func planTicketsArgs(script, workspace, specPath, criteriaPath, requestPath, verifyCommand, outDir, evidencePath string, files draftInputFiles, timeoutMinutes int, thinking, harness string) []string {
+// reasoning-effort level, or "" to omit --thinking entirely. prBudgetLines
+// is the session config's pr_budget_lines, always passed (0: no budget).
+func planTicketsArgs(script, workspace, specPath, criteriaPath, requestPath, verifyCommand, outDir, evidencePath string, files draftInputFiles, timeoutMinutes int, thinking, harness string, prBudgetLines int) []string {
 	args := []string{
 		script,
 		"--workspace", workspace,
@@ -82,7 +83,7 @@ func planTicketsArgs(script, workspace, specPath, criteriaPath, requestPath, ver
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
 	}
-	args = append(args, "--harness", harness)
+	args = append(args, "--harness", harness, "--pr-budget-lines", fmt.Sprint(prBudgetLines))
 	return args
 }
 
@@ -187,7 +188,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		}
 		outDir := planTicketsContainerOutDir
 		evidencePath := planTicketsContainerEvidencePath
-		args := planTicketsArgs(script, r.Workspace, specPath, planTicketsContainerCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+planTicketsScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
+		args := planTicketsArgs(script, r.Workspace, specPath, planTicketsContainerCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+planTicketsScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness, cfg.Settings.PRBudgetLines)
 		sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
 		defer cancel()
 		_, workerUID := requestJobSandboxIdentity(cfg)
@@ -208,7 +209,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	} else {
 		outDir := filepath.Join(scratchDir, "tickets")
 		evidencePath := filepath.Join(scratchDir, "evidence.json")
-		args := planTicketsArgs(script, r.Workspace, specPath, hostCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
+		args := planTicketsArgs(script, r.Workspace, specPath, hostCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness, cfg.Settings.PRBudgetLines)
 		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.PlanTicketsInterpreter, args[1:]...)
 	}
 	retainDraftPrompts(dataDir, r.ID, "plan", r.Workspace, []string{planTicketsScratchDirName + "/session"})

@@ -94,6 +94,10 @@ export interface RequestTicket {
   readonly mergeReadiness: MergeReadiness | null;
   /** The round ledger: every build round that ended in a commit, oldest first. */
   readonly roundTags: readonly RoundTag[];
+  /** The planner's declared `Estimated-Changed-Lines`; 0 when the ticket declares none. */
+  readonly estimatedChangedLines: number;
+  /** Changed lines (insertions plus deletions) of the ticket's built run; 0 until one is recorded. */
+  readonly builtChangedLines: number;
 }
 
 /**
@@ -199,6 +203,8 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
     prState: optString(o, "pr_state", at),
     content: optString(o, "content", at),
     fullPath: optString(o, "full_path", at),
+    estimatedChangedLines: numberOr(o, "estimated_changed_lines", at, 0),
+    builtChangedLines: numberOr(o, "built_changed_lines", at, 0),
   };
 }
 
@@ -566,6 +572,8 @@ export interface RequestSummary {
    * plan_review). Advice from its reading of the text: nothing depends on them.
    */
   readonly reviewNotes: readonly string[];
+  /** The `pr_budget_lines` the plan was drafted under; 0 when there was no budget (or an older request). */
+  readonly planBudgetLines: number;
   /** The drafting job running right now, or null. See requestRunningJob. */
   readonly activeJob: ActiveJob | null;
   readonly submittedAt: string;
@@ -788,6 +796,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     oracleDraftDetail: oracleDraftField(oracleDraft, "detail"),
     oracleSkipWarning: typeof skipWarning === "string" ? skipWarning : "",
     reviewNotes: stringList(o, "review_notes", at),
+    planBudgetLines: numberOr(o, "plan_budget_lines", at, 0),
     activeJob: isObject(activeJob) ? decodeActiveJob(activeJob, `${at}.active_job`) : null,
     oracleDraftCriteria: oracleDraftCriteria(oracleDraft, `${at}.oracle_draft.criteria`),
     nextAction: optString(o, "next_action", at),

@@ -74,6 +74,10 @@
       "note": "Otherwise fine."
     }
   ],
+  "review_notes": [
+    "Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget."
+  ],
+  "plan_budget_lines": 400,
   "title": "Add idempotency keys to checkout",
   "spec": "# Idempotency keys for checkout\n\n## Problem\n\nA retried checkout charges the card twice.\n\n## Acceptance criteria\n\n1. A repeated request with the same key returns the first response.\n2. A key is scoped to one account.\n",
   "criteria": [
@@ -85,14 +89,16 @@
     {
       "index": 1,
       "spec_path": "/data/requests/req-plan-review/tickets/001.spec.md",
-      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
-      "full_path": "/data/requests/req-plan-review/tickets/001.spec.md"
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\nEstimated-Changed-Lines: 220\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "full_path": "/data/requests/req-plan-review/tickets/001.spec.md",
+      "estimated_changed_lines": 220
     },
     {
       "index": 2,
       "spec_path": "/data/requests/req-plan-review/tickets/002.spec.md",
-      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
-      "full_path": "/data/requests/req-plan-review/tickets/002.spec.md"
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\nEstimated-Changed-Lines: 620\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "full_path": "/data/requests/req-plan-review/tickets/002.spec.md",
+      "estimated_changed_lines": 620
     }
   ],
   "cost_summary": {

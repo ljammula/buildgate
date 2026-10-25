@@ -190,6 +190,36 @@ class BuildPromptTests(unittest.TestCase):
 		self.assertIn("never split", prompt.lower())
 		self.assertIn("wiring", prompt.lower())
 
+	def test_a_budget_renders_the_one_ticket_unless_over_rule_with_its_number(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			init_repo(workspace)
+			prompt, _ = plan_tickets.build_prompt(
+				VALID_SPEC, "text", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR, pr_budget_lines=400,
+			)
+		self.assertIn("If it is within 400 lines, write\nexactly one ticket", prompt)
+		self.assertIn("split it into the fewest tickets that each fit within 400 lines", prompt)
+		self.assertIn("Never split by layer", prompt)
+		self.assertIn("\nEstimated-Changed-Lines: <N>\n", prompt)
+		self.assertNotIn("Estimated-Changed-Lines: <N> (", prompt)
+		self.assertIn('digits only, e.g.\n"Estimated-Changed-Lines: 240"', prompt)
+		self.assertIn("not a whole number above zero refuses the plan", prompt)
+		self.assertNotIn("never gates", prompt)
+		self.assertNotIn("~400", prompt)
+		self.assertNotIn("{", prompt.split("Decomposition rule:")[1].split("Tests rule:")[0])
+
+	def test_no_budget_renders_the_one_ticket_rule_without_a_number(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			init_repo(workspace)
+			prompt, _ = plan_tickets.build_prompt(
+				VALID_SPEC, "text", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR, pr_budget_lines=0,
+			)
+		rule = prompt.split("Decomposition rule:")[1].split("Tests rule:")[0]
+		self.assertIn("write exactly one ticket unless the spec's parts are independently\nshippable", rule)
+		self.assertNotRegex(rule, r"\d")
+		self.assertIn("Never split by layer", rule)
+
 	def test_records_committed_agents_md_without_pasting_it(self):
 		# The harness loads AGENTS.md into its own system prompt; a copy in
 		# this prompt would reach the model twice.
@@ -381,6 +411,45 @@ class RunPlanTests(unittest.TestCase):
 				with self.assertRaises(SystemExit) as raised:
 					plan_tickets.main()
 		self.assertEqual(raised.exception.code, 2)
+
+	def test_pr_budget_lines_option_reaches_run_plan_and_rejects_a_negative(self):
+		base_argv = [
+			str(PLAN_TICKETS_SCRIPT), "--spec", "/tmp/spec.md", "--request", "/tmp/request.md",
+			"--criteria-file", "/tmp/criteria.md",
+			"--workspace", "/tmp/work", "--verify-command", "make verify",
+			"--out-dir", "/tmp/tickets", "--evidence", "/tmp/evidence.json",
+		]
+		for extra, want in (([], 0), (["--pr-budget-lines", "400"], 400), (["--pr-budget-lines", "0"], 0)):
+			with self.subTest(extra=extra):
+				with mock.patch.object(sys, "argv", base_argv + extra), mock.patch.object(plan_tickets, "run_plan", return_value=0) as run_plan:
+					self.assertEqual(plan_tickets.main(), 0)
+				self.assertEqual(run_plan.call_args.kwargs["pr_budget_lines"], want)
+		with mock.patch.object(sys, "argv", base_argv + ["--pr-budget-lines", "-1"]):
+			with contextlib.redirect_stderr(io.StringIO()):
+				with self.assertRaises(SystemExit) as raised:
+					plan_tickets.main()
+		self.assertEqual(raised.exception.code, 2)
+
+	def test_budget_reaches_the_prompt_the_agent_is_given(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory) / "repo"
+			workspace.mkdir()
+			init_repo(workspace)
+			spec_path = Path(directory) / "spec.md"
+			spec_path.write_text(VALID_SPEC)
+			request_path = Path(directory) / "request.md"
+			request_path.write_text("Add a feature")
+			draft_dir = workspace / plan_tickets.DRAFT_RELATIVE_DIR
+			commands = []
+			with mock.patch.object(
+				build_app, "sh",
+				side_effect=scripted_pi(0, "", writes_tickets={"001.spec.md": VALID_TICKET}, draft_dir=draft_dir, commands=commands),
+			):
+				plan_tickets.run_plan(
+					workspace, spec_path, request_path, "make verify", Path(directory) / "tickets", Path(directory) / "evidence.json",
+					timeout_minutes=1, pr_budget_lines=250,
+				)
+		self.assertIn("within 250 lines", " ".join(" ".join(map(str, c)) for c in commands))
 
 	def test_feedback_file_reaches_the_prompt(self):
 		# run_plan's own --feedback-file plumbing, end to end.

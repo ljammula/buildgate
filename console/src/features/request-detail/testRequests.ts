@@ -40,8 +40,14 @@ export function ticketWire(o: {
   prUrl?: string;
   prState?: string;
   content?: string;
+  estimatedChangedLines?: number;
+  builtChangedLines?: number;
 }): Wire {
   return {
+    ...(o.estimatedChangedLines === undefined
+      ? {}
+      : { estimated_changed_lines: o.estimatedChangedLines }),
+    ...(o.builtChangedLines === undefined ? {} : { built_changed_lines: o.builtChangedLines }),
     index: o.index,
     spec_path: o.specPath ?? "",
     full_path: o.fullPath ?? "",

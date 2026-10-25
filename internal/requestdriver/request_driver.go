@@ -541,6 +541,8 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	testPatterns := inputs.testPatterns
 	criteriaCount := inputs.criteriaCount
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
+	// The budget the planner is told is the one the review's notes read.
+	r.PlanBudgetLines = cfg.Settings.PRBudgetLines
 
 	runner = withPlanImport(runner)
 	reviewedTickets, reviewErr := ReviewedTickets(dataDir, r)
@@ -2219,6 +2221,9 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		}
 		if problem := ticketProtectedPaths(ticket.Filename, allowed, required); problem != "" {
 			infeasible = append(infeasible, problem)
+		}
+		if _, _, err := ticketspec.ParseEstimatedChangedLines(ticketPath); err != nil {
+			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		}
 		testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(ticketPath)
 		if err != nil {

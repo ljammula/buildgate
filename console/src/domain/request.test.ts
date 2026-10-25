@@ -135,6 +135,8 @@ test("review_notes are the server's list, empty when absent", () => {
     "criterion 1 names `a.go`",
   ]);
   expect(request({}).reviewNotes).toEqual([]);
+  expect(request({}).planBudgetLines).toBe(0);
+  expect(request({ plan_budget_lines: 400 }).planBudgetLines).toBe(400);
   expect(request({ review_notes: null }).reviewNotes).toEqual([]);
 });
 
@@ -389,6 +391,7 @@ test("request-every-field decodes with every optional field populated", () => {
   expect(r.quarantineCheck).toBe("every-field quarantine_check");
   expect(r.oracleSkipWarning).toBe("every-field oracle_skip_warning");
   expect(r.reviewNotes).toEqual(["every-field review_notes"]);
+  expect(r.planBudgetLines).toBe(3);
   expect(r.oracleDraftStatus).toBe("drafted");
   expect(r.oracleDraftDetail).toBe("every-field detail");
   expect(r.oracleDraftCriteria).toEqual([
@@ -443,6 +446,8 @@ test("request-every-field decodes with every optional field populated", () => {
       // not a review round.
       reviewRounds: [],
       activeRoundRunId: "",
+      estimatedChangedLines: 0,
+      builtChangedLines: 0,
       roundTags: [
         {
           n: 3,
