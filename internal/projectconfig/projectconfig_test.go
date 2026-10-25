@@ -628,3 +628,17 @@ func TestLoadWithoutFileHasNoHash(t *testing.T) {
 		t.Fatalf("Load = %v, %v, %v, want nil, false, nil", cfg, found, err)
 	}
 }
+
+func TestLoadRejectsRootedOrGlobbedTestPatternDirectoryEntry(t *testing.T) {
+	for _, entry := range []string{"/", "/x/", "*/tests/", "test[s]/"} {
+		root := t.TempDir()
+		initGitRepo(t, root)
+		yml := "test_patterns:\n  - \"" + entry + "\"\n"
+		if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(root); err == nil {
+			t.Fatalf("expected error for test_patterns entry %q", entry)
+		}
+	}
+}

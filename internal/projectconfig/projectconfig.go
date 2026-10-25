@@ -94,7 +94,9 @@ type Config struct {
 	// (path.Match syntax) matched against a run's changed-file inventory,
 	// both the full repo-relative path and the bare basename, so
 	// "*_test.go" matches "internal/foo/bar_test.go" via the basename
-	// form without also having to be written as "**/*_test.go". Empty
+	// form without also having to be written as "**/*_test.go". An entry
+	// ending in "/" names a test directory: any file under a directory of
+	// that name counts ("__tests__/" matches "src/__tests__/a.js"). Empty
 	// (the default) falls back to policy.DefaultTestPatterns.
 	TestPatterns []string `yaml:"test_patterns"`
 	// RequiredBinaries names executables the operator-selected worker image
@@ -304,6 +306,12 @@ func (c *Config) Validate() error {
 	for _, p := range c.TestPatterns {
 		if p == "" {
 			return errors.New("test_patterns must not contain an empty entry")
+		}
+		if strings.HasPrefix(p, "/") {
+			return fmt.Errorf("test_patterns entry %q must not begin with \"/\": a directory entry is relative, like \"__tests__/\"", p)
+		}
+		if strings.HasSuffix(p, "/") && strings.ContainsAny(p, "*?[") {
+			return fmt.Errorf("test_patterns directory entry %q must not contain a glob character: it names a directory literally, like \"__tests__/\"", p)
 		}
 	}
 	if err := validateCommandList("setup", c.Setup); err != nil {

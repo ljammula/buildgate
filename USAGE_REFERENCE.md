@@ -677,6 +677,7 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 # test_patterns:                                     # glob patterns for the always-on "tests_added" gate
 #   - "*_test.go"
 #   - "*.spec.ts"
+#   - "__tests__/"                                  # an entry ending in "/" names a test directory
 # required_binaries:                                 # bare executable names required in the final worker image; doctor checks the configured base image
 #   - cargo
 #   - rustc
@@ -744,7 +745,11 @@ operator-approved worker image, write an explicit `verify_command`, and use
 
 Profile test patterns are suggestions only, and a profile may omit a pattern
 when it cannot safely cover common layouts. The `tests_added` gate uses
-committed `test_patterns` or the global defaults. For example, the Rust
+committed `test_patterns` or the global defaults. Doctor's candidate adds
+each test directory (`__tests__/`, `test/`, `tests/`, `spec/`, `specs/`) it
+finds holding files of the profile's languages that the profile's name patterns
+miss, and doctor flags a committed `test_patterns` that misses such a directory
+the same way. For example, the Rust
 profile does not suggest a file pattern because in-source unit tests and
 `tests/` integration tests need different coverage. Baseline failure names are
 parsed for Go and pytest only. Other formats remain fail-closed and may halt
@@ -942,10 +947,13 @@ pristine read-only host copy over that path for the gate's own container
 run.
 
 `test_patterns` bounds the always-on `tests_added` gate: passes when a
-changed file matches one of these globs (full path or basename), or the
+changed file matches one of these globs (full path or basename) or sits under
+a test directory (an entry ending in `/`, like `__tests__/`, matches any file
+under a directory of that name), or the
 ticket declares `Tests-Required: no -- <reason>` in spec.md (recorded on
 the release decision). Unset falls back to
-`policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust); this
+`policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust, plus
+`__tests__/`); this
 gate always runs. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never satisfy
 `tests_added` and it declares no `Tests-Required` opt-out.

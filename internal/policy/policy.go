@@ -185,6 +185,36 @@ var DefaultTestPatterns = []string{
 	"*Test.java",
 	"*Tests.cs",
 	"*_test.rs",
+	"__tests__/",
+}
+
+// IsTestFile reports whether the repo-relative file counts as a test file
+// under patterns: the single matcher behind the tests_added gate and the
+// plan-time feasibility check. A pattern ending in "/" names a test
+// directory and matches any file with that directory as a path segment
+// sequence anywhere in its path ("__tests__/" matches "__tests__/a.js" and
+// "src/x/__tests__/a.js", not "my__tests__/a.js"). Any other pattern is a
+// path.Match glob matched against the full path and the basename; a
+// malformed pattern never matches.
+func IsTestFile(file string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.HasSuffix(p, "/") {
+			if strings.HasPrefix(p, "/") {
+				continue
+			}
+			if strings.Contains("/"+file, "/"+p) {
+				return true
+			}
+			continue
+		}
+		if matched, err := path.Match(p, file); err == nil && matched {
+			return true
+		}
+		if matched, err := path.Match(p, path.Base(file)); err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 // TestsAdded evaluates the tests_added gate: it passes when at least
@@ -215,13 +245,8 @@ func TestsAdded(changed []string, patterns []string, optOutReason string) run.Ga
 		patterns = DefaultTestPatterns
 	}
 	for _, f := range changed {
-		for _, p := range patterns {
-			if matched, _ := path.Match(p, f); matched {
-				return run.GateResult{Check: "tests_added", Passed: true}
-			}
-			if matched, _ := path.Match(p, path.Base(f)); matched {
-				return run.GateResult{Check: "tests_added", Passed: true}
-			}
+		if IsTestFile(f, patterns) {
+			return run.GateResult{Check: "tests_added", Passed: true}
 		}
 	}
 	return run.GateResult{Check: "tests_added", Passed: false}
@@ -276,13 +301,8 @@ func TicketTestsAddedFeasible(allowed []string, patterns []string, optOutReason 
 		if strings.ContainsAny(entry, "*?[") {
 			return true
 		}
-		for _, p := range patterns {
-			if matched, err := path.Match(p, entry); err == nil && matched {
-				return true
-			}
-			if matched, err := path.Match(p, path.Base(entry)); err == nil && matched {
-				return true
-			}
+		if IsTestFile(entry, patterns) {
+			return true
 		}
 	}
 	return false
