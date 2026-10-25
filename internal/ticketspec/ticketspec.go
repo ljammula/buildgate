@@ -733,6 +733,30 @@ func forEachTopLevelLine(specPath string, fn func(line string) (stop bool)) erro
 	return nil
 }
 
+// FenceVerbatim returns content inside a tilde fence that nothing in content
+// can close: one tilde longer than the longest tilde run that opens any of
+// its lines, and at least four. Every reader of a ticket's machine-readable
+// lines (forEachTopLevelLine, GoalTitle) skips a fenced block, so a document
+// quoted this way into a build input can never declare a header key, a
+// required string or the ticket's goal.
+func FenceVerbatim(content string) string {
+	longest := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		n := 0
+		for n < len(trimmed) && trimmed[n] == '~' {
+			n++
+		}
+		longest = max(longest, n)
+	}
+	fence := strings.Repeat("~", max(4, longest+1))
+	body := content
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return fence + "\n" + body + fence + "\n"
+}
+
 // ClosingFenceIfOpen returns the delimiter line that closes a Markdown fence
 // content leaves open at end of input, or "" when every fence is closed --
 // judged by the same fenceMarker/closesFence rules forEachTopLevelLine
@@ -893,9 +917,27 @@ func parseGoalSection(specPath string) (string, error) {
 
 	var lines []string
 	inGoal := false
+	inFence := false
+	var fenceChar byte
+	var fenceLen int
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		trimmed := strings.TrimSpace(scanner.Text())
+		// A "## Goal" inside a fenced block (an approved spec quoted into a
+		// build input by FenceVerbatim) is content, never the ticket's goal.
+		if inFence {
+			if closesFence(trimmed, fenceChar, fenceLen) {
+				inFence = false
+			}
+			continue
+		}
+		if ch, n := fenceMarker(trimmed); ch != 0 {
+			if inGoal && len(lines) > 0 {
+				return strings.Join(lines, " "), nil
+			}
+			inFence, fenceChar, fenceLen = true, ch, n
+			continue
+		}
 		switch {
 		case !inGoal:
 			if trimmed == "## Goal" {

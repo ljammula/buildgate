@@ -699,6 +699,23 @@ func TestGoalTitleReadsSanitizesAndCaps(t *testing.T) {
 	}
 }
 
+func TestGoalTitleSkipsAGoalInsideAFence(t *testing.T) {
+	path := writeSpec(t, FenceVerbatim("## Goal\n\nquoted goal\n~~~\n")+"\n## Goal\n\nthe ticket's goal\n")
+	if got := GoalTitle(path); got != "the ticket's goal" {
+		t.Errorf("GoalTitle = %q, want the goal outside the fence", got)
+	}
+}
+
+func TestFenceVerbatimOutlastsEveryTildeRunInTheContent(t *testing.T) {
+	got := FenceVerbatim("a\n  ~~~~~~ x\nb")
+	if !strings.HasPrefix(got, "~~~~~~~\na\n") || !strings.HasSuffix(got, "b\n~~~~~~~\n") {
+		t.Errorf("FenceVerbatim = %q, want a seven-tilde fence around the content", got)
+	}
+	if got := FenceVerbatim("plain"); got != "~~~~\nplain\n~~~~\n" {
+		t.Errorf("FenceVerbatim(plain) = %q", got)
+	}
+}
+
 // TestGoalTitleEmptyForMissingSpecOrGoalSection covers GoalTitle's
 // documented "never an error, just empty" contract: callers rely on this
 // to fall back to their own generic title/subject.

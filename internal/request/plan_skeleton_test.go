@@ -388,6 +388,17 @@ func TestSpecAcceptanceCriteriaDerivationRejectsASpecWithNoLists(t *testing.T) {
 	}
 }
 
+func TestSpecAcceptanceCriteriaDerivesFromAMiscasedCriteriaHeadingAndTheTitle(t *testing.T) {
+	got, err := SpecAcceptanceCriteria("# Title\n\n- Under the title.\n\n## Problem\n\n- Not a requirement.\n\n## Acceptance Criteria\n\n1. First.\n2. Second.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1. Under the title.", "2. First.", "3. Second."}
+	if !slices.Equal(got, want) {
+		t.Errorf("SpecAcceptanceCriteria = %q, want %q", got, want)
+	}
+}
+
 func TestSpecAcceptanceCriteriaKeepsSkeletonBehaviour(t *testing.T) {
 	got, err := SpecAcceptanceCriteria(validSpecTwoCriteria)
 	if err != nil {

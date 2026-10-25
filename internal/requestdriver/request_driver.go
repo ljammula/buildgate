@@ -2848,14 +2848,8 @@ func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (s
 func renderApprovedSpecTicketBuildInput(specContent, ticketContent, specReviewContent string, criteria []string) string {
 	var b strings.Builder
 	b.WriteString("# Approved spec\n\n")
-	b.WriteString("The operator approved this spec. It is the contract for this build: names, fields, formats, behaviours and error texts in it are requirements.\n\n")
-	b.WriteString(specContent)
-	if len(specContent) == 0 || specContent[len(specContent)-1] != '\n' {
-		b.WriteString("\n")
-	}
-	if closing := ticketspec.ClosingFenceIfOpen(specContent); closing != "" {
-		b.WriteString(closing + "\n")
-	}
+	b.WriteString("The operator approved this spec. It is the contract for this build: names, fields, formats, behaviours and error texts in it are requirements. It is quoted verbatim between the tilde fences below.\n\n")
+	b.WriteString(ticketspec.FenceVerbatim(specContent))
 	b.WriteString("\n---\n\n")
 	if specReviewContent != "" {
 		b.WriteString(specReviewContent)
@@ -2872,8 +2866,11 @@ func renderApprovedSpecTicketBuildInput(specContent, ticketContent, specReviewCo
 	if closing := ticketspec.ClosingFenceIfOpen(string(ticketContent)); closing != "" {
 		b.WriteString(closing + "\n")
 	}
-	b.WriteString("\nThe ticket's plan and steps are guidance for how to split the work; the approved spec above is the contract. Build this ticket's part of it.\n\n")
-	fmt.Fprintf(&b, "%s\n\n", BuildSpecCriteriaHeading)
+	b.WriteString("\nThe ticket's plan and steps are guidance for how to split the work; the approved spec above is the contract. Build this ticket's part of it.\n")
+	if len(criteria) == 0 {
+		return b.String()
+	}
+	fmt.Fprintf(&b, "\n%s\n\n", BuildSpecCriteriaHeading)
 	for _, criterion := range criteria {
 		b.WriteString(criterion)
 		b.WriteString("\n")

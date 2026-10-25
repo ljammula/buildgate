@@ -158,6 +158,7 @@
   "draft_oracles": true,
   "bug": true,
   "spec_imported": true,
+  "build_input": "every-field build_input",
   "plan_imported": true,
   "review_notes": [
     "every-field review_notes"

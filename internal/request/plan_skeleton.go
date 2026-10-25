@@ -405,7 +405,7 @@ func markdownHeadingLevel(raw string) int {
 func deriveAcceptanceCriteria(lines []string) []string {
 	var criteria []string
 	var sectionLines []string
-	active := false
+	active := true
 	flushSection := func() {
 		if !active {
 			sectionLines = nil
@@ -432,18 +432,18 @@ func deriveAcceptanceCriteria(lines []string) []string {
 		if !wasInFence && !isFence {
 			switch markdownHeadingLevel(raw) {
 			case 1:
+				// Items under the title, before any "## " section, are
+				// requirements as much as a section's are.
 				flushSection()
-				active = false
+				active = true
 				continue
 			case 2:
 				flushSection()
 				heading := strings.ToLower(strings.TrimSpace(raw[2:]))
+				// A differently cased "## Acceptance Criteria" is not the
+				// named section; its items are derived like any section's.
 				_, excluded := nonRequirementSpecSections[heading]
-				// A differently cased acceptance heading is still a named
-				// section for derivation purposes. Leave it to the unchanged
-				// exact-heading parser to report it as missing instead of
-				// treating its numbered lines as unrelated derived criteria.
-				active = !excluded && !strings.EqualFold(heading, strings.TrimPrefix(specAcceptanceCriteriaHeading, "## "))
+				active = !excluded
 				continue
 			}
 		}
