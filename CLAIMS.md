@@ -287,6 +287,10 @@ reviews, bugs and fixes is kept outside this repo.
 
 Real, currently-open gaps.
 
+- **SC-022 is planned, not enforced.** A reviewer's finding still refuses
+  through the review verdicts of the code-review and conformity rows above;
+  the `review_reproduction` check that replaces them, and its row here, land
+  with its code.
 - **The Temporal-path scenario suite (`TestParityDirectAndTemporalPaths`)
   does not cover `reference_oracle` pass/fail/tamper, or a
   real-engine/live-Docker run.** `reference_oracle` pass/fail has its own
