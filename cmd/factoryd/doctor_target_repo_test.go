@@ -64,7 +64,7 @@ func TestDoctorLanguageProfileOffersReviewableFactoryYMLFields(t *testing.T) {
 		`required_binaries: ["java", "mvn"]`,
 		`test_patterns: ["*Test.java"]`,
 		"project-sandbox-image supports: pom.xml",
-		"registry proxy ecosystems: none",
+		"registry proxy ecosystems: Maven Central",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())

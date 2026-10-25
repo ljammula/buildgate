@@ -14,15 +14,16 @@ func writeFixtureRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod":                          "module fixture\n",
-		"go.sum":                          "",
-		"internal/sandbox/Dockerfile":     "FROM golang\n",
-		"cmd/bg-forward/main.go":          "package main\n",
-		"internal/meter/meter_test.go":    "package meter\n// excluded\n",
-		"cmd/factoryd-meter/main.go":      "package main\n",
-		"internal/meter/meter.go":         "package meter\n",
-		"cmd/registry-proxy/main.go":      "package main\n",
-		"internal/registryproxy/proxy.go": "package registryproxy\n",
+		"go.mod":                              "module fixture\n",
+		"go.sum":                              "",
+		"internal/sandbox/Dockerfile":         "FROM golang\n",
+		"internal/sandbox/maven-settings.xml": "<settings/>\n",
+		"cmd/bg-forward/main.go":              "package main\n",
+		"internal/meter/meter_test.go":        "package meter\n// excluded\n",
+		"cmd/factoryd-meter/main.go":          "package main\n",
+		"internal/meter/meter.go":             "package meter\n",
+		"cmd/registry-proxy/main.go":          "package main\n",
+		"internal/registryproxy/proxy.go":     "package registryproxy\n",
 	}
 	for rel, content := range files {
 		abs := filepath.Join(root, rel)

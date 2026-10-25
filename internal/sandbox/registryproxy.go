@@ -64,7 +64,22 @@ const (
 	// DefaultRegistryProxyRoutes: internal/registryproxy.Server.matchRoute
 	// takes the first route whose prefix matches.
 	goSumDBRoutePrefix = "/gomodproxy/sumdb/sum.golang.org/"
+	// mavenRoutePrefix fronts Maven Central's repository layout (POMs, jars,
+	// checksums, maven-metadata.xml). Maven reads no environment variable
+	// for a mirror: the worker image's global settings file names this
+	// route through BUILDGATE_MAVEN_MIRROR (see mavenSettingsPath).
+	mavenRoutePrefix = "/maven/"
+	// rubygemsRoutePrefix fronts rubygems.org: Bundler's compact index
+	// (/versions, /info/<gem>) and the gem downloads (/gems/<name>.gem).
+	// None of them names an absolute URL in its body, so nothing is
+	// rewritten.
+	rubygemsRoutePrefix = "/rubygems/"
 )
+
+// mavenSettingsPath is the global Maven settings file baked into the worker
+// image from internal/sandbox/maven-settings.xml: one mirror of every
+// repository, whose URL is the BUILDGATE_MAVEN_MIRROR environment variable.
+const mavenSettingsPath = "/etc/buildgate/maven/settings.xml"
 
 // goSumDBURL is the checksum database's URL on the registry proxy whose Go
 // module route is at goProxyBase.
@@ -94,10 +109,10 @@ type RegistryProxyRoute struct {
 }
 
 // DefaultRegistryProxyRoutes returns the documented ecosystems (npm, PyPI,
-// Go module proxy, and the Go checksum database's own proxy passthrough)
-// pointed at their real public upstreams -- cmd/factoryd's -registry-proxy
-// defaults to exactly this when an operator doesn't override individual
-// upstreams. goSumDBRoutePrefix is listed before goProxyRoutePrefix
+// Go module proxy, the Go checksum database's own proxy passthrough, Maven
+// Central and RubyGems) pointed at their real public upstreams --
+// cmd/factoryd's -registry-proxy defaults to exactly this when an operator
+// doesn't override individual upstreams. goSumDBRoutePrefix is listed before goProxyRoutePrefix
 // deliberately -- see that constant's own doc comment for why the order
 // matters.
 func DefaultRegistryProxyRoutes() []RegistryProxyRoute {
@@ -122,41 +137,63 @@ func DefaultRegistryProxyRoutes() []RegistryProxyRoute {
 		// zip. A plain redirect target, no href rewriting: the go command
 		// only ever follows the Location the proxy already resolved.
 		{Prefix: goProxyRoutePrefix, Upstream: "https://proxy.golang.org", AllowedHosts: []string{"storage.googleapis.com"}},
+		// Neither redirects, so neither allows a redirect host:
+		// repo.maven.apache.org answers POMs, jars, checksums and
+		// maven-metadata.xml itself, and rubygems.org answers /versions,
+		// /info/<gem>, /gems/<name>.gem and the legacy specs.4.8.gz and
+		// quick/Marshal.4.8 indexes itself.
+		{Prefix: mavenRoutePrefix, Upstream: "https://repo.maven.apache.org/maven2"},
+		{Prefix: rubygemsRoutePrefix, Upstream: "https://rubygems.org"},
 	}
 }
 
+// RegistryProxyUpstreams is the upstream of each default route: the public
+// registry, or an operator's corporate mirror of it (the
+// registry_proxy_*_upstream session-config keys).
+type RegistryProxyUpstreams struct {
+	NPM       string
+	PyPI      string
+	PyPIFiles string
+	GoProxy   string
+	GoSumDB   string
+	Maven     string
+	RubyGems  string
+}
+
+// upstream is the operator's upstream for the default route at prefix.
+func (u RegistryProxyUpstreams) upstream(prefix string) string {
+	return map[string]string{
+		npmRoutePrefix:       u.NPM,
+		pypiRoutePrefix:      u.PyPI,
+		pypiFilesRoutePrefix: u.PyPIFiles,
+		goProxyRoutePrefix:   u.GoProxy,
+		goSumDBRoutePrefix:   u.GoSumDB,
+		mavenRoutePrefix:     u.Maven,
+		rubygemsRoutePrefix:  u.RubyGems,
+	}[prefix]
+}
+
 // RegistryProxyRoutesWithUpstreams is DefaultRegistryProxyRoutes with each
-// route's upstream replaced by the operator's own (cmd/factoryd's
-// -registry-proxy-*-upstream flags, for a corporate mirror). The PyPI
-// index route's file-link rewrite follows the pypiFiles host, as before.
-// A route whose upstream is left at the public default keeps that
-// default's redirect allowlist; a mirror gets none, since where it
-// redirects is unknown here. One place, not a second hand-written copy
-// of the route table in cmd/factoryd: the previous copy there silently
-// dropped the Go route's storage.googleapis.com redirect host the moment
-// it was added to the defaults (found live 2026-09-10, second run).
-func RegistryProxyRoutesWithUpstreams(npm, pypi, pypiFiles, goProxy, goSumDB string) ([]RegistryProxyRoute, error) {
-	pypiFilesURL, err := url.Parse(pypiFiles)
+// route's upstream replaced by the operator's own (the
+// registry_proxy_*_upstream session-config keys, for a corporate mirror).
+// The PyPI index route's file-link rewrite follows the pypiFiles host. A
+// route whose upstream is left at the public default keeps that default's
+// redirect allowlist; a mirror gets none, since where it redirects is
+// unknown here. One place, not a second hand-written copy of the route
+// table in cmd/factoryd, so a redirect host added to the defaults cannot be
+// dropped by a copy that misses it.
+func RegistryProxyRoutesWithUpstreams(upstreams RegistryProxyUpstreams) ([]RegistryProxyRoute, error) {
+	pypiFilesURL, err := url.Parse(upstreams.PyPIFiles)
 	if err != nil {
 		return nil, fmt.Errorf("pypi files upstream: %w", err)
 	}
 	routes := DefaultRegistryProxyRoutes()
 	for i := range routes {
-		var upstream string
-		switch routes[i].Prefix {
-		case npmRoutePrefix:
-			upstream = npm
-		case pypiRoutePrefix:
-			upstream = pypi
+		upstream := upstreams.upstream(routes[i].Prefix)
+		switch {
+		case routes[i].Prefix == pypiRoutePrefix:
 			routes[i].AllowedHosts = []string{pypiFilesURL.Host + "->" + pypiFilesRoutePrefix}
-		case pypiFilesRoutePrefix:
-			upstream = pypiFiles
-		case goProxyRoutePrefix:
-			upstream = goProxy
-		case goSumDBRoutePrefix:
-			upstream = goSumDB
-		}
-		if upstream != routes[i].Upstream && routes[i].Prefix != pypiRoutePrefix {
+		case upstream != routes[i].Upstream:
 			routes[i].AllowedHosts = nil
 		}
 		routes[i].Upstream = upstream

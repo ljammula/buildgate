@@ -18,7 +18,7 @@ const SandboxVersion = 1
 
 // SandboxRegistries are the package registries a Sandbox may list: the
 // ecosystems the registry proxy fronts.
-var SandboxRegistries = []string{"npm", "pypi", "go"}
+var SandboxRegistries = []string{"npm", "pypi", "go", "maven", "rubygems"}
 
 // MaxSandboxPaths bounds each of Sandbox.CachePaths and Sandbox.Inputs.
 const MaxSandboxPaths = 16

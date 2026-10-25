@@ -27,7 +27,7 @@ import (
 // reaches the built image, so a test-only change shouldn't demand a
 // rebuild).
 var imagePaths = map[string][]string{
-	"worker":         {"internal/sandbox/Dockerfile", "go.mod", "go.sum", "cmd/bg-forward"},
+	"worker":         {"internal/sandbox/Dockerfile", "internal/sandbox/maven-settings.xml", "go.mod", "go.sum", "cmd/bg-forward"},
 	"meter":          {"go.mod", "go.sum", "cmd/factoryd-meter", "internal/meter"},
 	"registry-proxy": {"go.mod", "go.sum", "cmd/registry-proxy", "internal/registryproxy"},
 	// A pifork image is the operator's own Dockerfile layered onto the

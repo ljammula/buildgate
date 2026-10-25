@@ -11,6 +11,7 @@ import (
 	"buildgate/internal/projectconfig"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 )
 
@@ -90,6 +91,7 @@ func TestRegistryProxyPolicyIsNarrowedByTheCommittedBlock(t *testing.T) {
 	settings := sessionconfig.DefaultSettings()
 	tr.registryProxyNPMUpstream, tr.registryProxyPyPIUpstream, tr.registryProxyPyPIFilesUpstream = &settings.RegistryProxyNPMUpstream, &settings.RegistryProxyPyPIUpstream, &settings.RegistryProxyPyPIFilesUpstream
 	tr.registryProxyGoUpstream, tr.registryProxyGoSumDBUpstream = &settings.RegistryProxyGoUpstream, &settings.RegistryProxyGoSumDBUpstream
+	tr.registryProxyMavenUpstream, tr.registryProxyRubyGemsUpstream = &settings.RegistryProxyMavenUpstream, &settings.RegistryProxyRubyGemsUpstream
 	tr.registryProxyCacheBytes, tr.registryProxyMaxObjectBytes = &settings.RegistryProxyCacheBytes, &settings.RegistryProxyMaxObjectBytes
 	tr.registryProxyMaxConcurrent, tr.registryProxyUpstreamTimeout = &settings.RegistryProxyMaxConcurrentUpstream, &settings.RegistryProxyUpstreamTimeout
 	image := "registry-proxy@sha256:" + strings.Repeat("a", 64)
@@ -108,8 +110,10 @@ func TestRegistryProxyPolicyIsNarrowedByTheCommittedBlock(t *testing.T) {
 	}
 	tr.sandbox = nil
 	policy, err = tr.buildRegistryProxyPolicy()
-	if err != nil || len(policy.Routes) < 4 {
-		t.Errorf("without a block: %d routes, %v; want all of the operator's", len(policy.Routes), err)
+	// The session config's default upstreams are the public registries: the
+	// whole default route table, redirect hosts included.
+	if err != nil || !reflect.DeepEqual(policy.Routes, sandbox.DefaultRegistryProxyRoutes()) {
+		t.Errorf("without a block: routes %+v, %v; want every default route", policy.Routes, err)
 	}
 }
 

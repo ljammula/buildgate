@@ -1235,7 +1235,7 @@ func protectedComposeWorkerEnvironmentKey(key string) bool {
 	}
 	for _, prefix := range []string{
 		"ANTHROPIC_", "OPENAI_", "FACTORY", "SANDBOX_", "GIT_", "SF_", "COPILOT_", "PI_", "PIFORK_", "CODEX_",
-		"INFERENCE_RELAY_", "NPM_CONFIG_", "PIP_", "XDG_", "LD_", "DYLD_",
+		"INFERENCE_RELAY_", "NPM_CONFIG_", "PIP_", "MAVEN_", "MVNW_", "BUILDGATE_", "BUNDLE_", "GEM_", "XDG_", "LD_", "DYLD_",
 	} {
 		if strings.HasPrefix(key, prefix) {
 			return true

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven's global settings in the buildgate worker image, at
+  /etc/buildgate/maven/settings.xml (root-owned, read-only). A run whose
+  registry proxy has the Maven route sets MAVEN_ARGS to name this file with
+  -gs and BUILDGATE_MAVEN_MIRROR to that route's URL, so every repository a
+  build asks for, plugin repositories included, is fetched through the proxy.
+  Without that route nothing names this file and Maven is not affected.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>buildgate-registry-proxy</id>
+      <name>buildgate registry proxy</name>
+      <url>${env.BUILDGATE_MAVEN_MIRROR}</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+  </mirrors>
+</settings>

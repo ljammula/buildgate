@@ -230,6 +230,8 @@ func TestRegistriesNarrowTheProxyRoutes(t *testing.T) {
 		{[]string{"pypi"}, []string{"/pypi/", "/pypi-files/"}},
 		{[]string{"go"}, []string{"/gomodproxy/sumdb/sum.golang.org/", "/gomodproxy/"}},
 		{[]string{"go", "npm"}, []string{"/npm/", "/gomodproxy/sumdb/sum.golang.org/", "/gomodproxy/"}},
+		{[]string{"maven"}, []string{"/maven/"}},
+		{[]string{"rubygems"}, []string{"/rubygems/"}},
 	} {
 		got, err := sandbox.NarrowRegistryRoutes(all, tc.registries)
 		if err != nil {
@@ -253,7 +255,7 @@ func TestRegistriesNarrowTheProxyRoutes(t *testing.T) {
 	if _, err := sandbox.NarrowRegistryRoutes(all[:1], []string{"pypi"}); err == nil {
 		t.Error("a registry the proxy does not serve was accepted")
 	}
-	if _, err := sandbox.NarrowRegistryRoutes(all, []string{"rubygems"}); err == nil {
+	if _, err := sandbox.NarrowRegistryRoutes(all, []string{"cargo"}); err == nil {
 		t.Error("an unknown registry was accepted")
 	}
 	for _, name := range projectconfig.SandboxRegistries {

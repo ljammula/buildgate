@@ -6,9 +6,11 @@ import "fmt"
 // list (projectconfig.SandboxRegistries) to the proxy route prefixes that
 // serve it.
 var registryRoutePrefixes = map[string][]string{
-	"npm":  {npmRoutePrefix},
-	"pypi": {pypiRoutePrefix, pypiFilesRoutePrefix},
-	"go":   {goProxyRoutePrefix, goSumDBRoutePrefix},
+	"npm":      {npmRoutePrefix},
+	"pypi":     {pypiRoutePrefix, pypiFilesRoutePrefix},
+	"go":       {goProxyRoutePrefix, goSumDBRoutePrefix},
+	"maven":    {mavenRoutePrefix},
+	"rubygems": {rubygemsRoutePrefix},
 }
 
 // NarrowRegistryRoutes keeps only the routes that serve the named registries.

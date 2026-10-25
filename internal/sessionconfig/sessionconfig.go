@@ -83,6 +83,8 @@ type Config struct {
 	RegistryProxyPyPIFilesUpstream *string `yaml:"registry_proxy_pypi_files_upstream,omitempty"`
 	RegistryProxyGoUpstream        *string `yaml:"registry_proxy_go_upstream,omitempty"`
 	RegistryProxyGoSumDBUpstream   *string `yaml:"registry_proxy_gosumdb_upstream,omitempty"`
+	RegistryProxyMavenUpstream     *string `yaml:"registry_proxy_maven_upstream,omitempty"`
+	RegistryProxyRubyGemsUpstream  *string `yaml:"registry_proxy_rubygems_upstream,omitempty"`
 	// Workspaces allowlists the absolute workspace paths POST /requests
 	// (internal/api) will accept from an HTTP caller in
 	// addition to a workspace that is already the Workspace of some existing
@@ -514,6 +516,8 @@ type Settings struct {
 	RegistryProxyPyPIFilesUpstream     string
 	RegistryProxyGoUpstream            string
 	RegistryProxyGoSumDBUpstream       string
+	RegistryProxyMavenUpstream         string
+	RegistryProxyRubyGemsUpstream      string
 	RegistryProxyCacheBytes            int64
 	RegistryProxyMaxObjectBytes        int64
 	RegistryProxyMaxConcurrentUpstream int
@@ -638,6 +642,8 @@ func DefaultSettings() Settings {
 		RegistryProxyPyPIFilesUpstream:     "https://files.pythonhosted.org",
 		RegistryProxyGoUpstream:            "https://proxy.golang.org",
 		RegistryProxyGoSumDBUpstream:       "https://sum.golang.org",
+		RegistryProxyMavenUpstream:         "https://repo.maven.apache.org/maven2",
+		RegistryProxyRubyGemsUpstream:      "https://rubygems.org",
 		RegistryProxyCacheBytes:            1 << 30,
 		RegistryProxyMaxObjectBytes:        256 << 20,
 		RegistryProxyMaxConcurrentUpstream: 16,
@@ -787,6 +793,8 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	str(&s.RegistryProxyPyPIFilesUpstream, c.RegistryProxyPyPIFilesUpstream)
 	str(&s.RegistryProxyGoUpstream, c.RegistryProxyGoUpstream)
 	str(&s.RegistryProxyGoSumDBUpstream, c.RegistryProxyGoSumDBUpstream)
+	str(&s.RegistryProxyMavenUpstream, c.RegistryProxyMavenUpstream)
+	str(&s.RegistryProxyRubyGemsUpstream, c.RegistryProxyRubyGemsUpstream)
 	integer64(&s.RegistryProxyCacheBytes, c.RegistryProxyCacheBytes)
 	integer64(&s.RegistryProxyMaxObjectBytes, c.RegistryProxyMaxObjectBytes)
 	integer(&s.RegistryProxyMaxConcurrentUpstream, c.RegistryProxyMaxConcurrentUpstream)

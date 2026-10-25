@@ -14,7 +14,7 @@ import (
 
 // sandboxRegistryOfEcosystem maps a language profile's registry proxy
 // ecosystem to the registry name a sandbox block lists.
-var sandboxRegistryOfEcosystem = map[string]string{"npm": "npm", "PyPI": "pypi", "Go modules": "go"}
+var sandboxRegistryOfEcosystem = map[string]string{"npm": "npm", "PyPI": "pypi", "Go modules": "go", "Maven Central": "maven", "RubyGems": "rubygems"}
 
 // sandboxBlockDraft is the `sandbox:` block a repository's one detected
 // language profile suggests, as .factory.yml text, or "" when the profile has

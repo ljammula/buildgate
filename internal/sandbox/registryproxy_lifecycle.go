@@ -140,10 +140,10 @@ func (l *RegistryProxyLifecycle) UpstreamFailures(ctx context.Context) (count in
 // PrepareWorker points workerSpec at this run's already-started registry
 // proxy: its own internal network, and the package-manager environment
 // variables matching whichever of the fixed, well-known route prefixes
-// (npmRoutePrefix/pypiRoutePrefix/goProxyRoutePrefix) this policy
-// configured. A route using any other prefix is still proxied correctly by
-// the container itself, it just gets no automatic env wiring here -- the
-// caller's own build/verify script would need to reference it directly.
+// (npm, PyPI, Go, Maven, RubyGems) this policy configured. A route using any
+// other prefix is still proxied correctly by the container itself, it just
+// gets no automatic env wiring here -- the caller's own build/verify script
+// would need to reference it directly.
 func (l *RegistryProxyLifecycle) PrepareWorker(workerSpec LaunchSpec) (LaunchSpec, error) {
 	if l.handle == nil {
 		return LaunchSpec{}, errors.New("registry proxy lifecycle has no started registry proxy")
@@ -254,6 +254,13 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 			// directly by name -- it's only ever reached via a link the
 			// pypiRoutePrefix route's own response rewriting (internal/
 			// registryproxy.Route.RewriteHrefHosts) already pointed here.
+		case mavenRoutePrefix, rubygemsRoutePrefix:
+			keys, values := mavenAndRubyGemsEnvironment(route.Prefix, base)
+			for _, key := range keys {
+				forbidden[key] = true
+			}
+			additions = append(additions, values...)
+			workerSpec.Scratch = true
 		}
 	}
 	if forbidden["GOPROXY"] {
@@ -279,6 +286,50 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 	}
 	workerSpec.Environment = append(environment, additions...)
 	return workerSpec, nil
+}
+
+// mavenAndRubyGemsEnvironment is the environment the Maven or the RubyGems
+// route at base gives the worker, as the keys it replaces and the KEY=value
+// entries that replace them. Both put what they download on the disk-backed
+// per-launch scratch volume (LaunchSpec.Scratch): the image's own paths are
+// read-only, the memory-backed $HOME is too small for a real dependency
+// graph, and /tmp is noexec, where a native gem extension could not run.
+//
+// Maven reads no environment variable for a mirror, so MAVEN_ARGS (read by
+// Maven 3.9 and later) names the image's global settings file, whose single
+// mirror of every repository is BUILDGATE_MAVEN_MIRROR, and puts the local
+// repository on the scratch volume. Replacing the global settings also drops
+// the distribution's own, which carry Maven's block on plain-HTTP mirrors.
+// MVNW_REPOURL sends the Maven wrapper's own download of Maven to the same
+// route. A repository's .mvn/maven.config or settings.xml can name another
+// mirror, but the sandbox's network policy reaches no host but the proxy.
+//
+// Bundler's mirror.all setting sends every gem source to the route; gems
+// are installed under BUNDLE_PATH, and GEM_HOME is where a `gem install`
+// writes (it reads no mirror setting: it takes the route as --source).
+func mavenAndRubyGemsEnvironment(prefix, base string) (keys, values []string) {
+	scratch := WorkerScratchMount
+	var entries [][2]string
+	switch prefix {
+	case mavenRoutePrefix:
+		mirror := strings.TrimRight(base, "/")
+		entries = [][2]string{
+			{"BUILDGATE_MAVEN_MIRROR", mirror},
+			{"MAVEN_ARGS", "-gs " + mavenSettingsPath + " -Dmaven.repo.local=" + scratch + "/maven-repository"},
+			{"MVNW_REPOURL", mirror},
+		}
+	case rubygemsRoutePrefix:
+		entries = [][2]string{
+			{"BUNDLE_MIRROR__ALL", base},
+			{"BUNDLE_PATH", scratch + "/bundle"},
+			{"GEM_HOME", scratch + "/gems"},
+		}
+	}
+	for _, entry := range entries {
+		keys = append(keys, entry[0])
+		values = append(values, entry[0]+"="+entry[1])
+	}
+	return keys, values
 }
 
 // Cleanup tears this run's registry proxy down and stops the owner

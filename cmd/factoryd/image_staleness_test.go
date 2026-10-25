@@ -106,10 +106,11 @@ func writeStaleFixtureRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod":                      "module fixture\n",
-		"go.sum":                      "",
-		"internal/sandbox/Dockerfile": "FROM golang\n",
-		"cmd/bg-forward/main.go":      "package main\n",
+		"go.mod":                              "module fixture\n",
+		"go.sum":                              "",
+		"internal/sandbox/Dockerfile":         "FROM golang\n",
+		"internal/sandbox/maven-settings.xml": "<settings/>\n",
+		"cmd/bg-forward/main.go":              "package main\n",
 	}
 	for rel, content := range files {
 		abs := filepath.Join(root, rel)
