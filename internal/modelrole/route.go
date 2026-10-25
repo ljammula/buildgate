@@ -81,6 +81,25 @@ const (
 	skipReasonCredentialUnsafe      = "route's credential is unsafe for its upstream"
 )
 
+// meterMaxRequestBytes is the largest request body the meter lets a route
+// send. A value the session config sets wins (it is already within
+// sessionconfig.GatewayMaxRequestBytes). Otherwise it follows the model: a
+// harness resends the whole conversation with every request, so a long
+// session on a large-context model outgrows any fixed small size well inside
+// its window. The default is the window times 32 bytes a token (JSON
+// escaping, tool-call structure and the encrypted reasoning items the
+// Responses API resends), clamped to 1 MiB .. sessionconfig.GatewayMaxRequestBytes,
+// which is also what a model with no declared window gets.
+func meterMaxRequestBytes(configured int64, contextWindow int) int64 {
+	if configured > 0 {
+		return configured
+	}
+	if contextWindow <= 0 {
+		return sessionconfig.GatewayMaxRequestBytes
+	}
+	return min(max(int64(1<<20), int64(contextWindow)*32), sessionconfig.GatewayMaxRequestBytes)
+}
+
 // relayPolicyForRoute builds the candidate sandbox.RoutePolicy a
 // particular (model, route) pair would launch with: every session-scoped
 // field (budgets, window/ceiling, base pricing) comes from s
@@ -128,7 +147,7 @@ func relayPolicyForRoute(s sessionconfig.Settings, model sessionconfig.Model, ro
 	return sandbox.RoutePolicy{
 		Upstream:                     route.Upstream,
 		AllowedPathPrefix:            allowedPathPrefix,
-		MaxRequestBytes:              s.MeterMaxRequestBytes,
+		MaxRequestBytes:              meterMaxRequestBytes(s.MeterMaxRequestBytes, model.ContextWindow),
 		RequestsPerMinute:            s.MeterRequestsPerMinute,
 		TokenBudget:                  s.MeterTokenBudget,
 		TokenBudgetWindow:            s.MeterTokenBudgetWindow,

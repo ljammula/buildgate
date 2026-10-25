@@ -1970,7 +1970,7 @@ limits for API-started runs.
 | `sandbox_install_cache_images` | `3`, at least `1`. How many install images of one repository are kept after a new one is built (see "Install image"). |
 | `max_parallel_jobs` | `2`, at least `1` (two builds fit a 4 GiB Docker VM next to Temporal). How many model jobs and builds `factoryd worker` runs at once across all requests. Each build's sandbox takes up to `sandbox_memory`. |
 | `memory.repositories` | Unset: repository memory is off for every repository. A list of `{path, budget_lines, budget_chars}`: `path` is the repository's root, absolute or `~/` (listed once; matched by root path with symlinks resolved, never by directory name); `budget_lines` 5 to 80 (default 40) and `budget_chars` 500 to 6000 (default 3000) bound the section memory keeps in its `AGENTS.md`. A memory action also stops while the project's kill switch is engaged or its `off` marker exists (`<data-dir>/memory/<project>/off`) |
-| `meter_max_request_bytes` | `1048576` |
+| `meter_max_request_bytes` | Unset: the route's model `context_window` x 32 bytes, between 1 MiB and 4 MiB (4 MiB with no `context_window`). Set: that value, from `1` to `4194304`; the OpenShell gateway's payload cap is 4 MiB, so a larger value is refused |
 | `meter_requests_per_minute` | `60` |
 | `meter_token_budget` | `1000000` |
 | `meter_token_budget_window` | `1h` |
