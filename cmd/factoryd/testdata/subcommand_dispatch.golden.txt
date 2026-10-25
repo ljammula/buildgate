@@ -242,6 +242,12 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd reject [flags] <request-id>
 stderr:   Send a review back for a redraft, with the reason
 
+$ factoryd answer -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd answer [flags] <request-id>
+stderr:   Answer a question of a handed-over spec's read-back at spec review
+
 $ factoryd cancel -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag

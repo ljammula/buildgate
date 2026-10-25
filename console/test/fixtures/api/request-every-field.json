@@ -48,6 +48,7 @@
   "quarantine_check": "every-field quarantine_check",
   "approved_by": "every-field approved_by",
   "approved_at": "2026-09-10T09:00:00Z",
+  "approved_read_back_sha256": "every-field approved_read_back_sha256",
   "spec_evidence": {
     "usage": {
       "input": 100,
@@ -141,7 +142,16 @@
           "quote": "every-field quote"
         }
       ],
-      "note": "every-field note"
+      "note": "every-field note",
+      "read_back_answers": [
+        {
+          "id": "every-field id",
+          "text": "every-field text",
+          "answer": "every-field answer",
+          "answered_by": "every-field answered_by",
+          "answered_at": "2026-09-10T09:00:00Z"
+        }
+      ]
     }
   ],
   "edits": [
@@ -159,6 +169,19 @@
   "bug": true,
   "spec_imported": true,
   "build_input": "every-field build_input",
+  "read_back": {
+    "summary": "every-field summary",
+    "questions": [
+      {
+        "id": "every-field id",
+        "text": "every-field text",
+        "answer": "every-field answer",
+        "answered_by": "every-field answered_by",
+        "answered_at": "2026-09-10T09:00:00Z"
+      }
+    ],
+    "unavailable": "every-field unavailable"
+  },
   "plan_imported": true,
   "plan_import_ended": true,
   "imported_plan_criteria": [

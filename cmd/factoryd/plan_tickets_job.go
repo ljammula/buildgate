@@ -33,8 +33,8 @@ const planTicketsScratchDirName = ".factory-plan-draft"
 
 // planTicketsContainerOutDir/planTicketsContainerEvidencePath are the
 // fixed container-side paths planTicketsArgs passes to plan_tickets.py
-// for a sandboxed invocation -- see specDraftContainerOutPath's own doc
-// comment for why specDraftContainerWorkDir ("/workspace") is safe to
+// for a sandboxed invocation -- see specDraftContainerWorkDir's own doc
+// comment for why it ("/workspace") is safe to
 // hardcode here.
 const (
 	planTicketsContainerOutDir       = specDraftContainerWorkDir + "/" + planTicketsScratchDirName + "/tickets"

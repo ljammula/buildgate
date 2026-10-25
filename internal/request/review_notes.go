@@ -43,7 +43,8 @@ type PlanTicket struct {
 
 // RefreshReviewNotes sets r.ReviewNotes to the notes on what r's current
 // review gate shows, read from the request's files: SpecReviewNotes in
-// spec_review, PlanReviewNotes in plan_review, none in any other state. A
+// spec_review (after the note of a read-back that could not be drafted,
+// ReadBackUnavailableNote), PlanReviewNotes in plan_review, none in any other state. A
 // file that cannot be read gives no note. The caller saves r, or does not:
 // reading is cheap (the spec, the tickets, a few directory listings), so
 // every place that shows the notes (the API's request view, `factoryd
@@ -63,6 +64,9 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 	}
 	if r.State == StateSpecReview {
 		r.ReviewNotes = SpecReviewNotes(string(spec))
+		if rb := r.ReadBack; rb != nil && rb.Unavailable != "" {
+			r.ReviewNotes = append([]string{ReadBackUnavailableNote(rb.Unavailable)}, r.ReviewNotes...)
+		}
 		return
 	}
 	parsed := parseSpecAcceptanceCriteria(strings.Split(string(spec), "\n"))

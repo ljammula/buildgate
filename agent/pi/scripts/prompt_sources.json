@@ -30,6 +30,16 @@
       "description": "Combines the shared missing-AGENTS.md instructions, the repository workspace, and bounded repository context for the planning-role draft job."
     },
     {
+      "id": "prompt-source:read-back.context",
+      "source_path": "agent/pi/scripts/read_back.py",
+      "fragment": "READ_BACK_INSTRUCTIONS / build_prompt",
+      "role": "planning",
+      "stage": "spec_drafting",
+      "kind": "inline-assembly",
+      "template_refs": ["read_back.prompt.md"],
+      "description": "Quotes a handed-over spec between delimiters and asks for the read-back shown at spec review: a summary and the questions the spec leaves open."
+    },
+    {
       "id": "prompt-source:draft-feedback.section",
       "source_path": "agent/pi/scripts/draft_spec.py",
       "fragment": "FEEDBACK_HEADER / build_prompt",

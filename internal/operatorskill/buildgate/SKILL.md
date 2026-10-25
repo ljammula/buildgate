@@ -94,6 +94,10 @@ another profile:
   `factoryd reject -to plan -reason "..." <id>`; the reason becomes planning
   feedback and revised tickets are drafted instead of taking the imported
   tickets again.
+- `factoryd answer -q <question> -text "<answer>" <id>`, only with the answer
+  the operator gave, in their words, to that read-back question of a
+  handed-over spec in `spec_review` (an empty `-text` clears it). Never
+  answer a question yourself: an answer reaches every ticket's build
 - `factoryd retry [-from scratch|<round>] <id>` (a round number from
   `factoryd rounds <id>` rebuilds the ticket on a new branch at that round's
   commit; it is refused once the ticket's branch was pushed), `factoryd resume [-from scratch] <id>` and
@@ -247,7 +251,7 @@ request sits in a queue nobody drains.
 | State | Tell the operator |
 |---|---|
 | `submitted`, `spec_drafting`, `oracle_drafting`, `planning`, `building` | Factory is working; give stage and elapsed time (`building` includes the gates and the AI review) |
-| `spec_review` | Summarize `DIR/requests/<id>/spec.md`; give both gate commands (above). Quote every `[NEEDS DECISION]` item under Open questions: `approve` is refused while one is left, and the operator's answers go in `reject -reason`. Comments on passages (`reject -comments-file`) redraft only the commented sections |
+| `spec_review` | Summarize `DIR/requests/<id>/spec.md`; give both gate commands (above). For a handed-over spec, relay `read_back` from `DIR/requests/<id>/request.json` as the factory's model-written reading, with each question's id; the operator may answer any (`factoryd answer`), and approval does not wait on them. Quote every `[NEEDS DECISION]` item under Open questions: `approve` is refused while one is left, and the operator's answers go in `reject -reason`. Comments on passages (`reject -comments-file`) redraft only the commented sections |
 | `oracle_review` | List the oracle files and any `ACTION NEEDED` line `watch` printed |
 | `plan_review` | Summarize the ticket list with each ticket's `Estimated-Changed-Lines:` against the request's `plan_budget_lines`, and quote any note saying a ticket is over budget (advice, not a refusal); approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |

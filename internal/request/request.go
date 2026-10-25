@@ -463,6 +463,11 @@ type Request struct {
 	ApprovedBy     string            `json:"approved_by,omitempty"`
 	ApprovedAt     string            `json:"approved_at,omitempty"`
 	ApprovedSHA256 map[string]string `json:"approved_sha256,omitempty"`
+	// ApprovedReadBackSHA256 is what the spec approval pinned of the
+	// read-back's answered questions (ReadBackAnswersSHA256; empty when none
+	// was answered). VerifyApprovedHashes refuses a request whose answers
+	// changed after it, while the spec approval is in force.
+	ApprovedReadBackSHA256 string `json:"approved_read_back_sha256,omitempty"`
 	// SpecEvidence is best-effort cost/token evidence from the
 	// spec-drafting job (agent/pi/scripts/draft_spec.py's own evidence
 	// JSON), recorded once spec_drafting completes successfully -- never
@@ -559,6 +564,10 @@ type Request struct {
 	// legacy compatibility: old request records load and re-marshal without a
 	// new field, and their in-flight builds keep the old input.
 	BuildInput string `json:"build_input,omitempty"`
+	// ReadBack is the read-back of a handed-over spec shown at spec_review
+	// (read_back.go): drafted on every spec_drafting pass of a SpecImported
+	// request, replaced by the next one, nil for every other request.
+	ReadBack *ReadBack `json:"read_back,omitempty"`
 	// PlanImported is `factoryd submit -spec-file ... -plan-dir`: the
 	// operator also handed over the tickets (ImportedTicketsDir). The first
 	// planning pass takes them in place of the planning job, through the
@@ -772,6 +781,10 @@ type Rejection struct {
 	// each note against the document, never for building feedback.
 	Anchors []RejectionAnchor `json:"anchors,omitempty"`
 	Note    string            `json:"note,omitempty"`
+	// ReadBackAnswers are the read-back questions the operator had answered
+	// when this rejection sent the spec back: the redraft drafts a new
+	// read-back, so the answers ride in this rejection's feedback instead.
+	ReadBackAnswers []ReadBackQuestion `json:"read_back_answers,omitempty"`
 }
 
 // FactoryActor is the By of a Rejection the factory recorded itself: a

@@ -265,6 +265,12 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	// dropped just because its evidence record was overwritten (see
 	// request.JobSpend.Add's own doc comment).
 	accumulateSpecEvidence(r, evidence)
+	// A handed-over spec gets its read-back before the review; it never
+	// stops the request (recordReadBack).
+	if ok, err := recordReadBack(ctx, dataDir, r, cfg, now); !ok {
+		return false, err
+	}
+	now = time.Now()
 	if err := r.CompleteSpecDrafting(now); err != nil {
 		return false, err
 	}
@@ -2917,7 +2923,7 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 		if readErr != nil {
 			return "", fmt.Errorf("read approved spec: %w", readErr)
 		}
-		return checkedTicketBuildBaseInput(renderApprovedSpecTicketBuildInput(string(specContent), string(ticketContent), texts), requestRecord.ID)
+		return checkedTicketBuildBaseInput(renderApprovedSpecTicketBuildInput(string(specContent), requestRecord.ReadBack.Answered(), string(ticketContent), texts), requestRecord.ID)
 	}
 
 	if len(texts) == 0 {
@@ -2949,12 +2955,17 @@ func checkedTicketBuildBaseInput(content, requestID string) (string, error) {
 	return content, nil
 }
 
-// renderApprovedSpecTicketBuildInput is the new ticket-build input shape.
-func renderApprovedSpecTicketBuildInput(specContent, ticketContent string, criteria []string) string {
+// renderApprovedSpecTicketBuildInput is the new ticket-build input shape:
+// the approved spec, the read-back questions the operator answered at spec
+// review (answered), then the ticket and its covered criteria. The spec and
+// each question and answer are quoted in their own ticketspec.FenceVerbatim
+// fence, so none of them can declare a header key or the ticket's goal.
+func renderApprovedSpecTicketBuildInput(specContent string, answered []request.ReadBackQuestion, ticketContent string, criteria []string) string {
 	var b strings.Builder
 	b.WriteString("# Approved spec\n\n")
 	b.WriteString("The operator approved this spec. It is the contract for this build: names, fields, formats, behaviours and error texts in it are requirements. It is quoted verbatim between the tilde fences below.\n\n")
 	b.WriteString(ticketspec.FenceVerbatim(specContent))
+	writeAnsweredReadBack(&b, answered)
 	b.WriteString("\n---\n\n")
 	b.WriteString("# This ticket\n\n")
 	b.WriteString(ticketContent)
@@ -2975,6 +2986,27 @@ func renderApprovedSpecTicketBuildInput(specContent, ticketContent string, crite
 	}
 	fmt.Fprintf(&b, "\n%s\n", BuildSpecCriteriaFooter)
 	return b.String()
+}
+
+// AnsweredQuestionsHeading heads the read-back questions the operator
+// answered at spec review in a ticket's build input.
+const AnsweredQuestionsHeading = "# Questions answered at spec review"
+
+// writeAnsweredReadBack writes the answered read-back questions section of
+// a build input, or nothing when no question was answered. A question's ID
+// is checked to be Q<n> (request.ValidateReadBack), so it is written as is.
+func writeAnsweredReadBack(b *strings.Builder, answered []request.ReadBackQuestion) {
+	if len(answered) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n%s\n\n", AnsweredQuestionsHeading)
+	b.WriteString("The operator answered these questions about the spec when approving it. Each answer settles the choice its question names and is part of the contract. Each question and answer is quoted verbatim between tilde fences.\n")
+	for _, q := range answered {
+		fmt.Fprintf(b, "\nQuestion %s:\n\n", q.ID)
+		b.WriteString(ticketspec.FenceVerbatim(q.Text))
+		b.WriteString("\nAnswer:\n\n")
+		b.WriteString(ticketspec.FenceVerbatim(q.Answer))
+	}
 }
 
 // writeTicketBuildInput writes TicketBuildSpecContent's result to

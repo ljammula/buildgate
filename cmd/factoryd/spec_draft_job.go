@@ -45,19 +45,14 @@ const specDraftScriptName = "draft_spec.py"
 // runSpecDraftJob's own doc comment.
 const specDraftScratchDirName = ".factory-spec-draft"
 
-// specDraftContainerOutPath/specDraftContainerEvidencePath are the fixed
-// container-side paths draftSpecArgs passes to draft_spec.py for a
-// sandboxed invocation -- specDraftContainerWorkDir ("/workspace",
-// matching internal/sandbox/docker.go's own workerContainerWorkDir) is
-// the one stable, already-relied-upon convention runSandboxWithRetries'
-// own workspace-argument translation exists to honor (see that
-// function's own translated[i] == workspace check), so these are safe to
-// hardcode here rather than threaded through a translation table.
-const (
-	specDraftContainerWorkDir      = "/workspace"
-	specDraftContainerOutPath      = specDraftContainerWorkDir + "/" + specDraftScratchDirName + "/spec.md"
-	specDraftContainerEvidencePath = specDraftContainerWorkDir + "/" + specDraftScratchDirName + "/evidence.json"
-)
+// specDraftContainerWorkDir is the sandboxed worker's fixed workspace path
+// ("/workspace", matching internal/sandbox/docker.go's own
+// workerContainerWorkDir): the one stable, already-relied-upon convention
+// runSandboxWithRetries' own workspace-argument translation exists to honor
+// (see that function's own translated[i] == workspace check), so the
+// spec-stage jobs' container-side scratch paths are built from it rather
+// than threaded through a translation table.
+const specDraftContainerWorkDir = "/workspace"
 
 // specDraftEvidenceSchemaVersion is the schema_version draft_spec.py's own
 // EVIDENCE_SCHEMA_VERSION constant must equal -- bump both together, in
@@ -252,65 +247,24 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	}
 	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath, keepStructure: r.SpecImported}
 
-	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
-	if timeoutMinutes <= 0 {
-		timeoutMinutes = defaultSpecDraftTimeoutMinutes
-	}
-	sandboxImage := cfg.SandboxImage
-	if sandboxImage == "" && !cfg.AllowUnsandboxedSpecDraft {
-		return "", nil, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
-	}
-	roleOverride, roleErr := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", r.Models["planning"], r.Harnesses["planning"])
-	if roleErr != nil {
-		return "", nil, roleErr
-	}
-	defer startActiveJob(dataDir, r.ID, modelrole.StageSpecDrafting, roleOverride, time.Now())()
-
-	logDir := filepath.Join(request.Dir(dataDir, r.ID), "logs")
-	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		return "", nil, fmt.Errorf("create spec-draft log dir: %w", err)
-	}
-	logPath := func(attempt int) string {
-		if attempt == 1 {
-			return filepath.Join(logDir, "spec_draft.log")
-		}
-		return filepath.Join(logDir, fmt.Sprintf("spec_draft.attempt%d.log", attempt))
-	}
-
-	var specMD string
-	var evidence *request.SpecEvidence
-	var res runner.Result
-	if sandboxImage != "" {
-		sandboxDataDir, sddErr := requestdriver.SandboxDataDirFor(dataDir)
-		if sddErr != nil {
-			return "", nil, sddErr
-		}
-		relaySpec, relayErr := resolveSpecDraftRelaySpec(cfg, r.ID, sandboxDataDir, roleOverride)
-		if relayErr != nil {
-			return "", nil, relayErr
-		}
-		outPath := specDraftContainerOutPath
-		evidencePath := specDraftContainerEvidencePath
-		args := draftSpecArgs(script, r.Workspace, requestTextPath, outPath, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+specDraftScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
-		sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
-		defer cancel()
-		_, workerUID := requestJobSandboxIdentity(cfg)
-		res, err = runSandboxWithRetriesVia(
-			cfg.Sandboxes, cfg.MeterLedgerRoot, sandboxCtx, r.Workspace, requestTextPath, "", script, logPath, 1,
-			sandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
-			cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
-			nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-			"", "", roleOverride.WorkerEnv, roleOverride.Skills, cfg.DraftSpecInterpreter, args[1:]...,
-		)
-	} else {
-		outPath := filepath.Join(scratchDir, "spec.md")
-		evidencePath := filepath.Join(scratchDir, "evidence.json")
-		args := draftSpecArgs(script, r.Workspace, requestTextPath, outPath, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
-		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.DraftSpecInterpreter, args[1:]...)
-	}
-	retainDraftPrompts(dataDir, r.ID, "spec", r.Workspace, []string{specDraftScratchDirName + "/session", specDraftScratchDirName + "/check-session"})
+	res, roleOverride, err := runSpecStageJob(ctx, dataDir, r, cfg, specStageJob{
+		script:      script,
+		scriptName:  specDraftScriptName,
+		scratchName: specDraftScratchDirName,
+		inputPath:   requestTextPath,
+		logName:     "spec_draft",
+		promptKind:  "spec",
+		sessions:    []string{specDraftScratchDirName + "/session", specDraftScratchDirName + "/check-session"},
+		args: func(scratch string, sandboxed bool, timeoutMinutes int, role requestJobRoleOverride) []string {
+			files := hostFiles
+			if sandboxed {
+				files = hostFiles.inContainer(scratch)
+			}
+			return draftSpecArgs(script, r.Workspace, requestTextPath, scratch+"/spec.md", scratch+"/evidence.json", files, timeoutMinutes, role.Thinking, role.Harness)[1:]
+		},
+	})
 	if err != nil {
-		return "", nil, fmt.Errorf("draft_spec.py did not run to completion: %w", err)
+		return "", nil, err
 	}
 
 	specMD, evidence, readErr := readSpecDraftOutputs(scratchDir)
@@ -339,6 +293,100 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 		return "", evidence, fmt.Errorf("%s", requestJobExitReason("draft_spec.py", 0, "but wrote an empty spec.md", res.LogPath))
 	}
 	return specMD, evidence, nil
+}
+
+// specStageJob is one spec-stage model job runSpecStageJob launches: the
+// spec-drafting job (draft_spec.py) or a handed-over spec's read-back
+// (read_back.py). Both run with the spec-drafting role, the spec-drafting
+// job's interpreter and timeout, and one read-only input file.
+type specStageJob struct {
+	// script is the resolved script path, scriptName its file name for
+	// error text.
+	script, scriptName string
+	// scratchName is the job's scratch directory, relative to the workspace.
+	scratchName string
+	// inputPath is the host file mounted read-only for the job (the request
+	// text, or the spec); args name it by this same host path.
+	inputPath string
+	// logName names the job's log, logs/<logName>.log.
+	logName string
+	// promptKind and sessions are retainDraftPrompts' kind and the session
+	// directories, relative to the workspace, whose saved prompts it keeps.
+	promptKind string
+	sessions   []string
+	// args returns the script's arguments after its path. scratch is the
+	// scratch directory as the script sees it: the container path when
+	// sandboxed, the host path otherwise.
+	args func(scratch string, sandboxed bool, timeoutMinutes int, role requestJobRoleOverride) []string
+}
+
+// runSpecStageJob is the one launch path of the spec-stage jobs: the same
+// relay, budget ceilings and timeout shape as a ticket build's, through
+// runSandboxWithRetriesVia (or, only under AllowUnsandboxedSpecDraft in
+// tests, on the host). It returns the job's result and the role it ran with;
+// reading the job's outputs is the caller's.
+func runSpecStageJob(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig, job specStageJob) (runner.Result, requestJobRoleOverride, error) {
+	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
+	if timeoutMinutes <= 0 {
+		timeoutMinutes = defaultSpecDraftTimeoutMinutes
+	}
+	sandboxImage := cfg.SandboxImage
+	if sandboxImage == "" && !cfg.AllowUnsandboxedSpecDraft {
+		return runner.Result{}, requestJobRoleOverride{}, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
+	}
+	roleOverride, roleErr := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", r.Models["planning"], r.Harnesses["planning"])
+	if roleErr != nil {
+		return runner.Result{}, requestJobRoleOverride{}, roleErr
+	}
+	defer startActiveJob(dataDir, r.ID, modelrole.StageSpecDrafting, roleOverride, time.Now())()
+
+	logDir := filepath.Join(request.Dir(dataDir, r.ID), "logs")
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return runner.Result{}, roleOverride, fmt.Errorf("create %s log dir: %w", job.logName, err)
+	}
+	logPath := func(attempt int) string {
+		if attempt == 1 {
+			return filepath.Join(logDir, job.logName+".log")
+		}
+		return filepath.Join(logDir, fmt.Sprintf("%s.attempt%d.log", job.logName, attempt))
+	}
+
+	var res runner.Result
+	var err error
+	if sandboxImage != "" {
+		res, err = launchSandboxedSpecStageJob(ctx, dataDir, r, cfg, job, roleOverride, timeoutMinutes, logPath)
+	} else {
+		args := job.args(filepath.Join(r.Workspace, job.scratchName), false, timeoutMinutes, roleOverride)
+		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.DraftSpecInterpreter, args...)
+	}
+	retainDraftPrompts(dataDir, r.ID, job.promptKind, r.Workspace, job.sessions)
+	if err != nil {
+		return res, roleOverride, fmt.Errorf("%s did not run to completion: %w", job.scriptName, err)
+	}
+	return res, roleOverride, nil
+}
+
+// launchSandboxedSpecStageJob is runSpecStageJob's sandboxed launch.
+func launchSandboxedSpecStageJob(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig, job specStageJob, roleOverride requestJobRoleOverride, timeoutMinutes int, logPath func(int) string) (runner.Result, error) {
+	sandboxDataDir, err := requestdriver.SandboxDataDirFor(dataDir)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	relaySpec, err := resolveSpecDraftRelaySpec(cfg, r.ID, sandboxDataDir, roleOverride)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	args := job.args(specDraftContainerWorkDir+"/"+job.scratchName, true, timeoutMinutes, roleOverride)
+	sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
+	defer cancel()
+	sandboxUser, workerUID := requestJobSandboxIdentity(cfg)
+	return runSandboxWithRetriesVia(
+		cfg.Sandboxes, cfg.MeterLedgerRoot, sandboxCtx, r.Workspace, job.inputPath, "", job.script, logPath, 1,
+		cfg.SandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
+		cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
+		nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
+		"", "", roleOverride.WorkerEnv, roleOverride.Skills, cfg.DraftSpecInterpreter, args...,
+	)
 }
 
 // stageSpecDraftGuidance resolves and stages the operator-selected planning
@@ -403,21 +451,9 @@ func stagePreviousSpec(dataDir string, r *request.Request, scratchDir, sandboxUs
 // (see draft_spec.py's own doc comment) and is useful even for a
 // halt reason.
 func readSpecDraftOutputs(scratchDir string) (string, *request.SpecEvidence, error) {
-	var evidence *request.SpecEvidence
-	evidencePath := filepath.Join(scratchDir, "evidence.json")
-	if b, err := os.ReadFile(evidencePath); err == nil {
-		var payload draftSpecEvidencePayload
-		if jsonErr := json.Unmarshal(b, &payload); jsonErr == nil {
-			if payload.SchemaVersion != specDraftEvidenceSchemaVersion {
-				return "", nil, fmt.Errorf("%s schema_version %d, this factoryd understands %d", evidencePath, payload.SchemaVersion, specDraftEvidenceSchemaVersion)
-			}
-			evidence = &request.SpecEvidence{
-				Usage:         payload.Usage,
-				AgentExitCode: payload.AgentExitCode,
-				DurationS:     payload.DurationS,
-				AgentsMDUsed:  payload.AgentsMDUsed,
-			}
-		}
+	evidence, err := readSpecStageEvidence(scratchDir)
+	if err != nil {
+		return "", nil, err
 	}
 	specMD, err := os.ReadFile(filepath.Join(scratchDir, "spec.md"))
 	if err != nil {
@@ -427,6 +463,31 @@ func readSpecDraftOutputs(scratchDir string) (string, *request.SpecEvidence, err
 		return "", evidence, fmt.Errorf("read drafted spec.md: %w", err)
 	}
 	return string(specMD), evidence, nil
+}
+
+// readSpecStageEvidence reads a spec-stage job's evidence.json (draft_spec.py's
+// write_evidence shape, which read_back.py writes too) from scratchDir: nil
+// when the file is missing or not JSON, an error for a schema_version this
+// factoryd does not understand.
+func readSpecStageEvidence(scratchDir string) (*request.SpecEvidence, error) {
+	evidencePath := filepath.Join(scratchDir, "evidence.json")
+	b, err := os.ReadFile(evidencePath)
+	if err != nil {
+		return nil, nil
+	}
+	var payload draftSpecEvidencePayload
+	if json.Unmarshal(b, &payload) != nil {
+		return nil, nil
+	}
+	if payload.SchemaVersion != specDraftEvidenceSchemaVersion {
+		return nil, fmt.Errorf("%s schema_version %d, this factoryd understands %d", evidencePath, payload.SchemaVersion, specDraftEvidenceSchemaVersion)
+	}
+	return &request.SpecEvidence{
+		Usage:         payload.Usage,
+		AgentExitCode: payload.AgentExitCode,
+		DurationS:     payload.DurationS,
+		AgentsMDUsed:  payload.AgentsMDUsed,
+	}, nil
 }
 
 // resolveSpecDraftRelaySpec builds the same shape of sandbox.RouteSpec

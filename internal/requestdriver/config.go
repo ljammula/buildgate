@@ -163,6 +163,12 @@ type WorkerConfig struct {
 	SpecDraftTimeoutMinutes   int
 	AllowUnsandboxedSpecDraft bool
 
+	// ReadBack is the read-back job for a handed-over spec (see
+	// ReadBackRunner), run with the spec-drafting job's script directory,
+	// interpreter and timeout above. Nil leaves every handed-over spec's
+	// read-back unavailable, which spec_review notes.
+	ReadBack ReadBackRunner
+
 	// planTicketsScript/planTicketsInterpreter/planTicketsTimeoutMinutes
 	// mirror draftSpecScript/draftSpecInterpreter/specDraftTimeoutMinutes
 	// above, for the request driver's own plan-drafting job

@@ -23,6 +23,7 @@ func TestResumeAndEditsRefusedAtALapsedGate(t *testing.T) {
 		"spec edit":   {request.StateSpecReview, http.MethodPut, "/requests/req-1/spec", `{"content":"# Spec\n"}`},
 		"ticket edit": {request.StatePlanReview, http.MethodPut, "/requests/req-1/tickets/1", `{"content":"x"}`},
 		"oracle edit": {request.StateOracleReview, http.MethodPut, "/requests/req-1/oracle/RUN_COMMAND.txt", `{"content":"go test ./...\n"}`},
+		"answer":      {request.StateSpecReview, http.MethodPut, "/requests/req-1/read-back/answers/Q1", `{"answer":"yes"}`},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -58,6 +59,7 @@ func TestDecisionRefusedWhenTheExpiryCannotBeRead(t *testing.T) {
 		{http.MethodPost, "/requests/req-1/reject", `{"reason":"x","expected_state":"spec_review","expected_entered_at":"x"}`},
 		{http.MethodPost, "/requests/req-1/resume", `{}`},
 		{http.MethodPut, "/requests/req-1/spec", `{"content":"# Spec\n"}`},
+		{http.MethodPut, "/requests/req-1/read-back/answers/Q1", `{"answer":"yes"}`},
 	} {
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, requestActionFor(t, c.method, c.path, "test-token", c.body))

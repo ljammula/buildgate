@@ -190,6 +190,11 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 		return nil, err
 	}
 
+	// The answered read-back questions are approved with the spec they
+	// read: pinned here, beside spec.md's hash, before the state moves on.
+	if r.State == StateSpecReview {
+		r.ApprovedReadBackSHA256 = ReadBackAnswersSHA256(r.ReadBack)
+	}
 	if err := r.approveTransition(by, now, relPaths); err != nil {
 		return nil, err
 	}
@@ -482,6 +487,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	}
 	fromState := r.State
 	var relPaths []string
+	var readBackAnswers []ReadBackQuestion
 	switch r.State {
 	case StateOracleReview:
 		// Snapshot whatever oracle/ holds now, tolerant like the plan case: a
@@ -498,6 +504,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 		if err := r.RejectSpec(by, reason, now); err != nil {
 			return nil, err
 		}
+		readBackAnswers = takeReadBackAnswers(r)
 	case StatePlanReview:
 		// ticketSpecRelPaths is Approve's precondition check -- it hard-fails
 		// when tickets/*.spec.md is missing or empty, which is right for
@@ -532,6 +539,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	if len(anchors) > 0 {
 		rejection.Anchors, rejection.Note = anchors, note
 	}
+	rejection.ReadBackAnswers = readBackAnswers
 	r.Rejections = append(r.Rejections, rejection)
 	if err := r.Save(dataDir); err != nil {
 		return nil, err
@@ -543,6 +551,9 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 // r.ApprovedSHA256 whose current content no longer hashes to the value
 // recorded there -- an edit made after the operator approved that file.
 // A request with no recorded hashes yet (never approved) always passes.
+// While the spec approval is in force it also refuses answered read-back
+// questions that differ from what that approval pinned
+// (ApprovedReadBackSHA256).
 //
 // This is the one function both Approve (re-checking an earlier stage's
 // approval before recording a later one) and the request driver (before
@@ -553,6 +564,9 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 func VerifyApprovedHashes(dataDir string, r *Request) error {
 	if len(r.ApprovedSHA256) == 0 {
 		return nil
+	}
+	if err := verifyApprovedReadBack(r); err != nil {
+		return err
 	}
 	relPaths := make([]string, 0, len(r.ApprovedSHA256))
 	for relPath := range r.ApprovedSHA256 {
@@ -1006,6 +1020,7 @@ func stageFeedback(r *Request, stage State, label string) string {
 			continue
 		}
 		fmt.Fprintf(&b, "## %s rejected %s by %s\n\n%s\n\n", label, rej.At, sanitizeFeedbackBy(rej.By), rej.Reason)
+		b.WriteString(readBackAnswersFeedback(rej.ReadBackAnswers))
 		// The operator's own edits to the draft this rejection sends back
 		// ride in its section, so a redraft that rewrites the file is told
 		// to keep them.

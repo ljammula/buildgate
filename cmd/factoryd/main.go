@@ -570,6 +570,7 @@ func subcommands() map[string]subcommand {
 		"submit":            submitMain,
 		"approve":           approveMain,
 		"reject":            rejectMain,
+		"answer":            withoutDeps(answerMain),
 		"cancel":            cancelMain,
 		"worker":            workerMain,
 		"retry":             retryMain,
