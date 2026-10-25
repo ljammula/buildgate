@@ -1,5 +1,6 @@
 import { createHttp } from "@/api/http";
 import {
+  answerReadBackQuestion,
   approveRequest,
   cancelRequest,
   createRequest,
@@ -293,6 +294,19 @@ describe("writes", () => {
     expect(ticket.method).toBe("PUT");
     expect(ticket.headers).toEqual(WRITE);
     expect(ticket.body).toBe('{"content":"plan","base_sha256":"base2"}');
+  });
+
+  test("answerReadBackQuestion PUTs the answer for one question, and by only when set", async () => {
+    const answered = await sentBy((http) =>
+      answerReadBackQuestion(http, "req-1", "Q2", "By name.", { by: "alice" }),
+    );
+    expect(answered.url).toBe("/requests/req-1/read-back/answers/Q2");
+    expect(answered.method).toBe("PUT");
+    expect(answered.headers).toEqual(WRITE);
+    expect(answered.body).toBe('{"answer":"By name.","by":"alice"}');
+
+    const cleared = await sentBy((http) => answerReadBackQuestion(http, "req-1", "Q2", ""));
+    expect(cleared.body).toBe('{"answer":""}');
   });
 
   test("retry, cancel and resume send the reason or source, and by only when set", async () => {

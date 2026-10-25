@@ -285,6 +285,33 @@ export async function updateRequestTicket(
   );
 }
 
+/**
+ * PUT /requests/{id}/read-back/answers/{qid}: records the operator's answer
+ * to one question of a handed-over spec's read-back while the request is in
+ * spec_review; an empty `answer` clears it. Gated like the spec edit (token
+ * kind "gate"). Refused with a 409 outside spec_review, a 404 for an unknown
+ * question and a 422 for an answer over the server's cap.
+ */
+export async function answerReadBackQuestion(
+  http: Http,
+  id: string,
+  questionId: string,
+  answer: string,
+  options: { readonly by?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<RequestSummary> {
+  const at = "PUT /requests/{id}/read-back/answers/{qid}";
+  const body = {
+    answer,
+    ...(options.by != null && options.by !== "" ? { by: options.by } : {}),
+  };
+  const path = `${requestPath(id)}/read-back/answers/${encodeURIComponent(questionId)}`;
+  return decodeRequestSummary(
+    asObject(await http.sendJson("PUT", path, "gate", body, signal), at),
+    at,
+  );
+}
+
 export interface RequestReasonOptions {
   readonly reason: string;
   readonly by?: string | null;

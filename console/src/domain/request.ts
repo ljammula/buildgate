@@ -301,6 +301,48 @@ function decodeRejection(o: JsonObject, at: string): Rejection {
 }
 
 /**
+ * One question of a handed-over spec's read-back (Go's
+ * request.ReadBackQuestion). `id` and `text` are model-written; the answer
+ * fields are the operator's, empty while unanswered.
+ */
+export interface ReadBackQuestion {
+  readonly id: string;
+  readonly text: string;
+  readonly answer: string;
+  readonly answeredBy: string;
+  readonly answeredAt: string;
+}
+
+/**
+ * The factory's read-back of a handed-over spec (Go's request.ReadBack):
+ * model-written data shown at spec_review, never a check. `unavailable` is
+ * the cause class when none could be drafted, the rest then empty.
+ */
+export interface ReadBack {
+  readonly summary: string;
+  readonly questions: readonly ReadBackQuestion[];
+  readonly unavailable: string;
+}
+
+function decodeReadBackQuestion(o: JsonObject, at: string): ReadBackQuestion {
+  return {
+    id: reqString(o, "id", at),
+    text: reqString(o, "text", at),
+    answer: optString(o, "answer", at),
+    answeredBy: optString(o, "answered_by", at),
+    answeredAt: optString(o, "answered_at", at),
+  };
+}
+
+function decodeReadBack(o: JsonObject, at: string): ReadBack {
+  return {
+    summary: optString(o, "summary", at),
+    questions: objectList(o, "questions", at, decodeReadBackQuestion),
+    unavailable: optString(o, "unavailable", at),
+  };
+}
+
+/**
  * One in-place edit an operator saved to a reviewed file (Go's
  * request.Edit): who, when, which file, and the changed lines.
  */
@@ -611,6 +653,8 @@ export interface RequestSummary {
   readonly spec: string;
   /** The operator handed over the current spec with `-spec-file`. */
   readonly specImported: boolean;
+  /** The read-back of a handed-over spec, or null. */
+  readonly readBack: ReadBack | null;
   /** The Go request parser's criteria, including derived handed-over criteria. */
   readonly criteria: readonly string[];
   /** Absolute on the serve host; only GET /requests/{id} populates it, like `spec`. */
@@ -784,6 +828,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     haltKind: optString(o, "halt_kind", at),
     spec: optString(o, "spec", at),
     specImported: optBoolean(o, "spec_imported", at),
+    readBack: optObject(o, "read_back", at, decodeReadBack),
     criteria: stringList(o, "criteria", at),
     specFullPath: optString(o, "spec_full_path", at),
     specEvidence: optObject(o, "spec_evidence", at, decodeSpecEvidence),
