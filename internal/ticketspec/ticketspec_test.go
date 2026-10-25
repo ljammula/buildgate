@@ -19,6 +19,26 @@ func TestParseVerifyCommandFound(t *testing.T) {
 	}
 }
 
+func TestReadersAcceptALineLongerThanScannerLimit(t *testing.T) {
+	long := strings.Repeat("x", 70_000)
+	path := writeSpec(t, "Verify-Command: "+long+"\n\n## Goal\n\n"+long+"\n")
+
+	got, err := ParseVerifyCommand(path)
+	if err != nil {
+		t.Fatalf("ParseVerifyCommand: %v", err)
+	}
+	if got != long {
+		t.Fatalf("ParseVerifyCommand returned %d bytes, want %d", len(got), len(long))
+	}
+	goal, err := parseGoalSection(path)
+	if err != nil {
+		t.Fatalf("parseGoalSection: %v", err)
+	}
+	if goal != long {
+		t.Fatalf("parseGoalSection returned %d bytes, want %d", len(goal), len(long))
+	}
+}
+
 func TestParseVerifyCommandAbsent(t *testing.T) {
 	path := writeSpec(t, "# Ticket: foo\n\nNo machine-readable key here.\n")
 
@@ -696,6 +716,23 @@ func TestGoalTitleReadsSanitizesAndCaps(t *testing.T) {
 	got := GoalTitle(path)
 	if got != "Line one line two continues the same paragraph" {
 		t.Errorf("GoalTitle = %q", got)
+	}
+}
+
+func TestGoalTitleSkipsAGoalInsideAFence(t *testing.T) {
+	path := writeSpec(t, FenceVerbatim("## Goal\n\nquoted goal\n~~~\n")+"\n## Goal\n\nthe ticket's goal\n")
+	if got := GoalTitle(path); got != "the ticket's goal" {
+		t.Errorf("GoalTitle = %q, want the goal outside the fence", got)
+	}
+}
+
+func TestFenceVerbatimOutlastsEveryTildeRunInTheContent(t *testing.T) {
+	got := FenceVerbatim("a\n  ~~~~~~ x\nb")
+	if !strings.HasPrefix(got, "~~~~~~~\na\n") || !strings.HasSuffix(got, "b\n~~~~~~~\n") {
+		t.Errorf("FenceVerbatim = %q, want a seven-tilde fence around the content", got)
+	}
+	if got := FenceVerbatim("plain"); got != "~~~~\nplain\n~~~~\n" {
+		t.Errorf("FenceVerbatim(plain) = %q", got)
 	}
 }
 

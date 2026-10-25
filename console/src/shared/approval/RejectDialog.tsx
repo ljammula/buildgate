@@ -88,7 +88,7 @@ function RejectBody({ request, by, onOpenChange, onDone, blocked }: BodyProps) {
       }}
       description={(reason) => {
         if (notes.length === 0) return undefined;
-        return redraftIsScoped(notes, reason)
+        return redraftIsScoped(notes, reason, request.specImported)
           ? "Only the commented sections will be redrafted."
           : "The whole document will be redrafted: a reason, or a note on the whole spec, asks for that.";
       }}

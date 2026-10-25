@@ -63,10 +63,12 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		r.ReviewNotes = SpecReviewNotes(string(spec))
 		return
 	}
-	criteria, err := SpecAcceptanceCriteria(string(spec))
-	if err != nil {
+	parsed := parseSpecAcceptanceCriteria(strings.Split(string(spec), "\n"))
+	if parsed.err != nil || len(parsed.criteria) == 0 {
 		return
 	}
+	criteria := parsed.criteria
+	idNotes := !parsed.named && len(parsed.sections) == 0
 	var tickets []PlanTicket
 	for _, ticket := range r.Tickets {
 		// A ticket's path is recorded as written at planning; one recorded
@@ -85,7 +87,7 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		}
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed})
 	}
-	r.ReviewNotes = PlanReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r))
+	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r), idNotes)
 }
 
 // SpecReviewNotes returns one note for each acceptance criterion of
@@ -100,17 +102,31 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 // carry IDs also gets one note for each criterion not in an EARS form
 // ("When ..., the system shall ..."); that wording is advice, never refused.
 func SpecReviewNotes(specContent string) []string {
-	criteria, err := SpecAcceptanceCriteria(specContent)
-	if err != nil {
+	parsed := parseSpecAcceptanceCriteria(strings.Split(specContent, "\n"))
+	if len(parsed.criteria) == 0 {
 		return nil
 	}
+	criteria := parsed.criteria
 	var notes []string
+	derivedSections := len(parsed.sections)
+	if parsed.named && derivedSections == 0 {
+		derivedSections = 1
+	}
+	if derivedSections > 0 {
+		sectionWord := "sections"
+		if derivedSections == 1 {
+			sectionWord = "section"
+		}
+		notes = append(notes, fmt.Sprintf("Criteria 1-%d were derived from the list items of %d %s.", len(criteria), derivedSections, sectionWord))
+	}
 	for i, criterion := range criteria {
 		if isCommitMessageCriterion(criterion) {
 			notes = append(notes, fmt.Sprintf("criterion %d reads as a rule for the commit message, which the factory writes; keep, edit or remove it", i+1))
 		}
 	}
-	notes = append(notes, earsNotes(criteria)...)
+	if !parsed.named && len(parsed.sections) == 0 {
+		notes = append(notes, earsNotes(criteria)...)
+	}
 	return capReviewNotes(notes)
 }
 
@@ -139,6 +155,10 @@ func SpecReviewNotes(specContent string) []string {
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
 func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool) []string {
+	return planReviewNotes(criteria, tickets, workspace, oracleCovered, true)
+}
+
+func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool, idNotes bool) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))
@@ -161,7 +181,9 @@ func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 			notes = append(notes, plan.criterionNotes(n, text, covering[n], listing[n])...)
 		}
 	}
-	notes = append(notes, noTestNotes(criteria, tickets, oracleCovered)...)
+	if idNotes {
+		notes = append(notes, noTestNotes(criteria, tickets, oracleCovered)...)
+	}
 	return capReviewNotes(notes)
 }
 

@@ -182,7 +182,10 @@ with `-prior-run <previous run id>`. A ticket's actual `-spec` is not
 spec verbatim plus a `## Acceptance criteria this ticket must satisfy`
 section carrying the full text of every approved-spec criterion the
 ticket's own `### Acceptance criteria covered` numbers name (every
-criterion, if it names none). `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
+criterion, if it names none). New requests receive `# Approved spec`, the
+approved spec's bytes verbatim, `# This ticket`, the ticket's bytes and then
+that criteria section; requests without the build-input marker retain the
+legacy ticket-first shape. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
@@ -468,7 +471,8 @@ that draft again. What the next draft is told:
 
 ```text
 factoryd submit -spec-file my-spec.md <repo>
-  └─ refused unless the file passes the spec skeleton check, naming the missing heading
+  └─ refused unless the factory reads at least one criterion from the named
+     numbered section or from top-level list items in its ## sections
 submitted -> spec_drafting   (no model call: your file becomes spec.md)
           -> spec_review     approve, or reject -reason "..."
                                └─ reject: the planning model revises YOUR document with the feedback,
@@ -484,18 +488,38 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 
 | Point | Detail |
 |---|---|
-| Format | The skeleton a drafted spec has: `# Spec`, `## Problem`, `## Scope`, `## Non-goals`, `## Affected services and packages`, `## Acceptance criteria` (a numbered list), `## Risks`, `## Open questions`, in that order, each heading on its own line |
-| Request text | Optional with `-spec-file`: the spec's `## Problem` text is used. A request text, `-request-file` or `-issue` may still be given |
+| Format | A handed-over spec may use the operator's own headings. Leading YAML front matter is ignored. The exact `## Acceptance criteria` heading uses the numbered parser when its top-level items are numbered; when none are numbered it uses the derived item rules, while a mixture of numbered and bulleted top-level items is refused with the item line numbers and a requirement to write `1. ...` items. A `##` through `######` heading whose trimmed text, trailing colon removed and ASCII case ignored, is `Acceptance criteria` is read with the derived list rules instead. When no criteria heading is present, the factory numbers top-level `-`, `*`, `+`, `N.`, or `N)` items before the first `##` (the title area) and in each `#`/`##` section, except the normalized headings in the excluded-sections table below. Indented sub-lists are continuations, wrapped lines fold into their item, and fenced-code lists or HTML comment blocks are ignored. A fence closes only on the same backtick/tilde character with at least the opening length and no trailing content. A thematic break (`---`, `***`, `* * *`, or `___`, with optional spaces) ends an item; `- [ ]`, `- [x]` and `- [X]` lose the checkbox, including an empty task box; an unindented paragraph after a blank line is not a requirement, while an unindented line without that blank is a lazy continuation. `AC-N:` labels remain ordinary criterion text, and derived criteria do not receive ID-based review notes. A drafted spec still uses the skeleton: `# Spec`, `## Problem`, `## Scope`, `## Non-goals`, `## Affected services and packages`, `## Acceptance criteria`, `## Risks`, `## Open questions`, in that order, with drafted criteria IDs. |
+| Request text | Optional with `-spec-file`: the first `## Problem` heading's text is used when present. With no Problem heading, the first heading's text (without `#`) is used; if there is no heading, the first non-blank line outside leading `---` front matter is used. A request text, `-request-file` or `-issue` may still be given |
 | Review | The same `spec_review` gate and approval hash as a drafted spec. Planning, oracles and builds read it exactly like a drafted one |
-| After a reject | The request's spec is from then on a drafted document: later rejects revise the latest version, and the drafting cost shows in `factoryd cost` |
+| After a reject | An operator-shaped spec stays operator-shaped: the drafting model applies the feedback while keeping its headings, order and list structure, and scoped comments can name any heading in that document. A drafted spec keeps the skeleton rules. The drafting cost shows in `factoryd cost` |
 | Edited in the console | At `spec_review` and `plan_review` the console's Edit saves the file in place. Each save is recorded on the request: who, when, the changed lines, and the replaced text as a revision (the request page's Audit lists them). If you then reject that stage, the changed lines go to the planning model with your feedback, marked to be kept; an edit you approve reaches no model, since nothing redrafts the file |
-| Not in the skeleton | Hand the document over as the request (`-request-file`) and review the spec Buildgate drafts from it |
+| Not in the skeleton | Hand the document over with `-spec-file`; only the criterion rule above is required of its shape |
 | Ticket format | Header lines `Verify-Command:` (the request's verify command, exactly), `Allowed-Files:`, `Required-Changed-Files:` (with at least one test file, or a `Tests-Required: no -- <reason>` line), then `## Goal`, `## Plan` with `### Files to touch`, `### Steps`, `### Tests to add`, `### Acceptance criteria covered` (criterion numbers, one per list item), `## Out of scope` A file the ticket moves or renames is a change to both paths: list the old path and the new one in `Allowed-Files:` (the changed-file list names both, for `diff_scope`, required files and protected paths alike) |
 | Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (ticket format, verify command, allowed files, criteria coverage, the tests rule). A handed-over plan that fails one halts the request with the reason, or, when it fails the tests rule, is revised by the planning model with that reason as feedback. What the factory reads from a criterion's prose is a note at `plan_review`, never a refusal |
 | `-plan-dir` alone | Refused: tickets name the criteria of the spec they plan |
 | A halted hand-over | `factoryd retry` takes the same document again and halts the same way. Send it back with a reason instead (`factoryd reject -to plan -reason "..." <id>`, or `-to spec`): the model then revises your document to fix it. Or `cancel`, correct the file and submit again |
-| Spec changed after hand-over | If you reject the spec and the revision changes its criteria, your tickets are still taken on the first planning pass and must still cover them. Sending a request back to spec after a plan exists discards the plan's revisions and its feedback: the tickets as you handed them over are taken again |
+| Spec changed after hand-over | A handed-over plan records the exact criteria list it was checked against. If the approved spec's criteria differ before those tickets are taken, planning stops. Run `factoryd reject -to plan -reason "..." <id>`; the reason becomes plan feedback and planning drafts revised tickets instead of taking the imported tickets again. Sending a request back to spec after a plan exists discards the plan's revisions and its feedback; the criteria check runs again |
 | Team design guide | Not applied to a handed-over spec or plan on its first pass; a revision after a reject reads it. To have your document checked against the guide, reject it with that as the reason (`reject -reason "check this against the team design guide"`) |
+
+The handed-over or edited spec limit is **120,000 bytes**. The complete ticket
+build input is limited to **180,000 bytes**; build_app.py's round prompt limit
+is **200,000 bytes**, so the build input leaves 20,000 bytes for round state
+and corrective framing. `submit -spec-file`, the console's spec `PUT`, and an
+imported-spec redraft refuse a larger document before it is saved or reviewed.
+
+| Excluded `##` heading (case and one trailing colon ignored) | Derived criteria |
+|---|---|
+| `Problem` | Never read |
+| `Non-goals` | Never read |
+| `Out of scope` | Never read |
+| `Risks` | Never read |
+| `Open questions` | Never read |
+| `Background` | Never read |
+| `Context` | Never read |
+| `Motivation` | Never read |
+| `Alternatives considered` | Never read |
+| `References` | Never read |
+| `Notes` | Never read |
 
 ## Oracle drafting internals
 
@@ -970,9 +994,9 @@ of its prose:
 | A ticket off the format | The ticket's headings, in order (`## Goal` ... `## Out of scope`), and its header lines |
 | Another verify command | The ticket's `Verify-Command:` line against the request's verify command, as text |
 | No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
-| An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's numbered criteria |
+| An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's factory-numbered criteria |
 | The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
-| A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order, numbered lines inside a code fence are not items) and their `AC-N:` labels: every criterion `N. AC-N: ...` (its text may follow on the next lines) with the label equal to its number and no leading zero. A scoped redraft that keeps the reviewed criteria section is not asked for IDs. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for numbering and mixed labels only |
+| A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order, numbered lines inside a code fence are not items) and their `AC-N:` labels: every criterion `N. AC-N: ...` (its text may follow on the next lines) with the label equal to its number and no leading zero. A scoped redraft that keeps the reviewed criteria section is not asked for IDs. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for at least one parseable criterion; numbered exact sections keep their numbering/label checks, while bullet-only exact sections are factory-numbered and mixed top-level styles are refused |
 
 A plan the planning model drafted that fails one is re-planned once, with
 the check's message as the feedback; a second refused plan halts the

@@ -18,7 +18,7 @@ export interface SpecSectionProps {
   readonly session?: EditorBinding;
 }
 
-/** spec.md, with the parsed acceptance criteria under it. Editable in spec_review, and whole there; one closed line once the approval is behind it. */
+/** spec.md, with the factory-parsed acceptance criteria under it. Editable in spec_review, and whole there; one closed line once the approval is behind it. */
 export function SpecSection({
   request,
   editable,
@@ -45,11 +45,14 @@ export function SpecSection({
       }}
       onFetchCurrent={onFetchCurrent}
       structure="spec"
+      handedOver={request.specImported}
       {...(editable ? { commentPath: "spec.md", onComment: pending.add } : {})}
       {...(session === undefined ? {} : { session })}
-      {...(foldsContent(request.state) ? { foldedSummary: specSummary(request.spec) } : {})}
+      {...(foldsContent(request.state)
+        ? { foldedSummary: specSummary(request.spec, request.criteria) }
+        : {})}
     >
-      <AcceptanceCriteriaList spec={request.spec} />
+      <AcceptanceCriteriaList criteria={request.criteria} />
     </FileContentSection>
   );
 }

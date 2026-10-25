@@ -2164,6 +2164,7 @@ var HarnessSiblingModules = map[string]bool{
 	"draft_agents.prompt.md":                             true,
 	"draft_spec.design_guide.prompt.md":                  true,
 	"draft_spec.example_check.prompt.md":                 true,
+	"draft_spec.keep_structure.prompt.md":                true,
 	"draft_spec.previous_draft.prompt.md":                true,
 	"draft_spec.prompt.md":                               true,
 	"draft_spec.scoped_sections.prompt.md":               true,

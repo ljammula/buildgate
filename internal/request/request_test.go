@@ -103,6 +103,18 @@ func TestLegalTransitionsSucceed(t *testing.T) {
 	}
 }
 
+func TestRejectPlanKeepsImportedPlanHistory(t *testing.T) {
+	r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+	r.State = StatePlanReview
+	r.PlanImported = true
+	if err := r.RejectPlan("op", "revise the tickets", fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	if !r.PlanImported || !r.PlanImportEnded || r.PlanAsHandedOver() {
+		t.Fatalf("PlanImported = %v, PlanImportEnded = %v, PlanAsHandedOver = %v; want the imported plan retained as history and marked ended", r.PlanImported, r.PlanImportEnded, r.PlanAsHandedOver())
+	}
+}
+
 // TestTransitionFunctionsAppendOneHistoryEntry covers every named
 // transition function in this file: a successful call must append
 // exactly one Transition to History, with From/To/By set correctly (see

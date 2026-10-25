@@ -1105,6 +1105,30 @@ func TestUpdateRequestSpecHandler(t *testing.T) {
 	}
 }
 
+func TestUpdateRequestSpecHandlerAcceptsAnOperatorShapedHandedOverSpec(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.SpecImported = true
+	if err := loaded.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	content := "# Operator spec\n\n## Scope\n\n- The handed-over behaviour works.\n"
+	body, _ := json.Marshal(updateRequestContentBody{Content: content})
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/spec", "test-token", string(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	onDisk, err := os.ReadFile(request.SpecPath(dataDir, "req-1"))
+	if err != nil || string(onDisk) != content {
+		t.Fatalf("spec.md = %q (%v), want the operator-shaped content", onDisk, err)
+	}
+}
+
 // TestUpdateRequestSpecHandlerRecordsTheEdit: a saved edit is on the
 // request's edit history under the operator the client named, with the
 // replaced text kept as an edit revision; saving the same text again adds
@@ -1324,7 +1348,7 @@ func TestUpdateRequestSpecHandlerZeroCriteriaUnprocessable(t *testing.T) {
 	if recorder.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusUnprocessableEntity, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "no numbered criteria") {
+	if !strings.Contains(recorder.Body.String(), "section has no list items") {
 		t.Errorf("body %q does not name the zero-criteria failure", recorder.Body.String())
 	}
 	onDisk, err := os.ReadFile(request.SpecPath(dataDir, "req-1"))
@@ -1333,6 +1357,27 @@ func TestUpdateRequestSpecHandlerZeroCriteriaUnprocessable(t *testing.T) {
 	}
 	if string(onDisk) == zeroCriteriaSpecMD {
 		t.Errorf("spec.md was overwritten with content that parses to zero criteria")
+	}
+}
+
+func TestUpdateRequestSpecHandlerRefusesAnOversizedHandedOverSpec(t *testing.T) {
+	dataDir := t.TempDir()
+	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
+	r, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SpecImported = true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	body, _ := json.Marshal(updateRequestContentBody{Content: strings.Repeat("x", request.MaxHandedOverSpecBytes+1)})
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/spec", "test-token", string(body)))
+
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "spec is") {
+		t.Fatalf("status = %d, body %s; want the spec size refusal", recorder.Code, recorder.Body.String())
 	}
 }
 

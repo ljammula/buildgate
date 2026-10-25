@@ -14,6 +14,7 @@
         "draft_spec.design_guide.prompt.md",
         "draft_spec.previous_draft.prompt.md",
         "draft_spec.scoped_sections.prompt.md",
+        "draft_spec.keep_structure.prompt.md",
         "draft_feedback.prompt.md"
       ],
       "description": "Combines request text, repository architecture and overview, a capped file inventory, optional design guidance and revision feedback, and spec-writing instructions."

@@ -37,6 +37,9 @@ const ACCEPTANCE_CRITERIA = "## Acceptance criteria";
 const CRITERIA_COVERED = "### Acceptance criteria covered";
 const PLAN_CONTAINER = "## Plan";
 
+/** The byte cap the server applies to an operator-shaped spec. */
+export const MAX_HANDED_OVER_SPEC_BYTES = 120_000;
+
 // Go's unicode.IsSpace set. String.prototype.trim differs from it (it strips
 // U+FEFF and keeps U+0085), so the trim is written out.
 const GO_SPACE =
@@ -125,6 +128,8 @@ export function validateSpecSkeleton(content: string): SpecSkeletonResult {
 export interface CriterionBlock {
   readonly rawLines: readonly string[];
   readonly folded: string;
+  readonly startLine: number;
+  readonly endLine: number;
 }
 
 /**
@@ -133,23 +138,234 @@ export interface CriterionBlock {
  * non-blank line up to the next one belongs to it. Lines before the first
  * criterion are dropped.
  */
-function splitCriteriaBlocks(sectionLines: readonly string[]): CriterionBlock[] {
+const DERIVED_CRITERION_ITEM =
+  /^(?:[-*+][\t\n\f\r ]+[^\t\n\f\r ]|[0-9]+[.)][\t\n\f\r ]+[^\t\n\f\r ])/;
+const DERIVED_CRITERION_MARKER = /^(?:[-*+][\t\n\f\r ]+|[0-9]+[.)][\t\n\f\r ]+)([\s\S]*)$/;
+const TASK_LIST_MARKER = /^\[[ xX]\](?:[\t\n\f\r ]+|$)/;
+const EXACT_NUMBERED_ITEM = /^[0-9]+[.)][ \t]+/;
+const EXACT_BULLETED_ITEM = /^[-*+][ \t]+/;
+const NON_REQUIREMENT_SECTIONS = new Set([
+  "problem",
+  "non-goals",
+  "out of scope",
+  "risks",
+  "open questions",
+  "background",
+  "context",
+  "motivation",
+  "alternatives considered",
+  "references",
+  "notes",
+]);
+
+/** The level of an unindented ATX heading, or zero for any other line. */
+export function markdownHeadingLevel(raw: string): number {
+  if (raw === "" || raw !== raw.replace(/^[ \t]/, "") || raw.charAt(0) !== "#") return 0;
+  let level = 0;
+  while (raw.charAt(level) === "#") level++;
+  if (level === 0 || level > 6 || level >= raw.length || !/[ \t]/.test(raw.charAt(level))) return 0;
+  return level;
+}
+
+/** The first line after a closed leading YAML front-matter block, or zero. */
+export function frontMatterBodyOffset(lines: readonly string[]): number {
+  if (lines.length === 0 || trimSpace((lines[0] ?? "").replace(/^\uFEFF/, "")) !== "---") return 0;
+  let keyFound = false;
+  for (let i = 1; i < lines.length; i++) {
+    const marker = trimSpace(lines[i] ?? "");
+    if (!keyFound) {
+      if (marker === "") continue;
+      if (!/^[A-Za-z0-9_-]+:/.test(marker)) return 0;
+      keyFound = true;
+      continue;
+    }
+    if (marker === "---" || marker === "...") return i + 1;
+  }
+  return 0;
+}
+
+function asciiLower(text: string): string {
+  return text.replace(/[A-Z]/g, (char) => char.toLowerCase());
+}
+
+/** The shared heading comparison used by derivation, exclusions and decisions. */
+export function normalizeSpecHeading(raw: string): string {
+  let text = trimSpace(raw);
+  const level = markdownHeadingLevel(text);
+  if (level > 0) text = trimSpace(text.slice(level));
+  return asciiLower(trimSpace(text.endsWith(":") ? text.slice(0, -1) : text));
+}
+
+/** A heading's displayed text, retaining a trailing colon when it was written. */
+export function headingLabel(raw: string): string {
+  const text = trimSpace(raw);
+  const level = markdownHeadingLevel(text);
+  return level > 0 ? trimSpace(text.slice(level)) : text;
+}
+
+function markdownLineMask(lines: readonly string[]): boolean[] {
+  const blocked = lines.map(() => false);
+  const bodyOffset = frontMatterBodyOffset(lines);
+  for (let i = 0; i < bodyOffset && i < blocked.length; i++) blocked[i] = true;
+  let fence: { readonly ch: string; readonly length: number } | null = null;
+  let inHTMLComment = false;
+  lines.forEach((raw, i) => {
+    if (i < bodyOffset) return;
+    const trimmed = trimSpace(raw);
+    if (fence !== null) {
+      blocked[i] = true;
+      if (closesFence(trimmed, fence.ch, fence.length)) fence = null;
+      return;
+    }
+    if (inHTMLComment) {
+      blocked[i] = true;
+      if (raw.includes("-->")) inHTMLComment = false;
+      return;
+    }
+    const commentText = raw.replace(/^ +/, "");
+    const indent = raw.length - commentText.length;
+    if (indent <= 3 && commentText.startsWith("<!--")) {
+      blocked[i] = true;
+      if (!raw.includes("-->")) inHTMLComment = true;
+      return;
+    }
+    const opened = fenceMarker(trimmed);
+    if (opened !== null) {
+      blocked[i] = true;
+      fence = opened;
+    }
+  });
+  return blocked;
+}
+
+function headingIsOutsideFence(mask: readonly boolean[], wanted: number): boolean {
+  return !(mask[wanted] ?? false);
+}
+
+function sectionEnd(
+  lines: readonly string[],
+  headingLine: number,
+  level: number,
+  mask: readonly boolean[],
+): number {
+  for (let i = headingLine + 1; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    if (mask[i]) continue;
+    let got = markdownHeadingLevel(raw);
+    if (got === 0 && level === 2 && trimSpace(raw).startsWith("## ")) got = 2;
+    if (got > 0 && got <= level) return i;
+  }
+  return lines.length;
+}
+
+function exactCriteriaSection(
+  lines: readonly string[],
+  mask = markdownLineMask(lines),
+): { start: number; end: number } | null {
+  for (let i = 0; i < lines.length; i++) {
+    if (trimSpace(lines[i] ?? "") !== ACCEPTANCE_CRITERIA || !headingIsOutsideFence(mask, i))
+      continue;
+    return { start: i + 1, end: sectionEnd(lines, i, 2, mask) };
+  }
+  return null;
+}
+
+function namedCriteriaSection(
+  lines: readonly string[],
+  mask = markdownLineMask(lines),
+): { start: number; end: number; heading: string } | null {
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    const level = markdownHeadingLevel(raw);
+    if (
+      level < 2 ||
+      level > 6 ||
+      !headingIsOutsideFence(mask, i) ||
+      trimSpace(raw) === ACCEPTANCE_CRITERIA ||
+      normalizeSpecHeading(raw) !== "acceptance criteria"
+    ) {
+      continue;
+    }
+    return { start: i + 1, end: sectionEnd(lines, i, level, mask), heading: trimSpace(raw) };
+  }
+  return null;
+}
+
+function isThematicBreak(line: string): boolean {
+  const compact = line.replace(/[ \t]/g, "");
+  if (compact.length < 3 || ![45, 42, 95].includes(compact.charCodeAt(0))) return false;
+  const marker = compact.charAt(0);
+  for (let i = 1; i < compact.length; i++) {
+    if (compact.charAt(i) !== marker) return false;
+  }
+  return true;
+}
+
+function splitCriteriaBlocks(
+  sectionLines: readonly string[],
+  itemPattern = CRITERION_ITEM,
+  stopAtHeading = false,
+  mask: readonly boolean[] = markdownLineMask(sectionLines),
+): CriterionBlock[] {
   const blocks: CriterionBlock[] = [];
   let current: string[] | null = null;
+  let currentStart = -1;
+  let currentEnd = -1;
   const flush = () => {
     if (current !== null && current.length > 0) {
-      blocks.push({ rawLines: current, folded: current.map(trimSpace).join(" ") });
+      blocks.push({
+        rawLines: current,
+        folded: current.map(trimSpace).join(" "),
+        startLine: currentStart,
+        endLine: currentEnd,
+      });
     }
+    current = null;
+    currentStart = -1;
+    currentEnd = -1;
   };
-  for (const raw of sectionLines) {
+  let blankAfterItem = false;
+  sectionLines.forEach((raw, lineIndex) => {
+    if (mask[lineIndex] ?? false) {
+      if (current !== null && trimSpace(raw) !== "") {
+        current.push(raw);
+        currentEnd = lineIndex;
+        blankAfterItem = false;
+      }
+      return;
+    }
     const trimmed = trimSpace(raw);
-    if (trimmed === "") continue;
-    if (!isIndented(raw) && CRITERION_ITEM.test(trimmed)) {
+    if (trimmed === "") {
+      if (stopAtHeading && current !== null) blankAfterItem = true;
+      return;
+    }
+    if (stopAtHeading && isThematicBreak(trimmed)) {
+      flush();
+      blankAfterItem = false;
+      return;
+    }
+    const indented = isIndented(raw);
+    if (stopAtHeading && !indented && markdownHeadingLevel(raw) > 0) {
+      flush();
+      blankAfterItem = false;
+      return;
+    }
+    if (!indented && itemPattern.test(trimmed)) {
       flush();
       current = [];
+      currentStart = lineIndex;
+      currentEnd = lineIndex;
+      blankAfterItem = false;
+    } else if (stopAtHeading && current !== null && blankAfterItem && !indented) {
+      flush();
+      blankAfterItem = false;
     }
-    if (current !== null) current.push(raw);
-  }
+    if (current !== null) {
+      current.push(raw);
+      currentEnd = lineIndex;
+      blankAfterItem = false;
+    }
+  });
   flush();
   return blocks;
 }
@@ -158,25 +374,196 @@ function splitCriteriaBlocks(sectionLines: readonly string[]): CriterionBlock[] 
 export function criteriaSectionRange(
   lines: readonly string[],
 ): { readonly start: number; readonly end: number } | null {
-  const heading = lines.findIndex((line) => trimSpace(line) === ACCEPTANCE_CRITERIA);
-  if (heading === -1) return null;
-  const start = heading + 1;
-  let end = lines.length;
-  for (let i = start; i < lines.length; i++) {
-    if (trimSpace(lines[i] ?? "").startsWith("## ")) {
-      end = i;
-      break;
-    }
-  }
-  return { start, end };
+  return exactCriteriaSection(lines);
 }
 
-/** The spec's numbered criteria as the server reads them ("1. It works."), in order; empty where the server would refuse. */
-export function specAcceptanceCriteria(content: string): string[] {
+interface ParsedCriteria {
+  readonly criteria: string[];
+  readonly locations: SpecCriterionLocation[];
+  readonly sections: string[];
+  readonly named: boolean;
+  readonly heading: string;
+}
+
+export interface SpecCriterionLocation {
+  readonly text: string;
+  readonly section: string;
+  readonly item: number;
+  readonly startLine: number;
+  readonly endLine: number;
+}
+
+function deriveSectionCriteria(
+  lines: readonly string[],
+  offset: number,
+  source: string,
+  named: boolean,
+  mask: readonly boolean[] = markdownLineMask(lines),
+): ParsedCriteria {
+  const criteria: string[] = [];
+  const locations: SpecCriterionLocation[] = [];
+  splitCriteriaBlocks(lines, DERIVED_CRITERION_ITEM, true, mask).forEach((block) => {
+    const match = DERIVED_CRITERION_MARKER.exec(trimSpace(block.folded));
+    if (match === null) return;
+    const text = trimSpace((match[1] ?? "").replace(TASK_LIST_MARKER, ""));
+    if (text === "") return;
+    const item = criteria.length + 1;
+    const criterion = `${item}. ${text}`;
+    criteria.push(criterion);
+    locations.push({
+      text: criterion,
+      section: source,
+      item,
+      startLine: offset + block.startLine,
+      endLine: offset + block.endLine,
+    });
+  });
+  return { criteria, locations, sections: [], named, heading: source };
+}
+
+function deriveSourceName(lines: readonly string[]): string {
+  const heading = lines.find((line) => markdownHeadingLevel(line) === 1);
+  return heading === undefined ? "document title" : headingLabel(heading);
+}
+
+function deriveSourceSection(lines: readonly string[]): string {
+  const heading = lines.find((line) => markdownHeadingLevel(line) === 1);
+  return heading === undefined ? "" : trimSpace(heading);
+}
+
+function parseDerivedCriteria(lines: readonly string[]): ParsedCriteria {
+  const mask = markdownLineMask(lines);
+  const headingLines = lines.flatMap((raw, index) =>
+    [1, 2].includes(markdownHeadingLevel(raw)) && headingIsOutsideFence(mask, index) ? [index] : [],
+  );
+  const criteria: string[] = [];
+  const locations: SpecCriterionLocation[] = [];
+  const sections: string[] = [];
+  const sectionsSeen = new Set<string>();
+  const firstHeading = headingLines[0] ?? lines.length;
+  const titleArea = lines.slice(0, firstHeading);
+  const titleAreaSection = deriveSourceSection(titleArea);
+  const titleAreaName = deriveSourceName(titleArea);
+  for (let i = 0; i <= headingLines.length; i++) {
+    const start = i === 0 ? 0 : (headingLines[i - 1] ?? 0) + 1;
+    const end = i < headingLines.length ? (headingLines[i] ?? lines.length) : lines.length;
+    const heading = i === 0 ? null : (lines[headingLines[i - 1] ?? 0] ?? "");
+    const active = heading === null || !NON_REQUIREMENT_SECTIONS.has(normalizeSpecHeading(heading));
+    if (!active || start >= end) continue;
+    const section = heading === null ? titleAreaSection : trimSpace(heading);
+    const source = deriveSectionCriteria(
+      lines.slice(start, end),
+      start,
+      section,
+      false,
+      mask.slice(start, end),
+    );
+    if (source.criteria.length === 0) continue;
+    const name = heading === null ? titleAreaName : headingLabel(heading);
+    if (!sectionsSeen.has(name)) {
+      sectionsSeen.add(name);
+      sections.push(name);
+    }
+    source.criteria.forEach((criterion, criterionIndex) => {
+      const body = trimSpace(criterion.replace(/^[0-9]+[.)][\t\n\f\r ]*/, ""));
+      const text = `${criteria.length + 1}. ${body}`;
+      const location = source.locations[criterionIndex];
+      if (location === undefined) return;
+      criteria.push(text);
+      locations.push({ ...location, text, item: criteria.length });
+    });
+  }
+  return { criteria, locations, sections, named: false, heading: "" };
+}
+
+function exactCriteriaKinds(
+  lines: readonly string[],
+  mask: readonly boolean[],
+  offset: number,
+): { readonly numbered: boolean; readonly bulleted: boolean; readonly lines: number[] } {
+  let numbered = false;
+  let bulleted = false;
+  const itemLines: number[] = [];
+  lines.forEach((raw, index) => {
+    if ((mask[index] ?? false) || isIndented(raw)) return;
+    if (EXACT_NUMBERED_ITEM.test(raw)) {
+      numbered = true;
+      itemLines.push(offset + index + 1);
+    } else if (EXACT_BULLETED_ITEM.test(raw)) {
+      bulleted = true;
+      itemLines.push(offset + index + 1);
+    }
+  });
+  return { numbered, bulleted, lines: itemLines };
+}
+
+function parseCriteria(content: string): ParsedCriteria {
   const lines = content.split("\n");
-  const range = criteriaSectionRange(lines);
-  if (range === null) return [];
-  return splitCriteriaBlocks(lines.slice(range.start, range.end)).map((b) => b.folded);
+  const mask = markdownLineMask(lines);
+  const exact = exactCriteriaSection(lines, mask);
+  if (exact !== null) {
+    const sectionLines = lines.slice(exact.start, exact.end);
+    const sectionMask = mask.slice(exact.start, exact.end);
+    const kinds = exactCriteriaKinds(sectionLines, sectionMask, exact.start);
+    if (!kinds.numbered) {
+      const derived = deriveSectionCriteria(
+        sectionLines,
+        exact.start,
+        ACCEPTANCE_CRITERIA,
+        true,
+        sectionMask,
+      );
+      return {
+        ...derived,
+        named: false,
+        sections: derived.criteria.length > 0 ? [ACCEPTANCE_CRITERIA] : [],
+      };
+    }
+    const blocks = splitCriteriaBlocks(sectionLines, CRITERION_ITEM, false, sectionMask);
+    return {
+      criteria: blocks.map((block) => block.folded),
+      locations: blocks.map((block, i) => ({
+        text: block.folded,
+        section: ACCEPTANCE_CRITERIA,
+        item: i + 1,
+        startLine: exact.start + block.startLine,
+        endLine: exact.start + block.endLine,
+      })),
+      sections: [],
+      named: false,
+      heading: "",
+    };
+  }
+  const named = namedCriteriaSection(lines, mask);
+  if (named !== null)
+    return deriveSectionCriteria(
+      lines.slice(named.start, named.end),
+      named.start,
+      named.heading,
+      true,
+      mask.slice(named.start, named.end),
+    );
+  return parseDerivedCriteria(lines);
+}
+
+/** The spec's criteria as the server reads them, including derived operator-shaped criteria. */
+export function specAcceptanceCriteria(content: string): string[] {
+  return parseCriteria(content).criteria;
+}
+
+/** The structural source locations of the criteria the server numbers. */
+export function specCriterionLocations(content: string): SpecCriterionLocation[] {
+  return parseCriteria(content).locations;
+}
+
+/** All unindented ATX headings outside fences, in document order. */
+export function specDocumentHeadings(content: string): string[] {
+  const lines = content.split("\n");
+  const mask = markdownLineMask(lines);
+  return lines.flatMap((raw, index) => {
+    const trimmed = trimSpace(raw);
+    return markdownHeadingLevel(raw) > 0 && headingIsOutsideFence(mask, index) ? [trimmed] : [];
+  });
 }
 
 /** The numbers a "### Acceptance criteria covered" body names, or the first line that is not one. */
@@ -311,12 +698,38 @@ function headingRows(
   });
 }
 
-export function specStructure(content: string): StructureCheck {
-  const lines = content.split("\n");
+export function specStructure(content: string, handedOver = false): StructureCheck {
+  const bytes = new TextEncoder().encode(content).byteLength;
+  const sizeRow: StructureRow = {
+    label: handedOver ? "Handed-over spec size" : "Spec size",
+    ok: bytes <= MAX_HANDED_OVER_SPEC_BYTES,
+    note:
+      bytes <= MAX_HANDED_OVER_SPEC_BYTES
+        ? `${bytes} bytes`
+        : `${bytes} bytes, max ${MAX_HANDED_OVER_SPEC_BYTES}`,
+  };
   const criteria = specAcceptanceCriteria(content);
-  const rows = headingRows(lines, requiredSpecHeadings, (heading, body) =>
-    heading === ACCEPTANCE_CRITERIA && !anyNonBlank(body) ? "no content" : "",
-  );
+  if (handedOver) {
+    const rows: StructureRow[] = [
+      sizeRow,
+      {
+        label: "Handed-over criteria",
+        ok: criteria.length > 0,
+        note: criteria.length > 0 ? `${criteria.length} parsed` : 'none parsed (want "- item")',
+      },
+    ];
+    return {
+      rows,
+      passes: rows.every((row) => row.ok),
+    };
+  }
+  const lines = content.split("\n");
+  const rows: StructureRow[] = [
+    sizeRow,
+    ...headingRows(lines, requiredSpecHeadings, (heading, body) =>
+      heading === ACCEPTANCE_CRITERIA && !anyNonBlank(body) ? "no content" : "",
+    ),
+  ];
   rows.push({
     label: "Numbered criteria",
     ok: criteria.length > 0,

@@ -32,6 +32,8 @@ export interface FileEditorProps {
   readonly session?: EditorBinding;
   /** Shows the live structure checklist for this kind of file beside the text. */
   readonly structure?: StructureKind;
+  /** A handed-over spec is allowed to keep the operator's own structure. */
+  readonly handedOver?: boolean;
   /** For a ticket: the spec's numbered criteria, offered as what the ticket may cover. */
   readonly specCriteria?: readonly string[];
 }
@@ -63,6 +65,7 @@ export function FileEditor({
   onClose,
   session,
   structure,
+  handedOver = false,
   specCriteria,
 }: FileEditorProps) {
   const [opened] = useState(initialContent);
@@ -214,7 +217,12 @@ export function FileEditor({
           onKeyDown={onKeyDown}
         />
         {structure === undefined ? null : (
-          <StructureChecklist kind={structure} text={text} className="lg:w-72 lg:shrink-0" />
+          <StructureChecklist
+            kind={structure}
+            text={text}
+            handedOver={handedOver}
+            className="lg:w-72 lg:shrink-0"
+          />
         )}
       </div>
       {structure === undefined || !dirty ? null : (

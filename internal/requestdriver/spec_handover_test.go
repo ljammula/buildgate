@@ -37,7 +37,7 @@ func TestAdvanceSpecDraftingTakesAHandedOverSpecWithoutTheDraftingJob(t *testing
 // an invalid shape after submit halts the request and never reaches review.
 func TestAdvanceSpecDraftingHaltsOnAnInvalidOrMissingHandedOverSpec(t *testing.T) {
 	for name, spec := range map[string]string{
-		"invalid": strings.Replace(requestdrivertest.CanonicalValidSpec, "## Risks", "## Risk", 1),
+		"invalid": strings.Replace(requestdrivertest.CanonicalValidSpec, "1. A retried POST /refunds with the same idempotency key returns the original result.", "No numbered criterion.", 1),
 		"missing": "",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -50,6 +50,24 @@ func TestAdvanceSpecDraftingHaltsOnAnInvalidOrMissingHandedOverSpec(t *testing.T
 				t.Fatalf("State = %q, want halted", r.State)
 			}
 		})
+	}
+}
+
+func TestAdvanceSpecDraftingHaltsOnAnOversizedImportedRedraft(t *testing.T) {
+	dataDir := t.TempDir()
+	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: time.Now().UTC().Format(time.RFC3339), Reason: "add more detail", FromState: request.StateSpecReview})
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	revised := requestdrivertest.CanonicalValidSpec + strings.Repeat("x", request.MaxHandedOverSpecBytes+1)
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return revised, &request.SpecEvidence{}, nil
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != request.StateHalted || !strings.Contains(r.Error, "spec is") || !strings.Contains(r.Error, "120000-byte limit") {
+		t.Fatalf("State = %q, Error = %q; want oversized redraft halt", r.State, r.Error)
 	}
 }
 

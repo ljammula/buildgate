@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
@@ -131,6 +133,39 @@ func TestRejectMainSendBackFlag(t *testing.T) {
 
 	if err := rejectMain(dp, []string{"-reason", "x", "-to", "bogus", "-data-dir", dataDir, "req-1"}); err == nil {
 		t.Fatal("rejectMain -to bogus: want an error, got nil")
+	}
+}
+
+func TestRejectMainCriteriaChangeHaltFeedsPlanningFeedback(t *testing.T) {
+	t.Parallel()
+	dp := newTestDeps(t)
+	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{
+		"001.spec.md": requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1),
+		"002.spec.md": requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 2),
+	})
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	r.State = request.StateHalted
+	r.Error = "the spec's criteria changed after the plan was handed over"
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectMain(dp, []string{"-to", "plan", "-reason", "revise the imported tickets", "-data-dir", dataDir, id}); err != nil {
+		t.Fatalf("factoryd reject -to plan -reason: %v", err)
+	}
+	planning := requestdrivertest.LoadRequest(t, dataDir, id)
+	if planning.State != request.StatePlanning || !planning.PlanImported || !planning.PlanImportEnded || planning.PlanAsHandedOver() {
+		t.Fatalf("after reject: State = %q, PlanImported = %v, PlanImportEnded = %v, PlanAsHandedOver = %v; want planning with import history retained and drafted-plan path", planning.State, planning.PlanImported, planning.PlanImportEnded, planning.PlanAsHandedOver())
+	}
+	runner, gotVerify := requestdrivertest.StubPlanTicketsRunner([]requestdriver.DraftedTicket{
+		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1)},
+		{Filename: "002.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 2)},
+	}, &request.PlanEvidence{}, nil)
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, planning, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+		t.Fatalf("planning after reject: %v", err)
+	}
+	planned := requestdrivertest.LoadRequest(t, dataDir, id)
+	if planned.State != request.StatePlanReview || *gotVerify != requestdrivertest.HandoverVerify {
+		t.Fatalf("after planning: State = %q, verify = %q, Error = %q; want drafted plan_review", planned.State, *gotVerify, planned.Error)
 	}
 }
 

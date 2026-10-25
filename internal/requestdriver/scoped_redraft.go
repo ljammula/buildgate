@@ -1,6 +1,7 @@
 package requestdriver
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -22,7 +23,7 @@ const specRelPath = "spec.md"
 // the draft lacks a commented section: a structural refusal.
 func spliceScopedSpec(dataDir string, r *request.Request, drafted string) (string, error) {
 	scope := r.RedraftScope(request.StateSpecReview)
-	if scope == nil || importsSpec(r) {
+	if scope == nil {
 		return drafted, nil
 	}
 	headings, ok := scope.Sections(specRelPath)
@@ -34,7 +35,15 @@ func spliceScopedSpec(dataDir string, r *request.Request, drafted string) (strin
 		// Nothing reviewed on disk to keep: a full redraft stands.
 		return drafted, nil
 	}
-	return request.SpliceSections(string(current), drafted, request.SpecSkeletonHeadings(), headings)
+	sectionHeadings := request.SpecSkeletonHeadings()
+	if r.SpecImported {
+		sectionHeadings = request.SpecDocumentHeadings(string(current))
+	}
+	spliced, spliceErr := request.SpliceSections(string(current), drafted, sectionHeadings, headings)
+	if errors.Is(spliceErr, request.ErrAmbiguousSection) {
+		return drafted, nil
+	}
+	return spliced, spliceErr
 }
 
 // spliceScopedTickets is spliceScopedSpec for a plan: current is the reviewed
@@ -70,6 +79,9 @@ func spliceScopedTickets(r *request.Request, current, drafted []DraftedTicket) (
 			continue
 		}
 		content, err := request.SpliceSections(t.Content, draft, request.TicketSkeletonHeadings(), headings)
+		if errors.Is(err, request.ErrAmbiguousSection) {
+			return drafted, nil
+		}
 		if err != nil {
 			return nil, contentErr(fmt.Errorf("ticket %s: %w", t.Filename, err))
 		}

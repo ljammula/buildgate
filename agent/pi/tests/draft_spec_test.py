@@ -221,6 +221,20 @@ class BuildPromptTests(unittest.TestCase):
 		previous = prompt.index("<<<BEGIN CURRENT SPEC>>>\n# Spec\n\n## Problem\n\nRefunds double-process.\n<<<END CURRENT SPEC>>>")
 		self.assertLess(previous, prompt.index("<<<BEGIN OPERATOR FEEDBACK>>>"))
 
+	def test_keep_structure_uses_the_operator_document_instead_of_the_skeleton(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			init_repo(workspace)
+			previous = "# Operator spec\n\n## Wanted behaviour\n\n- It works.\n"
+			prompt, _ = draft_spec.build_prompt(
+				"text", workspace, draft_spec.DRAFT_RELATIVE_PATH,
+				feedback="add the error case", previous_draft=previous, keep_structure=True,
+			)
+		flat = " ".join(prompt.split())
+		self.assertIn("Keep its headings, heading order, paragraph order, list markers and list structure", flat)
+		self.assertIn("add the error case", flat)
+		self.assertNotIn("## Acceptance criteria", prompt)
+
 	def test_build_prompt_lists_rewrite_sections(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)
@@ -420,6 +434,15 @@ class RunDraftTests(unittest.TestCase):
 				with self.assertRaises(SystemExit) as raised:
 					draft_spec.main()
 		self.assertEqual(raised.exception.code, 2)
+
+	def test_main_keep_structure_option_reaches_run_draft(self):
+		args = [
+			str(DRAFT_SPEC_SCRIPT), "--request", "/tmp/request.md", "--workspace", "/tmp/work",
+			"--out", "/tmp/spec.md", "--evidence", "/tmp/evidence.json", "--keep-structure",
+		]
+		with mock.patch.object(sys, "argv", args), mock.patch.object(draft_spec, "run_draft", return_value=0) as run_draft:
+			self.assertEqual(draft_spec.main(), 0)
+		self.assertTrue(run_draft.call_args.kwargs["keep_structure"])
 
 	def test_feedback_file_reaches_the_prompt(self):
 		# run_draft's own --feedback-file plumbing, end to end from a

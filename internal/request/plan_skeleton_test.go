@@ -1,7 +1,11 @@
 package request
 
 import (
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 const validTicket = `Verify-Command: make verify
@@ -309,10 +313,105 @@ func TestSpecAcceptanceCriteriaCount(t *testing.T) {
 	}
 }
 
-func TestSpecAcceptanceCriteriaCountRejectsMissingSection(t *testing.T) {
+func TestSpecAcceptanceCriteriaCountRejectsASpecWithoutCriteria(t *testing.T) {
 	_, err := SpecAcceptanceCriteriaCount("# Spec\n\n## Problem\n\nx\n")
 	if err == nil {
 		t.Fatal("SpecAcceptanceCriteriaCount(no criteria section) = nil, want error")
+	}
+}
+
+func TestSpecAcceptanceCriteriaDerivesTheGoTomlExample(t *testing.T) {
+	spec := "# go-toml: an encoder setting for multiline strings\n\n" +
+		"## Problem\n\n- This problem bullet is not a criterion.\n\n" +
+		"## Wanted behaviour\n\nThe prose before the first item is not a criterion.\n" +
+		"- A new encoder setting chooses how string values are written, with three modes:\n" +
+		"  - **default**: quote strings.\n  - **if newline**: use multiline strings.\n" +
+		"- The setting applies to every string the encoder writes as a value: keys and nested values included.\n\n" +
+		"## Interface\n\nIn package github.com/pelletier/go-toml/v2:\n" +
+		"- `type MultilineStringMode int`, with the constants ...\n" +
+		"- `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`, chainable ...\n\n" +
+		"Document the setting in the Encoder docs and in the README.\n\n" +
+		"## Risks\n\n- This risk bullet is not a criterion.\n"
+	want := []string{
+		"1. A new encoder setting chooses how string values are written, with three modes: - **default**: quote strings. - **if newline**: use multiline strings.",
+		"2. The setting applies to every string the encoder writes as a value: keys and nested values included.",
+		"3. `type MultilineStringMode int`, with the constants ...",
+		"4. `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`, chainable ...",
+	}
+	got, err := SpecAcceptanceCriteria(spec)
+	if err != nil {
+		t.Fatalf("SpecAcceptanceCriteria: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("derived criteria = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("derived criteria[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSpecAcceptanceCriteriaDerivationIgnoresFencedListsAndSupportsNumberedLists(t *testing.T) {
+	spec := `# Spec
+
+## Scope
+
+~~~text
+- not a criterion
+1. also not a criterion
+~~~
+1. The first real item.
+2) The second real item.
+
+## Problem
+
+- ignored problem item
+`
+	got, err := SpecAcceptanceCriteria(spec)
+	if err != nil {
+		t.Fatalf("SpecAcceptanceCriteria: %v", err)
+	}
+	want := []string{"1. The first real item.", "2. The second real item."}
+	if len(got) != len(want) {
+		t.Fatalf("derived criteria = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("derived criteria[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSpecAcceptanceCriteriaDerivationRejectsASpecWithNoLists(t *testing.T) {
+	_, err := SpecAcceptanceCriteria("# Spec\n\n## Scope\n\nOnly prose.\n")
+	if err == nil || !strings.Contains(err.Error(), "no list items to derive criteria from") {
+		t.Fatalf("SpecAcceptanceCriteria(no lists) = %v, want a derivation error", err)
+	}
+}
+
+func TestSpecAcceptanceCriteriaDerivesFromAMiscasedCriteriaHeadingAndTheTitle(t *testing.T) {
+	got, err := SpecAcceptanceCriteria("# Title\n\n- Under the title.\n\n## Problem\n\n- Not a requirement.\n\n## Acceptance Criteria\n\n1. First.\n2. Second.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1. First.", "2. Second."}
+	if !slices.Equal(got, want) {
+		t.Errorf("SpecAcceptanceCriteria = %q, want %q", got, want)
+	}
+}
+
+func TestSpecAcceptanceCriteriaKeepsSkeletonBehaviour(t *testing.T) {
+	got, err := SpecAcceptanceCriteria(validSpecTwoCriteria)
+	if err != nil {
+		t.Fatalf("SpecAcceptanceCriteria(skeleton): %v", err)
+	}
+	want := []string{
+		"1. It works.",
+		"2. It doesn't break anything else.",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SpecAcceptanceCriteria(skeleton) = %v, want %v", got, want)
 	}
 }
 
@@ -430,5 +529,49 @@ None.
 		if got[i] != want[i] {
 			t.Errorf("SpecAcceptanceCriteria[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestSpecAcceptanceCriteriaLargeHeadingDocumentIsLinearEnough(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 10_000; i++ {
+		b.WriteString("## Heading ")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	if b.Len() < 150_000 {
+		b.WriteString(strings.Repeat("x", 150_000-b.Len()))
+	}
+	if b.Len() < 150_000 {
+		t.Fatalf("test document is %d bytes, want at least 150000", b.Len())
+	}
+	started := time.Now()
+	_, err := SpecAcceptanceCriteria(b.String())
+	if err == nil {
+		t.Fatal("document with no list items: want a derivation error")
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("parsing 150 KB with 10000 headings took %s", elapsed)
+	}
+}
+
+func TestSpecAcceptanceCriteriaLargePreambleAndHeadingDocumentIsLinearEnough(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(strings.Repeat("- preamble item\n", 15_000))
+	for i := 0; i < 10_000; i++ {
+		b.WriteString("## Heading ")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	started := time.Now()
+	criteria, err := SpecAcceptanceCriteria(b.String())
+	if err != nil {
+		t.Fatalf("large preamble: %v", err)
+	}
+	if len(criteria) != 15_000 {
+		t.Fatalf("large preamble criteria = %d, want 15000", len(criteria))
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("parsing 15000-item preamble and 10000 headings took %s", elapsed)
 	}
 }

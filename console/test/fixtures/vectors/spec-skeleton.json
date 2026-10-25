@@ -1,4 +1,5 @@
 {
+  "max_handed_over_spec_bytes": 120000,
   "specs": [
     {
       "name": "well-formed",
@@ -36,7 +37,10 @@
       "valid": false,
       "missing_heading": "## Acceptance criteria",
       "criteria_section_empty": false,
-      "criteria": []
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
     },
     {
       "name": "heading out of order",
@@ -243,6 +247,311 @@
       "criteria": [
         "1. It adds.",
         "2. It subtracts."
+      ]
+    },
+    {
+      "name": "go-toml operator shape",
+      "text": "# go-toml: an encoder setting\n\n## Problem\n\n- not a requirement\n\n## Wanted behaviour\n\n- A setting chooses the encoding mode.\n- Every string uses the chosen mode.\n\n## Interface\n\n- `SetMode` configures the encoder.\n\nDocument the setting in the README.\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. A setting chooses the encoding mode.",
+        "2. Every string uses the chosen mode.",
+        "3. `SetMode` configures the encoder."
+      ]
+    },
+    {
+      "name": "title list items",
+      "text": "# Operator spec\n\n- The first title requirement.\n- The second title requirement.\n\n## Problem\n\n- excluded\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. The first title requirement.",
+        "2. The second title requirement."
+      ]
+    },
+    {
+      "name": "all excluded sections",
+      "text": "# Spec\n\n## Problem\n- no\n## Non-goals\n- no\n## Out of scope\n- no\n## Risks\n- no\n## Open questions\n- no\n## Background\n- no\n## Context\n- no\n## Motivation\n- no\n## Alternatives considered\n- no\n## References\n- no\n## Notes\n- no\n## Wanted\n- keep this\n",
+      "valid": false,
+      "missing_heading": "## Scope",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. keep this"
+      ]
+    },
+    {
+      "name": "miscased colon level-three criteria heading",
+      "text": "# Spec\n\n### Acceptance Criteria:\n\n- first\n- AC-2: second\n\n#### Detail\n\n- not in the criteria section\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first",
+        "2. AC-2: second",
+        "3. not in the criteria section"
+      ]
+    },
+    {
+      "name": "nested fences use the exact delimiter",
+      "text": "# Spec\n\n## Wanted\n\n~~~text\n- hidden\n```\n- still hidden\n~~~not-a-close\n- still hidden\n~~~~\n- still hidden\n~~~\n- visible\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. still hidden ~~~ - visible"
+      ]
+    },
+    {
+      "name": "thematic breaks end an item",
+      "text": "# Spec\n\n## Wanted\n\n- first\n\n---\n\n- second\n\n* * *\n\n- third\n\n___\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first",
+        "2. second",
+        "3. third"
+      ]
+    },
+    {
+      "name": "task list items drop their checkbox",
+      "text": "# Spec\n\n## Wanted\n\n- [ ] unchecked\n- [x] checked\n- [X] uppercase\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. unchecked",
+        "2. checked",
+        "3. uppercase"
+      ]
+    },
+    {
+      "name": "paragraph after a blank ends the item",
+      "text": "# Spec\n\n## Interface\n\n- first item\n  lazy continuation\n\nThis paragraph is not a requirement.\n\n- second item\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first item lazy continuation",
+        "2. second item"
+      ]
+    },
+    {
+      "name": "front matter lists are ignored",
+      "text": "---\ntitle: x\nitems:\n  - hidden\n---\n\n# Title\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "front matter document marker closes before criteria",
+      "text": "---\ntitle: x\nitems:\n  - hidden\n...\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "level-one headings end sections",
+      "text": "# Part one\n\n## Notes\n\n- hidden\n\n# Part two\n\n- must do\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. must do"
+      ]
+    },
+    {
+      "name": "exact acceptance criteria accepts top-level bullets",
+      "text": "## Acceptance criteria\n\n- first\n- second\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first",
+        "2. second"
+      ]
+    },
+    {
+      "name": "exact acceptance criteria mixed styles use the numbered parser",
+      "text": "## Acceptance criteria\n\n- first\n1. second\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. second"
+      ]
+    },
+    {
+      "name": "carriage return stays inside an item",
+      "text": "## Scope\n\n- a\rb\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. a\rb"
+      ]
+    },
+    {
+      "name": "BOM after a list marker is preserved",
+      "text": "## Scope\n\n- ﻿item\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. ﻿item"
+      ]
+    },
+    {
+      "name": "ASCII heading folding does not fold dotted I",
+      "text": "## Rİsks\n\n- x\n\n## Scope\n\n- y\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. x",
+        "2. y"
+      ]
+    },
+    {
+      "name": "empty task boxes are not criteria",
+      "text": "## Scope\n\n- [X]\n- [ ]\n- keep\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. keep"
+      ]
+    },
+    {
+      "name": "HTML comment list items are ignored",
+      "text": "## Scope\n\n<!--\n- hidden\n-->\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "HTML comment marker inside an item stays visible",
+      "text": "## Scope\n\n- Escape `<!--` in titles\n- second\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. Escape `<!--` in titles",
+        "2. second"
+      ]
+    },
+    {
+      "name": "numbered exact criteria fold an unindented bullet",
+      "text": "## Acceptance criteria\n\n1. first\n- continuation\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first - continuation"
+      ]
+    },
+    {
+      "name": "HTML comment marker before open questions stays visible",
+      "text": "# Spec\n\n## Scope\n\n- reject `<!--` in names\n\n## Open questions\n\n1. [NEEDS DECISION] choose a name.\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. reject `<!--` in names"
+      ]
+    },
+    {
+      "name": "an HTML fence containing a comment stays fenced",
+      "text": "## Scope\n\n```html\n<!-- open\n- hidden\n```\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "masked fence lines fold into a numbered criterion",
+      "text": "## Acceptance criteria\n\n1. prints:\n   ```\n   2. two\n   ```\n2. two\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. prints: ``` 2. two ```",
+        "2. two"
+      ]
+    },
+    {
+      "name": "a thematic break on line one is not front matter",
+      "text": "---\n## Scope\n\n- keep\n\n---\n\n- after\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. keep",
+        "2. after"
+      ]
+    },
+    {
+      "name": "front matter requires a YAML key",
+      "text": "---\nnot metadata\n---\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "a BOM is allowed before front matter",
+      "text": "﻿---\ntitle: Example\n...\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "a heading inside an HTML comment is not a section",
+      "text": "<!--\n## Hidden\n- hidden\n-->\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "an indented HTML comment still hides its block",
+      "text": "## Scope\n\n   <!-- open\n- hidden\n-->\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "seven-hash lines are not headings",
+      "text": "####### not a heading\n\n- item\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. item"
       ]
     }
   ],

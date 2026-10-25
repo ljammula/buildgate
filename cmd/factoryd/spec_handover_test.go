@@ -55,6 +55,9 @@ func TestDraftInputFilesArgsAndContainerPaths(t *testing.T) {
 	if args := (draftInputFiles{}).args(); len(args) != 0 {
 		t.Errorf("no files gave args %v", args)
 	}
+	if got := strings.Join((draftInputFiles{keepStructure: true}).args(), " "); got != "--keep-structure" {
+		t.Errorf("keepStructure args = %q, want --keep-structure", got)
+	}
 }
 
 func TestResolveSubmitSpecFile(t *testing.T) {
@@ -78,15 +81,55 @@ func TestResolveSubmitSpecFile(t *testing.T) {
 	if err != nil || spec != "" || len(trailing) != 1 {
 		t.Fatalf("got %q, %q (%v)", spec, trailing, err)
 	}
-	// An empty Problem section and no request text: refused with a way out.
+	if _, _, err := resolveSubmitSpecFile(submitParams{specFile: filepath.Join(dir, "absent.md")}); err == nil || !strings.Contains(err.Error(), "read -spec-file") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveSubmitSpecFileUsesStructuralFallbacks(t *testing.T) {
+	dir := t.TempDir()
+	// A missing/empty Problem section uses the first heading's text.
 	empty := filepath.Join(dir, "empty.md")
 	if err := os.WriteFile(empty, []byte(strings.Replace(requestdrivertest.CanonicalValidSpec, "Refunds can be double-processed on retry.\n", "", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := resolveSubmitSpecFile(submitParams{specFile: empty}); err == nil || !strings.Contains(err.Error(), "pass a request text as well") {
-		t.Fatalf("err = %v", err)
+	fallbackSpec, trailing, err := resolveSubmitSpecFile(submitParams{specFile: empty})
+	if err != nil || fallbackSpec == "" || len(trailing) != 1 || trailing[0] != "Spec" {
+		t.Fatalf("fallback request text = %q (%v), want the first heading", trailing, err)
 	}
-	if _, _, err := resolveSubmitSpecFile(submitParams{specFile: filepath.Join(dir, "absent.md")}); err == nil || !strings.Contains(err.Error(), "read -spec-file") {
-		t.Fatalf("err = %v", err)
+	noHeading := filepath.Join(dir, "no-heading.md")
+	if err := os.WriteFile(noHeading, []byte("---\ntitle: Example\nitems:\n  - hidden\n...\n\nFirst request line.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: noHeading})
+	if err != nil || len(trailing) != 1 || trailing[0] != "First request line." {
+		t.Fatalf("front-matter fallback = %q (%v), want first non-blank content line", trailing, err)
+	}
+	leadingBlank := filepath.Join(dir, "leading-blank.md")
+	if err := os.WriteFile(leadingBlank, []byte("\n\nFirst request line.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: leadingBlank})
+	if err != nil || len(trailing) != 1 || trailing[0] != "First request line." {
+		t.Fatalf("leading-blank fallback = %q (%v), want first non-blank content line", trailing, err)
+	}
+	fencedHeading := filepath.Join(dir, "fenced-heading.md")
+	if err := os.WriteFile(fencedHeading, []byte("~~~markdown\n# Not the title\n~~~\n\n# Real title\n\n- criterion\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: fencedHeading})
+	if err != nil || len(trailing) != 1 || trailing[0] != "Real title" {
+		t.Fatalf("fenced-heading fallback = %q (%v), want the first structural heading", trailing, err)
+	}
+	commentedHeading := filepath.Join(dir, "commented-heading.md")
+	if err := os.WriteFile(commentedHeading, []byte("<!--\n# Not the title\n-->\n\n# Real title\n\n- criterion\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: commentedHeading})
+	if err != nil || len(trailing) != 1 || trailing[0] != "Real title" {
+		t.Fatalf("commented-heading fallback = %q (%v), want the first structural heading", trailing, err)
+	}
+	if got := specSection("## Problem\n\nreal problem\n<!--\n## Fake\n-->\n```\n## Also fake\n```\n## Scope\n\nscope\n", "## Problem"); got != "real problem" {
+		t.Fatalf("specSection = %q, want comments and fences ignored", got)
 	}
 }

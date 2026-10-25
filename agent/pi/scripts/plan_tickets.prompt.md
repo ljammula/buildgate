@@ -41,11 +41,13 @@ MCP-tool file owned by three tickets is listed under all three; listed
 under the MCP-tool ticket alone, no ticket can satisfy it, and the
 factory rejects the plan.
 
-Write EVERY spec acceptance criterion into at least one ticket's own
-"### Acceptance criteria covered" list (see the exact shape below) --
-every criterion number from the spec's own numbered "## Acceptance
-criteria" list must appear in at least one ticket, and no criterion may
-be claimed by zero tickets.
+Write EVERY criterion from the `## Acceptance criteria, as the factory
+numbers them` list above into at least one ticket's own "### Acceptance
+criteria covered" list (see the exact shape below) -- every number in that
+factory-numbered list must appear in at least one ticket, and no criterion may
+be claimed by zero tickets. Cover every criterion by the number the factory
+gave it, even when the approved spec itself uses a different list marker or
+does not have an "## Acceptance criteria" section.
 
 Each ticket file must contain, in this exact order:
 

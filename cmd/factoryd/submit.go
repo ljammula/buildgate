@@ -222,8 +222,9 @@ func submitRequest(dp *deps, ctx context.Context, p submitParams) (submitResult,
 
 // resolveSubmitSpecFile reads -spec-file and returns its content with the
 // trailing request text to use. A handed-over spec may come with no request
-// text at all; its own Problem section then stands in, so the request has
-// a title and planning has an "original request" to read.
+// text at all; its own Problem section then stands in. If there is no Problem
+// section, the first heading's text is the request title, or the first
+// non-blank line after any front matter when the document has no heading.
 func resolveSubmitSpecFile(p submitParams) (spec string, trailingText []string, err error) {
 	if p.specFile == "" {
 		return "", p.trailingText, nil
@@ -237,10 +238,46 @@ func resolveSubmitSpecFile(p submitParams) (spec string, trailingText []string, 
 		return spec, p.trailingText, nil
 	}
 	problem := specSection(spec, "## Problem")
-	if problem == "" {
-		return "", nil, fmt.Errorf("-spec-file %s has no text under \"## Problem\" to use as the request text; pass a request text as well", p.specFile)
+	if problem != "" {
+		return spec, []string{problem}, nil
 	}
-	return spec, []string{problem}, nil
+	if title := firstSubmitSpecHeading(spec); title != "" {
+		return spec, []string{title}, nil
+	}
+	if fallback := firstSubmitSpecLine(spec); fallback != "" {
+		return spec, []string{fallback}, nil
+	}
+	return spec, nil, nil
+}
+
+func firstSubmitSpecHeading(spec string) string {
+	lines := strings.Split(spec, "\n")
+	mask := request.MarkdownLineMask(lines)
+	for i, raw := range lines {
+		if mask[i] {
+			continue
+		}
+		line := strings.TrimSpace(raw)
+		level := request.MarkdownHeadingLevel(raw)
+		if level > 0 {
+			return strings.TrimSpace(line[level:])
+		}
+	}
+	return ""
+}
+
+func firstSubmitSpecLine(spec string) string {
+	lines := strings.Split(spec, "\n")
+	mask := request.MarkdownLineMask(lines)
+	for i, raw := range lines {
+		if mask[i] {
+			continue
+		}
+		if line := strings.TrimSpace(raw); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // readSubmitPlanDir reads -plan-dir's tickets, in name order. Their names
@@ -263,16 +300,24 @@ func readSubmitPlanDir(dir string) ([]requestsubmit.ImportedTicket, error) {
 	return tickets, nil
 }
 
-// specSection returns the trimmed text under heading, up to the next
-// "## " heading or the end of the spec.
+// specSection returns the trimmed text under heading, up to the next heading
+// of the same or higher level or the end of the spec.
 func specSection(spec, heading string) string {
 	var body []string
 	inside := false
-	for _, line := range strings.Split(spec, "\n") {
+	wanted := request.NormalizeSpecHeading(heading)
+	wantedLevel := request.MarkdownHeadingLevel(heading)
+	lines := strings.Split(spec, "\n")
+	mask := request.MarkdownLineMask(lines)
+	for i, line := range lines {
+		if mask[i] {
+			continue
+		}
+		level := request.MarkdownHeadingLevel(line)
 		switch {
-		case strings.TrimSpace(line) == heading:
+		case level > 0 && request.NormalizeSpecHeading(line) == wanted:
 			inside = true
-		case inside && strings.HasPrefix(line, "## "):
+		case inside && level > 0 && level <= wantedLevel:
 			return strings.TrimSpace(strings.Join(body, "\n"))
 		case inside:
 			body = append(body, line)
@@ -303,7 +348,7 @@ func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, p
 	verifyCommand = flags.String("verify-command", "", "Verification command for this request's tickets. Empty uses verify_command from the workspace's .factory.yml.")
 	preflightProfile = flags.String("preflight-profile", "", "Preflight strictness: \"brownfield\" does not require the repository's spec/spec.md, spec/contract.md and ARCHITECTURE.md. Unset uses preflight_profile from the workspace's .factory.yml, else strict.")
 	flags.String("full-suite-command", "", "Repo-wide regression command that must pass before a pull request opens. Empty uses .factory.yml's full_suite_command, else the verify command. \"none\" runs no full suite, which denies release.")
-	flags.String("spec-file", "", "Hand over a finished spec instead of drafting one. It must use the spec skeleton (a drafted spec's headings in order, with numbered criteria) or submit refuses it. The request text is then optional.")
+	flags.String("spec-file", "", "Hand over your own spec instead of drafting one. Without an acceptance criteria section, its top-level list items become the criteria. The request text is optional.")
 	flags.String("plan-dir", "", "With -spec-file (required), hand over the plan too: a directory of tickets 001.spec.md, 002.spec.md, ... in dependency order, in the ticket format, covering every acceptance criterion of the spec.")
 	flags.Bool("no-commit-oracles", false, "Keep accepted oracles out of the target repository. The oracle still gates every build, but it is not committed into the result and no verify runs after a commit.")
 	flags.Bool("bug", false, "The request fixes a bug. Adds the oracle stage and requires a test that fails on the current code: a build whose oracle passes before any change is quarantined without a model call.")

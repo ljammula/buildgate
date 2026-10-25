@@ -21,7 +21,7 @@ var ErrBadAnchor = errors.New("a comment names a place that is not part of the d
 // checkAnchorsAgainstFiles refuses a rejection whose comments are about text
 // that is not in the file now: at spec_review each anchor must name spec.md,
 // at plan_review a ticket file that exists, and a section it names must be a
-// skeleton heading present in that file, an item no larger than the spec's
+// document heading present in that file, an item no larger than the spec's
 // criteria count, a quote a byte-for-byte substring of the anchored section
 // (of the file when no section is named). A comment bound to text that has
 // since been edited or redrafted would otherwise scope a redraft to the wrong
@@ -63,31 +63,47 @@ func checkAnchor(r *Request, a RejectionAnchor, read func(string) (string, error
 	if !isSpec && !ticketAnchorPathRE.MatchString(a.Path) {
 		return fmt.Errorf("a plan review comment is on a ticket file: %w", ErrBadAnchor)
 	}
-	if a.Section != "" && !slices.Contains(skeletonFor(a.Path), a.Section) {
-		return fmt.Errorf("%q is not a section of %s: %w", a.Section, a.Path, ErrBadAnchor)
-	}
 	content, err := read(a.Path)
 	if err != nil {
 		return fmt.Errorf("the file is gone")
 	}
-	scope := content
+	headings := skeletonFor(a.Path)
+	if isSpec && r.SpecImported {
+		headings = SpecDocumentHeadings(content)
+	}
+	if a.Section != "" && !slices.Contains(headings, a.Section) {
+		return fmt.Errorf("%q is not a section of %s: %w", a.Section, a.Path, ErrBadAnchor)
+	}
+	scopes := []string{content}
 	if a.Section != "" {
-		text, ok := SectionText(content, skeletonFor(a.Path), a.Section)
-		if !ok {
+		texts := SectionTexts(content, headings, a.Section)
+		if len(texts) == 0 {
 			return fmt.Errorf("the file has no %q section", a.Section)
 		}
-		scope = text
+		scopes = texts
 	}
-	if a.Item > 0 && isSpec && a.Section == acceptanceCriteriaHeading {
-		criteria, _ := SpecAcceptanceCriteria(content)
-		if a.Item > len(criteria) {
-			return fmt.Errorf("the spec has %d acceptance criteria, not %d", len(criteria), a.Item)
+	if a.Item > 0 && isSpec {
+		locations := SpecCriterionLocations(content)
+		for _, location := range locations {
+			if location.Section == a.Section && location.Item == a.Item {
+				return checkAnchorQuotes(scopes, a)
+			}
+		}
+		return fmt.Errorf("the spec has no acceptance criterion %d under %q", a.Item, a.Section)
+	}
+	return checkAnchorQuotes(scopes, a)
+}
+
+func checkAnchorQuotes(scopes []string, a RejectionAnchor) error {
+	if a.Quote == "" {
+		return nil
+	}
+	for _, scope := range scopes {
+		if strings.Contains(scope, a.Quote) {
+			return nil
 		}
 	}
-	if a.Quote != "" && !strings.Contains(scope, a.Quote) {
-		return fmt.Errorf("the quoted passage is not in %s", sectionOrFile(a.Section))
-	}
-	return nil
+	return fmt.Errorf("the quoted passage is not in %s", sectionOrFile(a.Section))
 }
 
 func sectionOrFile(section string) string {

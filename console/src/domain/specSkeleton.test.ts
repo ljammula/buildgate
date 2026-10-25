@@ -2,6 +2,7 @@ import { readFixtureJson } from "@/test/fixtures";
 
 import {
   missingTicketHeaderKeys,
+  MAX_HANDED_OVER_SPEC_BYTES,
   specAcceptanceCriteria,
   specStructure,
   ticketStructure,
@@ -31,6 +32,7 @@ interface TicketVector {
 // the expectations are the server's own answers.
 describe("golden vectors (test/fixtures/vectors/spec-skeleton.json)", () => {
   const vectors = readFixtureJson("vectors/spec-skeleton.json") as {
+    max_handed_over_spec_bytes: number;
     specs: SpecVector[];
     tickets: TicketVector[];
   };
@@ -38,6 +40,10 @@ describe("golden vectors (test/fixtures/vectors/spec-skeleton.json)", () => {
   test("the file carries both sections", () => {
     expect(vectors.specs.length).toBeGreaterThan(20);
     expect(vectors.tickets.length).toBeGreaterThan(20);
+  });
+
+  test("the Go-written spec size limit is the console's limit", () => {
+    expect(vectors.max_handed_over_spec_bytes).toBe(MAX_HANDED_OVER_SPEC_BYTES);
   });
 
   test.each(vectors.specs)("spec: $name", (v) => {
@@ -117,6 +123,7 @@ describe("specStructure", () => {
     const check = specStructure(SPEC);
     expect(check.passes).toBe(true);
     expect(check.rows.map((r) => r.label)).toEqual([
+      "Spec size",
       "# Spec",
       "## Problem",
       "## Scope",
@@ -155,6 +162,58 @@ describe("specStructure", () => {
       note: "no content",
     });
   });
+
+  test("a handed-over spec does not require the drafted skeleton", () => {
+    const check = specStructure("# Operator spec\n\n## Scope\n\n- It works.\n", true);
+    expect(check.passes).toBe(true);
+    expect(check.rows.map((row) => row.label)).toEqual([
+      "Handed-over spec size",
+      "Handed-over criteria",
+    ]);
+    expect(check.rows.every((row) => row.ok)).toBe(true);
+    expect(check.rows.at(-1)?.note).toBe("1 parsed");
+  });
+
+  test("a drafted spec reports an oversized document", () => {
+    const check = specStructure(SPEC + "x".repeat(120_000));
+    expect(check.rows.find((row) => row.label === "Spec size")?.ok).toBe(false);
+  });
+
+  test("a handed-over spec without criteria fails the mirrored checklist", () => {
+    const check = specStructure("# Operator spec\n\n## Scope\n\nprose only\n", true);
+    expect(check.passes).toBe(false);
+    expect(check.rows.find((row) => row.label === "Handed-over criteria")).toEqual({
+      label: "Handed-over criteria",
+      ok: false,
+      note: 'none parsed (want "- item")',
+    });
+  });
+
+  test("an oversized handed-over spec fails the mirrored checklist", () => {
+    const check = specStructure("# Operator spec\n\n- item\n" + "x".repeat(120_000), true);
+    expect(check.passes).toBe(false);
+    expect(check.rows.find((row) => row.label === "Handed-over spec size")?.ok).toBe(false);
+  });
+});
+
+test("the mirrored parser handles 150 KB with 10000 headings within a generous bound", () => {
+  const headings = Array.from({ length: 10_000 }, (_, i) => `## Heading ${i}`).join("\n");
+  const spec =
+    headings +
+    "\n" +
+    "x".repeat(Math.max(0, 150_000 - new TextEncoder().encode(headings).byteLength));
+  expect(new TextEncoder().encode(spec).byteLength).toBeGreaterThanOrEqual(150_000);
+  const started = Date.now();
+  expect(specAcceptanceCriteria(spec)).toEqual([]);
+  expect(Date.now() - started).toBeLessThan(5_000);
+});
+
+test("the mirrored parser handles a 15000-item preamble before 10000 headings", () => {
+  const preamble = "- preamble item\n".repeat(15_000);
+  const headings = Array.from({ length: 10_000 }, (_, i) => `## Heading ${i}`).join("\n");
+  const started = Date.now();
+  expect(specAcceptanceCriteria(preamble + headings)).toHaveLength(15_000);
+  expect(Date.now() - started).toBeLessThan(5_000);
 });
 
 describe("ticketStructure", () => {

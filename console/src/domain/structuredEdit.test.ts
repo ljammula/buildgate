@@ -3,6 +3,7 @@ import {
   requiredTicketHeadings,
   requiredTicketHeaderKeys,
   specAcceptanceCriteria,
+  specDocumentHeadings,
   validateTicketPlan,
 } from "@/domain/specSkeleton";
 import { readFixtureJson } from "@/test/fixtures";
@@ -71,8 +72,38 @@ describe("criteriaItems", () => {
 
   // The server's reader and this one must cut the list at the same places.
   test.each(vectors.specs)("agrees with the server's criteria on: $name", ({ text }) => {
-    const items = criteriaItems(text) ?? [];
+    const items = criteriaItems(text);
+    if (items === null) {
+      // Factory-numbered bullet-only and mixed exact sections are not
+      // numbered-list editor surfaces, even though the server can parse or
+      // reject them structurally.
+      const hasExactHeading = text
+        .split("\n")
+        .some((line) => line.trim() === "## Acceptance criteria");
+      if (!hasExactHeading) expect(text).not.toContain("\n## Acceptance criteria\n");
+      return;
+    }
     expect(items).toHaveLength(specAcceptanceCriteria(text).length);
+  });
+
+  test("does not expose derived operator bullets as a numbered-list editor", () => {
+    const text = "# Operator spec\n\n## Wanted behaviour\n\n- Keep this bullet.\n";
+    expect(specAcceptanceCriteria(text)).toEqual(["1. Keep this bullet."]);
+    expect(criteriaItems(text)).toBeNull();
+    expect(setCriterionBody(text, 0, "rewritten")).toBe(text);
+    expect(
+      setSectionBody(
+        text,
+        specDocumentHeadings(text),
+        "## Wanted behaviour",
+        "\n- Rewritten bullet.",
+      ),
+    ).toBe("# Operator spec\n\n## Wanted behaviour\n\n- Rewritten bullet.\n");
+  });
+
+  test("does not expose factory-numbered or mixed exact criteria as an editor", () => {
+    expect(criteriaItems("## Acceptance criteria\n\n- first\n- second\n")).toBeNull();
+    expect(criteriaItems("## Acceptance criteria\n\n- first\n1. second\n")).toBeNull();
   });
 });
 

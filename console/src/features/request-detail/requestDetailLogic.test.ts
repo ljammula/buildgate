@@ -11,7 +11,6 @@ import {
   pipelineOutcome,
   terminalEntries,
   terminalEntryLine,
-  parseAcceptanceCriteria,
   pipelineSteps,
   recoveryPlan,
   rejectionHeading,
@@ -26,28 +25,6 @@ import { historyWire, requestWire, ticketWire } from "./testRequests";
 function req(state: string, rest: Record<string, unknown> = {}): RequestSummary {
   return decodeRequestSummary(requestWire({ state, ...rest }), "test");
 }
-
-describe("parseAcceptanceCriteria", () => {
-  test("lists the numbered items under the heading and stops at the next heading", () => {
-    const spec =
-      "# Spec\n\n## Acceptance criteria\n\n1. First\n2) Second  \n  3. Third\n\n## Non-goals\n\n4. Not a criterion\n";
-    expect(parseAcceptanceCriteria(spec)).toEqual(["First", "Second", "Third"]);
-  });
-
-  test("matches the heading at any level, in any case", () => {
-    expect(parseAcceptanceCriteria("### ACCEPTANCE CRITERIA\n1. x")).toEqual(["x"]);
-  });
-
-  test("is tolerant: no heading, or no numbered items, is an empty list", () => {
-    expect(parseAcceptanceCriteria("1. not under a heading")).toEqual([]);
-    expect(parseAcceptanceCriteria("## Acceptance criteria\n\nprose only\n")).toEqual([]);
-    expect(parseAcceptanceCriteria("")).toEqual([]);
-  });
-
-  test("only the exact heading counts", () => {
-    expect(parseAcceptanceCriteria("## Acceptance criteria notes\n1. x")).toEqual([]);
-  });
-});
 
 describe("currentContentFor", () => {
   const request = req("plan_review", {

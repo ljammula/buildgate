@@ -68,8 +68,8 @@ act in "you" rows.
 
 | State | Who acts | What happens / what you do |
 |---|---|---|
-| `submitted` -> `spec_drafting` | factory | A sandboxed job drafts `spec.md`; with `submit -spec-file`, your own spec is taken as `spec.md` with no model call ([reference](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir)) |
-| `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`). To change only some sections, comment on passages (console: select text in the raw view, then Request changes; CLI: `reject -comments-file <file> <id>`): the redraft changes just the commented sections and keeps every other byte, your own edits included. A spec with a `[NEEDS DECISION]` item under Open questions is not approvable: `approve` lists the items, and `reject -reason "<your answers>"` ("take the recommended option" is an answer) has the redraft write them into the spec |
+| `submitted` -> `spec_drafting` | factory | A sandboxed job drafts `spec.md`; with `submit -spec-file`, your own operator-shaped spec is taken as `spec.md` with no model call. It needs at least one acceptance criterion: a numbered `## Acceptance criteria` section or derivable top-level list items in `##` sections ([reference](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir)) |
+| `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`). To change only some sections, comment on passages (console: select text in the raw view, then Request changes; CLI: `reject -comments-file <file> <id>`): the redraft changes just the commented sections and keeps every other byte, your own edits included. A spec with a `[NEEDS DECISION]` item under Open questions is not approvable: `approve` lists the items, and `reject -reason "<your answers>"` ("take the recommended option" is an answer) has the redraft write them into the spec. A handed-over operator-shaped spec remains in its own headings, order and list structure after a reject. |
 | `oracle_drafting` | factory | Only with `-draft-oracles`: drafts executable acceptance tests from the spec |
 | `oracle_review` | **you** | Read every oracle file, then `approve` (to `planning`) or `reject -reason` (back to `oracle_drafting`) |
 | `planning` | factory | Drafts one or more tickets from the approved spec; with `submit -plan-dir`, your own tickets are taken with no model call and get the same checks |
@@ -80,6 +80,33 @@ act in "you" rows.
 | `done` | - | Every ticket's PR merged |
 | `closed` | - | A ticket's PR was closed without merging. Final: reopening the PR does not bring the request back; submit again. Another ticket's PR left open is named by `factoryd watch <id>` and on the console's request page, for you to merge or close |
 | `quarantined` / `halted` | **you** | Read the reason in `factoryd status`/console, fix the cause, `factoryd retry <id>` (a rebuilt ticket continues from the failed attempt's commit when a build may be told what failed; `-from scratch` rebuilds from the base, `-from <round>` on a new branch at a round `factoryd rounds <id>` lists: [reference](USAGE_REFERENCE.md#request-lifecycle); console: Retry request, with **Retry from scratch** ticked for `-from scratch`) -- or, before any ticket is accepted, send it back to redraft the plan or the spec: `factoryd reject -to plan\|spec -reason "..." <id>` (`plan`/`planning` and `spec`/`spec_drafting`) -- or, to drop the request instead, `factoryd cancel <id>`. A retry after the factory's own checks refused a drafted spec or plan gives the next draft their reason; a failed or timed-out draft job does not ([reference](USAGE_REFERENCE.md#a-retried-draft)) |
+
+Every new ticket build receives the approved spec verbatim before its ticket
+plan. The build input then lists the ticket's covered criteria using the
+factory's numbered criteria, so exact names, formats and behaviours in the
+operator's spec remain part of the build contract.
+
+For `-spec-file`, criteria are structural: top-level list items in the title
+area and in non-excluded `#`/`##` sections are numbered; the excluded headings are
+`Problem`, `Non-goals`, `Out of scope`, `Risks`, `Open questions`, `Background`,
+`Context`, `Motivation`, `Alternatives considered`, `References` and `Notes`
+(case-insensitive with one trailing colon ignored). A non-exact
+`##`-through-`######` `Acceptance criteria` heading uses the same derived
+reader; the exact `## Acceptance criteria` heading uses numbered checks for
+numbered top-level items and derived rules for bullet-only items, refusing a
+mixture of top-level styles.
+Fenced lists use a closing delimiter with the same backtick/tilde character, at
+least the opening length, and no trailing content; thematic breaks end items,
+task checkboxes are removed, and prose after a blank line is outside the
+preceding item while a lazy continuation without that blank stays in it.
+The handed-over or edited spec limit is 120,000 bytes at submit, at the
+console spec edit, and after a redraft. The complete ticket build input is
+limited to 180,000 bytes, leaving 20,000 bytes below build_app.py's 200,000-
+byte round-prompt limit for round state and corrective framing. If a
+handed-over plan's criteria change, planning stops; send it back to planning
+with `factoryd reject -to plan -reason "..." <id>`. That command supplies plan
+feedback, so planning drafts revised tickets instead of taking the imported
+tickets again.
 
 The reason names one of ten causes (`resume.cause` in the request's
 `request.json`). The four that say a model was not served, or a review

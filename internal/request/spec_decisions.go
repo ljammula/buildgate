@@ -36,19 +36,25 @@ var openDecisionItem = regexp.MustCompile("^(?:#{3,6}[ \\t]+|>[ \\t]*)?(?:[-*+][
 // stays in it. A marker anywhere else (quoted in Scope, say) is not an item.
 func OpenDecisions(content string) []string {
 	var items []string
-	inSection, inFence := false, false
-	for _, line := range strings.Split(content, "\n") {
+	lines := strings.Split(content, "\n")
+	mask := markdownLineMask(lines)
+	inSection := false
+	sectionLevel := 0
+	for i, line := range lines {
+		if lineBlocked(mask, i) {
+			continue
+		}
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ") {
-			inSection = trimmed == openQuestionsHeading
-			continue
+		if level := MarkdownHeadingLevel(line); level > 0 {
+			if level <= 2 {
+				inSection = level == 2 && NormalizeSpecHeading(line) == "open questions"
+				sectionLevel = level
+				continue
+			}
+			if inSection && level <= sectionLevel {
+				inSection = false
+				continue
+			}
 		}
 		if !inSection || !openDecisionItem.MatchString(trimmed) {
 			continue

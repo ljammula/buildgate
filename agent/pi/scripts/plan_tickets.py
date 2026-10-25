@@ -12,7 +12,7 @@ decides whether to advance the request or halt it -- "agent output is
 evidence, never the oracle", same as draft_spec.py.
 
 Usage:
-    python3 plan_tickets.py --spec spec.md --request request.md \
+    python3 plan_tickets.py --spec spec.md --criteria-file criteria.md --request request.md \
         --workspace /path/to/repo --verify-command "make verify" \
         --out-dir tickets --evidence evidence.json [--timeout-minutes 15] \
         [--feedback-file plan-feedback.md]
@@ -87,7 +87,7 @@ PREVIOUS_DRAFT_SECTION = prompt_templates.load("plan_tickets.previous_draft", ("
 SCOPED_SECTIONS_SECTION = prompt_templates.load("plan_tickets.scoped_sections", ("sections",))
 
 
-def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None) -> tuple[str, bool]:
+def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None, criteria_text: str | None = None) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- see draft_spec.py's own build_prompt for
 	why agents_md_used is threaded straight into the evidence payload.
@@ -99,6 +99,8 @@ def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_comm
 		f"## Approved spec\n\n{spec_text.strip()}\n",
 		f"## Original request\n\n{request_text.strip()}\n",
 	]
+	if criteria_text and criteria_text.strip():
+		sections.insert(1, f"## Acceptance criteria, as the factory numbers them\n\n{criteria_text.strip()}\n")
 	architecture = draft_spec.read_capped_text_file(workspace / "ARCHITECTURE.md", CONTEXT_FILE_MAX_BYTES)
 	if architecture:
 		sections.append(f"## Repository architecture (ARCHITECTURE.md)\n\n{architecture}")
@@ -141,9 +143,10 @@ def run_plan(
 	workspace: Path, spec_path: Path, request_path: Path, verify_command: str, out_dir: Path, evidence_path: Path,
 	timeout_minutes: int, feedback_path: Path | None = None, thinking: str | None = None,
 	adapter=build_app.DEFAULT_ADAPTER, design_guide_path: Path | None = None, previous_draft_path: Path | None = None,
-	rewrite_sections_path: Path | None = None,
+	rewrite_sections_path: Path | None = None, criteria_path: Path | None = None,
 ) -> int:
 	spec_text = spec_path.read_text()
+	criteria_text = criteria_path.read_text() if criteria_path is not None else None
 	request_text = request_path.read_text()
 	draft_dir = workspace / DRAFT_RELATIVE_DIR
 	feedback = draft_spec.read_feedback(feedback_path)
@@ -152,6 +155,7 @@ def run_plan(
 	prompt, agents_md_used = build_prompt(
 		spec_text, request_text, workspace, verify_command, DRAFT_RELATIVE_DIR, feedback, design_guide, previous_draft,
 		draft_spec.read_rewrite_sections(rewrite_sections_path),
+		criteria_text=criteria_text,
 	)
 
 	session_dir = workspace / ".factory-plan-draft" / "session"
@@ -233,6 +237,7 @@ def run_plan(
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--spec", required=True, type=Path, help="path to the approved spec.md")
+	parser.add_argument("--criteria-file", required=True, type=Path, help="factory-numbered acceptance criteria, one per line")
 	parser.add_argument("--request", required=True, type=Path, help="path to the verbatim request text (request.md)")
 	parser.add_argument("--workspace", required=True, type=Path, help="repository checkout the plan is drafted against, read from at HEAD")
 	parser.add_argument("--verify-command", required=True, help="the canonical Verify-Command every drafted ticket must declare verbatim")
@@ -260,6 +265,7 @@ def main() -> int:
 		workspace, args.spec.resolve(), args.request.resolve(), args.verify_command, args.out_dir, args.evidence,
 		args.timeout_minutes, args.feedback_file, thinking=args.thinking, adapter=adapter,
 		design_guide_path=args.design_guide_file, previous_draft_path=args.previous_draft_file, rewrite_sections_path=args.rewrite_sections_file,
+		criteria_path=args.criteria_file.resolve(),
 	)
 
 

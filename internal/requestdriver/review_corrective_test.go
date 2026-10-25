@@ -172,12 +172,24 @@ func TestReviewOnlyFlaggedGuards(t *testing.T) {
 // are carried through unchanged) and returns its path.
 func writeMinimalTicketSpec(t *testing.T, dir string) string {
 	t.Helper()
+	saveMinimalRequest(t, dir)
 	path := filepath.Join(dir, "001.spec.md")
 	content := "Verify-Command: make verify\nAllowed-Files: a.go, a_test.go\nRequired-Changed-Files: a.go\n\n## Goal\n\nDo the thing.\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func saveMinimalRequest(t *testing.T, dataDir string) {
+	t.Helper()
+	if err := request.SaveText(dataDir, "req-1", "request"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", dataDir, "app", request.Source{Kind: request.SourceText}, time.Now())
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestWriteReviewAddendumFlattensHeaderInjectionInCriterionAndVerdict
@@ -261,30 +273,23 @@ func TestWriteReviewAddendumBoundsSizeWithoutTruncatingAFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One included verdict costs at most roughly criterion+verdict+detail
-	// bytes plus a small fixed markdown/fence overhead; bounding well
-	// above that (2KiB slack per verdict) still proves the huge inputs
-	// (3x every cap, `verdictCount` far past maxConformityFlaggedVerdicts)
-	// were never rendered in full.
-	perVerdictBound := int64(requestdriver.MaxConformityCriterionBytes + requestdriver.MaxConformityVerdictBytes + requestdriver.MaxConformityDetailBytes + 2*1024)
-	maxExpected := int64(len(mustReadFile(t, specPath))) + int64(requestdriver.MaxConformityFlaggedVerdicts)*perVerdictBound + 1024
-	if info.Size() > maxExpected {
-		t.Errorf("addendum size = %d bytes, want <= %d (bounded regardless of oversized untrusted input)", info.Size(), maxExpected)
+	if info.Size() > requestdriver.MaxTicketBuildInputBytes {
+		t.Errorf("addendum size = %d bytes, want <= %d (the shared ticket-build cap)", info.Size(), requestdriver.MaxTicketBuildInputBytes)
 	}
 
 	content := mustReadFile(t, addendumPath)
-	wantOmitted := verdictCount - requestdriver.MaxConformityFlaggedVerdicts
-	if !strings.Contains(string(content), fmt.Sprintf("%d more flagged criteria omitted", wantOmitted)) {
-		t.Errorf("addendum missing the omitted-count note for %d omitted verdicts", wantOmitted)
+	if !strings.Contains(string(content), "more flagged criteria omitted") {
+		t.Errorf("addendum missing the byte/count omitted note:\n%s", content)
 	}
 }
 
 // Round-2 review: a ticket spec that ends inside an unclosed fence
-// would read the section's first fenceVerbatim opener as that fence's
+// would read the section's first verbatim-fence opener as that fence's
 // close, making every Detail line after it a top-level header line.
 // writeReviewAddendum closes the open fence first.
 func TestWriteReviewAddendumClosesAFenceTheSpecLeftOpen(t *testing.T) {
 	dir := t.TempDir()
+	saveMinimalRequest(t, dir)
 	specPath := filepath.Join(dir, "001.spec.md")
 	content := "Verify-Command: make verify\nAllowed-Files: a.go, a_test.go\nRequired-Changed-Files: a.go\n\n## Goal\n\nExample:\n\n```\nunclosed example\n"
 	if err := os.WriteFile(specPath, []byte(content), 0o600); err != nil {

@@ -2,6 +2,7 @@
 import { readFixtureJson } from "@/test/fixtures";
 import { requestJson } from "@/test/requestFixtures";
 import { type FakeRoute, json } from "@/test/render";
+import { specAcceptanceCriteria } from "@/domain/specSkeleton";
 
 export type Wire = Record<string, unknown>;
 
@@ -15,10 +16,13 @@ export interface RequestWireOptions {
 
 /** A `GET /requests/{id}` body with these defaults. */
 export function requestWire({ id = "req-1", state, ...rest }: RequestWireOptions): Wire {
+  const spec = typeof rest.spec === "string" ? rest.spec : "";
+  const criteria = rest.criteria ?? (spec === "" ? [] : specAcceptanceCriteria(spec));
   return {
     ...requestJson({ id, state }),
     error: "",
     spec: "",
+    criteria,
     approved_by: "",
     approved_at: "",
     history: [],

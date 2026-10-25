@@ -25,7 +25,12 @@ const SPEC =
   "\n\n## Risks\n\nr\n";
 
 test("a spec offers the file, each section it has, and each criterion", () => {
-  const targets = anchorTargets(request({ spec: SPEC }));
+  const targets = anchorTargets(
+    request({
+      spec: SPEC,
+      criteria: ["1. It adds.", `2. ${"A".repeat(100)}`],
+    }),
+  );
 
   expect(targets.map((t) => [t.path, t.section, t.item])).toEqual([
     ["spec.md", "", 0],
@@ -169,6 +174,64 @@ test("a criterion that kept its text under another number is matched by its text
   ]);
 });
 
+test("derived criteria are available as anchors under their operator headings", () => {
+  const spec =
+    "# Operator spec\n\n## Wanted behaviour\n\n- First behaviour.\n- Second behaviour.\n\n## Interface\n\n- POST /things returns 201.\n";
+  const targets = anchorTargets(request({ spec, criteria: [], spec_imported: true }));
+  expect(
+    targets.filter((target) => target.item > 0).map((target) => [target.section, target.item]),
+  ).toEqual([
+    ["## Wanted behaviour", 1],
+    ["## Wanted behaviour", 2],
+    ["## Interface", 3],
+  ]);
+
+  const start = spec.indexOf("Second behaviour.");
+  expect(
+    anchorForSelection("spec.md", spec, start, start + "Second behaviour.".length, true),
+  ).toMatchObject({
+    section: "## Wanted behaviour",
+    item: 2,
+    quote: "Second behaviour.",
+  });
+  expect(anchorExcerpt(spec, anchor("spec.md", "## Interface", 3))).toBe(
+    "3. POST /things returns 201.",
+  );
+  expect(anchorExcerpt(spec, anchor("spec.md", "## Interface", 0), true)).toBe(
+    "## Interface\n\n- POST /things returns 201.",
+  );
+});
+
+test("derived criteria before the first heading are anchored to the whole file", () => {
+  const spec =
+    "- First behaviour.\n- Second behaviour.\n\n## Interface\n\n- POST /things returns 201.\n";
+  const targets = anchorTargets(request({ spec, criteria: [], spec_imported: true }));
+  expect(targets.filter((target) => target.item > 0)).toEqual([
+    {
+      id: "spec.md\n\n1",
+      label: "spec.md · the whole file · 1. First behaviour.",
+      path: "spec.md",
+      section: "",
+      item: 1,
+    },
+    {
+      id: "spec.md\n\n2",
+      label: "spec.md · the whole file · 2. Second behaviour.",
+      path: "spec.md",
+      section: "",
+      item: 2,
+    },
+    {
+      id: "spec.md\n## Interface\n3",
+      label: "spec.md · Interface · 3. POST /things returns 201.",
+      path: "spec.md",
+      section: "## Interface",
+      item: 3,
+    },
+  ]);
+  expect(anchorExcerpt(spec, anchor("spec.md", "", 2), true)).toBe("2. Second behaviour.");
+});
+
 describe("anchorForSelection", () => {
   const spec =
     "# Spec\n\n## Problem\n\nRefunds double.\n\n## Scope\n\nThe /refunds endpoint.\n\n## Acceptance criteria\n\n1. A repeat returns the first result.\n   It keeps the key.\n2. A new key processes.\n\n## Risks\n\nNone.\n";
@@ -243,4 +306,10 @@ test("a redraft is scoped only by comments with no reason and none on the whole 
   expect(redraftIsScoped([scope, anchor("spec.md", "", 0)], "")).toBe(false);
   expect(redraftIsScoped([anchor("tickets/001.spec.md", "", 0)], "")).toBe(true);
   expect(redraftIsScoped([anchor("oracle/RUN_COMMAND.txt", "", 0)], "")).toBe(false);
+});
+
+test("operator-shaped spec comments can scope any document heading", () => {
+  const note = anchor("spec.md", "## Wanted behaviour", 0);
+  expect(redraftIsScoped([note], "")).toBe(false);
+  expect(redraftIsScoped([note], "", true)).toBe(true);
 });

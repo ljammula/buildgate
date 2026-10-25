@@ -1,9 +1,20 @@
 package request
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestSpliceSectionsRefusesARepeatedTakenHeading(t *testing.T) {
+	current := "## A\n\n### Example\n\nfoo\n\n## B\n\n### Example\n\nbar\n"
+	drafted := strings.ReplaceAll(current, "foo", "new foo")
+	drafted = strings.ReplaceAll(drafted, "bar", "new bar")
+	headings := SpecDocumentHeadings(current)
+	if _, err := SpliceSections(current, drafted, headings, []string{"### Example"}); !errors.Is(err, ErrAmbiguousSection) {
+		t.Fatalf("repeated taken heading: err = %v, want ErrAmbiguousSection", err)
+	}
+}
 
 // TestSpliceSectionsRefusesADraftThatDoesNotBoundTheSection: the redraft's
 // section ends where the skeleton says, so a renamed or dropped next heading,
@@ -67,5 +78,16 @@ func TestSpliceSectionsIgnoresHeadingsInCodeFencesAndRefusesAmbiguity(t *testing
 	}
 	if text, ok := SectionText(fenced, heads, "## Risks"); !ok || strings.Contains(text, fence) {
 		t.Errorf("SectionText must find the real heading, not the fenced one: %q", text)
+	}
+}
+
+func TestSpliceSectionsUsesTheSharedMaskForHTMLComments(t *testing.T) {
+	heads := SpecSkeletonHeadings()
+	commented := strings.Replace(joinSections(scopedSpecSections), "The refund path.\n", "<!--\n## Risks\n-->\nThe refund path.\n", 1)
+	if text, ok := SectionText(commented, heads, "## Risks"); !ok || strings.Contains(text, "## Risks\n-->") {
+		t.Errorf("commented skeleton heading changed the real section lookup: %q", text)
+	}
+	if _, err := SpliceSections(commented, rewriteEverySection(scopedSpecSections), heads, []string{"## Risks"}); err != nil {
+		t.Fatalf("SpliceSections with a commented heading: %v", err)
 	}
 }

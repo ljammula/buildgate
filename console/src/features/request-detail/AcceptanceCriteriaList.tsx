@@ -1,20 +1,17 @@
-import { parseAcceptanceCriteria } from "./requestDetailLogic";
-
 /**
- * The numbered acceptance criteria parsed from the current spec text, with a
- * count: lets an operator check plan and oracle coverage against the spec's
- * own numbering without hunting through the markdown. Renders nothing when
- * the spec has none.
+ * The numbered acceptance criteria supplied by the Go request parser, with a
+ * count: lets an operator check plan and oracle coverage against the factory's
+ * numbering without re-parsing the markdown in the browser. Renders nothing
+ * when the server has none.
  */
-export function AcceptanceCriteriaList({ spec }: { readonly spec: string }) {
-  const criteria = parseAcceptanceCriteria(spec);
+export function AcceptanceCriteriaList({ criteria }: { readonly criteria: readonly string[] }) {
   if (criteria.length === 0) return null;
   return (
     <div data-testid="acceptance-criteria-list" className="flex flex-col gap-1 text-sm">
       <h3 className="font-semibold">{`Acceptance criteria (${criteria.length})`}</h3>
       <ol className="flex flex-col gap-0.5">
         {criteria.map((criterion, i) => (
-          <li key={i}>{`${i + 1}. ${criterion}`}</li>
+          <li key={i}>{criterion}</li>
         ))}
       </ol>
     </div>

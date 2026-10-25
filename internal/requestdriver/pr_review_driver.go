@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -1031,10 +1030,6 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		diffBase = ticketRun.BaseSHA
 	}
 
-	threadIDs := make([]string, len(newThreads))
-	for i, t := range newThreads {
-		threadIDs[i] = t.ID
-	}
 	// Threads are marked seen only once an accepted round's commit has
 	// actually been pushed (pushAcceptedRoundAndReply), never before: a
 	// quarantined or halted round leaves them eligible for the next poll,
@@ -1058,11 +1053,13 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// max_review_rounds however many attempts it took.
 	var attempt roundAttempt
 	var priorRunIDs []string
+	var includedThreads []forge.Thread
 	for fix := 0; ; fix++ {
-		addendumPath, err := WriteRoundAddendum(dataDir, r.ID, ticket, newThreads, flaggedVerdicts, findings, roundIndex, fix)
+		addendumPath, renderedThreads, err := writeRoundAddendum(dataDir, r.ID, ticket, newThreads, flaggedVerdicts, findings, roundIndex, fix)
 		if err != nil {
 			return fmt.Errorf("request %s: ticket %d: round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
 		}
+		includedThreads = renderedThreads
 		attemptID := roundRunID
 		if fix > 0 {
 			attemptID = fmt.Sprintf("%s-fix%d", roundRunID, fix)
@@ -1092,6 +1089,10 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	}
 	loadID, outcome, errText := attempt.runID, attempt.outcome, attempt.errText
 
+	threadIDs := make([]string, len(includedThreads))
+	for i, t := range includedThreads {
+		threadIDs[i] = t.ID
+	}
 	ticket.Rounds = append(ticket.Rounds, request.Round{
 		Index:        roundIndex,
 		ThreadIDs:    threadIDs,
@@ -1124,7 +1125,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		// disk. A start failure is not: it used no round and is retried on
 		// the next poll, so it would repeat the same reply every poll.
 		if !attempt.startFailure {
-			replyRoundNotPushed(dp, ctx, dataDir, r, ticket, newThreads, attempt, countedRounds+1, cfg.MaxReviewRounds)
+			replyRoundNotPushed(dp, ctx, dataDir, r, ticket, includedThreads, attempt, countedRounds+1, cfg.MaxReviewRounds)
 		}
 		return nil
 	}
@@ -1133,7 +1134,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// sequence number used for naming (roundIndex above), but the slice
 	// position of the entry just appended is what pushAcceptedRoundAndReply
 	// needs to mark Pushed on the correct element.
-	return pushAcceptedRoundAndReply(dp, ctx, dataDir, r, ticket, len(ticket.Rounds)-1, loadID, branch, newThreads, now)
+	return pushAcceptedRoundAndReply(dp, ctx, dataDir, r, ticket, len(ticket.Rounds)-1, loadID, branch, includedThreads, now)
 }
 
 // roundAttempt is how one build of a PR-review round ended: the run that
@@ -1319,7 +1320,7 @@ func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, 
 // accepted, evidence-backed commit exists on the branch), only the network
 // push didn't land -- the same best-effort posture openEvidencePullRequest
 // already takes for an ordinary accepted run's own PR-open call.
-func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, roundSliceIndex int, roundRunID, branch string, newThreads []forge.Thread, now time.Time) error {
+func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, roundSliceIndex int, roundRunID, branch string, includedThreads []forge.Thread, now time.Time) error {
 	roundRun, err := run.Load(dataDir, roundRunID)
 	if err != nil {
 		return fmt.Errorf("request %s: ticket %d: load accepted round run %q: %w", r.ID, ticket.Index, roundRunID, err)
@@ -1421,9 +1422,6 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	// Outcome == RoundAccepted alone (already true on this entry, set
 	// before this function was ever called) is not sufficient.
 	ticket.Rounds[roundSliceIndex].Pushed = true
-	for _, t := range newThreads {
-		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
-	}
 
 	// The isolated worktree is no longer needed once its commit is pushed
 	// -- removed here (worktree only; branch untouched, see
@@ -1434,11 +1432,13 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	}
 
 	replyCtx, cancelReply := context.WithTimeout(ctx, 30*time.Second)
-	for _, t := range newThreads {
+	for _, t := range includedThreads {
 		body := fmt.Sprintf("Addressed in %s.", roundRun.ResultSHA)
 		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, body); err != nil {
 			log.Printf("request %s: ticket %d: reply on thread %s: %v", r.ID, ticket.Index, t.ID, err)
+			continue
 		}
+		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
 	}
 	cancelReply()
 	return r.Save(dataDir)
@@ -1497,6 +1497,10 @@ the earlier attempt's changes as needed.
 const (
 	maxReplyFindings    = 5
 	maxReplyDetailBytes = 600
+	// MaxAddendumReviewThreads bounds the number of whole reviewer comments
+	// carried into one build input; the shared renderer also applies the
+	// remaining-byte cap.
+	MaxAddendumReviewThreads = 20
 )
 
 // replyRoundNotPushed answers each thread a round was started for when the
@@ -1591,7 +1595,7 @@ func replyFindings(runRecord *run.Run) string {
 			fmt.Fprintf(&b, "%d more not shown.\n", len(items)-maxReplyFindings)
 			break
 		}
-		fmt.Fprintf(&b, "`%s`\n\n%s\n", replyInline(it.label), fenceVerbatim(capConformityDetail(it.detail, maxReplyDetailBytes)))
+		fmt.Fprintf(&b, "`%s`\n\n%s\n", replyInline(it.label), ticketspec.FenceVerbatim(capConformityDetail(it.detail, maxReplyDetailBytes)))
 	}
 	return b.String()
 }
@@ -1600,6 +1604,20 @@ func replyFindings(runRecord *run.Run) string {
 // (flattenConformityField) with no backtick to close the span.
 func replyInline(s string) string {
 	return strings.ReplaceAll(flattenConformityField(s, MaxConformityCriterionBytes), "`", "'")
+}
+
+func reviewThreadsSection(threads []forge.Thread) boundedAddendumSection {
+	entries := make([]string, 0, len(threads))
+	for _, t := range threads {
+		path := flattenConformityField(t.Path, MaxConformityCriterionBytes)
+		author := flattenConformityField(t.Author, MaxConformityCriterionBytes)
+		body := capConformityDetail(t.Body, MaxConformityDetailBytes)
+		entries = append(entries, fmt.Sprintf("- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, ticketspec.FenceVerbatim(body)))
+	}
+	return boundedAddendumSection{
+		heading: "\n## Reviewer comments to address", entries: entries,
+		omittedLabel: "reviewer comments", maxEntries: MaxAddendumReviewThreads,
+	}
 }
 
 // WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md
@@ -1614,13 +1632,18 @@ func replyInline(s string) string {
 // reviewFindingsSection renders them -- becomes the corrective round's own
 // -spec.
 func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex, fix int) (string, error) {
+	path, _, err := writeRoundAddendum(dataDir, requestID, ticket, threads, flaggedVerdicts, findings, roundIndex, fix)
+	return path, err
+}
+
+func writeRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex, fix int) (string, []forge.Thread, error) {
 	// buildSpec, not the raw ticket spec: this round's own -spec must
 	// carry the same acceptance-criteria text the ticket's first build
 	// received, not just the "### Acceptance criteria covered" numbers --
 	// see TicketBuildSpecContent's own doc comment (request_driver.go).
 	buildSpec, err := TicketBuildSpecContent(dataDir, requestID, *ticket)
 	if err != nil {
-		return "", fmt.Errorf("build spec for ticket %s: %w", ticket.SpecPath, err)
+		return "", nil, fmt.Errorf("build spec for ticket %s: %w", ticket.SpecPath, err)
 	}
 	var b strings.Builder
 	b.WriteString(buildSpec)
@@ -1628,27 +1651,28 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 		b.WriteString("\n")
 	}
 	// A spec that ends inside an unclosed fence would read the first
-	// fenceVerbatim opener below as that fence's close, leaving a comment
+	// verbatim-fence opener below as that fence's close, leaving a comment
 	// body or a finding's detail as top-level lines (WriteReviewAddendum
 	// closes it for the same reason).
 	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
 		b.WriteString(closing + "\n")
 	}
-	b.WriteString("\n## Reviewer comments to address\n\n")
-	for _, t := range threads {
-		// Fenced, never inline: a comment body is untrusted text and
-		// ticketspec skips fenced content, so a reviewer cannot smuggle a
-		// top-level key line (Required-Content: is additive across lines)
-		// into the round's own gates (adversarial review finding).
-		// The path and author sit outside the fence, so each is flattened
-		// to one bounded line first (flattenConformityField).
-		path := flattenConformityField(t.Path, MaxConformityCriterionBytes)
-		author := flattenConformityField(t.Author, MaxConformityCriterionBytes)
-		fmt.Fprintf(&b, "- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, fenceVerbatim(t.Body))
+	sections := make([]boundedAddendumSection, 0, 3)
+	if len(threads) > 0 {
+		sections = append(sections, reviewThreadsSection(threads))
 	}
-	if section := reviewFindingsSection(flaggedVerdicts, findings); section != "" {
-		b.WriteString(priorRoundFindingsNote)
+	findingSections := reviewFindingsSections(flaggedVerdicts, findings)
+	if len(findingSections) > 0 {
+		findingSections[0].prefix = priorRoundFindingsNote
+		sections = append(sections, findingSections...)
+	}
+	section, includedCounts := renderBoundedAddendumSectionsWithCounts(sections, MaxTicketBuildInputBytes-len([]byte(b.String())))
+	if section != "" {
 		b.WriteString(section)
+	}
+	includedThreads := threads
+	if len(threads) > 0 && len(includedCounts) > 0 {
+		includedThreads = threads[:includedCounts[0]]
 	}
 
 	name := fmt.Sprintf("%03d-%d", ticket.Index, roundIndex)
@@ -1656,14 +1680,11 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 		name = fmt.Sprintf("%s-fix%d", name, fix)
 	}
 	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", name)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("create round dir %s: %w", dir, err)
-	}
 	path := filepath.Join(dir, "addendum.md")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
+	if err := writeTicketBuildSpecFile(path, b.String()); err != nil {
+		return "", nil, fmt.Errorf("write %s: %w", path, err)
 	}
-	return path, nil
+	return path, includedThreads, nil
 }
 
 // notifyRoundOutcome sends one notification for a PR-review round that was
@@ -1682,18 +1703,4 @@ func notifyRoundOutcome(dataDir string, r *request.Request, ticket *request.Tick
 		Next:   fmt.Sprintf("review %s", ticket.PRURL),
 	}, now)
 	notify.DispatchExternal(dataDir, n)
-}
-
-// fenceVerbatim wraps text in a Markdown code fence longer than any run of
-// backticks inside it (CommonMark's rule for an unclosable-from-inside
-// fence), so the content can never terminate the fence early.
-func fenceVerbatim(text string) string {
-	longest := 0
-	for _, run := range regexp.MustCompile("`+").FindAllString(text, -1) {
-		if len(run) > longest {
-			longest = len(run)
-		}
-	}
-	fence := strings.Repeat("`", max(3, longest+1))
-	return fence + "\n" + strings.TrimRight(text, "\n") + "\n" + fence + "\n"
 }

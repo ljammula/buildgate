@@ -122,8 +122,9 @@ func draftSpecArgs(script, workspace, requestPath, outPath, evidencePath string,
 // (runSandboxWithRetries) rather than a second sandbox launcher --
 // unlike a ticket build, there is no worktree isolation, no gates, and no
 // PR: this is a single one-shot pi invocation, evaluated by the request
-// driver's own call to request.ValidateSpecSkeleton, not by this
-// function.
+// driver's drafted-spec validation, not by this function. The first pass for
+// a handed-over spec does not run this job; a redraft after rejection does,
+// with keep-structure.
 //
 // r.Workspace is mounted read-write (see specDraftScratchDirName's own
 // doc comment for why "read-only" here is a script-level convention, not
@@ -249,7 +250,7 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	if err != nil {
 		return "", nil, err
 	}
-	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath}
+	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath, keepStructure: r.SpecImported}
 
 	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
 	if timeoutMinutes <= 0 {

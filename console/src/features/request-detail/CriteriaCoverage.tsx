@@ -30,7 +30,7 @@ function list(numbers: readonly number[]): string {
  */
 export function CriteriaCoverage({ request }: { readonly request: RequestSummary }) {
   const tickets = request.tickets.filter((t) => t.content !== "");
-  const coverage = planCoverage(request.spec, tickets);
+  const coverage = planCoverage(request.criteria, tickets);
   if (tickets.length === 0 || coverage.criteria.length === 0) return null;
   const total = coverage.criteria.length;
   const missing = coverage.unclaimed.length;

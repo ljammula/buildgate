@@ -176,7 +176,7 @@ func (g ResumeGate) RequestResumeRefusals(ctx context.Context, dataDir, dockerBi
 	if err != nil {
 		return nil, err
 	}
-	specPath, err := writeTicketBuildSpecFile(dataDir, r, *ticket)
+	specPath, err := writeTicketBuildInput(dataDir, r, *ticket)
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}

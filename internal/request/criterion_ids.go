@@ -26,16 +26,24 @@ var criterionEARSRE = regexp.MustCompile(`^(?:(?:When|While|If|Where) .+, the|Th
 //   - with requireIDs, every criterion carries one.
 //
 // A drafted spec is checked with requireIDs set; a spec the operator
-// handed over, or that was approved before IDs existed, without. A spec with
-// no numbered list passes unless requireIDs is set: ValidateSpecSkeleton
+// handed over, or that was approved before IDs existed, without. A bullet-only
+// exact criteria section is factory-numbered and does not carry IDs. A spec
+// with no numbered list passes unless requireIDs is set: ValidateSpecSkeleton
 // owns the section's presence.
 func ValidateSpecCriteria(content string, requireIDs bool) error {
 	lines := strings.Split(content, "\n")
-	start, end, ok := findAcceptanceCriteriaSection(lines)
+	mask := markdownLineMask(lines)
+	start, end, ok := findAcceptanceCriteriaSectionWithMask(lines, mask)
 	if !ok {
 		return fmt.Errorf("spec is missing %q", specAcceptanceCriteriaHeading)
 	}
-	blocks := splitAcceptanceCriteriaBlocks(lines[start:end])
+	if !hasTopLevelNumbered(lines[start:end], mask[start:end]) {
+		if requireIDs {
+			return fmt.Errorf("acceptance criteria must be numbered (1. …) in a drafted spec")
+		}
+		return nil
+	}
+	blocks := splitAcceptanceCriteriaBlocks(lines[start:end], mask[start:end])
 	if len(blocks) == 0 {
 		if requireIDs {
 			return fmt.Errorf("spec's %q section has no numbered criteria", specAcceptanceCriteriaHeading)
@@ -67,6 +75,36 @@ func ValidateSpecCriteria(content string, requireIDs bool) error {
 	}
 	if requireIDs && withID == 0 {
 		return fmt.Errorf("acceptance criteria carry no IDs: write every criterion as \"N. AC-N: text\", for example \"1. AC-1: When ..., the system shall ...\"")
+	}
+	return nil
+}
+
+// ValidateHandedOverSpec checks the one structural contract for a spec an
+// operator supplied with -spec-file. It must contain at least one criterion
+// as read by SpecAcceptanceCriteria; a named "## Acceptance criteria" section
+// keeps its numbered check for numbered items and derives factory-numbered
+// criteria for bullet-only items, while a spec without that section gets
+// criteria derived from headings and list markup only. It intentionally does
+// not require the drafted-spec skeleton or criterion IDs.
+func ValidateHandedOverSpec(content string) error {
+	if err := validateSpecSize(content); err != nil {
+		return err
+	}
+	if _, err := SpecAcceptanceCriteria(content); err != nil {
+		return err
+	}
+	if _, _, ok := findAcceptanceCriteriaSection(strings.Split(content, "\n")); ok {
+		if err := ValidateSpecCriteria(content, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSpecSize(content string) error {
+	bytes := len([]byte(content))
+	if bytes > MaxHandedOverSpecBytes {
+		return fmt.Errorf("spec is %d bytes, over the %d-byte limit", bytes, MaxHandedOverSpecBytes)
 	}
 	return nil
 }

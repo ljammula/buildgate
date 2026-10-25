@@ -1,13 +1,13 @@
 import { ticketRelPath } from "@/domain/contentHash";
 import type { Rejection, RejectionAnchor, RequestSummary } from "@/domain/request";
 import {
-  CRITERION_ITEM,
-  criteriaSectionRange,
   headingPositions,
-  isIndented,
+  markdownHeadingLevel,
   requiredSpecHeadings,
   requiredTicketHeadings,
   sectionRange,
+  specCriterionLocations,
+  specDocumentHeadings,
   specAcceptanceCriteria,
   trimSpace,
 } from "@/domain/specSkeleton";
@@ -33,7 +33,9 @@ function fileTargets(
   path: string,
   content: string,
   headings: readonly string[],
-  items: (heading: string) => readonly string[],
+  items: (
+    heading: string,
+  ) => readonly (string | { readonly text: string; readonly item: number })[],
 ): AnchorTarget[] {
   const targets: AnchorTarget[] = [
     { id: path, label: `${path} · the whole file`, path, section: "", item: 0 },
@@ -49,13 +51,15 @@ function fileTargets(
       section: heading,
       item: 0,
     });
-    items(heading).forEach((text, n) => {
+    items(heading).forEach((entry, n) => {
+      const text = typeof entry === "string" ? entry : entry.text;
+      const item = typeof entry === "string" ? n + 1 : entry.item;
       targets.push({
-        id: `${path}\n${heading}\n${n + 1}`,
+        id: `${path}\n${heading}\n${item}`,
         label: `${path} · ${name} · ${clip(text)}`,
         path,
         section: heading,
-        item: n + 1,
+        item,
       });
     });
   });
@@ -71,10 +75,25 @@ function fileTargets(
  */
 export function anchorTargets(request: RequestSummary): AnchorTarget[] {
   if (request.state === "spec_review" && request.spec !== "") {
-    const criteria = specAcceptanceCriteria(request.spec);
-    return fileTargets("spec.md", request.spec, requiredSpecHeadings, (heading) =>
-      heading === "## Acceptance criteria" ? criteria : [],
+    const locations = specCriterionLocations(request.spec);
+    const headings = request.specImported
+      ? specDocumentHeadings(request.spec)
+      : requiredSpecHeadings;
+    const sectionTargets = fileTargets("spec.md", request.spec, headings, (heading) =>
+      locations
+        .filter((location) => location.section === heading)
+        .map((location) => ({ text: location.text, item: location.item })),
     );
+    const titleTargets = locations
+      .filter((location) => location.section === "")
+      .map((location) => ({
+        id: `spec.md\n\n${location.item}`,
+        label: `spec.md · the whole file · ${clip(location.text)}`,
+        path: "spec.md",
+        section: "",
+        item: location.item,
+      }));
+    return [...sectionTargets.slice(0, 1), ...titleTargets, ...sectionTargets.slice(1)];
   }
   if (request.state === "plan_review") {
     return request.tickets.flatMap((ticket) => {
@@ -94,12 +113,21 @@ export function anchorPlace(anchor: RejectionAnchor): string {
     .join(" · ");
 }
 
-const ACCEPTANCE_CRITERIA = "## Acceptance criteria";
-
-function headingsFor(path: string): readonly string[] | null {
-  if (path === "spec.md") return requiredSpecHeadings;
+function headingsFor(path: string, content?: string, handedOver = false): readonly string[] | null {
+  if (path === "spec.md") {
+    return content !== undefined && handedOver
+      ? specDocumentHeadings(content)
+      : requiredSpecHeadings;
+  }
   if (/^tickets\/[^/]+\.spec\.md$/.test(path)) return requiredTicketHeadings;
   return null;
+}
+
+function canScopeSection(path: string, section: string, handedOver: boolean): boolean {
+  if (section === "") return path !== "spec.md" && headingsFor(path) !== null;
+  if (path === "spec.md" && handedOver) return markdownHeadingLevel(section) > 0;
+  const headings = headingsFor(path);
+  return headings !== null && headings.includes(section);
 }
 
 /**
@@ -110,13 +138,21 @@ function headingsFor(path: string): readonly string[] | null {
  * of). Trailing blank lines are dropped, so two versions of a section compare
  * equal when only the spacing before the next heading moved.
  */
-export function anchorExcerpt(content: string, anchor: RejectionAnchor): string | null {
-  if (anchor.section === "") return content;
-  const headings = headingsFor(anchor.path);
-  if (headings === null) return null;
-  if (anchor.item > 0 && anchor.path === "spec.md" && anchor.section === ACCEPTANCE_CRITERIA) {
-    return specAcceptanceCriteria(content)[anchor.item - 1] ?? null;
+export function anchorExcerpt(
+  content: string,
+  anchor: RejectionAnchor,
+  handedOver = false,
+): string | null {
+  if (anchor.item > 0 && anchor.path === "spec.md") {
+    return (
+      specCriterionLocations(content).find(
+        (location) => location.section === anchor.section && location.item === anchor.item,
+      )?.text ?? null
+    );
   }
+  if (anchor.section === "") return content;
+  const headings = headingsFor(anchor.path, content, handedOver);
+  if (headings === null) return null;
   const lines = content.split("\n");
   const range = sectionRange(lines, headings, anchor.section);
   if (range === null) return null;
@@ -157,14 +193,14 @@ export function anchoredChanges(
   rejection: Rejection,
   rejected: Readonly<Record<string, string>>,
   current: (path: string) => string,
+  handedOver = false,
 ): AnchoredChange[] {
   return rejection.anchors.map((anchor) => {
     const then = Object.hasOwn(rejected, anchor.path) ? (rejected[anchor.path] ?? "") : null;
     const now = current(anchor.path);
-    const before = then === null ? null : anchorExcerpt(then, anchor);
-    const after = now === "" ? null : anchorExcerpt(now, anchor);
-    const numbered =
-      anchor.item > 0 && anchor.path === "spec.md" && anchor.section === ACCEPTANCE_CRITERIA;
+    const before = then === null ? null : anchorExcerpt(then, anchor, handedOver);
+    const after = now === "" ? null : anchorExcerpt(now, anchor, handedOver);
+    const numbered = anchor.item > 0 && anchor.path === "spec.md";
     if (numbered && before !== null && (after === null || bare(after) !== bare(before))) {
       const criteria = specAcceptanceCriteria(now);
       const at = criteria.findIndex((criterion) => bare(criterion) === bare(before));
@@ -229,7 +265,7 @@ export interface SelectionAnchor {
  * The anchor for the characters [start, end) of `content`, the file at `path`
  * (request-relative): the nearest required heading above `start` (""
  * before the first), the numbered criterion `start` is in when that section is
- * the spec's acceptance criteria, and the selected text as the quote. The
+ * the spec's criteria, and the selected text as the quote. The
  * quote is cut at the end of its section and at the server's byte limit, so a
  * selection that runs across a heading still names one section the quote is
  * really in. Null for an empty selection, a file the console reads no
@@ -240,8 +276,9 @@ export function anchorForSelection(
   content: string,
   start: number,
   end: number,
+  handedOver = false,
 ): SelectionAnchor | null {
-  const headings = headingsFor(path);
+  const headings = headingsFor(path, content, handedOver);
   if (headings === null || start < 0 || end > content.length || start >= end) return null;
   const lines = content.split("\n");
   const positions = headingPositions(lines, headings);
@@ -265,20 +302,17 @@ export function anchorForSelection(
   const sectionEnd = next === undefined ? content.length : (lineStarts[next] ?? content.length);
   const quote = clipBytes(content.slice(start, Math.min(end, sectionEnd)).trim(), QUOTE_BYTE_LIMIT);
   if (quote === "") return null;
-  return { path, section, item: itemAt(path, section, lines, startLine), quote };
+  return { path, section, item: itemAt(path, section, content, startLine), quote };
 }
 
 /** The 1-based numbered criterion line `line` is in under the spec's acceptance criteria; 0 elsewhere. */
-function itemAt(path: string, section: string, lines: readonly string[], line: number): number {
-  if (path !== "spec.md" || section !== ACCEPTANCE_CRITERIA) return 0;
-  const range = criteriaSectionRange(lines);
-  if (range === null || line < range.start || line >= range.end) return 0;
-  let item = 0;
-  for (let i = range.start; i <= line; i++) {
-    const raw = lines[i] ?? "";
-    if (!isIndented(raw) && CRITERION_ITEM.test(trimSpace(raw))) item++;
-  }
-  return item;
+function itemAt(path: string, section: string, content: string, line: number): number {
+  if (path !== "spec.md") return 0;
+  const location = specCriterionLocations(content).find(
+    (candidate) =>
+      candidate.section === section && line >= candidate.startLine && line <= candidate.endLine,
+  );
+  return location?.item ?? 0;
 }
 
 /**
@@ -287,9 +321,11 @@ function itemAt(path: string, section: string, lines: readonly string[], line: n
  * (`RedraftScope`). Any free reason, a note on the whole of spec.md, or a note
  * on a file that is neither spec.md nor a ticket asks for the whole document.
  */
-export function redraftIsScoped(notes: readonly RejectionAnchor[], reason: string): boolean {
+export function redraftIsScoped(
+  notes: readonly RejectionAnchor[],
+  reason: string,
+  handedOver = false,
+): boolean {
   if (notes.length === 0 || reason.trim() !== "") return false;
-  return notes.every(
-    (n) => headingsFor(n.path) !== null && !(n.path === "spec.md" && n.section === ""),
-  );
+  return notes.every((n) => canScopeSection(n.path, n.section, handedOver));
 }

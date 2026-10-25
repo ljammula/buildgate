@@ -3537,6 +3537,10 @@ type requestDetailView struct {
 	// ActiveJob: see requestSummaryView.ActiveJob.
 	ActiveJob *request.ActiveJob `json:"active_job,omitempty"`
 	Spec      string             `json:"spec,omitempty"`
+	// Criteria is the request package's one authoritative parse of Spec,
+	// including derived criteria for an operator-shaped handed-over spec.
+	// It is an empty list when the current spec cannot be parsed.
+	Criteria []string `json:"criteria"`
 	// SpecFullPath is spec.md's own absolute path, like requestTicketView.FullPath.
 	SpecFullPath string              `json:"spec_full_path,omitempty"`
 	Tickets      []requestTicketView `json:"tickets,omitempty"`
@@ -3654,10 +3658,16 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 		loaded.RefreshReviewNotes(dataDir)
 	}
 	specPath := request.SpecPath(dataDir, id)
+	spec := readRequestFileBestEffort(specPath)
+	criteria := make([]string, 0)
+	if parsed, parseErr := request.SpecAcceptanceCriteria(spec); parseErr == nil {
+		criteria = parsed
+	}
 	view := requestDetailView{
 		Request:      loaded,
 		Title:        request.Title(dataDir, id),
-		Spec:         readRequestFileBestEffort(specPath),
+		Spec:         spec,
+		Criteria:     criteria,
 		SpecFullPath: absPathBestEffort(specPath),
 		CostSummary:  s.ComputeCostSummary(loaded),
 		ActiveJob:    request.LoadActiveJob(dataDir, id),
@@ -4361,8 +4371,9 @@ func verifyBaseSHA256(w http.ResponseWriter, baseSHA256 string, currentPath stri
 // one state a spec is still being reviewed rather than already approved
 // or consumed by planning -- and only for content that passes the exact
 // structural check the request driver itself applies
-// (request.ValidateSpecSkeleton, internal/requestdriver/request_driver.go's own
-// advanceSpecDrafting call) before this write, so an operator can never
+// (request.ValidateSpecSkeleton for a drafted spec, or
+// request.ValidateHandedOverSpec for every pass of an imported spec)
+// before this write, so an operator can never
 // save a spec the pipeline would halt on later. Approval, and the
 // SHA-256 hash it records, happens after this call as its own separate
 // step (POST /requests/{id}/approve) -- an edit here never needs to touch
@@ -4415,26 +4426,25 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 	if !verifyBaseSHA256(w, body.BaseSHA256, specPath, nil) {
 		return
 	}
-	if err := request.ValidateSpecSkeleton(content); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
+	var validationErr error
+	if loaded.SpecImported {
+		validationErr = request.ValidateHandedOverSpec(content)
+	} else if err := request.ValidateSpecSkeleton(content); err != nil {
+		validationErr = err
+	} else if err := request.ValidateHandedOverSpec(content); err != nil {
+		validationErr = err
+	} else if _, err := request.SpecAcceptanceCriteria(content); err != nil {
+		// ValidateSpecSkeleton only requires the criteria section to be
+		// non-blank. Planning needs it to contain at least one parseable
+		// criteria item too.
+		validationErr = err
+	} else {
+		// The numbering and the IDs, if any, stay consistent; a drafted edit
+		// is not forced to add IDs a handed-over spec never had.
+		validationErr = request.ValidateSpecCriteria(content, false)
 	}
-	// ValidateSpecSkeleton only requires the "## Acceptance criteria"
-	// section to be non-blank, not that it actually parses as a numbered
-	// list -- SpecAcceptanceCriteria is the stricter parser planning
-	// itself relies on (SpecAcceptanceCriteriaCount), and an edit that
-	// passes the skeleton check but parses to zero criteria (prose with no
-	// leading "1." markers, say) would otherwise be saved silently and
-	// only fail once planning ran, silently ignoring a criterion the
-	// operator could see.
-	if _, err := request.SpecAcceptanceCriteria(content); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	// The numbering and the IDs, if any, stay consistent; an edit is not
-	// forced to add IDs a handed-over spec never had.
-	if err := request.ValidateSpecCriteria(content, false); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	if validationErr != nil {
+		writeError(w, http.StatusUnprocessableEntity, validationErr.Error())
 		return
 	}
 	by, named := s.writePrincipal(r, body.By)

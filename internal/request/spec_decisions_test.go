@@ -57,6 +57,13 @@ func TestOpenDecisionsListsOnlyTheOpenQuestionsItems(t *testing.T) {
 	}
 }
 
+func TestOpenDecisionsDoesNotTreatAnInlineHTMLMarkerAsAComment(t *testing.T) {
+	content := "# Spec\n\n## Scope\n\n- reject `<!--` in names\n\n## Open questions\n\n- [NEEDS DECISION] choose a name.\n"
+	if got := OpenDecisions(content); len(got) != 1 || got[0] != "- [NEEDS DECISION] choose a name." {
+		t.Fatalf("OpenDecisions = %q, want the decision after the inline marker", got)
+	}
+}
+
 // TestApproveRefusesASpecWithOpenDecisions: found live 2026-10-08, when a
 // drafted spec asked for a decision and `factoryd approve` moved it to
 // planning with the choice unanswered. The refusal names each item and the
@@ -128,5 +135,13 @@ func TestOpenDecisionsItemShapes(t *testing.T) {
 				t.Errorf("open decisions = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenDecisionsNormalizesTheHeadingAndKeepsFenceRules(t *testing.T) {
+	content := "# Spec\n\n## Open Questions:\n\n- [NEEDS DECISION] choose a mode.\n\n~~~text\n- [NEEDS DECISION] hidden.\n~~~ trailing text\n- [NEEDS DECISION] still hidden.\n~~~\n\n## Next\n\n- [NEEDS DECISION] outside.\n"
+	want := []string{"- [NEEDS DECISION] choose a mode."}
+	if got := OpenDecisions(content); !reflect.DeepEqual(got, want) {
+		t.Errorf("OpenDecisions = %q, want %q", got, want)
 	}
 }
