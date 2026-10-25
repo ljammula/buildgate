@@ -84,89 +84,114 @@ type ticketHeaderReport struct {
 	AbsentNote string
 }
 
-// buildTicketHeaderReports runs every ticketspec.Parse* function against
-// specPath and pairs each result with ticketspec.PresentHeaderKeys, so the
-// report below can distinguish "this header is absent" from "this header
-// is present but malformed" -- the nuance a bare forwarding of parser
-// errors would miss, since an absent or misspelled header (e.g.
-// "Verify-command:" lowercase c) is not a parse error at all; run_ticket.go
-// silently falls back to a default or skips the check it would have
-// gated, and that's the more common real mistake this command exists to
-// surface.
+// ticketHeaderCheck is how check-ticket reads one header key: Read parses it
+// from specPath and returns the text to show when it is declared (or the
+// parse error), Absent says what a real run does when it is not.
+type ticketHeaderCheck struct {
+	Read   func(specPath string, present map[string]bool) (declared string, err error)
+	Absent string
+}
+
+// ticketHeaderChecks has one entry per ticketspec.KnownHeaderKeys key.
+// buildTicketHeaderReports iterates KnownHeaderKeys and looks each up here,
+// refusing a key with no entry, so a header added to ticketspec can never be
+// missing from the report (TestTicketHeaderChecksCoverEveryKnownKey).
+var ticketHeaderChecks = map[string]ticketHeaderCheck{
+	ticketspec.VerifyCommandPrefix: {
+		Read: func(specPath string, _ map[string]bool) (string, error) {
+			return ticketspec.ParseVerifyCommand(specPath)
+		},
+		Absent: "not present -- a real run will fall back to -verify-command's own default",
+	},
+	ticketspec.AllowedFilesPrefix: {
+		Read: func(specPath string, _ map[string]bool) (string, error) {
+			files, err := ticketspec.ParseAllowedFiles(specPath)
+			return strings.Join(files, ", "), err
+		},
+		Absent: "not present -- a real run will skip the diff-scope check entirely (any file may be touched)",
+	},
+	ticketspec.RequiredChangedFilesPrefix: {
+		Read: func(specPath string, _ map[string]bool) (string, error) {
+			files, err := ticketspec.ParseRequiredChangedFiles(specPath)
+			return strings.Join(files, ", "), err
+		},
+		Absent: "not present -- a real run will skip the check that the ticket's required file(s) were actually changed",
+	},
+	ticketspec.RequiredContentPrefix: {
+		Read: func(specPath string, _ map[string]bool) (string, error) {
+			content, err := ticketspec.ParseRequiredContent(specPath)
+			if err != nil || len(content) == 0 {
+				return strings.Join(content, ", "), err
+			}
+			// Mirrors run_ticket.go's own preflight check (its comment:
+			// "ticket declares Required-Content: without
+			// Required-Changed-Files: -- there is no required file set to
+			// search"): the one cross-key validation a real run enforces
+			// before starting a build, reported here as malformed too since
+			// it halts a real run exactly like a bad header line does.
+			files, err := ticketspec.ParseRequiredChangedFiles(specPath)
+			if err == nil && len(files) == 0 {
+				err = fmt.Errorf("declares %s without %s -- there is no required file set to search", ticketspec.RequiredContentPrefix, ticketspec.RequiredChangedFilesPrefix)
+			}
+			return strings.Join(content, ", "), err
+		},
+		Absent: "not present -- a real run will skip the check that required content markers actually appear in the changed file(s)",
+	},
+	ticketspec.TestsRequiredPrefix: {
+		Read: func(specPath string, present map[string]bool) (string, error) {
+			reason, err := ticketspec.ParseTestsRequiredOptOut(specPath)
+			// ParseTestsRequiredOptOut returns "" for both "absent" and the
+			// explicit "Tests-Required: yes" -- present[...] is what
+			// disambiguates them here.
+			if err == nil && present[ticketspec.TestsRequiredPrefix] && reason == "" {
+				reason = "yes (tests_added gate applies normally)"
+			}
+			return reason, err
+		},
+		Absent: "not present -- the tests_added gate applies with no opt-out",
+	},
+	ticketspec.EstimatedChangedLinesPrefix: {
+		Read: func(specPath string, _ map[string]bool) (string, error) {
+			lines, declared, err := ticketspec.ParseEstimatedChangedLines(specPath)
+			if err != nil || !declared {
+				return "", err
+			}
+			return fmt.Sprintf("%d", lines), nil
+		},
+		Absent: "not present -- the plan review shows no size note for this ticket (the estimate never gates a build)",
+	},
+}
+
+// buildTicketHeaderReports runs every header key's parser against specPath,
+// one per ticketspec.KnownHeaderKeys entry, and pairs each result with
+// ticketspec.PresentHeaderKeys, so the report below can distinguish "this
+// header is absent" from "this header is present but malformed" -- the
+// nuance a bare forwarding of parser errors would miss, since an absent or
+// misspelled header (e.g. "Verify-command:" lowercase c) is not a parse
+// error at all; run_ticket.go silently falls back to a default or skips the
+// check it would have gated, and that's the more common real mistake this
+// command exists to surface.
 func buildTicketHeaderReports(specPath string) ([]ticketHeaderReport, error) {
 	present, err := ticketspec.PresentHeaderKeys(specPath)
 	if err != nil {
 		return nil, err
 	}
-
-	var reports []ticketHeaderReport
-
-	verifyCmd, err := ticketspec.ParseVerifyCommand(specPath)
-	reports = append(reports, ticketHeaderReport{
-		Prefix:     ticketspec.VerifyCommandPrefix,
-		Present:    present[ticketspec.VerifyCommandPrefix],
-		Malformed:  err != nil,
-		Err:        err,
-		Declared:   verifyCmd,
-		AbsentNote: "not present -- a real run will fall back to -verify-command's own default",
-	})
-
-	allowedFiles, err := ticketspec.ParseAllowedFiles(specPath)
-	reports = append(reports, ticketHeaderReport{
-		Prefix:     ticketspec.AllowedFilesPrefix,
-		Present:    present[ticketspec.AllowedFilesPrefix],
-		Malformed:  err != nil,
-		Err:        err,
-		Declared:   strings.Join(allowedFiles, ", "),
-		AbsentNote: "not present -- a real run will skip the diff-scope check entirely (any file may be touched)",
-	})
-
-	requiredChangedFiles, err := ticketspec.ParseRequiredChangedFiles(specPath)
-	reports = append(reports, ticketHeaderReport{
-		Prefix:     ticketspec.RequiredChangedFilesPrefix,
-		Present:    present[ticketspec.RequiredChangedFilesPrefix],
-		Malformed:  err != nil,
-		Err:        err,
-		Declared:   strings.Join(requiredChangedFiles, ", "),
-		AbsentNote: "not present -- a real run will skip the check that the ticket's required file(s) were actually changed",
-	})
-
-	requiredContent, err := ticketspec.ParseRequiredContent(specPath)
-	if err == nil && len(requiredContent) > 0 && len(requiredChangedFiles) == 0 {
-		// Mirrors run_ticket.go's own preflight check (its comment: "ticket
-		// declares Required-Content: without Required-Changed-Files: --
-		// there is no required file set to search") -- the one cross-key
-		// validation a real run enforces before ever starting a build,
-		// reported here as malformed too since it halts a real run exactly
-		// like a bad header line does.
-		err = fmt.Errorf("declares %s without %s -- there is no required file set to search", ticketspec.RequiredContentPrefix, ticketspec.RequiredChangedFilesPrefix)
+	reports := make([]ticketHeaderReport, 0, len(ticketspec.KnownHeaderKeys))
+	for _, prefix := range ticketspec.KnownHeaderKeys {
+		check, ok := ticketHeaderChecks[prefix]
+		if !ok {
+			return nil, fmt.Errorf("no check-ticket reader registered for %s", prefix)
+		}
+		declared, err := check.Read(specPath, present)
+		reports = append(reports, ticketHeaderReport{
+			Prefix:     prefix,
+			Present:    present[prefix],
+			Malformed:  err != nil,
+			Err:        err,
+			Declared:   declared,
+			AbsentNote: check.Absent,
+		})
 	}
-	reports = append(reports, ticketHeaderReport{
-		Prefix:     ticketspec.RequiredContentPrefix,
-		Present:    present[ticketspec.RequiredContentPrefix],
-		Malformed:  err != nil,
-		Err:        err,
-		Declared:   strings.Join(requiredContent, ", "),
-		AbsentNote: "not present -- a real run will skip the check that required content markers actually appear in the changed file(s)",
-	})
-
-	testsReason, err := ticketspec.ParseTestsRequiredOptOut(specPath)
-	declaredTests := testsReason
-	// ParseTestsRequiredOptOut returns "" for both "absent" and the
-	// explicit "Tests-Required: yes" -- present[...] is what disambiguates
-	// them here.
-	if err == nil && present[ticketspec.TestsRequiredPrefix] && testsReason == "" {
-		declaredTests = "yes (tests_added gate applies normally)"
-	}
-	reports = append(reports, ticketHeaderReport{
-		Prefix:     ticketspec.TestsRequiredPrefix,
-		Present:    present[ticketspec.TestsRequiredPrefix],
-		Malformed:  err != nil,
-		Err:        err,
-		Declared:   declaredTests,
-		AbsentNote: "not present -- the tests_added gate applies with no opt-out",
-	})
-
 	return reports, nil
 }
 
@@ -253,8 +278,9 @@ func ticketTemplateMain(args []string) error {
 const ticketTemplateContent = `# Ticket: <one-line summary of the change>
 
 This skeleton matches the header-line format internal/ticketspec parses:
-five optional "Key: value" lines (Verify-Command, Allowed-Files,
-Required-Changed-Files, Required-Content, Tests-Required) mixed into
+six optional "Key: value" lines (Verify-Command, Allowed-Files,
+Required-Changed-Files, Required-Content, Tests-Required,
+Estimated-Changed-Lines) mixed into
 ordinary prose sections below. Each one closes a real gap a run would
 otherwise leave unenforced -- see the note directly under each header
 line further down. Replace the placeholder text, delete any header line
@@ -303,6 +329,12 @@ Tests-Required: yes
   Set to ` + "`Tests-Required: no -- <reason>`" + ` only for a ticket that
   genuinely adds no tests (e.g. documentation-only), and always give the
   reason.
+
+Estimated-Changed-Lines: 120
+  -- optional: your estimate of the ticket's insertions plus deletions, as
+  git diff --shortstat counts them: digits only, a whole number above
+  zero. It is shown at plan review and never gates a build, but a value
+  that is not a whole number above zero is refused.
 
 <Prose describing what a human reviewer should check.>
 

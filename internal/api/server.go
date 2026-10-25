@@ -3496,23 +3496,28 @@ type requestTicketView struct {
 	// (ticketspec's one parser), omitted when it declares none or a value that
 	// is not a positive integer.
 	EstimatedChangedLines int `json:"estimated_changed_lines,omitempty"`
-	// ActualChangedLines is the changed lines (insertions plus deletions, as
-	// git diff --shortstat counts them) of this ticket's built run, omitted
-	// until a run with a recorded diff stat exists.
-	ActualChangedLines int `json:"actual_changed_lines,omitempty"`
+	// BuiltChangedLines is the changed lines (insertions plus deletions, as
+	// git diff --shortstat counts them) of the accepted run whose commit is on
+	// the ticket's pull request (request.Ticket.PRHeadRunID). It is omitted
+	// until that run is accepted and recorded a diff stat, and when that run
+	// is a corrective round: a round's stat is measured from the branch tip it
+	// started on, so it is the round's own change, not the ticket's.
+	BuiltChangedLines int `json:"built_changed_lines,omitempty"`
 }
 
-// ticketActualChangedLines returns the changed lines of ticket's built run, or
-// 0 when it has no run or the run recorded no diff stat.
-func (s *Server) ticketActualChangedLines(ticket request.Ticket) int {
-	if ticket.RunID == "" {
+// ticketBuiltChangedLines returns the changed lines of the ticket's PR-head
+// run when that run is accepted and measured from the ticket's own base, else
+// 0.
+func (s *Server) ticketBuiltChangedLines(ticket request.Ticket) int {
+	headID := ticket.PRHeadRunID()
+	if headID == "" {
 		return 0
 	}
-	built, err := run.Load(s.dataDir, ticket.RunID)
-	if err != nil || built.DiffStat == nil {
+	head, err := run.Load(s.dataDir, headID)
+	if err != nil || head.State != run.StateAccepted || head.DiffStat == nil || head.DiffBaseSHA != "" {
 		return 0
 	}
-	return built.DiffStat.Insertions + built.DiffStat.Deletions
+	return head.DiffStat.Insertions + head.DiffStat.Deletions
 }
 
 // activeRoundRunIDs returns, per ticket index, the run of a PR-review
@@ -3718,7 +3723,7 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 				FullPath:              absPathBestEffort(resolved),
 				ActiveRoundRunID:      activeRounds[ticket.Index],
 				EstimatedChangedLines: estimate,
-				ActualChangedLines:    s.ticketActualChangedLines(ticket),
+				BuiltChangedLines:     s.ticketBuiltChangedLines(ticket),
 			})
 		}
 	}

@@ -1,5 +1,5 @@
 // What each ticket's plan says about its size: the planner's estimate against
-// the budget the plan was drafted under, and the built run's actual lines.
+// the budget the plan was drafted under, and the pull-request run's built lines.
 import { screen } from "@testing-library/react";
 
 import { decodeRequestTicket } from "@/domain/request";
@@ -11,14 +11,14 @@ import { requestWire, ticketWire } from "./testRequests";
 beforeEach(seedOperator);
 
 const plan = "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n";
-const ticket = (estimatedChangedLines: number | undefined, actualChangedLines?: number) =>
+const ticket = (estimatedChangedLines: number | undefined, builtChangedLines?: number) =>
   decodeRequestTicket(
     ticketWire({
       index: 1,
       specPath: "tickets/001.spec.md",
       content: plan,
       ...(estimatedChangedLines === undefined ? {} : { estimatedChangedLines }),
-      ...(actualChangedLines === undefined ? {} : { actualChangedLines }),
+      ...(builtChangedLines === undefined ? {} : { builtChangedLines }),
     }),
     "ticket",
   );
@@ -34,11 +34,14 @@ describe("sizeLine", () => {
     expect(sizeLine(ticket(620), 0)).toBe("Estimated 620 changed lines");
   });
 
-  test("the built run's actual lines follow the estimate", () => {
+  test("the pull-request run's built lines follow the estimate", () => {
     expect(sizeLine(ticket(220, 251), 400)).toBe(
       "Estimated 220 changed lines, within the 400-line budget · built: 251 changed lines",
     );
     expect(sizeLine(ticket(undefined, 51), 400)).toBe("built: 51 changed lines");
+    expect(sizeLine(ticket(1, 1), 400)).toBe(
+      "Estimated 1 changed line, within the 400-line budget · built: 1 changed line",
+    );
   });
 
   test("a ticket with neither says nothing", () => {

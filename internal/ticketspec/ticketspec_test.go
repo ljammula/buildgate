@@ -811,6 +811,9 @@ func TestParseEstimatedChangedLines(t *testing.T) {
 		{"decimal", "Estimated-Changed-Lines: 2.5\n", 0, true, true},
 		{"empty", "Estimated-Changed-Lines:\n", 0, true, true},
 		{"too large", "Estimated-Changed-Lines: 99999999\n", 0, true, true},
+		{"leading zero", "Estimated-Changed-Lines: 0240\n", 0, true, true},
+		{"plus sign", "Estimated-Changed-Lines: +240\n", 0, true, true},
+		{"largest", "Estimated-Changed-Lines: 999999\n", 999999, true, false},
 		{"quoted in a fence is not declared", "```\nEstimated-Changed-Lines: nonsense\n```\n", 0, false, false},
 		{"indented example is not declared", "    Estimated-Changed-Lines: nonsense\n", 0, false, false},
 	} {

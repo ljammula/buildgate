@@ -38,7 +38,7 @@ func planUnderBudget(t *testing.T, c planCorpusCase, budget int) *request.Reques
 	return loaded
 }
 
-func TestRecordedBudgetedPlansReachPlanReviewWithNotesOnlyForOverBudgetTickets(t *testing.T) {
+func TestCorpusPlansWithEstimatesReachPlanReviewWithNotesOnlyForOverBudgetTickets(t *testing.T) {
 	small := loadPlanCase(t, filepath.Join(planBudgetDir, "small"), "small")
 	large := loadPlanCase(t, filepath.Join(planBudgetDir, "large"), "large")
 	for _, tc := range []struct {
@@ -49,9 +49,9 @@ func TestRecordedBudgetedPlansReachPlanReviewWithNotesOnlyForOverBudgetTickets(t
 	}{
 		{"small plan within the default budget", small, 400, nil},
 		{"large plan, every ticket within the default budget", large, 400, nil},
-		{"large plan under a tighter budget", large, 250, []string{
-			"Ticket 002.spec.md estimates 310 changed lines, over the 250-line budget.",
-			"Ticket 003.spec.md estimates 380 changed lines, over the 250-line budget.",
+		{"large plan under a tighter budget", large, 360, []string{
+			"Ticket 001.spec.md estimates 390 changed lines, over the 360-line budget.",
+			"Ticket 003.spec.md estimates 380 changed lines, over the 360-line budget.",
 		}},
 		{"small plan under a budget of 100", small, 100, []string{"Ticket 001.spec.md estimates 180 changed lines, over the 100-line budget."}},
 		{"no budget gives no note", large, 0, nil},
@@ -81,7 +81,7 @@ func TestRecordedBudgetedPlansReachPlanReviewWithNotesOnlyForOverBudgetTickets(t
 }
 
 func TestAMalformedEstimateIsRefusedAtPlanTime(t *testing.T) {
-	for _, value := range []string{"lots", "0", "-5", "12.5", ""} {
+	for _, value := range []string{"lots", "0", "-5", "12.5", "", "0180", "+180"} {
 		t.Run(value, func(t *testing.T) {
 			c := loadPlanCase(t, filepath.Join(planBudgetDir, "small"), "small")
 			c.tickets[0].Content = strings.Replace(c.tickets[0].Content, "Estimated-Changed-Lines: 180", "Estimated-Changed-Lines: "+value, 1)

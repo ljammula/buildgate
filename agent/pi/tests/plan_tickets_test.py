@@ -200,7 +200,11 @@ class BuildPromptTests(unittest.TestCase):
 		self.assertIn("If it is within 400 lines, write\nexactly one ticket", prompt)
 		self.assertIn("split it into the fewest tickets that each fit within 400 lines", prompt)
 		self.assertIn("Never split by layer", prompt)
-		self.assertIn("Estimated-Changed-Lines: <N>", prompt)
+		self.assertIn("\nEstimated-Changed-Lines: <N>\n", prompt)
+		self.assertNotIn("Estimated-Changed-Lines: <N> (", prompt)
+		self.assertIn('digits only, e.g.\n"Estimated-Changed-Lines: 240"', prompt)
+		self.assertIn("not a whole number above zero refuses the plan", prompt)
+		self.assertNotIn("never gates", prompt)
 		self.assertNotIn("~400", prompt)
 		self.assertNotIn("{", prompt.split("Decomposition rule:")[1].split("Tests rule:")[0])
 

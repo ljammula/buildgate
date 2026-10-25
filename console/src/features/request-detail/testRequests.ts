@@ -41,13 +41,13 @@ export function ticketWire(o: {
   prState?: string;
   content?: string;
   estimatedChangedLines?: number;
-  actualChangedLines?: number;
+  builtChangedLines?: number;
 }): Wire {
   return {
     ...(o.estimatedChangedLines === undefined
       ? {}
       : { estimated_changed_lines: o.estimatedChangedLines }),
-    ...(o.actualChangedLines === undefined ? {} : { actual_changed_lines: o.actualChangedLines }),
+    ...(o.builtChangedLines === undefined ? {} : { built_changed_lines: o.builtChangedLines }),
     index: o.index,
     spec_path: o.specPath ?? "",
     full_path: o.fullPath ?? "",

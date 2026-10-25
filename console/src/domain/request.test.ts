@@ -447,7 +447,7 @@ test("request-every-field decodes with every optional field populated", () => {
       reviewRounds: [],
       activeRoundRunId: "",
       estimatedChangedLines: 0,
-      actualChangedLines: 0,
+      builtChangedLines: 0,
       roundTags: [
         {
           n: 3,

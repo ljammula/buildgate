@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -74,7 +75,7 @@ const TestsRequiredPrefix = "Tests-Required:"
 // may contain to declare the planner's estimate of the ticket's change, e.g.
 // "Estimated-Changed-Lines: 240": a positive integer counting insertions plus
 // deletions, as git diff --shortstat does. It is advice shown at plan review,
-// never a gate; absence is a legitimate shape (older and handed-over plans).
+// never a gate on the build, though a declared value that is malformed refuses the plan; absence is a legitimate shape (older and handed-over plans).
 const EstimatedChangedLinesPrefix = "Estimated-Changed-Lines:"
 
 // KnownHeaderKeys lists every machine-readable header key this package
@@ -293,20 +294,18 @@ func ParseEstimatedChangedLines(specPath string) (lines int, declared bool, err 
 	return lines, true, nil
 }
 
-// ParseEstimatedChangedLinesValue parses the text after the header key:
-// digits only, greater than zero, and small enough to be a line count.
+// estimatedChangedLinesValue is the one accepted shape of the estimate: one
+// to six digits, no leading zero, so the value is a whole number above zero.
+var estimatedChangedLinesValue = regexp.MustCompile(`^[1-9][0-9]{0,5}$`)
+
+// ParseEstimatedChangedLinesValue parses the text after the header key: a
+// whole number above zero written as plain digits with no leading zero, at
+// most 999999.
 func ParseEstimatedChangedLinesValue(val string) (int, error) {
-	if val == "" || len(val) > 7 || strings.Trim(val, "0123456789") != "" {
-		return 0, fmt.Errorf("must be a positive integer, got %q", val)
+	if !estimatedChangedLinesValue.MatchString(val) {
+		return 0, fmt.Errorf("must be a whole number above zero written as digits only, without a leading zero, got %q", val)
 	}
-	n := 0
-	for _, c := range val {
-		n = n*10 + int(c-'0')
-	}
-	if n < 1 {
-		return 0, fmt.Errorf("must be a positive integer, got %q", val)
-	}
-	return n, nil
+	return strconv.Atoi(val)
 }
 
 // EstimatedChangedLinesOf reads the declared estimate from ticket content
@@ -316,13 +315,7 @@ func ParseEstimatedChangedLinesValue(val string) (int, error) {
 func EstimatedChangedLinesOf(content string) (lines int, declared bool) {
 	var val string
 	var found bool
-	_ = forEachTopLevelReaderLine(strings.NewReader(content), func(raw string) bool {
-		if rest, ok := strings.CutPrefix(raw, EstimatedChangedLinesPrefix); ok {
-			val, found = strings.TrimSpace(rest), true
-			return true
-		}
-		return false
-	})
+	_ = forEachTopLevelReaderLine(strings.NewReader(content), keyLineFinder(EstimatedChangedLinesPrefix, &val, &found))
 	if !found {
 		return 0, false
 	}
@@ -715,14 +708,21 @@ func hasModuleRootMarker(dir string) bool {
 // differently-charactered fence nested inside a longer one can't
 // prematurely end it.
 func parseTopLevelKeyLine(specPath, prefix string) (value string, found bool, err error) {
-	err = forEachTopLevelLine(specPath, func(raw string) (stop bool) {
+	err = forEachTopLevelLine(specPath, keyLineFinder(prefix, &value, &found))
+	return value, found, err
+}
+
+// keyLineFinder returns the line callback every single-valued key parse
+// shares: it stores the trimmed text after prefix of the first top-level line
+// that starts with it, and stops there.
+func keyLineFinder(prefix string, value *string, found *bool) func(line string) (stop bool) {
+	return func(raw string) (stop bool) {
 		if rest, ok := strings.CutPrefix(raw, prefix); ok {
-			value, found = strings.TrimSpace(rest), true
+			*value, *found = strings.TrimSpace(rest), true
 			return true
 		}
 		return false
-	})
-	return value, found, err
+	}
 }
 
 // parseAllTopLevelKeyLines is parseTopLevelKeyLine's multi-value sibling:

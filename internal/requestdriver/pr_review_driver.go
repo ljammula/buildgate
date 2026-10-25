@@ -601,7 +601,7 @@ func retargetOffMergedTicket(dp Deps, ctx context.Context, dataDir string, r *re
 		log.Printf("request %s: ticket %d: PR is stacked on merged ticket %d, whose base branch is not recorded; retarget it by hand (gh pr edit %s --base <default branch>)", r.ID, ticket.Index, merged.Index, ticket.PRURL)
 		return false
 	}
-	headRunID := CurrentPRHeadRunID(ticket)
+	headRunID := ticket.PRHeadRunID()
 	allowed, err := decisionStillAllows(dataDir, headRunID)
 	if err != nil {
 		log.Printf("request %s: ticket %d: check release decision before retargeting off merged ticket %d: %v", r.ID, ticket.Index, merged.Index, err)
@@ -636,30 +636,6 @@ func prHeadIsRun(dataDir, runID, headSHA string) bool {
 		return false
 	}
 	return strings.HasPrefix(headSHA, loaded.ResultSHA) || strings.HasPrefix(loaded.ResultSHA, headSHA)
-}
-
-// CurrentPRHeadRunID returns the run id whose ResultSHA is actually on
-// ticket's PR branch right now: the most recent round that is BOTH
-// RoundAccepted AND confirmed Pushed, since pushAcceptedRoundAndReply
-// moves the branch tip to that round's own commit only once its own
-// forge.pushExistingBranch call has actually succeeded -- or ticket.RunID
-// (the ticket's original build) when no round satisfies both. Outcome ==
-// RoundAccepted alone is NOT sufficient: that entry is appended to
-// Rounds BEFORE the push is even attempted, and a push failure halts the
-// request without erasing it, so an outcome-only check would treat an
-// unpushed round's own run as the PR's current head (found via review,
-// GitHub Codex App, PR #154 round 3) -- see Round.Pushed's own doc
-// comment. Rounds are appended in increasing Index order and never
-// reordered, so the last entry satisfying both is the most recent one; a
-// quarantined or halted round never reaches pushAcceptedRoundAndReply at
-// all and so is never Pushed, skipped here the same way it always was.
-func CurrentPRHeadRunID(ticket *request.Ticket) string {
-	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
-		if ticket.Rounds[i].Outcome == request.RoundAccepted && ticket.Rounds[i].Pushed {
-			return ticket.Rounds[i].RunID
-		}
-	}
-	return ticket.RunID
 }
 
 // decisionStillAllows reports whether runID's release decision, loaded
@@ -741,7 +717,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 		// (logged, not halted -- a human still sees this ticket's PR
 		// stuck in draft via `factoryd status`/the PR itself).
 		//
-		// CurrentPRHeadRunID, not ticket.RunID unconditionally: an
+		// Ticket.PRHeadRunID, not ticket.RunID unconditionally: an
 		// accepted corrective round (RunCorrectiveRound/
 		// pushAcceptedRoundAndReply) moves the PR branch's real HEAD to
 		// THAT round's own ResultSHA, which has its own, separately
@@ -752,7 +728,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 		// is still allowed. Checking ticket.RunID unconditionally would
 		// ready a PR whose actual head was never re-cleared by policy
 		// (found via review, GitHub Codex App, PR #154).
-		headRunID := CurrentPRHeadRunID(ticket)
+		headRunID := ticket.PRHeadRunID()
 		loaded, loadErr := run.Load(dataDir, headRunID)
 		var decision *release.Decision
 		var decisionErr error
@@ -769,7 +745,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 		case state.HeadSHA == "" || loaded.ResultSHA == "" || !strings.HasPrefix(state.HeadSHA, loaded.ResultSHA) && !strings.HasPrefix(loaded.ResultSHA, state.HeadSHA):
 			// This whole decision-check exists to gate a side effect on
 			// the release.Decision that actually describes the PR's real
-			// current head -- but CurrentPRHeadRunID's own selection is
+			// current head -- but Ticket.PRHeadRunID's own selection is
 			// built entirely from LOCALLY persisted Round.Pushed history.
 			// A maintainer pushing directly to the branch, or a crash
 			// between forge.pushExistingBranch's own confirmed success and
@@ -862,7 +838,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 // on, after the ready flip, so ticket.PRState is this poll's.
 //
 // "The last code review of the whole diff" is the code_review gate of the
-// run whose commit is the pull request's head (CurrentPRHeadRunID): the
+// run whose commit is the pull request's head (Ticket.PRHeadRunID): the
 // ticket's first build, or the last corrective round that was accepted and
 // pushed, each of which reviews the diff from the ticket's base. A head the
 // factory did not build (someone pushed to the branch) has no such review,
@@ -885,7 +861,7 @@ func checkMergeReadiness(dataDir string, ticket *request.Ticket, state forge.Rev
 	if state.ReviewDecision == forge.ReviewDecisionChangesRequested {
 		blockers = append(blockers, "a reviewer requested changes")
 	}
-	blockers = append(blockers, headReviewBlockers(dataDir, CurrentPRHeadRunID(ticket), state.HeadSHA)...)
+	blockers = append(blockers, headReviewBlockers(dataDir, ticket.PRHeadRunID(), state.HeadSHA)...)
 	return &request.MergeReadiness{
 		Ready:     len(blockers) == 0,
 		CheckedAt: now.UTC().Format(time.RFC3339Nano),
@@ -1400,7 +1376,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 		// human reconciles the branch, then `factoryd retry`. This
 		// round's own Rounds entry stays Outcome: RoundAccepted with
 		// Pushed left false (its zero value) -- exactly the state
-		// CurrentPRHeadRunID's own doc comment says a reader must not
+		// Ticket.PRHeadRunID's own doc comment says a reader must not
 		// mistake for "this round's commit is the PR's current head."
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s could not be pushed to %s: %v", ticket.Index, r.TicketCount, roundRunID, branch, pushErr), now)
 	}

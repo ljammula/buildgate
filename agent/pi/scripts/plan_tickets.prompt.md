@@ -52,7 +52,12 @@ Verify-Command: {verify_command}
 Allowed-Files: <comma-separated list of every file this ticket touches>
 Required-Changed-Files: <comma-separated list of files this ticket must actually change>
 Tests-Required: no -- <reason> (omit this line entirely unless this ticket adds no test file; see the tests rule above)
-Estimated-Changed-Lines: <N> (a whole number above zero: your estimate of this ticket's changed lines, insertions plus deletions, tests included; the factory shows it at plan review and never gates on it)
+Estimated-Changed-Lines: <N>
+
+The Estimated-Changed-Lines line is your estimate of this ticket's changed
+lines, insertions plus deletions, tests included. Write digits only, e.g.
+"Estimated-Changed-Lines: 240". The factory shows it at plan review; a value
+that is not a whole number above zero refuses the plan.
 
 ## Goal
 

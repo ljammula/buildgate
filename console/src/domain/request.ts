@@ -97,7 +97,7 @@ export interface RequestTicket {
   /** The planner's declared `Estimated-Changed-Lines`; 0 when the ticket declares none. */
   readonly estimatedChangedLines: number;
   /** Changed lines (insertions plus deletions) of the ticket's built run; 0 until one is recorded. */
-  readonly actualChangedLines: number;
+  readonly builtChangedLines: number;
 }
 
 /**
@@ -204,7 +204,7 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
     content: optString(o, "content", at),
     fullPath: optString(o, "full_path", at),
     estimatedChangedLines: numberOr(o, "estimated_changed_lines", at, 0),
-    actualChangedLines: numberOr(o, "actual_changed_lines", at, 0),
+    builtChangedLines: numberOr(o, "built_changed_lines", at, 0),
   };
 }
 
