@@ -167,6 +167,7 @@
   "review_notes": [
     "every-field review_notes"
   ],
+  "plan_budget_lines": 3,
   "draft_halt": {
     "stage": "",
     "reason": "every-field reason",

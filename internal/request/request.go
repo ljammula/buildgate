@@ -581,6 +581,10 @@ type Request struct {
 	// plan_review, dropped by every transition. Advice only: nothing reads
 	// them to decide anything.
 	ReviewNotes []string `json:"review_notes,omitempty"`
+	// PlanBudgetLines is the pr_budget_lines the planning job ran under (0: no
+	// budget), recorded when planning starts so the review's notes and display
+	// stay the same if the session config changes afterwards. Advice only.
+	PlanBudgetLines int `json:"plan_budget_lines,omitempty"`
 	// DraftHalt is the factory's reason for refusing the latest spec or plan
 	// draft whose CONTENT its own checks rejected; the next draft of that
 	// stage is told it (the driver renders it after the operator feedback,

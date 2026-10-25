@@ -453,8 +453,13 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	planAnchors := []request.RejectionAnchor{{Path: "tickets/001.spec.md", Section: "### Steps", Note: "split the migration out"}}
 	planReason := request.AnchoredReason(planAnchors, "Otherwise fine.")
 	planReview.Rejections = []request.Rejection{{By: "alice", At: stamp(8), Reason: planReason, FromState: request.StatePlanReview, Anchors: planAnchors, Note: "Otherwise fine."}}
-	writeTickets(planReview.ID, 2)
-	write(ticketPath(planReview.ID, 1), strings.Replace(seedApprovableRequestTicket, "1. s\n", "1. migrate and switch over in one step\n", 1))
+	// The plan was drafted under a 400-line budget; ticket 2's estimate is over it.
+	planReview.PlanBudgetLines = 400
+	withEstimate := func(ticket string, lines int) string {
+		return strings.Replace(ticket, "Required-Changed-Files: a.go\n", fmt.Sprintf("Required-Changed-Files: a.go\nEstimated-Changed-Lines: %d\n", lines), 1)
+	}
+	write(ticketPath(planReview.ID, 2), withEstimate(seedApprovableRequestTicket, 620))
+	write(ticketPath(planReview.ID, 1), strings.Replace(withEstimate(seedApprovableRequestTicket, 220), "1. s\n", "1. migrate and switch over in one step\n", 1))
 	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "RUN_COMMAND.txt"), contractOracleRunCommand)
 	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "idempotency_test.go"), contractOracleTest)
 	saveRequest(planReview)
@@ -462,7 +467,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 		[]string{"spec.md", "tickets/001.spec.md", "tickets/002.spec.md"}, at.Add(8*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	write(ticketPath(planReview.ID, 1), seedApprovableRequestTicket)
+	write(ticketPath(planReview.ID, 1), withEstimate(seedApprovableRequestTicket, 220))
 
 	building := newRequest("req-building", request.StateBuilding)
 	building.TicketCount, building.TicketIndex = 2, 2

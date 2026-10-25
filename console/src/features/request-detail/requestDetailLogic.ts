@@ -135,6 +135,28 @@ export function planSummary(content: string): string {
   return parts.length === 0 ? "plan" : parts.join(" · ");
 }
 
+/**
+ * The line a ticket's plan shows about its size: the planner's estimate in
+ * changed lines against the budget the plan was drafted under, and the built
+ * run's actual figure once there is one. "" when the ticket declares no
+ * estimate and has no built run (older plans, handed-over plans).
+ */
+export function sizeLine(ticket: RequestTicket, budgetLines: number): string {
+  const parts: string[] = [];
+  if (ticket.estimatedChangedLines > 0) {
+    const estimate = ticket.estimatedChangedLines;
+    const lines = `${estimate} changed ${estimate === 1 ? "line" : "lines"}`;
+    if (budgetLines <= 0) parts.push(`Estimated ${lines}`);
+    else if (estimate > budgetLines) {
+      parts.push(`Estimated ${lines}, over the ${budgetLines}-line budget`);
+    } else parts.push(`Estimated ${lines}, within the ${budgetLines}-line budget`);
+  }
+  if (ticket.actualChangedLines > 0) {
+    parts.push(`built: ${ticket.actualChangedLines} changed lines`);
+  }
+  return parts.join(" · ");
+}
+
 // The numbered items under a "Steps" heading, up to the next heading.
 function stepCount(content: string): number {
   let count = 0;

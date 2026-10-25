@@ -43,7 +43,7 @@ func TestReadPlanTicketsOutputsNeverPopulatesModelFromEvidenceJSON(t *testing.T)
 // TestPlanTicketsArgsShape covers the exact argv planTicketsArgs builds --
 // mirroring TestDraftSpecArgsShape's own style for draftSpecArgs.
 func TestPlanTicketsArgsShape(t *testing.T) {
-	args := planTicketsArgs("/harness/plan_tickets.py", "/workspace", "/workspace/spec.md", "/workspace/.factory-plan-draft/criteria.md", "/inputs/run/request.md", "make verify", "/workspace/out/tickets", "/workspace/out/evidence.json", draftInputFiles{}, 12, "", "pi")
+	args := planTicketsArgs("/harness/plan_tickets.py", "/workspace", "/workspace/spec.md", "/workspace/.factory-plan-draft/criteria.md", "/inputs/run/request.md", "make verify", "/workspace/out/tickets", "/workspace/out/evidence.json", draftInputFiles{}, 12, "", "pi", 400)
 	want := []string{
 		"/harness/plan_tickets.py",
 		"--workspace", "/workspace",
@@ -55,6 +55,7 @@ func TestPlanTicketsArgsShape(t *testing.T) {
 		"--evidence", "/workspace/out/evidence.json",
 		"--timeout-minutes", "12",
 		"--harness", "pi",
+		"--pr-budget-lines", "400",
 	}
 	if len(args) != len(want) {
 		t.Fatalf("planTicketsArgs = %v, want %v", args, want)
@@ -70,7 +71,7 @@ func TestPlanTicketsArgsShape(t *testing.T) {
 // feedbackPath appending --feedback-file, and an empty one omitting it
 // entirely (TestPlanTicketsArgsShape above already covers that case).
 func TestPlanTicketsArgsIncludesFeedbackFileWhenGiven(t *testing.T) {
-	args := planTicketsArgs("/harness/plan_tickets.py", "/workspace", "/workspace/spec.md", "/workspace/.factory-plan-draft/criteria.md", "/inputs/run/request.md", "make verify", "/workspace/out/tickets", "/workspace/out/evidence.json", draftInputFiles{feedback: "/workspace/.factory-plan-draft/feedback.md"}, 12, "", "pi")
+	args := planTicketsArgs("/harness/plan_tickets.py", "/workspace", "/workspace/spec.md", "/workspace/.factory-plan-draft/criteria.md", "/inputs/run/request.md", "make verify", "/workspace/out/tickets", "/workspace/out/evidence.json", draftInputFiles{feedback: "/workspace/.factory-plan-draft/feedback.md"}, 12, "", "pi", 0)
 	found := false
 	for i, a := range args {
 		if a == "--feedback-file" && i+1 < len(args) && args[i+1] == "/workspace/.factory-plan-draft/feedback.md" {
@@ -86,7 +87,7 @@ func TestPlanTicketsArgsIncludesFeedbackFileWhenGiven(t *testing.T) {
 // own --thinking argument, mirroring
 // TestDraftSpecArgsIncludesThinkingWhenGiven.
 func TestPlanTicketsArgsIncludesThinkingWhenGiven(t *testing.T) {
-	args := planTicketsArgs("/harness/plan_tickets.py", "/workspace", "/workspace/spec.md", "/workspace/.factory-plan-draft/criteria.md", "/inputs/run/request.md", "make verify", "/workspace/out/tickets", "/workspace/out/evidence.json", draftInputFiles{}, 12, "xhigh", "pi")
+	args := planTicketsArgs("/harness/plan_tickets.py", "/workspace", "/workspace/spec.md", "/workspace/.factory-plan-draft/criteria.md", "/inputs/run/request.md", "make verify", "/workspace/out/tickets", "/workspace/out/evidence.json", draftInputFiles{}, 12, "xhigh", "pi", 0)
 	found := false
 	for i, a := range args {
 		if a == "--thinking" && i+1 < len(args) && args[i+1] == "xhigh" {

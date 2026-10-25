@@ -52,7 +52,7 @@ type notesCase struct {
 func checkNotes(t *testing.T, workspace string, tickets []PlanTicket, cases []notesCase) {
 	t.Helper()
 	for _, tc := range cases {
-		got := PlanReviewNotes([]string{"1. " + tc.criterion}, tickets, workspace, nil)
+		got := PlanReviewNotes([]string{"1. " + tc.criterion}, tickets, workspace, nil, 0)
 		if strings.Join(got, "\n") != strings.Join(tc.notes, "\n") {
 			t.Errorf("criterion %q:\n got  %q\n want %q", tc.criterion, got, tc.notes)
 		}
@@ -176,7 +176,7 @@ func TestPlanReviewNotesAreShortAndCapped(t *testing.T) {
 		owned = append(owned, fmt.Sprintf("pkg/f%02d.go", i))
 		criterion += fmt.Sprintf(" `pkg/f%02d.go` and again `pkg/f%02d.go`,", i, i)
 	}
-	notes := PlanReviewNotes([]string{criterion}, []PlanTicket{notesTicket("001.spec.md", []string{"a.go"}, 1), notesTicket("002.spec.md", owned, 2)}, "", nil)
+	notes := PlanReviewNotes([]string{criterion}, []PlanTicket{notesTicket("001.spec.md", []string{"a.go"}, 1), notesTicket("002.spec.md", owned, 2)}, "", nil, 0)
 	if len(notes) != maxReviewNotes+1 || notes[maxReviewNotes] != "and 4 more" {
 		t.Fatalf("notes = %q, want %d and \"and 4 more\"", notes, maxReviewNotes)
 	}
@@ -204,14 +204,14 @@ func TestPlanReviewNotesHoldOnlyRealNamesCleanedAndBounded(t *testing.T) {
 	})
 
 	dirty := "docs/a\x1b[31m\u202eb'c.md"
-	notes := PlanReviewNotes([]string{"1. `" + dirty + "` is added."}, []PlanTicket{covering, notesTicket("002\x1b[0m\u202e.spec.md", []string{dirty}, 2)}, workspace, nil)
+	notes := PlanReviewNotes([]string{"1. `" + dirty + "` is added."}, []PlanTicket{covering, notesTicket("002\x1b[0m\u202e.spec.md", []string{dirty}, 2)}, workspace, nil, 0)
 	want := "criterion 1 names `docs/ab'c.md`, which ticket 002.spec.md may change, but the tickets covering criterion 1 may not"
 	if len(notes) != 1 || notes[0] != want {
 		t.Errorf("notes = %q, want [%q]", notes, want)
 	}
 
 	huge := "docs/" + strings.Repeat("a", 200_000) + ".md"
-	notes = PlanReviewNotes([]string{"1. `" + huge + "` is added."}, []PlanTicket{covering, notesTicket("002.spec.md", []string{huge}, 2)}, workspace, nil)
+	notes = PlanReviewNotes([]string{"1. `" + huge + "` is added."}, []PlanTicket{covering, notesTicket("002.spec.md", []string{huge}, 2)}, workspace, nil, 0)
 	if len(notes) != 1 || len([]rune(notes[0])) > maxNoteNameLen+150 || !strings.Contains(notes[0], "…`, which ticket 002.spec.md") {
 		t.Errorf("a 200 KB name gave notes of %d bytes: %.300q", len(strings.Join(notes, "")), notes)
 	}
@@ -310,5 +310,24 @@ func TestRefreshReviewNotesFollowsTheTextUnderReview(t *testing.T) {
 	}
 	if loaded.ReviewNotes != nil {
 		t.Errorf("after approval: ReviewNotes = %q", loaded.ReviewNotes)
+	}
+}
+
+func TestPlanReviewNotesNameATicketOverTheBudget(t *testing.T) {
+	over := notesTicket("002.spec.md", []string{"b.go"}, 1)
+	over.Estimate = 620
+	within := notesTicket("001.spec.md", []string{"a.go"}, 1)
+	within.Estimate = 400
+	undeclared := notesTicket("003.spec.md", []string{"c.go"}, 1)
+	tickets := []PlanTicket{within, over, undeclared}
+	criteria := []string{"1. It works."}
+
+	got := PlanReviewNotes(criteria, tickets, "", nil, 400)
+	want := []string{"Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget."}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("notes = %q, want %q", got, want)
+	}
+	if got := PlanReviewNotes(criteria, tickets, "", nil, 0); len(got) != 0 {
+		t.Errorf("no budget: notes = %q, want none", got)
 	}
 }

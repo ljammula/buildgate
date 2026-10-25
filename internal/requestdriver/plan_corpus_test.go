@@ -48,47 +48,52 @@ func loadPlanCorpus(t *testing.T) []planCorpusCase {
 		if !entry.IsDir() || entry.Name() == planCorpusWorkspaces {
 			continue
 		}
-		dir := filepath.Join(planCorpusDir, entry.Name())
-		c := planCorpusCase{name: entry.Name()}
-		spec, err := os.ReadFile(filepath.Join(dir, "spec.md"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		c.spec = string(spec)
-		meta, err := os.ReadFile(filepath.Join(dir, "case.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var parsed struct {
-			VerifyCommand string `json:"verify_command"`
-			Project       string `json:"project"`
-			Tickets       int    `json:"tickets"`
-		}
-		if err := json.Unmarshal(meta, &parsed); err != nil {
-			t.Fatalf("%s/case.json: %v", dir, err)
-		}
-		c.verifyCommand, c.project, c.wantTickets = parsed.VerifyCommand, parsed.Project, parsed.Tickets
-		names, err := filepath.Glob(filepath.Join(dir, "tickets", "*.spec.md"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			content, err := os.ReadFile(name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			c.tickets = append(c.tickets, requestdriver.DraftedTicket{Filename: filepath.Base(name), Content: string(content)})
-		}
-		if len(c.tickets) == 0 || len(c.tickets) != c.wantTickets {
-			t.Fatalf("%s: %d ticket files, case.json says %d", dir, len(c.tickets), c.wantTickets)
-		}
-		cases = append(cases, c)
+		cases = append(cases, loadPlanCase(t, filepath.Join(planCorpusDir, entry.Name()), entry.Name()))
 	}
 	if len(cases) == 0 {
 		t.Fatalf("no cases under %s", planCorpusDir)
 	}
 	return cases
+}
+
+// loadPlanCase reads one case directory: spec.md, case.json and tickets/.
+func loadPlanCase(t *testing.T, dir, name string) planCorpusCase {
+	t.Helper()
+	c := planCorpusCase{name: name}
+	spec, err := os.ReadFile(filepath.Join(dir, "spec.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.spec = string(spec)
+	meta, err := os.ReadFile(filepath.Join(dir, "case.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		VerifyCommand string `json:"verify_command"`
+		Project       string `json:"project"`
+		Tickets       int    `json:"tickets"`
+	}
+	if err := json.Unmarshal(meta, &parsed); err != nil {
+		t.Fatalf("%s/case.json: %v", dir, err)
+	}
+	c.verifyCommand, c.project, c.wantTickets = parsed.VerifyCommand, parsed.Project, parsed.Tickets
+	names, err := filepath.Glob(filepath.Join(dir, "tickets", "*.spec.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		content, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.tickets = append(c.tickets, requestdriver.DraftedTicket{Filename: filepath.Base(name), Content: string(content)})
+	}
+	if len(c.tickets) == 0 || len(c.tickets) != c.wantTickets {
+		t.Fatalf("%s: %d ticket files, case.json says %d", dir, len(c.tickets), c.wantTickets)
+	}
+	return c
 }
 
 // TestRealApprovedPlansPassEveryPlanTimeCheck puts every case of the plan

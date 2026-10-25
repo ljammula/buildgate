@@ -62,7 +62,8 @@
       "run_id": "run-accepted",
       "branch": "factory/req-halted-1",
       "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
-      "full_path": "/data/requests/req-halted/tickets/001.spec.md"
+      "full_path": "/data/requests/req-halted/tickets/001.spec.md",
+      "actual_changed_lines": 51
     }
   ],
   "cost_summary": {

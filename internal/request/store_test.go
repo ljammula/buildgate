@@ -34,6 +34,9 @@ func TestLegacyRequestRecordLoadsAndMarshalsByteIdentically(t *testing.T) {
 	if bytes.Contains(got, []byte(`"plan_import_ended"`)) {
 		t.Fatalf("legacy record gained plan_import_ended: %s", got)
 	}
+	if bytes.Contains(got, []byte(`"plan_budget_lines"`)) {
+		t.Fatalf("legacy record gained plan_budget_lines: %s", got)
+	}
 }
 
 func TestSaveThenLoadRoundTrips(t *testing.T) {

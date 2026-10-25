@@ -220,6 +220,16 @@ type Config struct {
 	// expiry: merging is a human act and a long-open pull request is normal.
 	ReviewGateExpiry *string `yaml:"review_gate_expiry,omitempty"`
 
+	// PRBudgetLines is the target size of one ticket's pull request in changed
+	// lines (insertions plus deletions, as git diff --shortstat counts them).
+	// Planning writes one ticket for a spec whose estimated change fits it and
+	// splits only an estimate over it, into the fewest tickets that each fit.
+	// Default 400; 0 is no budget (one ticket unless the spec's parts are
+	// independently shippable); negative is refused. It is a planning target,
+	// not a cap: release_max_insertions and release_max_files_changed stay the
+	// hard limits.
+	PRBudgetLines *int `yaml:"pr_budget_lines,omitempty"`
+
 	// AdvanceOn mirrors worker's own -advance-on flag: whether
 	// a request's ticket build advances to the next ticket as soon as a
 	// ticket's run is accepted ("accepted", the default) or only once its
@@ -511,6 +521,9 @@ type Settings struct {
 	// ReviewGateExpiry mirrors Config.ReviewGateExpiry; 0 is off.
 	ReviewGateExpiry time.Duration
 
+	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
+	PRBudgetLines int
+
 	RegistryProxy                      bool
 	RegistryProxyConfigured            bool
 	RegistryProxyNPMUpstream           string
@@ -636,6 +649,7 @@ func DefaultSettings() Settings {
 		MeterCostBudgetWindow:     time.Hour,
 		ModelHostConcurrency:      modelhost.DefaultConcurrency,
 		MaxParallelJobs:           DefaultMaxParallelJobs,
+		PRBudgetLines:             DefaultPRBudgetLines,
 		SandboxInstallCacheImages: DefaultSandboxInstallCacheImages,
 
 		RegistryProxyNPMUpstream:           "https://registry.npmjs.org",
@@ -659,8 +673,9 @@ func DefaultSettings() Settings {
 	}
 }
 
-// applyLimits applies the keys that bound spend or waiting, each refused when
-// negative: the request and monthly budgets and review_gate_expiry.
+// applyLimits applies the keys that bound spend, waiting or size, each refused
+// when negative: the request and monthly budgets, pr_budget_lines and
+// review_gate_expiry.
 func (c *Config) applyLimits(s *Settings) error {
 	// nonNegativeInteger/nonNegativeInteger64 back the four
 	// request/monthly budget keys below: unlike every other *int/*int64
@@ -698,6 +713,9 @@ func (c *Config) applyLimits(s *Settings) error {
 		return err
 	}
 	if err := nonNegativeInteger64(&s.MonthlyCostBudgetMicroUSD, "monthly_cost_budget_micro_usd", c.MonthlyCostBudgetMicroUSD); err != nil {
+		return err
+	}
+	if err := nonNegativeInteger(&s.PRBudgetLines, "pr_budget_lines", c.PRBudgetLines); err != nil {
 		return err
 	}
 	if c.ReviewGateExpiry == nil {
@@ -917,6 +935,10 @@ const (
 	// correct rollback for any PR this pipeline itself opens.
 	DefaultReleaseRollbackPlan = "git revert the merge commit on main"
 )
+
+// DefaultPRBudgetLines is pr_budget_lines' default: a pull request a reviewer
+// reads in one sitting.
+const DefaultPRBudgetLines = 400
 
 // DefaultMaxParallelJobs is max_parallel_jobs' default: two builds fit a
 // 4 GiB Docker VM next to Temporal. A build's sandbox_memory is a ceiling; a

@@ -41,3 +41,26 @@ func TestReviewGateExpiryRefusesWhatIsNotADuration(t *testing.T) {
 		}
 	}
 }
+
+func TestPRBudgetLinesDefaultsAndValidates(t *testing.T) {
+	if got := DefaultSettings().PRBudgetLines; got != 400 {
+		t.Errorf("default PRBudgetLines = %d, want 400", got)
+	}
+	for body, want := range map[string]int{"pr_budget_lines: 250\n": 250, "pr_budget_lines: 0\n": 0, "hitl_reminder_interval: 10m\n": 400} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.PRBudgetLines != want {
+			t.Errorf("%q: PRBudgetLines = %d err %v, want %d", body, s.PRBudgetLines, err, want)
+		}
+	}
+	cfg, err := Load(writeConfig(t, "pr_budget_lines: -1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.ApplySettings(DefaultSettings()); err == nil || !strings.Contains(err.Error(), "pr_budget_lines") {
+		t.Errorf("negative: ApplySettings = %v, want a refusal naming pr_budget_lines", err)
+	}
+}

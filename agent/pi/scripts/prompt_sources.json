@@ -58,6 +58,8 @@
       "kind": "inline-assembly",
       "template_refs": [
         "plan_tickets.prompt.md",
+        "plan_tickets.budget.prompt.md",
+        "plan_tickets.no_budget.prompt.md",
         "plan_tickets.design_guide.prompt.md",
         "plan_tickets.previous_draft.prompt.md",
         "plan_tickets.scoped_sections.prompt.md",

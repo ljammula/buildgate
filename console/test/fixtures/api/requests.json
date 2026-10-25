@@ -435,6 +435,7 @@
     "review_notes": [
       "every-field review_notes"
     ],
+    "plan_budget_lines": 3,
     "draft_halt": {
       "stage": "",
       "reason": "every-field reason",
@@ -783,6 +784,7 @@
         "note": "Otherwise fine."
       }
     ],
+    "plan_budget_lines": 400,
     "title": "Add idempotency keys to checkout",
     "cost_summary": {
       "spec": 0.012,

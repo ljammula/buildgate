@@ -301,7 +301,7 @@ func (p mutationPlan) notes(n int, text, owned string) []string {
 	if owned != "" {
 		tickets = append(append([]request.PlanTicket{}, tickets...), request.PlanTicket{Name: otherTicket, Content: "a ticket that covers no criterion", Allowed: []string{owned}})
 	}
-	return request.PlanReviewNotes(criteria, tickets, p.workspace, nil)
+	return request.PlanReviewNotes(criteria, tickets, p.workspace, nil, 0)
 }
 
 // mutationStride thins the mutations: of every mutationStride (clause,

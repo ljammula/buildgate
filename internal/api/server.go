@@ -34,6 +34,7 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/ticketspec"
 	"buildgate/internal/triage"
 )
 
@@ -3491,6 +3492,27 @@ type requestTicketView struct {
 	// page showed "ready for review" over a build in progress (found on a
 	// real corrective round, 2026-10-06).
 	ActiveRoundRunID string `json:"active_round_run_id,omitempty"`
+	// EstimatedChangedLines is the ticket's declared Estimated-Changed-Lines
+	// (ticketspec's one parser), omitted when it declares none or a value that
+	// is not a positive integer.
+	EstimatedChangedLines int `json:"estimated_changed_lines,omitempty"`
+	// ActualChangedLines is the changed lines (insertions plus deletions, as
+	// git diff --shortstat counts them) of this ticket's built run, omitted
+	// until a run with a recorded diff stat exists.
+	ActualChangedLines int `json:"actual_changed_lines,omitempty"`
+}
+
+// ticketActualChangedLines returns the changed lines of ticket's built run, or
+// 0 when it has no run or the run recorded no diff stat.
+func (s *Server) ticketActualChangedLines(ticket request.Ticket) int {
+	if ticket.RunID == "" {
+		return 0
+	}
+	built, err := run.Load(s.dataDir, ticket.RunID)
+	if err != nil || built.DiffStat == nil {
+		return 0
+	}
+	return built.DiffStat.Insertions + built.DiffStat.Deletions
 }
 
 // activeRoundRunIDs returns, per ticket index, the run of a PR-review
@@ -3688,11 +3710,15 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 		activeRounds := activeRoundRunIDs(dataDir, loaded)
 		for _, ticket := range loaded.Tickets {
 			resolved := resolveTicketSpecPath(dataDir, id, ticket.SpecPath)
+			content := readRequestFileBestEffort(resolved)
+			estimate, _ := ticketspec.EstimatedChangedLinesOf(content)
 			view.Tickets = append(view.Tickets, requestTicketView{
-				Ticket:           ticket,
-				Content:          readRequestFileBestEffort(resolved),
-				FullPath:         absPathBestEffort(resolved),
-				ActiveRoundRunID: activeRounds[ticket.Index],
+				Ticket:                ticket,
+				Content:               content,
+				FullPath:              absPathBestEffort(resolved),
+				ActiveRoundRunID:      activeRounds[ticket.Index],
+				EstimatedChangedLines: estimate,
+				ActualChangedLines:    s.ticketActualChangedLines(ticket),
 			})
 		}
 	}
