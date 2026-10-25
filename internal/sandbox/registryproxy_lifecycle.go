@@ -309,7 +309,10 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 // mirror, but the sandbox's network policy reaches no host but the proxy.
 // JAVA_TOOL_OPTIONS moves java.io.tmpdir off the noexec /tmp, where a test
 // suite unpacks the native libraries it loads (sqlite-jdbc, Netty, JNA), to
-// the scratch volume's java-tmp, which the worker's wrapper creates.
+// the scratch volume's java-tmp, which the worker's wrapper creates, and
+// makes Java open IPv4 sockets: the sandbox refuses the IPv6 socket a JVM
+// opens by default (BindException: Permission denied), so without it no
+// Java process reaches the proxy (found live 2026-10-25).
 //
 // Bundler's mirror.all setting sends every gem source to the route; gems
 // are installed under BUNDLE_PATH, and GEM_HOME is where a `gem install`
@@ -324,7 +327,7 @@ func mavenAndRubyGemsEnvironment(prefix, base string) (keys, values []string) {
 			{"BUILDGATE_MAVEN_MIRROR", mirror},
 			{"MAVEN_ARGS", "-Dmaven.repo.local=" + scratch + "/maven-repository"},
 			{"MVNW_REPOURL", mirror},
-			{"JAVA_TOOL_OPTIONS", "-Djava.io.tmpdir=" + scratch + "/" + workerJavaTmpDir},
+			{"JAVA_TOOL_OPTIONS", "-Djava.io.tmpdir=" + scratch + "/" + workerJavaTmpDir + " -Djava.net.preferIPv4Stack=true"},
 		}
 	case rubygemsRoutePrefix:
 		entries = [][2]string{

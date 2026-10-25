@@ -81,7 +81,7 @@ func TestRegistryProxyWorkerGetsMavenAndRubyGemsEnvironment(t *testing.T) {
 		"BUILDGATE_MAVEN_MIRROR=http://registry-proxy:8092/maven",
 		"MAVEN_ARGS=-Dmaven.repo.local=/scratch/maven-repository",
 		"MVNW_REPOURL=http://registry-proxy:8092/maven",
-		"JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/scratch/java-tmp",
+		"JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/scratch/java-tmp -Djava.net.preferIPv4Stack=true",
 		"BUNDLE_MIRROR__ALL=http://registry-proxy:8092/rubygems/",
 		"BUNDLE_PATH=/scratch/bundle",
 		"GEM_HOME=/scratch/gems",

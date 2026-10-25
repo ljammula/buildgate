@@ -2382,7 +2382,7 @@ repository's `sandbox.registries` keeps only the routes it lists.
 | `/npm/` | `registry_proxy_npm_upstream` | none | `npm_config_registry` |
 | `/pypi/`, `/pypi-files/` | `registry_proxy_pypi_upstream`, `registry_proxy_pypi_files_upstream` | the file host (index links are rewritten to `/pypi-files/`) | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` |
 | `/gomodproxy/`, its `sumdb/sum.golang.org/` | `registry_proxy_go_upstream`, `registry_proxy_gosumdb_upstream` | `storage.googleapis.com` | `GOPROXY`, `GOSUMDB`, `GONOPROXY=none`, `GOMODCACHE` and `GOCACHE` under `/scratch`, `GOFLAGS` plus `-modcacherw` |
-| `/maven/` | `registry_proxy_maven_upstream` | none | `BUILDGATE_MAVEN_MIRROR`, `MAVEN_ARGS=-Dmaven.repo.local=/scratch/maven-repository`, `MVNW_REPOURL`, `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/scratch/java-tmp` |
+| `/maven/` | `registry_proxy_maven_upstream` | none | `BUILDGATE_MAVEN_MIRROR`, `MAVEN_ARGS=-Dmaven.repo.local=/scratch/maven-repository`, `MVNW_REPOURL`, `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/scratch/java-tmp -Djava.net.preferIPv4Stack=true` (the sandbox refuses the IPv6 socket a JVM opens by default) |
 | `/rubygems/` | `registry_proxy_rubygems_upstream` | none | `BUNDLE_MIRROR__ALL`, `BUNDLE_PATH=/scratch/bundle`, `GEM_HOME=/scratch/gems` |
 
 Each variable replaces whatever the image or the caller set. A mirror
